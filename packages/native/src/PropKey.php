@@ -107,4 +107,5 @@ enum PropKey: int
     case HostName = 99;
     case HostProperties = 100;
     case OnNativeEvent = 101;
+    case FlexDirection = 102;
 }

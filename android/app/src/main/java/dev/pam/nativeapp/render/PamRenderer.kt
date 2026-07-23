@@ -184,9 +184,10 @@ class PamRenderer(
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text()
                     ?: error("Custom native view is missing its generated name")
-                nativeViews.create(name) { payload ->
-                    if (custom.properties[PropKey.ON_NATIVE_EVENT] != null) {
-                        dispatchBytes(custom.id, EVENT_NATIVE, payload)
+                nativeViews.create(name) { kind, payload ->
+                    val eventProperty = nativeEventProperty(kind)
+                    if (eventProperty != null && custom.properties[eventProperty] != null) {
+                        dispatchBytes(custom.id, kind, payload)
                     }
                 }
             }
@@ -276,7 +277,13 @@ class PamRenderer(
                 check(parent.childCount == 0) { "Scroll accepts exactly one child" }
                 parent.addView(view)
             }
-            else -> error("Node $parentId cannot contain children")
+            else -> {
+                if (parent is ViewGroup && nodes[parentId]?.kind == NodeKind.CUSTOM_VIEW) {
+                    parent.addView(view, index.coerceIn(0, parent.childCount))
+                } else {
+                    error("Node $parentId cannot contain children")
+                }
+            }
         }
     }
 
@@ -539,6 +546,7 @@ class PamRenderer(
             PropKey.HIT_SLOP,
             PropKey.HOST_NAME,
             PropKey.ON_NATIVE_EVENT,
+            PropKey.FLEX_DIRECTION,
             -> Unit
         }
     }
@@ -769,6 +777,24 @@ class PamRenderer(
     private fun dispatchBytes(id: Long, kind: Int, payload: ByteArray) {
         if (payload.size <= MAX_EVENT_BYTES) dispatchEvent(id, kind, payload)
     }
+
+    private fun nativeEventProperty(kind: Int): PropKey? =
+        when (kind) {
+            EVENT_PRESS -> PropKey.ON_PRESS
+            EVENT_CHANGE -> PropKey.ON_CHANGE
+            EVENT_LONG_PRESS -> PropKey.ON_LONG_PRESS
+            EVENT_FOCUS -> PropKey.ON_FOCUS
+            EVENT_BLUR -> PropKey.ON_BLUR
+            EVENT_SUBMIT -> PropKey.ON_SUBMIT
+            EVENT_SCROLL -> PropKey.ON_SCROLL
+            EVENT_REFRESH -> PropKey.ON_REFRESH
+            EVENT_TOGGLE -> PropKey.ON_TOGGLE
+            EVENT_END_REACHED -> PropKey.ON_END_REACHED
+            EVENT_DRAWER_OPEN -> PropKey.ON_DRAWER_OPEN
+            EVENT_DRAWER_CLOSE -> PropKey.ON_DRAWER_CLOSE
+            EVENT_NATIVE -> PropKey.ON_NATIVE_EVENT
+            else -> null
+        }
 
     private fun applyInputValue(view: View, state: NodeState, next: String) {
         val input = view as? EditText ?: return

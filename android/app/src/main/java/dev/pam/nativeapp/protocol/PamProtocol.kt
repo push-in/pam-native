@@ -143,7 +143,8 @@ enum class PropKey(val value: Int) {
     OVERFLOW(98),
     HOST_NAME(99),
     HOST_PROPERTIES(100),
-    ON_NATIVE_EVENT(101);
+    ON_NATIVE_EVENT(101),
+    FLEX_DIRECTION(102);
 
     companion object {
         fun from(value: Int): PropKey =

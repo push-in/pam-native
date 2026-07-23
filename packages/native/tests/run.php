@@ -25,7 +25,9 @@ use Pam\Native\View;
 use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
 use Pam\Native\UI\Column;
+use Pam\Native\UI\CustomView;
 use Pam\Native\UI\Input;
+use Pam\Native\UI\Pressable;
 use Pam\Native\UI\Screen;
 use Pam\Native\UI\Text;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
@@ -121,6 +123,16 @@ if ($firstFrame === null || $secondFrame === null) {
 $assert($firstFrame === $secondFrame, 'Tree encoding must be deterministic.');
 $assert(str_starts_with($firstFrame, 'PNT1'), 'Tree frame magic is missing.');
 $assert(count($first['callbacks']) === 1, 'Event callback was not registered.');
+
+$nativeContainer = CustomView::make(
+    'community.container',
+    ['axis' => 1],
+    Text::make('Native child'),
+);
+$assert(
+    count($nativeContainer->children()) === 1,
+    'Custom native view containers must retain declarative children.',
+);
 
 $incremental = new TreeEncoder();
 $initial = $incremental->encode(Text::make('A')->key('value'));
@@ -370,6 +382,14 @@ file_put_contents(
 </Screen>
 PAM,
 );
+file_put_contents(
+    $templateDirectory.'/override.pam',
+    <<<'PAM'
+<Button>
+    <Text>Plugin child</Text>
+</Button>
+PAM,
+);
 App::views($templateDirectory, $templateDirectory.'/cache');
 App::theme(Theme::pamLab());
 App::component('Panel', 'panel');
@@ -430,6 +450,17 @@ $slotView = View::make('slots')->toElement();
 $assert(
     $slotView->children() !== [],
     'Component props and slots did not render native children.',
+);
+
+TemplateRegistry::component(
+    'Button',
+    static fn (array $_props, array $children, ?object $_scope): Pressable => Pressable::make(...$children),
+);
+$overriddenButton = View::make('override')->toElement();
+$assert(
+    $overriddenButton->kind() === NodeKind::Pressable
+        && count($overriddenButton->children()) === 1,
+    'Plugin tags must be able to override core tags and receive element children.',
 );
 
 $failing = new class extends Component {

@@ -43,6 +43,7 @@ final readonly class Style
         public ?float $lineHeight = null,
         public ?int $zIndex = null,
         public ?Overflow $overflow = null,
+        public ?FlexDirection $flexDirection = null,
     ) {
     }
 
@@ -88,6 +89,7 @@ final readonly class Style
             PropKey::LineHeight->value => $this->lineHeight,
             PropKey::ZIndex->value => $this->zIndex,
             PropKey::Overflow->value => $this->overflow?->value,
+            PropKey::FlexDirection->value => $this->flexDirection?->value,
         ] as $key => $value) {
             if ($value !== null) {
                 $properties[$key] = $value;

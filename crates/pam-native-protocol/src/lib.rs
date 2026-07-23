@@ -178,6 +178,7 @@ pub enum PropKey {
     HostName = 99,
     HostProperties = 100,
     OnNativeEvent = 101,
+    FlexDirection = 102,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -286,6 +287,7 @@ impl TryFrom<u16> for PropKey {
             99 => Ok(Self::HostName),
             100 => Ok(Self::HostProperties),
             101 => Ok(Self::OnNativeEvent),
+            102 => Ok(Self::FlexDirection),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1089,10 +1091,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=101 {
+        for value in 1..=102 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(102).is_err());
+        assert!(PropKey::try_from(103).is_err());
     }
 
     fn tree(text: &str) -> Tree {

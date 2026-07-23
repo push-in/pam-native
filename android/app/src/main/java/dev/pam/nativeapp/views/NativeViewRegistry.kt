@@ -11,10 +11,20 @@ class NativeViewRegistry(private val context: Context) : AutoCloseable {
 
     fun create(
         name: String,
-        emit: (ByteArray) -> Unit,
+        emit: (Int, ByteArray) -> Unit,
     ): View {
         val factory = factories[name] ?: error("Unknown generated native view $name")
-        return factory.create(context = context, emit = emit).also { view ->
+        val view = if (factory is NativeViewFactoryV2) {
+            factory.create(
+                context,
+                NativeViewEmitter { kind, payload -> emit(kind.value, payload) },
+            )
+        } else {
+            factory.create(context) { payload ->
+                emit(NativeViewEventKind.NATIVE.value, payload)
+            }
+        }
+        return view.also {
             owners[view] = factory
         }
     }

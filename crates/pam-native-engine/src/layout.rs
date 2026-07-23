@@ -121,10 +121,17 @@ fn layout_node(
         }
         return Ok(());
     }
-    let axis = if node.kind == NodeKind::Row {
+    let default_direction = if node.kind == NodeKind::Row { 2 } else { 1 };
+    let direction = integer(node, PropKey::FlexDirection).unwrap_or(default_direction);
+    let axis = if matches!(direction, 2 | 4) {
         Axis::Horizontal
     } else {
         Axis::Vertical
+    };
+    let ordered_children = if matches!(direction, 3 | 4) {
+        node_children.iter().rev().copied().collect::<Vec<_>>()
+    } else {
+        node_children.to_vec()
     };
     let available_main = match axis {
         Axis::Vertical => inner.height,
@@ -153,7 +160,7 @@ fn layout_node(
     let (mut cursor, distributed_gap) = justify_offsets(justify, free, node_children.len(), gap);
     let parent_alignment = cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4));
 
-    for child in node_children {
+    for child in ordered_children {
         let flex = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
         let main = if flex > 0.0 && total_flex > 0.0 {
             remaining * flex / total_flex

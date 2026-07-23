@@ -136,6 +136,7 @@ final class TemplateRenderer
         'hitSlop' => PropKey::HitSlop,
         'zIndex' => PropKey::ZIndex,
         'overflow' => PropKey::Overflow,
+        'flexDirection' => PropKey::FlexDirection,
     ];
 
     /** @var array<string, EventKind> */
@@ -297,12 +298,13 @@ final class TemplateRenderer
             $renderedChildren,
             static fn (mixed $value): bool => is_string($value),
         ));
+        $factory = TemplateRegistry::factory($tag);
 
-        if ($text !== '' && !in_array($tag, ['Text', 'Button'], true)) {
+        if ($factory === null && $text !== '' && !in_array($tag, ['Text', 'Button'], true)) {
             throw new RuntimeException("Text content is not valid inside {$tag}; wrap it in Text.");
         }
 
-        if ($children !== [] && in_array($tag, ['Text', 'Button'], true)) {
+        if ($factory === null && $children !== [] && in_array($tag, ['Text', 'Button'], true)) {
             throw new RuntimeException("{$tag} cannot contain element children.");
         }
         $values = [];
@@ -315,7 +317,13 @@ final class TemplateRenderer
             $values[ltrim($name, ':')] = self::value($raw, $scope, $data);
         }
 
-        $element = match ($tag) {
+        if ($text !== '') {
+            $values['text'] ??= $text;
+        }
+
+        $element = $factory !== null
+            ? $factory($values, $children, $scope)->toElement()
+            : match ($tag) {
             'Screen' => Screen::make(...$children),
             'Column' => Column::make(...$children),
             'Row' => Row::make(...$children),
@@ -373,9 +381,10 @@ final class TemplateRenderer
             'Native', 'CustomView' => CustomView::make(
                 self::stringValue($values['name'] ?? '', 'Native view name'),
                 self::scalarMap($values['properties'] ?? []),
+                ...$children,
             ),
             default => self::custom($tag, $values, $children, $scope),
-        };
+            };
 
         $class = $attributes['class'] ?? null;
 
@@ -494,6 +503,12 @@ final class TemplateRenderer
                 'resize' => 1, 'pan' => 2, 'padding' => 3,
             ]),
             PropKey::Overflow => self::named($value, ['visible' => 1, 'hidden' => 2]),
+            PropKey::FlexDirection => self::named($value, [
+                'column' => 1,
+                'row' => 2,
+                'column-reverse' => 3,
+                'row-reverse' => 4,
+            ]),
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
                 ? $value
                 : null,
