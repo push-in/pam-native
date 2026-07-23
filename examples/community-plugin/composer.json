@@ -1,0 +1,20 @@
+{
+    "name": "pam-community/example-plugin",
+    "description": "Reference Composer plugin for Pam Native.",
+    "type": "pam-native-plugin",
+    "license": "BUSL-1.1",
+    "require": {
+        "php": "^8.4",
+        "pam/native": "^0.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "PamCommunity\\Example\\": "src/"
+        }
+    },
+    "extra": {
+        "pam-native": {
+            "plugin": "pam-native.plugin.json"
+        }
+    }
+}

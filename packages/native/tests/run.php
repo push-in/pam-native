@@ -10,7 +10,11 @@ use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
 use Pam\Native\MemoryPressure;
+use Pam\Native\Modules\NativeModuleResult;
+use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
+use Pam\Native\Plugin\PluginManager;
+use Pam\Native\Plugin\PluginException;
 use Pam\Native\PropKey;
 use Pam\Native\Restorable;
 use Pam\Native\State;
@@ -24,6 +28,7 @@ use Pam\Native\UI\Column;
 use Pam\Native\UI\Input;
 use Pam\Native\UI\Screen;
 use Pam\Native\UI\Text;
+use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
     $prefix = 'Pam\\Native\\';
@@ -39,16 +44,37 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
+require __DIR__.'/Fixtures/ExamplePluginProvider.php';
+
 final class TestDiagnostics
 {
     /** @var list<string> */
     public static array $messages = [];
+
+    /** @var array{requestId: int, module: string, method: string, payload: string}|null */
+    public static ?array $moduleCall = null;
 }
 
 if (!function_exists('pam_native_error')) {
     function pam_native_error(string $message): void
     {
         TestDiagnostics::$messages[] = $message;
+    }
+}
+
+if (!function_exists('pam_native_call')) {
+    function pam_native_call(
+        int $requestId,
+        string $module,
+        string $method,
+        string $payload,
+    ): void {
+        TestDiagnostics::$moduleCall = [
+            'requestId' => $requestId,
+            'module' => $module,
+            'method' => $method,
+            'payload' => $payload,
+        ];
     }
 }
 
@@ -154,6 +180,33 @@ $counter = new class extends Component {
 App::run($counter);
 $frame = Runtime::lastFrame();
 $assert($frame !== null, 'App did not render its initial frame.');
+$moduleResult = null;
+$requestId = NativeModules::call(
+    'community.echo',
+    'echo',
+    ['message' => 'fast'],
+    static function (NativeModuleResult $result) use (&$moduleResult): void {
+        $moduleResult = $result;
+    },
+);
+$assert(
+    TestDiagnostics::$moduleCall !== null
+        && TestDiagnostics::$moduleCall['requestId'] === $requestId
+        && TestDiagnostics::$moduleCall['module'] === 'community.echo'
+        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload']) === ['message' => 'fast'],
+    'Public native module facade did not emit a typed bridge call.',
+);
+Runtime::dispatchModuleResult(
+    $requestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map(['message' => 'fast']),
+);
+$assert(
+    $moduleResult instanceof NativeModuleResult
+        && $moduleResult->succeeded()
+        && $moduleResult->values() === ['message' => 'fast'],
+    'Public native module facade did not decode its result.',
+);
 $encoded = (new TreeEncoder())->encode($counter->render());
 $eventKey = array_key_first($encoded['callbacks']);
 
@@ -403,5 +456,102 @@ $assert(
 );
 $assert(Runtime::lastFrame() !== null, 'A PHP callback error stopped the runtime.');
 Runtime::shutdown();
+
+$pluginProject = sys_get_temp_dir().'/pam-native-plugin-tests-'.getmypid();
+$pluginPackage = $pluginProject.'/vendor/community/fixture';
+
+if (
+    !is_dir($pluginPackage)
+    && !mkdir($pluginPackage, 0o755, true)
+    && !is_dir($pluginPackage)
+) {
+    throw new RuntimeException('Cannot create the plugin fixture package.');
+}
+if (
+    !is_dir($pluginProject.'/vendor/composer')
+    && !mkdir($pluginProject.'/vendor/composer', 0o755, true)
+    && !is_dir($pluginProject.'/vendor/composer')
+) {
+    throw new RuntimeException('Cannot create the Composer fixture directory.');
+}
+
+file_put_contents(
+    $pluginProject.'/vendor/composer/installed.json',
+    <<<'JSON'
+{
+    "packages": [
+        {
+            "name": "community/fixture",
+            "version": "1.0.0",
+            "install-path": "../community/fixture",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            }
+        }
+    ]
+}
+JSON,
+);
+file_put_contents(
+    $pluginPackage.'/pam-native.plugin.json',
+    <<<'JSON'
+{
+    "version": 1,
+    "protocol": 1,
+    "pamNative": {
+        "minimum": "0.1.0",
+        "maximumExclusive": "0.2.0"
+    },
+    "php": {
+        "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
+    }
+}
+JSON,
+);
+
+PluginManager::reset();
+PluginManager::boot($pluginProject);
+$assert(
+    ExamplePluginProvider::$registered === 1
+        && ExamplePluginProvider::$booted === 1
+        && TemplateRegistry::factory('FixtureTag') !== null,
+    'Composer plugin provider was not registered and booted exactly once.',
+);
+PluginManager::boot($pluginProject);
+$assert(
+    ExamplePluginProvider::$registered === 1 && ExamplePluginProvider::$booted === 1,
+    'Plugin providers must be idempotent within a runtime.',
+);
+PluginManager::reset();
+file_put_contents(
+    $pluginProject.'/vendor/composer/installed.json',
+    <<<'JSON'
+{
+    "packages": [
+        {
+            "name": "community/fixture",
+            "version": "1.0.0",
+            "install-path": "../community/fixture",
+            "extra": {
+                "pam-native": {
+                    "plugin": "../outside.json"
+                }
+            }
+        }
+    ]
+}
+JSON,
+);
+$unsafeDescriptorRejected = false;
+
+try {
+    PluginManager::discover($pluginProject);
+} catch (PluginException) {
+    $unsafeDescriptorRejected = true;
+}
+
+$assert($unsafeDescriptorRejected, 'Plugin descriptor traversal must be rejected.');
 
 echo "Pam Native PHP SDK tests passed.\n";

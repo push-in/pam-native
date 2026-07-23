@@ -4,15 +4,47 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "2a15aae207c1a1ee8ba7df5db5303c3b",
+    "content-hash": "bbe0d70f0776aae32e8d8643624bf84e",
     "packages": [
+        {
+            "name": "pam-community/example-plugin",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../community-plugin",
+                "reference": "ad8277c7b027db2d3cf64761e7c7b85756812bac"
+            },
+            "require": {
+                "pam/native": "^0.1",
+                "php": "^8.4"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "PamCommunity\\Example\\": "src/"
+                }
+            },
+            "license": [
+                "BUSL-1.1"
+            ],
+            "description": "Reference Composer plugin for Pam Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
         {
             "name": "pam/native",
             "version": "0.1.1",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "216bd3ec65d305cb6543dc2d70de5541a0b64875"
+                "reference": "064cdbcc03477143f7f5d12dbc52d73bfc8ffa8d"
             },
             "require": {
                 "php": "^8.4"
@@ -21,6 +53,7 @@
             "extra": {
                 "pam-native": {
                     "manifest-schema": "resources/pam-native.schema.json",
+                    "plugin-schema": "resources/pam-native.plugin.schema.json",
                     "template-custom-data": "resources/pam-native.custom-data.json",
                     "protocol": 1
                 }

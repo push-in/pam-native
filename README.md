@@ -218,6 +218,33 @@ Built-in HTTP and storage calls use sequential integer operation IDs across
 PHP, C++, JNI, and Kotlin. The string-based custom module entry point remains as
 a compatibility path.
 
+## Composer Plugin SDK
+
+Pam Native packages can ship PHP providers, tag/component libraries, themes,
+native modules, native views, Android resources, manifests, Maven
+dependencies, AARs, and JNI libraries in one Composer install:
+
+```bash
+composer require vendor/maps-plugin
+pam mobile plugin:doctor .
+pam mobile plugin:list .
+pam mobile build .
+```
+
+The CLI securely discovers `extra.pam-native.plugin`, validates protocol and
+SDK compatibility, rejects binding conflicts and unsafe paths, generates
+isolated Android library projects, and writes
+`.pam-native/plugins.lock.json`. Android plugins compile against the stable
+`:plugin-api` module; production startup performs no native plugin scanning.
+
+PHP providers are auto-registered before the first render. Public
+`NativeModules::call()`/`callRaw()` APIs expose custom modules through the same
+bounded binary wire path used by PAM itself. Native view lifecycle methods run
+on the UI thread; slow module work remains off it.
+
+See the [Plugin SDK guide](docs/plugins.md) and the
+[complete reference plugin](examples/community-plugin).
+
 ## Benchmarks
 
 Run the isolated encoders and engine:

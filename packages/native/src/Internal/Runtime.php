@@ -158,7 +158,7 @@ final class Runtime
         Closure $callback,
     ): int {
         if (
-            preg_match('/^[A-Za-z][A-Za-z0-9_]{0,63}$/', $module) !== 1
+            preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/', $module) !== 1
             || preg_match('/^[A-Za-z][A-Za-z0-9_]{0,63}$/', $method) !== 1
         ) {
             throw new LogicException('Native module and method names must be safe identifiers.');

@@ -6,6 +6,7 @@ namespace Pam\Native;
 
 use Closure;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Plugin\PluginManager;
 
 final class App
 {
@@ -15,6 +16,7 @@ final class App
 
     public static function run(Renderable|Closure $root): void
     {
+        PluginManager::boot();
         Runtime::boot($root);
     }
 

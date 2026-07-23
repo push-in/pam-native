@@ -10,10 +10,15 @@ enum class ModuleResultStatus(val value: Int) {
 }
 
 interface NativeModule {
+    /**
+     * Implementations may perform slow work away from the UI thread.
+     *
+     * The completion can be invoked from any thread. Pam Native serializes the
+     * result before it re-enters the persistent PHP runtime.
+     */
     fun invoke(
         method: String,
         payload: ByteArray,
         completion: ModuleCompletion,
     )
 }
-

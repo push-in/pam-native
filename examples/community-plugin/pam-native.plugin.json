@@ -1,0 +1,31 @@
+{
+    "$schema": "https://pam.dev/schemas/pam-native-plugin.v1.schema.json",
+    "version": 1,
+    "protocol": 1,
+    "pamNative": {
+        "minimum": "0.1.0",
+        "maximumExclusive": "0.2.0"
+    },
+    "php": {
+        "provider": "PamCommunity\\Example\\ExamplePluginProvider"
+    },
+    "android": {
+        "namespace": "dev.pam.community.example",
+        "minSdk": 26,
+        "sourceDirs": [
+            "android/src/main/kotlin"
+        ]
+    },
+    "modules": [
+        {
+            "name": "community.echo",
+            "class": "dev.pam.community.example.EchoModule"
+        }
+    ],
+    "views": [
+        {
+            "name": "community.badge",
+            "class": "dev.pam.community.example.BadgeViewFactory"
+        }
+    ]
+}

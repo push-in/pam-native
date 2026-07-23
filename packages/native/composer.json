@@ -26,6 +26,7 @@
     "extra": {
         "pam-native": {
             "manifest-schema": "resources/pam-native.schema.json",
+            "plugin-schema": "resources/pam-native.plugin.schema.json",
             "template-custom-data": "resources/pam-native.custom-data.json",
             "protocol": 1
         }

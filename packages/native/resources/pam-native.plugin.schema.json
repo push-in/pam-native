@@ -1,0 +1,156 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pam.dev/schemas/pam-native-plugin.v1.schema.json",
+    "title": "Pam Native Composer plugin manifest",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "version",
+        "protocol",
+        "pamNative"
+    ],
+    "properties": {
+        "$schema": {
+            "type": "string"
+        },
+        "version": {
+            "const": 1
+        },
+        "protocol": {
+            "const": 1
+        },
+        "pamNative": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+                "minimum",
+                "maximumExclusive"
+            ],
+            "properties": {
+                "minimum": {
+                    "$ref": "#/$defs/version"
+                },
+                "maximumExclusive": {
+                    "$ref": "#/$defs/version"
+                }
+            }
+        },
+        "php": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "provider": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\\\[A-Za-z_][A-Za-z0-9_]*)+$"
+                }
+            }
+        },
+        "android": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "namespace": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+                },
+                "minSdk": {
+                    "type": "integer",
+                    "minimum": 26,
+                    "maximum": 36,
+                    "default": 26
+                },
+                "permissions": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^android\\.permission\\.[A-Z0-9_]+$"
+                    }
+                },
+                "repositories": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^https://"
+                    }
+                },
+                "dependencies": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[A-Za-z0-9_.+\\[\\](),-]+(:[A-Za-z0-9_.-]+)?$"
+                    }
+                },
+                "localAars": {
+                    "$ref": "#/$defs/paths"
+                },
+                "sourceDirs": {
+                    "$ref": "#/$defs/paths"
+                },
+                "resourceDirs": {
+                    "$ref": "#/$defs/paths"
+                },
+                "assetDirs": {
+                    "$ref": "#/$defs/paths"
+                },
+                "jniLibDirs": {
+                    "$ref": "#/$defs/paths"
+                },
+                "manifest": {
+                    "$ref": "#/$defs/path"
+                },
+                "consumerRules": {
+                    "$ref": "#/$defs/path"
+                }
+            }
+        },
+        "modules": {
+            "$ref": "#/$defs/nativeBindings"
+        },
+        "views": {
+            "$ref": "#/$defs/nativeBindings"
+        }
+    },
+    "$defs": {
+        "version": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][A-Za-z0-9.-]+)?$"
+        },
+        "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?![/\\\\])(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[^\\u0000]+$"
+        },
+        "paths": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+                "$ref": "#/$defs/path"
+            }
+        },
+        "nativeBindings": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "name",
+                    "class"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    },
+                    "class": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+                    }
+                }
+            }
+        }
+    }
+}

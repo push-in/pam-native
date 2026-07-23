@@ -74,6 +74,12 @@ final class TemplateRegistry
         return self::$classes[$class] ?? null;
     }
 
+    public static function reset(): void
+    {
+        self::$components = [];
+        self::$classes = [];
+    }
+
     private static function assertName(string $name): void
     {
         if (preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/', $name) !== 1) {

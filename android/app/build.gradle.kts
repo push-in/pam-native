@@ -9,6 +9,14 @@ val pamProperties = Properties().apply {
         load(input)
     }
 }
+val pamPluginProperties = Properties().apply {
+    val pluginFile = rootProject.file("pam-plugins.properties")
+    if (pluginFile.isFile) {
+        pluginFile.inputStream().use { input ->
+            load(input)
+        }
+    }
+}
 val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp")
 val pamApplicationName = pamProperties.getProperty("applicationName", "Pam Native")
 val pamNativeHome = pamProperties.getProperty("nativeHome")
@@ -121,5 +129,12 @@ android {
 }
 
 dependencies {
+    implementation(project(":plugin-api"))
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    val pluginCount = pamPluginProperties.getProperty("plugin.count", "0").toInt()
+    repeat(pluginCount) { index ->
+        val module = pamPluginProperties.getProperty("plugin.$index.module")
+            ?: error("pam-plugins.properties is missing plugin.$index.module")
+        add("implementation", project(module))
+    }
 }

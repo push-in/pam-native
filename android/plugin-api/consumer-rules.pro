@@ -1,0 +1,2 @@
+-keep,allowoptimization,allowobfuscation interface dev.pam.nativeapp.modules.NativeModule
+-keep,allowoptimization,allowobfuscation interface dev.pam.nativeapp.views.NativeViewFactory

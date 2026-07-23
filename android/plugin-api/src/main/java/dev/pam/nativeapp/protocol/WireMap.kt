@@ -6,13 +6,6 @@ import java.nio.ByteOrder
 
 private const val MAX_WIRE_BYTES = 1024 * 1024
 
-sealed interface WireValue {
-    data class Text(val value: String) : WireValue
-    data class Integer(val value: Long) : WireValue
-    data class Decimal(val value: Double) : WireValue
-    data class Flag(val value: Boolean) : WireValue
-}
-
 object WireMap {
     fun decode(bytes: ByteArray): Map<String, WireValue> =
         decode(ByteBuffer.wrap(bytes))
