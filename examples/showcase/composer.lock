@@ -1,0 +1,66 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "2a15aae207c1a1ee8ba7df5db5303c3b",
+    "packages": [
+        {
+            "name": "pam/native",
+            "version": "0.1.1",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/native",
+                "reference": "216bd3ec65d305cb6543dc2d70de5541a0b64875"
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "type": "library",
+            "extra": {
+                "pam-native": {
+                    "manifest-schema": "resources/pam-native.schema.json",
+                    "template-custom-data": "resources/pam-native.custom-data.json",
+                    "protocol": 1
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\": "src/"
+                }
+            },
+            "license": [
+                "BUSL-1.1"
+            ],
+            "description": "Build fast native Android applications with PHP and Pam.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "android",
+                "mobile",
+                "native",
+                "pam",
+                "php"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-native"
+            },
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "^8.4"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}

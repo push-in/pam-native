@@ -1,0 +1,37 @@
+{
+    "name": "pam/native",
+    "description": "Build fast native Android applications with PHP and Pam.",
+    "type": "library",
+    "license": "BUSL-1.1",
+    "keywords": [
+        "android",
+        "mobile",
+        "native",
+        "pam",
+        "php"
+    ],
+    "homepage": "https://github.com/push-in/pam",
+    "support": {
+        "issues": "https://github.com/push-in/pam/issues",
+        "source": "https://github.com/push-in/pam-native"
+    },
+    "require": {
+        "php": "^8.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pam\\Native\\": "src/"
+        }
+    },
+    "extra": {
+        "pam-native": {
+            "manifest-schema": "resources/pam-native.schema.json",
+            "template-custom-data": "resources/pam-native.custom-data.json",
+            "protocol": 1
+        }
+    },
+    "config": {
+        "platform-check": true,
+        "sort-packages": true
+    }
+}

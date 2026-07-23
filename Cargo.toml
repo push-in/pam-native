@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/pam-native-engine",
+    "crates/pam-native-protocol",
+]
+
+[workspace.package]
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.88"
+license = "BUSL-1.1"
+repository = "https://github.com/push-in/pam"
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"

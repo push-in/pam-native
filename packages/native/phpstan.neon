@@ -1,0 +1,9 @@
+parameters:
+    level: 9
+    paths:
+        - src
+        - tests
+    tmpDir: ../../../.pam-native/phpstan
+    treatPhpDocTypesAsCertain: true
+    reportUnmatchedIgnoredErrors: true
+

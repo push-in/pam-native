@@ -1,0 +1,131 @@
+Business Source License 1.1
+
+License text copyright © 2024 MariaDB plc, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB plc.
+
+Parameters
+
+Licensor:             Pushin
+
+Licensed Work:        PAM (PHP Application Mobile/Desktop Runtime & UI
+                        Framework), Version 0.1.1, and the software distributed
+                        in this repository under this License. The Licensed Work
+                        is Copyright (c) 2026 Pushin.
+
+Additional Use Grant: You may make production use of the Licensed Work for any
+                        purpose other than a Competing Use.
+
+                        "Competing Use" means using the Licensed Work to develop,
+                        offer, license, sell, host, or distribute a product or
+                        service whose primary purpose is to provide a substitute
+                        for PAM as an application development framework,
+                        developer platform, runtime environment, or UI engine.
+                        Offering a rebranded or repackaged version of PAM as a
+                        standalone framework, runtime, platform, or UI engine is
+                        a Competing Use.
+
+                        For clarity, Competing Use does not include:
+
+                        (a) developing, operating, marketing, distributing, or
+                            selling applications built with PAM, including
+                            commercial, internal, SaaS, mobile, desktop, and web
+                            applications;
+                        (b) providing consulting, development, integration,
+                            hosting, maintenance, training, or support services
+                            for applications built with PAM; or
+                        (c) creating or distributing libraries, components,
+                            plugins, integrations, or developer tools that work
+                            with PAM, require PAM, and do not substitute for PAM.
+
+                        Source code and content authored by you that merely uses
+                        PAM's public interfaces ("Application Code") is not part
+                        of the Licensed Work and may be licensed under terms of
+                        your choice.
+
+                        In addition, code emitted by PAM's code generators and
+                        application files copied from pam/skeleton may be used,
+                        modified, sublicensed, and distributed under terms of
+                        your choice. This application-output grant does not
+                        apply to copied or modified portions of PAM's framework,
+                        runtime, developer platform, or UI engine.
+
+Change Date:          2030-07-23
+
+Change License:       Apache License, Version 2.0
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited production
+use.
+
+Effective on the Change Date, or the fourth anniversary of the first publicly
+available distribution of a specific version of the Licensed Work under this
+License, whichever comes first, the Licensor hereby grants you rights under the
+terms of the Change License, and the rights granted in the paragraph above
+terminate.
+
+If your use of the Licensed Work does not comply with the requirements currently
+in effect as described in this License, you must purchase a commercial license
+from the Licensor, its affiliated entities, or authorized resellers, or you must
+refrain from using the Licensed Work.
+
+All copies of the original and modified Licensed Work, and derivative works of
+the Licensed Work, are subject to this License. This License applies separately
+for each version of the Licensed Work and the Change Date may vary for each
+version of the Licensed Work released by Licensor.
+
+You must conspicuously display this License on each original or modified copy of
+the Licensed Work. If you receive the Licensed Work in original or modified form
+from a third party, the terms and conditions set forth in this License apply to
+your use of that work.
+
+Any use of the Licensed Work in violation of this License will automatically
+terminate your rights under this License for the current and all other versions
+of the Licensed Work.
+
+This License does not grant you any right in any trademark or logo of Licensor or
+its affiliates (provided that you may use a trademark or logo of Licensor as
+expressly required by this License).
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED ON AN
+"AS IS" BASIS. LICENSOR HEREBY DISCLAIMS ALL WARRANTIES AND CONDITIONS, EXPRESS
+OR IMPLIED, INCLUDING (WITHOUT LIMITATION) WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, NON-INFRINGEMENT, AND TITLE.
+
+MariaDB hereby grants you permission to use this License's text to license your
+works, and to refer to it using the trademark "Business Source License", as long
+as you comply with the Covenants of Licensor below.
+
+Covenants of Licensor
+
+In consideration of the right to use this License's text and the "Business Source
+License" name and trademark, Licensor covenants to MariaDB, and to all other
+recipients of the licensed work to be provided by Licensor:
+
+1. To specify as the Change License the GPL Version 2.0 or any later version, or
+   a license that is compatible with GPL Version 2.0 or a later version, where
+   "compatible" means that software provided under the Change License can be
+   included in a program with software provided under GPL Version 2.0 or a later
+   version. Licensor may specify additional Change Licenses without limitation.
+
+2. To either: (a) specify an additional grant of rights to use that does not
+   impose any additional restriction on the right granted in this License; or
+   (b) insert the text "None".
+
+3. To specify a Change Date.
+
+4. Not to modify this License in any other way.
+
+Notice
+
+The Business Source License (this document, or the "License") is not an Open
+Source license. However, the Licensed Work will eventually be made available
+under an Open Source License, as stated in this License.
+
+For more information on the use of the Business Source License for MariaDB
+products, please visit the MariaDB Business Source License FAQ at
+https://mariadb.com/bsl-faq-mariadb/. For more information on the use of the
+Business Source License generally, please visit the Adopting and Developing
+Business Source License FAQ at https://mariadb.com/bsl-faq-adopting/.

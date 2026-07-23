@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Rust, PHP SDK, and protocol contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy,rustfmt
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate manifests
+        run: |
+          cargo metadata --locked --no-deps
+          composer validate --strict --no-check-lock packages/native/composer.json
+          composer validate --strict --working-dir=examples/showcase
+      - name: Rust contracts
+        run: |
+          cargo fmt --all -- --check
+          cargo test --locked --all-targets
+          cargo clippy --locked --all-targets -- -D warnings
+      - name: PHP and benchmark contracts
+        run: |
+          composer install --working-dir=examples/showcase --no-interaction
+          php packages/native/tests/run.php
+          python3 -m unittest benchmarks/mobile/test_compare.py

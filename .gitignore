@@ -1,0 +1,14 @@
+/target/
+**/.gradle/
+**/.kotlin/
+**/build/
+**/local.properties
+**/.cxx/
+**/.externalNativeBuild/
+**/.pam-native/
+**/__pycache__/
+*.py[cod]
+/runtime/android/
+/android/app/src/main/assets/pam/
+/android/app/src/main/generated/
+**/vendor/

@@ -1,0 +1,51 @@
+<Screen>
+    <SafeAreaView class="flex-1 surface">
+        <Column class="flex-1 p-4 gap-2">
+            <Row height="52" gap="12">
+                <Button width="96" on:press="back" accessibilityLabel="benchmark-back">Back</Button>
+                <Text class="text-primary" flexGrow="1" fontSize="22" fontWeight="700">Tags + classes</Text>
+            </Row>
+
+            <Text class="text-primary" height="36" fontSize="18">Hello, {{ $name }}.</Text>
+            <Input
+                key="name"
+                model="name"
+                placeholder="Your name"
+                keyboardType="text"
+                sync="debounced"
+                debounce="48"
+                height="48"
+                borderRadius="12"
+                borderWidth="1"
+                borderColor="#FF475569"
+                backgroundColor="#FF1E293B"
+                textColor="#FFF8FAFC"
+            />
+
+            <Row height="52" gap="8">
+                <Button flexGrow="1" on:press="increment">Count: {{ $count }}</Button>
+                <Switch checked="$enabled" on:toggle="toggle" width="72" />
+            </Row>
+
+            <Pressable
+                height="52"
+                class="rounded-3"
+                backgroundColor="#FF111827"
+                rippleColor="#33FFFFFF"
+                on:press="toggleModal"
+            >
+                <Text textColor="#FFFFFFFF" textAlign="center">Open native modal</Text>
+            </Pressable>
+
+            <ActivityIndicator visible="$enabled" progressColor="#FF2563EB" height="48" />
+
+            <Modal visible="$modal" presentation="dialog">
+                <Column class="p-4 gap-2 surface-muted" borderRadius="16">
+                    <Text class="text-primary" height="44" fontSize="22" fontWeight="700">Native modal</Text>
+                    <Text class="text-muted" height="52">Gestures, focus and animation remain on the UI thread.</Text>
+                    <Button height="48" on:press="toggleModal">Close</Button>
+                </Column>
+            </Modal>
+        </Column>
+    </SafeAreaView>
+</Screen>

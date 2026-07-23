@@ -1,0 +1,44 @@
+{
+    "version": 1,
+    "deviceRequirements": {
+        "physical": true,
+        "minimumApi": 31,
+        "releaseLike": true,
+        "airplaneMode": true,
+        "thermalStatusMaximum": 1
+    },
+    "scenarios": [
+        {
+            "id": "coldStartup",
+            "kind": 1,
+            "iterations": 10,
+            "metric": "timeToFullDisplayMs"
+        },
+        {
+            "id": "propertyPatches",
+            "kind": 2,
+            "iterations": 5,
+            "operationsPerIteration": 30,
+            "metrics": [
+                "frameOverrunMs",
+                "memoryRssKb",
+                "PamNative.decodeMs",
+                "PamNative.mountMs"
+            ]
+        },
+        {
+            "id": "virtualizedListScroll",
+            "kind": 3,
+            "iterations": 5,
+            "items": 10000,
+            "operationsPerIteration": 6,
+            "metric": "frameOverrunMs"
+        }
+    ],
+    "accessibilityTargets": {
+        "counter": "benchmark-counter",
+        "listRoute": "benchmark-list-route",
+        "largeList": "benchmark-large-list",
+        "back": "benchmark-back"
+    }
+}

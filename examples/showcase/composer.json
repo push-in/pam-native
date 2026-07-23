@@ -1,0 +1,31 @@
+{
+    "name": "pam/example-native-showcase",
+    "description": "Pam Native Android showcase application.",
+    "type": "project",
+    "license": "BUSL-1.1",
+    "require": {
+        "php": "^8.4",
+        "pam/native": "^0.1"
+    },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../packages/native",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pam/native": "0.1.1"
+                }
+            }
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "config": {
+        "platform-check": true,
+        "sort-packages": true
+    }
+}

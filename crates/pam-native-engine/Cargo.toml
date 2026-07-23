@@ -1,0 +1,18 @@
+[package]
+name = "pam-native-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["rlib", "staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+pam-native-protocol = { path = "../pam-native-protocol" }
+
+[lints]
+workspace = true
+

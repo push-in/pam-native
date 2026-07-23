@@ -1,0 +1,1240 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
+
+pub const TREE_MAGIC: [u8; 4] = *b"PNT1";
+pub const PATCH_MAGIC: [u8; 4] = *b"PNP1";
+pub const BATCH_MAGIC: [u8; 4] = *b"PNB1";
+pub const PROTOCOL_VERSION: u16 = 1;
+pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub const MAX_NODES: usize = 100_000;
+pub const MAX_TREE_DEPTH: usize = 512;
+pub const MAX_PROPERTIES_PER_NODE: usize = 128;
+pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum NodeKind {
+    Screen = 1,
+    Column = 2,
+    Row = 3,
+    Text = 4,
+    Button = 5,
+    Input = 6,
+    Image = 7,
+    Scroll = 8,
+    List = 9,
+    Spacer = 10,
+    View = 11,
+    Pressable = 12,
+    ActivityIndicator = 13,
+    Switch = 14,
+    Modal = 15,
+    ImageBackground = 16,
+    KeyboardAvoidingView = 17,
+    SectionList = 18,
+    RefreshControl = 19,
+    StatusBar = 20,
+    SafeAreaView = 21,
+    DrawerLayout = 22,
+    InputAccessoryView = 23,
+    CustomView = 24,
+}
+
+impl TryFrom<u8> for NodeKind {
+    type Error = ProtocolError;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Screen),
+            2 => Ok(Self::Column),
+            3 => Ok(Self::Row),
+            4 => Ok(Self::Text),
+            5 => Ok(Self::Button),
+            6 => Ok(Self::Input),
+            7 => Ok(Self::Image),
+            8 => Ok(Self::Scroll),
+            9 => Ok(Self::List),
+            10 => Ok(Self::Spacer),
+            11 => Ok(Self::View),
+            12 => Ok(Self::Pressable),
+            13 => Ok(Self::ActivityIndicator),
+            14 => Ok(Self::Switch),
+            15 => Ok(Self::Modal),
+            16 => Ok(Self::ImageBackground),
+            17 => Ok(Self::KeyboardAvoidingView),
+            18 => Ok(Self::SectionList),
+            19 => Ok(Self::RefreshControl),
+            20 => Ok(Self::StatusBar),
+            21 => Ok(Self::SafeAreaView),
+            22 => Ok(Self::DrawerLayout),
+            23 => Ok(Self::InputAccessoryView),
+            24 => Ok(Self::CustomView),
+            other => Err(ProtocolError::UnknownNodeKind(other)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u16)]
+pub enum PropKey {
+    Text = 1,
+    Value = 2,
+    Placeholder = 3,
+    Source = 4,
+    Width = 5,
+    Height = 6,
+    FlexGrow = 7,
+    Padding = 8,
+    Gap = 9,
+    BackgroundColor = 10,
+    TextColor = 11,
+    FontSize = 12,
+    Enabled = 13,
+    OnPress = 14,
+    OnChange = 15,
+    Items = 16,
+    AccessibilityLabel = 17,
+    TestId = 18,
+    OnLongPress = 19,
+    OnFocus = 20,
+    OnBlur = 21,
+    OnSubmit = 22,
+    OnScroll = 23,
+    OnRefresh = 24,
+    OnToggle = 25,
+    Margin = 26,
+    MarginHorizontal = 27,
+    MarginVertical = 28,
+    PaddingHorizontal = 29,
+    PaddingVertical = 30,
+    MinWidth = 31,
+    MinHeight = 32,
+    MaxWidth = 33,
+    MaxHeight = 34,
+    BorderRadius = 35,
+    BorderWidth = 36,
+    BorderColor = 37,
+    Opacity = 38,
+    AlignItems = 39,
+    AlignSelf = 40,
+    JustifyContent = 41,
+    TextAlign = 42,
+    FontWeight = 43,
+    NumberOfLines = 44,
+    Multiline = 45,
+    Secure = 46,
+    KeyboardType = 47,
+    AutoComplete = 48,
+    InputDebounceMs = 49,
+    InputSyncMode = 50,
+    Checked = 51,
+    Loading = 52,
+    ProgressColor = 53,
+    ImageFit = 54,
+    TintColor = 55,
+    Elevation = 56,
+    Visible = 57,
+    ModalPresentation = 58,
+    StatusBarColor = 59,
+    StatusBarStyle = 60,
+    StatusBarHidden = 61,
+    KeyboardBehavior = 62,
+    Refreshing = 63,
+    ScrollEnabled = 64,
+    ShowsScrollIndicator = 65,
+    Selected = 66,
+    RippleColor = 67,
+    PressOpacity = 68,
+    Collapsable = 69,
+    AccessibilityRole = 70,
+    AccessibilityHint = 71,
+    TranslationX = 72,
+    TranslationY = 73,
+    ScaleX = 74,
+    ScaleY = 75,
+    Rotation = 76,
+    AnimationDurationMs = 77,
+    AnimationEasing = 78,
+    AnimateChanges = 79,
+    SectionItems = 80,
+    ListRowHeight = 81,
+    ListPrefetch = 82,
+    OnEndReached = 83,
+    EndReachedThreshold = 84,
+    DrawerOpen = 85,
+    DrawerPosition = 86,
+    OnDrawerOpen = 87,
+    OnDrawerClose = 88,
+    LetterSpacing = 89,
+    LineHeight = 90,
+    PlaceholderColor = 91,
+    SelectionColor = 92,
+    MaxLength = 93,
+    AutoFocus = 94,
+    ReturnKeyType = 95,
+    HitSlop = 96,
+    ZIndex = 97,
+    Overflow = 98,
+    HostName = 99,
+    HostProperties = 100,
+    OnNativeEvent = 101,
+}
+
+impl TryFrom<u16> for PropKey {
+    type Error = ProtocolError;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Text),
+            2 => Ok(Self::Value),
+            3 => Ok(Self::Placeholder),
+            4 => Ok(Self::Source),
+            5 => Ok(Self::Width),
+            6 => Ok(Self::Height),
+            7 => Ok(Self::FlexGrow),
+            8 => Ok(Self::Padding),
+            9 => Ok(Self::Gap),
+            10 => Ok(Self::BackgroundColor),
+            11 => Ok(Self::TextColor),
+            12 => Ok(Self::FontSize),
+            13 => Ok(Self::Enabled),
+            14 => Ok(Self::OnPress),
+            15 => Ok(Self::OnChange),
+            16 => Ok(Self::Items),
+            17 => Ok(Self::AccessibilityLabel),
+            18 => Ok(Self::TestId),
+            19 => Ok(Self::OnLongPress),
+            20 => Ok(Self::OnFocus),
+            21 => Ok(Self::OnBlur),
+            22 => Ok(Self::OnSubmit),
+            23 => Ok(Self::OnScroll),
+            24 => Ok(Self::OnRefresh),
+            25 => Ok(Self::OnToggle),
+            26 => Ok(Self::Margin),
+            27 => Ok(Self::MarginHorizontal),
+            28 => Ok(Self::MarginVertical),
+            29 => Ok(Self::PaddingHorizontal),
+            30 => Ok(Self::PaddingVertical),
+            31 => Ok(Self::MinWidth),
+            32 => Ok(Self::MinHeight),
+            33 => Ok(Self::MaxWidth),
+            34 => Ok(Self::MaxHeight),
+            35 => Ok(Self::BorderRadius),
+            36 => Ok(Self::BorderWidth),
+            37 => Ok(Self::BorderColor),
+            38 => Ok(Self::Opacity),
+            39 => Ok(Self::AlignItems),
+            40 => Ok(Self::AlignSelf),
+            41 => Ok(Self::JustifyContent),
+            42 => Ok(Self::TextAlign),
+            43 => Ok(Self::FontWeight),
+            44 => Ok(Self::NumberOfLines),
+            45 => Ok(Self::Multiline),
+            46 => Ok(Self::Secure),
+            47 => Ok(Self::KeyboardType),
+            48 => Ok(Self::AutoComplete),
+            49 => Ok(Self::InputDebounceMs),
+            50 => Ok(Self::InputSyncMode),
+            51 => Ok(Self::Checked),
+            52 => Ok(Self::Loading),
+            53 => Ok(Self::ProgressColor),
+            54 => Ok(Self::ImageFit),
+            55 => Ok(Self::TintColor),
+            56 => Ok(Self::Elevation),
+            57 => Ok(Self::Visible),
+            58 => Ok(Self::ModalPresentation),
+            59 => Ok(Self::StatusBarColor),
+            60 => Ok(Self::StatusBarStyle),
+            61 => Ok(Self::StatusBarHidden),
+            62 => Ok(Self::KeyboardBehavior),
+            63 => Ok(Self::Refreshing),
+            64 => Ok(Self::ScrollEnabled),
+            65 => Ok(Self::ShowsScrollIndicator),
+            66 => Ok(Self::Selected),
+            67 => Ok(Self::RippleColor),
+            68 => Ok(Self::PressOpacity),
+            69 => Ok(Self::Collapsable),
+            70 => Ok(Self::AccessibilityRole),
+            71 => Ok(Self::AccessibilityHint),
+            72 => Ok(Self::TranslationX),
+            73 => Ok(Self::TranslationY),
+            74 => Ok(Self::ScaleX),
+            75 => Ok(Self::ScaleY),
+            76 => Ok(Self::Rotation),
+            77 => Ok(Self::AnimationDurationMs),
+            78 => Ok(Self::AnimationEasing),
+            79 => Ok(Self::AnimateChanges),
+            80 => Ok(Self::SectionItems),
+            81 => Ok(Self::ListRowHeight),
+            82 => Ok(Self::ListPrefetch),
+            83 => Ok(Self::OnEndReached),
+            84 => Ok(Self::EndReachedThreshold),
+            85 => Ok(Self::DrawerOpen),
+            86 => Ok(Self::DrawerPosition),
+            87 => Ok(Self::OnDrawerOpen),
+            88 => Ok(Self::OnDrawerClose),
+            89 => Ok(Self::LetterSpacing),
+            90 => Ok(Self::LineHeight),
+            91 => Ok(Self::PlaceholderColor),
+            92 => Ok(Self::SelectionColor),
+            93 => Ok(Self::MaxLength),
+            94 => Ok(Self::AutoFocus),
+            95 => Ok(Self::ReturnKeyType),
+            96 => Ok(Self::HitSlop),
+            97 => Ok(Self::ZIndex),
+            98 => Ok(Self::Overflow),
+            99 => Ok(Self::HostName),
+            100 => Ok(Self::HostProperties),
+            101 => Ok(Self::OnNativeEvent),
+            other => Err(ProtocolError::UnknownProperty(other)),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PropValue {
+    String(String),
+    Integer(i64),
+    Float(f64),
+    Boolean(bool),
+    Bytes(Vec<u8>),
+}
+
+impl PropValue {
+    #[must_use]
+    pub fn as_number(&self) -> Option<f32> {
+        match self {
+            Self::Integer(value) => Some(*value as f32),
+            Self::Float(value) => Some(*value as f32),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Node {
+    pub id: u64,
+    pub parent: u64,
+    pub index: u32,
+    pub kind: NodeKind,
+    pub properties: BTreeMap<PropKey, PropValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Tree {
+    pub root: u64,
+    pub nodes: BTreeMap<u64, Node>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PropertyPatch {
+    pub id: u64,
+    pub key: PropKey,
+    pub value: Option<PropValue>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum PatchOperation {
+    Create(Node),
+    Remove { id: u64 },
+    Update(PropertyPatch),
+    Move { id: u64, parent: u64, index: u32 },
+    SetRoot { id: u64 },
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Patch {
+    pub operations: Vec<PatchOperation>,
+}
+
+impl Patch {
+    pub fn decode(frame: &[u8]) -> Result<Self, ProtocolError> {
+        if frame.len() > MAX_FRAME_BYTES {
+            return Err(ProtocolError::LimitExceeded("patch bytes"));
+        }
+        let mut reader = Reader::new(frame);
+        if reader.bytes(4)? != PATCH_MAGIC {
+            return Err(ProtocolError::InvalidMagic);
+        }
+        let version = reader.u16()?;
+        if version != PROTOCOL_VERSION {
+            return Err(ProtocolError::UnsupportedVersion(version));
+        }
+        let count = reader.u32()? as usize;
+        if count > MAX_NODES.saturating_mul(MAX_PROPERTIES_PER_NODE) {
+            return Err(ProtocolError::LimitExceeded("patch operation count"));
+        }
+        let mut seen = BTreeSet::new();
+        let mut operations = Vec::with_capacity(count);
+        for _ in 0..count {
+            let operation = reader.u8()?;
+            operations.push(match operation {
+                1 => {
+                    let node = decode_node(&mut reader)?;
+                    validate_id(node.id)?;
+                    PatchOperation::Create(node)
+                }
+                2 => PatchOperation::Remove {
+                    id: positive_id(&mut reader)?,
+                },
+                3 => {
+                    let id = positive_id(&mut reader)?;
+                    let key = PropKey::try_from(reader.u16()?)?;
+                    if !seen.insert((id, key)) {
+                        return Err(ProtocolError::DuplicatePatchProperty {
+                            node: id,
+                            property: key as u16,
+                        });
+                    }
+                    let value = match reader.u8()? {
+                        1 => Some(decode_value(&mut reader)?),
+                        2 => None,
+                        other => return Err(ProtocolError::UnknownValueTag(other)),
+                    };
+                    PatchOperation::Update(PropertyPatch { id, key, value })
+                }
+                4 => PatchOperation::Move {
+                    id: positive_id(&mut reader)?,
+                    parent: reader.u64()?,
+                    index: reader.u32()?,
+                },
+                5 => PatchOperation::SetRoot {
+                    id: positive_id(&mut reader)?,
+                },
+                other => return Err(ProtocolError::UnknownPatchOperation(other)),
+            });
+        }
+        reader.finish()?;
+        Ok(Self { operations })
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        let mut writer = Writer::with_capacity(self.operations.len().saturating_mul(32));
+        writer.bytes(&PATCH_MAGIC);
+        writer.u16(PROTOCOL_VERSION);
+        writer.u32(usize_to_u32(self.operations.len())?);
+        let mut seen = BTreeSet::new();
+        for operation in &self.operations {
+            match operation {
+                PatchOperation::Create(node) => {
+                    validate_id(node.id)?;
+                    writer.u8(1);
+                    encode_node(&mut writer, node)?;
+                }
+                PatchOperation::Remove { id } => {
+                    validate_id(*id)?;
+                    writer.u8(2);
+                    writer.u64(*id);
+                }
+                PatchOperation::Update(update) => {
+                    validate_id(update.id)?;
+                    if !seen.insert((update.id, update.key)) {
+                        return Err(ProtocolError::DuplicatePatchProperty {
+                            node: update.id,
+                            property: update.key as u16,
+                        });
+                    }
+                    writer.u8(3);
+                    writer.u64(update.id);
+                    writer.u16(update.key as u16);
+                    match &update.value {
+                        Some(value) => {
+                            writer.u8(1);
+                            encode_value(&mut writer, value)?;
+                        }
+                        None => writer.u8(2),
+                    }
+                }
+                PatchOperation::Move { id, parent, index } => {
+                    validate_id(*id)?;
+                    writer.u8(4);
+                    writer.u64(*id);
+                    writer.u64(*parent);
+                    writer.u32(*index);
+                }
+                PatchOperation::SetRoot { id } => {
+                    validate_id(*id)?;
+                    writer.u8(5);
+                    writer.u64(*id);
+                }
+            }
+        }
+        writer.finish()
+    }
+
+    #[must_use]
+    pub fn is_property_only(&self) -> bool {
+        self.operations
+            .iter()
+            .all(|operation| matches!(operation, PatchOperation::Update(_)))
+    }
+}
+
+impl Tree {
+    pub fn decode(frame: &[u8]) -> Result<Self, ProtocolError> {
+        if frame.len() > MAX_FRAME_BYTES {
+            return Err(ProtocolError::LimitExceeded("frame bytes"));
+        }
+        let mut reader = Reader::new(frame);
+        if reader.bytes(4)? != TREE_MAGIC {
+            return Err(ProtocolError::InvalidMagic);
+        }
+        let version = reader.u16()?;
+        if version != PROTOCOL_VERSION {
+            return Err(ProtocolError::UnsupportedVersion(version));
+        }
+        let root = reader.u64()?;
+        let count = reader.u32()? as usize;
+        if count == 0 || count > MAX_NODES {
+            return Err(ProtocolError::LimitExceeded("node count"));
+        }
+        let mut nodes = BTreeMap::new();
+        for _ in 0..count {
+            let node = decode_node(&mut reader)?;
+            let id = node.id;
+            if id == 0 {
+                return Err(ProtocolError::ZeroNodeId);
+            }
+            if nodes.insert(id, node).is_some() {
+                return Err(ProtocolError::DuplicateNode(id));
+            }
+        }
+        reader.finish()?;
+        let tree = Self { root, nodes };
+        tree.validate()?;
+        Ok(tree)
+    }
+
+    pub fn encode(&self) -> Result<Vec<u8>, ProtocolError> {
+        self.validate()?;
+        let mut writer = Writer::with_capacity(self.nodes.len().saturating_mul(64));
+        writer.bytes(&TREE_MAGIC);
+        writer.u16(PROTOCOL_VERSION);
+        writer.u64(self.root);
+        writer.u32(usize_to_u32(self.nodes.len())?);
+        for node in self.nodes.values() {
+            encode_node(&mut writer, node)?;
+        }
+        writer.finish()
+    }
+
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if self.nodes.is_empty() || self.nodes.len() > MAX_NODES {
+            return Err(ProtocolError::LimitExceeded("node count"));
+        }
+        let root = self
+            .nodes
+            .get(&self.root)
+            .ok_or(ProtocolError::MissingRoot(self.root))?;
+        if root.parent != 0 {
+            return Err(ProtocolError::RootHasParent);
+        }
+
+        let mut sibling_positions = BTreeSet::new();
+        for node in self.nodes.values() {
+            validate_node(node)?;
+            if node.id != self.root {
+                if node.parent == 0 || !self.nodes.contains_key(&node.parent) {
+                    return Err(ProtocolError::MissingParent {
+                        node: node.id,
+                        parent: node.parent,
+                    });
+                }
+                if !sibling_positions.insert((node.parent, node.index)) {
+                    return Err(ProtocolError::DuplicateSiblingIndex {
+                        parent: node.parent,
+                        index: node.index,
+                    });
+                }
+            }
+        }
+
+        #[derive(Clone, Copy, Eq, PartialEq)]
+        enum Visit {
+            Visiting,
+            Valid,
+        }
+
+        let mut visits = BTreeMap::from([(self.root, Visit::Valid)]);
+        let mut depths = BTreeMap::from([(self.root, 0_usize)]);
+        for start in self.nodes.keys().copied() {
+            if visits.get(&start) == Some(&Visit::Valid) {
+                continue;
+            }
+            let mut cursor = start;
+            let mut path = Vec::new();
+            loop {
+                match visits.get(&cursor).copied() {
+                    Some(Visit::Valid) => break,
+                    Some(Visit::Visiting) => return Err(ProtocolError::Cycle(start)),
+                    None => {
+                        visits.insert(cursor, Visit::Visiting);
+                        path.push(cursor);
+                        cursor = self
+                            .nodes
+                            .get(&cursor)
+                            .ok_or(ProtocolError::Disconnected(start))?
+                            .parent;
+                    }
+                }
+            }
+            let mut depth = *depths
+                .get(&cursor)
+                .ok_or(ProtocolError::Disconnected(start))?;
+            for id in path.into_iter().rev() {
+                depth = depth.saturating_add(1);
+                if depth > MAX_TREE_DEPTH {
+                    return Err(ProtocolError::LimitExceeded("tree depth"));
+                }
+                visits.insert(id, Visit::Valid);
+                depths.insert(id, depth);
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Layout {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Mutation {
+    Create(Node),
+    Remove {
+        id: u64,
+    },
+    Update {
+        id: u64,
+        key: PropKey,
+        value: Option<PropValue>,
+    },
+    Move {
+        id: u64,
+        parent: u64,
+        index: u32,
+    },
+    Layout {
+        id: u64,
+        frame: Layout,
+    },
+    SetRoot {
+        id: u64,
+    },
+}
+
+pub fn encode_batch(mutations: &[Mutation]) -> Result<Vec<u8>, ProtocolError> {
+    let mut writer = Writer::with_capacity(mutations.len().saturating_mul(40));
+    writer.bytes(&BATCH_MAGIC);
+    writer.u16(PROTOCOL_VERSION);
+    writer.u32(usize_to_u32(mutations.len())?);
+    for mutation in mutations {
+        match mutation {
+            Mutation::Create(node) => {
+                writer.u8(1);
+                encode_node(&mut writer, node)?;
+            }
+            Mutation::Remove { id } => {
+                writer.u8(2);
+                writer.u64(*id);
+            }
+            Mutation::Update { id, key, value } => {
+                writer.u8(3);
+                writer.u64(*id);
+                writer.u16(*key as u16);
+                match value {
+                    Some(value) => {
+                        writer.u8(1);
+                        encode_value(&mut writer, value)?;
+                    }
+                    None => writer.u8(2),
+                }
+            }
+            Mutation::Move { id, parent, index } => {
+                writer.u8(4);
+                writer.u64(*id);
+                writer.u64(*parent);
+                writer.u32(*index);
+            }
+            Mutation::Layout { id, frame } => {
+                writer.u8(5);
+                writer.u64(*id);
+                writer.f32(frame.x);
+                writer.f32(frame.y);
+                writer.f32(frame.width);
+                writer.f32(frame.height);
+            }
+            Mutation::SetRoot { id } => {
+                writer.u8(6);
+                writer.u64(*id);
+            }
+        }
+    }
+    writer.finish()
+}
+
+pub fn decode_batch(frame: &[u8]) -> Result<Vec<Mutation>, ProtocolError> {
+    if frame.len() > MAX_FRAME_BYTES {
+        return Err(ProtocolError::LimitExceeded("batch bytes"));
+    }
+    let mut reader = Reader::new(frame);
+    if reader.bytes(4)? != BATCH_MAGIC {
+        return Err(ProtocolError::InvalidMagic);
+    }
+    let version = reader.u16()?;
+    if version != PROTOCOL_VERSION {
+        return Err(ProtocolError::UnsupportedVersion(version));
+    }
+    let count = reader.u32()? as usize;
+    if count > MAX_NODES.saturating_mul(8) {
+        return Err(ProtocolError::LimitExceeded("mutation count"));
+    }
+    let mut mutations = Vec::with_capacity(count);
+    for _ in 0..count {
+        mutations.push(match reader.u8()? {
+            1 => Mutation::Create(decode_node(&mut reader)?),
+            2 => Mutation::Remove { id: reader.u64()? },
+            3 => {
+                let id = reader.u64()?;
+                let key = PropKey::try_from(reader.u16()?)?;
+                let value = match reader.u8()? {
+                    1 => Some(decode_value(&mut reader)?),
+                    2 => None,
+                    other => return Err(ProtocolError::UnknownValueTag(other)),
+                };
+                Mutation::Update { id, key, value }
+            }
+            4 => Mutation::Move {
+                id: reader.u64()?,
+                parent: reader.u64()?,
+                index: reader.u32()?,
+            },
+            5 => Mutation::Layout {
+                id: reader.u64()?,
+                frame: Layout {
+                    x: reader.f32()?,
+                    y: reader.f32()?,
+                    width: reader.f32()?,
+                    height: reader.f32()?,
+                },
+            },
+            6 => Mutation::SetRoot { id: reader.u64()? },
+            other => return Err(ProtocolError::UnknownMutation(other)),
+        });
+    }
+    reader.finish()?;
+    Ok(mutations)
+}
+
+fn validate_node(node: &Node) -> Result<(), ProtocolError> {
+    if node.properties.len() > MAX_PROPERTIES_PER_NODE {
+        return Err(ProtocolError::LimitExceeded("properties per node"));
+    }
+    for value in node.properties.values() {
+        let bytes = match value {
+            PropValue::String(value) => value.len(),
+            PropValue::Bytes(value) => value.len(),
+            _ => 0,
+        };
+        if bytes > MAX_VALUE_BYTES {
+            return Err(ProtocolError::LimitExceeded("property bytes"));
+        }
+    }
+    Ok(())
+}
+
+fn encode_node(writer: &mut Writer, node: &Node) -> Result<(), ProtocolError> {
+    validate_node(node)?;
+    writer.u64(node.id);
+    writer.u64(node.parent);
+    writer.u32(node.index);
+    writer.u8(node.kind as u8);
+    writer.u16(usize_to_u16(node.properties.len())?);
+    for (key, value) in &node.properties {
+        writer.u16(*key as u16);
+        encode_value(writer, value)?;
+    }
+    Ok(())
+}
+
+fn decode_node(reader: &mut Reader<'_>) -> Result<Node, ProtocolError> {
+    let id = reader.u64()?;
+    let parent = reader.u64()?;
+    let index = reader.u32()?;
+    let kind = NodeKind::try_from(reader.u8()?)?;
+    let property_count = reader.u16()? as usize;
+    if property_count > MAX_PROPERTIES_PER_NODE {
+        return Err(ProtocolError::LimitExceeded("properties per node"));
+    }
+    let mut properties = BTreeMap::new();
+    for _ in 0..property_count {
+        let key = PropKey::try_from(reader.u16()?)?;
+        let value = decode_value(reader)?;
+        if properties.insert(key, value).is_some() {
+            return Err(ProtocolError::DuplicateProperty(key as u16));
+        }
+    }
+    let node = Node {
+        id,
+        parent,
+        index,
+        kind,
+        properties,
+    };
+    validate_node(&node)?;
+    Ok(node)
+}
+
+fn positive_id(reader: &mut Reader<'_>) -> Result<u64, ProtocolError> {
+    let id = reader.u64()?;
+    validate_id(id)?;
+    Ok(id)
+}
+
+fn validate_id(id: u64) -> Result<(), ProtocolError> {
+    if id == 0 {
+        Err(ProtocolError::ZeroNodeId)
+    } else {
+        Ok(())
+    }
+}
+
+fn encode_value(writer: &mut Writer, value: &PropValue) -> Result<(), ProtocolError> {
+    match value {
+        PropValue::String(value) => {
+            writer.u8(1);
+            writer.sized_bytes(value.as_bytes())?;
+        }
+        PropValue::Integer(value) => {
+            writer.u8(2);
+            writer.i64(*value);
+        }
+        PropValue::Float(value) => {
+            writer.u8(3);
+            writer.f64(*value);
+        }
+        PropValue::Boolean(value) => {
+            writer.u8(4);
+            writer.u8(u8::from(*value));
+        }
+        PropValue::Bytes(value) => {
+            writer.u8(5);
+            writer.sized_bytes(value)?;
+        }
+    }
+    Ok(())
+}
+
+fn decode_value(reader: &mut Reader<'_>) -> Result<PropValue, ProtocolError> {
+    match reader.u8()? {
+        1 => {
+            let bytes = reader.sized_bytes()?;
+            let value = std::str::from_utf8(bytes).map_err(|_| ProtocolError::InvalidUtf8)?;
+            Ok(PropValue::String(value.to_owned()))
+        }
+        2 => Ok(PropValue::Integer(reader.i64()?)),
+        3 => Ok(PropValue::Float(reader.f64()?)),
+        4 => match reader.u8()? {
+            0 => Ok(PropValue::Boolean(false)),
+            1 => Ok(PropValue::Boolean(true)),
+            _ => Err(ProtocolError::InvalidBoolean),
+        },
+        5 => Ok(PropValue::Bytes(reader.sized_bytes()?.to_vec())),
+        other => Err(ProtocolError::UnknownValueTag(other)),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ProtocolError {
+    InvalidMagic,
+    UnsupportedVersion(u16),
+    UnexpectedEnd,
+    TrailingBytes,
+    InvalidUtf8,
+    InvalidBoolean,
+    UnknownNodeKind(u8),
+    UnknownProperty(u16),
+    UnknownValueTag(u8),
+    UnknownPatchOperation(u8),
+    UnknownMutation(u8),
+    DuplicateNode(u64),
+    DuplicateProperty(u16),
+    DuplicatePatchProperty { node: u64, property: u16 },
+    DuplicateSiblingIndex { parent: u64, index: u32 },
+    ZeroNodeId,
+    MissingRoot(u64),
+    RootHasParent,
+    MissingParent { node: u64, parent: u64 },
+    Cycle(u64),
+    Disconnected(u64),
+    LimitExceeded(&'static str),
+    IntegerOverflow,
+}
+
+impl fmt::Display for ProtocolError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidMagic => formatter.write_str("invalid Pam Native frame magic"),
+            Self::UnsupportedVersion(version) => {
+                write!(
+                    formatter,
+                    "unsupported Pam Native protocol version {version}"
+                )
+            }
+            Self::UnexpectedEnd => formatter.write_str("truncated Pam Native frame"),
+            Self::TrailingBytes => formatter.write_str("trailing bytes in Pam Native frame"),
+            Self::InvalidUtf8 => formatter.write_str("string property is not valid UTF-8"),
+            Self::InvalidBoolean => formatter.write_str("boolean property is neither 0 nor 1"),
+            Self::UnknownNodeKind(kind) => write!(formatter, "unknown node kind {kind}"),
+            Self::UnknownProperty(property) => write!(formatter, "unknown property {property}"),
+            Self::UnknownValueTag(tag) => write!(formatter, "unknown property value tag {tag}"),
+            Self::UnknownPatchOperation(kind) => {
+                write!(formatter, "unknown patch operation {kind}")
+            }
+            Self::UnknownMutation(kind) => write!(formatter, "unknown mutation kind {kind}"),
+            Self::DuplicateNode(id) => write!(formatter, "duplicate node id {id}"),
+            Self::DuplicateProperty(key) => write!(formatter, "duplicate property {key}"),
+            Self::DuplicatePatchProperty { node, property } => {
+                write!(
+                    formatter,
+                    "duplicate patch property {property} for node {node}"
+                )
+            }
+            Self::DuplicateSiblingIndex { parent, index } => {
+                write!(
+                    formatter,
+                    "duplicate child index {index} under parent {parent}"
+                )
+            }
+            Self::ZeroNodeId => formatter.write_str("node id 0 is reserved"),
+            Self::MissingRoot(id) => write!(formatter, "root node {id} does not exist"),
+            Self::RootHasParent => formatter.write_str("root node cannot have a parent"),
+            Self::MissingParent { node, parent } => {
+                write!(formatter, "node {node} references missing parent {parent}")
+            }
+            Self::Cycle(id) => write!(formatter, "cycle detected from node {id}"),
+            Self::Disconnected(id) => write!(formatter, "node {id} is disconnected from the root"),
+            Self::LimitExceeded(limit) => write!(formatter, "protocol limit exceeded: {limit}"),
+            Self::IntegerOverflow => formatter.write_str("integer does not fit protocol field"),
+        }
+    }
+}
+
+impl std::error::Error for ProtocolError {}
+
+struct Reader<'a> {
+    bytes: &'a [u8],
+    offset: usize,
+}
+
+impl<'a> Reader<'a> {
+    fn new(bytes: &'a [u8]) -> Self {
+        Self { bytes, offset: 0 }
+    }
+
+    fn bytes(&mut self, length: usize) -> Result<&'a [u8], ProtocolError> {
+        let end = self
+            .offset
+            .checked_add(length)
+            .ok_or(ProtocolError::IntegerOverflow)?;
+        let value = self
+            .bytes
+            .get(self.offset..end)
+            .ok_or(ProtocolError::UnexpectedEnd)?;
+        self.offset = end;
+        Ok(value)
+    }
+
+    fn sized_bytes(&mut self) -> Result<&'a [u8], ProtocolError> {
+        let length = self.u32()? as usize;
+        if length > MAX_VALUE_BYTES {
+            return Err(ProtocolError::LimitExceeded("property bytes"));
+        }
+        self.bytes(length)
+    }
+
+    fn u8(&mut self) -> Result<u8, ProtocolError> {
+        Ok(self.bytes(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, ProtocolError> {
+        Ok(u16::from_le_bytes(
+            self.bytes(2)?.try_into().expect("fixed length"),
+        ))
+    }
+
+    fn u32(&mut self) -> Result<u32, ProtocolError> {
+        Ok(u32::from_le_bytes(
+            self.bytes(4)?.try_into().expect("fixed length"),
+        ))
+    }
+
+    fn u64(&mut self) -> Result<u64, ProtocolError> {
+        Ok(u64::from_le_bytes(
+            self.bytes(8)?.try_into().expect("fixed length"),
+        ))
+    }
+
+    fn i64(&mut self) -> Result<i64, ProtocolError> {
+        Ok(i64::from_le_bytes(
+            self.bytes(8)?.try_into().expect("fixed length"),
+        ))
+    }
+
+    fn f32(&mut self) -> Result<f32, ProtocolError> {
+        Ok(f32::from_le_bytes(
+            self.bytes(4)?.try_into().expect("fixed length"),
+        ))
+    }
+
+    fn f64(&mut self) -> Result<f64, ProtocolError> {
+        Ok(f64::from_le_bytes(
+            self.bytes(8)?.try_into().expect("fixed length"),
+        ))
+    }
+
+    fn finish(self) -> Result<(), ProtocolError> {
+        if self.offset == self.bytes.len() {
+            Ok(())
+        } else {
+            Err(ProtocolError::TrailingBytes)
+        }
+    }
+}
+
+struct Writer {
+    bytes: Vec<u8>,
+}
+
+impl Writer {
+    fn with_capacity(capacity: usize) -> Self {
+        Self {
+            bytes: Vec::with_capacity(capacity.min(MAX_FRAME_BYTES)),
+        }
+    }
+
+    fn bytes(&mut self, value: &[u8]) {
+        self.bytes.extend_from_slice(value);
+    }
+
+    fn sized_bytes(&mut self, value: &[u8]) -> Result<(), ProtocolError> {
+        if value.len() > MAX_VALUE_BYTES {
+            return Err(ProtocolError::LimitExceeded("property bytes"));
+        }
+        self.u32(usize_to_u32(value.len())?);
+        self.bytes(value);
+        Ok(())
+    }
+
+    fn u8(&mut self, value: u8) {
+        self.bytes.push(value);
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn i64(&mut self, value: i64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn f32(&mut self, value: f32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn f64(&mut self, value: f64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn finish(self) -> Result<Vec<u8>, ProtocolError> {
+        if self.bytes.len() > MAX_FRAME_BYTES {
+            Err(ProtocolError::LimitExceeded("frame bytes"))
+        } else {
+            Ok(self.bytes)
+        }
+    }
+}
+
+fn usize_to_u16(value: usize) -> Result<u16, ProtocolError> {
+    u16::try_from(value).map_err(|_| ProtocolError::IntegerOverflow)
+}
+
+fn usize_to_u32(value: usize) -> Result<u32, ProtocolError> {
+    u32::try_from(value).map_err(|_| ProtocolError::IntegerOverflow)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_enums_are_sequential_and_append_only() {
+        for value in 1..=24 {
+            assert!(
+                NodeKind::try_from(value).is_ok(),
+                "missing node kind {value}"
+            );
+        }
+        assert!(NodeKind::try_from(25).is_err());
+
+        for value in 1..=101 {
+            assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
+        }
+        assert!(PropKey::try_from(102).is_err());
+    }
+
+    fn tree(text: &str) -> Tree {
+        Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::Screen,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (
+                    2,
+                    Node {
+                        id: 2,
+                        parent: 1,
+                        index: 0,
+                        kind: NodeKind::Text,
+                        properties: BTreeMap::from([(
+                            PropKey::Text,
+                            PropValue::String(text.to_owned()),
+                        )]),
+                    },
+                ),
+            ]),
+        }
+    }
+
+    #[test]
+    fn tree_round_trip_is_lossless() {
+        let original = tree("Pam Native");
+        let encoded = original.encode().expect("encode");
+        assert_eq!(Tree::decode(&encoded).expect("decode"), original);
+    }
+
+    #[test]
+    fn protocol_v1_golden_frames_are_stable() {
+        let minimal_tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([(
+                1,
+                Node {
+                    id: 1,
+                    parent: 0,
+                    index: 0,
+                    kind: NodeKind::Screen,
+                    properties: BTreeMap::new(),
+                },
+            )]),
+        };
+        assert_eq!(
+            hex(&minimal_tree.encode().expect("tree")),
+            "504e543101000100000000000000010000000100000000000000000000000000000000000000010000",
+        );
+
+        let patch = Patch {
+            operations: vec![PatchOperation::Update(PropertyPatch {
+                id: 1,
+                key: PropKey::Text,
+                value: None,
+            })],
+        };
+        assert_eq!(
+            hex(&patch.encode().expect("patch")),
+            "504e5031010001000000030100000000000000010002",
+        );
+
+        assert_eq!(
+            hex(&encode_batch(&[Mutation::SetRoot { id: 1 }]).expect("batch")),
+            "504e4231010001000000060100000000000000",
+        );
+    }
+
+    #[test]
+    fn batch_round_trip_is_lossless() {
+        let mutations = vec![
+            Mutation::SetRoot { id: 1 },
+            Mutation::Create(tree("Pam").nodes[&1].clone()),
+            Mutation::Layout {
+                id: 1,
+                frame: Layout {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 360.0,
+                    height: 800.0,
+                },
+            },
+        ];
+        let encoded = encode_batch(&mutations).expect("encode");
+        assert_eq!(decode_batch(&encoded).expect("decode"), mutations);
+    }
+
+    #[test]
+    fn patch_round_trip_is_lossless() {
+        let patch = Patch {
+            operations: vec![
+                PatchOperation::Update(PropertyPatch {
+                    id: 2,
+                    key: PropKey::Text,
+                    value: Some(PropValue::String("Updated".to_owned())),
+                }),
+                PatchOperation::Update(PropertyPatch {
+                    id: 2,
+                    key: PropKey::Enabled,
+                    value: None,
+                }),
+                PatchOperation::Create(Node {
+                    id: 3,
+                    parent: 1,
+                    index: 1,
+                    kind: NodeKind::Button,
+                    properties: BTreeMap::new(),
+                }),
+                PatchOperation::Move {
+                    id: 2,
+                    parent: 1,
+                    index: 1,
+                },
+                PatchOperation::Remove { id: 3 },
+            ],
+        };
+        let encoded = patch.encode().expect("encode");
+        assert_eq!(Patch::decode(&encoded).expect("decode"), patch);
+    }
+
+    #[test]
+    fn rejects_cycles_and_trailing_data() {
+        let mut invalid = tree("cycle");
+        invalid.nodes.get_mut(&1).expect("root").parent = 2;
+        assert_eq!(invalid.validate(), Err(ProtocolError::RootHasParent));
+
+        let mut encoded = tree("extra").encode().expect("encode");
+        encoded.push(0);
+        assert_eq!(Tree::decode(&encoded), Err(ProtocolError::TrailingBytes));
+    }
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+}

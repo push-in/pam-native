@@ -1,0 +1,12 @@
+{
+    "version": 1,
+    "applicationId": "dev.pam.showcase",
+    "name": "Pam Native Showcase",
+    "entry": "index.php",
+    "android": {
+        "minSdk": 26,
+        "targetSdk": 36
+    },
+    "modules": [],
+    "views": []
+}

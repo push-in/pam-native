@@ -1,0 +1,101 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pam.dev/schemas/pam-native.v1.schema.json",
+    "title": "Pam Native application manifest",
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+        "version",
+        "applicationId",
+        "name",
+        "entry"
+    ],
+    "properties": {
+        "$schema": {
+            "type": "string"
+        },
+        "version": {
+            "const": 1
+        },
+        "applicationId": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$"
+        },
+        "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+        },
+        "entry": {
+            "type": "string",
+            "pattern": "^[^/\\\\][^\\u0000]*\\.php$"
+        },
+        "versionCode": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+        },
+        "versionName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "default": "0.1.0"
+        },
+        "android": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "minSdk": {
+                    "type": "integer",
+                    "minimum": 26,
+                    "maximum": 36,
+                    "default": 26
+                },
+                "targetSdk": {
+                    "type": "integer",
+                    "minimum": 26,
+                    "maximum": 36,
+                    "default": 36
+                },
+                "permissions": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "pattern": "^android\\.permission\\.[A-Z0-9_]+$"
+                    }
+                }
+            }
+        },
+        "modules": {
+            "$ref": "#/$defs/nativeBindings"
+        },
+        "views": {
+            "$ref": "#/$defs/nativeBindings"
+        }
+    },
+    "$defs": {
+        "nativeBindings": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "name",
+                    "class"
+                ],
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+                    },
+                    "class": {
+                        "type": "string",
+                        "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+                    }
+                }
+            }
+        }
+    }
+}
