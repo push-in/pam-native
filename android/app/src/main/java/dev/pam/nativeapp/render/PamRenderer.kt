@@ -213,6 +213,7 @@ class PamRenderer(
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
         view?.let(nativeViews::release)
+        view?.let(::clearHitSlop)
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
         children.remove(id)
@@ -252,6 +253,7 @@ class PamRenderer(
     private fun move(id: Long, parent: Long, index: Int) {
         val state = nodes[id] ?: return
         val view = views[id]
+        view?.let(::clearHitSlop)
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
         state.parent = parent
@@ -259,6 +261,7 @@ class PamRenderer(
         addChild(parent, id)
         if (view != null) {
             attachHosted(view, state)
+            applyHitSlop(view, state)
         } else {
             reattachHostedDescendants(id)
         }
@@ -332,6 +335,7 @@ class PamRenderer(
 
     private fun demote(state: NodeState) {
         val view = views[state.id] ?: return
+        clearHitSlop(view)
         (view.parent as? ViewGroup)?.removeView(view)
         views.remove(state.id)
         state.virtual = true
@@ -345,6 +349,7 @@ class PamRenderer(
             if (child == null) {
                 reattachHostedDescendants(childId)
             } else {
+                clearHitSlop(child)
                 (child.parent as? ViewGroup)?.removeView(child)
                 attachHosted(child, childState)
                 applyLayout(childId)
@@ -377,6 +382,7 @@ class PamRenderer(
                 topMargin = topPx
             }
         }
+        applyHitSlop(view, state)
         state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
             view.translationX = width * (percent / 100.0).toFloat()
         }
@@ -574,6 +580,7 @@ class PamRenderer(
                     applyAnimationKind(view, state, 2)
                 }
             }
+            PropKey.HIT_SLOP -> applyHitSlop(view, state)
             PropKey.WIDTH,
             PropKey.HEIGHT,
             PropKey.FLEX_GROW,
@@ -614,7 +621,6 @@ class PamRenderer(
             PropKey.ON_DRAWER_OPEN,
             PropKey.ON_DRAWER_CLOSE,
             PropKey.RETURN_KEY_TYPE,
-            PropKey.HIT_SLOP,
             PropKey.HOST_NAME,
             PropKey.ON_NATIVE_EVENT,
             PropKey.FLEX_DIRECTION,
@@ -708,8 +714,40 @@ class PamRenderer(
                     applyAnimationKind(view, state, 2)
                 }
             }
+            PropKey.HIT_SLOP -> clearHitSlop(view)
             PropKey.HOST_PROPERTIES -> Unit
             else -> Unit
+        }
+    }
+
+    private fun applyHitSlop(view: View, state: NodeState) {
+        val parent = view.parent as? ViewGroup ?: return
+        val amount = dp(
+            state.number(PropKey.HIT_SLOP, 0.0)
+                .toFloat()
+                .coerceAtLeast(0f),
+        )
+        if (amount <= 0) {
+            clearHitSlop(view)
+            return
+        }
+        parent.post {
+            if (view.parent !== parent || !view.isAttachedToWindow) return@post
+            val bounds = Rect()
+            view.getHitRect(bounds)
+            bounds.inset(-amount, -amount)
+            val group = parent.touchDelegate as? PamTouchDelegateGroup
+                ?: PamTouchDelegateGroup(parent).also { parent.touchDelegate = it }
+            group.update(view, bounds)
+        }
+    }
+
+    private fun clearHitSlop(view: View) {
+        val parent = view.parent as? ViewGroup ?: return
+        val group = parent.touchDelegate as? PamTouchDelegateGroup ?: return
+        group.remove(view)
+        if (group.isEmpty()) {
+            parent.touchDelegate = null
         }
     }
 

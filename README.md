@@ -103,6 +103,9 @@ React's JavaScript runtime:
 sheet presentations. A native-event handler receives a bounded dismissal map
 when the user presses Back; controlled modals remain mounted until PHP confirms
 the state change, and focus returns to the previously focused view after close.
+Scalar `hitSlop` expands touch and TalkBack delegate regions without changing
+visual layout; sibling delegates share one parent dispatcher and are removed
+when their view moves or unmounts.
 
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
