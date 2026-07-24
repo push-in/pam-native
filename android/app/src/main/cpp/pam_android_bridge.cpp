@@ -2,6 +2,7 @@
 #include <android/log.h>
 
 #include <sapi/embed/php_embed.h>
+#include <Zend/zend_execute.h>
 #include <Zend/zend_exceptions.h>
 
 #include <array>
@@ -361,6 +362,19 @@ const zend_function_entry pam_native_functions[] = {
     PHP_FE_END
 };
 
+bool register_php_runtime_api(RuntimeState* state) {
+    if (zend_register_functions(
+            nullptr,
+            pam_native_functions,
+            nullptr,
+            MODULE_TEMPORARY
+        ) == FAILURE) {
+        report_error(state, "Pam Native failed to register its PHP runtime API.");
+        return false;
+    }
+    return true;
+}
+
 bool call_runtime(
     const char* method,
     std::uint32_t argument_count,
@@ -409,6 +423,9 @@ bool initialize_php(RuntimeState* state) {
     log_debug("Initializing embedded PHP.");
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
+    php_embed_module.ini_entries =
+        "max_execution_time=0\n"
+        "max_input_time=-1\n";
     state->php_entry_argument = state->entry;
     state->php_arguments = {
         state->php_executable.data(),
@@ -420,16 +437,11 @@ bool initialize_php(RuntimeState* state) {
         report_error(state, "PHP Embed failed to initialize on Android.");
         return false;
     }
-    if (zend_register_functions(
-            nullptr,
-            pam_native_functions,
-            nullptr,
-            MODULE_PERSISTENT
-        ) == FAILURE) {
-        report_error(state, "Pam Native failed to register its PHP runtime API.");
+    if (!register_php_runtime_api(state)) {
         php_embed_shutdown();
         return false;
     }
+    zend_unset_timeout();
     log_debug("Embedded PHP initialized.");
     return true;
 }
@@ -497,6 +509,10 @@ void runtime_loop(RuntimeState* state) {
                 report_error(state, "PHP request failed to restart during hot reload.");
                 break;
             }
+            if (!register_php_runtime_api(state)) {
+                break;
+            }
+            zend_unset_timeout();
             SG(headers_sent) = 1;
             SG(request_info).no_headers = 1;
             php_register_variable("PHP_SELF", "-", nullptr);
