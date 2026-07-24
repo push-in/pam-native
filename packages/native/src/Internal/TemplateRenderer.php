@@ -20,6 +20,7 @@ use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
 use Pam\Native\ModalPresentation;
 use Pam\Native\PropKey;
+use Pam\Native\RefreshIndicatorSize;
 use Pam\Native\Renderable;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\SafeAreaMode;
@@ -112,6 +113,10 @@ final class TemplateRenderer
         'statusBarHidden' => PropKey::StatusBarHidden,
         'keyboardBehavior' => PropKey::KeyboardBehavior,
         'refreshing' => PropKey::Refreshing,
+        'refreshColors' => PropKey::RefreshColors,
+        'progressBackgroundColor' => PropKey::RefreshProgressBackgroundColor,
+        'progressViewOffset' => PropKey::RefreshProgressViewOffset,
+        'refreshIndicatorSize' => PropKey::RefreshIndicatorSize,
         'scrollEnabled' => PropKey::ScrollEnabled,
         'showsScrollIndicator' => PropKey::ShowsScrollIndicator,
         'selected' => PropKey::Selected,
@@ -732,6 +737,10 @@ final class TemplateRenderer
             PropKey::SafeAreaMode => self::named($value, [
                 'padding' => SafeAreaMode::Padding->value,
                 'margin' => SafeAreaMode::Margin->value,
+            ]),
+            PropKey::RefreshIndicatorSize => self::named($value, [
+                'default' => RefreshIndicatorSize::Default->value,
+                'large' => RefreshIndicatorSize::Large->value,
             ]),
             PropKey::AnimationKind => self::named($value, [
                 'none' => AnimationKind::None->value,

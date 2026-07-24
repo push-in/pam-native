@@ -67,6 +67,11 @@ Android applies system-bar and IME insets directly on the UI thread. The same
 options are available through `SafeAreaView::edges()->mode()` and
 `KeyboardAvoidingView::verticalOffset()->avoidingEnabled()`.
 
+Pull-to-refresh is configured with `RefreshControl::colors()`,
+`progressBackgroundColor()`, `progressViewOffset()`, `enabled()` and `size()`.
+The Android gesture and indicator run locally; only `onRefresh` crosses into
+PHP.
+
 Run `pam mobile benchmark .` on a physical device for release-like AndroidX
 Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in

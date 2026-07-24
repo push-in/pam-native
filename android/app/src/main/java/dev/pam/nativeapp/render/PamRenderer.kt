@@ -550,6 +550,19 @@ class PamRenderer(
             PropKey.SAFE_AREA_MODE,
             -> applySafeAreaLayout(view, state)
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(value.flag())
+            PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text())
+            PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
+                (view as? PamRefreshContainer)?.setProgressBackgroundColor(
+                    value.integer().toInt(),
+                )
+            PropKey.REFRESH_PROGRESS_VIEW_OFFSET ->
+                (view as? PamRefreshContainer)?.setProgressViewOffset(
+                    value.decimal().toFloat(),
+                )
+            PropKey.REFRESH_INDICATOR_SIZE ->
+                (view as? PamRefreshContainer)?.setIndicatorSize(
+                    value.integer().toInt(),
+                )
             PropKey.SCROLL_ENABLED -> when (view) {
                 is ScrollView -> view.isEnabled = value.flag()
                 is ListView -> view.isEnabled = value.flag()
@@ -596,19 +609,6 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_VALUE_NOW,
             PropKey.ACCESSIBILITY_VALUE_TEXT,
             -> notifyAccessibilityChanged(view)
-            PropKey.KEYBOARD_BEHAVIOR -> {
-                state.keyboardBehavior = KEYBOARD_RESIZE
-                applyKeyboardAvoidance(view, state)
-            }
-            PropKey.KEYBOARD_VERTICAL_OFFSET,
-            PropKey.KEYBOARD_AVOIDING_ENABLED,
-            -> applyKeyboardAvoidance(view, state)
-            PropKey.SAFE_AREA_TOP,
-            PropKey.SAFE_AREA_RIGHT,
-            PropKey.SAFE_AREA_BOTTOM_EDGE,
-            PropKey.SAFE_AREA_LEFT,
-            PropKey.SAFE_AREA_MODE,
-            -> applySafeAreaLayout(view, state)
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
             PropKey.SCALE_X,
@@ -774,6 +774,19 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_VALUE_NOW,
             PropKey.ACCESSIBILITY_VALUE_TEXT,
             -> notifyAccessibilityChanged(view)
+            PropKey.KEYBOARD_BEHAVIOR -> {
+                state.keyboardBehavior = KEYBOARD_RESIZE
+                applyKeyboardAvoidance(view, state)
+            }
+            PropKey.KEYBOARD_VERTICAL_OFFSET,
+            PropKey.KEYBOARD_AVOIDING_ENABLED,
+            -> applyKeyboardAvoidance(view, state)
+            PropKey.SAFE_AREA_TOP,
+            PropKey.SAFE_AREA_RIGHT,
+            PropKey.SAFE_AREA_BOTTOM_EDGE,
+            PropKey.SAFE_AREA_LEFT,
+            PropKey.SAFE_AREA_MODE,
+            -> applySafeAreaLayout(view, state)
             PropKey.TEST_ID -> view.transitionName = null
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
@@ -793,6 +806,13 @@ class PamRenderer(
             PropKey.VISIBLE -> view.visibility = View.VISIBLE
             PropKey.CHECKED -> (view as? Switch)?.isChecked = false
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(false)
+            PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(null)
+            PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
+                (view as? PamRefreshContainer)?.setProgressBackgroundColor(null)
+            PropKey.REFRESH_PROGRESS_VIEW_OFFSET ->
+                (view as? PamRefreshContainer)?.setProgressViewOffset(0f)
+            PropKey.REFRESH_INDICATOR_SIZE ->
+                (view as? PamRefreshContainer)?.setIndicatorSize(REFRESH_SIZE_DEFAULT)
             PropKey.DRAWER_OPEN -> (view as? PamDrawerLayout)?.setOpen(false)
             PropKey.TEXT_DECORATION -> (view as? TextView)?.let { text ->
                 text.paintFlags = text.paintFlags and
@@ -1743,6 +1763,7 @@ class PamRenderer(
         const val KEYBOARD_PADDING = 3
         const val SAFE_AREA_PADDING = 1
         const val SAFE_AREA_MARGIN = 2
+        const val REFRESH_SIZE_DEFAULT = 1
         const val MAX_VIRTUAL_DEPTH = 512
 
         val LAYOUT_ONLY_KINDS = setOf(
@@ -1793,6 +1814,10 @@ class PamRenderer(
             PropKey.SAFE_AREA_MODE,
             PropKey.KEYBOARD_VERTICAL_OFFSET,
             PropKey.KEYBOARD_AVOIDING_ENABLED,
+            PropKey.REFRESH_COLORS,
+            PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR,
+            PropKey.REFRESH_PROGRESS_VIEW_OFFSET,
+            PropKey.REFRESH_INDICATOR_SIZE,
             PropKey.TEST_ID,
             PropKey.RIPPLE_COLOR,
             PropKey.PRESS_OPACITY,

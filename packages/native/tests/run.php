@@ -24,6 +24,7 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
 use Pam\Native\PointerEvents;
 use Pam\Native\ReturnKeyType;
+use Pam\Native\RefreshIndicatorSize;
 use Pam\Native\SafeAreaMode;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
@@ -44,6 +45,7 @@ use Pam\Native\UI\CustomView;
 use Pam\Native\UI\Input;
 use Pam\Native\UI\KeyboardAvoidingView;
 use Pam\Native\UI\Pressable;
+use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Screen;
 use Pam\Native\UI\Text;
@@ -128,6 +130,7 @@ foreach ([
     PointerEvents::cases(),
     PositionType::cases(),
     ReturnKeyType::cases(),
+    RefreshIndicatorSize::cases(),
     SafeAreaMode::cases(),
     TextDecoration::cases(),
     TextTransform::cases(),
@@ -206,6 +209,28 @@ $assert(
         && $keyboardAvoidingElement
             ->properties()[PropKey::KeyboardAvoidingEnabled->value] === false,
     'Keyboard avoidance helpers must preserve behavior, offset and enabled state.',
+);
+
+$refreshColors = [0xff112233, 0xff445566];
+$refreshElement = RefreshControl::make(Text::make('Refresh content'), true)
+    ->colors(...$refreshColors)
+    ->progressBackgroundColor(0xfff8fafc)
+    ->progressViewOffset(16.0)
+    ->enabled(false)
+    ->size(RefreshIndicatorSize::Large);
+$assert(
+    $refreshElement->properties()[PropKey::Refreshing->value] === true
+        && $refreshElement->properties()[PropKey::RefreshColors->value]
+            === implode(',', $refreshColors)
+        && $refreshElement
+            ->properties()[PropKey::RefreshProgressBackgroundColor->value]
+            === 0xfff8fafc
+        && $refreshElement
+            ->properties()[PropKey::RefreshProgressViewOffset->value] === 16.0
+        && $refreshElement->properties()[PropKey::Enabled->value] === false
+        && $refreshElement->properties()[PropKey::RefreshIndicatorSize->value]
+            === RefreshIndicatorSize::Large->value,
+    'Refresh control helpers must preserve Android indicator and gesture properties.',
 );
 
 $first = (new TreeEncoder())->encode($tree);

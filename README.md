@@ -118,6 +118,11 @@ padding behavior, a vertical offset and an enabled switch. Android window
 insets, IME overlap and the resulting frame or padding updates are calculated
 and applied on the UI thread without a PHP round trip.
 
+`RefreshControl` detects a vertical pull only while its native child is at the
+top. Indicator visibility, drag feedback, multi-color animation, background,
+size and progress offset stay on the UI thread; PHP receives only the semantic
+refresh event and controls the final `refreshing` state.
+
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,

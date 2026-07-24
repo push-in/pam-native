@@ -162,4 +162,8 @@ enum PropKey: int
     case SafeAreaMode = 154;
     case KeyboardVerticalOffset = 155;
     case KeyboardAvoidingEnabled = 156;
+    case RefreshColors = 157;
+    case RefreshProgressBackgroundColor = 158;
+    case RefreshProgressViewOffset = 159;
+    case RefreshIndicatorSize = 160;
 }
