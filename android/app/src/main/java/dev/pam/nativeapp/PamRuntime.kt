@@ -39,7 +39,13 @@ class PamRuntime(
     @Volatile
     private var handle = 0L
 
-    fun start(entry: File, widthDp: Float, heightDp: Float, textScale: Float) {
+    fun start(
+        entry: File,
+        widthDp: Float,
+        heightDp: Float,
+        textScale: Float,
+        darkAppearance: Boolean,
+    ) {
         synchronized(handleLock) {
             check(!closed.get()) { "Pam Runtime is closed" }
             check(handle == 0L) { "Pam Runtime is already running" }
@@ -52,16 +58,22 @@ class PamRuntime(
                 widthDp,
                 heightDp,
                 textScale,
+                darkAppearance,
             )
             check(handle != 0L) { "Pam Runtime failed to start" }
         }
     }
 
-    fun updateViewport(widthDp: Float, heightDp: Float, textScale: Float) {
+    fun updateViewport(
+        widthDp: Float,
+        heightDp: Float,
+        textScale: Float,
+        darkAppearance: Boolean,
+    ) {
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
-                nativeRelayout(active, widthDp, heightDp, textScale)
+                nativeRelayout(active, widthDp, heightDp, textScale, darkAppearance)
             }
         }
     }
@@ -227,12 +239,14 @@ class PamRuntime(
         widthDp: Float,
         heightDp: Float,
         textScale: Float,
+        darkAppearance: Boolean,
     ): Long
     private external fun nativeRelayout(
         handle: Long,
         widthDp: Float,
         heightDp: Float,
         textScale: Float,
+        darkAppearance: Boolean,
     )
 
     private external fun nativeDispatchEvent(

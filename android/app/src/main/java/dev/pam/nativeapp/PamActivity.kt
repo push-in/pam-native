@@ -3,9 +3,12 @@ package dev.pam.nativeapp
 import android.app.Activity
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
+import android.view.View
+import android.view.WindowInsetsController
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.widget.FrameLayout
@@ -52,6 +55,7 @@ class PamActivity : Activity() {
         )
         root.addView(errors)
         setContentView(root)
+        applyDefaultSystemBars()
         registerBackCallback()
 
         runCatching {
@@ -59,7 +63,13 @@ class PamActivity : Activity() {
             val density = resources.displayMetrics.density
             val widthDp = resources.displayMetrics.widthPixels / density
             val heightDp = resources.displayMetrics.heightPixels / density
-            runtime.start(entry, widthDp, heightDp, resources.configuration.fontScale)
+            runtime.start(
+                entry,
+                widthDp,
+                heightDp,
+                resources.configuration.fontScale,
+                isDarkAppearance(),
+            )
             runtimeStarted = true
             if (BuildConfig.DEBUG) {
                 hotReload = HotReloadClient(
@@ -100,6 +110,7 @@ class PamActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         if (!runtimeStarted) return
+        applyDefaultSystemBars()
         val density = resources.displayMetrics.density
         val widthDp = resources.displayMetrics.widthPixels / density
         val heightDp = resources.displayMetrics.heightPixels / density
@@ -107,6 +118,7 @@ class PamActivity : Activity() {
             widthDp,
             heightDp,
             resources.configuration.fontScale,
+            isDarkAppearance(),
         )
         runtime.dispatchLifecycle(
             EVENT_DIMENSIONS,
@@ -115,6 +127,7 @@ class PamActivity : Activity() {
                     "width" to WireValue.Decimal(widthDp.toDouble()),
                     "height" to WireValue.Decimal(heightDp.toDouble()),
                     "density" to WireValue.Decimal(density.toDouble()),
+                    "appearance" to WireValue.Integer(appearanceValue()),
                 ),
             ),
         )
@@ -205,6 +218,38 @@ class PamActivity : Activity() {
         }
     }
 
+    private fun isDarkAppearance(): Boolean =
+        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+            Configuration.UI_MODE_NIGHT_YES
+
+    private fun appearanceValue(): Long =
+        if (isDarkAppearance()) APPEARANCE_DARK else APPEARANCE_LIGHT
+
+    @Suppress("DEPRECATION")
+    private fun applyDefaultSystemBars() {
+        val dark = isDarkAppearance()
+        val color = if (dark) Color.rgb(15, 23, 42) else Color.WHITE
+        window.statusBarColor = color
+        window.navigationBarColor = color
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            window.insetsController?.setSystemBarsAppearance(
+                if (dark) 0 else lightBars,
+                lightBars,
+            )
+        } else {
+            val lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
+                View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.decorView.systemUiVisibility = if (dark) {
+                window.decorView.systemUiVisibility and lightBars.inv()
+            } else {
+                window.decorView.systemUiVisibility or lightBars
+            }
+        }
+    }
+
     private companion object {
         const val EVENT_APP_STATE = 16
         const val EVENT_DIMENSIONS = 17
@@ -214,5 +259,7 @@ class PamActivity : Activity() {
         const val APP_STATE_BACKGROUND = 3
         const val MEMORY_PRESSURE_MODERATE = 1
         const val MEMORY_PRESSURE_CRITICAL = 2
+        const val APPEARANCE_LIGHT = 1L
+        const val APPEARANCE_DARK = 2L
     }
 }

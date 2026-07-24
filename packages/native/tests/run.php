@@ -63,6 +63,7 @@ use Pam\Native\TextEllipsizeMode;
 use Pam\Native\TextHyphenationFrequency;
 use Pam\Native\TextTransform;
 use Pam\Native\Theme;
+use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
@@ -1275,6 +1276,7 @@ Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
     'width' => 412.0,
     'height' => 915.0,
     'density' => 3.0,
+    'appearance' => UserInterfaceAppearance::Dark->value,
 ]));
 Runtime::dispatchEvent(
     0,
@@ -1286,7 +1288,8 @@ $assert(
     $windowMetrics instanceof WindowMetrics
         && $windowMetrics->width === 412.0
         && $windowMetrics->height === 915.0
-        && $windowMetrics->density === 3.0,
+        && $windowMetrics->density === 3.0
+        && $windowMetrics->appearance === UserInterfaceAppearance::Dark,
     'Window metrics lifecycle event was not decoded.',
 );
 $assert(

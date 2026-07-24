@@ -46,6 +46,7 @@ struct RuntimeState {
     jmethodID on_error = nullptr;
     std::string entry;
     std::string state_dir;
+    bool dark_appearance = false;
     PamNativeEngineHandle* engine = nullptr;
     std::mutex engine_mutex;
     std::mutex queue_mutex;
@@ -403,6 +404,7 @@ void dispatch_event(const Event& event) {
 bool run_php(RuntimeState* state) {
     log_debug("Initializing embedded PHP.");
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
+    setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
     char executable[] = "pam-native";
     std::unique_ptr<char[]> entry = std::make_unique<char[]>(state->entry.size() + 1);
     std::memcpy(entry.get(), state->entry.c_str(), state->entry.size() + 1);
@@ -524,7 +526,8 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     jstring state_dir,
     jfloat width,
     jfloat height,
-    jfloat text_scale
+    jfloat text_scale,
+    jboolean dark_appearance
 ) {
     log_debug("Starting the Pam Native worker.");
     if (
@@ -553,6 +556,7 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
         return 0;
     }
     state->state_dir = state_dir_chars;
+    state->dark_appearance = dark_appearance == JNI_TRUE;
     env->ReleaseStringUTFChars(state_dir, state_dir_chars);
     jclass runtime_class = env->GetObjectClass(runtime);
     if (runtime_class != nullptr) {
@@ -619,12 +623,15 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
     jlong handle,
     jfloat width,
     jfloat height,
-    jfloat text_scale
+    jfloat text_scale,
+    jboolean dark_appearance
 ) {
     RuntimeState* state = from_handle(handle);
     if (state == nullptr || width <= 0 || height <= 0 || text_scale <= 0) {
         return;
     }
+    state->dark_appearance = dark_appearance == JNI_TRUE;
+    setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
     PamNativeBuffer batch{nullptr, 0};
     PamStatus status;
     {

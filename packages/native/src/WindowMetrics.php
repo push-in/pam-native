@@ -10,6 +10,7 @@ final readonly class WindowMetrics
         public float $width,
         public float $height,
         public float $density,
+        public UserInterfaceAppearance $appearance = UserInterfaceAppearance::Light,
     ) {
     }
 }

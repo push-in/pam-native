@@ -16,6 +16,7 @@ use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
 use Pam\Native\State;
 use Pam\Native\TemplateException;
+use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\WindowMetrics;
 use Throwable;
 
@@ -116,6 +117,9 @@ final class Runtime
                     width: (float) ($values['width'] ?? 0.0),
                     height: (float) ($values['height'] ?? 0.0),
                     density: (float) ($values['density'] ?? 1.0),
+                    appearance: UserInterfaceAppearance::tryFrom(
+                        (int) ($values['appearance'] ?? UserInterfaceAppearance::Light->value),
+                    ) ?? UserInterfaceAppearance::Light,
                 ));
                 self::render();
 
