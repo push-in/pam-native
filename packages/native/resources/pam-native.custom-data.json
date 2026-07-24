@@ -159,7 +159,6 @@
         { "name": "NativeList", "description": "Alias of FlatList." },
         { "name": "VirtualizedList", "description": "Alias of FlatList." },
         { "name": "SectionList", "description": "Virtualized sectioned native list." },
-        { "name": "Pressable", "description": "Native press and long-press surface." },
         { "name": "TouchableOpacity", "description": "Pressable with native opacity feedback." },
         { "name": "TouchableHighlight", "description": "Pressable with native highlight feedback." },
         {
@@ -183,7 +182,26 @@
                 { "name": "on:toggle" }
             ]
         },
-        { "name": "Modal", "description": "Native modal, dialog, or sheet." },
+        {
+            "name": "Modal",
+            "description": "Native modal, dialog, or sheet with UI-thread window lifecycle.",
+            "attributes": [
+                { "name": "visible", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "presentation", "values": [{ "name": "fullScreen" }, { "name": "dialog" }, { "name": "sheet" }] },
+                { "name": "animationType", "values": [{ "name": "none" }, { "name": "slide" }, { "name": "fade" }] },
+                { "name": "backdropColor" },
+                { "name": "transparent", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "hardwareAccelerated", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "navigationBarTranslucent", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "statusBarTranslucent", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "allowSwipeDismissal", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "on:close" },
+                { "name": "on:requestClose" },
+                { "name": "on:show" },
+                { "name": "on:dismiss" },
+                { "name": "on:orientationChange" }
+            ]
+        },
         { "name": "KeyboardAvoidingView", "description": "Container that follows the software keyboard." },
         { "name": "RefreshControl", "description": "Native pull-to-refresh container." },
         { "name": "StatusBar", "description": "Android status bar configuration." },

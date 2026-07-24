@@ -581,6 +581,20 @@ class PamRenderer(
             PropKey.MODAL_PRESENTATION -> (view as? PamModalHost)?.setPresentation(
                 value.integer().toInt(),
             )
+            PropKey.MODAL_ANIMATION_TYPE ->
+                (view as? PamModalHost)?.setAnimationType(value.integer().toInt())
+            PropKey.MODAL_BACKDROP_COLOR ->
+                (view as? PamModalHost)?.setBackdropColor(value.integer().toInt())
+            PropKey.MODAL_TRANSPARENT ->
+                (view as? PamModalHost)?.setTransparent(value.flag())
+            PropKey.MODAL_HARDWARE_ACCELERATED ->
+                (view as? PamModalHost)?.setHardwareAccelerated(value.flag())
+            PropKey.MODAL_NAVIGATION_BAR_TRANSLUCENT ->
+                (view as? PamModalHost)?.setNavigationBarTranslucent(value.flag())
+            PropKey.MODAL_STATUS_BAR_TRANSLUCENT ->
+                (view as? PamModalHost)?.setStatusBarTranslucent(value.flag())
+            PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
+                (view as? PamModalHost)?.setAllowSwipeDismissal(value.flag())
             PropKey.STATUS_BAR_COLOR,
             PropKey.STATUS_BAR_STYLE,
             PropKey.STATUS_BAR_HIDDEN,
@@ -871,6 +885,10 @@ class PamRenderer(
             PropKey.ON_PRESS_IN,
             PropKey.ON_PRESS_OUT,
             PropKey.ON_PRESS_MOVE,
+            PropKey.ON_MODAL_REQUEST_CLOSE,
+            PropKey.ON_MODAL_SHOW,
+            PropKey.ON_MODAL_DISMISS,
+            PropKey.ON_MODAL_ORIENTATION_CHANGE,
             PropKey.FLEX_DIRECTION,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
@@ -1092,9 +1110,26 @@ class PamRenderer(
             PropKey.SCALE_Y -> view.scaleY = 1f
             PropKey.ROTATION -> view.rotation = 0f
             PropKey.VISIBLE -> when (view) {
+                is PamModalHost -> view.setVisible(true)
                 is PamActivityIndicator -> view.setRequestedVisible(true)
                 else -> view.visibility = View.VISIBLE
             }
+            PropKey.MODAL_PRESENTATION ->
+                (view as? PamModalHost)?.setPresentation(2)
+            PropKey.MODAL_ANIMATION_TYPE ->
+                (view as? PamModalHost)?.setAnimationType(1)
+            PropKey.MODAL_BACKDROP_COLOR ->
+                (view as? PamModalHost)?.setBackdropColor(Color.WHITE)
+            PropKey.MODAL_TRANSPARENT ->
+                (view as? PamModalHost)?.setTransparent(false)
+            PropKey.MODAL_HARDWARE_ACCELERATED ->
+                (view as? PamModalHost)?.setHardwareAccelerated(false)
+            PropKey.MODAL_NAVIGATION_BAR_TRANSLUCENT ->
+                (view as? PamModalHost)?.setNavigationBarTranslucent(false)
+            PropKey.MODAL_STATUS_BAR_TRANSLUCENT ->
+                (view as? PamModalHost)?.setStatusBarTranslucent(false)
+            PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
+                (view as? PamModalHost)?.setAllowSwipeDismissal(false)
             PropKey.CHECKED -> (view as? Switch)?.isChecked = false
             PropKey.ACTIVITY_ANIMATING ->
                 (view as? PamActivityIndicator)?.setAnimating(true)
@@ -1161,6 +1196,10 @@ class PamRenderer(
             PropKey.ON_PRESS_IN,
             PropKey.ON_PRESS_OUT,
             PropKey.ON_PRESS_MOVE,
+            PropKey.ON_MODAL_REQUEST_CLOSE,
+            PropKey.ON_MODAL_SHOW,
+            PropKey.ON_MODAL_DISMISS,
+            PropKey.ON_MODAL_ORIENTATION_CHANGE,
             -> Unit
             else -> Unit
         }
@@ -1282,13 +1321,40 @@ class PamRenderer(
             )
         }
         if (view is PamModalHost) {
-            view.setOnRequestClose(
-                if (state.properties[PropKey.ON_NATIVE_EVENT] != null) {
+            view.setCallbacks(
+                onRequestClose = if (
+                    state.properties[PropKey.ON_MODAL_REQUEST_CLOSE] != null ||
+                    state.properties[PropKey.ON_NATIVE_EVENT] != null
+                ) {
                     {
-                        dispatchBytes(
+                        if (state.properties[PropKey.ON_MODAL_REQUEST_CLOSE] != null) {
+                            dispatch(state.id, EVENT_MODAL_REQUEST_CLOSE)
+                        }
+                        if (state.properties[PropKey.ON_NATIVE_EVENT] != null) {
+                            dispatchBytes(
+                                state.id,
+                                EVENT_NATIVE,
+                                MODAL_DISMISS_PAYLOAD,
+                            )
+                        }
+                    }
+                } else {
+                    null
+                },
+                onShow = state.callback(PropKey.ON_MODAL_SHOW) {
+                    dispatch(state.id, EVENT_MODAL_SHOW)
+                },
+                onDismiss = state.callback(PropKey.ON_MODAL_DISMISS) {
+                    dispatch(state.id, EVENT_MODAL_DISMISS)
+                },
+                onOrientationChange = if (
+                    state.properties[PropKey.ON_MODAL_ORIENTATION_CHANGE] != null
+                ) {
+                    { orientation ->
+                        dispatch(
                             state.id,
-                            EVENT_NATIVE,
-                            MODAL_DISMISS_PAYLOAD,
+                            EVENT_MODAL_ORIENTATION_CHANGE,
+                            orientation.toString(),
                         )
                     }
                 } else {
@@ -1649,6 +1715,10 @@ class PamRenderer(
             EVENT_PRESS_IN -> PropKey.ON_PRESS_IN
             EVENT_PRESS_OUT -> PropKey.ON_PRESS_OUT
             EVENT_PRESS_MOVE -> PropKey.ON_PRESS_MOVE
+            EVENT_MODAL_REQUEST_CLOSE -> PropKey.ON_MODAL_REQUEST_CLOSE
+            EVENT_MODAL_SHOW -> PropKey.ON_MODAL_SHOW
+            EVENT_MODAL_DISMISS -> PropKey.ON_MODAL_DISMISS
+            EVENT_MODAL_ORIENTATION_CHANGE -> PropKey.ON_MODAL_ORIENTATION_CHANGE
             else -> null
         }
 
@@ -2961,6 +3031,10 @@ class PamRenderer(
         const val EVENT_PRESS_IN = 28
         const val EVENT_PRESS_OUT = 29
         const val EVENT_PRESS_MOVE = 30
+        const val EVENT_MODAL_REQUEST_CLOSE = 31
+        const val EVENT_MODAL_SHOW = 32
+        const val EVENT_MODAL_DISMISS = 33
+        const val EVENT_MODAL_ORIENTATION_CHANGE = 34
         const val MAX_EVENT_BYTES = 1024 * 1024
         const val INPUT_SYNC_NATIVE = 1
         const val INPUT_SYNC_DEBOUNCED = 2
@@ -3049,6 +3123,10 @@ class PamRenderer(
             PropKey.ON_PRESS_IN,
             PropKey.ON_PRESS_OUT,
             PropKey.ON_PRESS_MOVE,
+            PropKey.ON_MODAL_REQUEST_CLOSE,
+            PropKey.ON_MODAL_SHOW,
+            PropKey.ON_MODAL_DISMISS,
+            PropKey.ON_MODAL_ORIENTATION_CHANGE,
             PropKey.ACCESSIBILITY_LABEL,
             PropKey.ACCESSIBILITY_HINT,
             PropKey.ACCESSIBILITY_ROLE,
@@ -3133,6 +3211,10 @@ class PamRenderer(
             PropKey.ON_PRESS_IN,
             PropKey.ON_PRESS_OUT,
             PropKey.ON_PRESS_MOVE,
+            PropKey.ON_MODAL_REQUEST_CLOSE,
+            PropKey.ON_MODAL_SHOW,
+            PropKey.ON_MODAL_DISMISS,
+            PropKey.ON_MODAL_ORIENTATION_CHANGE,
         )
         val IMAGE_EVENT_PROPERTIES = setOf(
             PropKey.ON_IMAGE_LOAD_START,

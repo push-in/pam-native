@@ -328,6 +328,17 @@ pub enum PropKey {
     OnPressIn = 249,
     OnPressOut = 250,
     OnPressMove = 251,
+    ModalAnimationType = 252,
+    ModalBackdropColor = 253,
+    ModalTransparent = 254,
+    ModalHardwareAccelerated = 255,
+    ModalNavigationBarTranslucent = 256,
+    ModalStatusBarTranslucent = 257,
+    ModalAllowSwipeDismissal = 258,
+    OnModalRequestClose = 259,
+    OnModalShow = 260,
+    OnModalDismiss = 261,
+    OnModalOrientationChange = 262,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -586,6 +597,17 @@ impl TryFrom<u16> for PropKey {
             249 => Ok(Self::OnPressIn),
             250 => Ok(Self::OnPressOut),
             251 => Ok(Self::OnPressMove),
+            252 => Ok(Self::ModalAnimationType),
+            253 => Ok(Self::ModalBackdropColor),
+            254 => Ok(Self::ModalTransparent),
+            255 => Ok(Self::ModalHardwareAccelerated),
+            256 => Ok(Self::ModalNavigationBarTranslucent),
+            257 => Ok(Self::ModalStatusBarTranslucent),
+            258 => Ok(Self::ModalAllowSwipeDismissal),
+            259 => Ok(Self::OnModalRequestClose),
+            260 => Ok(Self::OnModalShow),
+            261 => Ok(Self::OnModalDismiss),
+            262 => Ok(Self::OnModalOrientationChange),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1389,10 +1411,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=251 {
+        for value in 1..=262 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(252).is_err());
+        assert!(PropKey::try_from(263).is_err());
     }
 
     fn tree(text: &str) -> Tree {

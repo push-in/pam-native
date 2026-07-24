@@ -36,4 +36,8 @@ enum EventKind: int
     case PressIn = 28;
     case PressOut = 29;
     case PressMove = 30;
+    case ModalRequestClose = 31;
+    case ModalShow = 32;
+    case ModalDismiss = 33;
+    case ModalOrientationChange = 34;
 }

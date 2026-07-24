@@ -154,6 +154,11 @@ final class TreeEncoder
                 EventKind::PressIn => PropKey::OnPressIn,
                 EventKind::PressOut => PropKey::OnPressOut,
                 EventKind::PressMove => PropKey::OnPressMove,
+                EventKind::ModalRequestClose => PropKey::OnModalRequestClose,
+                EventKind::ModalShow => PropKey::OnModalShow,
+                EventKind::ModalDismiss => PropKey::OnModalDismiss,
+                EventKind::ModalOrientationChange =>
+                    PropKey::OnModalOrientationChange,
                 EventKind::Back,
                 EventKind::ModuleResult,
                 EventKind::AppState,

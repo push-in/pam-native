@@ -105,12 +105,18 @@ React's JavaScript runtime:
 | Compatibility | `TouchableOpacity`, `TouchableHighlight`, `TouchableWithoutFeedback` |
 
 `Modal` content is hosted by an Android `Dialog`, with dialog, full-screen and
-sheet presentations. A native-event handler receives a bounded dismissal map
-when the user presses Back; controlled modals remain mounted until PHP confirms
-the state change, and focus returns to the previously focused view after close.
-Scalar `hitSlop` expands touch and TalkBack delegate regions without changing
-visual layout; sibling delegates share one parent dispatcher and are removed
-when their view moves or unmounts.
+sheet presentations. Its current React Native-compatible surface includes
+none/slide/fade animation, transparency and backdrop color, hardware
+acceleration, status/navigation bar translucency, request-close, show, dismiss
+and typed orientation lifecycle events. Animation, Back interception, window
+configuration and focus capture/restoration stay on the Android UI thread;
+controlled modals remain mounted until PHP confirms the state change.
+
+`Pressable` keeps hit/press rectangles, long-press recognition, press delays,
+opacity, Android ripple and optional click sound on the UI thread. Per-edge
+`hitSlop` expands touch and TalkBack delegate regions without changing visual
+layout; overlapping siblings respect z-order. Pointer movement crosses into
+PHP at most once per frame and only when `onPressMove` is registered.
 
 `Image` and `ImageBackground` share a cancelable native pipeline with
 measured-size downsampling, request coalescing, a 32 MiB decoded RAM cache and

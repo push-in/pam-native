@@ -257,4 +257,15 @@ enum PropKey: int
     case OnPressIn = 249;
     case OnPressOut = 250;
     case OnPressMove = 251;
+    case ModalAnimationType = 252;
+    case ModalBackdropColor = 253;
+    case ModalTransparent = 254;
+    case ModalHardwareAccelerated = 255;
+    case ModalNavigationBarTranslucent = 256;
+    case ModalStatusBarTranslucent = 257;
+    case ModalAllowSwipeDismissal = 258;
+    case OnModalRequestClose = 259;
+    case OnModalShow = 260;
+    case OnModalDismiss = 261;
+    case OnModalOrientationChange = 262;
 }

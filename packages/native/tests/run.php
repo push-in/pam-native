@@ -34,6 +34,9 @@ use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\MemoryPressure;
+use Pam\Native\ModalAnimationType;
+use Pam\Native\ModalOrientation;
+use Pam\Native\ModalPresentation;
 use Pam\Native\Modules\NativeModuleResult;
 use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
@@ -71,6 +74,7 @@ use Pam\Native\UI\Input;
 use Pam\Native\UI\Image;
 use Pam\Native\UI\ImageBackground;
 use Pam\Native\UI\KeyboardAvoidingView;
+use Pam\Native\UI\Modal;
 use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\SafeAreaView;
@@ -551,6 +555,66 @@ $assert(
         && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true,
     'Status bar helpers must preserve color, style, visibility and edge-to-edge properties.',
 );
+$modalShown = false;
+$modalDismissed = false;
+$modalRequestedClose = false;
+$modalOrientation = null;
+$modalElement = Modal::make(
+    Text::make('Modal content'),
+    true,
+    ModalPresentation::Sheet,
+)
+    ->animationType(ModalAnimationType::Slide)
+    ->backdropColor(0xFF102030)
+    ->transparent()
+    ->hardwareAccelerated()
+    ->navigationBarTranslucent()
+    ->statusBarTranslucent()
+    ->allowSwipeDismissal()
+    ->onRequestClose(static function () use (&$modalRequestedClose): void {
+        $modalRequestedClose = true;
+    })
+    ->onShow(static function () use (&$modalShown): void {
+        $modalShown = true;
+    })
+    ->onDismiss(static function () use (&$modalDismissed): void {
+        $modalDismissed = true;
+    })
+    ->onOrientationChange(
+        static function (ModalOrientation $orientation) use (
+            &$modalOrientation,
+        ): void {
+            $modalOrientation = $orientation;
+        },
+    );
+$modalElement->events()[EventKind::ModalRequestClose->value]('');
+$modalElement->events()[EventKind::ModalShow->value]('');
+$modalElement->events()[EventKind::ModalDismiss->value]('');
+$modalElement->events()[EventKind::ModalOrientationChange->value](
+    (string) ModalOrientation::Landscape->value,
+);
+$assert(
+    $modalElement->properties()[PropKey::ModalPresentation->value]
+        === ModalPresentation::Sheet->value
+        && $modalElement->properties()[PropKey::ModalAnimationType->value]
+            === ModalAnimationType::Slide->value
+        && $modalElement->properties()[PropKey::ModalBackdropColor->value]
+            === 0xFF102030
+        && $modalElement->properties()[PropKey::ModalTransparent->value] === true
+        && $modalElement
+            ->properties()[PropKey::ModalHardwareAccelerated->value] === true
+        && $modalElement
+            ->properties()[PropKey::ModalNavigationBarTranslucent->value] === true
+        && $modalElement
+            ->properties()[PropKey::ModalStatusBarTranslucent->value] === true
+        && $modalElement
+            ->properties()[PropKey::ModalAllowSwipeDismissal->value] === true
+        && $modalRequestedClose
+        && $modalShown
+        && $modalDismissed
+        && $modalOrientation === ModalOrientation::Landscape,
+    'Modal helpers must preserve window configuration and typed lifecycle events.',
+);
 
 $scrollElement = Scroll::make(Text::make('Scrollable'))
     ->horizontal()
@@ -956,6 +1020,41 @@ $assert(
         && $pressScope->move instanceof PressEvent
         && $pressScope->move->pageX === 12.0,
     'Core Pressable tags must retain gesture properties and typed move events.',
+);
+$modalScope = new class {
+    public ?ModalOrientation $orientation = null;
+
+    public function oriented(ModalOrientation $orientation): void
+    {
+        $this->orientation = $orientation;
+    }
+};
+$coreModalElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Modal visible="true" presentation="fullScreen" '
+        .'animationType="fade" transparent="true" '
+        .'hardwareAccelerated="true" statusBarTranslucent="true" '
+        .'on:orientationChange="oriented"><Text>Dialog</Text></Modal>',
+    ),
+    $modalScope,
+    [],
+);
+$coreModalElement->events()[EventKind::ModalOrientationChange->value](
+    (string) ModalOrientation::Landscape->value,
+);
+$assert(
+    $coreModalElement->properties()[PropKey::ModalPresentation->value]
+        === ModalPresentation::FullScreen->value
+        && $coreModalElement->properties()[PropKey::ModalAnimationType->value]
+            === ModalAnimationType::Fade->value
+        && $coreModalElement->properties()[PropKey::ModalTransparent->value]
+            === true
+        && $coreModalElement
+            ->properties()[PropKey::ModalHardwareAccelerated->value] === true
+        && $coreModalElement
+            ->properties()[PropKey::ModalStatusBarTranslucent->value] === true
+        && $modalScope->orientation === ModalOrientation::Landscape,
+    'Core Modal tags must preserve window properties and typed orientation events.',
 );
 $eventScope = new class {
     public string $submission = '';

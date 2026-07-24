@@ -85,6 +85,11 @@ labels, multiline sizing and submit behavior. `onSelectionChange` is
 coalesced once per frame; `onContentSizeChange`, `onKeyPress` and
 `onEndEditing` cross into PHP only when registered.
 
+`Modal` exposes `animationType`, backdrop/transparency, hardware acceleration,
+system-bar translucency and typed request-close/show/dismiss/orientation
+callbacks. Android owns its window lifecycle and animation and restores the
+previously focused view after a controlled close.
+
 Images use one cancelable loader for `Image` and `ImageBackground`. Remote
 originals are coalesced and cached on disk, decoded bitmaps are cached in RAM
 by measured-size bucket, and Android downsamples before allocating pixels:

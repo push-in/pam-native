@@ -26,6 +26,7 @@ use Pam\Native\InputSyncMode;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
+use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalPresentation;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
@@ -154,6 +155,12 @@ final class TemplateRenderer
         'elevation' => PropKey::Elevation,
         'visible' => PropKey::Visible,
         'presentation' => PropKey::ModalPresentation,
+        'animationType' => PropKey::ModalAnimationType,
+        'backdropColor' => PropKey::ModalBackdropColor,
+        'transparent' => PropKey::ModalTransparent,
+        'hardwareAccelerated' => PropKey::ModalHardwareAccelerated,
+        'navigationBarTranslucent' => PropKey::ModalNavigationBarTranslucent,
+        'allowSwipeDismissal' => PropKey::ModalAllowSwipeDismissal,
         'statusBarColor' => PropKey::StatusBarColor,
         'statusBarStyle' => PropKey::StatusBarStyle,
         'statusBarHidden' => PropKey::StatusBarHidden,
@@ -316,6 +323,7 @@ final class TemplateRenderer
         'on:drawerOpen' => EventKind::DrawerOpen,
         'on:drawerClose' => EventKind::DrawerClose,
         'on:event' => EventKind::Native,
+        'on:close' => EventKind::Native,
         'on:loadStart' => EventKind::ImageLoadStart,
         'on:progress' => EventKind::ImageProgress,
         'on:load' => EventKind::ImageLoad,
@@ -328,6 +336,10 @@ final class TemplateRenderer
         'on:pressIn' => EventKind::PressIn,
         'on:pressOut' => EventKind::PressOut,
         'on:pressMove' => EventKind::PressMove,
+        'on:requestClose' => EventKind::ModalRequestClose,
+        'on:show' => EventKind::ModalShow,
+        'on:dismiss' => EventKind::ModalDismiss,
+        'on:orientationChange' => EventKind::ModalOrientationChange,
     ];
 
     private function __construct()
@@ -656,6 +668,16 @@ final class TemplateRenderer
                         EventKind::PressMove => $element->onPressMove($handler),
                         default => $element->on($event, $handler),
                     };
+                } elseif ($factory === null && $element instanceof Modal) {
+                    $element = match ($event) {
+                        EventKind::ModalRequestClose =>
+                            $element->onRequestClose($handler),
+                        EventKind::ModalShow => $element->onShow($handler),
+                        EventKind::ModalDismiss => $element->onDismiss($handler),
+                        EventKind::ModalOrientationChange =>
+                            $element->onOrientationChange($handler),
+                        default => $element->on($event, $handler),
+                    };
                 } else {
                     $element = $element->on($event, $handler);
                 }
@@ -748,6 +770,16 @@ final class TemplateRenderer
             );
         }
 
+        if (
+            $element instanceof Modal
+            && array_key_exists('statusBarTranslucent', $attributes)
+        ) {
+            $element = $element->statusBarTranslucent(self::boolValue(
+                $attributes['statusBarTranslucent'],
+                'Modal statusBarTranslucent',
+            ));
+        }
+
         if (array_key_exists('horizontal', $attributes)) {
             $horizontal = self::boolValue(
                 $attributes['horizontal'],
@@ -828,6 +860,21 @@ final class TemplateRenderer
             PropKey::SwitchTrackColorTrue,
             PropKey::SwitchThumbColor,
             => $kind === NodeKind::Switch,
+            PropKey::StatusBarColor,
+            PropKey::StatusBarStyle,
+            PropKey::StatusBarHidden,
+            PropKey::StatusBarAnimated,
+            PropKey::StatusBarTranslucent,
+            => $kind === NodeKind::StatusBar,
+            PropKey::ModalPresentation,
+            PropKey::ModalAnimationType,
+            PropKey::ModalBackdropColor,
+            PropKey::ModalTransparent,
+            PropKey::ModalHardwareAccelerated,
+            PropKey::ModalNavigationBarTranslucent,
+            PropKey::ModalStatusBarTranslucent,
+            PropKey::ModalAllowSwipeDismissal,
+            => $kind === NodeKind::Modal,
             PropKey::ImageDefaultSource,
             PropKey::ImageLoadingIndicatorSource,
             PropKey::ImageFadeDurationMs,
@@ -953,6 +1000,11 @@ final class TemplateRenderer
             ]),
             PropKey::ModalPresentation => self::named($value, [
                 'fullScreen' => 1, 'dialog' => 2, 'sheet' => 3,
+            ]),
+            PropKey::ModalAnimationType => self::named($value, [
+                'none' => ModalAnimationType::None->value,
+                'slide' => ModalAnimationType::Slide->value,
+                'fade' => ModalAnimationType::Fade->value,
             ]),
             PropKey::StatusBarStyle => self::named($value, ['dark' => 1, 'light' => 2]),
             PropKey::KeyboardBehavior => self::named($value, [

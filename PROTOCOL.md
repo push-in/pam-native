@@ -19,8 +19,8 @@ New optional properties, node kinds, event kinds and native operations may only
 be appended. A change to an existing field's representation or meaning requires
 a new protocol version and an explicit compatibility adapter.
 
-Protocol v1 currently appends properties through ID `251` and events through
-ID `30`.
+Protocol v1 currently appends properties through ID `262` and events through
+ID `34`.
 
 ## Frames
 
