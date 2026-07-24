@@ -401,7 +401,7 @@ void dispatch_event(const Event& event) {
     }
 }
 
-bool run_php(RuntimeState* state) {
+bool initialize_php(RuntimeState* state) {
     log_debug("Initializing embedded PHP.");
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
@@ -425,7 +425,10 @@ bool run_php(RuntimeState* state) {
         return false;
     }
     log_debug("Embedded PHP initialized.");
+    return true;
+}
 
+bool run_php_request(RuntimeState* state) {
     zend_file_handle file_handle;
     zend_stream_init_filename(&file_handle, state->entry.c_str());
     const int status = php_execute_script(&file_handle);
@@ -470,13 +473,24 @@ bool run_php(RuntimeState* state) {
     zval result;
     ZVAL_UNDEF(&result);
     call_runtime("shutdown", 0, nullptr);
-    php_embed_shutdown();
     return reload;
 }
 
 void runtime_loop(RuntimeState* state) {
     active_runtime = state;
-    while (!state->stopping.load(std::memory_order_acquire) && run_php(state)) {
+    if (initialize_php(state)) {
+        while (
+            !state->stopping.load(std::memory_order_acquire)
+            && run_php_request(state)
+        ) {
+            log_debug("Restarting PHP request for hot reload.");
+            php_request_shutdown(nullptr);
+            if (php_request_startup() == FAILURE) {
+                report_error(state, "PHP request failed to restart during hot reload.");
+                break;
+            }
+        }
+        php_embed_shutdown();
     }
     active_runtime = nullptr;
 
