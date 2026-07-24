@@ -22,6 +22,7 @@ use Pam\Native\ModalPresentation;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 use Pam\Native\ReturnKeyType;
+use Pam\Native\SafeAreaMode;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TemplateException;
@@ -190,6 +191,13 @@ final class TemplateRenderer
         'accessibilityValueMax' => PropKey::AccessibilityValueMax,
         'accessibilityValueNow' => PropKey::AccessibilityValueNow,
         'accessibilityValueText' => PropKey::AccessibilityValueText,
+        'safeAreaEdgeTop' => PropKey::SafeAreaTop,
+        'safeAreaEdgeRight' => PropKey::SafeAreaRight,
+        'safeAreaEdgeBottom' => PropKey::SafeAreaBottomEdge,
+        'safeAreaEdgeLeft' => PropKey::SafeAreaLeft,
+        'safeAreaMode' => PropKey::SafeAreaMode,
+        'keyboardVerticalOffset' => PropKey::KeyboardVerticalOffset,
+        'keyboardAvoidingEnabled' => PropKey::KeyboardAvoidingEnabled,
     ];
 
     /** @var array<string, EventKind> */
@@ -720,6 +728,10 @@ final class TemplateRenderer
                 'send' => ReturnKeyType::Send->value,
                 'none' => ReturnKeyType::None->value,
                 'previous' => ReturnKeyType::Previous->value,
+            ]),
+            PropKey::SafeAreaMode => self::named($value, [
+                'padding' => SafeAreaMode::Padding->value,
+                'margin' => SafeAreaMode::Margin->value,
             ]),
             PropKey::AnimationKind => self::named($value, [
                 'none' => AnimationKind::None->value,

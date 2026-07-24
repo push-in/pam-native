@@ -17,12 +17,14 @@ use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
+use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\MemoryPressure;
 use Pam\Native\Modules\NativeModuleResult;
 use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
 use Pam\Native\PointerEvents;
 use Pam\Native\ReturnKeyType;
+use Pam\Native\SafeAreaMode;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
@@ -40,7 +42,9 @@ use Pam\Native\UI\Button;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\Input;
+use Pam\Native\UI\KeyboardAvoidingView;
 use Pam\Native\UI\Pressable;
+use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Screen;
 use Pam\Native\UI\Text;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
@@ -124,6 +128,7 @@ foreach ([
     PointerEvents::cases(),
     PositionType::cases(),
     ReturnKeyType::cases(),
+    SafeAreaMode::cases(),
     TextDecoration::cases(),
     TextTransform::cases(),
 ] as $cases) {
@@ -173,6 +178,34 @@ $assert(
             ->properties()[PropKey::AccessibilityValueText->value]
             === '40 percent',
     'Accessibility state and range helpers must use fixed protocol properties.',
+);
+
+$safeAreaElement = SafeAreaView::make(Text::make('Inset content'))
+    ->edges(top: true, right: false, bottom: true, left: false)
+    ->mode(SafeAreaMode::Margin);
+$assert(
+    $safeAreaElement->properties()[PropKey::SafeAreaTop->value] === true
+        && $safeAreaElement->properties()[PropKey::SafeAreaRight->value] === false
+        && $safeAreaElement
+            ->properties()[PropKey::SafeAreaBottomEdge->value] === true
+        && $safeAreaElement->properties()[PropKey::SafeAreaLeft->value] === false
+        && $safeAreaElement->properties()[PropKey::SafeAreaMode->value]
+            === SafeAreaMode::Margin->value,
+    'Safe area helpers must preserve per-edge and mode protocol properties.',
+);
+
+$keyboardAvoidingElement = KeyboardAvoidingView::make(
+    Text::make('Keyboard content'),
+    KeyboardAvoidingBehavior::Padding,
+)->verticalOffset(24.0)->avoidingEnabled(false);
+$assert(
+    $keyboardAvoidingElement->properties()[PropKey::KeyboardBehavior->value]
+        === KeyboardAvoidingBehavior::Padding->value
+        && $keyboardAvoidingElement
+            ->properties()[PropKey::KeyboardVerticalOffset->value] === 24.0
+        && $keyboardAvoidingElement
+            ->properties()[PropKey::KeyboardAvoidingEnabled->value] === false,
+    'Keyboard avoidance helpers must preserve behavior, offset and enabled state.',
 );
 
 $first = (new TreeEncoder())->encode($tree);

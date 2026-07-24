@@ -112,6 +112,12 @@ Scalar `hitSlop` expands touch and TalkBack delegate regions without changing
 visual layout; sibling delegates share one parent dispatcher and are removed
 when their view moves or unmounts.
 
+`SafeAreaView` accepts independent top/right/bottom/left edges and padding or
+margin mode. `KeyboardAvoidingView` supports resize/height, pan/position and
+padding behavior, a vertical offset and an enabled switch. Android window
+insets, IME overlap and the resulting frame or padding updates are calculated
+and applied on the UI thread without a PHP round trip.
+
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,

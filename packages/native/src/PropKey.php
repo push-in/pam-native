@@ -155,4 +155,11 @@ enum PropKey: int
     case AccessibilityValueMax = 147;
     case AccessibilityValueNow = 148;
     case AccessibilityValueText = 149;
+    case SafeAreaTop = 150;
+    case SafeAreaRight = 151;
+    case SafeAreaBottomEdge = 152;
+    case SafeAreaLeft = 153;
+    case SafeAreaMode = 154;
+    case KeyboardVerticalOffset = 155;
+    case KeyboardAvoidingEnabled = 156;
 }

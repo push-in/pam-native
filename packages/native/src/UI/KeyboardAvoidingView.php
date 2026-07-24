@@ -20,4 +20,14 @@ final class KeyboardAvoidingView extends Element
             ->withChildren([$content])
             ->withProperty(PropKey::KeyboardBehavior, $behavior->value);
     }
+
+    public function verticalOffset(float $offset): self
+    {
+        return $this->withProperty(PropKey::KeyboardVerticalOffset, $offset);
+    }
+
+    public function avoidingEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::KeyboardAvoidingEnabled, $enabled);
+    }
 }

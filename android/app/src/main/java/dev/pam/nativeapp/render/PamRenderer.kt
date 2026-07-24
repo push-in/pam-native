@@ -192,9 +192,13 @@ class PamRenderer(
             NodeKind.ACTIVITY_INDICATOR -> ProgressBar(context)
             NodeKind.SWITCH -> Switch(context)
             NodeKind.MODAL -> PamModalHost(context)
-            NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also(::installKeyboardInsets)
+            NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {
+                installKeyboardInsets(it, requireNotNull(state))
+            }
             NodeKind.REFRESH_CONTROL -> PamRefreshContainer(context)
-            NodeKind.SAFE_AREA_VIEW -> PamContainer(context).also(::installSafeArea)
+            NodeKind.SAFE_AREA_VIEW -> PamContainer(context).also {
+                installSafeArea(it, requireNotNull(state))
+            }
             NodeKind.DRAWER_LAYOUT -> PamDrawerLayout(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
@@ -367,10 +371,36 @@ class PamRenderer(
         val parentFrame = frames[effectiveParent(state.parent)]
         val left = frame.x - (parentFrame?.x ?: 0f)
         val top = frame.y - (parentFrame?.y ?: 0f)
-        val width = dp(frame.width).coerceAtLeast(0)
-        val height = dp(frame.height).coerceAtLeast(0)
-        val leftPx = dp(left)
-        val topPx = dp(top)
+        val safeMargin = state.kind == NodeKind.SAFE_AREA_VIEW &&
+            state.integer(PropKey.SAFE_AREA_MODE, SAFE_AREA_PADDING.toLong()).toInt() ==
+            SAFE_AREA_MARGIN
+        val safeLeft = if (safeMargin && state.flag(PropKey.SAFE_AREA_LEFT, true)) {
+            state.safeAreaLeftInset
+        } else {
+            0
+        }
+        val safeTop = if (safeMargin && state.flag(PropKey.SAFE_AREA_TOP, true)) {
+            state.safeAreaTopInset
+        } else {
+            0
+        }
+        val safeRight = if (safeMargin && state.flag(PropKey.SAFE_AREA_RIGHT, true)) {
+            state.safeAreaRightInset
+        } else {
+            0
+        }
+        val safeBottom = if (
+            safeMargin &&
+            state.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true)
+        ) {
+            state.safeAreaBottomInset
+        } else {
+            0
+        }
+        val width = (dp(frame.width) - safeLeft - safeRight).coerceAtLeast(0)
+        val height = (dp(frame.height) - safeTop - safeBottom).coerceAtLeast(0)
+        val leftPx = dp(left) + safeLeft
+        val topPx = dp(top) + safeTop
         val current = view.layoutParams as? ViewGroup.MarginLayoutParams
 
         if (
@@ -506,7 +536,19 @@ class PamRenderer(
             PropKey.STATUS_BAR_COLOR -> applyStatusBarColor(value.integer().toInt())
             PropKey.STATUS_BAR_STYLE -> applyStatusBarAppearance(value.integer().toInt())
             PropKey.STATUS_BAR_HIDDEN -> applyStatusBarHidden(value.flag())
-            PropKey.KEYBOARD_BEHAVIOR -> state.keyboardBehavior = value.integer().toInt()
+            PropKey.KEYBOARD_BEHAVIOR -> {
+                state.keyboardBehavior = value.integer().toInt()
+                applyKeyboardAvoidance(view, state)
+            }
+            PropKey.KEYBOARD_VERTICAL_OFFSET,
+            PropKey.KEYBOARD_AVOIDING_ENABLED,
+            -> applyKeyboardAvoidance(view, state)
+            PropKey.SAFE_AREA_TOP,
+            PropKey.SAFE_AREA_RIGHT,
+            PropKey.SAFE_AREA_BOTTOM_EDGE,
+            PropKey.SAFE_AREA_LEFT,
+            PropKey.SAFE_AREA_MODE,
+            -> applySafeAreaLayout(view, state)
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(value.flag())
             PropKey.SCROLL_ENABLED -> when (view) {
                 is ScrollView -> view.isEnabled = value.flag()
@@ -554,6 +596,19 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_VALUE_NOW,
             PropKey.ACCESSIBILITY_VALUE_TEXT,
             -> notifyAccessibilityChanged(view)
+            PropKey.KEYBOARD_BEHAVIOR -> {
+                state.keyboardBehavior = KEYBOARD_RESIZE
+                applyKeyboardAvoidance(view, state)
+            }
+            PropKey.KEYBOARD_VERTICAL_OFFSET,
+            PropKey.KEYBOARD_AVOIDING_ENABLED,
+            -> applyKeyboardAvoidance(view, state)
+            PropKey.SAFE_AREA_TOP,
+            PropKey.SAFE_AREA_RIGHT,
+            PropKey.SAFE_AREA_BOTTOM_EDGE,
+            PropKey.SAFE_AREA_LEFT,
+            PropKey.SAFE_AREA_MODE,
+            -> applySafeAreaLayout(view, state)
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
             PropKey.SCALE_X,
@@ -1269,43 +1324,98 @@ class PamRenderer(
         }
     }
 
-    private fun installSafeArea(view: View) {
+    private fun installSafeArea(view: View, state: NodeState) {
         view.setOnApplyWindowInsetsListener { target, insets ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                target.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+                state.safeAreaLeftInset = bars.left
+                state.safeAreaTopInset = bars.top
+                state.safeAreaRightInset = bars.right
+                state.safeAreaBottomInset = bars.bottom
             } else {
                 @Suppress("DEPRECATION")
-                target.setPadding(
-                    insets.systemWindowInsetLeft,
-                    insets.systemWindowInsetTop,
-                    insets.systemWindowInsetRight,
-                    insets.systemWindowInsetBottom,
-                )
+                state.safeAreaLeftInset = insets.systemWindowInsetLeft
+                @Suppress("DEPRECATION")
+                state.safeAreaTopInset = insets.systemWindowInsetTop
+                @Suppress("DEPRECATION")
+                state.safeAreaRightInset = insets.systemWindowInsetRight
+                @Suppress("DEPRECATION")
+                state.safeAreaBottomInset = insets.systemWindowInsetBottom
+            }
+            applySafeAreaLayout(target, state)
+            insets
+        }
+        view.requestApplyInsets()
+    }
+
+    private fun applySafeAreaLayout(view: View, state: NodeState) {
+        val paddingMode = state.integer(
+            PropKey.SAFE_AREA_MODE,
+            SAFE_AREA_PADDING.toLong(),
+        ).toInt() == SAFE_AREA_PADDING
+        view.setPadding(
+            if (paddingMode && state.flag(PropKey.SAFE_AREA_LEFT, true)) {
+                state.safeAreaLeftInset
+            } else {
+                0
+            },
+            if (paddingMode && state.flag(PropKey.SAFE_AREA_TOP, true)) {
+                state.safeAreaTopInset
+            } else {
+                0
+            },
+            if (paddingMode && state.flag(PropKey.SAFE_AREA_RIGHT, true)) {
+                state.safeAreaRightInset
+            } else {
+                0
+            },
+            if (
+                paddingMode &&
+                state.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true)
+            ) {
+                state.safeAreaBottomInset
+            } else {
+                0
+            },
+        )
+        applyLayout(state.id)
+    }
+
+    private fun installKeyboardInsets(view: View, state: NodeState) {
+        view.setOnApplyWindowInsetsListener { target, insets ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                state.keyboardInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+                applyKeyboardAvoidance(target, state)
             }
             insets
         }
         view.requestApplyInsets()
     }
 
-    private fun installKeyboardInsets(view: View) {
-        view.setOnApplyWindowInsetsListener { target, insets ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val position = views.indexOfValue(target)
-                val node = if (position >= 0) nodes[views.keyAt(position)] else null
-                val keyboard = insets.getInsets(WindowInsets.Type.ime()).bottom
-                when (node?.keyboardBehavior ?: KEYBOARD_RESIZE) {
-                    KEYBOARD_PAN -> target.translationY = -keyboard.toFloat()
-                    KEYBOARD_PADDING -> target.setPadding(0, 0, 0, keyboard)
-                    else -> {
-                        target.translationY = 0f
-                        target.setPadding(0, 0, 0, 0)
-                    }
-                }
-            }
-            insets
+    private fun applyKeyboardAvoidance(view: View, state: NodeState) {
+        val enabled = state.flag(PropKey.KEYBOARD_AVOIDING_ENABLED, true)
+        val offset = dp(
+            state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat(),
+        )
+        val keyboard = if (enabled) {
+            max(0, state.keyboardInset + offset)
+        } else {
+            0
         }
-        view.requestApplyInsets()
+        when (state.keyboardBehavior) {
+            KEYBOARD_PAN -> {
+                view.translationY = -keyboard.toFloat()
+                view.setPadding(0, 0, 0, 0)
+            }
+            KEYBOARD_PADDING -> {
+                view.translationY = 0f
+                view.setPadding(0, 0, 0, keyboard)
+            }
+            else -> {
+                view.translationY = 0f
+                view.setPadding(0, 0, 0, 0)
+            }
+        }
     }
 
     private fun applyStatusBarAppearance(value: Int) {
@@ -1579,6 +1689,11 @@ class PamRenderer(
         var listAdapter: PackedStringAdapter? = null,
         var sectionAdapter: PackedSectionAdapter? = null,
         var safeBottomInset: Int = 0,
+        var safeAreaLeftInset: Int = 0,
+        var safeAreaTopInset: Int = 0,
+        var safeAreaRightInset: Int = 0,
+        var safeAreaBottomInset: Int = 0,
+        var keyboardInset: Int = 0,
         var propertyAnimator: ObjectAnimator? = null,
         var virtual: Boolean = false,
     ) {
@@ -1626,6 +1741,8 @@ class PamRenderer(
         const val KEYBOARD_RESIZE = 1
         const val KEYBOARD_PAN = 2
         const val KEYBOARD_PADDING = 3
+        const val SAFE_AREA_PADDING = 1
+        const val SAFE_AREA_MARGIN = 2
         const val MAX_VIRTUAL_DEPTH = 512
 
         val LAYOUT_ONLY_KINDS = setOf(
@@ -1669,6 +1786,13 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_VALUE_MAX,
             PropKey.ACCESSIBILITY_VALUE_NOW,
             PropKey.ACCESSIBILITY_VALUE_TEXT,
+            PropKey.SAFE_AREA_TOP,
+            PropKey.SAFE_AREA_RIGHT,
+            PropKey.SAFE_AREA_BOTTOM_EDGE,
+            PropKey.SAFE_AREA_LEFT,
+            PropKey.SAFE_AREA_MODE,
+            PropKey.KEYBOARD_VERTICAL_OFFSET,
+            PropKey.KEYBOARD_AVOIDING_ENABLED,
             PropKey.TEST_ID,
             PropKey.RIPPLE_COLOR,
             PropKey.PRESS_OPACITY,

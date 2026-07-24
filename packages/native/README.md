@@ -49,6 +49,24 @@ binding, conditional blocks, loops, utility classes and user-defined theme
 tokens. The fluent PHP element API and custom Kotlin views remain available as
 escape hatches, so the template/class convention is optional.
 
+Safe-area and keyboard avoidance remain native:
+
+```xml
+<SafeAreaView edges="top,bottom" mode="margin">
+    <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset="24"
+        enabled="true"
+    >
+        <Input placeholder="Message" />
+    </KeyboardAvoidingView>
+</SafeAreaView>
+```
+
+Android applies system-bar and IME insets directly on the UI thread. The same
+options are available through `SafeAreaView::edges()->mode()` and
+`KeyboardAvoidingView::verticalOffset()->avoidingEnabled()`.
+
 Run `pam mobile benchmark .` on a physical device for release-like AndroidX
 Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in
