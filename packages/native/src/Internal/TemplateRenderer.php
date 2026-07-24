@@ -344,7 +344,7 @@ final class TemplateRenderer
         }
         $ownVariants = array_filter(
             $values,
-            static fn (mixed $value): bool => is_scalar($value),
+            self::isDeclarativeContextValue(...),
         );
         $childData = [
             ...$data,
@@ -743,13 +743,15 @@ final class TemplateRenderer
             throw new RuntimeException("Template event handler {$resolved} must be public.");
         }
 
-        return static function (string $payload = '') use ($kind, $method, $scope): void {
+        return static function (string|bool $payload = '') use ($kind, $method, $scope): void {
             if ($method->getNumberOfParameters() === 0) {
                 $method->invoke($scope);
                 return;
             }
 
-            $value = $kind === EventKind::Toggle ? $payload === '1' : $payload;
+            $value = $kind === EventKind::Toggle
+                ? $payload === true || $payload === '1'
+                : (string) $payload;
             $method->invoke($scope, $value);
         };
     }
@@ -881,6 +883,42 @@ final class TemplateRenderer
 
         return $value;
     }
+
+    private static function isDeclarativeContextValue(
+        mixed $value,
+        int $depth = 0,
+    ): bool {
+        if (is_scalar($value)) {
+            return true;
+        }
+        if ($value === null) {
+            return $depth > 0;
+        }
+        if (
+            !is_array($value)
+            || $depth >= self::MAX_CONTEXT_DEPTH
+            || count($value) > self::MAX_CONTEXT_ITEMS
+        ) {
+            return false;
+        }
+
+        foreach ($value as $key => $item) {
+            if (
+                !is_int($key)
+                && preg_match('/^[A-Za-z][A-Za-z0-9_-]{0,127}$/D', $key) !== 1
+            ) {
+                return false;
+            }
+            if (!self::isDeclarativeContextValue($item, $depth + 1)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private const int MAX_CONTEXT_DEPTH = 4;
+    private const int MAX_CONTEXT_ITEMS = 1_024;
 
     private static function reflectionProperty(object $scope, string $property): ReflectionProperty
     {

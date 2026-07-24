@@ -180,6 +180,18 @@ $assert(
     $capturedParentVariants === ['variant' => 'outline', 'size' => 'lg'],
     'Custom template components must inherit parent variant context.',
 );
+$gallery = [
+    ['url' => 'file:///mountain.jpg', 'alt' => 'Mountain'],
+    ['url' => 'file:///ocean.jpg', 'alt' => 'Ocean'],
+];
+$variantTemplate = TemplateCompiler::compile(
+    '<VariantParent images="$gallery"><VariantChild /></VariantParent>',
+);
+TemplateRenderer::render($variantTemplate, null, ['gallery' => $gallery]);
+$assert(
+    $capturedParentVariants === ['images' => $gallery],
+    'Bound declarative arrays must remain available to compound child components.',
+);
 TemplateRegistry::reset();
 TemplateRegistry::styleResolver(
     static fn (string $class): ?array => $class === 'w-1/2'
