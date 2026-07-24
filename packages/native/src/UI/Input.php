@@ -11,6 +11,7 @@ use Pam\Native\InputSyncMode;
 use Pam\Native\KeyboardType;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
+use Pam\Native\ReturnKeyType;
 
 final class Input extends Element
 {
@@ -76,5 +77,10 @@ final class Input extends Element
     public function autoFocus(bool $autoFocus = true): self
     {
         return $this->withProperty(PropKey::AutoFocus, $autoFocus);
+    }
+
+    public function returnKey(ReturnKeyType $type): self
+    {
+        return $this->withProperty(PropKey::ReturnKeyType, $type->value);
     }
 }

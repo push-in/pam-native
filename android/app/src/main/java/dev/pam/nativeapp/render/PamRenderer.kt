@@ -26,6 +26,7 @@ import android.text.method.TransformationMethod
 import android.util.LongSparseArray
 import android.view.Choreographer
 import android.view.Gravity
+import android.view.inputmethod.EditorInfo
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -553,6 +554,8 @@ class PamRenderer(
             } else {
                 Unit
             }
+            PropKey.RETURN_KEY_TYPE -> (view as? EditText)?.imeOptions =
+                returnKeyImeOption(value.integer().toInt())
             PropKey.Z_INDEX -> view.z = value.decimal().toFloat()
             PropKey.OVERFLOW -> (view as? ViewGroup)?.clipChildren = value.integer() == 2L
             PropKey.HOST_PROPERTIES -> {
@@ -620,7 +623,6 @@ class PamRenderer(
             PropKey.DRAWER_POSITION,
             PropKey.ON_DRAWER_OPEN,
             PropKey.ON_DRAWER_CLOSE,
-            PropKey.RETURN_KEY_TYPE,
             PropKey.HOST_NAME,
             PropKey.ON_NATIVE_EVENT,
             PropKey.FLEX_DIRECTION,
@@ -1312,6 +1314,18 @@ class PamRenderer(
             5 -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             6 -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             else -> InputType.TYPE_CLASS_TEXT
+        }
+
+    private fun returnKeyImeOption(value: Int): Int =
+        when (value) {
+            2 -> EditorInfo.IME_ACTION_DONE
+            3 -> EditorInfo.IME_ACTION_GO
+            4 -> EditorInfo.IME_ACTION_NEXT
+            5 -> EditorInfo.IME_ACTION_SEARCH
+            6 -> EditorInfo.IME_ACTION_SEND
+            7 -> EditorInfo.IME_ACTION_NONE
+            8 -> EditorInfo.IME_ACTION_PREVIOUS
+            else -> EditorInfo.IME_ACTION_UNSPECIFIED
         }
 
     private fun accessibilityClass(value: Int): String =

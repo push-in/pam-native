@@ -18,6 +18,7 @@ use Pam\Native\Modules\NativeModuleResult;
 use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
 use Pam\Native\PointerEvents;
+use Pam\Native\ReturnKeyType;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
@@ -114,6 +115,7 @@ foreach ([
     FontStyle::cases(),
     PointerEvents::cases(),
     PositionType::cases(),
+    ReturnKeyType::cases(),
     TextDecoration::cases(),
     TextTransform::cases(),
 ] as $cases) {

@@ -17,6 +17,7 @@ use Pam\Native\KeyboardType;
 use Pam\Native\ModalPresentation;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
+use Pam\Native\ReturnKeyType;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TemplateException;
@@ -630,6 +631,16 @@ final class TemplateRenderer
                 'none' => 2,
                 'box-none' => 3,
                 'box-only' => 4,
+            ]),
+            PropKey::ReturnKeyType => self::named($value, [
+                'default' => ReturnKeyType::Default->value,
+                'done' => ReturnKeyType::Done->value,
+                'go' => ReturnKeyType::Go->value,
+                'next' => ReturnKeyType::Next->value,
+                'search' => ReturnKeyType::Search->value,
+                'send' => ReturnKeyType::Send->value,
+                'none' => ReturnKeyType::None->value,
+                'previous' => ReturnKeyType::Previous->value,
             ]),
             PropKey::AnimationKind => self::named($value, [
                 'none' => AnimationKind::None->value,
