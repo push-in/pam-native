@@ -112,13 +112,24 @@ The template syntax includes:
 - `@press="method"` native events and `@event="method"` component events;
 - `bind:value="$property"` and `bind:checked="$property"` two-way bindings;
 - `v-if`, `v-else-if`, and `v-else`;
-- `v-for="$item in $items"`;
+- `v-for="$item in $items"` for arrays and `Traversable` values;
+- `v-for="$number in $count"` for one-based repetition from `1` to `$count`;
 - `<Slot />`, `<Slot name="..."/>`, and `<template #name>`;
 - `key` for stable identity in repeated or reordered children.
 
 Expressions support component properties, local loop values, public component
 methods, arrays, comparisons, boolean operators, and ternaries. Business logic
 stays in PHP methods rather than in markup.
+
+An integer `v-for` source repeats the element that many times and exposes the
+current one-based number. Zero and negative integers render nothing:
+
+```xml
+<Column v-for="$number in $count" :key="$number">
+    <Text>Item {{ $number }}</Text>
+    <Text>Any subtree can be repeated.</Text>
+</Column>
+```
 
 ## Lifecycle
 

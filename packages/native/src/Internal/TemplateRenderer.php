@@ -406,12 +406,14 @@ final class TemplateRenderer
                     );
                 }
                 $items = TemplateExpression::evaluate($match[2], $scope, $nodeData);
-                if ($items instanceof Traversable) {
+                if (is_int($items)) {
+                    $items = $items > 0 ? range(1, $items) : [];
+                } elseif ($items instanceof Traversable) {
                     $items = iterator_to_array($items);
                 }
                 if (!is_array($items)) {
                     throw new RuntimeException(
-                        'v-for source must resolve to an array or Traversable.',
+                        'v-for source must resolve to an integer, array, or Traversable.',
                     );
                 }
                 $loopNode = self::withoutAttributes($node, ['v-for']);

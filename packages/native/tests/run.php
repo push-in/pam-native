@@ -1650,6 +1650,8 @@ final class CounterCard extends Component
     /** @var list<string> */
     public array $items = ['One', 'Two'];
 
+    public int $repeatCount = 3;
+
     public function __construct(
         public string $title,
         public ?string $subtitle = null,
@@ -1715,6 +1717,8 @@ final class CounterCard extends Component
         <Text>{{ $title }}</Text>
         <Text v-if="$subtitle">{{ $subtitle }}</Text>
         <Text v-for="$item in $items">{{ $item }}</Text>
+        <Text v-for="$number in $repeatCount">Repeat {{ $number }}</Text>
+        <Text v-for="$_ in 0">Never rendered</Text>
         <Button @press="increment">
             {{ $count === 0 ? 'Ready' : $count }}
         </Button>
@@ -1792,8 +1796,16 @@ foreach (array_keys($sfcEncoded['callbacks']) as $callbackKey) {
 $assert($pressKey !== null, '.pam.php @press event was not compiled.');
 $assert($toggleKey !== null, '.pam.php bind:checked event was not compiled.');
 $assert(
-    count($sfcElement->children()) === 8,
-    '.pam.php v-if, v-for and named/default slots did not compose correctly.',
+    count($sfcElement->children()) === 11,
+    '.pam.php v-if, iterable/integer v-for and slots did not compose correctly.',
+);
+$assert(
+    array_map(
+        static fn (\Pam\Native\Element $element): mixed =>
+            $element->properties()[PropKey::Text->value] ?? null,
+        array_slice($sfcElement->children(), 4, 3),
+    ) === ['Repeat 1', 'Repeat 2', 'Repeat 3'],
+    '.pam.php integer v-for must expose a one-based loop value.',
 );
 $assert(
     $counterClass::$lifecycle === ['boot', 'mount', 'attached', 'resumed'],
@@ -1831,7 +1843,7 @@ if ($newToggleKey === null) {
 [$toggleNode, $toggleKind] = array_map('intval', explode(':', $newToggleKey));
 Runtime::dispatchEvent($toggleNode, $toggleKind, '1');
 $assert(
-    $dashboard->toElement()->children()[5]
+    $dashboard->toElement()->children()[8]
         ->properties()[PropKey::Checked->value] === true,
     'bind:checked must update component state and rerender the native toggle.',
 );
