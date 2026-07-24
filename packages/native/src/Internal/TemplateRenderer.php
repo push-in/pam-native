@@ -337,6 +337,13 @@ final class TemplateRenderer
 
             $values[ltrim($name, ':')] = self::value($raw, $scope, $data);
         }
+        $class = $attributes['class'] ?? null;
+        $resolvedClass = is_string($class)
+            ? self::interpolate($class, $scope, $data)
+            : null;
+        if ($factory !== null && $resolvedClass !== null) {
+            $values['className'] = $resolvedClass;
+        }
 
         $inheritedVariants = $data['__pamParentVariants'] ?? [];
         if (!is_array($inheritedVariants)) {
@@ -442,10 +449,8 @@ final class TemplateRenderer
             default => self::custom($tag, $values, $children, $scope),
             };
 
-        $class = $attributes['class'] ?? null;
-
-        if (is_string($class)) {
-            $element = self::classes($element, self::interpolate($class, $scope, $data));
+        if ($resolvedClass !== null) {
+            $element = self::classes($element, $resolvedClass);
         }
 
         $element = self::attributes($element, $values);

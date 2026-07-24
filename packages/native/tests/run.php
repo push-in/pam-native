@@ -192,6 +192,36 @@ $assert(
     $capturedParentVariants === ['images' => $gallery],
     'Bound declarative arrays must remain available to compound child components.',
 );
+$capturedClassName = null;
+TemplateRegistry::component(
+    'SemanticClasses',
+    static function (
+        array $props,
+    ) use (&$capturedClassName): \Pam\Native\Renderable {
+        $capturedClassName = $props['className'] ?? null;
+
+        return Column::make();
+    },
+);
+TemplateRegistry::styleResolver(
+    static fn (string $class): ?array => $class === 'grid-cols-2'
+        ? []
+        : null,
+);
+$semanticClassTemplate = TemplateCompiler::compile(
+    '<SemanticClasses class="grid-cols-2 gap-3" />',
+);
+$semanticClassElement = TemplateRenderer::render(
+    $semanticClassTemplate,
+    null,
+    [],
+);
+$assert(
+    $capturedClassName === 'grid-cols-2 gap-3'
+        && ($semanticClassElement->properties()[PropKey::Gap->value] ?? null)
+            === 12.0,
+    'Registered template components must receive className before visual utilities are applied.',
+);
 TemplateRegistry::reset();
 TemplateRegistry::styleResolver(
     static fn (string $class): ?array => $class === 'w-1/2'
