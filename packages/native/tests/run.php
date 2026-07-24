@@ -34,6 +34,10 @@ use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\MemoryPressure;
+use Pam\Native\Navigation\NavigationOperation;
+use Pam\Native\Navigation\NavigationTransition;
+use Pam\Native\Navigation\Navigator;
+use Pam\Native\Navigation\Router;
 use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalOrientation;
 use Pam\Native\ModalPresentation;
@@ -1891,5 +1895,32 @@ $assert(
     $globalCallRejected,
     '.pam.php expressions must never call global PHP functions.',
 );
+
+$navigator = new Navigator(
+    initialRoute: 'home',
+    routes: [
+        'home' => static fn () => Screen::make(Text::make('Home')),
+        'details' => static fn () => Screen::make(Text::make('Details')),
+    ],
+    transition: NavigationTransition::Fade,
+    transitionDurationMs: 300,
+);
+$assert($navigator->render()->toElement()->kind() === NodeKind::NavigationHost, 'Navigator must render a native host.');
+$navigator->push('details');
+$pushed = $navigator->render()->toElement();
+$assert(count($pushed->children()) === 2, 'Push must retain both screens for the native transition.');
+$assert(
+    $pushed->properties()[PropKey::NavigationOperation->value] === NavigationOperation::Push->value,
+    'Push operation was not sent to the native host.',
+);
+$assert($navigator->pop(), 'Navigator must pop a secondary route.');
+$popped = $navigator->render()->toElement();
+$assert(count($popped->children()) === 2, 'Pop must retain its outgoing screen until native animation completes.');
+$assert($navigator->currentRoute() === 'home', 'Pop must reveal the previous route.');
+$fluentNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->transitions(NavigationTransition::Scale, 180)
+    ->build();
+$assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
 
 echo "Pam Native PHP SDK tests passed.\n";

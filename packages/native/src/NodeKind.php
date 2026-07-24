@@ -30,4 +30,5 @@ enum NodeKind: int
     case DrawerLayout = 22;
     case InputAccessoryView = 23;
     case CustomView = 24;
+    case NavigationHost = 25;
 }

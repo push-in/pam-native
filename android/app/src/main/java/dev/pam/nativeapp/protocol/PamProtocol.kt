@@ -33,7 +33,8 @@ enum class NodeKind(val value: Int) {
     SAFE_AREA_VIEW(21),
     DRAWER_LAYOUT(22),
     INPUT_ACCESSORY_VIEW(23),
-    CUSTOM_VIEW(24);
+    CUSTOM_VIEW(24),
+    NAVIGATION_HOST(25);
 
     companion object {
         fun from(value: Int): NodeKind =
@@ -359,7 +360,11 @@ enum class PropKey(val value: Int) {
     GRID_ORDER_LG(277),
     GRID_ORDER_XL(278),
     GRID_COLUMN_GAP(279),
-    GRID_ROW_GAP(280);
+    GRID_ROW_GAP(280),
+    NAVIGATION_OPERATION(281),
+    NAVIGATION_TRANSITION(282),
+    NAVIGATION_DURATION_MS(283),
+    NAVIGATION_REVISION(284);
 
     companion object {
         fun from(value: Int): PropKey =

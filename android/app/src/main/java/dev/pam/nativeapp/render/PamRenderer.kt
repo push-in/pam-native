@@ -235,6 +235,7 @@ class PamRenderer(
                 installSafeArea(it, requireNotNull(state))
             }
             NodeKind.DRAWER_LAYOUT -> PamDrawerLayout(context)
+            NodeKind.NAVIGATION_HOST -> PamNavigationHost(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text()
@@ -337,6 +338,7 @@ class PamRenderer(
             is PamImageBackground -> parent.insert(view, index)
             is PamRefreshContainer -> parent.insert(view, index)
             is PamDrawerLayout -> parent.insert(view, index)
+            is PamNavigationHost -> parent.insert(view, index)
             is PamModalHost -> parent.insert(view, index)
             is PamScrollContainer -> parent.insert(view)
             else -> {
@@ -568,6 +570,14 @@ class PamRenderer(
             PropKey.TEST_ID -> view.transitionName = value.text()
             PropKey.ITEMS -> applyStringList(view, state, value)
             PropKey.SECTION_ITEMS -> applySectionList(view, state, value)
+            PropKey.NAVIGATION_OPERATION ->
+                (view as? PamNavigationHost)?.operation = value.integer().toInt()
+            PropKey.NAVIGATION_TRANSITION ->
+                (view as? PamNavigationHost)?.transition = value.integer().toInt()
+            PropKey.NAVIGATION_DURATION_MS ->
+                (view as? PamNavigationHost)?.durationMs = value.integer()
+            PropKey.NAVIGATION_REVISION ->
+                (view as? PamNavigationHost)?.navigate(value.integer())
             PropKey.OPACITY -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
                     applyAnimationKind(view, state, 2)
@@ -1011,6 +1021,10 @@ class PamRenderer(
             PropKey.GRID_ORDER_XL,
             PropKey.GRID_COLUMN_GAP,
             PropKey.GRID_ROW_GAP,
+            PropKey.NAVIGATION_OPERATION,
+            PropKey.NAVIGATION_TRANSITION,
+            PropKey.NAVIGATION_DURATION_MS,
+            PropKey.NAVIGATION_REVISION,
             -> Unit
         }
     }

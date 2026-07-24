@@ -6,6 +6,7 @@ use App\Showcase;
 use App\TemplateShowcase;
 use Pam\Native\App;
 use Pam\Native\Navigation\Navigator;
+use Pam\Native\Navigation\NavigationTransition;
 
 require __DIR__.'/vendor/autoload.php';
 
@@ -24,6 +25,8 @@ $navigator = new Navigator(
         'tags' => static fn () => $template,
     ],
     persistenceKey: 'showcase',
+    transition: NavigationTransition::PlatformDefault,
+    transitionDurationMs: 240,
 );
 $showcase->navigator = $navigator;
 $template->navigator = $navigator;

@@ -38,6 +38,7 @@ pub enum NodeKind {
     DrawerLayout = 22,
     InputAccessoryView = 23,
     CustomView = 24,
+    NavigationHost = 25,
 }
 
 impl TryFrom<u8> for NodeKind {
@@ -69,6 +70,7 @@ impl TryFrom<u8> for NodeKind {
             22 => Ok(Self::DrawerLayout),
             23 => Ok(Self::InputAccessoryView),
             24 => Ok(Self::CustomView),
+            25 => Ok(Self::NavigationHost),
             other => Err(ProtocolError::UnknownNodeKind(other)),
         }
     }
@@ -357,6 +359,10 @@ pub enum PropKey {
     GridOrderXl = 278,
     GridColumnGap = 279,
     GridRowGap = 280,
+    NavigationOperation = 281,
+    NavigationTransition = 282,
+    NavigationDurationMs = 283,
+    NavigationRevision = 284,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -644,6 +650,10 @@ impl TryFrom<u16> for PropKey {
             278 => Ok(Self::GridOrderXl),
             279 => Ok(Self::GridColumnGap),
             280 => Ok(Self::GridRowGap),
+            281 => Ok(Self::NavigationOperation),
+            282 => Ok(Self::NavigationTransition),
+            283 => Ok(Self::NavigationDurationMs),
+            284 => Ok(Self::NavigationRevision),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1439,18 +1449,18 @@ mod tests {
 
     #[test]
     fn protocol_enums_are_sequential_and_append_only() {
-        for value in 1..=24 {
+        for value in 1..=25 {
             assert!(
                 NodeKind::try_from(value).is_ok(),
                 "missing node kind {value}"
             );
         }
-        assert!(NodeKind::try_from(25).is_err());
+        assert!(NodeKind::try_from(26).is_err());
 
-        for value in 1..=280 {
+        for value in 1..=284 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(281).is_err());
+        assert!(PropKey::try_from(285).is_err());
     }
 
     fn tree(text: &str) -> Tree {

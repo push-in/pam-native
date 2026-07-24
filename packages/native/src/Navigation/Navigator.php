@@ -15,9 +15,13 @@ final class Navigator extends Component implements Restorable
     /** @var array<string, Closure(): Renderable> */
     private array $routes;
 
-    /** @var list<string> */
+    /** @var list<array{name: string, id: int}> */
     private array $stack;
     private string $persistenceKey;
+    private int $nextId = 2;
+    private int $revision = 0;
+    private NavigationOperation $operation = NavigationOperation::Idle;
+    private ?array $outgoing = null;
 
     /**
      * @param array<array-key, mixed> $routes
@@ -26,6 +30,8 @@ final class Navigator extends Component implements Restorable
         string $initialRoute,
         array $routes,
         string $persistenceKey = 'main',
+        private NavigationTransition $transition = NavigationTransition::PlatformDefault,
+        private int $transitionDurationMs = 240,
     )
     {
         $validated = [];
@@ -46,8 +52,9 @@ final class Navigator extends Component implements Restorable
         }
 
         $this->routes = $validated;
-        $this->stack = [$initialRoute];
+        $this->stack = [['name' => $initialRoute, 'id' => 1]];
         $this->persistenceKey = $persistenceKey;
+        $this->transitionDurationMs = max(0, min(2_000, $transitionDurationMs));
     }
 
     public function push(string $route): void
@@ -56,7 +63,10 @@ final class Navigator extends Component implements Restorable
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
 
-        $this->stack[] = $route;
+        $this->outgoing = null;
+        $this->stack[] = ['name' => $route, 'id' => $this->nextId++];
+        $this->operation = NavigationOperation::Push;
+        $this->revision++;
     }
 
     public function pop(): bool
@@ -65,19 +75,84 @@ final class Navigator extends Component implements Restorable
             return false;
         }
 
-        array_pop($this->stack);
+        $this->outgoing = array_pop($this->stack);
+        $this->operation = NavigationOperation::Pop;
+        $this->revision++;
 
         return true;
     }
 
     public function currentRoute(): string
     {
-        return $this->stack[count($this->stack) - 1];
+        return $this->stack[count($this->stack) - 1]['name'];
     }
 
     public function render(): Renderable
     {
-        return ($this->routes[$this->currentRoute()])();
+        $entries = [];
+
+        if ($this->operation === NavigationOperation::Push && count($this->stack) > 1) {
+            $entries[] = $this->stack[count($this->stack) - 2];
+        }
+        if ($this->operation === NavigationOperation::Replace && $this->outgoing !== null) {
+            $entries[] = $this->outgoing;
+        }
+        $entries[] = $this->stack[count($this->stack) - 1];
+        if ($this->operation === NavigationOperation::Pop && $this->outgoing !== null) {
+            $entries[] = $this->outgoing;
+        }
+
+        $screens = array_map(
+            fn (array $entry): Renderable => ($this->routes[$entry['name']])()
+                ->toElement()
+                ->key('navigation.'.$entry['id']),
+            $entries,
+        );
+
+        return NavigationHost::make(
+            $this->operation,
+            $this->transition,
+            $this->transitionDurationMs,
+            $this->revision,
+            ...$screens,
+        );
+    }
+
+    public function canGoBack(): bool
+    {
+        return count($this->stack) > 1;
+    }
+
+    public function replace(string $route): void
+    {
+        if (!isset($this->routes[$route])) {
+            throw new InvalidArgumentException("Route {$route} is not registered.");
+        }
+        $this->outgoing = array_pop($this->stack);
+        $this->stack[] = ['name' => $route, 'id' => $this->nextId++];
+        $this->operation = NavigationOperation::Replace;
+        $this->revision++;
+    }
+
+    public function reset(string $route): void
+    {
+        if (!isset($this->routes[$route])) {
+            throw new InvalidArgumentException("Route {$route} is not registered.");
+        }
+        $this->outgoing = null;
+        $this->stack = [['name' => $route, 'id' => $this->nextId++]];
+        $this->operation = NavigationOperation::Reset;
+        $this->revision++;
+    }
+
+    public function transition(
+        NavigationTransition $transition,
+        ?int $durationMs = null,
+    ): void {
+        $this->transition = $transition;
+        if ($durationMs !== null) {
+            $this->transitionDurationMs = max(0, min(2_000, $durationMs));
+        }
     }
 
     public function stateKey(): string
@@ -99,13 +174,15 @@ final class Navigator extends Component implements Restorable
                 return;
             }
 
-            $restored[] = $route;
+            $restored[] = ['name' => $route, 'id' => $this->nextId++];
         }
         $this->stack = $restored;
+        $this->operation = NavigationOperation::Reset;
+        $this->revision++;
     }
 
     public function saveState(): array
     {
-        return ['stack' => $this->stack];
+        return ['stack' => array_column($this->stack, 'name')];
     }
 }

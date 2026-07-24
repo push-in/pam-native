@@ -234,7 +234,10 @@ fn layout_node(
         }
         return Ok(());
     }
-    if matches!(node.kind, NodeKind::Modal | NodeKind::RefreshControl) {
+    if matches!(
+        node.kind,
+        NodeKind::Modal | NodeKind::RefreshControl | NodeKind::NavigationHost
+    ) {
         for child in node_children {
             if !visible(child) {
                 continue;
@@ -1093,7 +1096,8 @@ fn content_sized(node: &Node) -> bool {
         | NodeKind::ImageBackground
         | NodeKind::KeyboardAvoidingView
         | NodeKind::SafeAreaView
-        | NodeKind::InputAccessoryView => true,
+        | NodeKind::InputAccessoryView
+        | NodeKind::NavigationHost => true,
         // Authored native components are frequently compound controls (forms,
         // calendars, tables, conversations, etc.). Their host participates in
         // intrinsic measurement so descendants cannot escape and overlap the

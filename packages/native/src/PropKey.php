@@ -286,4 +286,8 @@ enum PropKey: int
     case GridOrderXl = 278;
     case GridColumnGap = 279;
     case GridRowGap = 280;
+    case NavigationOperation = 281;
+    case NavigationTransition = 282;
+    case NavigationDurationMs = 283;
+    case NavigationRevision = 284;
 }
