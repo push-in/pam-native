@@ -49,13 +49,10 @@ import android.view.animation.AccelerateInterpolator
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
 import android.view.animation.OvershootInterpolator
-import android.widget.AbsListView
-import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.Space
@@ -65,8 +62,6 @@ import dev.pam.nativeapp.protocol.Frame
 import dev.pam.nativeapp.protocol.Mutation
 import dev.pam.nativeapp.protocol.NodeKind
 import dev.pam.nativeapp.protocol.NodeSpec
-import dev.pam.nativeapp.protocol.PackedSectionList
-import dev.pam.nativeapp.protocol.PackedStringList
 import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import dev.pam.nativeapp.protocol.WireMap
@@ -201,11 +196,7 @@ class PamRenderer(
             }
             NodeKind.LIST,
             NodeKind.SECTION_LIST,
-            -> ListView(context).apply {
-                dividerHeight = 0
-                isVerticalScrollBarEnabled = false
-                isFastScrollEnabled = true
-            }
+            -> PamRecyclerList(context)
             NodeKind.SPACER,
             NodeKind.STATUS_BAR,
             -> Space(context)
@@ -592,12 +583,26 @@ class PamRenderer(
                 )
             PropKey.SCROLL_ENABLED -> when (view) {
                 is ScrollView -> view.isEnabled = value.flag()
-                is ListView -> view.isEnabled = value.flag()
+                is PamRecyclerList -> view.setScrollEnabled(value.flag())
             }
             PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
                 is ScrollView -> view.isVerticalScrollBarEnabled = value.flag()
-                is ListView -> view.isVerticalScrollBarEnabled = value.flag()
+                is PamRecyclerList -> view.setShowsScrollIndicator(value.flag())
             }
+            PropKey.LIST_ROW_HEIGHT ->
+                (view as? PamRecyclerList)?.setRowHeight(value.decimal().toFloat())
+            PropKey.LIST_PREFETCH ->
+                (view as? PamRecyclerList)?.setPrefetchItems(value.integer().toInt())
+            PropKey.LIST_HORIZONTAL ->
+                (view as? PamRecyclerList)?.setHorizontal(value.flag())
+            PropKey.LIST_NUM_COLUMNS ->
+                (view as? PamRecyclerList)?.setColumns(value.integer().toInt())
+            PropKey.LIST_INVERTED ->
+                (view as? PamRecyclerList)?.setInverted(value.flag())
+            PropKey.LIST_INITIAL_SCROLL_INDEX ->
+                (view as? PamRecyclerList)?.setInitialIndex(value.integer().toInt())
+            PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
+                (view as? PamRecyclerList)?.setRemoveClippedSubviews(value.flag())
             PropKey.SELECTED -> view.isSelected = value.flag()
             PropKey.PRESS_OPACITY -> state.pressOpacity = value.decimal().toFloat()
             PropKey.ACCESSIBILITY_ROLE -> {
@@ -642,10 +647,6 @@ class PamRenderer(
             PropKey.SCALE_Y,
             PropKey.ROTATION,
             -> animateOrSet(view, state, key, value.decimal().toFloat())
-            PropKey.LIST_ROW_HEIGHT -> {
-                state.listAdapter?.rowHeight = value.decimal().toFloat()
-                state.sectionAdapter?.rowHeight = value.decimal().toFloat()
-            }
             PropKey.DRAWER_OPEN -> (view as? PamDrawerLayout)?.setOpen(value.flag())
             PropKey.LETTER_SPACING -> (view as? TextView)?.letterSpacing = value.decimal().toFloat()
             PropKey.LINE_HEIGHT -> (view as? TextView)?.setLineSpacing(
@@ -749,7 +750,6 @@ class PamRenderer(
             PropKey.COLLAPSABLE,
             PropKey.ANIMATION_EASING,
             PropKey.ANIMATE_CHANGES,
-            PropKey.LIST_PREFETCH,
             PropKey.ON_END_REACHED,
             PropKey.END_REACHED_THRESHOLD,
             PropKey.DRAWER_POSITION,
@@ -868,7 +868,19 @@ class PamRenderer(
             PropKey.TEST_ID -> view.transitionName = null
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
-            -> (view as? ListView)?.adapter = null
+            -> (view as? PamRecyclerList)?.setItems(null)
+            PropKey.SCROLL_ENABLED -> (view as? PamRecyclerList)?.setScrollEnabled(true)
+            PropKey.SHOWS_SCROLL_INDICATOR ->
+                (view as? PamRecyclerList)?.setShowsScrollIndicator(true)
+            PropKey.LIST_ROW_HEIGHT -> (view as? PamRecyclerList)?.setRowHeight(48f)
+            PropKey.LIST_PREFETCH -> (view as? PamRecyclerList)?.setPrefetchItems(5)
+            PropKey.LIST_HORIZONTAL -> (view as? PamRecyclerList)?.setHorizontal(false)
+            PropKey.LIST_NUM_COLUMNS -> (view as? PamRecyclerList)?.setColumns(1)
+            PropKey.LIST_INVERTED -> (view as? PamRecyclerList)?.setInverted(false)
+            PropKey.LIST_INITIAL_SCROLL_INDEX ->
+                (view as? PamRecyclerList)?.setInitialIndex(0)
+            PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
+                (view as? PamRecyclerList)?.setRemoveClippedSubviews(true)
             PropKey.OPACITY -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
                     applyAnimationKind(view, state, 2)
@@ -972,7 +984,7 @@ class PamRenderer(
             }
         }
         if (view is ScrollView) installScrollEvents(view, state)
-        if (view is ListView) installListEvents(view, state)
+        if (view is PamRecyclerList) installListEvents(view, state)
         if (view is PamRefreshContainer) {
             view.setOnRefresh(
                 if (state.properties[PropKey.ON_REFRESH] != null) {
@@ -1113,21 +1125,36 @@ class PamRenderer(
         }
     }
 
-    private fun installListEvents(list: ListView, state: NodeState) {
-        if (state.properties[PropKey.ON_END_REACHED] == null) {
-            list.setOnScrollListener(null)
+    private fun installListEvents(list: PamRecyclerList, state: NodeState) {
+        val scroll = state.properties[PropKey.ON_SCROLL] != null
+        val endReached = state.properties[PropKey.ON_END_REACHED] != null
+        if (!scroll && !endReached) {
+            list.setOnViewportChanged(null)
             return
         }
-        list.setOnScrollListener(object : AbsListView.OnScrollListener {
-            override fun onScrollStateChanged(view: AbsListView?, scrollState: Int) = Unit
-
-            override fun onScroll(
-                view: AbsListView?,
-                firstVisibleItem: Int,
-                visibleItemCount: Int,
-                totalItemCount: Int,
-            ) {
-                if (totalItemCount == 0 || state.endReachedSent) return
+        list.setOnViewportChanged {
+                offset,
+                firstVisibleItem,
+                visibleItemCount,
+                totalItemCount,
+            ->
+            if (scroll) {
+                state.pendingScrollOffset = offset
+                if (!state.scrollScheduled) {
+                    state.scrollScheduled = true
+                    Choreographer.getInstance().postFrameCallback {
+                        state.scrollScheduled = false
+                        if (nodes[state.id] === state) {
+                            dispatch(
+                                state.id,
+                                EVENT_SCROLL,
+                                state.pendingScrollOffset.toString(),
+                            )
+                        }
+                    }
+                }
+            }
+            if (endReached && totalItemCount > 0 && !state.endReachedSent) {
                 val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, 1.0)
                 val remaining = totalItemCount - firstVisibleItem - visibleItemCount
                 val trigger = max(1, (visibleItemCount * threshold).toInt())
@@ -1136,7 +1163,7 @@ class PamRenderer(
                     dispatch(state.id, EVENT_END_REACHED)
                 }
             }
-        })
+        }
     }
 
     private fun dispatchInput(state: NodeState) {
@@ -1190,28 +1217,18 @@ class PamRenderer(
     }
 
     private fun applyStringList(view: View, state: NodeState, value: PropValue) {
-        val list = view as? ListView ?: return
+        val list = view as? PamRecyclerList ?: return
         val items = (value as? PropValue.Strings)?.value
             ?: error("Expected packed string list")
-        val adapter = state.listAdapter
-        if (adapter == null) {
-            state.listAdapter = PackedStringAdapter(context, items).also { list.adapter = it }
-        } else {
-            adapter.update(items)
-        }
+        list.setItems(items)
         state.endReachedSent = false
     }
 
     private fun applySectionList(view: View, state: NodeState, value: PropValue) {
-        val list = view as? ListView ?: return
+        val list = view as? PamRecyclerList ?: return
         val sections = (value as? PropValue.Sections)?.value
             ?: error("Expected packed section list")
-        val adapter = state.sectionAdapter
-        if (adapter == null) {
-            state.sectionAdapter = PackedSectionAdapter(context, sections).also { list.adapter = it }
-        } else {
-            adapter.update(sections)
-        }
+        list.setSections(sections)
         state.endReachedSent = false
     }
 
@@ -1799,8 +1816,7 @@ class PamRenderer(
             22 -> EditText::class.java.name
             23 -> "android.widget.SpinButton"
             29 -> "android.widget.ToggleButton"
-            31 -> "android.widget.GridView"
-            32 -> "android.widget.AbsListView"
+            31, 32 -> "androidx.recyclerview.widget.RecyclerView"
             else -> View::class.java.name
         }
 
@@ -1996,10 +2012,9 @@ class PamRenderer(
         var baseText: String = "",
         var pressOpacity: Float = 0.72f,
         var scrollScheduled: Boolean = false,
+        var pendingScrollOffset: Float = 0f,
         var endReachedSent: Boolean = false,
         var keyboardBehavior: Int = KEYBOARD_RESIZE,
-        var listAdapter: PackedStringAdapter? = null,
-        var sectionAdapter: PackedSectionAdapter? = null,
         var safeBottomInset: Int = 0,
         var safeAreaLeftInset: Int = 0,
         var safeAreaTopInset: Int = 0,
@@ -2203,70 +2218,4 @@ private class PamTextTransformMethod(
     private companion object {
         val WORD_BOUNDARY = Regex("(?<=\\s)|(?=\\s)")
     }
-}
-
-private class PackedStringAdapter(
-    private val context: Context,
-    private var items: PackedStringList,
-) : BaseAdapter() {
-    var rowHeight = 48f
-
-    fun update(next: PackedStringList) {
-        items = next
-        notifyDataSetChanged()
-    }
-
-    override fun getCount(): Int = items.size
-    override fun getItem(position: Int): String = items[position]
-    override fun getItemId(position: Int): Long = position.toLong()
-
-    override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-        val text = convertView as? TextView ?: TextView(context).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16f), 0, dp(16f), 0)
-            includeFontPadding = false
-        }
-        text.minHeight = dp(rowHeight)
-        text.text = items[position]
-        return text
-    }
-
-    private fun dp(value: Float): Int =
-        (value * context.resources.displayMetrics.density + 0.5f).toInt()
-}
-
-private class PackedSectionAdapter(
-    private val context: Context,
-    private var sections: PackedSectionList,
-) : BaseAdapter() {
-    var rowHeight = 48f
-
-    fun update(next: PackedSectionList) {
-        sections = next
-        notifyDataSetChanged()
-    }
-
-    override fun getCount(): Int = sections.size
-    override fun getItem(position: Int): String = sections[position]
-    override fun getItemId(position: Int): Long = position.toLong()
-    override fun getViewTypeCount(): Int = 2
-    override fun getItemViewType(position: Int): Int = if (sections.isHeader(position)) 0 else 1
-    override fun isEnabled(position: Int): Boolean = !sections.isHeader(position)
-
-    override fun getView(position: Int, convertView: View?, parent: ViewGroup?): View {
-        val text = convertView as? TextView ?: TextView(context).apply {
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16f), 0, dp(16f), 0)
-            includeFontPadding = false
-        }
-        val header = sections.isHeader(position)
-        text.minHeight = dp(if (header) 36f else rowHeight)
-        text.setTypeface(text.typeface, if (header) Typeface.BOLD else Typeface.NORMAL)
-        text.setBackgroundColor(if (header) 0xFFF3F4F6.toInt() else Color.TRANSPARENT)
-        text.text = sections[position]
-        return text
-    }
-
-    private fun dp(value: Float): Int =
-        (value * context.resources.displayMetrics.density + 0.5f).toInt()
 }

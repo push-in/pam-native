@@ -47,12 +47,14 @@ use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
+use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Input;
 use Pam\Native\UI\KeyboardAvoidingView;
 use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Screen;
+use Pam\Native\UI\SectionList;
 use Pam\Native\UI\StatusBar;
 use Pam\Native\UI\Text;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
@@ -288,6 +290,58 @@ $assert(
         && $statusBarElement->properties()[PropKey::StatusBarAnimated->value] === true
         && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true,
     'Status bar helpers must preserve color, style, visibility and edge-to-edge properties.',
+);
+
+$listElement = FlatList::make(['One', 'Two', 'Three'])
+    ->rowHeight(56.0)
+    ->prefetch(8)
+    ->columns(2)
+    ->inverted()
+    ->initialScrollIndex(1)
+    ->removeClippedSubviews(false)
+    ->scrollEnabled(false)
+    ->showsIndicator(false)
+    ->onScroll(static function (): void {
+    })
+    ->onEndReached(static function (): void {
+    }, 0.25);
+$assert(
+    $listElement->properties()[PropKey::ListRowHeight->value] === 56.0
+        && $listElement->properties()[PropKey::ListPrefetch->value] === 8
+        && $listElement->properties()[PropKey::ListNumColumns->value] === 2
+        && $listElement->properties()[PropKey::ListInverted->value] === true
+        && $listElement->properties()[PropKey::ListInitialScrollIndex->value] === 1
+        && $listElement
+            ->properties()[PropKey::ListRemoveClippedSubviews->value] === false
+        && $listElement->properties()[PropKey::ScrollEnabled->value] === false
+        && $listElement->properties()[PropKey::ShowsScrollIndicator->value] === false
+        && $listElement->properties()[PropKey::EndReachedThreshold->value] === 0.25
+        && isset($listElement->events()[EventKind::Scroll->value])
+        && isset($listElement->events()[EventKind::EndReached->value]),
+    'List helpers must preserve recycling, prefetch, layout and scroll event properties.',
+);
+
+$sectionListElement = SectionList::make([
+    'Frameworks' => ['Laravel', 'PAM'],
+])
+    ->rowHeight(52.0)
+    ->prefetch(6)
+    ->horizontal()
+    ->columns(2)
+    ->inverted()
+    ->initialScrollIndex(1)
+    ->removeClippedSubviews(false);
+$assert(
+    $sectionListElement->properties()[PropKey::ListRowHeight->value] === 52.0
+        && $sectionListElement->properties()[PropKey::ListPrefetch->value] === 6
+        && $sectionListElement->properties()[PropKey::ListHorizontal->value] === true
+        && $sectionListElement->properties()[PropKey::ListNumColumns->value] === 2
+        && $sectionListElement->properties()[PropKey::ListInverted->value] === true
+        && $sectionListElement
+            ->properties()[PropKey::ListInitialScrollIndex->value] === 1
+        && $sectionListElement
+            ->properties()[PropKey::ListRemoveClippedSubviews->value] === false,
+    'Section list helpers must preserve native recycler configuration.',
 );
 
 $first = (new TreeEncoder())->encode($tree);

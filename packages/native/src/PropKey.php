@@ -177,4 +177,9 @@ enum PropKey: int
     case TextDataDetectorType = 169;
     case StatusBarAnimated = 170;
     case StatusBarTranslucent = 171;
+    case ListHorizontal = 172;
+    case ListNumColumns = 173;
+    case ListInverted = 174;
+    case ListInitialScrollIndex = 175;
+    case ListRemoveClippedSubviews = 176;
 }

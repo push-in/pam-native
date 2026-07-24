@@ -1,0 +1,413 @@
+package dev.pam.nativeapp.render
+
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Typeface
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+import android.view.ViewGroup
+import android.widget.TextView
+import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
+import dev.pam.nativeapp.protocol.PackedSectionList
+import dev.pam.nativeapp.protocol.PackedStringList
+import kotlin.math.abs
+import kotlin.math.max
+
+internal class PamRecyclerList(context: Context) : RecyclerView(context) {
+    private var rowHeight = 48f
+    private var horizontal = false
+    private var columns = 1
+    private var inverted = false
+    private var prefetchItems = 5
+    private var initialIndex = 0
+    private var initialPositionApplied = false
+    private var scrollEnabled = true
+    private var showsScrollIndicator = true
+    private var removeClippedSubviews = true
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var touchMoved = false
+    private var viewportChanged: ((Float, Int, Int, Int) -> Unit)? = null
+
+    init {
+        itemAnimator = null
+        isNestedScrollingEnabled = true
+        clipToPadding = false
+        setHasFixedSize(true)
+        updateLayoutManager()
+        addOnScrollListener(object : OnScrollListener() {
+            override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                dispatchViewport()
+            }
+        })
+    }
+
+    fun setItems(items: PackedStringList?) {
+        adapter = items?.let { PackedStringRecyclerAdapter(context, it) }
+        configureAdapter()
+        applyInitialPosition()
+    }
+
+    fun setSections(sections: PackedSectionList?) {
+        adapter = sections?.let { PackedSectionRecyclerAdapter(context, it) }
+        configureAdapter()
+        updateHeaderSpans()
+        applyInitialPosition()
+    }
+
+    fun setRowHeight(value: Float) {
+        rowHeight = value.coerceAtLeast(1f)
+        configureAdapter()
+        updatePrefetch()
+    }
+
+    fun setHorizontal(value: Boolean) {
+        if (horizontal == value) return
+        horizontal = value
+        if (value) columns = 1
+        updateLayoutManager()
+    }
+
+    fun setColumns(value: Int) {
+        val next = if (horizontal) 1 else value.coerceAtLeast(1)
+        if (columns == next) return
+        columns = next
+        updateLayoutManager()
+    }
+
+    fun setInverted(value: Boolean) {
+        if (inverted == value) return
+        inverted = value
+        updateLayoutManager()
+    }
+
+    fun setPrefetchItems(value: Int) {
+        prefetchItems = value.coerceIn(1, MAX_PREFETCH_ITEMS)
+        updatePrefetch()
+    }
+
+    fun setInitialIndex(value: Int) {
+        val next = value.coerceAtLeast(0)
+        if (initialIndex == next && initialPositionApplied) return
+        initialIndex = next
+        initialPositionApplied = false
+        applyInitialPosition()
+    }
+
+    fun setRemoveClippedSubviews(value: Boolean) {
+        removeClippedSubviews = value
+        updatePrefetch()
+    }
+
+    fun setScrollEnabled(value: Boolean) {
+        scrollEnabled = value
+        isEnabled = value
+        if (!value) stopScroll()
+    }
+
+    fun setShowsScrollIndicator(value: Boolean) {
+        showsScrollIndicator = value
+        isVerticalScrollBarEnabled = value && !horizontal
+        isHorizontalScrollBarEnabled = value && horizontal
+    }
+
+    fun setOnViewportChanged(listener: ((Float, Int, Int, Int) -> Unit)?) {
+        viewportChanged = listener
+    }
+
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean =
+        scrollEnabled && super.onInterceptTouchEvent(event)
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!scrollEnabled) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+                touchMoved = false
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (
+                    abs(event.x - touchDownX) > touchSlop ||
+                    abs(event.y - touchDownY) > touchSlop
+                ) {
+                    touchMoved = true
+                }
+            }
+        }
+        val handled = super.onTouchEvent(event)
+        if (handled && event.actionMasked == MotionEvent.ACTION_UP && !touchMoved) {
+            performClick()
+        }
+        if (
+            event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
+            touchMoved = false
+        }
+        return handled
+    }
+
+    override fun performClick(): Boolean = super.performClick()
+
+    private fun updateLayoutManager() {
+        val previous = layoutManager as? LinearLayoutManager
+        val position = previous?.findFirstVisibleItemPosition()?.coerceAtLeast(0) ?: 0
+        val previousHorizontal = previous?.orientation == HORIZONTAL
+        val offset = previous
+            ?.findViewByPosition(position)
+            ?.let {
+                if (previousHorizontal) {
+                    it.left - paddingLeft
+                } else {
+                    it.top - paddingTop
+                }
+            }
+            ?: 0
+        val orientation = if (horizontal) HORIZONTAL else VERTICAL
+        layoutManager = if (columns > 1 && !horizontal) {
+            PamGridLayoutManager(
+                context,
+                columns,
+                orientation,
+                inverted,
+            )
+        } else {
+            PamLinearLayoutManager(
+                context,
+                orientation,
+                inverted,
+            )
+        }
+        (layoutManager as LinearLayoutManager).stackFromEnd = inverted
+        configureAdapter()
+        updateHeaderSpans()
+        updatePrefetch()
+        if ((adapter?.itemCount ?: 0) > 0) {
+            (layoutManager as LinearLayoutManager).scrollToPositionWithOffset(position, offset)
+        }
+        setShowsScrollIndicator(showsScrollIndicator)
+    }
+
+    private fun updatePrefetch() {
+        val extent = dp(rowHeight)
+        (layoutManager as? PrefetchLayoutManager)?.apply {
+            prefetchCount = prefetchItems
+            extraLayoutSpace = extent * prefetchItems
+        }
+        val requestedCache = prefetchItems * max(1, columns)
+        val cache = if (removeClippedSubviews) {
+            requestedCache
+        } else {
+            max(requestedCache, (adapter?.itemCount ?: 0).coerceAtMost(64))
+        }
+        setItemViewCacheSize(cache.coerceAtMost(64))
+        val recycled = (prefetchItems * max(1, columns) * 2).coerceAtMost(96)
+        recycledViewPool.setMaxRecycledViews(PackedRowAdapter.TYPE_ITEM, recycled)
+        recycledViewPool.setMaxRecycledViews(PackedRowAdapter.TYPE_HEADER, prefetchItems)
+    }
+
+    private fun configureAdapter() {
+        (adapter as? PackedRowAdapter)?.configure(
+            extent = dp(rowHeight),
+            horizontal = horizontal,
+        )
+    }
+
+    private fun updateHeaderSpans() {
+        val grid = layoutManager as? GridLayoutManager ?: return
+        val rows = adapter as? PackedRowAdapter ?: return
+        grid.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+            override fun getSpanSize(position: Int): Int =
+                if (rows.isHeader(position)) grid.spanCount else 1
+        }
+    }
+
+    private fun applyInitialPosition() {
+        if (initialPositionApplied) return
+        val count = adapter?.itemCount ?: 0
+        if (count == 0) return
+        val target = initialIndex.coerceAtMost(count - 1)
+        post {
+            (layoutManager as? LinearLayoutManager)
+                ?.scrollToPositionWithOffset(target, 0)
+            initialPositionApplied = true
+        }
+    }
+
+    private fun dispatchViewport() {
+        val layout = layoutManager as? LinearLayoutManager ?: return
+        val first = layout.findFirstVisibleItemPosition().coerceAtLeast(0)
+        val last = layout.findLastVisibleItemPosition()
+        val visible = if (last >= first) last - first + 1 else 0
+        val total = adapter?.itemCount ?: 0
+        val offset = if (horizontal) {
+            computeHorizontalScrollOffset()
+        } else {
+            computeVerticalScrollOffset()
+        } / resources.displayMetrics.density
+        viewportChanged?.invoke(offset, first, visible, total)
+    }
+
+    private fun dp(value: Float): Int =
+        max(1, (value * resources.displayMetrics.density + 0.5f).toInt())
+
+    private interface PrefetchLayoutManager {
+        var prefetchCount: Int
+        var extraLayoutSpace: Int
+    }
+
+    private class PamLinearLayoutManager(
+        context: Context,
+        orientation: Int,
+        reverseLayout: Boolean,
+    ) : LinearLayoutManager(context, orientation, reverseLayout), PrefetchLayoutManager {
+        override var prefetchCount = 5
+            set(value) {
+                field = value
+                initialPrefetchItemCount = value
+                isItemPrefetchEnabled = value > 0
+            }
+        override var extraLayoutSpace = 0
+
+        override fun calculateExtraLayoutSpace(
+            state: State,
+            extraLayoutSpace: IntArray,
+        ) {
+            super.calculateExtraLayoutSpace(state, extraLayoutSpace)
+            extraLayoutSpace[0] = max(extraLayoutSpace[0], this.extraLayoutSpace)
+            extraLayoutSpace[1] = max(extraLayoutSpace[1], this.extraLayoutSpace)
+        }
+    }
+
+    private class PamGridLayoutManager(
+        context: Context,
+        spanCount: Int,
+        orientation: Int,
+        reverseLayout: Boolean,
+    ) : GridLayoutManager(
+        context,
+        spanCount,
+        orientation,
+        reverseLayout,
+    ), PrefetchLayoutManager {
+        override var prefetchCount = 5
+            set(value) {
+                field = value
+                initialPrefetchItemCount = value
+                isItemPrefetchEnabled = value > 0
+            }
+        override var extraLayoutSpace = 0
+
+        override fun calculateExtraLayoutSpace(
+            state: State,
+            extraLayoutSpace: IntArray,
+        ) {
+            super.calculateExtraLayoutSpace(state, extraLayoutSpace)
+            extraLayoutSpace[0] = max(extraLayoutSpace[0], this.extraLayoutSpace)
+            extraLayoutSpace[1] = max(extraLayoutSpace[1], this.extraLayoutSpace)
+        }
+    }
+
+    private companion object {
+        const val MAX_PREFETCH_ITEMS = 32
+    }
+}
+
+private abstract class PackedRowAdapter(
+    private val context: Context,
+) : RecyclerView.Adapter<PackedRowAdapter.RowHolder>() {
+    private var extent = dp(48f)
+    private var horizontal = false
+
+    init {
+        setHasStableIds(false)
+    }
+
+    fun configure(extent: Int, horizontal: Boolean) {
+        this.extent = extent
+        this.horizontal = horizontal
+        notifyItemRangeChanged(0, itemCount, PAYLOAD_LAYOUT)
+    }
+
+    open fun isHeader(position: Int): Boolean = false
+
+    override fun getItemViewType(position: Int): Int =
+        if (isHeader(position)) TYPE_HEADER else TYPE_ITEM
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowHolder =
+        RowHolder(TextView(context).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(16f), 0, dp(16f), 0)
+            includeFontPadding = false
+        })
+
+    override fun onBindViewHolder(holder: RowHolder, position: Int) {
+        bind(holder, position)
+    }
+
+    override fun onBindViewHolder(
+        holder: RowHolder,
+        position: Int,
+        payloads: MutableList<Any>,
+    ) {
+        if (payloads.size == 1 && payloads[0] === PAYLOAD_LAYOUT) {
+            applyLayout(holder.text)
+            return
+        }
+        bind(holder, position)
+    }
+
+    private fun bind(holder: RowHolder, position: Int) {
+        val header = isHeader(position)
+        holder.text.apply {
+            text = value(position)
+            setTypeface(typeface, if (header) Typeface.BOLD else Typeface.NORMAL)
+            setBackgroundColor(if (header) HEADER_BACKGROUND else Color.TRANSPARENT)
+            isEnabled = !header
+        }
+        applyLayout(holder.text)
+    }
+
+    private fun applyLayout(text: TextView) {
+        text.layoutParams = RecyclerView.LayoutParams(
+            if (horizontal) extent else ViewGroup.LayoutParams.MATCH_PARENT,
+            if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else extent,
+        )
+    }
+
+    protected abstract fun value(position: Int): String
+
+    private fun dp(value: Float): Int =
+        (value * context.resources.displayMetrics.density + 0.5f).toInt()
+
+    class RowHolder(val text: TextView) : RecyclerView.ViewHolder(text)
+
+    companion object {
+        const val TYPE_HEADER = 0
+        const val TYPE_ITEM = 1
+        private val PAYLOAD_LAYOUT = Any()
+        private const val HEADER_BACKGROUND = 0xFFF3F4F6.toInt()
+    }
+}
+
+private class PackedStringRecyclerAdapter(
+    context: Context,
+    private val items: PackedStringList,
+) : PackedRowAdapter(context) {
+    override fun getItemCount(): Int = items.size
+    override fun value(position: Int): String = items[position]
+}
+
+private class PackedSectionRecyclerAdapter(
+    context: Context,
+    private val sections: PackedSectionList,
+) : PackedRowAdapter(context) {
+    override fun getItemCount(): Int = sections.size
+    override fun value(position: Int): String = sections[position]
+    override fun isHeader(position: Int): Boolean = sections.isHeader(position)
+}

@@ -82,6 +82,30 @@ appearance and visibility. Multiple mounted bars merge in order and restore
 the previous native window state when removed. Android 15+ follows mandatory
 edge-to-edge semantics.
 
+Virtualized lists are real AndroidX `RecyclerView` hosts:
+
+```php
+FlatList::make($packages)
+    ->rowHeight(52)
+    ->prefetch(8)
+    ->columns(2)
+    ->initialScrollIndex(20)
+    ->showsIndicator(false)
+    ->onEndReached($loadMore);
+
+SectionList::make($groups)
+    ->rowHeight(48)
+    ->inverted()
+    ->onScroll($rememberOffset);
+```
+
+`horizontal()`, `columns()`, `inverted()`, `initialScrollIndex()`,
+`removeClippedSubviews()`, `scrollEnabled()` and `showsIndicator()` map directly
+to the native host. Packed scalar and section payloads remain outside PHP while
+scrolling; Android binds only visible/prefetched rows and limits `onScroll` to
+one event per VSYNC. Rich heterogeneous rows can use keyed PAM composition or a
+specialized native plugin.
+
 Run `pam mobile benchmark .` on a physical device for release-like AndroidX
 Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in

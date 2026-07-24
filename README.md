@@ -157,10 +157,12 @@ that thread would make the app slower, not faster.
 
 Inputs keep their text and cursor natively. Change delivery defaults to a
 48 ms debounce and can be configured as native, debounced, immediate, blur, or
-submit synchronization. Lists recycle native rows and retain packed UTF-8
-payloads, decoding only visible strings. Layout-only `View`, `Column`, and
-`Row` nodes are flattened automatically and promoted if they gain paint,
-event, transform, or accessibility properties.
+submit synchronization. Lists retain packed UTF-8 payloads and mount through
+AndroidX `RecyclerView`, decoding only rows being bound. Its native recycled
+pool and GapWorker prefetch cover vertical, horizontal, grid and inverted
+layouts; scroll progress is coalesced to one semantic event per display frame.
+Layout-only `View`, `Column`, and `Row` nodes are flattened automatically and
+promoted if they gain paint, event, transform, or accessibility properties.
 
 ## Native extension views
 

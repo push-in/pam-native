@@ -131,6 +131,7 @@ android {
 dependencies {
     implementation(project(":plugin-api"))
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
     val pluginCount = pamPluginProperties.getProperty("plugin.count", "0").toInt()
     repeat(pluginCount) { index ->
         val module = pamPluginProperties.getProperty("plugin.$index.module")
