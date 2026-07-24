@@ -2,6 +2,7 @@ package dev.pam.nativeapp
 
 import android.content.Context
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.concurrent.Executors
@@ -50,7 +51,7 @@ internal class HotReloadClient(
             onReload(entry.absolutePath)
             cleanupExcept(next)
         }.onFailure {
-            if (it !is java.net.ConnectException && it !is java.net.SocketTimeoutException) {
+            if (it !is HotReloadTransportException) {
                 onError(it.message ?: "Hot reload failed")
             }
         }
@@ -80,11 +81,16 @@ internal class HotReloadClient(
                 }
             }
             return output.toByteArray()
+        } catch (error: IOException) {
+            throw HotReloadTransportException(error)
         } finally {
             activeConnection.compareAndSet(connection, null)
             connection.disconnect()
         }
     }
+
+    private class HotReloadTransportException(cause: IOException) :
+        RuntimeException(cause)
 
     private fun cleanupExcept(active: String) {
         context.filesDir.resolve("pam/dev").listFiles()?.forEach {
