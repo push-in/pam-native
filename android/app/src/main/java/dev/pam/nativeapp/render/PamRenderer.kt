@@ -391,7 +391,11 @@ class PamRenderer(
                 text.text = value.text()
                 state.baseText = value.text()
             }
-            PropKey.VALUE -> applyInputValue(view, state, value.text())
+            PropKey.VALUE -> if (view is EditText) {
+                applyInputValue(view, state, value.text())
+            } else {
+                view.tag = value.semanticValue()
+            }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text()
             PropKey.SOURCE -> when (view) {
                 is ImageView -> imageLoader.load(value.text(), view)
@@ -630,7 +634,11 @@ class PamRenderer(
     private fun resetProperty(view: View, state: NodeState, key: PropKey) {
         when (key) {
             PropKey.TEXT -> (view as? TextView)?.text = ""
-            PropKey.VALUE -> (view as? EditText)?.setText("")
+            PropKey.VALUE -> if (view is EditText) {
+                view.setText("")
+            } else {
+                view.tag = null
+            }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = null
             PropKey.SOURCE -> imageView(view)?.setImageDrawable(null)
             PropKey.BACKGROUND_COLOR,
@@ -1295,6 +1303,15 @@ class PamRenderer(
 
     private fun PropValue.flag(): Boolean =
         (this as? PropValue.Flag)?.value ?: error("Expected boolean property")
+
+    private fun PropValue.semanticValue(): Any =
+        when (this) {
+            is PropValue.Text -> value
+            is PropValue.Integer -> value
+            is PropValue.Decimal -> value
+            is PropValue.Flag -> value
+            else -> error("Semantic values must be scalar")
+        }
 
     private fun dp(value: Float): Int =
         (value * resourcesDensity() + 0.5f).toInt()
