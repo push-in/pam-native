@@ -99,6 +99,11 @@ React's JavaScript runtime:
 | Android | `DrawerLayoutAndroid`, `TouchableNativeFeedback`, `InputAccessoryView` |
 | Compatibility | `TouchableOpacity`, `TouchableHighlight`, `TouchableWithoutFeedback` |
 
+`Modal` content is hosted by an Android `Dialog`, with dialog, full-screen and
+sheet presentations. A native-event handler receives a bounded dismissal map
+when the user presses Back; controlled modals remain mounted until PHP confirms
+the state change, and focus returns to the previously focused view after close.
+
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,

@@ -57,6 +57,8 @@ import dev.pam.nativeapp.protocol.PackedSectionList
 import dev.pam.nativeapp.protocol.PackedStringList
 import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
+import dev.pam.nativeapp.protocol.WireMap
+import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.views.NativeViewRegistry
 import java.util.LinkedHashSet
 import java.util.Locale
@@ -759,6 +761,21 @@ class PamRenderer(
                 },
             )
         }
+        if (view is PamModalHost) {
+            view.setOnRequestClose(
+                if (state.properties[PropKey.ON_NATIVE_EVENT] != null) {
+                    {
+                        dispatchBytes(
+                            state.id,
+                            EVENT_NATIVE,
+                            MODAL_DISMISS_PAYLOAD,
+                        )
+                    }
+                } else {
+                    null
+                },
+            )
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -1443,6 +1460,12 @@ class PamRenderer(
             PropKey.ON_DRAWER_OPEN,
             PropKey.ON_DRAWER_CLOSE,
             PropKey.ON_NATIVE_EVENT,
+        )
+        val MODAL_DISMISS_PAYLOAD = WireMap.encode(
+            mapOf(
+                "action" to WireValue.Integer(1),
+                "dismissed" to WireValue.Flag(true),
+            ),
         )
     }
 }
