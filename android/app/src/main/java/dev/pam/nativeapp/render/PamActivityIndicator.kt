@@ -60,6 +60,18 @@ internal class PamActivityIndicator(context: Context) : FrameLayout(context) {
         }
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val desired = dp(size) + paddingLeft + paddingRight
+        val desiredHeight = dp(size) + paddingTop + paddingBottom
+        setMeasuredDimension(
+            resolveSize(desired, widthMeasureSpec),
+            resolveSize(desiredHeight, heightMeasureSpec),
+        )
+        val childWidth = MeasureSpec.makeMeasureSpec(dp(size), MeasureSpec.EXACTLY)
+        val childHeight = MeasureSpec.makeMeasureSpec(dp(size), MeasureSpec.EXACTLY)
+        indicator.measure(childWidth, childHeight)
+    }
+
     private fun applyState() {
         val drawable = indicator.indeterminateDrawable
         if (animating && requestedVisible) {

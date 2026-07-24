@@ -1,8 +1,10 @@
 package dev.pam.nativeapp.render
 
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ViewConfiguration
@@ -27,6 +29,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var scrollEnabled = true
     private var showsScrollIndicator = true
     private var removeClippedSubviews = true
+    private var rowTextColor = context.themeColor(
+        android.R.attr.textColorPrimary,
+        Color.BLACK,
+    )
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
     private var touchDownX = 0f
     private var touchDownY = 0f
@@ -115,12 +121,43 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         isHorizontalScrollBarEnabled = value && horizontal
     }
 
+    fun setTextColor(value: Int) {
+        if (rowTextColor == value) return
+        rowTextColor = value
+        configureAdapter()
+    }
+
     fun setOnViewportChanged(listener: ((Float, Int, Int, Int) -> Unit)?) {
         viewportChanged = listener
     }
 
-    override fun onInterceptTouchEvent(event: MotionEvent): Boolean =
-        scrollEnabled && super.onInterceptTouchEvent(event)
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        if (!scrollEnabled) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                touchDownX = event.x
+                touchDownY = event.y
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val delta = if (horizontal) {
+                    event.x - touchDownX
+                } else {
+                    event.y - touchDownY
+                }
+                val direction = if (delta < 0f) 1 else -1
+                val canScroll = if (horizontal) {
+                    canScrollHorizontally(direction)
+                } else {
+                    canScrollVertically(direction)
+                }
+                if (abs(delta) > touchSlop && !canScroll) {
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    return false
+                }
+            }
+        }
+        return super.onInterceptTouchEvent(event)
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!scrollEnabled) return false
@@ -215,6 +252,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         (adapter as? PackedRowAdapter)?.configure(
             extent = dp(rowHeight),
             horizontal = horizontal,
+            textColor = rowTextColor,
         )
     }
 
@@ -323,14 +361,23 @@ private abstract class PackedRowAdapter(
 ) : RecyclerView.Adapter<PackedRowAdapter.RowHolder>() {
     private var extent = dp(48f)
     private var horizontal = false
+    private var textColor = context.themeColor(
+        android.R.attr.textColorPrimary,
+        Color.BLACK,
+    )
+    private val headerBackground = context.themeColor(
+        android.R.attr.colorControlHighlight,
+        0x1F000000,
+    )
 
     init {
         setHasStableIds(false)
     }
 
-    fun configure(extent: Int, horizontal: Boolean) {
+    fun configure(extent: Int, horizontal: Boolean, textColor: Int) {
         this.extent = extent
         this.horizontal = horizontal
+        this.textColor = textColor
         notifyItemRangeChanged(0, itemCount, PAYLOAD_LAYOUT)
     }
 
@@ -344,6 +391,7 @@ private abstract class PackedRowAdapter(
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(16f), 0, dp(16f), 0)
             includeFontPadding = false
+            setTextColor(textColor)
         })
 
     override fun onBindViewHolder(holder: RowHolder, position: Int) {
@@ -366,8 +414,9 @@ private abstract class PackedRowAdapter(
         val header = isHeader(position)
         holder.text.apply {
             text = value(position)
+            setTextColor(textColor)
             setTypeface(typeface, if (header) Typeface.BOLD else Typeface.NORMAL)
-            setBackgroundColor(if (header) HEADER_BACKGROUND else Color.TRANSPARENT)
+            setBackgroundColor(if (header) headerBackground else Color.TRANSPARENT)
             isEnabled = !header
         }
         applyLayout(holder.text)
@@ -391,7 +440,18 @@ private abstract class PackedRowAdapter(
         const val TYPE_HEADER = 0
         const val TYPE_ITEM = 1
         private val PAYLOAD_LAYOUT = Any()
-        private const val HEADER_BACKGROUND = 0xFFF3F4F6.toInt()
+    }
+}
+
+private fun Context.themeColor(attribute: Int, fallback: Int): Int {
+    val value = TypedValue()
+    if (!theme.resolveAttribute(attribute, value, true)) return fallback
+    return when {
+        value.resourceId != 0 ->
+            ColorStateList.valueOf(getColor(value.resourceId)).defaultColor
+        value.type in TypedValue.TYPE_FIRST_COLOR_INT..TypedValue.TYPE_LAST_COLOR_INT ->
+            value.data
+        else -> fallback
     }
 }
 

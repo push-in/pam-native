@@ -554,7 +554,10 @@ class PamRenderer(
             PropKey.RIPPLE_FOREGROUND,
             PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
-            PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(value.integer().toInt())
+            PropKey.TEXT_COLOR -> when (view) {
+                is TextView -> view.setTextColor(value.integer().toInt())
+                is PamRecyclerList -> view.setTextColor(value.integer().toInt())
+            }
             PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
             PropKey.ENABLED -> {
                 view.isEnabled = value.flag()
@@ -1022,7 +1025,10 @@ class PamRenderer(
             PropKey.RIPPLE_FOREGROUND,
             PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
-            PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(Color.BLACK)
+            PropKey.TEXT_COLOR -> when (view) {
+                is TextView -> view.setTextColor(Color.BLACK)
+                is PamRecyclerList -> view.setTextColor(Color.BLACK)
+            }
             PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
