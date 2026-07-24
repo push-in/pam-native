@@ -222,6 +222,48 @@ $assert(
             === 12.0,
     'Registered template components must receive className before visual utilities are applied.',
 );
+$eventScope = new class {
+    public string $submission = '';
+
+    public function submit(string $payload): void
+    {
+        $this->submission = $payload;
+    }
+};
+TemplateRegistry::component(
+    'AdaptedEvent',
+    static fn (array $_props, array $children): \Pam\Native\Renderable =>
+        Column::make(...$children),
+);
+TemplateRegistry::eventAdapter(
+    'AdaptedEvent',
+    static fn (
+        EventKind $_kind,
+        Closure $handler,
+        array $props,
+    ): Closure => static function (string $payload) use (
+        $handler,
+        $props,
+    ): void {
+        $prefix = is_string($props['prefix'] ?? null)
+            ? $props['prefix']
+            : '';
+        $handler($prefix.$payload);
+    },
+);
+$adaptedEventTemplate = TemplateCompiler::compile(
+    '<AdaptedEvent prefix="ui:" on:submit="submit" />',
+);
+$adaptedEventElement = TemplateRenderer::render(
+    $adaptedEventTemplate,
+    $eventScope,
+    [],
+);
+$adaptedEventElement->events()[EventKind::Submit->value]('payload');
+$assert(
+    $eventScope->submission === 'ui:payload',
+    'Registered components must be able to adapt declarative event contracts.',
+);
 TemplateRegistry::reset();
 TemplateRegistry::styleResolver(
     static fn (string $class): ?array => $class === 'w-1/2'

@@ -457,9 +457,23 @@ final class TemplateRenderer
 
         foreach (self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
+                $handler = self::handler(
+                    $attributes[$name],
+                    $event,
+                    $scope,
+                    $data,
+                );
+                if ($factory !== null) {
+                    $handler = TemplateRegistry::adaptEvent(
+                        $tag,
+                        $event,
+                        $handler,
+                        $values,
+                    );
+                }
                 $element = $element->on(
                     $event,
-                    self::handler($attributes[$name], $event, $scope, $data),
+                    $handler,
                 );
             }
         }
@@ -748,7 +762,7 @@ final class TemplateRenderer
             throw new RuntimeException("Template event handler {$resolved} must be public.");
         }
 
-        return static function (string|bool $payload = '') use ($kind, $method, $scope): void {
+        return static function (mixed $payload = '') use ($kind, $method, $scope): void {
             if ($method->getNumberOfParameters() === 0) {
                 $method->invoke($scope);
                 return;
@@ -756,7 +770,7 @@ final class TemplateRenderer
 
             $value = $kind === EventKind::Toggle
                 ? $payload === true || $payload === '1'
-                : (string) $payload;
+                : (is_array($payload) ? $payload : (string) $payload);
             $method->invoke($scope, $value);
         };
     }

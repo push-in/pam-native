@@ -12,6 +12,14 @@ final class TemplateRegistry
     /** @var array<string, Closure(array<string, mixed>, list<Element>, ?object): Renderable> */
     private static array $components = [];
 
+    /**
+     * @var array<
+     *     string,
+     *     Closure(EventKind, Closure, array<string, mixed>): Closure
+     * >
+     */
+    private static array $eventAdapters = [];
+
     /** @var array<string, array<int, string|int|float|bool>> */
     private static array $classes = [];
 
@@ -47,6 +55,34 @@ final class TemplateRegistry
     public static function factory(string $tag): ?Closure
     {
         return self::$components[$tag] ?? null;
+    }
+
+    /**
+     * Lets a registered component preserve its public event contract while
+     * retaining PAM's compact binary event channel.
+     *
+     * @param Closure(EventKind, Closure, array<string, mixed>): Closure $adapter
+     */
+    public static function eventAdapter(string $tag, Closure $adapter): void
+    {
+        self::assertName($tag);
+        self::$eventAdapters[$tag] = $adapter;
+    }
+
+    /**
+     * @param array<string, mixed> $props
+     */
+    public static function adaptEvent(
+        string $tag,
+        EventKind $kind,
+        Closure $handler,
+        array $props,
+    ): Closure {
+        $adapter = self::$eventAdapters[$tag] ?? null;
+
+        return $adapter === null
+            ? $handler
+            : $adapter($kind, $handler, $props);
     }
 
     /**
@@ -92,6 +128,7 @@ final class TemplateRegistry
     public static function reset(): void
     {
         self::$components = [];
+        self::$eventAdapters = [];
         self::$classes = [];
         self::$styleResolvers = [];
     }
