@@ -4,15 +4,21 @@ declare(strict_types=1);
 
 use Pam\Native\App;
 use Pam\Native\AppState;
+use Pam\Native\AnimationKind;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
+use Pam\Native\FontStyle;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\TemplateCompiler;
+use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
 use Pam\Native\MemoryPressure;
 use Pam\Native\Modules\NativeModuleResult;
 use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
+use Pam\Native\PointerEvents;
+use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
 use Pam\Native\PropKey;
@@ -20,6 +26,8 @@ use Pam\Native\Restorable;
 use Pam\Native\State;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
+use Pam\Native\TextDecoration;
+use Pam\Native\TextTransform;
 use Pam\Native\Theme;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
@@ -101,6 +109,21 @@ foreach (PropKey::cases() as $index => $key) {
 foreach (EventKind::cases() as $index => $kind) {
     $assert($kind->value === $index + 1, 'Event kinds must remain sequential protocol integers.');
 }
+foreach ([
+    AnimationKind::cases(),
+    FontStyle::cases(),
+    PointerEvents::cases(),
+    PositionType::cases(),
+    TextDecoration::cases(),
+    TextTransform::cases(),
+] as $cases) {
+    foreach ($cases as $index => $case) {
+        $assert(
+            $case->value === $index + 1,
+            $case::class.' values must remain sequential protocol integers.',
+        );
+    }
+}
 
 $tree = Screen::make(
     Column::make(
@@ -133,6 +156,31 @@ $assert(
     count($nativeContainer->children()) === 1,
     'Custom native view containers must retain declarative children.',
 );
+
+$capturedParentVariants = null;
+TemplateRegistry::reset();
+TemplateRegistry::component(
+    'VariantParent',
+    static fn (array $props, array $children): \Pam\Native\Renderable =>
+        Column::make(...$children),
+);
+TemplateRegistry::component(
+    'VariantChild',
+    static function (array $props) use (&$capturedParentVariants): \Pam\Native\Renderable {
+        $capturedParentVariants = $props['__parentVariants'] ?? null;
+
+        return Text::make('Child');
+    },
+);
+$variantTemplate = TemplateCompiler::compile(
+    '<VariantParent variant="outline" size="lg"><VariantChild /></VariantParent>',
+);
+TemplateRenderer::render($variantTemplate, null, []);
+$assert(
+    $capturedParentVariants === ['variant' => 'outline', 'size' => 'lg'],
+    'Custom template components must inherit parent variant context.',
+);
+TemplateRegistry::reset();
 
 $incremental = new TreeEncoder();
 $initial = $incremental->encode(Text::make('A')->key('value'));

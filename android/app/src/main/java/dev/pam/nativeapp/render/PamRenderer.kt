@@ -1,10 +1,16 @@
 package dev.pam.nativeapp.render
 
 import android.annotation.SuppressLint
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Rect
+import android.graphics.RenderEffect
+import android.graphics.Shader
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
@@ -16,6 +22,7 @@ import android.text.InputFilter
 import android.text.InputType
 import android.text.TextWatcher
 import android.text.method.PasswordTransformationMethod
+import android.text.method.TransformationMethod
 import android.util.LongSparseArray
 import android.view.Choreographer
 import android.view.Gravity
@@ -52,6 +59,7 @@ import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import dev.pam.nativeapp.views.NativeViewRegistry
 import java.util.LinkedHashSet
+import java.util.Locale
 import kotlin.math.max
 
 class PamRenderer(
@@ -100,6 +108,9 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper())
         for (position in 0 until views.size()) {
             (views.valueAt(position) as? PamModalHost)?.close()
+        }
+        for (position in 0 until nodes.size()) {
+            nodes.valueAt(position).propertyAnimator?.cancel()
         }
         imageLoader.close()
         nativeViews.close()
@@ -196,6 +207,7 @@ class PamRenderer(
     private fun remove(id: Long) {
         val state = nodes[id] ?: return
         val view = views[id]
+        state.propertyAnimator?.cancel()
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
         view?.let(nativeViews::release)
@@ -363,6 +375,9 @@ class PamRenderer(
                 topMargin = topPx
             }
         }
+        state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
+            view.translationX = width * (percent / 100.0).toFloat()
+        }
     }
 
     private fun applyProperty(
@@ -386,6 +401,14 @@ class PamRenderer(
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.BORDER_TOP_LEFT_RADIUS,
+            PropKey.BORDER_TOP_RIGHT_RADIUS,
+            PropKey.BORDER_BOTTOM_RIGHT_RADIUS,
+            PropKey.BORDER_BOTTOM_LEFT_RADIUS,
+            PropKey.BORDER_LEFT_WIDTH,
+            PropKey.BORDER_TOP_WIDTH,
+            PropKey.BORDER_RIGHT_WIDTH,
+            PropKey.BORDER_BOTTOM_WIDTH,
             PropKey.RIPPLE_COLOR,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(value.integer().toInt())
@@ -396,16 +419,38 @@ class PamRenderer(
             PropKey.TEST_ID -> view.transitionName = value.text()
             PropKey.ITEMS -> applyStringList(view, state, value)
             PropKey.SECTION_ITEMS -> applySectionList(view, state, value)
-            PropKey.OPACITY -> animateOrSet(view, state, key, value.decimal().toFloat())
+            PropKey.OPACITY -> {
+                if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
+                    applyAnimationKind(view, state, 2)
+                } else {
+                    animateOrSet(view, state, key, value.decimal().toFloat())
+                }
+            }
             PropKey.TEXT_ALIGN -> (view as? TextView)?.gravity = when (value.integer().toInt()) {
                 2 -> Gravity.CENTER
                 3 -> Gravity.END or Gravity.CENTER_VERTICAL
                 else -> Gravity.START or Gravity.CENTER_VERTICAL
             }
-            PropKey.FONT_WEIGHT -> (view as? TextView)?.setTypeface(
-                view.typeface,
-                if (value.integer() >= 600) Typeface.BOLD else Typeface.NORMAL,
-            )
+            PropKey.FONT_WEIGHT,
+            PropKey.FONT_STYLE,
+            PropKey.FONT_FAMILY,
+            -> (view as? TextView)?.let { applyTypeface(it, state) }
+            PropKey.TEXT_DECORATION -> (view as? TextView)?.let { text ->
+                text.paintFlags = text.paintFlags and
+                    (Paint.UNDERLINE_TEXT_FLAG or Paint.STRIKE_THRU_TEXT_FLAG).inv()
+                when (value.integer().toInt()) {
+                    2 -> text.paintFlags = text.paintFlags or Paint.UNDERLINE_TEXT_FLAG
+                    3 -> text.paintFlags = text.paintFlags or Paint.STRIKE_THRU_TEXT_FLAG
+                    4 -> text.paintFlags = text.paintFlags or
+                        Paint.UNDERLINE_TEXT_FLAG or Paint.STRIKE_THRU_TEXT_FLAG
+                }
+            }
+            PropKey.TEXT_TRANSFORM -> if (view is TextView && view !is EditText) {
+                view.transformationMethod = when (value.integer().toInt()) {
+                    2, 3, 4 -> PamTextTransformMethod(value.integer().toInt())
+                    else -> null
+                }
+            }
             PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines = value.integer().toInt()
             PropKey.MULTILINE -> (view as? EditText)?.let { input ->
                 input.isSingleLine = !value.flag()
@@ -506,14 +551,35 @@ class PamRenderer(
             PropKey.PADDING,
             PropKey.PADDING_HORIZONTAL,
             PropKey.PADDING_VERTICAL,
+            PropKey.PADDING_LEFT,
+            PropKey.PADDING_TOP,
+            PropKey.PADDING_RIGHT,
+            PropKey.PADDING_BOTTOM,
             -> applyLeafPadding(view, state)
+            PropKey.POINTER_EVENTS -> applyPointerEvents(view, state, value.integer().toInt())
+            PropKey.SAFE_AREA_BOTTOM -> applySafeAreaBottom(view, state, value.flag())
+            PropKey.BLUR_RADIUS -> applyBlur(view, state, value.decimal().toFloat())
+            PropKey.TRANSLATION_X_PERCENT -> {
+                view.translationX = view.width * (value.decimal() / 100.0).toFloat()
+            }
+            PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
+            PropKey.ANIMATION_DURATION_MS -> {
+                if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
+                    applyAnimationKind(view, state, 2)
+                }
+            }
             PropKey.WIDTH,
             PropKey.HEIGHT,
             PropKey.FLEX_GROW,
+            PropKey.FLEX_SHRINK,
             PropKey.GAP,
             PropKey.MARGIN,
             PropKey.MARGIN_HORIZONTAL,
             PropKey.MARGIN_VERTICAL,
+            PropKey.MARGIN_LEFT,
+            PropKey.MARGIN_TOP,
+            PropKey.MARGIN_RIGHT,
+            PropKey.MARGIN_BOTTOM,
             PropKey.MIN_WIDTH,
             PropKey.MIN_HEIGHT,
             PropKey.MAX_WIDTH,
@@ -533,7 +599,6 @@ class PamRenderer(
             PropKey.INPUT_DEBOUNCE_MS,
             PropKey.INPUT_SYNC_MODE,
             PropKey.COLLAPSABLE,
-            PropKey.ANIMATION_DURATION_MS,
             PropKey.ANIMATION_EASING,
             PropKey.ANIMATE_CHANGES,
             PropKey.LIST_PREFETCH,
@@ -547,6 +612,17 @@ class PamRenderer(
             PropKey.HOST_NAME,
             PropKey.ON_NATIVE_EVENT,
             PropKey.FLEX_DIRECTION,
+            PropKey.POSITION_TYPE,
+            PropKey.LEFT,
+            PropKey.TOP,
+            PropKey.RIGHT,
+            PropKey.BOTTOM,
+            PropKey.ASPECT_RATIO,
+            PropKey.WIDTH_PERCENT,
+            PropKey.HEIGHT_PERCENT,
+            PropKey.MAX_WIDTH_PERCENT,
+            PropKey.MAX_HEIGHT_PERCENT,
+            PropKey.MARGIN_LEFT_AUTO,
             -> Unit
         }
     }
@@ -561,10 +637,25 @@ class PamRenderer(
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.BORDER_TOP_LEFT_RADIUS,
+            PropKey.BORDER_TOP_RIGHT_RADIUS,
+            PropKey.BORDER_BOTTOM_RIGHT_RADIUS,
+            PropKey.BORDER_BOTTOM_LEFT_RADIUS,
+            PropKey.BORDER_LEFT_WIDTH,
+            PropKey.BORDER_TOP_WIDTH,
+            PropKey.BORDER_RIGHT_WIDTH,
+            PropKey.BORDER_BOTTOM_WIDTH,
             PropKey.RIPPLE_COLOR,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(Color.BLACK)
             PropKey.FONT_SIZE -> (view as? TextView)?.textSize = 14f
+            PropKey.FONT_WEIGHT,
+            PropKey.FONT_STYLE,
+            PropKey.FONT_FAMILY,
+            -> (view as? TextView)?.let { applyTypeface(it, state) }
+            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines = Int.MAX_VALUE
+            PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
+            PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(Color.GRAY)
             PropKey.ENABLED -> view.isEnabled = true
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
@@ -572,7 +663,13 @@ class PamRenderer(
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
             -> (view as? ListView)?.adapter = null
-            PropKey.OPACITY -> view.alpha = 1f
+            PropKey.OPACITY -> {
+                if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
+                    applyAnimationKind(view, state, 2)
+                } else {
+                    view.alpha = 1f
+                }
+            }
             PropKey.TRANSLATION_X -> view.translationX = 0f
             PropKey.TRANSLATION_Y -> view.translationY = 0f
             PropKey.SCALE_X -> view.scaleX = 1f
@@ -582,6 +679,25 @@ class PamRenderer(
             PropKey.CHECKED -> (view as? Switch)?.isChecked = false
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(false)
             PropKey.DRAWER_OPEN -> (view as? PamDrawerLayout)?.setOpen(false)
+            PropKey.TEXT_DECORATION -> (view as? TextView)?.let { text ->
+                text.paintFlags = text.paintFlags and
+                    (Paint.UNDERLINE_TEXT_FLAG or Paint.STRIKE_THRU_TEXT_FLAG).inv()
+            }
+            PropKey.TEXT_TRANSFORM -> if (view is TextView && view !is EditText) {
+                view.transformationMethod = null
+            }
+            PropKey.POINTER_EVENTS -> applyPointerEvents(view, state, POINTER_EVENTS_AUTO)
+            PropKey.SAFE_AREA_BOTTOM -> applySafeAreaBottom(view, state, false)
+            PropKey.BLUR_RADIUS -> applyBlur(view, state, 0f)
+            PropKey.TRANSLATION_X_PERCENT -> {
+                view.translationX = dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
+            }
+            PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, 1)
+            PropKey.ANIMATION_DURATION_MS -> {
+                if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
+                    applyAnimationKind(view, state, 2)
+                }
+            }
             PropKey.HOST_PROPERTIES -> Unit
             else -> Unit
         }
@@ -846,21 +962,53 @@ class PamRenderer(
     }
 
     private fun applyLeafPadding(view: View, state: NodeState) {
-        if (view is ViewGroup) return
+        if (view is ViewGroup) {
+            view.setPadding(0, 0, 0, state.safeBottomInset)
+            return
+        }
         val all = state.number(PropKey.PADDING, 0.0).toFloat()
         val horizontal = state.number(PropKey.PADDING_HORIZONTAL, all.toDouble()).toFloat()
         val vertical = state.number(PropKey.PADDING_VERTICAL, all.toDouble()).toFloat()
-        view.setPadding(dp(horizontal), dp(vertical), dp(horizontal), dp(vertical))
+        val left = state.number(PropKey.PADDING_LEFT, horizontal.toDouble()).toFloat()
+        val top = state.number(PropKey.PADDING_TOP, vertical.toDouble()).toFloat()
+        val right = state.number(PropKey.PADDING_RIGHT, horizontal.toDouble()).toFloat()
+        val bottom = state.number(PropKey.PADDING_BOTTOM, vertical.toDouble()).toFloat()
+        view.setPadding(dp(left), dp(top), dp(right), dp(bottom) + state.safeBottomInset)
     }
 
     private fun updateBackground(view: View, state: NodeState) {
         val color = state.integer(PropKey.BACKGROUND_COLOR, Color.TRANSPARENT.toLong()).toInt()
-        val radius = dp(state.number(PropKey.BORDER_RADIUS, 0.0).toFloat()).toFloat()
-        val borderWidth = dp(state.number(PropKey.BORDER_WIDTH, 0.0).toFloat())
+        val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
+        val topLeft = dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat())
+            .toFloat()
+        val topRight = dp(state.number(PropKey.BORDER_TOP_RIGHT_RADIUS, logicalRadius).toFloat())
+            .toFloat()
+        val bottomRight = dp(
+            state.number(PropKey.BORDER_BOTTOM_RIGHT_RADIUS, logicalRadius).toFloat(),
+        ).toFloat()
+        val bottomLeft = dp(
+            state.number(PropKey.BORDER_BOTTOM_LEFT_RADIUS, logicalRadius).toFloat(),
+        ).toFloat()
+        val borderWidth = listOf(
+            PropKey.BORDER_WIDTH,
+            PropKey.BORDER_LEFT_WIDTH,
+            PropKey.BORDER_TOP_WIDTH,
+            PropKey.BORDER_RIGHT_WIDTH,
+            PropKey.BORDER_BOTTOM_WIDTH,
+        ).maxOf { key -> dp(state.number(key, 0.0).toFloat()) }
         val borderColor = state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
         val shape = GradientDrawable().apply {
             setColor(color)
-            cornerRadius = radius
+            cornerRadii = floatArrayOf(
+                topLeft,
+                topLeft,
+                topRight,
+                topRight,
+                bottomRight,
+                bottomRight,
+                bottomLeft,
+                bottomLeft,
+            )
             if (borderWidth > 0) setStroke(borderWidth, borderColor)
         }
         val ripple = state.properties[PropKey.RIPPLE_COLOR]?.integer()?.toInt()
@@ -868,6 +1016,103 @@ class PamRenderer(
             RippleDrawable(ColorStateList.valueOf(ripple), shape, null)
         } else {
             shape
+        }
+    }
+
+    private fun applyTypeface(view: TextView, state: NodeState) {
+        val bold = state.integer(PropKey.FONT_WEIGHT, 400L) >= 600L
+        val italic = state.integer(PropKey.FONT_STYLE, 1L) == 2L
+        val style = when {
+            bold && italic -> Typeface.BOLD_ITALIC
+            bold -> Typeface.BOLD
+            italic -> Typeface.ITALIC
+            else -> Typeface.NORMAL
+        }
+        val family = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value
+        view.typeface = if (family != null) {
+            Typeface.create(family, style)
+        } else {
+            Typeface.defaultFromStyle(style)
+        }
+    }
+
+    private fun applySafeAreaBottom(view: View, state: NodeState, enabled: Boolean) {
+        if (!enabled) {
+            view.setOnApplyWindowInsetsListener(null)
+            state.safeBottomInset = 0
+            applyLeafPadding(view, state)
+            return
+        }
+        view.setOnApplyWindowInsetsListener { _, insets ->
+            state.safeBottomInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                insets.getInsets(WindowInsets.Type.systemBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            applyLeafPadding(view, state)
+            insets
+        }
+        view.requestApplyInsets()
+    }
+
+    private fun applyBlur(view: View, state: NodeState, radius: Float) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            view.setRenderEffect(
+                if (radius > 0f) {
+                    val pixels = dp(radius).toFloat().coerceAtLeast(1f)
+                    RenderEffect.createBlurEffect(pixels, pixels, Shader.TileMode.CLAMP)
+                } else {
+                    null
+                },
+            )
+        } else {
+            view.elevation = if (radius > 0f) {
+                max(view.elevation, dp(radius / 2f).toFloat())
+            } else {
+                dp(state.number(PropKey.ELEVATION, 0.0).toFloat()).toFloat()
+            }
+        }
+    }
+
+    private fun applyAnimationKind(view: View, state: NodeState, kind: Int) {
+        state.propertyAnimator?.cancel()
+        state.propertyAnimator = null
+        if (kind != 2 || !ValueAnimator.areAnimatorsEnabled()) {
+            view.alpha = state.targetAlpha()
+            return
+        }
+        val target = state.targetAlpha()
+        state.propertyAnimator = ObjectAnimator.ofFloat(
+            view,
+            View.ALPHA,
+            target * 0.55f,
+            target,
+        ).apply {
+            duration = state.integer(PropKey.ANIMATION_DURATION_MS, 1_500L)
+                .coerceIn(100L, 60_000L)
+            repeatMode = ValueAnimator.REVERSE
+            repeatCount = ValueAnimator.INFINITE
+            start()
+        }
+    }
+
+    private fun applyPointerEvents(view: View, state: NodeState, mode: Int) {
+        if (view is PamPointerEventsHost) {
+            view.setPointerEvents(mode)
+            return
+        }
+        when (mode) {
+            2 -> {
+                view.isClickable = false
+                view.isLongClickable = false
+            }
+            3 -> view.isClickable = false
+            4 -> view.isClickable = true
+            else -> {
+                view.isClickable = state.properties[PropKey.ON_PRESS] != null
+                view.isLongClickable = state.properties[PropKey.ON_LONG_PRESS] != null
+            }
         }
     }
 
@@ -1073,6 +1318,8 @@ class PamRenderer(
         var keyboardBehavior: Int = KEYBOARD_RESIZE,
         var listAdapter: PackedStringAdapter? = null,
         var sectionAdapter: PackedSectionAdapter? = null,
+        var safeBottomInset: Int = 0,
+        var propertyAnimator: ObjectAnimator? = null,
         var virtual: Boolean = false,
     ) {
         fun inputSyncMode(): Int = integer(PropKey.INPUT_SYNC_MODE, INPUT_SYNC_DEBOUNCED.toLong()).toInt()
@@ -1132,7 +1379,21 @@ class PamRenderer(
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.BORDER_TOP_LEFT_RADIUS,
+            PropKey.BORDER_TOP_RIGHT_RADIUS,
+            PropKey.BORDER_BOTTOM_RIGHT_RADIUS,
+            PropKey.BORDER_BOTTOM_LEFT_RADIUS,
+            PropKey.BORDER_LEFT_WIDTH,
+            PropKey.BORDER_TOP_WIDTH,
+            PropKey.BORDER_RIGHT_WIDTH,
+            PropKey.BORDER_BOTTOM_WIDTH,
             PropKey.OPACITY,
+            PropKey.VISIBLE,
+            PropKey.TRANSLATION_X_PERCENT,
+            PropKey.ANIMATION_KIND,
+            PropKey.POINTER_EVENTS,
+            PropKey.SAFE_AREA_BOTTOM,
+            PropKey.BLUR_RADIUS,
             PropKey.ON_PRESS,
             PropKey.ON_LONG_PRESS,
             PropKey.ACCESSIBILITY_LABEL,
@@ -1166,6 +1427,40 @@ class PamRenderer(
             PropKey.ON_DRAWER_CLOSE,
             PropKey.ON_NATIVE_EVENT,
         )
+    }
+}
+
+private class PamTextTransformMethod(
+    private val mode: Int,
+) : TransformationMethod {
+    override fun getTransformation(source: CharSequence?, view: View?): CharSequence? {
+        val value = source?.toString() ?: return source
+        return when (mode) {
+            2 -> value.uppercase(Locale.getDefault())
+            3 -> value.lowercase(Locale.getDefault())
+            4 -> value.split(WORD_BOUNDARY).joinToString(separator = "") { part ->
+                if (part.firstOrNull()?.isLetter() == true) {
+                    part.replaceFirstChar { character ->
+                        character.titlecase(Locale.getDefault())
+                    }
+                } else {
+                    part
+                }
+            }
+            else -> value
+        }
+    }
+
+    override fun onFocusChanged(
+        view: View?,
+        sourceText: CharSequence?,
+        focused: Boolean,
+        direction: Int,
+        previouslyFocusedRect: Rect?,
+    ) = Unit
+
+    private companion object {
+        val WORD_BOUNDARY = Regex("(?<=\\s)|(?=\\s)")
     }
 }
 

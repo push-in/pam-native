@@ -7,6 +7,7 @@ namespace Pam\Native\Internal;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Align;
+use Pam\Native\AnimationKind;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\ImageFit;
@@ -137,6 +138,43 @@ final class TemplateRenderer
         'zIndex' => PropKey::ZIndex,
         'overflow' => PropKey::Overflow,
         'flexDirection' => PropKey::FlexDirection,
+        'flexShrink' => PropKey::FlexShrink,
+        'paddingLeft' => PropKey::PaddingLeft,
+        'paddingTop' => PropKey::PaddingTop,
+        'paddingRight' => PropKey::PaddingRight,
+        'paddingBottom' => PropKey::PaddingBottom,
+        'marginLeft' => PropKey::MarginLeft,
+        'marginTop' => PropKey::MarginTop,
+        'marginRight' => PropKey::MarginRight,
+        'marginBottom' => PropKey::MarginBottom,
+        'position' => PropKey::PositionType,
+        'left' => PropKey::Left,
+        'top' => PropKey::Top,
+        'right' => PropKey::Right,
+        'bottom' => PropKey::Bottom,
+        'aspectRatio' => PropKey::AspectRatio,
+        'borderTopLeftRadius' => PropKey::BorderTopLeftRadius,
+        'borderTopRightRadius' => PropKey::BorderTopRightRadius,
+        'borderBottomRightRadius' => PropKey::BorderBottomRightRadius,
+        'borderBottomLeftRadius' => PropKey::BorderBottomLeftRadius,
+        'borderLeftWidth' => PropKey::BorderLeftWidth,
+        'borderTopWidth' => PropKey::BorderTopWidth,
+        'borderRightWidth' => PropKey::BorderRightWidth,
+        'borderBottomWidth' => PropKey::BorderBottomWidth,
+        'textDecoration' => PropKey::TextDecoration,
+        'textTransform' => PropKey::TextTransform,
+        'fontStyle' => PropKey::FontStyle,
+        'widthPercent' => PropKey::WidthPercent,
+        'heightPercent' => PropKey::HeightPercent,
+        'maxWidthPercent' => PropKey::MaxWidthPercent,
+        'maxHeightPercent' => PropKey::MaxHeightPercent,
+        'pointerEvents' => PropKey::PointerEvents,
+        'safeAreaBottom' => PropKey::SafeAreaBottom,
+        'blurRadius' => PropKey::BlurRadius,
+        'fontFamily' => PropKey::FontFamily,
+        'marginLeftAuto' => PropKey::MarginLeftAuto,
+        'translationXPercent' => PropKey::TranslationXPercent,
+        'animationKind' => PropKey::AnimationKind,
     ];
 
     /** @var array<string, EventKind> */
@@ -289,24 +327,7 @@ final class TemplateRenderer
         ?object $scope,
         array $data,
     ): Element {
-        $renderedChildren = self::nodes($childNodes, $scope, $data);
-        $children = array_values(array_filter(
-            $renderedChildren,
-            static fn (mixed $value): bool => $value instanceof Element,
-        ));
-        $text = implode('', array_filter(
-            $renderedChildren,
-            static fn (mixed $value): bool => is_string($value),
-        ));
         $factory = TemplateRegistry::factory($tag);
-
-        if ($factory === null && $text !== '' && !in_array($tag, ['Text', 'Button'], true)) {
-            throw new RuntimeException("Text content is not valid inside {$tag}; wrap it in Text.");
-        }
-
-        if ($factory === null && $children !== [] && in_array($tag, ['Text', 'Button'], true)) {
-            throw new RuntimeException("{$tag} cannot contain element children.");
-        }
         $values = [];
 
         foreach ($attributes as $name => $raw) {
@@ -317,8 +338,43 @@ final class TemplateRenderer
             $values[ltrim($name, ':')] = self::value($raw, $scope, $data);
         }
 
+        $inheritedVariants = $data['__pamParentVariants'] ?? [];
+        if (!is_array($inheritedVariants)) {
+            $inheritedVariants = [];
+        }
+        $ownVariants = array_filter(
+            $values,
+            static fn (mixed $value): bool => is_scalar($value),
+        );
+        $childData = [
+            ...$data,
+            '__pamParentVariants' => [
+                ...$inheritedVariants,
+                ...$ownVariants,
+            ],
+        ];
+        $renderedChildren = self::nodes($childNodes, $scope, $childData);
+        $children = array_values(array_filter(
+            $renderedChildren,
+            static fn (mixed $value): bool => $value instanceof Element,
+        ));
+        $text = implode('', array_filter(
+            $renderedChildren,
+            static fn (mixed $value): bool => is_string($value),
+        ));
+
+        if ($factory === null && $text !== '' && !in_array($tag, ['Text', 'Button'], true)) {
+            throw new RuntimeException("Text content is not valid inside {$tag}; wrap it in Text.");
+        }
+
+        if ($factory === null && $children !== [] && in_array($tag, ['Text', 'Button'], true)) {
+            throw new RuntimeException("{$tag} cannot contain element children.");
+        }
         if ($text !== '') {
             $values['text'] ??= $text;
+        }
+        if ($factory !== null && $inheritedVariants !== []) {
+            $values['__parentVariants'] = $inheritedVariants;
         }
 
         $element = $factory !== null
@@ -508,6 +564,36 @@ final class TemplateRenderer
                 'row' => 2,
                 'column-reverse' => 3,
                 'row-reverse' => 4,
+            ]),
+            PropKey::PositionType => self::named($value, [
+                'relative' => 1,
+                'absolute' => 2,
+            ]),
+            PropKey::TextDecoration => self::named($value, [
+                'none' => 1,
+                'underline' => 2,
+                'line-through' => 3,
+                'underline-line-through' => 4,
+            ]),
+            PropKey::TextTransform => self::named($value, [
+                'none' => 1,
+                'uppercase' => 2,
+                'lowercase' => 3,
+                'capitalize' => 4,
+            ]),
+            PropKey::FontStyle => self::named($value, [
+                'normal' => 1,
+                'italic' => 2,
+            ]),
+            PropKey::PointerEvents => self::named($value, [
+                'auto' => 1,
+                'none' => 2,
+                'box-none' => 3,
+                'box-only' => 4,
+            ]),
+            PropKey::AnimationKind => self::named($value, [
+                'none' => AnimationKind::None->value,
+                'pulse' => AnimationKind::Pulse->value,
             ]),
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
                 ? $value

@@ -500,6 +500,28 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::AlignItems
             | PropKey::AlignSelf
             | PropKey::JustifyContent
+            | PropKey::FlexDirection
+            | PropKey::FlexShrink
+            | PropKey::PaddingLeft
+            | PropKey::PaddingTop
+            | PropKey::PaddingRight
+            | PropKey::PaddingBottom
+            | PropKey::MarginLeft
+            | PropKey::MarginTop
+            | PropKey::MarginRight
+            | PropKey::MarginBottom
+            | PropKey::PositionType
+            | PropKey::Left
+            | PropKey::Top
+            | PropKey::Right
+            | PropKey::Bottom
+            | PropKey::AspectRatio
+            | PropKey::WidthPercent
+            | PropKey::HeightPercent
+            | PropKey::MaxWidthPercent
+            | PropKey::MaxHeightPercent
+            | PropKey::Visible
+            | PropKey::MarginLeftAuto
     )
 }
 

@@ -8,7 +8,7 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_NODES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 512;
-pub const MAX_PROPERTIES_PER_NODE: usize = 128;
+pub const MAX_PROPERTIES_PER_NODE: usize = 256;
 pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -179,6 +179,43 @@ pub enum PropKey {
     HostProperties = 100,
     OnNativeEvent = 101,
     FlexDirection = 102,
+    FlexShrink = 103,
+    PaddingLeft = 104,
+    PaddingTop = 105,
+    PaddingRight = 106,
+    PaddingBottom = 107,
+    MarginLeft = 108,
+    MarginTop = 109,
+    MarginRight = 110,
+    MarginBottom = 111,
+    PositionType = 112,
+    Left = 113,
+    Top = 114,
+    Right = 115,
+    Bottom = 116,
+    AspectRatio = 117,
+    BorderTopLeftRadius = 118,
+    BorderTopRightRadius = 119,
+    BorderBottomRightRadius = 120,
+    BorderBottomLeftRadius = 121,
+    BorderLeftWidth = 122,
+    BorderTopWidth = 123,
+    BorderRightWidth = 124,
+    BorderBottomWidth = 125,
+    TextDecoration = 126,
+    TextTransform = 127,
+    FontStyle = 128,
+    WidthPercent = 129,
+    HeightPercent = 130,
+    MaxWidthPercent = 131,
+    MaxHeightPercent = 132,
+    PointerEvents = 133,
+    SafeAreaBottom = 134,
+    BlurRadius = 135,
+    FontFamily = 136,
+    MarginLeftAuto = 137,
+    TranslationXPercent = 138,
+    AnimationKind = 139,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -288,6 +325,43 @@ impl TryFrom<u16> for PropKey {
             100 => Ok(Self::HostProperties),
             101 => Ok(Self::OnNativeEvent),
             102 => Ok(Self::FlexDirection),
+            103 => Ok(Self::FlexShrink),
+            104 => Ok(Self::PaddingLeft),
+            105 => Ok(Self::PaddingTop),
+            106 => Ok(Self::PaddingRight),
+            107 => Ok(Self::PaddingBottom),
+            108 => Ok(Self::MarginLeft),
+            109 => Ok(Self::MarginTop),
+            110 => Ok(Self::MarginRight),
+            111 => Ok(Self::MarginBottom),
+            112 => Ok(Self::PositionType),
+            113 => Ok(Self::Left),
+            114 => Ok(Self::Top),
+            115 => Ok(Self::Right),
+            116 => Ok(Self::Bottom),
+            117 => Ok(Self::AspectRatio),
+            118 => Ok(Self::BorderTopLeftRadius),
+            119 => Ok(Self::BorderTopRightRadius),
+            120 => Ok(Self::BorderBottomRightRadius),
+            121 => Ok(Self::BorderBottomLeftRadius),
+            122 => Ok(Self::BorderLeftWidth),
+            123 => Ok(Self::BorderTopWidth),
+            124 => Ok(Self::BorderRightWidth),
+            125 => Ok(Self::BorderBottomWidth),
+            126 => Ok(Self::TextDecoration),
+            127 => Ok(Self::TextTransform),
+            128 => Ok(Self::FontStyle),
+            129 => Ok(Self::WidthPercent),
+            130 => Ok(Self::HeightPercent),
+            131 => Ok(Self::MaxWidthPercent),
+            132 => Ok(Self::MaxHeightPercent),
+            133 => Ok(Self::PointerEvents),
+            134 => Ok(Self::SafeAreaBottom),
+            135 => Ok(Self::BlurRadius),
+            136 => Ok(Self::FontFamily),
+            137 => Ok(Self::MarginLeftAuto),
+            138 => Ok(Self::TranslationXPercent),
+            139 => Ok(Self::AnimationKind),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1091,10 +1165,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=102 {
+        for value in 1..=139 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(103).is_err());
+        assert!(PropKey::try_from(140).is_err());
     }
 
     fn tree(text: &str) -> Tree {
