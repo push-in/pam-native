@@ -286,6 +286,29 @@ pub enum PropKey {
     OnImageLoad = 207,
     OnImageError = 208,
     OnImageLoadEnd = 209,
+    InputEditable = 210,
+    InputAutoCorrect = 211,
+    InputAutoCapitalize = 212,
+    InputCaretHidden = 213,
+    InputContextMenuHidden = 214,
+    InputCursorColor = 215,
+    InputDisableFullscreenUi = 216,
+    InputAutofillImportance = 217,
+    InputMode = 218,
+    InputMinLines = 219,
+    InputSelectTextOnFocus = 220,
+    InputSelectionStart = 221,
+    InputSelectionEnd = 222,
+    InputShowSoftInputOnFocus = 223,
+    InputSubmitBehavior = 224,
+    InputTextAlignVertical = 225,
+    InputReturnKeyLabel = 226,
+    InputScrollEnabled = 227,
+    InputUnderlineColor = 228,
+    OnInputEndEditing = 229,
+    OnInputSelectionChange = 230,
+    OnInputContentSizeChange = 231,
+    OnInputKeyPress = 232,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -502,6 +525,29 @@ impl TryFrom<u16> for PropKey {
             207 => Ok(Self::OnImageLoad),
             208 => Ok(Self::OnImageError),
             209 => Ok(Self::OnImageLoadEnd),
+            210 => Ok(Self::InputEditable),
+            211 => Ok(Self::InputAutoCorrect),
+            212 => Ok(Self::InputAutoCapitalize),
+            213 => Ok(Self::InputCaretHidden),
+            214 => Ok(Self::InputContextMenuHidden),
+            215 => Ok(Self::InputCursorColor),
+            216 => Ok(Self::InputDisableFullscreenUi),
+            217 => Ok(Self::InputAutofillImportance),
+            218 => Ok(Self::InputMode),
+            219 => Ok(Self::InputMinLines),
+            220 => Ok(Self::InputSelectTextOnFocus),
+            221 => Ok(Self::InputSelectionStart),
+            222 => Ok(Self::InputSelectionEnd),
+            223 => Ok(Self::InputShowSoftInputOnFocus),
+            224 => Ok(Self::InputSubmitBehavior),
+            225 => Ok(Self::InputTextAlignVertical),
+            226 => Ok(Self::InputReturnKeyLabel),
+            227 => Ok(Self::InputScrollEnabled),
+            228 => Ok(Self::InputUnderlineColor),
+            229 => Ok(Self::OnInputEndEditing),
+            230 => Ok(Self::OnInputSelectionChange),
+            231 => Ok(Self::OnInputContentSizeChange),
+            232 => Ok(Self::OnInputKeyPress),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1305,10 +1351,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=209 {
+        for value in 1..=232 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(210).is_err());
+        assert!(PropKey::try_from(233).is_err());
     }
 
     fn tree(text: &str) -> Tree {

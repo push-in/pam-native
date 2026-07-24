@@ -35,6 +35,7 @@ import android.util.TypedValue
 import android.view.Choreographer
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -178,7 +179,7 @@ class PamRenderer(
                 minHeight = 0
                 minWidth = 0
             }
-            NodeKind.INPUT -> EditText(context).apply {
+            NodeKind.INPUT -> PamEditText(context).apply {
                 isSingleLine = true
                 minHeight = 0
                 setPadding(dp(12f), 0, dp(12f), 0)
@@ -475,10 +476,15 @@ class PamRenderer(
                     animateOrSet(view, state, key, value.decimal().toFloat())
                 }
             }
-            PropKey.TEXT_ALIGN -> (view as? TextView)?.gravity = when (value.integer().toInt()) {
-                2 -> Gravity.CENTER
-                3 -> Gravity.END or Gravity.CENTER_VERTICAL
-                else -> Gravity.START or Gravity.CENTER_VERTICAL
+            PropKey.TEXT_ALIGN -> if (view is PamEditText) {
+                applyInputConfiguration(view, state)
+            } else {
+                (view as? TextView)?.gravity =
+                    when (value.integer().toInt()) {
+                        2 -> Gravity.CENTER
+                        3 -> Gravity.END or Gravity.CENTER_VERTICAL
+                        else -> Gravity.START or Gravity.CENTER_VERTICAL
+                    }
             }
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
@@ -502,18 +508,32 @@ class PamRenderer(
             }
             PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines =
                 value.integer().toInt().takeIf { it > 0 } ?: Int.MAX_VALUE
-            PropKey.MULTILINE -> (view as? EditText)?.let { input ->
-                input.isSingleLine = !value.flag()
-                input.inputType = if (value.flag()) {
-                    input.inputType or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-                } else {
-                    input.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE.inv()
-                }
+            PropKey.MULTILINE,
+            PropKey.SECURE,
+            PropKey.KEYBOARD_TYPE,
+            PropKey.AUTO_COMPLETE,
+            PropKey.INPUT_EDITABLE,
+            PropKey.INPUT_AUTO_CORRECT,
+            PropKey.INPUT_AUTO_CAPITALIZE,
+            PropKey.INPUT_CARET_HIDDEN,
+            PropKey.INPUT_CONTEXT_MENU_HIDDEN,
+            PropKey.INPUT_CURSOR_COLOR,
+            PropKey.INPUT_DISABLE_FULLSCREEN_UI,
+            PropKey.INPUT_AUTOFILL_IMPORTANCE,
+            PropKey.INPUT_MODE,
+            PropKey.INPUT_MIN_LINES,
+            PropKey.INPUT_SELECT_TEXT_ON_FOCUS,
+            PropKey.INPUT_SELECTION_START,
+            PropKey.INPUT_SELECTION_END,
+            PropKey.INPUT_SHOW_SOFT_INPUT_ON_FOCUS,
+            PropKey.INPUT_SUBMIT_BEHAVIOR,
+            PropKey.INPUT_TEXT_ALIGN_VERTICAL,
+            PropKey.INPUT_RETURN_KEY_LABEL,
+            PropKey.INPUT_SCROLL_ENABLED,
+            PropKey.INPUT_UNDERLINE_COLOR,
+            -> (view as? PamEditText)?.let {
+                applyInputConfiguration(it, state)
             }
-            PropKey.SECURE -> (view as? EditText)?.transformationMethod =
-                if (value.flag()) PasswordTransformationMethod.getInstance() else null
-            PropKey.KEYBOARD_TYPE -> (view as? EditText)?.inputType = keyboardType(value.integer().toInt())
-            PropKey.AUTO_COMPLETE -> (view as? EditText)?.setAutofillHints(value.text())
             PropKey.CHECKED -> if (view is Switch && view.isChecked != value.flag()) {
                 state.updating = true
                 view.isChecked = value.flag()
@@ -743,8 +763,9 @@ class PamRenderer(
             } else {
                 Unit
             }
-            PropKey.RETURN_KEY_TYPE -> (view as? EditText)?.imeOptions =
-                returnKeyImeOption(value.integer().toInt())
+            PropKey.RETURN_KEY_TYPE -> (view as? PamEditText)?.let {
+                applyInputConfiguration(it, state)
+            }
             PropKey.Z_INDEX -> view.z = value.decimal().toFloat()
             PropKey.OVERFLOW -> (view as? ViewGroup)?.clipChildren = value.integer() == 2L
             PropKey.HOST_PROPERTIES -> {
@@ -818,6 +839,10 @@ class PamRenderer(
             PropKey.ON_IMAGE_LOAD,
             PropKey.ON_IMAGE_ERROR,
             PropKey.ON_IMAGE_LOAD_END,
+            PropKey.ON_INPUT_END_EDITING,
+            PropKey.ON_INPUT_SELECTION_CHANGE,
+            PropKey.ON_INPUT_CONTENT_SIZE_CHANGE,
+            PropKey.ON_INPUT_KEY_PRESS,
             PropKey.FLEX_DIRECTION,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
@@ -909,6 +934,35 @@ class PamRenderer(
             -> loadImage(view, state)
             PropKey.IMAGE_OVERLAY_COLOR -> updateBackground(view, state)
             PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(Color.GRAY)
+            PropKey.MULTILINE,
+            PropKey.SECURE,
+            PropKey.KEYBOARD_TYPE,
+            PropKey.AUTO_COMPLETE,
+            PropKey.RETURN_KEY_TYPE,
+            PropKey.INPUT_EDITABLE,
+            PropKey.INPUT_AUTO_CORRECT,
+            PropKey.INPUT_AUTO_CAPITALIZE,
+            PropKey.INPUT_CARET_HIDDEN,
+            PropKey.INPUT_CONTEXT_MENU_HIDDEN,
+            PropKey.INPUT_CURSOR_COLOR,
+            PropKey.INPUT_DISABLE_FULLSCREEN_UI,
+            PropKey.INPUT_AUTOFILL_IMPORTANCE,
+            PropKey.INPUT_MODE,
+            PropKey.INPUT_MIN_LINES,
+            PropKey.INPUT_SELECT_TEXT_ON_FOCUS,
+            PropKey.INPUT_SELECTION_START,
+            PropKey.INPUT_SELECTION_END,
+            PropKey.INPUT_SHOW_SOFT_INPUT_ON_FOCUS,
+            PropKey.INPUT_SUBMIT_BEHAVIOR,
+            PropKey.INPUT_TEXT_ALIGN_VERTICAL,
+            PropKey.INPUT_RETURN_KEY_LABEL,
+            PropKey.INPUT_SCROLL_ENABLED,
+            PropKey.INPUT_UNDERLINE_COLOR,
+            -> (view as? PamEditText)?.let {
+                applyInputConfiguration(it, state)
+            }
+            PropKey.MAX_LENGTH -> (view as? EditText)?.filters = emptyArray()
+            PropKey.AUTO_FOCUS -> Unit
             PropKey.ENABLED -> view.isEnabled = true
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
@@ -1049,6 +1103,11 @@ class PamRenderer(
             }
             PropKey.HIT_SLOP -> clearHitSlop(view)
             PropKey.HOST_PROPERTIES -> Unit
+            PropKey.ON_INPUT_END_EDITING,
+            PropKey.ON_INPUT_SELECTION_CHANGE,
+            PropKey.ON_INPUT_CONTENT_SIZE_CHANGE,
+            PropKey.ON_INPUT_KEY_PRESS,
+            -> Unit
             else -> Unit
         }
     }
@@ -1178,6 +1237,10 @@ class PamRenderer(
     }
 
     private fun installInputEvents(input: EditText, state: NodeState) {
+        if (state.properties[PropKey.ON_CHANGE] == null) {
+            state.pendingChange?.let(main::removeCallbacks)
+            state.pendingChange = null
+        }
         if (!state.textWatcherInstalled) {
             state.textWatcherInstalled = true
             input.addTextChangedListener(object : TextWatcher {
@@ -1196,8 +1259,9 @@ class PamRenderer(
                 ) = Unit
 
                 override fun afterTextChanged(editable: Editable?) {
-                    if (state.updating || state.properties[PropKey.ON_CHANGE] == null) return
+                    if (state.updating) return
                     state.nativeValue = editable?.toString().orEmpty()
+                    if (state.properties[PropKey.ON_CHANGE] == null) return
                     when (state.inputSyncMode()) {
                         INPUT_SYNC_IMMEDIATE -> dispatchInput(state)
                         INPUT_SYNC_DEBOUNCED -> {
@@ -1218,20 +1282,108 @@ class PamRenderer(
                     dispatchInput(state)
                 }
                 if (state.properties[PropKey.ON_BLUR] != null) dispatch(state.id, EVENT_BLUR)
-            }
-        }
-        input.setOnEditorActionListener { _, _, event ->
-            val submitted = event == null || event.keyCode == KeyEvent.KEYCODE_ENTER
-            if (submitted) {
-                if (state.inputSyncMode() == INPUT_SYNC_NATIVE || state.inputSyncMode() == INPUT_SYNC_SUBMIT) {
-                    dispatchInput(state)
-                }
-                if (state.properties[PropKey.ON_SUBMIT] != null) {
-                    dispatch(state.id, EVENT_SUBMIT, input.text.toString())
+                if (state.properties[PropKey.ON_INPUT_END_EDITING] != null) {
+                    dispatch(
+                        state.id,
+                        EVENT_INPUT_END_EDITING,
+                        input.text.toString(),
+                    )
                 }
             }
-            false
         }
+        input.setOnEditorActionListener { _, actionId, event ->
+            val submitted =
+                actionId != EditorInfo.IME_ACTION_NONE &&
+                    actionId != EditorInfo.IME_NULL ||
+                    (
+                        event?.keyCode == KeyEvent.KEYCODE_ENTER &&
+                            event.action == KeyEvent.ACTION_UP
+                    )
+            if (!submitted || inputSubmitBehavior(state) == INPUT_SUBMIT_NEWLINE) {
+                return@setOnEditorActionListener false
+            }
+            if (
+                state.inputSyncMode() == INPUT_SYNC_NATIVE ||
+                state.inputSyncMode() == INPUT_SYNC_SUBMIT
+            ) {
+                dispatchInput(state)
+            }
+            if (state.properties[PropKey.ON_SUBMIT] != null) {
+                dispatch(state.id, EVENT_SUBMIT, input.text.toString())
+            }
+            if (inputSubmitBehavior(state) == INPUT_SUBMIT_BLUR) {
+                input.clearFocus()
+                (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                    ?.hideSoftInputFromWindow(input.windowToken, 0)
+            }
+            true
+        }
+        (input as? PamEditText)?.setInputCallbacks(
+            selection = if (
+                state.properties[PropKey.ON_INPUT_SELECTION_CHANGE] != null
+            ) {
+                { start, end ->
+                    if (!state.updating) {
+                        state.inputSelectionStart = start
+                        state.inputSelectionEnd = end
+                        if (!state.inputSelectionScheduled) {
+                            state.inputSelectionScheduled = true
+                            Choreographer.getInstance().postFrameCallback {
+                                state.inputSelectionScheduled = false
+                                if (nodes[state.id] === state) {
+                                    dispatchInputSelection(state)
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                null
+            },
+            contentSize = if (
+                state.properties[PropKey.ON_INPUT_CONTENT_SIZE_CHANGE] != null
+            ) {
+                { width, height ->
+                    if (nodes[state.id] === state) {
+                        dispatchBytes(
+                            state.id,
+                            EVENT_INPUT_CONTENT_SIZE_CHANGE,
+                            WireMap.encode(
+                                mapOf(
+                                    "width" to WireValue.Decimal(
+                                        width / resourcesDensity().toDouble(),
+                                    ),
+                                    "height" to WireValue.Decimal(
+                                        height / resourcesDensity().toDouble(),
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+            key = if (state.properties[PropKey.ON_INPUT_KEY_PRESS] != null) {
+                { key ->
+                    if (nodes[state.id] === state) {
+                        dispatchBytes(
+                            state.id,
+                            EVENT_INPUT_KEY_PRESS,
+                            WireMap.encode(
+                                mapOf(
+                                    "key" to WireValue.Text(
+                                        key.take(MAX_INPUT_KEY_BYTES),
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
+                }
+            } else {
+                null
+            },
+        )
     }
 
     private fun installScrollEvents(scroll: PamScrollContainer, state: NodeState) {
@@ -1301,7 +1453,25 @@ class PamRenderer(
     private fun dispatchInput(state: NodeState) {
         state.pendingChange?.let(main::removeCallbacks)
         state.pendingChange = null
-        dispatch(state.id, EVENT_CHANGE, state.nativeValue)
+        if (state.properties[PropKey.ON_CHANGE] != null) {
+            dispatch(state.id, EVENT_CHANGE, state.nativeValue)
+        }
+    }
+
+    private fun dispatchInputSelection(state: NodeState) {
+        if (state.properties[PropKey.ON_INPUT_SELECTION_CHANGE] == null) {
+            return
+        }
+        dispatchBytes(
+            state.id,
+            EVENT_INPUT_SELECTION_CHANGE,
+            WireMap.encode(
+                mapOf(
+                    "start" to WireValue.Integer(state.inputSelectionStart.toLong()),
+                    "end" to WireValue.Integer(state.inputSelectionEnd.toLong()),
+                ),
+            ),
+        )
     }
 
     private fun dispatch(id: Long, kind: Int, payload: String = "") {
@@ -1333,6 +1503,11 @@ class PamRenderer(
             EVENT_IMAGE_LOAD -> PropKey.ON_IMAGE_LOAD
             EVENT_IMAGE_ERROR -> PropKey.ON_IMAGE_ERROR
             EVENT_IMAGE_LOAD_END -> PropKey.ON_IMAGE_LOAD_END
+            EVENT_INPUT_END_EDITING -> PropKey.ON_INPUT_END_EDITING
+            EVENT_INPUT_SELECTION_CHANGE -> PropKey.ON_INPUT_SELECTION_CHANGE
+            EVENT_INPUT_CONTENT_SIZE_CHANGE ->
+                PropKey.ON_INPUT_CONTENT_SIZE_CHANGE
+            EVENT_INPUT_KEY_PRESS -> PropKey.ON_INPUT_KEY_PRESS
             else -> null
         }
 
@@ -2101,6 +2276,198 @@ class PamRenderer(
             else -> InputType.TYPE_CLASS_TEXT
         }
 
+    private fun applyInputConfiguration(
+        input: PamEditText,
+        state: NodeState,
+    ) {
+        val multiline = state.flag(PropKey.MULTILINE, false)
+        val secure = state.flag(PropKey.SECURE, false) && !multiline
+        val inputMode = state.integer(PropKey.INPUT_MODE, 0L).toInt()
+        var type = when (inputMode) {
+            INPUT_MODE_DECIMAL ->
+                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            INPUT_MODE_NUMERIC -> InputType.TYPE_CLASS_NUMBER
+            INPUT_MODE_TEL -> InputType.TYPE_CLASS_PHONE
+            INPUT_MODE_EMAIL ->
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
+            INPUT_MODE_URL ->
+                InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+            else -> keyboardType(
+                state.integer(PropKey.KEYBOARD_TYPE, 1L).toInt(),
+            )
+        }
+        if (multiline) {
+            type = type or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+        }
+        if ((type and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT) {
+            if (!state.flag(PropKey.INPUT_AUTO_CORRECT, true)) {
+                type = type or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            }
+            type = type or when (
+                state.integer(
+                    PropKey.INPUT_AUTO_CAPITALIZE,
+                    INPUT_CAPITALIZE_SENTENCES.toLong(),
+                ).toInt()
+            ) {
+                INPUT_CAPITALIZE_NONE -> 0
+                INPUT_CAPITALIZE_WORDS -> InputType.TYPE_TEXT_FLAG_CAP_WORDS
+                INPUT_CAPITALIZE_CHARACTERS -> InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS
+                else -> InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            }
+            if (secure) {
+                type = type or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            }
+        } else if (
+            secure &&
+            (type and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_NUMBER
+        ) {
+            type = type or InputType.TYPE_NUMBER_VARIATION_PASSWORD
+        }
+
+        input.isSingleLine = !multiline
+        input.inputType = type
+        input.transformationMethod =
+            if (secure) PasswordTransformationMethod.getInstance() else null
+        input.setHorizontallyScrolling(!multiline)
+        input.minLines = if (multiline) {
+            state.integer(PropKey.INPUT_MIN_LINES, 1L).toInt().coerceAtLeast(1)
+        } else {
+            1
+        }
+        input.maxLines = state.integer(PropKey.NUMBER_OF_LINES, 0L)
+            .toInt()
+            .takeIf { it > 0 }
+            ?: if (multiline) Int.MAX_VALUE else 1
+
+        var imeOptions = returnKeyImeOption(
+            state.integer(PropKey.RETURN_KEY_TYPE, 1L).toInt(),
+        )
+        if (
+            imeOptions == EditorInfo.IME_ACTION_UNSPECIFIED &&
+            inputMode == INPUT_MODE_SEARCH
+        ) {
+            imeOptions = EditorInfo.IME_ACTION_SEARCH
+        }
+        if (state.flag(PropKey.INPUT_DISABLE_FULLSCREEN_UI, false)) {
+            imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        }
+        if (inputSubmitBehavior(state) == INPUT_SUBMIT_NEWLINE) {
+            imeOptions = imeOptions or EditorInfo.IME_FLAG_NO_ENTER_ACTION
+        }
+        input.imeOptions = imeOptions
+        val returnLabel = state.textOrNull(PropKey.INPUT_RETURN_KEY_LABEL)
+        input.setImeActionLabel(
+            returnLabel,
+            imeOptions and EditorInfo.IME_MASK_ACTION,
+        )
+
+        val horizontal = when (
+            state.integer(PropKey.TEXT_ALIGN, 1L).toInt()
+        ) {
+            2 -> Gravity.CENTER_HORIZONTAL
+            3 -> Gravity.END
+            else -> Gravity.START
+        }
+        val vertical = when (
+            state.integer(
+                PropKey.INPUT_TEXT_ALIGN_VERTICAL,
+                INPUT_ALIGN_AUTO.toLong(),
+            ).toInt()
+        ) {
+            INPUT_ALIGN_TOP -> Gravity.TOP
+            INPUT_ALIGN_BOTTOM -> Gravity.BOTTOM
+            INPUT_ALIGN_CENTER -> Gravity.CENTER_VERTICAL
+            else -> if (multiline) Gravity.TOP else Gravity.CENTER_VERTICAL
+        }
+        input.gravity = horizontal or vertical
+
+        input.setAutofillHints(
+            *autofillHints(state.textOrNull(PropKey.AUTO_COMPLETE)),
+        )
+        input.importantForAutofill = when (
+            state.integer(
+                PropKey.INPUT_AUTOFILL_IMPORTANCE,
+                INPUT_AUTOFILL_AUTO.toLong(),
+            ).toInt()
+        ) {
+            INPUT_AUTOFILL_NO -> View.IMPORTANT_FOR_AUTOFILL_NO
+            INPUT_AUTOFILL_NO_EXCLUDE ->
+                View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+            INPUT_AUTOFILL_YES -> View.IMPORTANT_FOR_AUTOFILL_YES
+            INPUT_AUTOFILL_YES_EXCLUDE ->
+                View.IMPORTANT_FOR_AUTOFILL_YES_EXCLUDE_DESCENDANTS
+            else -> View.IMPORTANT_FOR_AUTOFILL_AUTO
+        }
+        input.isCursorVisible = !state.flag(PropKey.INPUT_CARET_HIDDEN, false)
+        input.setContextMenuHidden(
+            state.flag(PropKey.INPUT_CONTEXT_MENU_HIDDEN, false),
+        )
+        input.setSelectAllOnFocus(
+            state.flag(PropKey.INPUT_SELECT_TEXT_ON_FOCUS, false),
+        )
+        input.showSoftInputOnFocus =
+            inputMode != INPUT_MODE_NONE &&
+                state.flag(PropKey.INPUT_SHOW_SOFT_INPUT_ON_FOCUS, true)
+        val scrollEnabled = state.flag(PropKey.INPUT_SCROLL_ENABLED, true)
+        input.isVerticalScrollBarEnabled = multiline && scrollEnabled
+        input.overScrollMode = if (scrollEnabled) {
+            View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        } else {
+            View.OVER_SCROLL_NEVER
+        }
+        input.setCursorColor(
+            state.integerOrNull(PropKey.INPUT_CURSOR_COLOR)?.toInt(),
+        )
+        input.setUnderlineColor(
+            state.integerOrNull(PropKey.INPUT_UNDERLINE_COLOR)?.toInt(),
+        )
+        input.setEditableValue(state.flag(PropKey.INPUT_EDITABLE, true))
+
+        val selectionStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)
+            ?.toInt()
+            ?: return
+        val selectionEnd = state.integerOrNull(PropKey.INPUT_SELECTION_END)
+            ?.toInt()
+            ?: selectionStart
+        val length = input.text.length
+        val safeStart = selectionStart.coerceIn(0, length)
+        val safeEnd = selectionEnd.coerceIn(safeStart, length)
+        if (
+            input.selectionStart != safeStart ||
+            input.selectionEnd != safeEnd
+        ) {
+            state.updating = true
+            input.setSelection(safeStart, safeEnd)
+            state.updating = false
+        }
+    }
+
+    private fun autofillHints(value: String?): Array<String> =
+        when (value?.lowercase()) {
+            null, "", "off" -> emptyArray()
+            "email" -> arrayOf("emailAddress")
+            "tel" -> arrayOf("phone")
+            "current-password", "password" -> arrayOf("password")
+            "new-password", "password-new" -> arrayOf("newPassword")
+            "postal-code" -> arrayOf("postalCode")
+            "street-address", "postal-address" -> arrayOf("postalAddress")
+            "cc-number" -> arrayOf("creditCardNumber")
+            "cc-csc" -> arrayOf("creditCardSecurityCode")
+            "cc-exp" -> arrayOf("creditCardExpirationDate")
+            "name" -> arrayOf("name")
+            "username", "username-new" -> arrayOf("username")
+            else -> arrayOf(value.take(MAX_AUTOFILL_HINT_BYTES))
+        }
+
+    private fun inputSubmitBehavior(state: NodeState): Int =
+        state.integerOrNull(PropKey.INPUT_SUBMIT_BEHAVIOR)
+            ?.toInt()
+            ?: if (state.flag(PropKey.MULTILINE, false)) {
+                INPUT_SUBMIT_NEWLINE
+            } else {
+                INPUT_SUBMIT_BLUR
+            }
+
     private fun returnKeyImeOption(value: Int): Int =
         when (value) {
             2 -> EditorInfo.IME_ACTION_DONE
@@ -2341,6 +2708,9 @@ class PamRenderer(
         var imageProgressScheduled: Boolean = false,
         var imageProgressLoaded: Long = 0L,
         var imageProgressTotal: Long = 0L,
+        var inputSelectionScheduled: Boolean = false,
+        var inputSelectionStart: Int = 0,
+        var inputSelectionEnd: Int = 0,
     ) {
         fun inputSyncMode(): Int = integer(PropKey.INPUT_SYNC_MODE, INPUT_SYNC_DEBOUNCED.toLong()).toInt()
 
@@ -2361,6 +2731,9 @@ class PamRenderer(
 
         fun integer(key: PropKey, fallback: Long): Long =
             (properties[key] as? PropValue.Integer)?.value ?: fallback
+
+        fun integerOrNull(key: PropKey): Long? =
+            (properties[key] as? PropValue.Integer)?.value
 
         fun textOrNull(key: PropKey): String? =
             (properties[key] as? PropValue.Text)?.value
@@ -2385,12 +2758,40 @@ class PamRenderer(
         const val EVENT_IMAGE_LOAD = 21
         const val EVENT_IMAGE_ERROR = 22
         const val EVENT_IMAGE_LOAD_END = 23
+        const val EVENT_INPUT_END_EDITING = 24
+        const val EVENT_INPUT_SELECTION_CHANGE = 25
+        const val EVENT_INPUT_CONTENT_SIZE_CHANGE = 26
+        const val EVENT_INPUT_KEY_PRESS = 27
         const val MAX_EVENT_BYTES = 1024 * 1024
         const val INPUT_SYNC_NATIVE = 1
         const val INPUT_SYNC_DEBOUNCED = 2
         const val INPUT_SYNC_IMMEDIATE = 3
         const val INPUT_SYNC_BLUR = 4
         const val INPUT_SYNC_SUBMIT = 5
+        const val INPUT_CAPITALIZE_NONE = 1
+        const val INPUT_CAPITALIZE_SENTENCES = 2
+        const val INPUT_CAPITALIZE_WORDS = 3
+        const val INPUT_CAPITALIZE_CHARACTERS = 4
+        const val INPUT_AUTOFILL_AUTO = 1
+        const val INPUT_AUTOFILL_NO = 2
+        const val INPUT_AUTOFILL_NO_EXCLUDE = 3
+        const val INPUT_AUTOFILL_YES = 4
+        const val INPUT_AUTOFILL_YES_EXCLUDE = 5
+        const val INPUT_MODE_NONE = 2
+        const val INPUT_MODE_DECIMAL = 3
+        const val INPUT_MODE_NUMERIC = 4
+        const val INPUT_MODE_TEL = 5
+        const val INPUT_MODE_SEARCH = 6
+        const val INPUT_MODE_EMAIL = 7
+        const val INPUT_MODE_URL = 8
+        const val INPUT_SUBMIT_BLUR = 2
+        const val INPUT_SUBMIT_NEWLINE = 3
+        const val INPUT_ALIGN_AUTO = 1
+        const val INPUT_ALIGN_TOP = 2
+        const val INPUT_ALIGN_CENTER = 3
+        const val INPUT_ALIGN_BOTTOM = 4
+        const val MAX_AUTOFILL_HINT_BYTES = 128
+        const val MAX_INPUT_KEY_BYTES = 64
         const val KEYBOARD_RESIZE = 1
         const val KEYBOARD_PAN = 2
         const val KEYBOARD_PADDING = 3
@@ -2506,6 +2907,10 @@ class PamRenderer(
             PropKey.ON_IMAGE_LOAD,
             PropKey.ON_IMAGE_ERROR,
             PropKey.ON_IMAGE_LOAD_END,
+            PropKey.ON_INPUT_END_EDITING,
+            PropKey.ON_INPUT_SELECTION_CHANGE,
+            PropKey.ON_INPUT_CONTENT_SIZE_CHANGE,
+            PropKey.ON_INPUT_KEY_PRESS,
         )
         val IMAGE_EVENT_PROPERTIES = setOf(
             PropKey.ON_IMAGE_LOAD_START,

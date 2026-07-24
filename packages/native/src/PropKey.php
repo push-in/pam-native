@@ -215,4 +215,27 @@ enum PropKey: int
     case OnImageLoad = 207;
     case OnImageError = 208;
     case OnImageLoadEnd = 209;
+    case InputEditable = 210;
+    case InputAutoCorrect = 211;
+    case InputAutoCapitalize = 212;
+    case InputCaretHidden = 213;
+    case InputContextMenuHidden = 214;
+    case InputCursorColor = 215;
+    case InputDisableFullscreenUi = 216;
+    case InputAutofillImportance = 217;
+    case InputMode = 218;
+    case InputMinLines = 219;
+    case InputSelectTextOnFocus = 220;
+    case InputSelectionStart = 221;
+    case InputSelectionEnd = 222;
+    case InputShowSoftInputOnFocus = 223;
+    case InputSubmitBehavior = 224;
+    case InputTextAlignVertical = 225;
+    case InputReturnKeyLabel = 226;
+    case InputScrollEnabled = 227;
+    case InputUnderlineColor = 228;
+    case OnInputEndEditing = 229;
+    case OnInputSelectionChange = 230;
+    case OnInputContentSizeChange = 231;
+    case OnInputKeyPress = 232;
 }

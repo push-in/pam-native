@@ -172,7 +172,11 @@ that thread would make the app slower, not faster.
 
 Inputs keep their text and cursor natively. Change delivery defaults to a
 48 ms debounce and can be configured as native, debounced, immediate, blur, or
-submit synchronization. Lists retain packed UTF-8 payloads and mount through
+submit synchronization. The same host supports controlled selection,
+autocomplete/autofill, correction and capitalization, input modes,
+cursor/underline colors, read-only fields, multiline sizing and
+`submitBehavior`. Selection is coalesced to VSYNC and key, content-size and
+end-editing events are opt-in. Lists retain packed UTF-8 payloads and mount through
 AndroidX `RecyclerView`, decoding only rows being bound. Its native recycled
 pool and GapWorker prefetch cover vertical, horizontal, grid and inverted
 layouts; scroll progress is coalesced to one semantic event per display frame.

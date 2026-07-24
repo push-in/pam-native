@@ -19,6 +19,14 @@ use Pam\Native\ImageFit;
 use Pam\Native\ImageLoadEvent;
 use Pam\Native\ImageProgressEvent;
 use Pam\Native\ImageResizeMethod;
+use Pam\Native\InputAutoCapitalize;
+use Pam\Native\InputAutofillImportance;
+use Pam\Native\InputContentSizeEvent;
+use Pam\Native\InputKeyEvent;
+use Pam\Native\InputMode;
+use Pam\Native\InputSelectionEvent;
+use Pam\Native\InputSubmitBehavior;
+use Pam\Native\InputTextAlignVertical;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
@@ -241,6 +249,11 @@ foreach ([
     ImageCachePolicy::cases(),
     ImageFit::cases(),
     ImageResizeMethod::cases(),
+    InputAutoCapitalize::cases(),
+    InputAutofillImportance::cases(),
+    InputMode::cases(),
+    InputSubmitBehavior::cases(),
+    InputTextAlignVertical::cases(),
     PointerEvents::cases(),
     PositionType::cases(),
     ReturnKeyType::cases(),
@@ -268,6 +281,95 @@ $tree = Screen::make(
         }),
         Input::make('value')->placeholder('Type here'),
     )->style(new Style(padding: 16.0, gap: 8.0)),
+);
+$inputSelection = null;
+$inputContentSize = null;
+$inputKey = null;
+$inputEndValue = null;
+$inputElement = Input::make('hello')
+    ->multiline()
+    ->editable(false)
+    ->autoCorrect(false)
+    ->autoCapitalize(InputAutoCapitalize::Words)
+    ->caretHidden()
+    ->contextMenuHidden()
+    ->cursorColor(0xFF2563EB)
+    ->disableFullscreenUi()
+    ->autofillImportance(InputAutofillImportance::Yes)
+    ->inputMode(InputMode::Email)
+    ->minLines(3)
+    ->selectTextOnFocus()
+    ->selection(1, 4)
+    ->showSoftInputOnFocus(false)
+    ->submitBehavior(InputSubmitBehavior::Submit)
+    ->textAlignVertical(InputTextAlignVertical::Top)
+    ->returnKeyLabel('Publish')
+    ->scrollEnabled(false)
+    ->underlineColor(0x00000000)
+    ->onEndEditing(
+        static function (string $value) use (&$inputEndValue): void {
+            $inputEndValue = $value;
+        },
+    )
+    ->onSelectionChange(
+        static function (InputSelectionEvent $event) use (&$inputSelection): void {
+            $inputSelection = $event;
+        },
+    )
+    ->onContentSizeChange(
+        static function (InputContentSizeEvent $event) use (
+            &$inputContentSize,
+        ): void {
+            $inputContentSize = $event;
+        },
+    )
+    ->onKeyPress(
+        static function (InputKeyEvent $event) use (&$inputKey): void {
+            $inputKey = $event;
+        },
+    );
+$inputElement->events()[EventKind::InputEndEditing->value]('finished');
+$inputElement->events()[EventKind::InputSelectionChange->value](Wire::map([
+    'start' => 1,
+    'end' => 4,
+]));
+$inputElement->events()[EventKind::InputContentSizeChange->value](Wire::map([
+    'width' => 240.0,
+    'height' => 96.0,
+]));
+$inputElement->events()[EventKind::InputKeyPress->value](Wire::map([
+    'key' => 'Enter',
+]));
+$assert(
+    $inputElement->properties()[PropKey::InputEditable->value] === false
+        && $inputElement->properties()[PropKey::InputAutoCorrect->value]
+            === false
+        && $inputElement->properties()[PropKey::InputAutoCapitalize->value]
+            === InputAutoCapitalize::Words->value
+        && $inputElement->properties()[PropKey::InputAutofillImportance->value]
+            === InputAutofillImportance::Yes->value
+        && $inputElement->properties()[PropKey::InputMode->value]
+            === InputMode::Email->value
+        && $inputElement->properties()[PropKey::InputMinLines->value] === 3
+        && $inputElement->properties()[PropKey::InputSelectionStart->value]
+            === 1
+        && $inputElement->properties()[PropKey::InputSelectionEnd->value] === 4
+        && $inputElement->properties()[PropKey::InputSubmitBehavior->value]
+            === InputSubmitBehavior::Submit->value
+        && $inputElement->properties()[PropKey::InputTextAlignVertical->value]
+            === InputTextAlignVertical::Top->value
+        && $inputElement->properties()[PropKey::InputReturnKeyLabel->value]
+            === 'Publish'
+        && $inputElement->properties()[PropKey::InputScrollEnabled->value]
+            === false
+        && $inputEndValue === 'finished'
+        && $inputSelection instanceof InputSelectionEvent
+        && $inputSelection->end === 4
+        && $inputContentSize instanceof InputContentSizeEvent
+        && $inputContentSize->height === 96.0
+        && $inputKey instanceof InputKeyEvent
+        && $inputKey->key === 'Enter',
+    'Input helpers must preserve native editing, selection, keyboard, size and key behavior.',
 );
 $accessibilityElement = Text::make('Upload')
     ->accessibilityRole(AccessibilityRole::ProgressBar)

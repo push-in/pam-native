@@ -77,6 +77,14 @@ PHP.
 `breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
 selection, fitting, line breaking and link detection inside `TextView`.
 
+`Input` and its `TextInput` alias keep composition, selection and the editable
+buffer inside a dedicated Android `EditText`. They support React
+Native-compatible capitalization, correction, input mode, autofill,
+controlled selection, cursor/underline colors, read-only behavior, return-key
+labels, multiline sizing and submit behavior. `onSelectionChange` is
+coalesced once per frame; `onContentSizeChange`, `onKeyPress` and
+`onEndEditing` cross into PHP only when registered.
+
 Images use one cancelable loader for `Image` and `ImageBackground`. Remote
 originals are coalesced and cached on disk, decoded bitmaps are cached in RAM
 by measured-size bucket, and Android downsamples before allocating pixels:

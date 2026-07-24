@@ -18,7 +18,12 @@ use Pam\Native\EventKind;
 use Pam\Native\ImageFit;
 use Pam\Native\ImageCachePolicy;
 use Pam\Native\ImageResizeMethod;
+use Pam\Native\InputAutoCapitalize;
+use Pam\Native\InputAutofillImportance;
+use Pam\Native\InputMode;
+use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputSyncMode;
+use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
 use Pam\Native\ModalPresentation;
@@ -108,6 +113,25 @@ final class TemplateRenderer
         'secure' => PropKey::Secure,
         'keyboardType' => PropKey::KeyboardType,
         'autoComplete' => PropKey::AutoComplete,
+        'editable' => PropKey::InputEditable,
+        'autoCorrect' => PropKey::InputAutoCorrect,
+        'autoCapitalize' => PropKey::InputAutoCapitalize,
+        'caretHidden' => PropKey::InputCaretHidden,
+        'contextMenuHidden' => PropKey::InputContextMenuHidden,
+        'cursorColor' => PropKey::InputCursorColor,
+        'disableFullscreenUI' => PropKey::InputDisableFullscreenUi,
+        'importantForAutofill' => PropKey::InputAutofillImportance,
+        'inputMode' => PropKey::InputMode,
+        'minLines' => PropKey::InputMinLines,
+        'rows' => PropKey::InputMinLines,
+        'selectTextOnFocus' => PropKey::InputSelectTextOnFocus,
+        'selectionStart' => PropKey::InputSelectionStart,
+        'selectionEnd' => PropKey::InputSelectionEnd,
+        'showSoftInputOnFocus' => PropKey::InputShowSoftInputOnFocus,
+        'submitBehavior' => PropKey::InputSubmitBehavior,
+        'textAlignVertical' => PropKey::InputTextAlignVertical,
+        'returnKeyLabel' => PropKey::InputReturnKeyLabel,
+        'underlineColorAndroid' => PropKey::InputUnderlineColor,
         'debounce' => PropKey::InputDebounceMs,
         'sync' => PropKey::InputSyncMode,
         'checked' => PropKey::Checked,
@@ -281,6 +305,10 @@ final class TemplateRenderer
         'on:load' => EventKind::ImageLoad,
         'on:error' => EventKind::ImageError,
         'on:loadEnd' => EventKind::ImageLoadEnd,
+        'on:endEditing' => EventKind::InputEndEditing,
+        'on:selectionChange' => EventKind::InputSelectionChange,
+        'on:contentSizeChange' => EventKind::InputContentSizeChange,
+        'on:keyPress' => EventKind::InputKeyPress,
     ];
 
     private function __construct()
@@ -590,10 +618,21 @@ final class TemplateRenderer
                         $values,
                     );
                 }
-                $element = $element->on(
-                    $event,
-                    $handler,
-                );
+                if ($factory === null && $element instanceof Input) {
+                    $element = match ($event) {
+                        EventKind::InputEndEditing =>
+                            $element->onEndEditing($handler),
+                        EventKind::InputSelectionChange =>
+                            $element->onSelectionChange($handler),
+                        EventKind::InputContentSizeChange =>
+                            $element->onContentSizeChange($handler),
+                        EventKind::InputKeyPress =>
+                            $element->onKeyPress($handler),
+                        default => $element->on($event, $handler),
+                    };
+                } else {
+                    $element = $element->on($event, $handler);
+                }
             }
         }
 
@@ -657,6 +696,21 @@ final class TemplateRenderer
                 $attributes['placeholder'],
                 'Input placeholder',
             ));
+        }
+
+        if ($element instanceof Input) {
+            if (isset($attributes['readOnly'])) {
+                $element = $element->editable(!self::boolValue(
+                    $attributes['readOnly'],
+                    'Input readOnly',
+                ));
+            }
+            if (isset($attributes['scrollEnabled'])) {
+                $element = $element->scrollEnabled(self::boolValue(
+                    $attributes['scrollEnabled'],
+                    'Input scrollEnabled',
+                ));
+            }
         }
 
         if (array_key_exists('horizontal', $attributes)) {
@@ -725,6 +779,12 @@ final class TemplateRenderer
             PropKey::ScrollDecelerationRate,
             PropKey::ScrollKeyboardDismissMode,
             => $kind === NodeKind::Scroll,
+            PropKey::ScrollEnabled =>
+                in_array(
+                    $kind,
+                    [NodeKind::Scroll, NodeKind::List, NodeKind::SectionList],
+                    true,
+                ),
             PropKey::ActivityAnimating,
             PropKey::ActivityHidesWhenStopped,
             PropKey::ActivitySize,
@@ -748,6 +808,26 @@ final class TemplateRenderer
                 [NodeKind::Image, NodeKind::ImageBackground],
                 true,
             ),
+            PropKey::InputEditable,
+            PropKey::InputAutoCorrect,
+            PropKey::InputAutoCapitalize,
+            PropKey::InputCaretHidden,
+            PropKey::InputContextMenuHidden,
+            PropKey::InputCursorColor,
+            PropKey::InputDisableFullscreenUi,
+            PropKey::InputAutofillImportance,
+            PropKey::InputMode,
+            PropKey::InputMinLines,
+            PropKey::InputSelectTextOnFocus,
+            PropKey::InputSelectionStart,
+            PropKey::InputSelectionEnd,
+            PropKey::InputShowSoftInputOnFocus,
+            PropKey::InputSubmitBehavior,
+            PropKey::InputTextAlignVertical,
+            PropKey::InputReturnKeyLabel,
+            PropKey::InputScrollEnabled,
+            PropKey::InputUnderlineColor,
+            => $kind === NodeKind::Input,
             default => true,
         };
     }
@@ -777,6 +857,42 @@ final class TemplateRenderer
                 'immediate' => InputSyncMode::Immediate->value,
                 'blur' => InputSyncMode::OnBlur->value,
                 'submit' => InputSyncMode::OnSubmit->value,
+            ]),
+            PropKey::InputAutoCapitalize => self::named($value, [
+                'none' => InputAutoCapitalize::None->value,
+                'sentences' => InputAutoCapitalize::Sentences->value,
+                'words' => InputAutoCapitalize::Words->value,
+                'characters' => InputAutoCapitalize::Characters->value,
+            ]),
+            PropKey::InputAutofillImportance => self::named($value, [
+                'auto' => InputAutofillImportance::Auto->value,
+                'no' => InputAutofillImportance::No->value,
+                'noExcludeDescendants' =>
+                    InputAutofillImportance::NoExcludeDescendants->value,
+                'yes' => InputAutofillImportance::Yes->value,
+                'yesExcludeDescendants' =>
+                    InputAutofillImportance::YesExcludeDescendants->value,
+            ]),
+            PropKey::InputMode => self::named($value, [
+                'text' => InputMode::Text->value,
+                'none' => InputMode::None->value,
+                'decimal' => InputMode::Decimal->value,
+                'numeric' => InputMode::Numeric->value,
+                'tel' => InputMode::Tel->value,
+                'search' => InputMode::Search->value,
+                'email' => InputMode::Email->value,
+                'url' => InputMode::Url->value,
+            ]),
+            PropKey::InputSubmitBehavior => self::named($value, [
+                'submit' => InputSubmitBehavior::Submit->value,
+                'blurAndSubmit' => InputSubmitBehavior::BlurAndSubmit->value,
+                'newline' => InputSubmitBehavior::Newline->value,
+            ]),
+            PropKey::InputTextAlignVertical => self::named($value, [
+                'auto' => InputTextAlignVertical::Auto->value,
+                'top' => InputTextAlignVertical::Top->value,
+                'center' => InputTextAlignVertical::Center->value,
+                'bottom' => InputTextAlignVertical::Bottom->value,
             ]),
             PropKey::ImageFit => self::named($value, [
                 'cover' => ImageFit::Cover->value,

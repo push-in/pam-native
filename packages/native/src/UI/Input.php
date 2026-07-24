@@ -12,9 +12,12 @@ use Pam\Native\KeyboardType;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\ReturnKeyType;
+use Pam\Native\UI\Concerns\HasInputBehavior;
 
 final class Input extends Element
 {
+    use HasInputBehavior;
+
     public static function make(string $value = ''): self
     {
         return (new self(NodeKind::Input))->withProperty(PropKey::Value, $value);

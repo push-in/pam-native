@@ -29,4 +29,8 @@ enum EventKind: int
     case ImageLoad = 21;
     case ImageError = 22;
     case ImageLoadEnd = 23;
+    case InputEndEditing = 24;
+    case InputSelectionChange = 25;
+    case InputContentSizeChange = 26;
+    case InputKeyPress = 27;
 }

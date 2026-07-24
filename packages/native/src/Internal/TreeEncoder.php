@@ -145,6 +145,12 @@ final class TreeEncoder
                 EventKind::ImageLoad => PropKey::OnImageLoad,
                 EventKind::ImageError => PropKey::OnImageError,
                 EventKind::ImageLoadEnd => PropKey::OnImageLoadEnd,
+                EventKind::InputEndEditing => PropKey::OnInputEndEditing,
+                EventKind::InputSelectionChange =>
+                    PropKey::OnInputSelectionChange,
+                EventKind::InputContentSizeChange =>
+                    PropKey::OnInputContentSizeChange,
+                EventKind::InputKeyPress => PropKey::OnInputKeyPress,
                 EventKind::Back,
                 EventKind::ModuleResult,
                 EventKind::AppState,
