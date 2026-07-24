@@ -39,14 +39,14 @@ internal class PamImageView(context: Context) : ImageView(context) {
     }
 
     override fun onDraw(canvas: Canvas) {
+        val checkpoint = canvas.save()
         if (cornerRadii.any { it > 0f }) {
-            val checkpoint = canvas.save()
             canvas.clipPath(clipPath)
-            super.onDraw(canvas)
-            canvas.restoreToCount(checkpoint)
         } else {
-            super.onDraw(canvas)
+            canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
         }
+        super.onDraw(canvas)
+        canvas.restoreToCount(checkpoint)
     }
 
     private fun rebuildClipPath() {
