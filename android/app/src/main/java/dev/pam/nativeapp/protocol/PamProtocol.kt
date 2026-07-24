@@ -211,7 +211,9 @@ enum class PropKey(val value: Int) {
     TEXT_MINIMUM_FONT_SCALE(166),
     TEXT_BREAK_STRATEGY(167),
     TEXT_HYPHENATION_FREQUENCY(168),
-    TEXT_DATA_DETECTOR_TYPE(169);
+    TEXT_DATA_DETECTOR_TYPE(169),
+    STATUS_BAR_ANIMATED(170),
+    STATUS_BAR_TRANSLUCENT(171);
 
     companion object {
         fun from(value: Int): PropKey =

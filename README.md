@@ -128,6 +128,12 @@ automatic font fitting, accessibility font scaling with an optional maximum,
 Android break/hyphenation strategies and local link/e-mail/phone detection.
 These behaviors never require a PHP callback.
 
+Mounted `StatusBar` nodes merge in mount order and restore the prior window
+configuration when removed. Icon appearance, visibility, translucency and
+optional color animation run on the UI thread. Android 15+ keeps its enforced
+edge-to-edge behavior, where background color and translucency are system
+no-ops.
+
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,

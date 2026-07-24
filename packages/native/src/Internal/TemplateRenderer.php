@@ -115,6 +115,8 @@ final class TemplateRenderer
         'statusBarColor' => PropKey::StatusBarColor,
         'statusBarStyle' => PropKey::StatusBarStyle,
         'statusBarHidden' => PropKey::StatusBarHidden,
+        'statusBarAnimated' => PropKey::StatusBarAnimated,
+        'statusBarTranslucent' => PropKey::StatusBarTranslucent,
         'keyboardBehavior' => PropKey::KeyboardBehavior,
         'refreshing' => PropKey::Refreshing,
         'refreshColors' => PropKey::RefreshColors,

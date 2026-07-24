@@ -32,6 +32,7 @@ use Pam\Native\Plugin\PluginException;
 use Pam\Native\PropKey;
 use Pam\Native\Restorable;
 use Pam\Native\State;
+use Pam\Native\StatusBarAppearance;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TextDecoration;
@@ -52,6 +53,7 @@ use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Screen;
+use Pam\Native\UI\StatusBar;
 use Pam\Native\UI\Text;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
@@ -271,6 +273,21 @@ $assert(
         && $textElement->properties()[PropKey::TextDataDetectorType->value]
             === TextDataDetectorType::Link->value,
     'Text helpers must preserve selection, fitting, breaking and detector properties.',
+);
+
+$statusBarElement = StatusBar::make(
+    0x80112233,
+    StatusBarAppearance::Light,
+    true,
+)->animated()->translucent();
+$assert(
+    $statusBarElement->properties()[PropKey::StatusBarColor->value] === 0x80112233
+        && $statusBarElement->properties()[PropKey::StatusBarStyle->value]
+            === StatusBarAppearance::Light->value
+        && $statusBarElement->properties()[PropKey::StatusBarHidden->value] === true
+        && $statusBarElement->properties()[PropKey::StatusBarAnimated->value] === true
+        && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true,
+    'Status bar helpers must preserve color, style, visibility and edge-to-edge properties.',
 );
 
 $first = (new TreeEncoder())->encode($tree);

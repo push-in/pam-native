@@ -77,6 +77,11 @@ PHP.
 `breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
 selection, fitting, line breaking and link detection inside `TextView`.
 
+`StatusBar::animated()` and `StatusBar::translucent()` complement color, icon
+appearance and visibility. Multiple mounted bars merge in order and restore
+the previous native window state when removed. Android 15+ follows mandatory
+edge-to-edge semantics.
+
 Run `pam mobile benchmark .` on a physical device for release-like AndroidX
 Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in

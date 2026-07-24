@@ -175,4 +175,6 @@ enum PropKey: int
     case TextBreakStrategy = 167;
     case TextHyphenationFrequency = 168;
     case TextDataDetectorType = 169;
+    case StatusBarAnimated = 170;
+    case StatusBarTranslucent = 171;
 }

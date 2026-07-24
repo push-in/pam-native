@@ -22,4 +22,14 @@ final class StatusBar extends Element
 
         return $color === null ? $bar : $bar->withProperty(PropKey::StatusBarColor, $color);
     }
+
+    public function animated(bool $animated = true): self
+    {
+        return $this->withProperty(PropKey::StatusBarAnimated, $animated);
+    }
+
+    public function translucent(bool $translucent = true): self
+    {
+        return $this->withProperty(PropKey::StatusBarTranslucent, $translucent);
+    }
 }

@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.render
 
 import android.annotation.SuppressLint
+import android.animation.ArgbEvaluator
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Activity
@@ -39,6 +40,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.AccelerateDecelerateInterpolator
@@ -88,6 +91,9 @@ class PamRenderer(
     private val imageLoader = NativeImageLoader()
     private val nativeViews = NativeViewRegistry(context)
     private var rootId = 0L
+    private var nextMountOrder = 1L
+    private var statusBarDefaults: StatusBarConfig? = null
+    private var statusBarColorAnimator: ValueAnimator? = null
 
     fun commit(batches: List<List<Mutation>>) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
@@ -125,6 +131,8 @@ class PamRenderer(
         for (position in 0 until nodes.size()) {
             nodes.valueAt(position).propertyAnimator?.cancel()
         }
+        statusBarDefaults?.let(::applyStatusBarConfig)
+        statusBarColorAnimator?.cancel()
         imageLoader.close()
         nativeViews.close()
         host.removeAllViews()
@@ -142,6 +150,7 @@ class PamRenderer(
             index = spec.index,
             kind = spec.kind,
             properties = spec.properties.toMutableMap(),
+            mountOrder = nextMountOrder++,
             virtual = isLayoutOnly(spec),
         )
         nodes.put(spec.id, state)
@@ -226,6 +235,7 @@ class PamRenderer(
 
     private fun remove(id: Long) {
         val state = nodes[id] ?: return
+        val removedStatusBar = state.kind == NodeKind.STATUS_BAR
         val view = views[id]
         state.propertyAnimator?.cancel()
         state.pendingChange?.let(main::removeCallbacks)
@@ -239,6 +249,7 @@ class PamRenderer(
         nodes.remove(id)
         frames.remove(id)
         if (id == rootId) rootId = 0L
+        if (removedStatusBar) applyMergedStatusBar()
     }
 
     private fun update(id: Long, key: PropKey, value: PropValue?) {
@@ -546,9 +557,12 @@ class PamRenderer(
             PropKey.MODAL_PRESENTATION -> (view as? PamModalHost)?.setPresentation(
                 value.integer().toInt(),
             )
-            PropKey.STATUS_BAR_COLOR -> applyStatusBarColor(value.integer().toInt())
-            PropKey.STATUS_BAR_STYLE -> applyStatusBarAppearance(value.integer().toInt())
-            PropKey.STATUS_BAR_HIDDEN -> applyStatusBarHidden(value.flag())
+            PropKey.STATUS_BAR_COLOR,
+            PropKey.STATUS_BAR_STYLE,
+            PropKey.STATUS_BAR_HIDDEN,
+            PropKey.STATUS_BAR_ANIMATED,
+            PropKey.STATUS_BAR_TRANSLUCENT,
+            -> applyMergedStatusBar()
             PropKey.KEYBOARD_BEHAVIOR -> {
                 state.keyboardBehavior = value.integer().toInt()
                 applyKeyboardAvoidance(view, state)
@@ -811,6 +825,12 @@ class PamRenderer(
                     Layout.HYPHENATION_FREQUENCY_NONE
             PropKey.TEXT_DATA_DETECTOR_TYPE ->
                 (view as? TextView)?.let { applyTextDataDetector(it, state) }
+            PropKey.STATUS_BAR_COLOR,
+            PropKey.STATUS_BAR_STYLE,
+            PropKey.STATUS_BAR_HIDDEN,
+            PropKey.STATUS_BAR_ANIMATED,
+            PropKey.STATUS_BAR_TRANSLUCENT,
+            -> applyMergedStatusBar()
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
             PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(Color.GRAY)
             PropKey.ENABLED -> view.isEnabled = true
@@ -1572,10 +1592,107 @@ class PamRenderer(
         }
     }
 
+    private fun applyMergedStatusBar() {
+        val window = activity()?.window ?: return
+        val defaults = statusBarDefaults
+            ?: captureStatusBarDefaults().also { statusBarDefaults = it }
+        var merged = defaults
+        val mounted = ArrayList<NodeState>()
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            if (state.kind == NodeKind.STATUS_BAR) mounted += state
+        }
+        mounted.sortBy(NodeState::mountOrder)
+        mounted.forEach { state ->
+            if (state.properties.containsKey(PropKey.STATUS_BAR_COLOR)) {
+                merged = merged.copy(
+                    color = state.integer(
+                        PropKey.STATUS_BAR_COLOR,
+                        merged.color.toLong(),
+                    ).toInt(),
+                )
+            }
+            if (state.properties.containsKey(PropKey.STATUS_BAR_STYLE)) {
+                merged = merged.copy(
+                    appearance = state.integer(
+                        PropKey.STATUS_BAR_STYLE,
+                        merged.appearance.toLong(),
+                    ).toInt(),
+                )
+            }
+            if (state.properties.containsKey(PropKey.STATUS_BAR_HIDDEN)) {
+                merged = merged.copy(
+                    hidden = state.flag(PropKey.STATUS_BAR_HIDDEN, merged.hidden),
+                )
+            }
+            if (state.properties.containsKey(PropKey.STATUS_BAR_ANIMATED)) {
+                merged = merged.copy(
+                    animated = state.flag(PropKey.STATUS_BAR_ANIMATED, merged.animated),
+                )
+            }
+            if (state.properties.containsKey(PropKey.STATUS_BAR_TRANSLUCENT)) {
+                merged = merged.copy(
+                    translucent = state.flag(
+                        PropKey.STATUS_BAR_TRANSLUCENT,
+                        merged.translucent,
+                    ),
+                )
+            }
+        }
+        applyStatusBarConfig(merged)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun captureStatusBarDefaults(): StatusBarConfig {
+        val window = activity()?.window
+            ?: return StatusBarConfig(Color.BLACK, STATUS_BAR_LIGHT, false, false, false)
+        val decor = window.decorView
+        val lightIcons = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val appearance = decor.windowInsetsController?.systemBarsAppearance ?: 0
+            appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS == 0
+        } else {
+            decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR == 0
+        }
+        val hidden = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            decor.rootWindowInsets?.isVisible(WindowInsets.Type.statusBars()) == false
+        } else {
+            decor.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN != 0
+        }
+        val translucent =
+            decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN != 0
+
+        return StatusBarConfig(
+            color = window.statusBarColor,
+            appearance = if (lightIcons) STATUS_BAR_LIGHT else STATUS_BAR_DARK,
+            hidden = hidden,
+            animated = false,
+            translucent = translucent,
+        )
+    }
+
+    private fun applyStatusBarConfig(config: StatusBarConfig) {
+        applyStatusBarTranslucent(config.translucent)
+        applyStatusBarColor(config.color, config.animated)
+        applyStatusBarAppearance(config.appearance)
+        applyStatusBarHidden(config.hidden)
+    }
+
+    @Suppress("DEPRECATION")
     private fun applyStatusBarAppearance(value: Int) {
         val decor = activity()?.window?.decorView ?: return
-        @Suppress("DEPRECATION")
-        decor.systemUiVisibility = if (value == 1) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val controller = decor.windowInsetsController ?: return
+            controller.setSystemBarsAppearance(
+                if (value == STATUS_BAR_DARK) {
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                } else {
+                    0
+                },
+                WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+            )
+            return
+        }
+        decor.systemUiVisibility = if (value == STATUS_BAR_DARK) {
             decor.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
         } else {
             decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
@@ -1601,8 +1718,40 @@ class PamRenderer(
     }
 
     @Suppress("DEPRECATION")
-    private fun applyStatusBarColor(color: Int) {
-        activity()?.window?.statusBarColor = color
+    private fun applyStatusBarColor(color: Int, animated: Boolean) {
+        if (Build.VERSION.SDK_INT >= 35) return
+        val window = activity()?.window ?: return
+        statusBarColorAnimator?.cancel()
+        if (!animated || window.statusBarColor == color) {
+            window.statusBarColor = color
+            return
+        }
+        statusBarColorAnimator = ValueAnimator.ofObject(
+            ArgbEvaluator(),
+            window.statusBarColor,
+            color,
+        ).apply {
+            duration = STATUS_BAR_ANIMATION_DURATION_MS
+            addUpdateListener { animation ->
+                window.statusBarColor = animation.animatedValue as Int
+            }
+            start()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyStatusBarTranslucent(translucent: Boolean) {
+        if (Build.VERSION.SDK_INT >= 35) return
+        val window = activity()?.window ?: return
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+        val decor = window.decorView
+        decor.systemUiVisibility = if (translucent) {
+            decor.systemUiVisibility or
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+        } else {
+            decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN.inv()
+        }
     }
 
     private fun imageView(view: View): ImageView? =
@@ -1825,12 +1974,21 @@ class PamRenderer(
 
     private fun resourcesDensity(): Float = context.resources.displayMetrics.density
 
+    private data class StatusBarConfig(
+        val color: Int,
+        val appearance: Int,
+        val hidden: Boolean,
+        val animated: Boolean,
+        val translucent: Boolean,
+    )
+
     private data class NodeState(
         val id: Long,
         var parent: Long,
         var index: Int,
         val kind: NodeKind,
         val properties: MutableMap<PropKey, PropValue>,
+        val mountOrder: Long,
         var updating: Boolean = false,
         var textWatcherInstalled: Boolean = false,
         var pendingChange: Runnable? = null,
@@ -1899,6 +2057,9 @@ class PamRenderer(
         const val SAFE_AREA_PADDING = 1
         const val SAFE_AREA_MARGIN = 2
         const val REFRESH_SIZE_DEFAULT = 1
+        const val STATUS_BAR_DARK = 1
+        const val STATUS_BAR_LIGHT = 2
+        const val STATUS_BAR_ANIMATION_DURATION_MS = 300L
         const val TEXT_ELLIPSIZE_HEAD = 2
         const val TEXT_ELLIPSIZE_MIDDLE = 3
         const val TEXT_ELLIPSIZE_CLIP = 4
