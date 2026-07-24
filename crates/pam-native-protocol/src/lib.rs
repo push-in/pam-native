@@ -271,6 +271,21 @@ pub enum PropKey {
     SwitchTrackColorFalse = 192,
     SwitchTrackColorTrue = 193,
     SwitchThumbColor = 194,
+    ImageDefaultSource = 195,
+    ImageLoadingIndicatorSource = 196,
+    ImageFadeDurationMs = 197,
+    ImageResizeMethod = 198,
+    ImageResizeMultiplier = 199,
+    ImageProgressiveRenderingEnabled = 200,
+    ImageCachePolicy = 201,
+    ImageOverlayColor = 202,
+    ImageSourceSet = 203,
+    ImageRequestHeaders = 204,
+    OnImageLoadStart = 205,
+    OnImageProgress = 206,
+    OnImageLoad = 207,
+    OnImageError = 208,
+    OnImageLoadEnd = 209,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -472,6 +487,21 @@ impl TryFrom<u16> for PropKey {
             192 => Ok(Self::SwitchTrackColorFalse),
             193 => Ok(Self::SwitchTrackColorTrue),
             194 => Ok(Self::SwitchThumbColor),
+            195 => Ok(Self::ImageDefaultSource),
+            196 => Ok(Self::ImageLoadingIndicatorSource),
+            197 => Ok(Self::ImageFadeDurationMs),
+            198 => Ok(Self::ImageResizeMethod),
+            199 => Ok(Self::ImageResizeMultiplier),
+            200 => Ok(Self::ImageProgressiveRenderingEnabled),
+            201 => Ok(Self::ImageCachePolicy),
+            202 => Ok(Self::ImageOverlayColor),
+            203 => Ok(Self::ImageSourceSet),
+            204 => Ok(Self::ImageRequestHeaders),
+            205 => Ok(Self::OnImageLoadStart),
+            206 => Ok(Self::OnImageProgress),
+            207 => Ok(Self::OnImageLoad),
+            208 => Ok(Self::OnImageError),
+            209 => Ok(Self::OnImageLoadEnd),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1275,10 +1305,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=194 {
+        for value in 1..=209 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(195).is_err());
+        assert!(PropKey::try_from(210).is_err());
     }
 
     fn tree(text: &str) -> Tree {

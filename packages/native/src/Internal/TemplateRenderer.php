@@ -16,6 +16,8 @@ use Pam\Native\AnimationKind;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\ImageFit;
+use Pam\Native\ImageCachePolicy;
+use Pam\Native\ImageResizeMethod;
 use Pam\Native\InputSyncMode;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
@@ -112,7 +114,19 @@ final class TemplateRenderer
         'loading' => PropKey::Loading,
         'progressColor' => PropKey::ProgressColor,
         'fit' => PropKey::ImageFit,
+        'resizeMode' => PropKey::ImageFit,
         'tintColor' => PropKey::TintColor,
+        'defaultSource' => PropKey::ImageDefaultSource,
+        'loadingIndicatorSource' => PropKey::ImageLoadingIndicatorSource,
+        'fadeDuration' => PropKey::ImageFadeDurationMs,
+        'resizeMethod' => PropKey::ImageResizeMethod,
+        'resizeMultiplier' => PropKey::ImageResizeMultiplier,
+        'progressiveRenderingEnabled' =>
+            PropKey::ImageProgressiveRenderingEnabled,
+        'cache' => PropKey::ImageCachePolicy,
+        'cachePolicy' => PropKey::ImageCachePolicy,
+        'overlayColor' => PropKey::ImageOverlayColor,
+        'srcSet' => PropKey::ImageSourceSet,
         'elevation' => PropKey::Elevation,
         'visible' => PropKey::Visible,
         'presentation' => PropKey::ModalPresentation,
@@ -262,6 +276,11 @@ final class TemplateRenderer
         'on:drawerOpen' => EventKind::DrawerOpen,
         'on:drawerClose' => EventKind::DrawerClose,
         'on:event' => EventKind::Native,
+        'on:loadStart' => EventKind::ImageLoadStart,
+        'on:progress' => EventKind::ImageProgress,
+        'on:load' => EventKind::ImageLoad,
+        'on:error' => EventKind::ImageError,
+        'on:loadEnd' => EventKind::ImageLoadEnd,
     ];
 
     private function __construct()
@@ -608,6 +627,23 @@ final class TemplateRenderer
             ));
         }
 
+        if (
+            !isset($attributes['accessibilityLabel'])
+            && isset($attributes['alt'])
+            && in_array(
+                $element->kind(),
+                [NodeKind::Image, NodeKind::ImageBackground],
+                true,
+            )
+        ) {
+            $element = $element
+                ->accessibilityLabel(self::stringValue(
+                    $attributes['alt'],
+                    'Image alt text',
+                ))
+                ->accessible();
+        }
+
         if (isset($attributes['testId'])) {
             $element = $element->testId(self::stringValue($attributes['testId'], 'Test ID'));
         }
@@ -697,6 +733,21 @@ final class TemplateRenderer
             PropKey::SwitchTrackColorTrue,
             PropKey::SwitchThumbColor,
             => $kind === NodeKind::Switch,
+            PropKey::ImageDefaultSource,
+            PropKey::ImageLoadingIndicatorSource,
+            PropKey::ImageFadeDurationMs,
+            PropKey::ImageResizeMethod,
+            PropKey::ImageResizeMultiplier,
+            PropKey::ImageProgressiveRenderingEnabled,
+            PropKey::ImageCachePolicy,
+            PropKey::ImageOverlayColor,
+            PropKey::ImageSourceSet,
+            PropKey::ImageRequestHeaders,
+            => in_array(
+                $kind,
+                [NodeKind::Image, NodeKind::ImageBackground],
+                true,
+            ),
             default => true,
         };
     }
@@ -731,7 +782,23 @@ final class TemplateRenderer
                 'cover' => ImageFit::Cover->value,
                 'contain' => ImageFit::Contain->value,
                 'fill' => ImageFit::Fill->value,
+                'stretch' => ImageFit::Fill->value,
                 'center' => ImageFit::Center->value,
+                'repeat' => ImageFit::Repeat->value,
+            ]),
+            PropKey::ImageResizeMethod => self::named($value, [
+                'auto' => ImageResizeMethod::Auto->value,
+                'resize' => ImageResizeMethod::Resize->value,
+                'scale' => ImageResizeMethod::Scale->value,
+                'none' => ImageResizeMethod::None->value,
+            ]),
+            PropKey::ImageCachePolicy => self::named($value, [
+                'default' => ImageCachePolicy::Default->value,
+                'reload' => ImageCachePolicy::Reload->value,
+                'force-cache' => ImageCachePolicy::ForceCache->value,
+                'forceCache' => ImageCachePolicy::ForceCache->value,
+                'only-if-cached' => ImageCachePolicy::OnlyIfCached->value,
+                'onlyIfCached' => ImageCachePolicy::OnlyIfCached->value,
             ]),
             PropKey::ModalPresentation => self::named($value, [
                 'fullScreen' => 1, 'dialog' => 2, 'sheet' => 3,
@@ -1082,9 +1149,11 @@ final class TemplateRenderer
                 || $payload instanceof Stringable
             ) {
                 $value = (string) $payload;
+            } elseif (is_object($payload)) {
+                $value = $payload;
             } else {
                 throw new RuntimeException(
-                    'Template event payload must be scalar, stringable, or an array.',
+                    'Template event payload must be scalar, stringable, an object, or an array.',
                 );
             }
             $method->invoke($scope, $value);

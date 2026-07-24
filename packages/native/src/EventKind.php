@@ -24,4 +24,9 @@ enum EventKind: int
     case AppState = 16;
     case Dimensions = 17;
     case MemoryPressure = 18;
+    case ImageLoadStart = 19;
+    case ImageProgress = 20;
+    case ImageLoad = 21;
+    case ImageError = 22;
+    case ImageLoadEnd = 23;
 }

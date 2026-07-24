@@ -4,16 +4,13 @@ import android.content.Context
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.ImageView
 
 internal class PamImageBackground(context: Context) :
     FrameLayout(context),
     PamPointerEventsHost {
     private var pointerEvents = POINTER_EVENTS_AUTO
 
-    val image = ImageView(context).apply {
-        scaleType = ImageView.ScaleType.CENTER_CROP
-    }
+    val image = PamImageView(context)
 
     init {
         clipChildren = false

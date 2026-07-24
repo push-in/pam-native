@@ -42,6 +42,32 @@ enum class NodeKind(val value: Int) {
     }
 }
 
+enum class EventKind(val value: Int) {
+    PRESS(1),
+    CHANGE(2),
+    BACK(3),
+    MODULE_RESULT(4),
+    LONG_PRESS(5),
+    FOCUS(6),
+    BLUR(7),
+    SUBMIT(8),
+    SCROLL(9),
+    REFRESH(10),
+    TOGGLE(11),
+    END_REACHED(12),
+    DRAWER_OPEN(13),
+    DRAWER_CLOSE(14),
+    NATIVE(15),
+    APP_STATE(16),
+    DIMENSIONS(17),
+    MEMORY_PRESSURE(18),
+    IMAGE_LOAD_START(19),
+    IMAGE_PROGRESS(20),
+    IMAGE_LOAD(21),
+    IMAGE_ERROR(22),
+    IMAGE_LOAD_END(23);
+}
+
 enum class PropKey(val value: Int) {
     TEXT(1),
     VALUE(2),
@@ -236,7 +262,22 @@ enum class PropKey(val value: Int) {
     ACTIVITY_SIZE(191),
     SWITCH_TRACK_COLOR_FALSE(192),
     SWITCH_TRACK_COLOR_TRUE(193),
-    SWITCH_THUMB_COLOR(194);
+    SWITCH_THUMB_COLOR(194),
+    IMAGE_DEFAULT_SOURCE(195),
+    IMAGE_LOADING_INDICATOR_SOURCE(196),
+    IMAGE_FADE_DURATION_MS(197),
+    IMAGE_RESIZE_METHOD(198),
+    IMAGE_RESIZE_MULTIPLIER(199),
+    IMAGE_PROGRESSIVE_RENDERING_ENABLED(200),
+    IMAGE_CACHE_POLICY(201),
+    IMAGE_OVERLAY_COLOR(202),
+    IMAGE_SOURCE_SET(203),
+    IMAGE_REQUEST_HEADERS(204),
+    ON_IMAGE_LOAD_START(205),
+    ON_IMAGE_PROGRESS(206),
+    ON_IMAGE_LOAD(207),
+    ON_IMAGE_ERROR(208),
+    ON_IMAGE_LOAD_END(209);
 
     companion object {
         fun from(value: Int): PropKey =

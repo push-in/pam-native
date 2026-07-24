@@ -77,6 +77,31 @@ PHP.
 `breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
 selection, fitting, line breaking and link detection inside `TextView`.
 
+Images use one cancelable loader for `Image` and `ImageBackground`. Remote
+originals are coalesced and cached on disk, decoded bitmaps are cached in RAM
+by measured-size bucket, and Android downsamples before allocating pixels:
+
+```php
+Image::make($url)
+    ->defaultSource('asset://avatar-placeholder.png')
+    ->fit(ImageFit::Cover)
+    ->resizeMethod(ImageResizeMethod::Auto)
+    ->resizeMultiplier(2)
+    ->cache(ImageCachePolicy::ForceCache)
+    ->fadeDuration(180)
+    ->onProgress($updateProgress)
+    ->onLoad($rememberNaturalSize)
+    ->onError($showFallback);
+```
+
+HTTPS, debug HTTP, `asset:`, `file:`, `content:`, `android.resource:` and
+bounded image `data:` URIs are supported. Redirects cannot downgrade HTTPS;
+responses, headers, redirects, input bytes and decoded pixels are bounded.
+`srcSet`, request headers, loading indicators, repeat mode and typed
+load-start/progress/load/error/load-end callbacks share the same path.
+Callbacks are opt-in, and download progress is coalesced to one event per
+display frame before crossing into PHP.
+
 `StatusBar::animated()` and `StatusBar::translucent()` complement color, icon
 appearance and visibility. Multiple mounted bars merge in order and restore
 the previous native window state when removed. Android 15+ follows mandatory

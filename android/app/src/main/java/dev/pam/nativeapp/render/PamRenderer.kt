@@ -81,7 +81,7 @@ class PamRenderer(
     private val nodes = LongSparseArray<NodeState>()
     private val frames = LongSparseArray<Frame>()
     private val children = LongSparseArray<MutableList<Long>>()
-    private val imageLoader = NativeImageLoader()
+    private val imageLoader = NativeImageLoader(context)
     private val nativeViews = NativeViewRegistry(context)
     private var rootId = 0L
     private var nextMountOrder = 1L
@@ -183,10 +183,7 @@ class PamRenderer(
                 minHeight = 0
                 setPadding(dp(12f), 0, dp(12f), 0)
             }
-            NodeKind.IMAGE -> ImageView(context).apply {
-                adjustViewBounds = true
-                scaleType = ImageView.ScaleType.CENTER_CROP
-            }
+            NodeKind.IMAGE -> PamImageView(context)
             NodeKind.IMAGE_BACKGROUND -> PamImageBackground(context)
             NodeKind.SCROLL -> PamScrollContainer(context)
             NodeKind.LIST,
@@ -226,6 +223,7 @@ class PamRenderer(
         state.propertyAnimator?.cancel()
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
+        pamImageView(view)?.let(imageLoader::cancel)
         view?.let(nativeViews::release)
         view?.let(::clearHitSlop)
         (view?.parent as? ViewGroup)?.removeView(view)
@@ -262,6 +260,9 @@ class PamRenderer(
         }
         if (key.isEventProperty()) {
             views[id]?.let { installEvents(it, state) }
+        }
+        if (key in IMAGE_EVENT_PROPERTIES) {
+            views[id]?.let { loadImage(it, state) }
         }
     }
 
@@ -444,10 +445,7 @@ class PamRenderer(
                 view.tag = value.semanticValue()
             }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text()
-            PropKey.SOURCE -> when (view) {
-                is ImageView -> imageLoader.load(value.text(), view)
-                is PamImageBackground -> imageLoader.load(value.text(), view.image)
-            }
+            PropKey.SOURCE -> loadImage(view, state)
             PropKey.BACKGROUND_COLOR,
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
@@ -524,14 +522,28 @@ class PamRenderer(
             PropKey.LOADING -> applyLoading(view, state, value.flag())
             PropKey.PROGRESS_COLOR ->
                 (view as? PamActivityIndicator)?.setColor(value.integer().toInt())
-            PropKey.IMAGE_FIT -> imageView(view)?.scaleType = when (value.integer().toInt()) {
-                2 -> ImageView.ScaleType.CENTER_INSIDE
-                3 -> ImageView.ScaleType.FIT_XY
-                4 -> ImageView.ScaleType.CENTER
-                else -> ImageView.ScaleType.CENTER_CROP
+            PropKey.IMAGE_FIT -> {
+                imageView(view)?.scaleType = when (value.integer().toInt()) {
+                    2 -> ImageView.ScaleType.CENTER_INSIDE
+                    3 -> ImageView.ScaleType.FIT_XY
+                    4, 5 -> ImageView.ScaleType.CENTER
+                    else -> ImageView.ScaleType.CENTER_CROP
+                }
+                loadImage(view, state)
             }
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList =
                 ColorStateList.valueOf(value.integer().toInt())
+            PropKey.IMAGE_DEFAULT_SOURCE,
+            PropKey.IMAGE_LOADING_INDICATOR_SOURCE,
+            PropKey.IMAGE_FADE_DURATION_MS,
+            PropKey.IMAGE_RESIZE_METHOD,
+            PropKey.IMAGE_RESIZE_MULTIPLIER,
+            PropKey.IMAGE_PROGRESSIVE_RENDERING_ENABLED,
+            PropKey.IMAGE_CACHE_POLICY,
+            PropKey.IMAGE_SOURCE_SET,
+            PropKey.IMAGE_REQUEST_HEADERS,
+            -> loadImage(view, state)
+            PropKey.IMAGE_OVERLAY_COLOR -> updateBackground(view, state)
             PropKey.ELEVATION -> view.elevation = dp(value.decimal().toFloat()).toFloat()
             PropKey.VISIBLE -> when (view) {
                 is PamModalHost -> view.setVisible(value.flag())
@@ -801,6 +813,11 @@ class PamRenderer(
             PropKey.ON_DRAWER_CLOSE,
             PropKey.HOST_NAME,
             PropKey.ON_NATIVE_EVENT,
+            PropKey.ON_IMAGE_LOAD_START,
+            PropKey.ON_IMAGE_PROGRESS,
+            PropKey.ON_IMAGE_LOAD,
+            PropKey.ON_IMAGE_ERROR,
+            PropKey.ON_IMAGE_LOAD_END,
             PropKey.FLEX_DIRECTION,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
@@ -826,7 +843,7 @@ class PamRenderer(
                 view.tag = null
             }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = null
-            PropKey.SOURCE -> imageView(view)?.setImageDrawable(null)
+            PropKey.SOURCE -> pamImageView(view)?.let(imageLoader::cancel)
             PropKey.BACKGROUND_COLOR,
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
@@ -876,6 +893,21 @@ class PamRenderer(
             PropKey.STATUS_BAR_TRANSLUCENT,
             -> applyMergedStatusBar()
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
+            PropKey.IMAGE_FIT -> {
+                imageView(view)?.scaleType = ImageView.ScaleType.CENTER_CROP
+                loadImage(view, state)
+            }
+            PropKey.IMAGE_DEFAULT_SOURCE,
+            PropKey.IMAGE_LOADING_INDICATOR_SOURCE,
+            PropKey.IMAGE_FADE_DURATION_MS,
+            PropKey.IMAGE_RESIZE_METHOD,
+            PropKey.IMAGE_RESIZE_MULTIPLIER,
+            PropKey.IMAGE_PROGRESSIVE_RENDERING_ENABLED,
+            PropKey.IMAGE_CACHE_POLICY,
+            PropKey.IMAGE_SOURCE_SET,
+            PropKey.IMAGE_REQUEST_HEADERS,
+            -> loadImage(view, state)
+            PropKey.IMAGE_OVERLAY_COLOR -> updateBackground(view, state)
             PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(Color.GRAY)
             PropKey.ENABLED -> view.isEnabled = true
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
@@ -1296,6 +1328,11 @@ class PamRenderer(
             EVENT_DRAWER_OPEN -> PropKey.ON_DRAWER_OPEN
             EVENT_DRAWER_CLOSE -> PropKey.ON_DRAWER_CLOSE
             EVENT_NATIVE -> PropKey.ON_NATIVE_EVENT
+            EVENT_IMAGE_LOAD_START -> PropKey.ON_IMAGE_LOAD_START
+            EVENT_IMAGE_PROGRESS -> PropKey.ON_IMAGE_PROGRESS
+            EVENT_IMAGE_LOAD -> PropKey.ON_IMAGE_LOAD
+            EVENT_IMAGE_ERROR -> PropKey.ON_IMAGE_ERROR
+            EVENT_IMAGE_LOAD_END -> PropKey.ON_IMAGE_LOAD_END
             else -> null
         }
 
@@ -1354,7 +1391,19 @@ class PamRenderer(
     }
 
     private fun updateBackground(view: View, state: NodeState) {
-        val color = state.integer(PropKey.BACKGROUND_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        val defaultColor = if (
+            state.kind == NodeKind.IMAGE ||
+            state.kind == NodeKind.IMAGE_BACKGROUND
+        ) {
+            state.integer(
+                PropKey.IMAGE_OVERLAY_COLOR,
+                Color.TRANSPARENT.toLong(),
+            )
+        } else {
+            Color.TRANSPARENT.toLong()
+        }
+        val color = state.integer(PropKey.BACKGROUND_COLOR, defaultColor)
+            .toInt()
         val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
         val topLeft = dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat())
             .toFloat()
@@ -1374,19 +1423,36 @@ class PamRenderer(
             PropKey.BORDER_BOTTOM_WIDTH,
         ).maxOf { key -> dp(state.number(key, 0.0).toFloat()) }
         val borderColor = state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        val imageHost = state.kind == NodeKind.IMAGE ||
+            state.kind == NodeKind.IMAGE_BACKGROUND
+        val radii = floatArrayOf(
+            topLeft,
+            topLeft,
+            topRight,
+            topRight,
+            bottomRight,
+            bottomRight,
+            bottomLeft,
+            bottomLeft,
+        )
         val shape = GradientDrawable().apply {
             setColor(color)
-            cornerRadii = floatArrayOf(
-                topLeft,
-                topLeft,
-                topRight,
-                topRight,
-                bottomRight,
-                bottomRight,
-                bottomLeft,
-                bottomLeft,
-            )
-            if (borderWidth > 0) setStroke(borderWidth, borderColor)
+            cornerRadii = radii
+            if (!imageHost && borderWidth > 0) {
+                setStroke(borderWidth, borderColor)
+            }
+        }
+        pamImageView(view)?.setCornerRadii(radii)
+        if (imageHost) {
+            view.foreground = if (borderWidth > 0) {
+                GradientDrawable().apply {
+                    setColor(Color.TRANSPARENT)
+                    cornerRadii = radii
+                    setStroke(borderWidth, borderColor)
+                }
+            } else {
+                null
+            }
         }
         val ripple = state.properties[PropKey.RIPPLE_COLOR]?.integer()?.toInt()
         view.background = if (ripple != null) {
@@ -1871,6 +1937,153 @@ class PamRenderer(
         }
     }
 
+    private fun loadImage(view: View, state: NodeState) {
+        val image = pamImageView(view) ?: return
+        val source = (state.properties[PropKey.SOURCE] as? PropValue.Text)
+            ?.value
+            ?: run {
+                imageLoader.cancel(image)
+                return
+            }
+        val request = NativeImageRequest(
+            source = source,
+            defaultSource = state.textOrNull(PropKey.IMAGE_DEFAULT_SOURCE),
+            loadingIndicatorSource =
+                state.textOrNull(PropKey.IMAGE_LOADING_INDICATOR_SOURCE),
+            sourceSet = state.textOrNull(PropKey.IMAGE_SOURCE_SET),
+            requestHeaders = state.textOrNull(PropKey.IMAGE_REQUEST_HEADERS),
+            fadeDurationMs = state.integer(
+                PropKey.IMAGE_FADE_DURATION_MS,
+                300L,
+            ).toInt().coerceIn(0, 10_000),
+            resizeMethod = state.integer(
+                PropKey.IMAGE_RESIZE_METHOD,
+                IMAGE_RESIZE_AUTO.toLong(),
+            ).toInt(),
+            resizeMultiplier = state.number(
+                PropKey.IMAGE_RESIZE_MULTIPLIER,
+                1.0,
+            ).toFloat(),
+            progressiveRenderingEnabled = state.flag(
+                PropKey.IMAGE_PROGRESSIVE_RENDERING_ENABLED,
+                false,
+            ),
+            cachePolicy = state.integer(
+                PropKey.IMAGE_CACHE_POLICY,
+                IMAGE_CACHE_DEFAULT.toLong(),
+            ).toInt(),
+            repeat = state.integer(PropKey.IMAGE_FIT, 1L) == 5L,
+        )
+        imageLoader.load(
+            request,
+            image,
+            NativeImageCallbacks(
+                onStart = {
+                    state.imageLoading = true
+                    if (
+                        nodes[state.id] === state &&
+                        state.properties[PropKey.ON_IMAGE_LOAD_START] != null
+                    ) {
+                        dispatch(state.id, EVENT_IMAGE_LOAD_START)
+                    }
+                },
+                onProgress = { loaded, total ->
+                    if (state.properties[PropKey.ON_IMAGE_PROGRESS] == null) {
+                        return@NativeImageCallbacks
+                    }
+                    state.imageProgressLoaded = loaded
+                    state.imageProgressTotal = total
+                    if (!state.imageProgressScheduled) {
+                        state.imageProgressScheduled = true
+                        Choreographer.getInstance().postFrameCallback {
+                            if (
+                                state.imageProgressScheduled &&
+                                state.imageLoading &&
+                                nodes[state.id] === state
+                            ) {
+                                dispatchImageProgress(state)
+                            }
+                        }
+                    }
+                },
+                onSuccess = { result ->
+                    if (nodes[state.id] !== state) {
+                        return@NativeImageCallbacks
+                    }
+                    if (
+                        state.imageProgressScheduled &&
+                        state.properties[PropKey.ON_IMAGE_PROGRESS] != null
+                    ) {
+                        dispatchImageProgress(state)
+                    }
+                    state.imageLoading = false
+                    if (state.properties[PropKey.ON_IMAGE_LOAD] != null) {
+                        dispatchBytes(
+                            state.id,
+                            EVENT_IMAGE_LOAD,
+                            WireMap.encode(
+                                mapOf(
+                                    "uri" to WireValue.Text(result.source),
+                                    "width" to WireValue.Decimal(
+                                        result.width.toDouble(),
+                                    ),
+                                    "height" to WireValue.Decimal(
+                                        result.height.toDouble(),
+                                    ),
+                                ),
+                            ),
+                        )
+                    }
+                },
+                onError = { message ->
+                    if (nodes[state.id] !== state) {
+                        return@NativeImageCallbacks
+                    }
+                    state.imageLoading = false
+                    state.imageProgressScheduled = false
+                    if (state.properties[PropKey.ON_IMAGE_ERROR] != null) {
+                        dispatchBytes(
+                            state.id,
+                            EVENT_IMAGE_ERROR,
+                            WireMap.encode(
+                                mapOf("error" to WireValue.Text(message)),
+                            ),
+                        )
+                    }
+                },
+                onEnd = {
+                    if (
+                        nodes[state.id] === state &&
+                        state.properties[PropKey.ON_IMAGE_LOAD_END] != null
+                    ) {
+                        dispatch(state.id, EVENT_IMAGE_LOAD_END)
+                    }
+                },
+            ),
+        )
+    }
+
+    private fun dispatchImageProgress(state: NodeState) {
+        state.imageProgressScheduled = false
+        dispatchBytes(
+            state.id,
+            EVENT_IMAGE_PROGRESS,
+            WireMap.encode(
+                mapOf(
+                    "loaded" to WireValue.Integer(state.imageProgressLoaded),
+                    "total" to WireValue.Integer(state.imageProgressTotal),
+                ),
+            ),
+        )
+    }
+
+    private fun pamImageView(view: View?): PamImageView? =
+        when (view) {
+            is PamImageView -> view
+            is PamImageBackground -> view.image
+            else -> null
+        }
+
     private fun imageView(view: View): ImageView? =
         when (view) {
             is ImageView -> view
@@ -2124,6 +2337,10 @@ class PamRenderer(
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var virtual: Boolean = false,
+        var imageLoading: Boolean = false,
+        var imageProgressScheduled: Boolean = false,
+        var imageProgressLoaded: Long = 0L,
+        var imageProgressTotal: Long = 0L,
     ) {
         fun inputSyncMode(): Int = integer(PropKey.INPUT_SYNC_MODE, INPUT_SYNC_DEBOUNCED.toLong()).toInt()
 
@@ -2144,6 +2361,9 @@ class PamRenderer(
 
         fun integer(key: PropKey, fallback: Long): Long =
             (properties[key] as? PropValue.Integer)?.value ?: fallback
+
+        fun textOrNull(key: PropKey): String? =
+            (properties[key] as? PropValue.Text)?.value
     }
 
     private companion object {
@@ -2160,6 +2380,11 @@ class PamRenderer(
         const val EVENT_DRAWER_OPEN = 13
         const val EVENT_DRAWER_CLOSE = 14
         const val EVENT_NATIVE = 15
+        const val EVENT_IMAGE_LOAD_START = 19
+        const val EVENT_IMAGE_PROGRESS = 20
+        const val EVENT_IMAGE_LOAD = 21
+        const val EVENT_IMAGE_ERROR = 22
+        const val EVENT_IMAGE_LOAD_END = 23
         const val MAX_EVENT_BYTES = 1024 * 1024
         const val INPUT_SYNC_NATIVE = 1
         const val INPUT_SYNC_DEBOUNCED = 2
@@ -2276,6 +2501,18 @@ class PamRenderer(
             PropKey.ON_DRAWER_OPEN,
             PropKey.ON_DRAWER_CLOSE,
             PropKey.ON_NATIVE_EVENT,
+            PropKey.ON_IMAGE_LOAD_START,
+            PropKey.ON_IMAGE_PROGRESS,
+            PropKey.ON_IMAGE_LOAD,
+            PropKey.ON_IMAGE_ERROR,
+            PropKey.ON_IMAGE_LOAD_END,
+        )
+        val IMAGE_EVENT_PROPERTIES = setOf(
+            PropKey.ON_IMAGE_LOAD_START,
+            PropKey.ON_IMAGE_PROGRESS,
+            PropKey.ON_IMAGE_LOAD,
+            PropKey.ON_IMAGE_ERROR,
+            PropKey.ON_IMAGE_LOAD_END,
         )
         val MODAL_DISMISS_PAYLOAD = WireMap.encode(
             mapOf(

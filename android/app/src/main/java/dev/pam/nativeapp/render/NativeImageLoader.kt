@@ -1,70 +1,141 @@
 package dev.pam.nativeapp.render
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Shader
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.TransitionDrawable
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
 import android.util.LruCache
-import android.widget.ImageView
 import dev.pam.nativeapp.BuildConfig
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
+import java.security.MessageDigest
+import java.util.WeakHashMap
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import kotlin.math.max
 
-internal class NativeImageLoader : AutoCloseable {
+internal data class NativeImageRequest(
+    val source: String,
+    val defaultSource: String? = null,
+    val loadingIndicatorSource: String? = null,
+    val sourceSet: String? = null,
+    val requestHeaders: String? = null,
+    val fadeDurationMs: Int = 300,
+    val resizeMethod: Int = IMAGE_RESIZE_AUTO,
+    val resizeMultiplier: Float = 1f,
+    val progressiveRenderingEnabled: Boolean = false,
+    val cachePolicy: Int = IMAGE_CACHE_DEFAULT,
+    val repeat: Boolean = false,
+) {
+    fun signature(): String = listOf(
+        source,
+        defaultSource.orEmpty(),
+        loadingIndicatorSource.orEmpty(),
+        sourceSet.orEmpty(),
+        requestHeaders.orEmpty(),
+        fadeDurationMs,
+        resizeMethod,
+        resizeMultiplier,
+        progressiveRenderingEnabled,
+        cachePolicy,
+        repeat,
+    ).joinToString("\u0000")
+}
+
+internal data class NativeImageResult(
+    val source: String,
+    val bitmap: Bitmap,
+    val width: Int,
+    val height: Int,
+)
+
+internal class NativeImageCallbacks(
+    val onStart: () -> Unit = {},
+    val onProgress: (Long, Long) -> Unit = { _, _ -> },
+    val onSuccess: (NativeImageResult) -> Unit = {},
+    val onError: (String) -> Unit = {},
+    val onEnd: () -> Unit = {},
+)
+
+internal class NativeImageLoader(
+    private val context: Context,
+) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
-    private val executor = Executors.newFixedThreadPool(2) { runnable ->
+    private val executor = Executors.newFixedThreadPool(3) { runnable ->
         Thread(runnable, "pam-image").apply { isDaemon = true }
     }
-    private val cache = object : LruCache<String, Bitmap>(16 * 1024 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap): Int = value.allocationByteCount
+    private val cache = object : LruCache<String, DecodedBitmap>(MEMORY_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: DecodedBitmap): Int =
+            value.bitmap.allocationByteCount
     }
-    private val inFlight = ConcurrentHashMap<String, CompletableFuture<Bitmap>>()
+    private val inFlight =
+        ConcurrentHashMap<String, CompletableFuture<NativeImageResult>>()
+    private val active = WeakHashMap<PamImageView, ActiveRequest>()
     private val generation = AtomicLong()
     private val closed = AtomicBoolean()
-    private val connections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
+    private val connections =
+        ConcurrentHashMap.newKeySet<HttpURLConnection>()
+    private val diskDirectory = File(context.cacheDir, DISK_DIRECTORY)
+    private val diskLock = Any()
 
-    fun load(source: String, view: ImageView) {
+    fun load(
+        request: NativeImageRequest,
+        view: PamImageView,
+        callbacks: NativeImageCallbacks,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
         if (closed.get()) return
-        val request = generation.incrementAndGet()
-        view.setTag(IMAGE_REQUEST_TAG, request)
-        cache.get(source)?.let {
-            view.setImageBitmap(it)
+
+        val signature = request.signature()
+        val current = active[view]
+        if (current?.signature == signature) {
+            current.callbacks = callbacks
             return
         }
-        val future = runCatching {
-            inFlight.computeIfAbsent(source) {
-                CompletableFuture.supplyAsync(
-                    {
-                        fetch(source).also { bitmap ->
-                            if (!closed.get()) cache.put(source, bitmap)
-                        }
-                    },
-                    executor,
-                ).whenComplete { _, _ -> inFlight.remove(source) }
-            }
-        }.getOrNull() ?: return
-        future.whenComplete { bitmap, error ->
-            if (error != null || bitmap == null) return@whenComplete
-            main.post {
-                if (!closed.get() && view.getTag(IMAGE_REQUEST_TAG) == request) {
-                    view.setImageBitmap(bitmap)
-                }
-            }
+
+        val token = generation.incrementAndGet()
+        val pending = ActiveRequest(
+            token = token,
+            signature = signature,
+            request = request,
+            callbacks = callbacks,
+        )
+        active[view] = pending
+        view.onImageSizeChanged = { width, height ->
+            begin(view, token, width, height)
         }
+        view.setImageDrawable(null)
+        callbacks.onStart()
+        showPlaceholder(view, pending)
+        begin(view, token, view.width, view.height)
+    }
+
+    fun cancel(view: PamImageView) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        active.remove(view)
+        view.onImageSizeChanged = null
+        view.setImageDrawable(null)
     }
 
     fun trimMemory(critical: Boolean) {
-        if (critical) {
-            cache.evictAll()
-        } else {
-            cache.trimToSize(cache.maxSize() / 2)
+        synchronized(cache) {
+            if (critical) {
+                cache.evictAll()
+            } else {
+                cache.trimToSize(cache.maxSize() / 2)
+            }
         }
     }
 
@@ -72,83 +143,703 @@ internal class NativeImageLoader : AutoCloseable {
         if (!closed.compareAndSet(false, true)) return
         generation.incrementAndGet()
         main.removeCallbacksAndMessages(null)
+        active.keys.forEach { view -> view.onImageSizeChanged = null }
+        active.clear()
         connections.toList().forEach(HttpURLConnection::disconnect)
         connections.clear()
         inFlight.values.forEach { future -> future.cancel(true) }
         executor.shutdownNow()
         inFlight.clear()
-        cache.evictAll()
+        synchronized(cache) { cache.evictAll() }
     }
 
-    private fun fetch(source: String): Bitmap {
+    private fun begin(
+        view: PamImageView,
+        token: Long,
+        measuredWidth: Int,
+        measuredHeight: Int,
+    ) {
+        val pending = active[view]
+            ?.takeIf { it.token == token && !it.finished }
+            ?: return
+        if (measuredWidth <= 0 || measuredHeight <= 0) return
+
+        val source = resolveSource(
+            pending.request.source,
+            pending.request.sourceSet,
+            context.resources.displayMetrics.density,
+            measuredWidth,
+        )
+        if (source.isBlank()) {
+            finishError(view, pending, "Image source is empty.")
+            return
+        }
+        val key = decodedKey(
+            source,
+            pending.request,
+            measuredWidth,
+            measuredHeight,
+        )
+        if (pending.decodedKey == key) return
+        pending.decodedKey = key
+
+        if (pending.request.cachePolicy != IMAGE_CACHE_RELOAD) {
+            synchronized(cache) { cache.get(key) }?.let { bitmap ->
+                finishSuccess(
+                    view,
+                    pending,
+                    NativeImageResult(
+                        source,
+                        bitmap.bitmap,
+                        bitmap.width,
+                        bitmap.height,
+                    ),
+                )
+                return
+            }
+        }
+
+        val future = runCatching {
+            inFlight.computeIfAbsent(key) {
+                CompletableFuture.supplyAsync(
+                    {
+                        val bytes = loadBytes(
+                            source = source,
+                            request = pending.request,
+                            progress = { loaded, total ->
+                                main.post {
+                                    dispatchProgress(key, loaded, total)
+                                }
+                            },
+                            partial = partial@{ partialBytes ->
+                                if (!pending.request.progressiveRenderingEnabled) {
+                                    return@partial
+                                }
+                                val preview = runCatching {
+                                    decode(
+                                        partialBytes,
+                                        measuredWidth,
+                                        measuredHeight,
+                                        pending.request.resizeMethod,
+                                        pending.request.resizeMultiplier,
+                                    )
+                                }.getOrNull()?.bitmap ?: return@partial
+                                main.post {
+                                    displayPartial(key, preview)
+                                }
+                            },
+                        )
+                        val decoded = decode(
+                            bytes,
+                            measuredWidth,
+                            measuredHeight,
+                            pending.request.resizeMethod,
+                            pending.request.resizeMultiplier,
+                        )
+                        if (!closed.get()) {
+                            synchronized(cache) { cache.put(key, decoded) }
+                        }
+                        NativeImageResult(
+                            source,
+                            decoded.bitmap,
+                            decoded.width,
+                            decoded.height,
+                        )
+                    },
+                    executor,
+                ).whenComplete { _, _ -> inFlight.remove(key) }
+            }
+        }.getOrElse { error ->
+            finishError(view, pending, safeError(error))
+            return
+        }
+
+        future.whenComplete { decoded, error ->
+            main.post {
+                val latest = active[view]
+                    ?.takeIf {
+                        it.token == token &&
+                            it.decodedKey == key &&
+                            !it.finished
+                    }
+                    ?: return@post
+                if (error != null || decoded == null) {
+                    finishError(view, latest, safeError(error))
+                } else {
+                    finishSuccess(
+                        view,
+                        latest,
+                        decoded,
+                    )
+                }
+            }
+        }
+    }
+
+    private fun showPlaceholder(
+        view: PamImageView,
+        pending: ActiveRequest,
+    ) {
+        val source = pending.request.loadingIndicatorSource
+            ?: pending.request.defaultSource
+            ?: return
+        val token = pending.token
+        CompletableFuture.supplyAsync(
+            {
+                runCatching {
+                    val request = pending.request.copy(
+                        source = source,
+                        sourceSet = null,
+                        requestHeaders = null,
+                        cachePolicy = IMAGE_CACHE_DEFAULT,
+                        resizeMethod = IMAGE_RESIZE_AUTO,
+                    )
+                    val bytes = loadBytes(
+                        source = source,
+                        request = request,
+                        progress = { _, _ -> },
+                    )
+                    decode(
+                        bytes,
+                        PLACEHOLDER_EDGE,
+                        PLACEHOLDER_EDGE,
+                        IMAGE_RESIZE_AUTO,
+                        1f,
+                    ).bitmap
+                }.getOrNull()
+            },
+            executor,
+        ).whenComplete { bitmap, _ ->
+            if (bitmap == null) return@whenComplete
+            main.post {
+                val latest = active[view]
+                    ?.takeIf { it.token == token && !it.finished }
+                    ?: return@post
+                display(view, bitmap, latest.request.repeat, 0)
+            }
+        }
+    }
+
+    private fun finishSuccess(
+        view: PamImageView,
+        pending: ActiveRequest,
+        result: NativeImageResult,
+    ) {
+        if (active[view] !== pending || pending.finished) return
+        pending.finished = true
+        display(
+            view,
+            result.bitmap,
+            pending.request.repeat,
+            pending.request.fadeDurationMs,
+        )
+        pending.callbacks.onSuccess(result)
+        pending.callbacks.onEnd()
+    }
+
+    private fun finishError(
+        view: PamImageView,
+        pending: ActiveRequest,
+        message: String,
+    ) {
+        if (active[view] !== pending || pending.finished) return
+        pending.finished = true
+        pending.callbacks.onError(message)
+        pending.callbacks.onEnd()
+    }
+
+    private fun dispatchProgress(
+        key: String,
+        loaded: Long,
+        total: Long,
+    ) {
+        active.values
+            .filter { request ->
+                request.decodedKey == key && !request.finished
+            }
+            .forEach { request ->
+                request.callbacks.onProgress(loaded, total)
+            }
+    }
+
+    private fun displayPartial(key: String, bitmap: Bitmap) {
+        active.entries
+            .filter { (_, request) ->
+                request.decodedKey == key && !request.finished
+            }
+            .forEach { (view, request) ->
+                display(view, bitmap, request.request.repeat, 0)
+            }
+    }
+
+    private fun display(
+        view: PamImageView,
+        bitmap: Bitmap,
+        repeat: Boolean,
+        fadeDurationMs: Int,
+    ) {
+        val next = BitmapDrawable(context.resources, bitmap).apply {
+            if (repeat) {
+                setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+            }
+        }
+        val previous = view.drawable
+        if (fadeDurationMs > 0 && previous != null) {
+            val transition = TransitionDrawable(arrayOf(previous, next)).apply {
+                isCrossFadeEnabled = true
+            }
+            view.setImageDrawable(transition)
+            transition.startTransition(fadeDurationMs.coerceIn(0, 10_000))
+        } else {
+            view.setImageDrawable(next)
+        }
+    }
+
+    private fun loadBytes(
+        source: String,
+        request: NativeImageRequest,
+        progress: (Long, Long) -> Unit,
+        partial: (ByteArray) -> Unit = {},
+    ): ByteArray {
         val uri = URI(source)
-        require(uri.scheme == "https" || (BuildConfig.DEBUG && uri.scheme == "http")) {
-            "Remote images require HTTPS"
+        return when (uri.scheme?.lowercase()) {
+            "https", "http" ->
+                loadRemote(source, request, progress, partial)
+            "data" -> loadDataUri(source)
+            "content", "android.resource", "file" ->
+                context.contentResolver.openInputStream(
+                    android.net.Uri.parse(source),
+                )?.use(::readBounded)
+                    ?: error("Image source cannot be opened.")
+            "asset" -> context.assets.open(
+                uri.schemeSpecificPart.removePrefix("//").removePrefix("/"),
+            ).use(::readBounded)
+            null -> context.assets.open(source.removePrefix("/"))
+                .use(::readBounded)
+            else -> error("Unsupported image URI scheme.")
         }
-        val connection = URL(source).openConnection() as HttpURLConnection
-        connections += connection
-        if (closed.get()) {
-            connections -= connection
-            connection.disconnect()
-            error("Image loader is closed")
+    }
+
+    private fun loadRemote(
+        source: String,
+        request: NativeImageRequest,
+        progress: (Long, Long) -> Unit,
+        partial: (ByteArray) -> Unit,
+    ): ByteArray {
+        validateRemote(URI(source), null)
+        val headers = parseHeaders(request.requestHeaders)
+        val origin = URI(source)
+        val cacheFile = diskFile(source, headers)
+        if (request.cachePolicy != IMAGE_CACHE_RELOAD) {
+            readDisk(cacheFile)?.let { return it }
         }
-        connection.connectTimeout = 5_000
-        connection.readTimeout = 10_000
-        connection.instanceFollowRedirects = false
-        connection.setRequestProperty("Accept", "image/*")
-        try {
-            require(connection.responseCode in 200..299) { "Image request failed" }
-            val length = connection.contentLengthLong
-            require(length in -1..MAX_IMAGE_BYTES) { "Image is too large" }
-            val bytes = connection.inputStream.use { input ->
-                val initialCapacity = when {
-                    length > 0 -> length.toInt()
-                    else -> DEFAULT_IMAGE_CAPACITY
-                }
-                val output = ByteArrayOutputStream(initialCapacity)
-                val buffer = ByteArray(8_192)
-                var total = 0
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    total += read
-                    require(total <= MAX_IMAGE_BYTES) { "Image is too large" }
-                    output.write(buffer, 0, read)
-                }
-                output.toByteArray()
+        if (request.cachePolicy == IMAGE_CACHE_ONLY_IF_CACHED) {
+            error("Image is not available in the local cache.")
+        }
+
+        var current = source
+        var previous: URI? = null
+        repeat(MAX_REDIRECTS + 1) { redirect ->
+            val uri = URI(current)
+            validateRemote(uri, previous)
+            val connection = URL(current).openConnection() as HttpURLConnection
+            connections += connection
+            connection.connectTimeout = CONNECT_TIMEOUT_MS
+            connection.readTimeout = READ_TIMEOUT_MS
+            connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Accept", "image/*")
+            if (sameOrigin(origin, uri)) {
+                headers.forEach(connection::setRequestProperty)
             }
-            val bounds = BitmapFactory.Options().apply {
-                inJustDecodeBounds = true
+            try {
+                val status = connection.responseCode
+                if (status in REDIRECT_STATUS) {
+                    require(redirect < MAX_REDIRECTS) {
+                        "Image request has too many redirects."
+                    }
+                    val location = connection.getHeaderField("Location")
+                        ?: error("Image redirect has no location.")
+                    previous = uri
+                    current = uri.resolve(location).toString()
+                    return@repeat
+                }
+                require(status in 200..299) {
+                    "Image request failed with HTTP $status."
+                }
+                val contentType = connection.contentType.orEmpty()
+                    .substringBefore(';')
+                    .trim()
+                    .lowercase()
+                require(
+                    contentType.isEmpty() ||
+                        contentType.startsWith("image/") ||
+                        contentType == "application/octet-stream",
+                ) {
+                    "Image response has an unsupported content type."
+                }
+                val length = connection.contentLengthLong
+                require(length in -1..MAX_IMAGE_BYTES.toLong()) {
+                    "Image is too large."
+                }
+                val bytes = connection.inputStream.use { input ->
+                    readBounded(
+                        input,
+                        length,
+                        progress,
+                        if (
+                            request.progressiveRenderingEnabled &&
+                            contentType in JPEG_CONTENT_TYPES
+                        ) {
+                            partial
+                        } else {
+                            {}
+                        },
+                    )
+                }
+                writeDisk(cacheFile, bytes)
+                return bytes
+            } finally {
+                connections -= connection
+                connection.disconnect()
             }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unsupported image" }
-            var sample = 1
-            val target = MAX_DECODE_EDGE
+        }
+        error("Image request could not be completed.")
+    }
+
+    private fun decode(
+        bytes: ByteArray,
+        targetWidth: Int,
+        targetHeight: Int,
+        resizeMethod: Int,
+        resizeMultiplier: Float,
+    ): DecodedBitmap {
+        val bounds = BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+        }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+            "Unsupported image format."
+        }
+        val sourcePixels = bounds.outWidth.toLong() * bounds.outHeight
+        require(
+            resizeMethod != IMAGE_RESIZE_NONE ||
+                sourcePixels <= MAX_DECODE_PIXELS,
+        ) {
+            "Full-resolution image exceeds the safe decode limit."
+        }
+
+        val multiplier = resizeMultiplier.coerceIn(0.1f, 8f)
+        val desiredWidth = max(
+            1,
+            (targetWidth.coerceAtMost(MAX_DECODE_EDGE) * multiplier).toInt(),
+        )
+        val desiredHeight = max(
+            1,
+            (targetHeight.coerceAtMost(MAX_DECODE_EDGE) * multiplier).toInt(),
+        )
+        val shouldResize = when (resizeMethod) {
+            IMAGE_RESIZE_RESIZE -> true
+            IMAGE_RESIZE_SCALE, IMAGE_RESIZE_NONE -> false
+            else -> bounds.outWidth > desiredWidth * 2 ||
+                bounds.outHeight > desiredHeight * 2
+        }
+        var sample = 1
+        if (shouldResize) {
             while (
-                bounds.outWidth / sample > target ||
-                bounds.outHeight / sample > target ||
-                bounds.outWidth.toLong() * bounds.outHeight / sample / sample > MAX_DECODE_PIXELS
+                bounds.outWidth / (sample * 2) >= desiredWidth &&
+                bounds.outHeight / (sample * 2) >= desiredHeight
             ) {
                 sample *= 2
             }
-            val options = BitmapFactory.Options().apply {
-                inSampleSize = sample
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        while (
+            bounds.outWidth.toLong() * bounds.outHeight /
+            sample /
+            sample > MAX_DECODE_PIXELS
+        ) {
+            sample *= 2
+        }
+
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = sample
+            inPreferredConfig = Bitmap.Config.ARGB_8888
+        }
+        val bitmap = requireNotNull(
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options),
+        ) {
+            "Unsupported image format."
+        }
+        return DecodedBitmap(bitmap, bounds.outWidth, bounds.outHeight)
+    }
+
+    private fun readBounded(
+        input: java.io.InputStream,
+        expected: Long = -1,
+        progress: (Long, Long) -> Unit = { _, _ -> },
+        partial: (ByteArray) -> Unit = {},
+    ): ByteArray {
+        require(expected in -1..MAX_IMAGE_BYTES.toLong()) {
+            "Image is too large."
+        }
+        val initialCapacity = when {
+            expected > 0 -> expected.toInt()
+            else -> DEFAULT_IMAGE_CAPACITY
+        }
+        val output = ByteArrayOutputStream(initialCapacity)
+        val buffer = ByteArray(BUFFER_BYTES)
+        var total = 0L
+        var lastProgress = 0L
+        var nextPartial = PROGRESSIVE_STEP_BYTES
+        var partialCount = 0
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            require(total <= MAX_IMAGE_BYTES) { "Image is too large." }
+            output.write(buffer, 0, read)
+            if (
+                total >= nextPartial &&
+                partialCount < MAX_PROGRESSIVE_PREVIEWS
+            ) {
+                partial(output.toByteArray())
+                partialCount++
+                nextPartial *= 2
             }
-            return requireNotNull(BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)) {
-                "Unsupported image"
+            if (
+                total - lastProgress >= PROGRESS_STEP_BYTES ||
+                (expected > 0 && total == expected)
+            ) {
+                lastProgress = total
+                progress(total, expected.coerceAtLeast(0))
             }
-        } finally {
-            connections -= connection
-            connection.disconnect()
+        }
+        if (total > lastProgress) {
+            progress(total, expected.coerceAtLeast(total))
+        }
+        return output.toByteArray()
+    }
+
+    private fun loadDataUri(source: String): ByteArray {
+        val separator = source.indexOf(',')
+        require(separator > 5) { "Image data URI is malformed." }
+        val metadata = source.substring(5, separator)
+        require(metadata.substringBefore(';').startsWith("image/")) {
+            "Data URI is not an image."
+        }
+        val encoded = source.substring(separator + 1)
+        val bytes = if (metadata.endsWith(";base64")) {
+            Base64.decode(encoded, Base64.DEFAULT)
+        } else {
+            URLDecoder.decode(encoded, Charsets.UTF_8.name())
+                .toByteArray(Charsets.UTF_8)
+        }
+        require(bytes.size <= MAX_IMAGE_BYTES) { "Image is too large." }
+        return bytes
+    }
+
+    private fun readDisk(file: File): ByteArray? = synchronized(diskLock) {
+        if (!file.isFile || file.length() !in 1..MAX_IMAGE_BYTES.toLong()) {
+            return@synchronized null
+        }
+        runCatching {
+            file.setLastModified(System.currentTimeMillis())
+            file.inputStream().use(::readBounded)
+        }.getOrNull()
+    }
+
+    private fun writeDisk(file: File, bytes: ByteArray) {
+        if (closed.get()) return
+        synchronized(diskLock) {
+            runCatching {
+                diskDirectory.mkdirs()
+                val temporary = File(diskDirectory, "${file.name}.tmp")
+                temporary.outputStream().use { output -> output.write(bytes) }
+                if (!temporary.renameTo(file)) {
+                    file.outputStream().use { output -> output.write(bytes) }
+                    temporary.delete()
+                }
+                trimDisk()
+            }
         }
     }
 
+    private fun trimDisk() {
+        val files = diskDirectory.listFiles()
+            ?.filter(File::isFile)
+            ?.sortedByDescending(File::lastModified)
+            ?: return
+        var size = 0L
+        files.forEach { file ->
+            size += file.length()
+            if (size > DISK_CACHE_BYTES) file.delete()
+        }
+    }
+
+    private fun diskFile(
+        source: String,
+        headers: Map<String, String>,
+    ): File {
+        val digest = MessageDigest.getInstance("SHA-256")
+            .digest(
+                buildString {
+                    append(source)
+                    headers.toSortedMap().forEach { (name, value) ->
+                        append('\u0000').append(name).append(':').append(value)
+                    }
+                }.toByteArray(Charsets.UTF_8),
+            )
+            .joinToString("") { byte -> "%02x".format(byte) }
+        return File(diskDirectory, "$digest.image")
+    }
+
+    private fun decodedKey(
+        source: String,
+        request: NativeImageRequest,
+        width: Int,
+        height: Int,
+    ): String {
+        val widthBucket = ((width + TARGET_BUCKET - 1) / TARGET_BUCKET)
+            .coerceAtLeast(1)
+        val heightBucket = ((height + TARGET_BUCKET - 1) / TARGET_BUCKET)
+            .coerceAtLeast(1)
+        return listOf(
+            source,
+            request.requestHeaders.orEmpty(),
+            widthBucket,
+            heightBucket,
+            request.resizeMethod,
+            request.resizeMultiplier,
+        ).joinToString("\u0000")
+    }
+
+    private fun resolveSource(
+        fallback: String,
+        sourceSet: String?,
+        density: Float,
+        width: Int,
+    ): String {
+        val candidates = sourceSet
+            ?.split(',')
+            ?.mapNotNull { raw ->
+                val value = raw.trim()
+                val separator = value.lastIndexOf(' ')
+                if (separator <= 0) return@mapNotNull null
+                val source = value.substring(0, separator).trim()
+                val descriptor = value.substring(separator + 1).trim()
+                val score = when {
+                    descriptor.endsWith('x') ->
+                        descriptor.dropLast(1).toFloatOrNull()
+                            ?.let { kotlin.math.abs(it - density) }
+                    descriptor.endsWith('w') ->
+                        descriptor.dropLast(1).toFloatOrNull()
+                            ?.let { kotlin.math.abs(it - width) / max(1, width) }
+                    else -> null
+                } ?: return@mapNotNull null
+                source to score
+            }
+            .orEmpty()
+        return candidates.minByOrNull { it.second }?.first ?: fallback
+    }
+
+    private fun parseHeaders(packed: String?): Map<String, String> {
+        if (packed.isNullOrBlank()) return emptyMap()
+        return packed.lineSequence()
+            .take(MAX_HEADERS)
+            .mapNotNull { line ->
+                val separator = line.indexOf(':')
+                if (separator <= 0) return@mapNotNull null
+                val name = line.substring(0, separator)
+                val value = line.substring(separator + 1)
+                if (!HEADER_NAME.matches(name) || value.length > MAX_HEADER_BYTES) {
+                    return@mapNotNull null
+                }
+                name to value
+            }
+            .toMap()
+    }
+
+    private fun validateRemote(uri: URI, previous: URI?) {
+        val scheme = uri.scheme?.lowercase()
+        require(
+            scheme == "https" || (BuildConfig.DEBUG && scheme == "http"),
+        ) {
+            "Remote images require HTTPS."
+        }
+        require(
+            previous?.scheme?.lowercase() != "https" || scheme == "https",
+        ) {
+            "Image redirects cannot downgrade HTTPS."
+        }
+        require(!uri.host.isNullOrBlank()) { "Image URL has no host." }
+    }
+
+    private fun sameOrigin(first: URI, second: URI): Boolean =
+        first.scheme.equals(second.scheme, ignoreCase = true) &&
+            first.host.equals(second.host, ignoreCase = true) &&
+            effectivePort(first) == effectivePort(second)
+
+    private fun effectivePort(uri: URI): Int = when {
+        uri.port >= 0 -> uri.port
+        uri.scheme.equals("https", ignoreCase = true) -> 443
+        else -> 80
+    }
+
+    private fun safeError(error: Throwable?): String {
+        var cause = error
+        while (cause?.cause != null && cause.cause !== cause) {
+            cause = cause.cause
+        }
+        return cause?.message
+            ?.take(MAX_ERROR_BYTES)
+            ?.takeIf(String::isNotBlank)
+            ?: "Image request failed."
+    }
+
+    private data class ActiveRequest(
+        val token: Long,
+        val signature: String,
+        val request: NativeImageRequest,
+        var callbacks: NativeImageCallbacks,
+        var decodedKey: String? = null,
+        var finished: Boolean = false,
+    )
+
+    private data class DecodedBitmap(
+        val bitmap: Bitmap,
+        val width: Int,
+        val height: Int,
+    )
+
     private companion object {
-        const val MAX_IMAGE_BYTES = 8 * 1024 * 1024
+        const val MEMORY_CACHE_BYTES = 32 * 1024 * 1024
+        const val DISK_CACHE_BYTES = 96L * 1024 * 1024
+        const val DISK_DIRECTORY = "pam-images-v1"
+        const val MAX_IMAGE_BYTES = 16 * 1024 * 1024
         const val DEFAULT_IMAGE_CAPACITY = 64 * 1024
-        const val IMAGE_REQUEST_TAG = 0x50414D49
+        const val BUFFER_BYTES = 16 * 1024
+        const val PROGRESS_STEP_BYTES = 64 * 1024L
+        const val PROGRESSIVE_STEP_BYTES = 256 * 1024L
+        const val MAX_PROGRESSIVE_PREVIEWS = 4
         const val MAX_DECODE_EDGE = 4096
-        const val MAX_DECODE_PIXELS = 16_777_216L
+        const val MAX_DECODE_PIXELS = 33_554_432L
+        const val PLACEHOLDER_EDGE = 512
+        const val TARGET_BUCKET = 64
+        const val CONNECT_TIMEOUT_MS = 5_000
+        const val READ_TIMEOUT_MS = 15_000
+        const val MAX_REDIRECTS = 5
+        const val MAX_HEADERS = 32
+        const val MAX_HEADER_BYTES = 4_096
+        const val MAX_ERROR_BYTES = 512
+        val HEADER_NAME = Regex("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$")
+        val REDIRECT_STATUS = setOf(301, 302, 303, 307, 308)
+        val JPEG_CONTENT_TYPES = setOf("image/jpeg", "image/jpg")
     }
 }
+
+internal const val IMAGE_RESIZE_AUTO = 1
+internal const val IMAGE_RESIZE_RESIZE = 2
+internal const val IMAGE_RESIZE_SCALE = 3
+internal const val IMAGE_RESIZE_NONE = 4
+internal const val IMAGE_CACHE_DEFAULT = 1
+internal const val IMAGE_CACHE_RELOAD = 2
+internal const val IMAGE_CACHE_ONLY_IF_CACHED = 4

@@ -112,6 +112,13 @@ Scalar `hitSlop` expands touch and TalkBack delegate regions without changing
 visual layout; sibling delegates share one parent dispatcher and are removed
 when their view moves or unmounts.
 
+`Image` and `ImageBackground` share a cancelable native pipeline with
+measured-size downsampling, request coalescing, a 32 MiB decoded RAM cache and
+a bounded 96 MiB original disk cache. It supports placeholders, fade,
+cover/contain/stretch/center/repeat, `srcSet`, safe request headers and opt-in
+typed lifecycle events. Images with no registered lifecycle callbacks produce
+zero PHP bridge traffic.
+
 `SafeAreaView` accepts independent top/right/bottom/left edges and padding or
 margin mode. `KeyboardAvoidingView` supports resize/height, pan/position and
 padding behavior, a vertical offset and an enabled switch. Android window

@@ -200,4 +200,19 @@ enum PropKey: int
     case SwitchTrackColorFalse = 192;
     case SwitchTrackColorTrue = 193;
     case SwitchThumbColor = 194;
+    case ImageDefaultSource = 195;
+    case ImageLoadingIndicatorSource = 196;
+    case ImageFadeDurationMs = 197;
+    case ImageResizeMethod = 198;
+    case ImageResizeMultiplier = 199;
+    case ImageProgressiveRenderingEnabled = 200;
+    case ImageCachePolicy = 201;
+    case ImageOverlayColor = 202;
+    case ImageSourceSet = 203;
+    case ImageRequestHeaders = 204;
+    case OnImageLoadStart = 205;
+    case OnImageProgress = 206;
+    case OnImageLoad = 207;
+    case OnImageError = 208;
+    case OnImageLoadEnd = 209;
 }

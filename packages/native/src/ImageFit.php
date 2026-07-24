@@ -10,4 +10,5 @@ enum ImageFit: int
     case Contain = 2;
     case Fill = 3;
     case Center = 4;
+    case Repeat = 5;
 }

@@ -13,6 +13,12 @@ use Pam\Native\AnimationKind;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
 use Pam\Native\FontStyle;
+use Pam\Native\ImageCachePolicy;
+use Pam\Native\ImageErrorEvent;
+use Pam\Native\ImageFit;
+use Pam\Native\ImageLoadEvent;
+use Pam\Native\ImageProgressEvent;
+use Pam\Native\ImageResizeMethod;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
@@ -53,6 +59,8 @@ use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Input;
+use Pam\Native\UI\Image;
+use Pam\Native\UI\ImageBackground;
 use Pam\Native\UI\KeyboardAvoidingView;
 use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
@@ -156,8 +164,13 @@ if (
         $rustProtocol,
         $rustBlock,
     ) !== 1
+    || preg_match(
+        '/enum class EventKind\\(val value: Int\\) \\{(?<body>.*?)\\n\\}/s',
+        $kotlinProtocol,
+        $kotlinEventBlock,
+    ) !== 1
 ) {
-    throw new RuntimeException('Cross-language property enums must be discoverable.');
+    throw new RuntimeException('Cross-language protocol enums must be discoverable.');
 }
 preg_match_all(
     '/^\\s*([A-Z][A-Z0-9_]*)\\((\\d+)\\)[,;]/m',
@@ -168,6 +181,11 @@ preg_match_all(
     '/^\\s*([A-Za-z][A-Za-z0-9_]*)\\s*=\\s*(\\d+),/m',
     $rustBlock['body'],
     $rustValues,
+);
+preg_match_all(
+    '/^\\s*([A-Z][A-Z0-9_]*)\\((\\d+)\\)[,;]/m',
+    $kotlinEventBlock['body'],
+    $kotlinEventValues,
 );
 $phpPropertyValues = array_map(
     static fn (PropKey $key): int => $key->value,
@@ -199,6 +217,19 @@ $assert(
         && $rustPropertyNames === $phpPropertyNames,
     'PHP, Kotlin, and Rust property protocol enums must remain byte-for-byte aligned.',
 );
+$phpEventValues = array_map(
+    static fn (EventKind $kind): int => $kind->value,
+    EventKind::cases(),
+);
+$phpEventNames = array_map(
+    static fn (EventKind $kind): string => $normalizeProtocolName($kind->name),
+    EventKind::cases(),
+);
+$assert(
+    array_map('intval', $kotlinEventValues[2]) === $phpEventValues
+        && $kotlinEventValues[1] === $phpEventNames,
+    'PHP and Kotlin event protocol enums must remain byte-for-byte aligned.',
+);
 
 foreach ([
     AnimationKind::cases(),
@@ -207,6 +238,9 @@ foreach ([
     AccessibilityImportance::cases(),
     AccessibilityLiveRegion::cases(),
     FontStyle::cases(),
+    ImageCachePolicy::cases(),
+    ImageFit::cases(),
+    ImageResizeMethod::cases(),
     PointerEvents::cases(),
     PositionType::cases(),
     ReturnKeyType::cases(),
@@ -424,6 +458,102 @@ $assert(
             ->properties()[PropKey::SwitchTrackColorTrue->value] === 0xFF2563EB
         && $toggleElement->properties()[PropKey::SwitchThumbColor->value] === 0xFFFFFFFF,
     'Switch helpers must preserve checked, track and thumb colors.',
+);
+
+$imageStarted = false;
+$imageProgress = null;
+$imageLoaded = null;
+$imageError = null;
+$imageEnded = false;
+$imageElement = Image::make('https://example.test/photo.jpg')
+    ->fit(ImageFit::Repeat)
+    ->defaultSource('asset://placeholder.png')
+    ->loadingIndicatorSource('asset://loading.png')
+    ->fadeDuration(180)
+    ->resizeMethod(ImageResizeMethod::Resize)
+    ->resizeMultiplier(2.0)
+    ->progressiveRendering()
+    ->cache(ImageCachePolicy::ForceCache)
+    ->overlayColor(0xFF0F172A)
+    ->sourceSet(
+        'https://example.test/photo.png 1x, '.
+        'https://example.test/photo@2x.png 2x',
+    )
+    ->headers(['X-Image-Variant' => 'retina'])
+    ->onLoadStart(static function () use (&$imageStarted): void {
+        $imageStarted = true;
+    })
+    ->onProgress(
+        static function (ImageProgressEvent $event) use (&$imageProgress): void {
+            $imageProgress = $event;
+        },
+    )
+    ->onLoad(
+        static function (ImageLoadEvent $event) use (&$imageLoaded): void {
+            $imageLoaded = $event;
+        },
+    )
+    ->onError(
+        static function (ImageErrorEvent $event) use (&$imageError): void {
+            $imageError = $event;
+        },
+    )
+    ->onLoadEnd(static function () use (&$imageEnded): void {
+        $imageEnded = true;
+    });
+$imageElement->events()[EventKind::ImageLoadStart->value]('');
+$imageElement->events()[EventKind::ImageProgress->value](Wire::map([
+    'loaded' => 65_536,
+    'total' => 131_072,
+]));
+$imageElement->events()[EventKind::ImageLoad->value](Wire::map([
+    'uri' => 'https://example.test/photo@2x.png',
+    'width' => 800.0,
+    'height' => 600.0,
+]));
+$imageElement->events()[EventKind::ImageError->value](Wire::map([
+    'error' => 'offline',
+]));
+$imageElement->events()[EventKind::ImageLoadEnd->value]('');
+$imageBackground = ImageBackground::make(
+    'asset://hero.jpg',
+    Text::make('Overlay'),
+)->tint(0xFFFFFFFF);
+$assert(
+    $imageElement->properties()[PropKey::ImageFit->value]
+        === ImageFit::Repeat->value
+        && $imageElement->properties()[PropKey::ImageDefaultSource->value]
+            === 'asset://placeholder.png'
+        && $imageElement
+            ->properties()[PropKey::ImageLoadingIndicatorSource->value]
+            === 'asset://loading.png'
+        && $imageElement->properties()[PropKey::ImageFadeDurationMs->value]
+            === 180
+        && $imageElement->properties()[PropKey::ImageResizeMethod->value]
+            === ImageResizeMethod::Resize->value
+        && $imageElement->properties()[PropKey::ImageResizeMultiplier->value]
+            === 2.0
+        && $imageElement
+            ->properties()[PropKey::ImageProgressiveRenderingEnabled->value]
+            === true
+        && $imageElement->properties()[PropKey::ImageCachePolicy->value]
+            === ImageCachePolicy::ForceCache->value
+        && $imageElement->properties()[PropKey::ImageOverlayColor->value]
+            === 0xFF0F172A
+        && $imageElement->properties()[PropKey::ImageRequestHeaders->value]
+            === 'X-Image-Variant:retina'
+        && $imageStarted
+        && $imageProgress instanceof ImageProgressEvent
+        && $imageProgress->loaded === 65_536
+        && $imageLoaded instanceof ImageLoadEvent
+        && $imageLoaded->width === 800.0
+        && $imageError instanceof ImageErrorEvent
+        && $imageError->message === 'offline'
+        && $imageEnded
+        && $imageBackground->children()[0]->kind() === NodeKind::Text
+        && $imageBackground->properties()[PropKey::TintColor->value]
+            === 0xFFFFFFFF,
+    'Image helpers must preserve native loading, cache, resize, lifecycle and background behavior.',
 );
 
 $nativeControlTemplate = TemplateRenderer::render(
