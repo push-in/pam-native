@@ -523,10 +523,17 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     jstring entry,
     jstring state_dir,
     jfloat width,
-    jfloat height
+    jfloat height,
+    jfloat text_scale
 ) {
     log_debug("Starting the Pam Native worker.");
-    if (entry == nullptr || state_dir == nullptr || width <= 0 || height <= 0) {
+    if (
+        entry == nullptr
+        || state_dir == nullptr
+        || width <= 0
+        || height <= 0
+        || text_scale <= 0
+    ) {
         return 0;
     }
     const char* entry_chars = env->GetStringUTFChars(entry, nullptr);
@@ -591,7 +598,9 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     }
     state->engine = pam_native_engine_new();
     if (state->engine == nullptr
-        || pam_native_engine_set_viewport(state->engine, width, height) != PAM_STATUS_SUCCESS) {
+        || pam_native_engine_set_viewport(state->engine, width, height) != PAM_STATUS_SUCCESS
+        || pam_native_engine_set_text_scale(state->engine, text_scale)
+            != PAM_STATUS_SUCCESS) {
         if (state->engine != nullptr) {
             pam_native_engine_free(state->engine);
         }
@@ -609,17 +618,24 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
     jobject,
     jlong handle,
     jfloat width,
-    jfloat height
+    jfloat height,
+    jfloat text_scale
 ) {
     RuntimeState* state = from_handle(handle);
-    if (state == nullptr || width <= 0 || height <= 0) {
+    if (state == nullptr || width <= 0 || height <= 0 || text_scale <= 0) {
         return;
     }
     PamNativeBuffer batch{nullptr, 0};
     PamStatus status;
     {
         std::lock_guard<std::mutex> lock(state->engine_mutex);
-        status = pam_native_engine_relayout(state->engine, width, height, &batch);
+        status = pam_native_engine_relayout_with_metrics(
+            state->engine,
+            width,
+            height,
+            text_scale,
+            &batch
+        );
     }
     if (status != PAM_STATUS_SUCCESS) {
         report_error(state, "Pam Native could not update the viewport.");

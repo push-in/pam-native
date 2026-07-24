@@ -5,7 +5,7 @@
     "license": "BUSL-1.1",
     "require": {
         "php": "^8.4",
-        "pam/native": "^0.1",
+        "pushinbr/pam-native": "^0.1",
         "pam-community/example-plugin": "^0.1"
     },
     "repositories": [
@@ -15,7 +15,7 @@
             "options": {
                 "symlink": false,
                 "versions": {
-                    "pam/native": "0.1.1"
+                    "pushinbr/pam-native": "0.1.1"
                 }
             }
         },

@@ -11,13 +11,15 @@ use pam_native_protocol::{
 pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_new,
-    pam_native_engine_relayout, pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
+    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 
 #[derive(Debug)]
 pub struct Engine {
     current: Option<Tree>,
     viewport: layout::Size,
+    text_scale: f32,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
     created: u64,
@@ -37,6 +39,7 @@ impl Default for Engine {
                 width: 360.0,
                 height: 800.0,
             },
+            text_scale: 1.0,
             layouts: BTreeMap::new(),
             commits: 0,
             created: 0,
@@ -64,12 +67,31 @@ impl Engine {
         Ok(())
     }
 
+    pub fn set_text_scale(&mut self, text_scale: f32) -> Result<(), EngineError> {
+        if !text_scale.is_finite() || text_scale <= 0.0 {
+            return Err(EngineError::InvalidViewport);
+        }
+        self.text_scale = text_scale;
+        Ok(())
+    }
+
     pub fn relayout(&mut self, width: f32, height: f32) -> Result<Vec<u8>, EngineError> {
+        self.relayout_with_metrics(width, height, self.text_scale)
+    }
+
+    pub fn relayout_with_metrics(
+        &mut self,
+        width: f32,
+        height: f32,
+        text_scale: f32,
+    ) -> Result<Vec<u8>, EngineError> {
         self.set_viewport(width, height)?;
+        self.set_text_scale(text_scale)?;
         let Some(current) = self.current.as_ref() else {
             return Ok(Vec::new());
         };
-        let next_layouts = layout::calculate(current, self.viewport)?;
+        let next_layouts =
+            layout::calculate_with_text_scale(current, self.viewport, self.text_scale)?;
         let mutations = next_layouts
             .iter()
             .filter_map(|(id, frame)| {
@@ -114,7 +136,8 @@ impl Engine {
 
     fn commit_tree(&mut self, frame: &[u8]) -> Result<Vec<u8>, EngineError> {
         let next = Tree::decode(frame).map_err(EngineError::Protocol)?;
-        let next_layouts = layout::calculate(&next, self.viewport)?;
+        let next_layouts =
+            layout::calculate_with_text_scale(&next, self.viewport, self.text_scale)?;
         let mut mutations = Vec::new();
         let next_children = child_index(&next);
 
@@ -190,11 +213,12 @@ impl Engine {
         }
 
         if layout_dirty {
-            let next_layouts = layout::calculate(
+            let next_layouts = layout::calculate_with_text_scale(
                 self.current
                     .as_ref()
                     .expect("current tree remains available"),
                 self.viewport,
+                self.text_scale,
             )?;
             for (id, next) in &next_layouts {
                 if self.layouts.get(id) != Some(next) {
@@ -257,7 +281,8 @@ impl Engine {
         }
         next.validate().map_err(EngineError::Protocol)?;
 
-        let next_layouts = layout::calculate(&next, self.viewport)?;
+        let next_layouts =
+            layout::calculate_with_text_scale(&next, self.viewport, self.text_scale)?;
         let next_children = child_index(&next);
         let mut mutations = Vec::new();
         diff(current, &next, &next_children, &mut mutations);
@@ -483,7 +508,8 @@ fn append_removes(
 fn affects_layout(key: PropKey) -> bool {
     matches!(
         key,
-        PropKey::Width
+        PropKey::Text
+            | PropKey::Width
             | PropKey::Height
             | PropKey::FlexGrow
             | PropKey::Padding
@@ -500,6 +526,11 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::AlignItems
             | PropKey::AlignSelf
             | PropKey::JustifyContent
+            | PropKey::FontSize
+            | PropKey::FontWeight
+            | PropKey::NumberOfLines
+            | PropKey::LetterSpacing
+            | PropKey::LineHeight
             | PropKey::FlexDirection
             | PropKey::FlexShrink
             | PropKey::PaddingLeft
@@ -520,6 +551,13 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::HeightPercent
             | PropKey::MaxWidthPercent
             | PropKey::MaxHeightPercent
+            | PropKey::TextTransform
+            | PropKey::FontStyle
+            | PropKey::FontFamily
+            | PropKey::TextAllowFontScaling
+            | PropKey::TextMaxFontSizeMultiplier
+            | PropKey::TextAdjustsFontSizeToFit
+            | PropKey::TextMinimumFontScale
             | PropKey::Visible
             | PropKey::MarginLeftAuto
             | PropKey::ScrollHorizontal
@@ -659,8 +697,8 @@ mod tests {
         let patch = Patch {
             operations: vec![PatchOperation::Update(PropertyPatch {
                 id: 3,
-                key: PropKey::Text,
-                value: Some(PropValue::String("B".to_owned())),
+                key: PropKey::TextColor,
+                value: Some(PropValue::Integer(0xff112233)),
             })],
         }
         .encode()
@@ -710,6 +748,31 @@ mod tests {
     }
 
     #[test]
+    fn text_patch_remeasures_wrapped_content() {
+        let mut engine = Engine::new();
+        engine.commit(&frame("A", false)).expect("initial");
+        let patch = Patch {
+            operations: vec![PatchOperation::Update(PropertyPatch {
+                id: 3,
+                key: PropKey::Text,
+                value: Some(PropValue::String(
+                    "PamUI content expands across enough words to require multiple lines on a phone"
+                        .to_owned(),
+                )),
+            })],
+        }
+        .encode()
+        .expect("patch");
+
+        let mutations = decode_batch(&engine.commit(&patch).expect("update")).expect("batch");
+        assert!(
+            mutations
+                .iter()
+                .any(|mutation| matches!(mutation, Mutation::Layout { id: 2 | 3, .. }))
+        );
+    }
+
+    #[test]
     fn scroll_extent_configuration_is_classified_as_layout_work() {
         assert!(affects_layout(PropKey::ScrollHorizontal));
         assert!(affects_layout(PropKey::ScrollFillViewport));
@@ -734,6 +797,25 @@ mod tests {
         assert_eq!(engine.stats().commits, commits);
         assert!(engine.stats().output_bytes > output_before);
         assert!(engine.relayout(720.0, 480.0).expect("stable").is_empty());
+    }
+
+    #[test]
+    fn font_scale_change_relayouts_retained_text_without_a_php_commit() {
+        let mut engine = Engine::new();
+        engine.commit(&frame("PamUI", false)).expect("initial");
+
+        let mutations = decode_batch(
+            &engine
+                .relayout_with_metrics(360.0, 800.0, 1.5)
+                .expect("scaled relayout"),
+        )
+        .expect("batch");
+
+        assert!(
+            mutations
+                .iter()
+                .any(|mutation| matches!(mutation, Mutation::Layout { id: 2 | 3, .. }))
+        );
     }
 
     #[test]

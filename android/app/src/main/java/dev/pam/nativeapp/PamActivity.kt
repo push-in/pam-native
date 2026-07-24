@@ -59,7 +59,7 @@ class PamActivity : Activity() {
             val density = resources.displayMetrics.density
             val widthDp = resources.displayMetrics.widthPixels / density
             val heightDp = resources.displayMetrics.heightPixels / density
-            runtime.start(entry, widthDp, heightDp)
+            runtime.start(entry, widthDp, heightDp, resources.configuration.fontScale)
             runtimeStarted = true
             if (BuildConfig.DEBUG) {
                 hotReload = HotReloadClient(
@@ -103,7 +103,11 @@ class PamActivity : Activity() {
         val density = resources.displayMetrics.density
         val widthDp = resources.displayMetrics.widthPixels / density
         val heightDp = resources.displayMetrics.heightPixels / density
-        runtime.updateViewport(widthDp, heightDp)
+        runtime.updateViewport(
+            widthDp,
+            heightDp,
+            resources.configuration.fontScale,
+        )
         runtime.dispatchLifecycle(
             EVENT_DIMENSIONS,
             WireMap.encode(

@@ -36,36 +36,37 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         applyRequestedOffset()
     }
     private var viewportChanged: ((Float, Float) -> Unit)? = null
+    private val content = FrameLayout(context).apply {
+        clipChildren = false
+        clipToPadding = false
+    }
     private var activeScroll: ViewGroup = createVerticalScroll()
 
     init {
         clipChildren = false
         clipToPadding = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        activeScroll.addView(content, contentLayout())
         addView(activeScroll, matchParentLayout())
         applyConfiguration()
     }
 
     fun insert(child: View) {
-        check(activeScroll.childCount == 0) {
-            "Scroll accepts exactly one content child"
-        }
-        activeScroll.addView(child)
+        content.addView(child)
         applyRequestedOffset()
     }
 
     fun setHorizontal(value: Boolean) {
         if (horizontal == value) return
         val previous = activeScroll
-        val child = previous.getChildAt(0)
         val previousX = scrollXOf(previous)
         val previousY = scrollYOf(previous)
-        if (child != null) previous.removeView(child)
+        previous.removeView(content)
         removeView(previous)
         horizontal = value
         activeScroll = if (value) createHorizontalScroll() else createVerticalScroll()
+        activeScroll.addView(content, contentLayout())
         addView(activeScroll, matchParentLayout())
-        if (child != null) activeScroll.addView(child)
         applyConfiguration()
         if (!hasRequestedOffsetX) requestedOffsetX = previousX
         if (!hasRequestedOffsetY) requestedOffsetY = previousY
@@ -164,6 +165,25 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     fun primaryOffset(x: Float, y: Float): Float = if (horizontal) x else y
 
+    fun snapshotOffsetPixels(): Pair<Int, Int> =
+        scrollXOf(activeScroll) to scrollYOf(activeScroll)
+
+    fun restoreOffsetPixels(x: Int, y: Int) {
+        if (hasRequestedOffsetX || hasRequestedOffsetY) return
+        activeScroll.post {
+            if (
+                isAttachedToWindow
+                && !hasRequestedOffsetX
+                && !hasRequestedOffsetY
+            ) {
+                activeScroll.scrollTo(
+                    x.coerceAtLeast(0),
+                    y.coerceAtLeast(0),
+                )
+            }
+        }
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         applyRequestedOffset()
@@ -247,6 +267,20 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
+        )
+
+    private fun contentLayout(): ViewGroup.LayoutParams =
+        ViewGroup.LayoutParams(
+            if (horizontal) {
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            } else {
+                ViewGroup.LayoutParams.MATCH_PARENT
+            },
+            if (horizontal) {
+                ViewGroup.LayoutParams.MATCH_PARENT
+            } else {
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            },
         )
 
     private fun scrollXOf(view: View): Int = view.scrollX.coerceAtLeast(0)

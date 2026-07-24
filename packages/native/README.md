@@ -1,4 +1,4 @@
-# pam/native
+# pushinbr/pam-native
 
 Pam Native renders real Android views from persistent PHP. PHP owns application
 state and events, Rust performs retained layout and incremental diffing, and

@@ -249,11 +249,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
     private fun applyWindowLayout(modal: Dialog) {
         modal.window?.setLayout(
-            when (presentation) {
-                PRESENTATION_DIALOG ->
-                    (resources.displayMetrics.widthPixels * DIALOG_WIDTH_FRACTION).toInt()
-                else -> ViewGroup.LayoutParams.MATCH_PARENT
-            },
+            ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
     }
@@ -381,7 +377,6 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         const val ORIENTATION_PORTRAIT = 1
         const val ORIENTATION_LANDSCAPE = 2
         const val MODAL_ANIMATION_DURATION_MS = 220L
-        const val DIALOG_WIDTH_FRACTION = 0.9f
         const val SLIDE_DISTANCE_FRACTION = 0.25f
     }
 }

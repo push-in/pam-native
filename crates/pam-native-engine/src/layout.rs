@@ -28,19 +28,40 @@ enum CrossAlignment {
     Stretch,
 }
 
-pub fn calculate(tree: &Tree, viewport: Size) -> Result<BTreeMap<u64, Layout>, LayoutError> {
+struct LayoutContext<'a> {
+    tree: &'a Tree,
+    children: &'a BTreeMap<u64, Vec<&'a Node>>,
+    text_scale: f32,
+}
+
+#[cfg(test)]
+fn calculate(tree: &Tree, viewport: Size) -> Result<BTreeMap<u64, Layout>, LayoutError> {
+    calculate_with_text_scale(tree, viewport, 1.0)
+}
+
+pub fn calculate_with_text_scale(
+    tree: &Tree,
+    viewport: Size,
+    text_scale: f32,
+) -> Result<BTreeMap<u64, Layout>, LayoutError> {
     if !viewport.width.is_finite()
         || !viewport.height.is_finite()
         || viewport.width <= 0.0
         || viewport.height <= 0.0
+        || !text_scale.is_finite()
+        || text_scale <= 0.0
     {
         return Err(LayoutError::InvalidDimension);
     }
     let children = child_index(tree);
+    let context = LayoutContext {
+        tree,
+        children: &children,
+        text_scale,
+    };
     let mut result = BTreeMap::new();
     layout_node(
-        tree,
-        &children,
+        &context,
         tree.root,
         Layout {
             x: 0.0,
@@ -52,12 +73,30 @@ pub fn calculate(tree: &Tree, viewport: Size) -> Result<BTreeMap<u64, Layout>, L
         0,
         &mut result,
     )?;
+    for modal in tree
+        .nodes
+        .values()
+        .filter(|node| node.kind == NodeKind::Modal && visible(node) && node.id != tree.root)
+    {
+        layout_node(
+            &context,
+            modal.id,
+            Layout {
+                x: 0.0,
+                y: 0.0,
+                width: viewport.width,
+                height: viewport.height,
+            },
+            false,
+            0,
+            &mut result,
+        )?;
+    }
     Ok(result)
 }
 
 fn layout_node(
-    tree: &Tree,
-    children: &BTreeMap<u64, Vec<&Node>>,
+    context: &LayoutContext<'_>,
     id: u64,
     bounds: Layout,
     resolve_dimensions: bool,
@@ -67,7 +106,11 @@ fn layout_node(
     if depth > MAX_LAYOUT_DEPTH {
         return Err(LayoutError::DepthExceeded);
     }
-    let node = tree.nodes.get(&id).ok_or(LayoutError::MissingNode(id))?;
+    let node = context
+        .tree
+        .nodes
+        .get(&id)
+        .ok_or(LayoutError::MissingNode(id))?;
     let frame = if resolve_dimensions {
         let explicit_width = dimension(node, PropKey::Width, PropKey::WidthPercent, bounds.width);
         let explicit_height =
@@ -105,7 +148,7 @@ fn layout_node(
     };
     output.insert(id, frame);
 
-    let node_children = children.get(&id).map_or(&[][..], Vec::as_slice);
+    let node_children = context.children.get(&id).map_or(&[][..], Vec::as_slice);
     if node_children.is_empty() {
         return Ok(());
     }
@@ -148,7 +191,19 @@ fn layout_node(
                 Axis::Vertical => inner.height,
                 Axis::Horizontal => inner.width,
             };
-            let natural = natural_scroll_extent(children, child, axis, available_main, depth + 1)?;
+            let available_cross = match axis {
+                Axis::Vertical => inner.width,
+                Axis::Horizontal => inner.height,
+            };
+            let natural = natural_scroll_extent(
+                context.children,
+                child,
+                axis,
+                available_main,
+                available_cross,
+                context.text_scale,
+                depth + 1,
+            )?;
             let main = if fill_viewport {
                 natural.max(available_main)
             } else {
@@ -166,15 +221,7 @@ fn layout_node(
                     ..inner
                 },
             };
-            layout_node(
-                tree,
-                children,
-                child.id,
-                content_frame,
-                false,
-                depth + 1,
-                output,
-            )?;
+            layout_node(context, child.id, content_frame, false, depth + 1, output)?;
         }
         return Ok(());
     }
@@ -183,7 +230,7 @@ fn layout_node(
             if !visible(child) {
                 continue;
             }
-            layout_node(tree, children, child.id, inner, true, depth + 1, output)?;
+            layout_node(context, child.id, inner, true, depth + 1, output)?;
         }
         return Ok(());
     }
@@ -201,15 +248,7 @@ fn layout_node(
                     ..inner
                 }
             };
-            layout_node(
-                tree,
-                children,
-                child.id,
-                child_frame,
-                false,
-                depth + 1,
-                output,
-            )?;
+            layout_node(context, child.id, child_frame, false, depth + 1, output)?;
         }
         return Ok(());
     }
@@ -223,12 +262,20 @@ fn layout_node(
     let flow_children = node_children
         .iter()
         .copied()
-        .filter(|child| visible(child) && integer(child, PropKey::PositionType).unwrap_or(1) != 2)
+        .filter(|child| {
+            visible(child)
+                && child.kind != NodeKind::Modal
+                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
+        })
         .collect::<Vec<_>>();
     let absolute_children = node_children
         .iter()
         .copied()
-        .filter(|child| visible(child) && integer(child, PropKey::PositionType).unwrap_or(1) == 2)
+        .filter(|child| {
+            visible(child)
+                && child.kind != NodeKind::Modal
+                && integer(child, PropKey::PositionType).unwrap_or(1) == 2
+        })
         .collect::<Vec<_>>();
     let ordered_children = if matches!(direction, 3 | 4) {
         flow_children.iter().rev().copied().collect::<Vec<_>>()
@@ -252,7 +299,15 @@ fn layout_node(
     for child in &flow_children {
         base_main.insert(
             child.id,
-            child_main(child, axis, available_main, available_cross)?,
+            child_main(
+                context.children,
+                child,
+                axis,
+                available_main,
+                available_cross,
+                context.text_scale,
+                depth + 1,
+            )?,
         );
     }
     let fixed = flow_children
@@ -346,8 +401,17 @@ fn layout_node(
             if alignment == CrossAlignment::Stretch {
                 (available_cross - cross_before - cross_after).max(0.0)
             } else {
-                intrinsic_cross(child, axis)
-                    .min((available_cross - cross_before - cross_after).max(0.0))
+                intrinsic_cross(
+                    context.children,
+                    child,
+                    axis,
+                    available_main,
+                    available_cross,
+                    context.text_scale,
+                    depth + 1,
+                )
+                .unwrap_or(0.0)
+                .min((available_cross - cross_before - cross_after).max(0.0))
             }
         });
         let cross_offset = match alignment {
@@ -371,15 +435,7 @@ fn layout_node(
                 height: cross,
             },
         };
-        layout_node(
-            tree,
-            children,
-            child.id,
-            child_frame,
-            false,
-            depth + 1,
-            output,
-        )?;
+        layout_node(context, child.id, child_frame, false, depth + 1, output)?;
         cursor += main + main_after + distributed_gap;
     }
 
@@ -395,14 +451,32 @@ fn layout_node(
             if let (Some(left), Some(right)) = (left, right) {
                 (inner.width - left - right).max(0.0)
             } else {
-                intrinsic_cross(child, Axis::Vertical)
+                intrinsic_extent(
+                    context.children,
+                    child,
+                    Axis::Horizontal,
+                    inner.width,
+                    inner.height,
+                    context.text_scale,
+                    depth + 1,
+                )
+                .unwrap_or(0.0)
             }
         });
         let mut height = explicit_height.unwrap_or_else(|| {
             if let (Some(top), Some(bottom)) = (top, bottom) {
                 (inner.height - top - bottom).max(0.0)
             } else {
-                intrinsic_main(child, Axis::Vertical)
+                intrinsic_extent(
+                    context.children,
+                    child,
+                    Axis::Vertical,
+                    width,
+                    inner.height,
+                    context.text_scale,
+                    depth + 1,
+                )
+                .unwrap_or(0.0)
             }
         });
         if let Some(ratio) = number(child, PropKey::AspectRatio).filter(|value| *value > 0.0) {
@@ -444,15 +518,7 @@ fn layout_node(
             width,
             height,
         };
-        layout_node(
-            tree,
-            children,
-            child.id,
-            child_frame,
-            false,
-            depth + 1,
-            output,
-        )?;
+        layout_node(context, child.id, child_frame, false, depth + 1, output)?;
     }
     Ok(())
 }
@@ -473,19 +539,16 @@ fn natural_scroll_extent(
     node: &Node,
     axis: Axis,
     available_main: f32,
+    available_cross: f32,
+    text_scale: f32,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     if depth > MAX_LAYOUT_DEPTH {
         return Err(LayoutError::DepthExceeded);
     }
     let explicit = match axis {
-        Axis::Vertical => dimension(
-            node,
-            PropKey::Height,
-            PropKey::HeightPercent,
-            available_main,
-        ),
-        Axis::Horizontal => dimension(node, PropKey::Width, PropKey::WidthPercent, available_main),
+        Axis::Vertical => number(node, PropKey::Height),
+        Axis::Horizontal => number(node, PropKey::Width),
     };
     if let Some(explicit) = explicit {
         return finite_non_negative(explicit);
@@ -495,10 +558,30 @@ fn natural_scroll_extent(
         .map_or(&[][..], Vec::as_slice)
         .iter()
         .copied()
-        .filter(|child| visible(child) && integer(child, PropKey::PositionType).unwrap_or(1) != 2)
+        .filter(|child| {
+            visible(child)
+                && child.kind != NodeKind::Modal
+                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
+        })
         .collect::<Vec<_>>();
     if visible_children.is_empty() {
-        return finite_non_negative(intrinsic_main(node, axis));
+        return intrinsic_extent(
+            children,
+            node,
+            axis,
+            if axis == Axis::Vertical {
+                available_cross
+            } else {
+                available_main
+            },
+            if axis == Axis::Vertical {
+                available_main
+            } else {
+                available_cross
+            },
+            text_scale,
+            depth + 1,
+        );
     }
     let direction = integer(node, PropKey::FlexDirection)
         .unwrap_or_else(|| if node.kind == NodeKind::Row { 2 } else { 1 });
@@ -530,7 +613,15 @@ fn natural_scroll_extent(
     };
     let mut extents = Vec::with_capacity(visible_children.len());
     for child in visible_children {
-        let extent = natural_scroll_extent(children, child, axis, available_main, depth + 1)?;
+        let extent = natural_scroll_extent(
+            children,
+            child,
+            axis,
+            available_main,
+            available_cross,
+            text_scale,
+            depth + 1,
+        )?;
         let (before, after) = margin_main(child, axis);
         extents.push(extent + before + after);
     }
@@ -543,47 +634,387 @@ fn natural_scroll_extent(
     finite_non_negative(padding_before + content + padding_after)
 }
 
-fn intrinsic_main(node: &Node, axis: Axis) -> f32 {
-    let explicit = match axis {
+fn intrinsic_extent(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    requested_axis: Axis,
+    available_width: f32,
+    available_height: f32,
+    text_scale: f32,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    if depth > MAX_LAYOUT_DEPTH {
+        return Err(LayoutError::DepthExceeded);
+    }
+    // A percentage on an auto-sized axis is indefinite in flexbox. Resolving it
+    // against the provisional intrinsic extent feeds the result back into its
+    // own parent and can grow a finite tree without bound. Point dimensions are
+    // definite here; percentages are resolved later by `layout_node`, once the
+    // containing block has a final frame.
+    let explicit = match requested_axis {
         Axis::Vertical => number(node, PropKey::Height),
         Axis::Horizontal => number(node, PropKey::Width),
     };
-    explicit.unwrap_or(match (axis, node.kind) {
+    if let Some(explicit) = explicit {
+        return finite_non_negative(explicit);
+    }
+
+    if node.kind == NodeKind::Text {
+        let padding = finite_non_negative(number(node, PropKey::Padding).unwrap_or(0.0))?;
+        let padding_horizontal =
+            finite_non_negative(number(node, PropKey::PaddingHorizontal).unwrap_or(padding))?;
+        let padding_vertical =
+            finite_non_negative(number(node, PropKey::PaddingVertical).unwrap_or(padding))?;
+        let padding_left =
+            finite_non_negative(number(node, PropKey::PaddingLeft).unwrap_or(padding_horizontal))?;
+        let padding_top =
+            finite_non_negative(number(node, PropKey::PaddingTop).unwrap_or(padding_vertical))?;
+        let padding_right =
+            finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(padding_horizontal))?;
+        let padding_bottom =
+            finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
+        let inner_width = (available_width - padding_left - padding_right).max(0.0);
+        let text = text_extent(node, requested_axis, inner_width, text_scale);
+        let padding_extent = match requested_axis {
+            Axis::Vertical => padding_top + padding_bottom,
+            Axis::Horizontal => padding_left + padding_right,
+        };
+
+        return finite_non_negative(text + padding_extent);
+    }
+
+    let node_children = children
+        .get(&node.id)
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .copied()
+        .filter(|child| {
+            visible(child)
+                && child.kind != NodeKind::Modal
+                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
+        })
+        .collect::<Vec<_>>();
+    if node_children.is_empty() || !content_sized(node) {
+        return finite_non_negative(leaf_intrinsic(node, requested_axis, text_scale));
+    }
+
+    let padding = finite_non_negative(number(node, PropKey::Padding).unwrap_or(0.0))?;
+    let padding_horizontal =
+        finite_non_negative(number(node, PropKey::PaddingHorizontal).unwrap_or(padding))?;
+    let padding_vertical =
+        finite_non_negative(number(node, PropKey::PaddingVertical).unwrap_or(padding))?;
+    let padding_left =
+        finite_non_negative(number(node, PropKey::PaddingLeft).unwrap_or(padding_horizontal))?;
+    let padding_top =
+        finite_non_negative(number(node, PropKey::PaddingTop).unwrap_or(padding_vertical))?;
+    let padding_right =
+        finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(padding_horizontal))?;
+    let padding_bottom =
+        finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
+    let inner_width = (available_width - padding_left - padding_right).max(0.0);
+    let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
+    let direction = integer(node, PropKey::FlexDirection)
+        .unwrap_or_else(|| if node.kind == NodeKind::Row { 2 } else { 1 });
+    let flow_axis = if matches!(direction, 2 | 4) {
+        Axis::Horizontal
+    } else {
+        Axis::Vertical
+    };
+    let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
+    let mut child_extents = Vec::with_capacity(node_children.len());
+    for child in node_children {
+        let child_extent = constrained_intrinsic_extent(
+            children,
+            child,
+            requested_axis,
+            inner_width,
+            inner_height,
+            text_scale,
+            depth + 1,
+        )?;
+        let (before, after) = if requested_axis == flow_axis {
+            margin_main(child, flow_axis)
+        } else {
+            margin_cross(child, flow_axis)
+        };
+        child_extents.push(child_extent + before + after);
+    }
+    let content = if requested_axis == flow_axis {
+        child_extents.iter().sum::<f32>() + gap * child_extents.len().saturating_sub(1) as f32
+    } else {
+        child_extents.into_iter().fold(0.0, f32::max)
+    };
+    let padding_extent = match requested_axis {
+        Axis::Vertical => padding_top + padding_bottom,
+        Axis::Horizontal => padding_left + padding_right,
+    };
+
+    finite_non_negative(content + padding_extent)
+}
+
+fn constrained_intrinsic_extent(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    axis: Axis,
+    available_width: f32,
+    available_height: f32,
+    text_scale: f32,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    let extent = intrinsic_extent(
+        children,
+        node,
+        axis,
+        available_width,
+        available_height,
+        text_scale,
+        depth,
+    )?;
+    let (minimum, maximum) = match axis {
+        Axis::Vertical => (
+            number(node, PropKey::MinHeight),
+            number(node, PropKey::MaxHeight),
+        ),
+        Axis::Horizontal => (
+            number(node, PropKey::MinWidth),
+            number(node, PropKey::MaxWidth),
+        ),
+    };
+    constrained(extent, minimum, maximum)
+}
+
+fn content_sized(node: &Node) -> bool {
+    match node.kind {
+        NodeKind::Screen
+        | NodeKind::Column
+        | NodeKind::Row
+        | NodeKind::View
+        | NodeKind::Pressable
+        | NodeKind::ImageBackground
+        | NodeKind::KeyboardAvoidingView
+        | NodeKind::SafeAreaView
+        | NodeKind::InputAccessoryView => true,
+        // Authored native components are frequently compound controls (forms,
+        // calendars, tables, conversations, etc.). Their host participates in
+        // intrinsic measurement so descendants cannot escape and overlap the
+        // next sibling. Grid is the exception: its Android view owns the
+        // responsive row/column plan, while its engine children retain a
+        // simple fallback layout. Counting that fallback would reserve both
+        // arrangements and leave a large blank tail below the actual grid.
+        NodeKind::CustomView => !matches!(
+            node.properties.get(&PropKey::HostName),
+            Some(pam_native_protocol::PropValue::String(name))
+                if name == "pam.mobile_ui.grid"
+        ),
+        _ => false,
+    }
+}
+
+fn leaf_intrinsic(node: &Node, axis: Axis, text_scale: f32) -> f32 {
+    match (axis, node.kind) {
+        (Axis::Horizontal, NodeKind::Text) => text_extent(node, axis, f32::INFINITY, text_scale),
+        (Axis::Horizontal, NodeKind::Switch) => 52.0,
+        (Axis::Horizontal, NodeKind::ActivityIndicator) => DEFAULT_CONTROL_HEIGHT,
+        (Axis::Horizontal, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
+        (Axis::Horizontal, NodeKind::Spacer) => 8.0,
+        (Axis::Horizontal, NodeKind::StatusBar) => 0.0,
         (Axis::Horizontal, _) => 100.0,
-        (_, NodeKind::Text) => DEFAULT_TEXT_HEIGHT,
         (
-            _,
+            Axis::Vertical,
             NodeKind::Button
             | NodeKind::Input
             | NodeKind::Pressable
             | NodeKind::Switch
             | NodeKind::ActivityIndicator,
         ) => DEFAULT_CONTROL_HEIGHT,
-        (_, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
+        (Axis::Vertical, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (
-            _,
+            Axis::Vertical,
             NodeKind::List | NodeKind::SectionList | NodeKind::Scroll | NodeKind::RefreshControl,
         ) => DEFAULT_LIST_HEIGHT,
-        (_, NodeKind::Spacer) => 8.0,
-        (_, NodeKind::StatusBar) => 0.0,
-        _ => DEFAULT_CONTROL_HEIGHT,
-    })
-}
-
-fn intrinsic_cross(node: &Node, axis: Axis) -> f32 {
-    match axis {
-        Axis::Vertical => number(node, PropKey::Width).unwrap_or(100.0),
-        Axis::Horizontal => {
-            number(node, PropKey::Height).unwrap_or(intrinsic_main(node, Axis::Vertical))
-        }
+        (Axis::Vertical, NodeKind::Spacer) => 8.0,
+        (Axis::Vertical, NodeKind::StatusBar) => 0.0,
+        (Axis::Vertical, _) => DEFAULT_CONTROL_HEIGHT,
     }
 }
 
+fn text_extent(node: &Node, axis: Axis, available_width: f32, device_text_scale: f32) -> f32 {
+    let allow_scaling = !matches!(
+        node.properties.get(&PropKey::TextAllowFontScaling),
+        Some(pam_native_protocol::PropValue::Boolean(false))
+    );
+    let maximum_scale = number(node, PropKey::TextMaxFontSizeMultiplier).unwrap_or(0.0);
+    let text_scale = if !allow_scaling {
+        1.0
+    } else if maximum_scale > 0.0 {
+        device_text_scale.min(maximum_scale.max(1.0))
+    } else {
+        device_text_scale
+    };
+    let base_font_size = number(node, PropKey::FontSize).unwrap_or(14.0).max(1.0);
+    let font_size = base_font_size * text_scale;
+    let line_height = number(node, PropKey::LineHeight)
+        .unwrap_or((base_font_size * 1.4).max(DEFAULT_TEXT_HEIGHT / 2.0))
+        * text_scale;
+    let letter_spacing = number(node, PropKey::LetterSpacing).unwrap_or(0.0) * font_size;
+    let source_text = match node.properties.get(&PropKey::Text) {
+        Some(pam_native_protocol::PropValue::String(value)) => value.as_str(),
+        _ => "",
+    };
+    let text = transformed_text_for_measurement(
+        source_text,
+        integer(node, PropKey::TextTransform).unwrap_or(1),
+    );
+    let lines = wrapped_text_lines(&text, font_size, letter_spacing, available_width);
+    match axis {
+        Axis::Vertical => {
+            let maximum_lines = integer(node, PropKey::NumberOfLines)
+                .filter(|value| *value > 0)
+                .map_or(lines.len(), |value| value as usize);
+            line_height * lines.len().min(maximum_lines).max(1) as f32
+        }
+        Axis::Horizontal => lines
+            .iter()
+            .map(|line| estimated_text_width(line, font_size, letter_spacing))
+            .fold(0.0, f32::max)
+            .min(available_width.max(0.0)),
+    }
+}
+
+fn transformed_text_for_measurement(text: &str, transform: i64) -> String {
+    match transform {
+        2 => text.to_uppercase(),
+        3 => text.to_lowercase(),
+        4 => {
+            let mut capitalize_next = true;
+            text.chars()
+                .flat_map(|character| {
+                    if character.is_whitespace() {
+                        capitalize_next = true;
+                        character.to_string().chars().collect::<Vec<_>>()
+                    } else if capitalize_next && character.is_alphabetic() {
+                        capitalize_next = false;
+                        character.to_uppercase().collect::<Vec<_>>()
+                    } else {
+                        capitalize_next = false;
+                        character.to_string().chars().collect::<Vec<_>>()
+                    }
+                })
+                .collect()
+        }
+        _ => text.to_owned(),
+    }
+}
+
+fn wrapped_text_lines(
+    text: &str,
+    font_size: f32,
+    letter_spacing: f32,
+    available_width: f32,
+) -> Vec<&str> {
+    let hard_lines = text.split('\n').collect::<Vec<_>>();
+    if !available_width.is_finite() || available_width <= 0.0 {
+        return hard_lines;
+    }
+    let mut result = Vec::new();
+    for hard_line in hard_lines {
+        if hard_line.is_empty() {
+            result.push(hard_line);
+            continue;
+        }
+        let mut start = 0;
+        let mut last_break = None;
+        let mut width = 0.0;
+        for (offset, character) in hard_line.char_indices() {
+            let advance = estimated_character_width(character, font_size) + letter_spacing;
+            if character.is_whitespace() {
+                last_break = Some(offset);
+            }
+            // Intrinsic parents are often exactly the sum of their text and
+            // padding. Allow a small floating-point tolerance so measuring
+            // that child again does not wrap its last word onto a phantom
+            // second line.
+            let fit_tolerance = 0.5_f32.max(font_size * 0.02);
+            if width + advance > available_width + fit_tolerance && offset > start {
+                let end = last_break
+                    .filter(|position| *position > start)
+                    .unwrap_or(offset);
+                result.push(hard_line[start..end].trim_end());
+                start = if end < offset {
+                    hard_line[end..]
+                        .char_indices()
+                        .find(|(_, character)| !character.is_whitespace())
+                        .map_or(offset, |(position, _)| end + position)
+                } else {
+                    offset
+                };
+                last_break = None;
+                width = estimated_text_width(&hard_line[start..offset], font_size, letter_spacing);
+            }
+            width += advance;
+        }
+        result.push(hard_line[start..].trim_end());
+    }
+    result
+}
+
+fn estimated_text_width(text: &str, font_size: f32, letter_spacing: f32) -> f32 {
+    let mut characters = text.chars().peekable();
+    let mut width = 0.0;
+    while let Some(character) = characters.next() {
+        width += estimated_character_width(character, font_size);
+        if characters.peek().is_some() {
+            width += letter_spacing;
+        }
+    }
+    width
+}
+
+fn estimated_character_width(character: char, font_size: f32) -> f32 {
+    let em = match character {
+        ' ' | '\t' => 0.33,
+        'i' | 'l' | 'I' | '!' | '|' | '.' | ',' | ':' | ';' | '\'' => 0.30,
+        'm' | 'w' | 'M' | 'W' | '@' | '%' | '&' => 0.88,
+        character if character.is_ascii_uppercase() => 0.68,
+        character if character.is_ascii_digit() => 0.56,
+        character if character.is_ascii() => 0.54,
+        _ => 1.0,
+    };
+    font_size * em
+}
+
+fn intrinsic_cross(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    parent_axis: Axis,
+    available_main: f32,
+    available_cross: f32,
+    text_scale: f32,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    let (requested_axis, available_width, available_height) = match parent_axis {
+        Axis::Vertical => (Axis::Horizontal, available_cross, available_main),
+        Axis::Horizontal => (Axis::Vertical, available_main, available_cross),
+    };
+    intrinsic_extent(
+        children,
+        node,
+        requested_axis,
+        available_width,
+        available_height,
+        text_scale,
+        depth,
+    )
+}
+
 fn child_main(
+    children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
     axis: Axis,
     available_main: f32,
     available_cross: f32,
+    text_scale: f32,
+    depth: usize,
 ) -> Result<f32, LayoutError> {
     let explicit_main = match axis {
         Axis::Vertical => dimension(
@@ -607,7 +1038,22 @@ fn child_main(
     let main = explicit_main.unwrap_or_else(|| match (axis, explicit_cross, ratio) {
         (Axis::Vertical, Some(width), Some(ratio)) => width / ratio,
         (Axis::Horizontal, Some(height), Some(ratio)) => height * ratio,
-        _ => intrinsic_main(node, axis),
+        _ => {
+            let (available_width, available_height) = match axis {
+                Axis::Vertical => (explicit_cross.unwrap_or(available_cross), available_main),
+                Axis::Horizontal => (available_main, explicit_cross.unwrap_or(available_cross)),
+            };
+            intrinsic_extent(
+                children,
+                node,
+                axis,
+                available_width,
+                available_height,
+                text_scale,
+                depth,
+            )
+            .unwrap_or(0.0)
+        }
     });
     let (minimum, maximum) = match axis {
         Axis::Vertical => (
@@ -1194,5 +1640,575 @@ mod tests {
         .expect("vertical scroll layout");
         assert_eq!(vertical_layouts[&2].height, 300.0);
         assert_eq!(vertical_layouts[&4].y, 150.0);
+    }
+
+    #[test]
+    fn percentage_height_inside_auto_content_resolves_after_intrinsic_measurement() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Scroll, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::FlexDirection, PropValue::Integer(1))],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Padding, PropValue::Float(16.0))],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Pressable,
+                        [(PropKey::FlexDirection, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        4,
+                        0,
+                        NodeKind::Input,
+                        [(PropKey::HeightPercent, PropValue::Float(100.0))],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        4,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(24.0)),
+                            (PropKey::Height, PropValue::Float(24.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("layout");
+
+        assert_eq!(layouts[&3].height, 80.0);
+        assert_eq!(layouts[&4].height, 48.0);
+        assert_eq!(layouts[&5].height, 48.0);
+        assert!(layouts.values().all(|frame| frame.height <= 640.0));
+    }
+
+    #[test]
+    fn modal_is_a_viewport_portal_and_does_not_consume_parent_flow() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::Gap, PropValue::Float(10.0))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(20.0))],
+                    ),
+                ),
+                (3, node(3, 1, 1, NodeKind::Modal, [])),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::PositionType, PropValue::Integer(2)),
+                            (PropKey::Left, PropValue::Float(0.0)),
+                            (PropKey::Top, PropValue::Float(0.0)),
+                            (PropKey::Right, PropValue::Float(0.0)),
+                            (PropKey::Bottom, PropValue::Float(0.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        1,
+                        2,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(20.0))],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("modal portal layout");
+
+        assert_eq!(layouts[&3].width, 360.0);
+        assert_eq!(layouts[&3].height, 640.0);
+        assert_eq!(layouts[&4].width, 360.0);
+        assert_eq!(layouts[&4].height, 640.0);
+        assert_eq!(layouts[&5].y, 30.0);
+    }
+
+    #[test]
+    fn nested_auto_sized_containers_expand_to_fit_wrapped_text_and_controls() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Screen,
+                        [
+                            (PropKey::AlignItems, PropValue::Integer(2)),
+                            (PropKey::JustifyContent, PropValue::Integer(2)),
+                        ],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(300.0)),
+                            (PropKey::Padding, PropValue::Float(24.0)),
+                            (PropKey::Gap, PropValue::Float(24.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::Gap, PropValue::Float(8.0))],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Text,
+                        [
+                            (
+                                PropKey::Text,
+                                PropValue::String("Build native apps with PHP".into()),
+                            ),
+                            (PropKey::FontSize, PropValue::Float(36.0)),
+                            (PropKey::LineHeight, PropValue::Float(50.4)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        3,
+                        1,
+                        NodeKind::Text,
+                        [
+                            (
+                                PropKey::Text,
+                                PropValue::String(
+                                    "Accessible official components on the PAM Native renderer."
+                                        .into(),
+                                ),
+                            ),
+                            (PropKey::FontSize, PropValue::Float(14.0)),
+                            (PropKey::LineHeight, PropValue::Float(19.6)),
+                        ],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        2,
+                        1,
+                        NodeKind::Pressable,
+                        [
+                            (PropKey::MinHeight, PropValue::Float(52.0)),
+                            (PropKey::PaddingHorizontal, PropValue::Float(24.0)),
+                        ],
+                    ),
+                ),
+                (
+                    7,
+                    node(
+                        7,
+                        6,
+                        0,
+                        NodeKind::Text,
+                        [
+                            (PropKey::Text, PropValue::String("Native taps: 0".into())),
+                            (PropKey::FontSize, PropValue::Float(14.0)),
+                            (PropKey::LineHeight, PropValue::Float(19.6)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 800.0,
+            },
+        )
+        .expect("content-sized layout");
+        let card = layouts[&2];
+        let stack = layouts[&3];
+        let heading = layouts[&4];
+        let description = layouts[&5];
+        let button = layouts[&6];
+
+        assert!(card.height > DEFAULT_CONTROL_HEIGHT);
+        assert!(heading.height >= 100.0, "heading should wrap to two lines");
+        assert!(description.y >= heading.y + heading.height);
+        assert!(button.y >= stack.y + stack.height);
+        assert!(
+            button.y + button.height <= card.y + card.height,
+            "card={card:?} stack={stack:?} button={button:?}",
+        );
+    }
+
+    #[test]
+    fn compound_custom_view_expands_to_fit_its_children() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::CustomView,
+                        [
+                            (PropKey::PaddingVertical, PropValue::Float(2.0)),
+                            (PropKey::Gap, PropValue::Float(4.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Text,
+                        [
+                            (PropKey::Text, PropValue::String("Email".into())),
+                            (PropKey::LineHeight, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+                (4, node(4, 2, 1, NodeKind::Input, [])),
+                (
+                    5,
+                    node(
+                        5,
+                        2,
+                        2,
+                        NodeKind::Text,
+                        [
+                            (
+                                PropKey::Text,
+                                PropValue::String("We never share your email.".into()),
+                            ),
+                            (PropKey::LineHeight, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(24.0))],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 320.0,
+                height: 640.0,
+            },
+        )
+        .expect("compound custom view layout");
+
+        assert_eq!(layouts[&2].height, 100.0);
+        assert_eq!(layouts[&6].y, 100.0);
+        assert!(layouts[&5].y >= layouts[&4].y + layouts[&4].height);
+    }
+
+    #[test]
+    fn native_grid_uses_its_authored_minimum_instead_of_fallback_child_flow() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::CustomView,
+                        [
+                            (
+                                PropKey::HostName,
+                                PropValue::String("pam.mobile_ui.grid".into()),
+                            ),
+                            (PropKey::MinHeight, PropValue::Float(108.0)),
+                            (PropKey::Gap, PropValue::Float(12.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(108.0))],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(108.0))],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(24.0))],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 320.0,
+                height: 640.0,
+            },
+        )
+        .expect("native grid layout");
+
+        assert_eq!(layouts[&2].height, 108.0);
+        assert_eq!(layouts[&5].y, 108.0);
+    }
+
+    #[test]
+    fn text_measurement_honors_explicit_line_height_and_number_of_lines() {
+        let text = node(
+            1,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (
+                    PropKey::Text,
+                    PropValue::String("one two three four five six".into()),
+                ),
+                (PropKey::FontSize, PropValue::Float(20.0)),
+                (PropKey::LineHeight, PropValue::Float(30.0)),
+                (PropKey::NumberOfLines, PropValue::Integer(2)),
+            ],
+        );
+
+        assert_eq!(text_extent(&text, Axis::Vertical, 70.0, 1.0), 60.0);
+    }
+
+    #[test]
+    fn text_measurement_tracks_android_font_scale_and_respects_opt_out() {
+        let scalable = node(
+            1,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (PropKey::Text, PropValue::String("PamUI".into())),
+                (PropKey::FontSize, PropValue::Float(20.0)),
+                (PropKey::LineHeight, PropValue::Float(28.0)),
+            ],
+        );
+        let fixed = node(
+            2,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (PropKey::Text, PropValue::String("PamUI".into())),
+                (PropKey::FontSize, PropValue::Float(20.0)),
+                (PropKey::LineHeight, PropValue::Float(28.0)),
+                (PropKey::TextAllowFontScaling, PropValue::Boolean(false)),
+            ],
+        );
+
+        assert_eq!(text_extent(&scalable, Axis::Vertical, 200.0, 1.5), 42.0,);
+        assert_eq!(text_extent(&fixed, Axis::Vertical, 200.0, 1.5), 28.0);
+    }
+
+    #[test]
+    fn text_measurement_uses_the_rendered_case_transform() {
+        let plain = node(
+            1,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (
+                    PropKey::Text,
+                    PropValue::String("pushinbr/pam-mobile-ui".into()),
+                ),
+                (PropKey::FontSize, PropValue::Float(12.0)),
+            ],
+        );
+        let uppercase = node(
+            2,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (
+                    PropKey::Text,
+                    PropValue::String("pushinbr/pam-mobile-ui".into()),
+                ),
+                (PropKey::FontSize, PropValue::Float(12.0)),
+                (PropKey::TextTransform, PropValue::Integer(2)),
+            ],
+        );
+
+        assert!(
+            text_extent(&uppercase, Axis::Horizontal, 400.0, 1.0)
+                > text_extent(&plain, Axis::Horizontal, 400.0, 1.0),
+        );
+    }
+
+    #[test]
+    fn exact_intrinsic_text_width_does_not_create_a_phantom_line() {
+        let font_size = 15.4;
+        let letter_spacing = 0.0;
+        let label = "Open modal";
+        let intrinsic = estimated_text_width(label, font_size, letter_spacing);
+
+        assert_eq!(
+            wrapped_text_lines(label, font_size, letter_spacing, intrinsic),
+            vec![label],
+        );
+    }
+
+    #[test]
+    fn intrinsic_text_extent_includes_authored_padding() {
+        let padded = node(
+            1,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (PropKey::Text, PropValue::String("Cell".into())),
+                (PropKey::FontSize, PropValue::Float(16.0)),
+                (PropKey::LineHeight, PropValue::Float(22.0)),
+                (PropKey::PaddingHorizontal, PropValue::Float(24.0)),
+                (PropKey::PaddingVertical, PropValue::Float(14.0)),
+            ],
+        );
+
+        assert_eq!(
+            intrinsic_extent(
+                &BTreeMap::new(),
+                &padded,
+                Axis::Vertical,
+                320.0,
+                640.0,
+                1.0,
+                0,
+            )
+            .expect("padded text height"),
+            50.0,
+        );
+        assert!(
+            intrinsic_extent(
+                &BTreeMap::new(),
+                &padded,
+                Axis::Horizontal,
+                320.0,
+                640.0,
+                1.0,
+                0,
+            )
+            .expect("padded text width")
+                > 48.0,
+        );
     }
 }

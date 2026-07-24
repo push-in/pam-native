@@ -39,23 +39,29 @@ class PamRuntime(
     @Volatile
     private var handle = 0L
 
-    fun start(entry: File, widthDp: Float, heightDp: Float) {
+    fun start(entry: File, widthDp: Float, heightDp: Float, textScale: Float) {
         synchronized(handleLock) {
             check(!closed.get()) { "Pam Runtime is closed" }
             check(handle == 0L) { "Pam Runtime is already running" }
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
             }
-            handle = nativeStart(entry.absolutePath, stateDirectory.absolutePath, widthDp, heightDp)
+            handle = nativeStart(
+                entry.absolutePath,
+                stateDirectory.absolutePath,
+                widthDp,
+                heightDp,
+                textScale,
+            )
             check(handle != 0L) { "Pam Runtime failed to start" }
         }
     }
 
-    fun updateViewport(widthDp: Float, heightDp: Float) {
+    fun updateViewport(widthDp: Float, heightDp: Float, textScale: Float) {
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
-                nativeRelayout(active, widthDp, heightDp)
+                nativeRelayout(active, widthDp, heightDp, textScale)
             }
         }
     }
@@ -220,8 +226,14 @@ class PamRuntime(
         stateDirectory: String,
         widthDp: Float,
         heightDp: Float,
+        textScale: Float,
     ): Long
-    private external fun nativeRelayout(handle: Long, widthDp: Float, heightDp: Float)
+    private external fun nativeRelayout(
+        handle: Long,
+        widthDp: Float,
+        heightDp: Float,
+        textScale: Float,
+    )
 
     private external fun nativeDispatchEvent(
         handle: Long,

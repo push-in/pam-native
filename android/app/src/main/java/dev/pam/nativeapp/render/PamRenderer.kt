@@ -93,6 +93,29 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
         }
+        val retainedScrollOffsets = buildMap {
+            for (position in 0 until views.size()) {
+                val view = views.valueAt(position)
+                if (view is PamScrollContainer) {
+                    put(views.keyAt(position), view.snapshotOffsetPixels())
+                }
+            }
+        }
+        val explicitlyUpdatedScrollOffsets = buildSet {
+            batches.forEach { batch ->
+                batch.forEach { mutation ->
+                    if (
+                        mutation is Mutation.Update
+                        && (
+                            mutation.key == PropKey.SCROLL_CONTENT_OFFSET_X
+                                || mutation.key == PropKey.SCROLL_CONTENT_OFFSET_Y
+                        )
+                    ) {
+                        add(mutation.id)
+                    }
+                }
+            }
+        }
         val dirtyLayouts = LinkedHashSet<Long>()
         batches.forEach { batch ->
             batch.forEach { mutation ->
@@ -110,6 +133,14 @@ class PamRenderer(
             }
         }
         dirtyLayouts.forEach(::applyLayout)
+        retainedScrollOffsets.forEach { (id, offset) ->
+            if (id !in explicitlyUpdatedScrollOffsets) {
+                (views[id] as? PamScrollContainer)?.restoreOffsetPixels(
+                    offset.first,
+                    offset.second,
+                )
+            }
+        }
     }
 
     fun trimMemory(critical: Boolean) {
@@ -320,10 +351,59 @@ class PamRenderer(
 
     private fun attachHosted(view: View, state: NodeState) {
         val parent = effectiveParent(state.parent)
-        val index = if (parent == state.parent) state.index else {
-            (views[parent] as? ViewGroup)?.childCount ?: host.childCount
-        }
+        val index = hostedInsertionIndex(state, parent)
         attach(view, parent, index)
+    }
+
+    private fun hostedInsertionIndex(state: NodeState, parentId: Long): Int {
+        val targetPath = hostedPath(state, parentId)
+        var index = 0
+        for (position in 0 until nodes.size()) {
+            val candidate = nodes.valueAt(position)
+            if (
+                candidate.id == state.id ||
+                views[candidate.id] == null ||
+                effectiveParent(candidate.parent) != parentId
+            ) {
+                continue
+            }
+            val comparison = compareHostedPaths(
+                hostedPath(candidate, parentId),
+                targetPath,
+            )
+            if (
+                comparison < 0 ||
+                comparison == 0 && candidate.mountOrder < state.mountOrder
+            ) {
+                index++
+            }
+        }
+        return index
+    }
+
+    private fun hostedPath(state: NodeState, parentId: Long): List<Int> {
+        val reversed = ArrayList<Int>()
+        var current: NodeState? = state
+        var depth = 0
+        while (current != null && current.id != parentId) {
+            reversed += current.index
+            current = nodes[current.parent]
+            check(++depth <= MAX_VIRTUAL_DEPTH) { "Virtual native hierarchy is too deep" }
+        }
+        check(parentId == 0L || current?.id == parentId) {
+            "Node ${state.id} is not descended from host $parentId"
+        }
+        reversed.reverse()
+        return reversed
+    }
+
+    private fun compareHostedPaths(left: List<Int>, right: List<Int>): Int {
+        val shared = min(left.size, right.size)
+        for (index in 0 until shared) {
+            val comparison = left[index].compareTo(right[index])
+            if (comparison != 0) return comparison
+        }
+        return left.size.compareTo(right.size)
     }
 
     private fun effectiveParent(start: Long): Long {
@@ -421,6 +501,15 @@ class PamRenderer(
                 leftMargin = leftPx
                 topMargin = topPx
             }
+        }
+        // Some plugin hosts (for example Calendar) draw against tagged child
+        // bounds. A descendant frame can change without mutating the host's
+        // own properties, so invalidate the hosted ancestor chain after
+        // applying layout instead of leaving a stale custom canvas.
+        var ancestor = view.parent
+        while (ancestor is View) {
+            ancestor.invalidate()
+            ancestor = ancestor.parent
         }
         applyHitSlop(view, state)
         state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
@@ -1271,7 +1360,7 @@ class PamRenderer(
                 },
             )
             configurePressable(view, state)
-        } else {
+        } else if (state.kind != NodeKind.CUSTOM_VIEW) {
             if (state.properties[PropKey.ON_PRESS] != null) {
                 view.setOnClickListener { dispatch(state.id, EVENT_PRESS) }
             } else {
@@ -1284,6 +1373,11 @@ class PamRenderer(
                 }
             } else {
                 view.setOnLongClickListener(null)
+            }
+            if (view is TextView && view !is EditText) {
+                view.isClickable = state.properties[PropKey.ON_PRESS] != null
+                view.isLongClickable =
+                    state.properties[PropKey.ON_LONG_PRESS] != null
             }
         }
         installPressFeedback(view, state)
@@ -3091,7 +3185,6 @@ class PamRenderer(
         const val TEXT_DATA_EMAIL = 4
         const val TEXT_DATA_ALL = 5
         const val MAX_VIRTUAL_DEPTH = 512
-
         val LAYOUT_ONLY_KINDS = setOf(
             NodeKind.COLUMN,
             NodeKind.ROW,
@@ -3099,6 +3192,11 @@ class PamRenderer(
         )
 
         val HOST_PROPERTIES = setOf(
+            // A semantic value on a layout container is also its Android tag.
+            // Native compound hosts query these tagged descendants for
+            // calendars, accordions, tabs, overlays, file trees and pagers;
+            // flattening the node makes that authored anatomy disappear.
+            PropKey.VALUE,
             PropKey.BACKGROUND_COLOR,
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,

@@ -53,7 +53,7 @@ The package advertises one descriptor:
 
 ```json
 {
-    "$schema": "vendor/pam/native/resources/pam-native.plugin.schema.json",
+    "$schema": "vendor/pushinbr/pam-native/resources/pam-native.plugin.schema.json",
     "version": 1,
     "protocol": 1,
     "pamNative": {

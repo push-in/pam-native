@@ -44,10 +44,21 @@ PamStatus pam_native_engine_set_viewport(
     float width,
     float height
 );
+PamStatus pam_native_engine_set_text_scale(
+    PamNativeEngineHandle *handle,
+    float text_scale
+);
 PamStatus pam_native_engine_relayout(
     PamNativeEngineHandle *handle,
     float width,
     float height,
+    PamNativeBuffer *output
+);
+PamStatus pam_native_engine_relayout_with_metrics(
+    PamNativeEngineHandle *handle,
+    float width,
+    float height,
+    float text_scale,
     PamNativeBuffer *output
 );
 PamStatus pam_native_engine_commit(

@@ -1,5 +1,5 @@
 {
-    "name": "pam/native",
+    "name": "pushinbr/pam-native",
     "description": "Build fast native Android applications with PHP and Pam.",
     "type": "library",
     "license": "BUSL-1.1",

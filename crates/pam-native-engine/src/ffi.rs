@@ -112,6 +112,29 @@ pub unsafe extern "C" fn pam_native_engine_set_viewport(
 }
 
 #[unsafe(no_mangle)]
+/// Changes the text scale used by subsequent commits.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine and the caller must provide exclusive
+/// access to it for the duration of this call.
+pub unsafe extern "C" fn pam_native_engine_set_text_scale(
+    handle: *mut PamNativeEngineHandle,
+    text_scale: f32,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    match catch_unwind(AssertUnwindSafe(|| {
+        handle.engine.set_text_scale(text_scale)
+    })) {
+        Ok(Ok(())) => PamStatus::Success,
+        Ok(Err(_)) => PamStatus::InvalidArgument,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Changes the viewport and returns layout mutations for the retained tree.
 ///
 /// # Safety
@@ -132,6 +155,41 @@ pub unsafe extern "C" fn pam_native_engine_relayout(
     };
     *output = PamNativeBuffer::default();
     match catch_unwind(AssertUnwindSafe(|| handle.engine.relayout(width, height))) {
+        Ok(Ok(batch)) => {
+            *output = leak_buffer(batch);
+            PamStatus::Success
+        }
+        Ok(Err(_)) => PamStatus::InvalidArgument,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
+/// Changes viewport and text metrics and returns retained-tree layout mutations.
+///
+/// # Safety
+///
+/// `handle` must point to a live, exclusively borrowed engine and `output`
+/// must point to writable storage for one [`PamNativeBuffer`].
+pub unsafe extern "C" fn pam_native_engine_relayout_with_metrics(
+    handle: *mut PamNativeEngineHandle,
+    width: f32,
+    height: f32,
+    text_scale: f32,
+    output: *mut PamNativeBuffer,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    *output = PamNativeBuffer::default();
+    match catch_unwind(AssertUnwindSafe(|| {
+        handle
+            .engine
+            .relayout_with_metrics(width, height, text_scale)
+    })) {
         Ok(Ok(batch)) => {
             *output = leak_buffer(batch);
             PamStatus::Success
