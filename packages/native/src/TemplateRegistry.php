@@ -15,6 +15,9 @@ final class TemplateRegistry
     /** @var array<string, array<int, string|int|float|bool>> */
     private static array $classes = [];
 
+    /** @var list<Closure(string): (array<int, mixed>|null)> */
+    private static array $styleResolvers = [];
+
     private function __construct()
     {
     }
@@ -52,7 +55,53 @@ final class TemplateRegistry
     public static function style(string $class, array $properties): void
     {
         self::assertName($class);
+        self::$classes[$class] = self::validatedProperties($properties);
+    }
 
+    /**
+     * Registers a lazy utility-class compiler supplied by a plugin.
+     *
+     * Returning null delegates to the next resolver. Returning an empty array
+     * marks a platform-specific or intentionally visual no-op as supported.
+     *
+     * @param Closure(string): (array<int, mixed>|null) $resolver
+     */
+    public static function styleResolver(Closure $resolver): void
+    {
+        self::$styleResolvers[] = $resolver;
+    }
+
+    /** @return array<int, string|int|float|bool>|null */
+    public static function classProperties(string $class): ?array
+    {
+        if (isset(self::$classes[$class])) {
+            return self::$classes[$class];
+        }
+
+        foreach (self::$styleResolvers as $resolver) {
+            $properties = $resolver($class);
+
+            if ($properties !== null) {
+                return self::validatedProperties($properties);
+            }
+        }
+
+        return null;
+    }
+
+    public static function reset(): void
+    {
+        self::$components = [];
+        self::$classes = [];
+        self::$styleResolvers = [];
+    }
+
+    /**
+     * @param array<int, mixed> $properties
+     * @return array<int, string|int|float|bool>
+     */
+    private static function validatedProperties(array $properties): array
+    {
         $validated = [];
 
         foreach ($properties as $key => $value) {
@@ -65,19 +114,7 @@ final class TemplateRegistry
             $validated[$key] = $value;
         }
 
-        self::$classes[$class] = $validated;
-    }
-
-    /** @return array<int, string|int|float|bool>|null */
-    public static function classProperties(string $class): ?array
-    {
-        return self::$classes[$class] ?? null;
-    }
-
-    public static function reset(): void
-    {
-        self::$components = [];
-        self::$classes = [];
+        return $validated;
     }
 
     private static function assertName(string $name): void

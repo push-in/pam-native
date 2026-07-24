@@ -181,6 +181,21 @@ $assert(
     'Custom template components must inherit parent variant context.',
 );
 TemplateRegistry::reset();
+TemplateRegistry::styleResolver(
+    static fn (string $class): ?array => $class === 'w-1/2'
+        ? [PropKey::WidthPercent->value => 50.0]
+        : null,
+);
+$assert(
+    TemplateRegistry::classProperties('w-1/2')
+        === [PropKey::WidthPercent->value => 50.0],
+    'Plugin utility resolvers must compile classes lazily.',
+);
+$assert(
+    TemplateRegistry::classProperties('unknown-utility') === null,
+    'Plugin utility resolvers must delegate unsupported classes.',
+);
+TemplateRegistry::reset();
 
 $incremental = new TreeEncoder();
 $initial = $incremental->encode(Text::make('A')->key('value'));
