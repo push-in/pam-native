@@ -2,4 +2,24 @@
 <resources>
     <string name="pam_error_dismiss">Dismiss</string>
     <string name="pam_error_dismiss_description">Dismiss error</string>
+    <string name="pam_accessibility_busy">Busy</string>
+    <string name="pam_accessibility_collapsed">Collapsed</string>
+    <string name="pam_accessibility_expanded">Expanded</string>
+    <string name="pam_accessibility_mixed">Mixed</string>
+    <string name="pam_accessibility_role_alert">Alert</string>
+    <string name="pam_accessibility_role_combobox">Combo box</string>
+    <string name="pam_accessibility_role_link">Link</string>
+    <string name="pam_accessibility_role_listitem">List item</string>
+    <string name="pam_accessibility_role_menu">Menu</string>
+    <string name="pam_accessibility_role_menubar">Menu bar</string>
+    <string name="pam_accessibility_role_menuitem">Menu item</string>
+    <string name="pam_accessibility_role_progressbar">Progress bar</string>
+    <string name="pam_accessibility_role_radiogroup">Radio group</string>
+    <string name="pam_accessibility_role_scrollbar">Scroll bar</string>
+    <string name="pam_accessibility_role_spinbutton">Spin button</string>
+    <string name="pam_accessibility_role_summary">Summary</string>
+    <string name="pam_accessibility_role_tab">Tab</string>
+    <string name="pam_accessibility_role_tablist">Tab list</string>
+    <string name="pam_accessibility_role_timer">Timer</string>
+    <string name="pam_accessibility_role_toolbar">Toolbar</string>
 </resources>

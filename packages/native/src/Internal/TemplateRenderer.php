@@ -8,6 +8,9 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\Align;
 use Pam\Native\AccessibilityRole;
+use Pam\Native\AccessibilityCheckedState;
+use Pam\Native\AccessibilityImportance;
+use Pam\Native\AccessibilityLiveRegion;
 use Pam\Native\AnimationKind;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -177,6 +180,16 @@ final class TemplateRenderer
         'marginLeftAuto' => PropKey::MarginLeftAuto,
         'translationXPercent' => PropKey::TranslationXPercent,
         'animationKind' => PropKey::AnimationKind,
+        'accessible' => PropKey::Accessible,
+        'accessibilityLiveRegion' => PropKey::AccessibilityLiveRegion,
+        'importantForAccessibility' => PropKey::AccessibilityImportance,
+        'accessibilityExpanded' => PropKey::AccessibilityExpanded,
+        'accessibilityBusy' => PropKey::AccessibilityBusy,
+        'accessibilityCheckedState' => PropKey::AccessibilityCheckedState,
+        'accessibilityValueMin' => PropKey::AccessibilityValueMin,
+        'accessibilityValueMax' => PropKey::AccessibilityValueMax,
+        'accessibilityValueNow' => PropKey::AccessibilityValueNow,
+        'accessibilityValueText' => PropKey::AccessibilityValueText,
     ];
 
     /** @var array<string, EventKind> */
@@ -673,6 +686,31 @@ final class TemplateRenderer
                 'list' => AccessibilityRole::List->value,
                 'listitem' => AccessibilityRole::ListItem->value,
             ]),
+            PropKey::AccessibilityLiveRegion => self::named($value, [
+                'none' => AccessibilityLiveRegion::None->value,
+                'off' => AccessibilityLiveRegion::None->value,
+                'polite' => AccessibilityLiveRegion::Polite->value,
+                'assertive' => AccessibilityLiveRegion::Assertive->value,
+            ]),
+            PropKey::AccessibilityImportance => self::named($value, [
+                'auto' => AccessibilityImportance::Auto->value,
+                'yes' => AccessibilityImportance::Yes->value,
+                'no' => AccessibilityImportance::No->value,
+                'no-hide-descendants' => AccessibilityImportance::NoHideDescendants->value,
+            ]),
+            PropKey::AccessibilityCheckedState => is_bool($value)
+                ? (
+                    $value
+                        ? AccessibilityCheckedState::Checked->value
+                        : AccessibilityCheckedState::Unchecked->value
+                )
+                : self::named($value, [
+                    'false' => AccessibilityCheckedState::Unchecked->value,
+                    'unchecked' => AccessibilityCheckedState::Unchecked->value,
+                    'true' => AccessibilityCheckedState::Checked->value,
+                    'checked' => AccessibilityCheckedState::Checked->value,
+                    'mixed' => AccessibilityCheckedState::Mixed->value,
+                ]),
             PropKey::ReturnKeyType => self::named($value, [
                 'default' => ReturnKeyType::Default->value,
                 'done' => ReturnKeyType::Done->value,

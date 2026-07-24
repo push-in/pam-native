@@ -32,6 +32,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.AccelerateInterpolator
@@ -60,6 +61,7 @@ import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
+import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
 import java.util.LinkedHashSet
 import java.util.Locale
@@ -526,10 +528,32 @@ class PamRenderer(
                     ) {
                         super.onInitializeAccessibilityNodeInfo(host, info)
                         info.className = className
-                        applyAccessibilityRoleInfo(info, role)
+                        applyAccessibilityRoleInfo(info, role, state)
                     }
                 }
             }
+            PropKey.ACCESSIBLE -> view.isFocusable = value.flag()
+            PropKey.ACCESSIBILITY_LIVE_REGION -> view.accessibilityLiveRegion =
+                when (value.integer().toInt()) {
+                    2 -> View.ACCESSIBILITY_LIVE_REGION_POLITE
+                    3 -> View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE
+                    else -> View.ACCESSIBILITY_LIVE_REGION_NONE
+                }
+            PropKey.ACCESSIBILITY_IMPORTANCE -> view.importantForAccessibility =
+                when (value.integer().toInt()) {
+                    2 -> View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                    3 -> View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    4 -> View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                    else -> View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                }
+            PropKey.ACCESSIBILITY_EXPANDED,
+            PropKey.ACCESSIBILITY_BUSY,
+            PropKey.ACCESSIBILITY_CHECKED_STATE,
+            PropKey.ACCESSIBILITY_VALUE_MIN,
+            PropKey.ACCESSIBILITY_VALUE_MAX,
+            PropKey.ACCESSIBILITY_VALUE_NOW,
+            PropKey.ACCESSIBILITY_VALUE_TEXT,
+            -> notifyAccessibilityChanged(view)
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
             PropKey.SCALE_X,
@@ -680,6 +704,21 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
             PropKey.ACCESSIBILITY_ROLE -> view.accessibilityDelegate = null
+            PropKey.ACCESSIBLE -> view.isFocusable = false
+            PropKey.ACCESSIBILITY_LIVE_REGION -> {
+                view.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_NONE
+            }
+            PropKey.ACCESSIBILITY_IMPORTANCE -> {
+                view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            }
+            PropKey.ACCESSIBILITY_EXPANDED,
+            PropKey.ACCESSIBILITY_BUSY,
+            PropKey.ACCESSIBILITY_CHECKED_STATE,
+            PropKey.ACCESSIBILITY_VALUE_MIN,
+            PropKey.ACCESSIBILITY_VALUE_MAX,
+            PropKey.ACCESSIBILITY_VALUE_NOW,
+            PropKey.ACCESSIBILITY_VALUE_TEXT,
+            -> notifyAccessibilityChanged(view)
             PropKey.TEST_ID -> view.transitionName = null
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
@@ -1355,15 +1394,122 @@ class PamRenderer(
     private fun applyAccessibilityRoleInfo(
         info: AccessibilityNodeInfo,
         role: Int,
+        state: NodeState,
     ) {
         when (role) {
             2, 11, 12 -> info.isClickable = true
-            5, 8, 19, 29 -> info.isCheckable = true
+            5, 8, 19, 29 -> {
+                info.isCheckable = true
+                val checkedState = state.integer(
+                    PropKey.ACCESSIBILITY_CHECKED_STATE,
+                    if (state.flag(PropKey.CHECKED, false)) 2L else 1L,
+                ).toInt()
+                info.isChecked = checkedState == 2
+            }
             10 -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 info.isHeading = true
             }
         }
+
+        accessibilityRoleDescription(role)?.let { description ->
+            info.extras.putCharSequence(
+                ROLE_DESCRIPTION_KEY,
+                context.getString(description),
+            )
+        }
+
+        val stateDescriptions = ArrayList<CharSequence>(4)
+        if (
+            state.integer(PropKey.ACCESSIBILITY_CHECKED_STATE, 0L) == 3L
+        ) {
+            stateDescriptions += context.getString(R.string.pam_accessibility_mixed)
+        }
+        if (state.flag(PropKey.ACCESSIBILITY_BUSY, false)) {
+            stateDescriptions += context.getString(R.string.pam_accessibility_busy)
+        }
+        state.properties[PropKey.ACCESSIBILITY_EXPANDED]?.let { expandedValue ->
+            val expanded = expandedValue.flag()
+            stateDescriptions += context.getString(
+                if (expanded) {
+                    R.string.pam_accessibility_expanded
+                } else {
+                    R.string.pam_accessibility_collapsed
+                },
+            )
+            info.addAction(
+                if (expanded) {
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_COLLAPSE
+                } else {
+                    AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND
+                },
+            )
+        }
+        (state.properties[PropKey.ACCESSIBILITY_VALUE_TEXT] as? PropValue.Text)
+            ?.value
+            ?.takeIf(String::isNotEmpty)
+            ?.let(stateDescriptions::add)
+        if (stateDescriptions.isNotEmpty()) {
+            setStateDescription(info, stateDescriptions.joinToString(", "))
+        }
+
+        val minimum = state.number(PropKey.ACCESSIBILITY_VALUE_MIN, Double.NaN)
+        val maximum = state.number(PropKey.ACCESSIBILITY_VALUE_MAX, Double.NaN)
+        val current = state.number(PropKey.ACCESSIBILITY_VALUE_NOW, Double.NaN)
+        if (
+            minimum.isFinite() &&
+            maximum.isFinite() &&
+            current.isFinite() &&
+            minimum <= current &&
+            current <= maximum
+        ) {
+            info.rangeInfo = AccessibilityNodeInfo.RangeInfo.obtain(
+                AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT,
+                minimum.toFloat(),
+                maximum.toFloat(),
+                current.toFloat(),
+            )
+        }
     }
+
+    private fun setStateDescription(
+        info: AccessibilityNodeInfo,
+        description: CharSequence,
+    ) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            info.stateDescription = description
+        } else {
+            info.extras.putCharSequence(STATE_DESCRIPTION_KEY, description)
+        }
+    }
+
+    private fun notifyAccessibilityChanged(view: View) {
+        if (view.isAttachedToWindow) {
+            view.sendAccessibilityEvent(
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
+            )
+        }
+    }
+
+    private fun accessibilityRoleDescription(role: Int): Int? =
+        when (role) {
+            7 -> R.string.pam_accessibility_role_alert
+            9 -> R.string.pam_accessibility_role_combobox
+            13 -> R.string.pam_accessibility_role_link
+            14 -> R.string.pam_accessibility_role_menu
+            15 -> R.string.pam_accessibility_role_menubar
+            16 -> R.string.pam_accessibility_role_menuitem
+            18 -> R.string.pam_accessibility_role_progressbar
+            20 -> R.string.pam_accessibility_role_radiogroup
+            21 -> R.string.pam_accessibility_role_scrollbar
+            23 -> R.string.pam_accessibility_role_spinbutton
+            24 -> R.string.pam_accessibility_role_summary
+            25 -> R.string.pam_accessibility_role_tab
+            26 -> R.string.pam_accessibility_role_tablist
+            28 -> R.string.pam_accessibility_role_timer
+            30 -> R.string.pam_accessibility_role_toolbar
+            33 -> R.string.pam_accessibility_role_listitem
+            else -> null
+        }
 
     private fun activity(): Activity? = context as? Activity
 
@@ -1513,6 +1659,16 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_LABEL,
             PropKey.ACCESSIBILITY_HINT,
             PropKey.ACCESSIBILITY_ROLE,
+            PropKey.ACCESSIBLE,
+            PropKey.ACCESSIBILITY_LIVE_REGION,
+            PropKey.ACCESSIBILITY_IMPORTANCE,
+            PropKey.ACCESSIBILITY_EXPANDED,
+            PropKey.ACCESSIBILITY_BUSY,
+            PropKey.ACCESSIBILITY_CHECKED_STATE,
+            PropKey.ACCESSIBILITY_VALUE_MIN,
+            PropKey.ACCESSIBILITY_VALUE_MAX,
+            PropKey.ACCESSIBILITY_VALUE_NOW,
+            PropKey.ACCESSIBILITY_VALUE_TEXT,
             PropKey.TEST_ID,
             PropKey.RIPPLE_COLOR,
             PropKey.PRESS_OPACITY,
@@ -1525,6 +1681,10 @@ class PamRenderer(
             PropKey.ANIMATE_CHANGES,
             PropKey.OVERFLOW,
         )
+
+        const val ROLE_DESCRIPTION_KEY = "AccessibilityNodeInfo.roleDescription"
+        const val STATE_DESCRIPTION_KEY =
+            "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY"
 
         val EVENT_PROPERTIES = setOf(
             PropKey.ON_PRESS,

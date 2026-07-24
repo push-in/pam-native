@@ -63,6 +63,70 @@ abstract class Element implements Renderable
         return $this->withProperty(PropKey::AccessibilityRole, $role->value);
     }
 
+    final public function accessible(bool $accessible = true): static
+    {
+        return $this->withProperty(PropKey::Accessible, $accessible);
+    }
+
+    final public function accessibilityLiveRegion(
+        AccessibilityLiveRegion $region,
+    ): static {
+        return $this->withProperty(
+            PropKey::AccessibilityLiveRegion,
+            $region->value,
+        );
+    }
+
+    final public function accessibilityImportance(
+        AccessibilityImportance $importance,
+    ): static {
+        return $this->withProperty(
+            PropKey::AccessibilityImportance,
+            $importance->value,
+        );
+    }
+
+    final public function accessibilityExpanded(bool $expanded): static
+    {
+        return $this->withProperty(PropKey::AccessibilityExpanded, $expanded);
+    }
+
+    final public function accessibilityBusy(bool $busy = true): static
+    {
+        return $this->withProperty(PropKey::AccessibilityBusy, $busy);
+    }
+
+    final public function accessibilityChecked(
+        AccessibilityCheckedState $state,
+    ): static {
+        return $this->withProperty(
+            PropKey::AccessibilityCheckedState,
+            $state->value,
+        );
+    }
+
+    final public function accessibilityValue(
+        float $minimum,
+        float $maximum,
+        float $current,
+        ?string $text = null,
+    ): static {
+        if ($minimum > $maximum || $current < $minimum || $current > $maximum) {
+            throw new InvalidArgumentException(
+                'Accessibility range must satisfy minimum <= current <= maximum.',
+            );
+        }
+
+        $element = $this
+            ->withProperty(PropKey::AccessibilityValueMin, $minimum)
+            ->withProperty(PropKey::AccessibilityValueMax, $maximum)
+            ->withProperty(PropKey::AccessibilityValueNow, $current);
+
+        return $text === null
+            ? $element
+            : $element->withProperty(PropKey::AccessibilityValueText, $text);
+    }
+
     final public function testId(string $id): static
     {
         return $this->withProperty(PropKey::TestId, $id);

@@ -5,6 +5,9 @@ declare(strict_types=1);
 use Pam\Native\App;
 use Pam\Native\AppState;
 use Pam\Native\AccessibilityRole;
+use Pam\Native\AccessibilityCheckedState;
+use Pam\Native\AccessibilityImportance;
+use Pam\Native\AccessibilityLiveRegion;
 use Pam\Native\AnimationKind;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
@@ -114,6 +117,9 @@ foreach (EventKind::cases() as $index => $kind) {
 foreach ([
     AnimationKind::cases(),
     AccessibilityRole::cases(),
+    AccessibilityCheckedState::cases(),
+    AccessibilityImportance::cases(),
+    AccessibilityLiveRegion::cases(),
     FontStyle::cases(),
     PointerEvents::cases(),
     PositionType::cases(),
@@ -136,6 +142,37 @@ $tree = Screen::make(
         }),
         Input::make('value')->placeholder('Type here'),
     )->style(new Style(padding: 16.0, gap: 8.0)),
+);
+$accessibilityElement = Text::make('Upload')
+    ->accessibilityRole(AccessibilityRole::ProgressBar)
+    ->accessible()
+    ->accessibilityLiveRegion(AccessibilityLiveRegion::Polite)
+    ->accessibilityImportance(AccessibilityImportance::Yes)
+    ->accessibilityExpanded(false)
+    ->accessibilityBusy(true)
+    ->accessibilityChecked(AccessibilityCheckedState::Mixed)
+    ->accessibilityValue(0.0, 100.0, 40.0, '40 percent');
+$assert(
+    $accessibilityElement->properties()[PropKey::Accessible->value] === true
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityLiveRegion->value]
+            === AccessibilityLiveRegion::Polite->value
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityImportance->value]
+            === AccessibilityImportance::Yes->value
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityExpanded->value] === false
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityBusy->value] === true
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityCheckedState->value]
+            === AccessibilityCheckedState::Mixed->value
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityValueNow->value] === 40.0
+        && $accessibilityElement
+            ->properties()[PropKey::AccessibilityValueText->value]
+            === '40 percent',
+    'Accessibility state and range helpers must use fixed protocol properties.',
 );
 
 $first = (new TreeEncoder())->encode($tree);

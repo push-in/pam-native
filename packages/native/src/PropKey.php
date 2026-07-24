@@ -145,4 +145,14 @@ enum PropKey: int
     case MarginLeftAuto = 137;
     case TranslationXPercent = 138;
     case AnimationKind = 139;
+    case Accessible = 140;
+    case AccessibilityLiveRegion = 141;
+    case AccessibilityImportance = 142;
+    case AccessibilityExpanded = 143;
+    case AccessibilityBusy = 144;
+    case AccessibilityCheckedState = 145;
+    case AccessibilityValueMin = 146;
+    case AccessibilityValueMax = 147;
+    case AccessibilityValueNow = 148;
+    case AccessibilityValueText = 149;
 }
