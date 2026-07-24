@@ -185,7 +185,7 @@ final class TemplateCompiler
     {
         $matches = [];
         preg_match_all(
-            "/([:@A-Za-z_][:@A-Za-z0-9_.-]*)(?:\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'))?/",
+            "/([#:@A-Za-z_][#:@A-Za-z0-9_.-]*)(?:\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'))?/",
             $source,
             $matches,
             PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL,

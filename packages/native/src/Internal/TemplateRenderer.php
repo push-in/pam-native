@@ -374,9 +374,16 @@ final class TemplateRenderer
     {
         $output = [];
 
-        foreach ($nodes as $node) {
+        $branchMatched = false;
+
+        foreach ($nodes as $index => $node) {
+            $nodeData = [
+                ...$data,
+                '__pamNodePath' => self::nodePath($data, $index),
+            ];
             if ($node->kind === 2) {
-                $output[] = self::interpolate($node->value, $scope, $data);
+                $output[] = self::interpolate($node->value, $scope, $nodeData);
+                $branchMatched = false;
                 continue;
             }
 
@@ -384,18 +391,102 @@ final class TemplateRenderer
             $attributes = $node->attributes;
             $children = $node->children;
 
+            if (isset($attributes['v-for'])) {
+                $directive = $attributes['v-for'];
+                if (
+                    !is_string($directive)
+                    || preg_match(
+                        '/^\s*\$?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+)\s*$/D',
+                        $directive,
+                        $match,
+                    ) !== 1
+                ) {
+                    throw new RuntimeException(
+                        'v-for must use "$item in $items" syntax.',
+                    );
+                }
+                $items = TemplateExpression::evaluate($match[2], $scope, $nodeData);
+                if ($items instanceof Traversable) {
+                    $items = iterator_to_array($items);
+                }
+                if (!is_array($items)) {
+                    throw new RuntimeException(
+                        'v-for source must resolve to an array or Traversable.',
+                    );
+                }
+                $loopNode = self::withoutAttributes($node, ['v-for']);
+                foreach ($items as $itemIndex => $item) {
+                    array_push(
+                        $output,
+                        ...self::nodes([$loopNode], $scope, [
+                            ...$nodeData,
+                            $match[1] => $item,
+                            $match[1].'Index' => $itemIndex,
+                            '__pamNodePath' =>
+                                self::pathValue(
+                                    $nodeData['__pamNodePath'] ?? 'root',
+                                ).'.'.(string) $itemIndex,
+                        ]),
+                    );
+                }
+                $branchMatched = false;
+                continue;
+            }
+
+            if (isset($attributes['v-if'])) {
+                $condition = self::dynamicValue(
+                    $attributes['v-if'],
+                    $scope,
+                    $nodeData,
+                );
+                $branchMatched = (bool) $condition;
+                if (!$branchMatched) {
+                    continue;
+                }
+            } elseif (isset($attributes['v-else-if'])) {
+                if ($branchMatched) {
+                    continue;
+                }
+                $branchMatched = (bool) self::dynamicValue(
+                    $attributes['v-else-if'],
+                    $scope,
+                    $nodeData,
+                );
+                if (!$branchMatched) {
+                    continue;
+                }
+            } elseif (isset($attributes['v-else'])) {
+                if ($branchMatched) {
+                    $branchMatched = false;
+                    continue;
+                }
+                $branchMatched = true;
+            } else {
+                $branchMatched = false;
+            }
+
+            $node = self::withoutAttributes(
+                $node,
+                ['v-if', 'v-else-if', 'v-else'],
+            );
+            $attributes = $node->attributes;
+
             if ($tag === 'If') {
-                $condition = self::value($attributes['condition'] ?? false, $scope, $data);
+                $condition = self::value(
+                    $attributes['condition'] ?? false,
+                    $scope,
+                    $nodeData,
+                );
 
                 if ((bool) $condition) {
-                    array_push($output, ...self::nodes($children, $scope, $data));
+                    array_push($output, ...self::nodes($children, $scope, $nodeData));
                 }
 
                 continue;
             }
 
             if ($tag === 'Each') {
-                $items = self::value($attributes['items'] ?? [], $scope, $data);
+                $items = self::value($attributes['items'] ?? [], $scope, $nodeData);
                 $name = (string) ($attributes['as'] ?? 'item');
 
                 if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
@@ -414,7 +505,7 @@ final class TemplateRenderer
                     array_push(
                         $output,
                         ...self::nodes($children, $scope, [
-                            ...$data,
+                            ...$nodeData,
                             $name => $item,
                             $name.'Index' => $index,
                         ]),
@@ -426,7 +517,7 @@ final class TemplateRenderer
 
             if ($tag === 'Slot') {
                 $name = (string) ($attributes['name'] ?? 'slot');
-                $slot = $data[$name] ?? [];
+                $slot = $nodeData[$name] ?? [];
                 if ($slot instanceof Renderable) {
                     $slot = [$slot];
                 }
@@ -434,7 +525,7 @@ final class TemplateRenderer
                     throw new RuntimeException("Slot {$name} must resolve to renderable content.");
                 }
                 if ($slot === [] && $children !== []) {
-                    array_push($output, ...self::nodes($children, $scope, $data));
+                    array_push($output, ...self::nodes($children, $scope, $nodeData));
                     continue;
                 }
                 foreach ($slot as $content) {
@@ -447,7 +538,13 @@ final class TemplateRenderer
             }
 
             try {
-                $output[] = self::tag($tag, $attributes, $children, $scope, $data);
+                $output[] = self::tag(
+                    $tag,
+                    $attributes,
+                    $children,
+                    $scope,
+                    $nodeData,
+                );
             } catch (TemplateException $error) {
                 throw $error;
             } catch (RuntimeException $error) {
@@ -464,6 +561,45 @@ final class TemplateRenderer
     }
 
     /**
+     * @param list<string> $names
+     */
+    private static function withoutAttributes(
+        CompiledTemplateNode $node,
+        array $names,
+    ): CompiledTemplateNode {
+        $attributes = array_diff_key($node->attributes, array_flip($names));
+        $copy = new CompiledTemplateNode(
+            kind: $node->kind,
+            name: $node->name,
+            attributes: $attributes,
+            source: $node->source,
+            line: $node->line,
+            column: $node->column,
+            value: $node->value,
+        );
+        $copy->children = $node->children;
+
+        return $copy;
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function nodePath(array $data, int $index): string
+    {
+        $parent = $data['__pamNodePath'] ?? 'root';
+
+        return (is_string($parent) || is_int($parent)
+            ? (string) $parent
+            : 'root').'.'.$index;
+    }
+
+    private static function pathValue(mixed $value): string
+    {
+        return is_string($value) || is_int($value)
+            ? (string) $value
+            : 'root';
+    }
+
+    /**
      * @param array<string, string|bool> $attributes
      * @param list<CompiledTemplateNode> $childNodes
      * @param array<string, mixed> $data
@@ -476,21 +612,51 @@ final class TemplateRenderer
         array $data,
     ): Element {
         $factory = TemplateRegistry::factory($tag);
+        if ($factory === null) {
+            $attributes = self::nativeEventAliases($attributes);
+        }
+        if (isset($attributes['bind:value'])) {
+            $attributes[':value'] = $attributes['bind:value'];
+            $attributes['model'] = ltrim(
+                self::stringValue(
+                    $attributes['bind:value'],
+                    'bind:value target',
+                ),
+                '$',
+            );
+            unset($attributes['bind:value']);
+        }
+        $checkedBinding = null;
+        if (isset($attributes['bind:checked'])) {
+            $checkedBinding = self::stringValue(
+                $attributes['bind:checked'],
+                'bind:checked target',
+            );
+            $attributes[':checked'] = $attributes['bind:checked'];
+            unset($attributes['bind:checked']);
+        }
         $values = [];
 
         foreach ($attributes as $name => $raw) {
-            if (isset(self::EVENTS[$name]) || $name === 'class') {
+            if (
+                isset(self::EVENTS[$name])
+                || $name === 'class'
+                || $name === ':class'
+                || str_starts_with($name, '@')
+            ) {
                 continue;
             }
 
-            $values[ltrim($name, ':')] = self::value($raw, $scope, $data);
+            $values[ltrim($name, ':')] = str_starts_with($name, ':')
+                ? self::dynamicValue($raw, $scope, $data)
+                : self::value($raw, $scope, $data);
         }
-        $class = $attributes['class'] ?? null;
-        $resolvedClass = is_string($class)
-            ? self::interpolate($class, $scope, $data)
-            : null;
+        $resolvedClass = self::classValue($attributes, $scope, $data);
         if ($factory !== null && $resolvedClass !== null) {
             $values['className'] = $resolvedClass;
+        }
+        if ($factory !== null) {
+            $values['__pamNodePath'] = $data['__pamNodePath'] ?? $tag;
         }
 
         $inheritedVariants = $data['__pamParentVariants'] ?? [];
@@ -499,7 +665,10 @@ final class TemplateRenderer
         }
         $ownVariants = array_filter(
             $values,
-            self::isDeclarativeContextValue(...),
+            static fn (mixed $value, string $name): bool =>
+                !str_starts_with($name, '__pam')
+                && self::isDeclarativeContextValue($value),
+            ARRAY_FILTER_USE_BOTH,
         );
         $ownHandlers = [];
         foreach (self::EVENTS as $name => $event) {
@@ -507,6 +676,29 @@ final class TemplateRenderer
                 $ownHandlers[$event->value] = self::handler(
                     $attributes[$name],
                     $event,
+                    $scope,
+                    $data,
+                );
+            }
+        }
+        $componentEvents = [];
+        if ($factory !== null) {
+            foreach ($attributes as $name => $raw) {
+                if (!str_starts_with($name, '@')) {
+                    continue;
+                }
+                $event = substr($name, 1);
+                if (
+                    $event === ''
+                    || preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/D', $event)
+                        !== 1
+                ) {
+                    throw new RuntimeException(
+                        "Invalid component event {$name}.",
+                    );
+                }
+                $componentEvents[$event] = self::componentHandler(
+                    $raw,
                     $scope,
                     $data,
                 );
@@ -531,11 +723,28 @@ final class TemplateRenderer
             ],
             '__pamEventContexts' => $childEventContexts,
         ];
-        $renderedChildren = self::nodes($childNodes, $scope, $childData);
+        [$defaultNodes, $slotNodes] = $factory === null
+            ? [$childNodes, []]
+            : self::componentSlotNodes($childNodes);
+        $renderedChildren = self::nodes($defaultNodes, $scope, $childData);
         $children = array_values(array_filter(
             $renderedChildren,
             static fn (mixed $value): bool => $value instanceof Element,
         ));
+        $slots = ['slot' => $children];
+        foreach ($slotNodes as $slotName => $nodes) {
+            $renderedSlot = self::nodes($nodes, $scope, $childData);
+            $slotElements = array_values(array_filter(
+                $renderedSlot,
+                static fn (mixed $value): bool => $value instanceof Element,
+            ));
+            if (count($slotElements) !== count($renderedSlot)) {
+                throw new RuntimeException(
+                    "Named slot {$slotName} must contain renderable elements.",
+                );
+            }
+            $slots[$slotName] = $slotElements;
+        }
         $text = implode('', array_filter(
             $renderedChildren,
             static fn (mixed $value): bool => is_string($value),
@@ -556,6 +765,10 @@ final class TemplateRenderer
         }
         if ($factory !== null && $inheritedEventContexts !== []) {
             $values['__pamEventContexts'] = $inheritedEventContexts;
+        }
+        if ($factory !== null) {
+            $values['__pamSlots'] = $slots;
+            $values['__pamComponentEvents'] = $componentEvents;
         }
 
         $element = $factory !== null
@@ -693,6 +906,17 @@ final class TemplateRenderer
                 self::stringValue($values['model'], 'Input model'),
                 $scope,
             ));
+        }
+        if ($checkedBinding !== null) {
+            if ($element->kind() !== NodeKind::Switch) {
+                throw new RuntimeException(
+                    'bind:checked is only valid on Switch or Toggle.',
+                );
+            }
+            $element = $element->on(
+                EventKind::Toggle,
+                self::checkedModelHandler($checkedBinding, $scope),
+            );
         }
 
         return $element;
@@ -1332,6 +1556,175 @@ final class TemplateRenderer
     }
 
     /**
+     * @param array<string, string|bool> $attributes
+     * @return array<string, string|bool>
+     */
+    private static function nativeEventAliases(array $attributes): array
+    {
+        foreach (self::EVENTS as $native => $_kind) {
+            $alias = '@'.substr($native, 3);
+            if (array_key_exists($alias, $attributes)) {
+                $attributes[$native] ??= $attributes[$alias];
+                unset($attributes[$alias]);
+            }
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * @param list<CompiledTemplateNode> $nodes
+     * @return array{
+     *     list<CompiledTemplateNode>,
+     *     array<string, list<CompiledTemplateNode>>
+     * }
+     */
+    private static function componentSlotNodes(array $nodes): array
+    {
+        $default = [];
+        $slots = [];
+
+        foreach ($nodes as $node) {
+            if (
+                $node->kind !== 1
+                || strtolower($node->name) !== 'template'
+            ) {
+                $default[] = $node;
+                continue;
+            }
+
+            $slotName = null;
+            foreach ($node->attributes as $name => $value) {
+                if (str_starts_with($name, '#')) {
+                    $slotName = substr($name, 1);
+                    break;
+                }
+                if ($name === 'slot' && is_string($value)) {
+                    $slotName = $value;
+                    break;
+                }
+            }
+            if (
+                $slotName === null
+                || preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/D', $slotName)
+                    !== 1
+            ) {
+                throw new RuntimeException(
+                    'Named component templates require #slot or slot="name".',
+                );
+            }
+            if (isset($slots[$slotName])) {
+                throw new RuntimeException("Duplicate named slot {$slotName}.");
+            }
+            $slots[$slotName] = $node->children;
+        }
+
+        return [$default, $slots];
+    }
+
+    /**
+     * @param array<string, string|bool> $attributes
+     * @param array<string, mixed> $data
+     */
+    private static function classValue(
+        array $attributes,
+        ?object $scope,
+        array $data,
+    ): ?string {
+        $classes = [];
+        $static = $attributes['class'] ?? null;
+
+        if (is_string($static)) {
+            $classes[] = self::interpolate($static, $scope, $data);
+        }
+        if (array_key_exists(':class', $attributes)) {
+            $dynamic = self::dynamicValue(
+                $attributes[':class'],
+                $scope,
+                $data,
+            );
+            if (is_string($dynamic)) {
+                $classes[] = $dynamic;
+            } elseif (is_array($dynamic)) {
+                foreach ($dynamic as $class => $enabled) {
+                    if (is_int($class)) {
+                        if (!is_string($enabled)) {
+                            throw new RuntimeException(
+                                'Numeric dynamic class entries must contain class names.',
+                            );
+                        }
+                        $classes[] = $enabled;
+                    } elseif ((bool) $enabled) {
+                        $classes[] = $class;
+                    }
+                }
+            } elseif ($dynamic !== null && $dynamic !== false) {
+                throw new RuntimeException(
+                    ':class must resolve to a string, array, false or null.',
+                );
+            }
+        }
+
+        $value = trim(implode(' ', array_filter(
+            $classes,
+            static fn (string $class): bool => trim($class) !== '',
+        )));
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private static function componentHandler(
+        string|bool $raw,
+        ?object $scope,
+        array $data,
+    ): Closure {
+        if ($scope === null || !is_string($raw)) {
+            throw new RuntimeException(
+                'Component events require a method or expression on the parent component.',
+            );
+        }
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $raw) === 1) {
+            if (!method_exists($scope, $raw)) {
+                throw new RuntimeException(
+                    "Component event handler {$raw} does not exist.",
+                );
+            }
+            $method = new ReflectionMethod($scope, $raw);
+            if (!$method->isPublic()) {
+                throw new RuntimeException(
+                    "Component event handler {$raw} must be public.",
+                );
+            }
+
+            return static function (mixed $payload = null) use (
+                $method,
+                $scope,
+            ): void {
+                if ($method->getNumberOfParameters() === 0) {
+                    $method->invoke($scope);
+                } else {
+                    $method->invoke($scope, $payload);
+                }
+            };
+        }
+
+        return static function (mixed $payload = null) use (
+            $raw,
+            $scope,
+            $data,
+        ): void {
+            TemplateExpression::evaluate(
+                $raw,
+                $scope,
+                [...$data, 'event' => $payload],
+            );
+        };
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     private static function handler(
@@ -1408,6 +1801,35 @@ final class TemplateRenderer
         };
     }
 
+    private static function checkedModelHandler(
+        string $model,
+        ?object $scope,
+    ): Closure {
+        $property = ltrim($model, '$');
+        if (
+            $scope === null
+            || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $property) !== 1
+            || !property_exists($scope, $property)
+        ) {
+            throw new RuntimeException(
+                "Template checked binding {$model} does not resolve to component state.",
+            );
+        }
+        $reflection = self::reflectionProperty($scope, $property);
+        if ($reflection->isReadOnly()) {
+            throw new RuntimeException(
+                "Template checked binding {$model} cannot write a readonly property.",
+            );
+        }
+
+        return static function (mixed $payload) use ($reflection, $scope): void {
+            $reflection->setValue(
+                $scope,
+                $payload === true || $payload === 1 || $payload === '1',
+            );
+        };
+    }
+
     /** @param array<string, mixed> $values */
     private static function modelValue(array $values, ?object $scope): string
     {
@@ -1440,8 +1862,28 @@ final class TemplateRenderer
             'true' => true,
             'false' => false,
             'null' => null,
-            default => self::literal($raw, $scope, $data),
+            default => (
+                preg_match(
+                    '/^[A-Za-z_][A-Za-z0-9_]*\s*\(/D',
+                    $raw,
+                ) === 1
+                    ? TemplateExpression::evaluate($raw, $scope, $data)
+                    : self::literal($raw, $scope, $data)
+            ),
         };
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function dynamicValue(
+        mixed $raw,
+        ?object $scope,
+        array $data,
+    ): mixed {
+        if (!is_string($raw)) {
+            return $raw;
+        }
+
+        return TemplateExpression::evaluate($raw, $scope, $data);
     }
 
     /** @param array<string, mixed> $data */
@@ -1467,25 +1909,7 @@ final class TemplateRenderer
     /** @param array<string, mixed> $data */
     private static function interpolate(string $value, ?object $scope, array $data): string
     {
-        return preg_replace_callback(
-            '/\\{\\{\\s*(\\$[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)*)\\s*\\}\\}/',
-            static function (array $match) use ($scope, $data): string {
-                $resolved = self::path($match[1], $scope, $data);
-
-                if (
-                    !is_string($resolved)
-                    && !is_int($resolved)
-                    && !is_float($resolved)
-                    && !is_bool($resolved)
-                    && !$resolved instanceof Stringable
-                ) {
-                    throw new RuntimeException("Template expression {$match[1]} is not printable.");
-                }
-
-                return (string) $resolved;
-            },
-            $value,
-        ) ?? $value;
+        return TemplateExpression::interpolate($value, $scope, $data);
     }
 
     /** @param array<string, mixed> $data */

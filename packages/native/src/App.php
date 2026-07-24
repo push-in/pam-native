@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native;
 
 use Closure;
+use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Plugin\PluginManager;
 
@@ -23,6 +24,22 @@ final class App
     public static function views(string $path, ?string $cachePath = null): void
     {
         View::configure($path, $cachePath);
+    }
+
+    public static function components(
+        string $path,
+        ?string $cachePath = null,
+    ): void {
+        PamPhpRegistry::discover(
+            $path,
+            $cachePath ?? getcwd().'/.pam/components',
+        );
+    }
+
+    /** @param array<string, mixed> $props */
+    public static function make(string $className, array $props = []): Component
+    {
+        return PamPhpRegistry::make($className, $props);
     }
 
     public static function theme(Theme $theme): void

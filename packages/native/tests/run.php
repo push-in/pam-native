@@ -1610,4 +1610,249 @@ try {
 
 $assert($unsafeDescriptorRejected, 'Plugin descriptor traversal must be rejected.');
 
+$pamPhpDirectory = sys_get_temp_dir().'/pam-native-sfc-tests-'.getmypid();
+$pamPhpCache = $pamPhpDirectory.'/.cache';
+
+if (
+    !is_dir($pamPhpDirectory)
+    && !mkdir($pamPhpDirectory, 0o755, true)
+    && !is_dir($pamPhpDirectory)
+) {
+    throw new RuntimeException('Cannot create the .pam.php fixture directory.');
+}
+
+file_put_contents(
+    $pamPhpDirectory.'/CounterCard.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+
+final class CounterCard extends Component
+{
+    /** @var list<string> */
+    public static array $lifecycle = [];
+
+    #[State]
+    public int $count = 0;
+
+    #[State]
+    public bool $enabled = false;
+
+    /** @var list<string> */
+    public array $items = ['One', 'Two'];
+
+    public function __construct(
+        public string $title,
+        public ?string $subtitle = null,
+        public bool $elevated = false,
+    ) {
+    }
+
+    public function boot(): void
+    {
+        self::$lifecycle[] = 'boot';
+    }
+
+    public function mount(): void
+    {
+        self::$lifecycle[] = 'mount';
+    }
+
+    public function attached(): void
+    {
+        self::$lifecycle[] = 'attached';
+    }
+
+    public function resumed(): void
+    {
+        self::$lifecycle[] = 'resumed';
+    }
+
+    public function updated(string $property): void
+    {
+        self::$lifecycle[] = 'updated:'.$property;
+    }
+
+    public function paused(): void
+    {
+        self::$lifecycle[] = 'paused';
+    }
+
+    public function unmount(): void
+    {
+        self::$lifecycle[] = 'unmount';
+    }
+
+    public function increment(): void
+    {
+        $this->count++;
+        $this->emit('changed', $this->count);
+    }
+
+    /** @return array<array-key, string|bool> */
+    public function cardClasses(): array
+    {
+        return [
+            'p-4',
+            'gap-2',
+            'elevation-2' => $this->elevated,
+        ];
+    }
+}
+?>
+
+<template>
+    <Column :class="cardClasses()">
+        <Text>{{ $title }}</Text>
+        <Text v-if="$subtitle">{{ $subtitle }}</Text>
+        <Text v-for="$item in $items">{{ $item }}</Text>
+        <Button @press="increment">
+            {{ $count === 0 ? 'Ready' : $count }}
+        </Button>
+        <Switch bind:checked="$enabled" />
+        <Slot name="action">
+            <Text>Fallback action</Text>
+        </Slot>
+        <Slot />
+    </Column>
+</template>
+PAM,
+);
+file_put_contents(
+    $pamPhpDirectory.'/Dashboard.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class Dashboard extends Component
+{
+    public string $title = 'PAM Native';
+    public int $changes = 0;
+
+    public function changed(int $count): void
+    {
+        $this->changes = $count;
+        $this->title = 'Changed';
+    }
+
+}
+?>
+
+<template>
+    <CounterCard
+        :title="$title"
+        subtitle="Compiled .pam.php"
+        :elevated="true"
+        @changed="changed"
+    >
+        <template #action>
+            <Text>Named action</Text>
+        </template>
+
+        <Text>Default slot</Text>
+    </CounterCard>
+</template>
+PAM,
+);
+
+TemplateRegistry::reset();
+App::components($pamPhpDirectory, $pamPhpCache);
+$dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
+$counterClass = 'Pam\\Native\\Tests\\Sfc\\CounterCard';
+$dashboard = App::make($dashboardClass);
+App::run($dashboard);
+$sfcElement = $dashboard->toElement();
+$sfcEncoded = (new TreeEncoder())->encode($sfcElement);
+$pressKey = null;
+$toggleKey = null;
+
+foreach (array_keys($sfcEncoded['callbacks']) as $callbackKey) {
+    [, $kind] = array_map('intval', explode(':', $callbackKey));
+    if ($kind === EventKind::Press->value) {
+        $pressKey = $callbackKey;
+    } elseif ($kind === EventKind::Toggle->value) {
+        $toggleKey = $callbackKey;
+    }
+}
+
+$assert($pressKey !== null, '.pam.php @press event was not compiled.');
+$assert($toggleKey !== null, '.pam.php bind:checked event was not compiled.');
+$assert(
+    count($sfcElement->children()) === 8,
+    '.pam.php v-if, v-for and named/default slots did not compose correctly.',
+);
+$assert(
+    $counterClass::$lifecycle === ['boot', 'mount', 'attached', 'resumed'],
+    '.pam.php component lifecycle did not mount on the committed render.',
+);
+
+if ($pressKey === null) {
+    throw new RuntimeException('.pam.php press callback is missing.');
+}
+[$pressNode, $pressKind] = array_map('intval', explode(':', $pressKey));
+Runtime::dispatchEvent($pressNode, $pressKind, '');
+$afterPress = $dashboard->toElement();
+$assert(
+    $afterPress->children()[0]->properties()[PropKey::Text->value] === 'Changed',
+    'Component emit() did not reach the parent @event handler.',
+);
+$assert(
+    in_array('updated:title', $counterClass::$lifecycle, true),
+    'Constructor prop changes must update a stable nested component.',
+);
+
+$rerendered = $dashboard->toElement();
+$rerenderedEncoded = (new TreeEncoder())->encode($rerendered);
+$newToggleKey = null;
+foreach (array_keys($rerenderedEncoded['callbacks']) as $callbackKey) {
+    [, $kind] = array_map('intval', explode(':', $callbackKey));
+    if ($kind === EventKind::Toggle->value) {
+        $newToggleKey = $callbackKey;
+        break;
+    }
+}
+if ($newToggleKey === null) {
+    throw new RuntimeException('Rerendered .pam.php toggle callback is missing.');
+}
+[$toggleNode, $toggleKind] = array_map('intval', explode(':', $newToggleKey));
+Runtime::dispatchEvent($toggleNode, $toggleKind, '1');
+$assert(
+    $dashboard->toElement()->children()[5]
+        ->properties()[PropKey::Checked->value] === true,
+    'bind:checked must update component state and rerender the native toggle.',
+);
+
+Runtime::shutdown();
+$assert(
+    array_slice($counterClass::$lifecycle, -2) === ['paused', 'unmount'],
+    '.pam.php component lifecycle did not clean up on runtime shutdown.',
+);
+
+$globalCallRejected = false;
+try {
+    TemplateRenderer::render(
+        TemplateCompiler::compile('<Text>{{ system(\'id\') }}</Text>'),
+        new class {
+        },
+        [],
+    );
+} catch (RuntimeException) {
+    $globalCallRejected = true;
+}
+$assert(
+    $globalCallRejected,
+    '.pam.php expressions must never call global PHP functions.',
+);
+
 echo "Pam Native PHP SDK tests passed.\n";

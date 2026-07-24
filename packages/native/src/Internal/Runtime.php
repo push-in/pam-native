@@ -64,27 +64,33 @@ final class Runtime
             throw new LogicException('Pam Native has not been booted.');
         }
 
-        $rendered = $root instanceof Renderable ? $root : $root();
-        $element = $rendered instanceof Renderable ? $rendered->toElement() : null;
+        PamPhpRegistry::beginRender();
+        ComponentLifecycle::beginRender();
+        try {
+            $rendered = $root instanceof Renderable ? $root : $root();
+            $element = $rendered instanceof Renderable ? $rendered->toElement() : null;
 
-        if (!$element instanceof Element) {
-            throw new LogicException('The Pam Native root must be renderable.');
+            if (!$element instanceof Element) {
+                throw new LogicException('The Pam Native root must be renderable.');
+            }
+
+            $encoder = self::$encoder ??= new TreeEncoder();
+            $encoded = $encoder->encode($element);
+            self::$eventCallbacks = $encoded['callbacks'];
+            $frame = $encoded['frame'];
+
+            if ($frame !== null) {
+                self::$lastFrame = $frame;
+
+                if (function_exists('pam_native_commit')) {
+                    pam_native_commit($frame);
+                }
+            }
+        } finally {
+            ComponentLifecycle::finishRender();
+            PamPhpRegistry::finishRender();
         }
-
-        $encoder = self::$encoder ??= new TreeEncoder();
-        $encoded = $encoder->encode($element);
-        self::$eventCallbacks = $encoded['callbacks'];
-        $frame = $encoded['frame'];
-
-        if ($frame === null) {
-            return;
-        }
-
-        self::$lastFrame = $frame;
-
-        if (function_exists('pam_native_commit')) {
-            pam_native_commit($frame);
-        }
+        ComponentLifecycle::commit();
     }
 
     public static function dispatchEvent(int $nodeId, int $eventKind, string $payload): void
@@ -97,7 +103,9 @@ final class Runtime
                 return;
             }
             if ($eventKind === EventKind::AppState->value) {
-                self::$appStateHandler?->__invoke(AppState::from((int) $payload));
+                $appState = AppState::from((int) $payload);
+                ComponentLifecycle::appState($appState);
+                self::$appStateHandler?->__invoke($appState);
                 self::render();
 
                 return;
@@ -224,6 +232,8 @@ final class Runtime
         self::$dimensionsHandler = null;
         self::$memoryPressureHandler = null;
         self::$encoder = null;
+        ComponentLifecycle::shutdown();
+        PamPhpRegistry::releaseInstances();
         State::resetCache();
     }
 

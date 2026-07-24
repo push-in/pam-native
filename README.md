@@ -9,6 +9,33 @@ resulting native mutations.
 Every public style resolves to the same `Renderable -> Element -> PNT1/PNP1`
 path. Choosing tags does not add a second renderer or a web view.
 
+The default project starts with the explicit PHP tree. For Vue/React-like
+composition with ordinary PHP classes, constructor props, lifecycle, slots,
+directives and local state, PAM also supports single-file `*.pam.php`
+components:
+
+```php
+final class Card extends Component
+{
+    public function __construct(
+        public string $title,
+        public bool $elevated = false,
+    ) {}
+}
+?>
+
+<template>
+    <Column :class="['card', 'elevation-2' => $elevated]">
+        <Text>{{ $title }}</Text>
+        <Slot />
+    </Column>
+</template>
+```
+
+Register them with `App::components(__DIR__.'/src')`. See
+[`docs/components.md`](docs/components.md) for the complete syntax and
+lifecycle contract.
+
 Typed PHP:
 
 ```php

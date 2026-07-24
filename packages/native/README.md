@@ -11,37 +11,40 @@ pam composer install
 pam mobile dev .
 ```
 
-A screen can be a compact `.pam` template backed by a normal PHP class:
+A screen can be a compact `.pam.php` single-file component:
 
 ```php
 final class Home extends \Pam\Native\Component
 {
-    private int $count = 0;
-
-    public function render(): \Pam\Native\View
-    {
-        return \Pam\Native\View::make('screens.home');
-    }
+    #[\Pam\Native\Attributes\State]
+    public int $count = 0;
 
     public function increment(): void
     {
         $this->count++;
     }
 }
-```
+?>
 
-```xml
+<template>
 <Screen>
     <SafeAreaView class="flex-1 surface">
         <Column class="flex-1 p-6 gap-4">
             <Text class="text-primary" fontSize="28">Hello, PHP</Text>
-            <Button class="accent" height="52" on:press="increment">
+            <Button class="accent" height="52" @press="increment">
                 Count: {{ $count }}
             </Button>
         </Column>
     </SafeAreaView>
 </Screen>
+</template>
 ```
+
+Call `App::components(__DIR__.'/src')` before `App::run(...)`. Constructor
+properties become typed props; named/default slots, `v-if`, `v-for`, dynamic
+bindings, component events, two-way bindings, and lifecycle hooks all compile
+to the existing `Element` tree and binary protocol. The fluent tree API remains
+the default and can be mixed with single-file components freely.
 
 Use `pam mobile make:screen`, `make:component`, and `make:native-view` for
 non-destructive scaffolding. Templates support props, slots, events, model
