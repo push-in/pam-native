@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Pam\Native\App;
 use Pam\Native\AppState;
+use Pam\Native\AccessibilityRole;
 use Pam\Native\AnimationKind;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
@@ -112,6 +113,7 @@ foreach (EventKind::cases() as $index => $kind) {
 }
 foreach ([
     AnimationKind::cases(),
+    AccessibilityRole::cases(),
     FontStyle::cases(),
     PointerEvents::cases(),
     PositionType::cases(),
@@ -223,6 +225,18 @@ $assert(
         && ($semanticClassElement->properties()[PropKey::Gap->value] ?? null)
             === 12.0,
     'Registered template components must receive className before visual utilities are applied.',
+);
+$coreRoleElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Text accessibilityRole="header">Accessible heading</Text>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $coreRoleElement->properties()[PropKey::AccessibilityRole->value]
+        === AccessibilityRole::Header->value,
+    'Core tag accessibility roles must compile to sequential protocol integers.',
 );
 $eventScope = new class {
     public string $submission = '';

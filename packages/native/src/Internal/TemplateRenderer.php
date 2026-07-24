@@ -7,6 +7,7 @@ namespace Pam\Native\Internal;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Align;
+use Pam\Native\AccessibilityRole;
 use Pam\Native\AnimationKind;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -631,6 +632,46 @@ final class TemplateRenderer
                 'none' => 2,
                 'box-none' => 3,
                 'box-only' => 4,
+            ]),
+            PropKey::AccessibilityRole => self::named($value, [
+                'generic' => AccessibilityRole::Generic->value,
+                'button' => AccessibilityRole::Button->value,
+                'input' => AccessibilityRole::Input->value,
+                'image' => AccessibilityRole::Image->value,
+                'img' => AccessibilityRole::Image->value,
+                'switch' => AccessibilityRole::Switch->value,
+                'adjustable' => AccessibilityRole::Adjustable->value,
+                'slider' => AccessibilityRole::Adjustable->value,
+                'alert' => AccessibilityRole::Alert->value,
+                'checkbox' => AccessibilityRole::Checkbox->value,
+                'combobox' => AccessibilityRole::ComboBox->value,
+                'header' => AccessibilityRole::Header->value,
+                'heading' => AccessibilityRole::Header->value,
+                'imagebutton' => AccessibilityRole::ImageButton->value,
+                'keyboardkey' => AccessibilityRole::KeyboardKey->value,
+                'link' => AccessibilityRole::Link->value,
+                'menu' => AccessibilityRole::Menu->value,
+                'menubar' => AccessibilityRole::MenuBar->value,
+                'menuitem' => AccessibilityRole::MenuItem->value,
+                'none' => AccessibilityRole::None->value,
+                'presentation' => AccessibilityRole::Presentation->value,
+                'progressbar' => AccessibilityRole::ProgressBar->value,
+                'radio' => AccessibilityRole::Radio->value,
+                'radiogroup' => AccessibilityRole::RadioGroup->value,
+                'scrollbar' => AccessibilityRole::ScrollBar->value,
+                'search' => AccessibilityRole::Search->value,
+                'searchbox' => AccessibilityRole::Search->value,
+                'spinbutton' => AccessibilityRole::SpinButton->value,
+                'summary' => AccessibilityRole::Summary->value,
+                'tab' => AccessibilityRole::Tab->value,
+                'tablist' => AccessibilityRole::TabList->value,
+                'text' => AccessibilityRole::Text->value,
+                'timer' => AccessibilityRole::Timer->value,
+                'togglebutton' => AccessibilityRole::ToggleButton->value,
+                'toolbar' => AccessibilityRole::Toolbar->value,
+                'grid' => AccessibilityRole::Grid->value,
+                'list' => AccessibilityRole::List->value,
+                'listitem' => AccessibilityRole::ListItem->value,
             ]),
             PropKey::ReturnKeyType => self::named($value, [
                 'default' => ReturnKeyType::Default->value,

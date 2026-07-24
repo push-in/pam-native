@@ -517,7 +517,8 @@ class PamRenderer(
             PropKey.SELECTED -> view.isSelected = value.flag()
             PropKey.PRESS_OPACITY -> state.pressOpacity = value.decimal().toFloat()
             PropKey.ACCESSIBILITY_ROLE -> {
-                val className = accessibilityClass(value.integer().toInt())
+                val role = value.integer().toInt()
+                val className = accessibilityClass(role)
                 view.accessibilityDelegate = object : View.AccessibilityDelegate() {
                     override fun onInitializeAccessibilityNodeInfo(
                         host: View,
@@ -525,6 +526,7 @@ class PamRenderer(
                     ) {
                         super.onInitializeAccessibilityNodeInfo(host, info)
                         info.className = className
+                        applyAccessibilityRoleInfo(info, role)
                     }
                 }
             }
@@ -677,6 +679,7 @@ class PamRenderer(
             PropKey.ENABLED -> view.isEnabled = true
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
+            PropKey.ACCESSIBILITY_ROLE -> view.accessibilityDelegate = null
             PropKey.TEST_ID -> view.transitionName = null
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
@@ -1334,8 +1337,33 @@ class PamRenderer(
             3 -> EditText::class.java.name
             4 -> ImageView::class.java.name
             5 -> Switch::class.java.name
+            6 -> "android.widget.SeekBar"
+            8 -> "android.widget.CheckBox"
+            9 -> "android.widget.Spinner"
+            10, 24, 27, 28 -> TextView::class.java.name
+            11 -> "android.widget.ImageButton"
+            12 -> "android.inputmethodservice.Keyboard\$Key"
+            19 -> "android.widget.RadioButton"
+            22 -> EditText::class.java.name
+            23 -> "android.widget.SpinButton"
+            29 -> "android.widget.ToggleButton"
+            31 -> "android.widget.GridView"
+            32 -> "android.widget.AbsListView"
             else -> View::class.java.name
         }
+
+    private fun applyAccessibilityRoleInfo(
+        info: AccessibilityNodeInfo,
+        role: Int,
+    ) {
+        when (role) {
+            2, 11, 12 -> info.isClickable = true
+            5, 8, 19, 29 -> info.isCheckable = true
+            10 -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.isHeading = true
+            }
+        }
+    }
 
     private fun activity(): Activity? = context as? Activity
 
