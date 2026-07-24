@@ -6,6 +6,7 @@ import android.graphics.Region
 import android.view.MotionEvent
 import android.view.TouchDelegate
 import android.view.View
+import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 
 internal class PamTouchDelegateGroup(parent: View) : TouchDelegate(Rect(), parent) {
@@ -43,9 +44,19 @@ internal class PamTouchDelegateGroup(parent: View) : TouchDelegate(Rect(), paren
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            active = entries.values.firstOrNull { entry ->
-                entry.bounds.contains(event.x.toInt(), event.y.toInt())
-            }?.delegate
+            active = entries
+                .filter { (_, entry) ->
+                    entry.bounds.contains(event.x.toInt(), event.y.toInt())
+                }
+                .maxWithOrNull(
+                    compareBy<Map.Entry<View, Entry>> { (target, _) ->
+                        target.z
+                    }.thenBy { (target, _) ->
+                        (target.parent as? ViewGroup)?.indexOfChild(target) ?: -1
+                    },
+                )
+                ?.value
+                ?.delegate
         }
         val handled = active?.onTouchEvent(event) ?: false
         if (

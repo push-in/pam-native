@@ -38,6 +38,7 @@ use Pam\Native\Modules\NativeModuleResult;
 use Pam\Native\Modules\NativeModules;
 use Pam\Native\NodeKind;
 use Pam\Native\PointerEvents;
+use Pam\Native\PressEvent;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\RefreshIndicatorSize;
 use Pam\Native\SafeAreaMode;
@@ -370,6 +371,57 @@ $assert(
         && $inputKey instanceof InputKeyEvent
         && $inputKey->key === 'Enter',
     'Input helpers must preserve native editing, selection, keyboard, size and key behavior.',
+);
+$pressInEvent = null;
+$pressOutEvent = null;
+$pressMoveEvent = null;
+$pressableElement = Pressable::make(Text::make('Open'))
+    ->ripple(0x66010203, true, 24.0, true, 0.5)
+    ->pressedOpacity(0.7)
+    ->hitSlopEdges(4.0, 6.0, 8.0, 10.0)
+    ->pressRetentionEdges(12.0, 14.0, 16.0, 18.0)
+    ->delayLongPress(420)
+    ->delayPressIn(25)
+    ->delayPressOut(40)
+    ->androidDisableSound()
+    ->onPressIn(static function (PressEvent $event) use (&$pressInEvent): void {
+        $pressInEvent = $event;
+    })
+    ->onPressOut(static function (PressEvent $event) use (&$pressOutEvent): void {
+        $pressOutEvent = $event;
+    })
+    ->onPressMove(static function (PressEvent $event) use (&$pressMoveEvent): void {
+        $pressMoveEvent = $event;
+    });
+$pressPayload = Wire::map([
+    'x' => 11.5,
+    'y' => 12.5,
+    'pageX' => 21.5,
+    'pageY' => 22.5,
+    'timestamp' => 1234,
+    'pointerId' => 7,
+]);
+$pressableElement->events()[EventKind::PressIn->value]($pressPayload);
+$pressableElement->events()[EventKind::PressOut->value]($pressPayload);
+$pressableElement->events()[EventKind::PressMove->value]($pressPayload);
+$assert(
+    $pressableElement->properties()[PropKey::HitSlopLeft->value] === 4.0
+        && $pressableElement->properties()[PropKey::HitSlopBottom->value] === 10.0
+        && $pressableElement->properties()[PropKey::PressRetentionRight->value] === 16.0
+        && $pressableElement->properties()[PropKey::PressDelayLongMs->value] === 420
+        && $pressableElement->properties()[PropKey::PressDelayInMs->value] === 25
+        && $pressableElement->properties()[PropKey::PressDelayOutMs->value] === 40
+        && $pressableElement->properties()[PropKey::PressAndroidDisableSound->value] === true
+        && $pressableElement->properties()[PropKey::RippleBorderless->value] === true
+        && $pressableElement->properties()[PropKey::RippleRadius->value] === 24.0
+        && $pressableElement->properties()[PropKey::RippleForeground->value] === true
+        && $pressableElement->properties()[PropKey::RippleAlpha->value] === 0.5
+        && $pressInEvent instanceof PressEvent
+        && $pressInEvent->x === 11.5
+        && $pressOutEvent instanceof PressEvent
+        && $pressMoveEvent instanceof PressEvent
+        && $pressMoveEvent->pointerId === 7,
+    'Pressable helpers must preserve complete native gesture geometry and lifecycle events.',
 );
 $accessibilityElement = Text::make('Upload')
     ->accessibilityRole(AccessibilityRole::ProgressBar)
@@ -860,6 +912,50 @@ $assert(
     $coreRoleElement->properties()[PropKey::AccessibilityRole->value]
         === AccessibilityRole::Header->value,
     'Core tag accessibility roles must compile to sequential protocol integers.',
+);
+$pressScope = new class {
+    public ?PressEvent $move = null;
+
+    public function moved(PressEvent $event): void
+    {
+        $this->move = $event;
+    }
+};
+$corePressableElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Pressable hitSlopLeft="4" hitSlopBottom="10" '
+        .'pressRetentionOffset="12" delayLongPress="420" '
+        .'androidDisableSound="true" rippleAlpha="0.5" '
+        .'on:pressMove="moved"><Text>Open</Text></Pressable>',
+    ),
+    $pressScope,
+    [],
+);
+$corePressableElement->events()[EventKind::PressMove->value](Wire::map([
+    'x' => 2.0,
+    'y' => 3.0,
+    'pageX' => 12.0,
+    'pageY' => 13.0,
+    'timestamp' => 99,
+    'pointerId' => 1,
+]));
+$assert(
+    $corePressableElement->properties()[PropKey::HitSlopLeft->value] === 4.0
+        && $corePressableElement
+            ->properties()[PropKey::HitSlopBottom->value] === 10.0
+        && $corePressableElement
+            ->properties()[PropKey::PressRetentionLeft->value] === 12.0
+        && $corePressableElement
+            ->properties()[PropKey::PressRetentionBottom->value] === 12.0
+        && $corePressableElement
+            ->properties()[PropKey::PressDelayLongMs->value] === 420
+        && $corePressableElement
+            ->properties()[PropKey::PressAndroidDisableSound->value] === true
+        && $corePressableElement
+            ->properties()[PropKey::RippleAlpha->value] === 0.5
+        && $pressScope->move instanceof PressEvent
+        && $pressScope->move->pageX === 12.0,
+    'Core Pressable tags must retain gesture properties and typed move events.',
 );
 $eventScope = new class {
     public string $submission = '';

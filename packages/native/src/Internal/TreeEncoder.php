@@ -151,6 +151,9 @@ final class TreeEncoder
                 EventKind::InputContentSizeChange =>
                     PropKey::OnInputContentSizeChange,
                 EventKind::InputKeyPress => PropKey::OnInputKeyPress,
+                EventKind::PressIn => PropKey::OnPressIn,
+                EventKind::PressOut => PropKey::OnPressOut,
+                EventKind::PressMove => PropKey::OnPressMove,
                 EventKind::Back,
                 EventKind::ModuleResult,
                 EventKind::AppState,

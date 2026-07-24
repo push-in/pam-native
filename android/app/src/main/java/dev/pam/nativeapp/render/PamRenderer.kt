@@ -167,9 +167,9 @@ class PamRenderer(
             NodeKind.COLUMN,
             NodeKind.ROW,
             NodeKind.VIEW,
-            NodeKind.PRESSABLE,
             NodeKind.INPUT_ACCESSORY_VIEW,
             -> PamContainer(context)
+            NodeKind.PRESSABLE -> PamPressable(context)
             NodeKind.TEXT -> TextView(context).apply {
                 includeFontPadding = false
                 gravity = Gravity.CENTER_VERTICAL
@@ -460,10 +460,17 @@ class PamRenderer(
             PropKey.BORDER_RIGHT_WIDTH,
             PropKey.BORDER_BOTTOM_WIDTH,
             PropKey.RIPPLE_COLOR,
+            PropKey.RIPPLE_BORDERLESS,
+            PropKey.RIPPLE_RADIUS,
+            PropKey.RIPPLE_FOREGROUND,
+            PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(value.integer().toInt())
             PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
-            PropKey.ENABLED -> view.isEnabled = value.flag()
+            PropKey.ENABLED -> {
+                view.isEnabled = value.flag()
+                configurePressable(view, state)
+            }
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text()
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text()
             PropKey.TEST_ID -> view.transitionName = value.text()
@@ -475,6 +482,7 @@ class PamRenderer(
                 } else {
                     animateOrSet(view, state, key, value.decimal().toFloat())
                 }
+                configurePressable(view, state)
             }
             PropKey.TEXT_ALIGN -> if (view is PamEditText) {
                 applyInputConfiguration(view, state)
@@ -679,7 +687,10 @@ class PamRenderer(
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
                 (view as? PamRecyclerList)?.setRemoveClippedSubviews(value.flag())
             PropKey.SELECTED -> view.isSelected = value.flag()
-            PropKey.PRESS_OPACITY -> state.pressOpacity = value.decimal().toFloat()
+            PropKey.PRESS_OPACITY -> {
+                state.pressOpacity = value.decimal().toFloat()
+                configurePressable(view, state)
+            }
             PropKey.ACCESSIBILITY_ROLE -> {
                 val role = value.integer().toInt()
                 val className = accessibilityClass(role)
@@ -793,7 +804,21 @@ class PamRenderer(
                     applyAnimationKind(view, state, 2)
                 }
             }
-            PropKey.HIT_SLOP -> applyHitSlop(view, state)
+            PropKey.HIT_SLOP,
+            PropKey.HIT_SLOP_LEFT,
+            PropKey.HIT_SLOP_TOP,
+            PropKey.HIT_SLOP_RIGHT,
+            PropKey.HIT_SLOP_BOTTOM,
+            -> applyHitSlop(view, state)
+            PropKey.PRESS_RETENTION_LEFT,
+            PropKey.PRESS_RETENTION_TOP,
+            PropKey.PRESS_RETENTION_RIGHT,
+            PropKey.PRESS_RETENTION_BOTTOM,
+            PropKey.PRESS_DELAY_LONG_MS,
+            PropKey.PRESS_DELAY_IN_MS,
+            PropKey.PRESS_DELAY_OUT_MS,
+            PropKey.PRESS_ANDROID_DISABLE_SOUND,
+            -> configurePressable(view, state)
             PropKey.WIDTH,
             PropKey.HEIGHT,
             PropKey.FLEX_GROW,
@@ -843,6 +868,9 @@ class PamRenderer(
             PropKey.ON_INPUT_SELECTION_CHANGE,
             PropKey.ON_INPUT_CONTENT_SIZE_CHANGE,
             PropKey.ON_INPUT_KEY_PRESS,
+            PropKey.ON_PRESS_IN,
+            PropKey.ON_PRESS_OUT,
+            PropKey.ON_PRESS_MOVE,
             PropKey.FLEX_DIRECTION,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
@@ -882,6 +910,10 @@ class PamRenderer(
             PropKey.BORDER_RIGHT_WIDTH,
             PropKey.BORDER_BOTTOM_WIDTH,
             PropKey.RIPPLE_COLOR,
+            PropKey.RIPPLE_BORDERLESS,
+            PropKey.RIPPLE_RADIUS,
+            PropKey.RIPPLE_FOREGROUND,
+            PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(Color.BLACK)
             PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
@@ -963,7 +995,10 @@ class PamRenderer(
             }
             PropKey.MAX_LENGTH -> (view as? EditText)?.filters = emptyArray()
             PropKey.AUTO_FOCUS -> Unit
-            PropKey.ENABLED -> view.isEnabled = true
+            PropKey.ENABLED -> {
+                view.isEnabled = true
+                configurePressable(view, state)
+            }
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
             PropKey.ACCESSIBILITY_ROLE -> {
@@ -1049,6 +1084,7 @@ class PamRenderer(
                 } else {
                     view.alpha = 1f
                 }
+                configurePressable(view, state)
             }
             PropKey.TRANSLATION_X -> view.translationX = 0f
             PropKey.TRANSLATION_Y -> view.translationY = 0f
@@ -1101,12 +1137,30 @@ class PamRenderer(
                     applyAnimationKind(view, state, 2)
                 }
             }
-            PropKey.HIT_SLOP -> clearHitSlop(view)
+            PropKey.HIT_SLOP,
+            PropKey.HIT_SLOP_LEFT,
+            PropKey.HIT_SLOP_TOP,
+            PropKey.HIT_SLOP_RIGHT,
+            PropKey.HIT_SLOP_BOTTOM,
+            -> applyHitSlop(view, state)
+            PropKey.PRESS_OPACITY,
+            PropKey.PRESS_RETENTION_LEFT,
+            PropKey.PRESS_RETENTION_TOP,
+            PropKey.PRESS_RETENTION_RIGHT,
+            PropKey.PRESS_RETENTION_BOTTOM,
+            PropKey.PRESS_DELAY_LONG_MS,
+            PropKey.PRESS_DELAY_IN_MS,
+            PropKey.PRESS_DELAY_OUT_MS,
+            PropKey.PRESS_ANDROID_DISABLE_SOUND,
+            -> configurePressable(view, state)
             PropKey.HOST_PROPERTIES -> Unit
             PropKey.ON_INPUT_END_EDITING,
             PropKey.ON_INPUT_SELECTION_CHANGE,
             PropKey.ON_INPUT_CONTENT_SIZE_CHANGE,
             PropKey.ON_INPUT_KEY_PRESS,
+            PropKey.ON_PRESS_IN,
+            PropKey.ON_PRESS_OUT,
+            PropKey.ON_PRESS_MOVE,
             -> Unit
             else -> Unit
         }
@@ -1114,12 +1168,22 @@ class PamRenderer(
 
     private fun applyHitSlop(view: View, state: NodeState) {
         val parent = view.parent as? ViewGroup ?: return
-        val amount = dp(
-            state.number(PropKey.HIT_SLOP, 0.0)
-                .toFloat()
-                .coerceAtLeast(0f),
+        val all = state.number(PropKey.HIT_SLOP, 0.0)
+            .toFloat()
+            .coerceAtLeast(0f)
+        val left = dp(
+            state.number(PropKey.HIT_SLOP_LEFT, all.toDouble()).toFloat().coerceAtLeast(0f),
         )
-        if (amount <= 0) {
+        val top = dp(
+            state.number(PropKey.HIT_SLOP_TOP, all.toDouble()).toFloat().coerceAtLeast(0f),
+        )
+        val right = dp(
+            state.number(PropKey.HIT_SLOP_RIGHT, all.toDouble()).toFloat().coerceAtLeast(0f),
+        )
+        val bottom = dp(
+            state.number(PropKey.HIT_SLOP_BOTTOM, all.toDouble()).toFloat().coerceAtLeast(0f),
+        )
+        if (left <= 0 && top <= 0 && right <= 0 && bottom <= 0) {
             clearHitSlop(view)
             return
         }
@@ -1127,7 +1191,10 @@ class PamRenderer(
             if (view.parent !== parent || !view.isAttachedToWindow) return@post
             val bounds = Rect()
             view.getHitRect(bounds)
-            bounds.inset(-amount, -amount)
+            bounds.left -= left
+            bounds.top -= top
+            bounds.right += right
+            bounds.bottom += bottom
             val group = parent.touchDelegate as? PamTouchDelegateGroup
                 ?: PamTouchDelegateGroup(parent).also { parent.touchDelegate = it }
             group.update(view, bounds)
@@ -1144,18 +1211,41 @@ class PamRenderer(
     }
 
     private fun installEvents(view: View, state: NodeState) {
-        if (state.properties[PropKey.ON_PRESS] != null) {
-            view.setOnClickListener { dispatch(state.id, EVENT_PRESS) }
-        } else {
+        if (view is PamPressable) {
             view.setOnClickListener(null)
-        }
-        if (state.properties[PropKey.ON_LONG_PRESS] != null) {
-            view.setOnLongClickListener {
-                dispatch(state.id, EVENT_LONG_PRESS)
-                true
-            }
-        } else {
             view.setOnLongClickListener(null)
+            view.setCallbacks(
+                onPress = state.callback(PropKey.ON_PRESS) {
+                    dispatch(state.id, EVENT_PRESS)
+                },
+                onLongPress = state.callback(PropKey.ON_LONG_PRESS) {
+                    dispatch(state.id, EVENT_LONG_PRESS)
+                },
+                onPressIn = state.pointerCallback(PropKey.ON_PRESS_IN) { pointer ->
+                    dispatchPressPointer(state, EVENT_PRESS_IN, pointer)
+                },
+                onPressOut = state.pointerCallback(PropKey.ON_PRESS_OUT) { pointer ->
+                    dispatchPressPointer(state, EVENT_PRESS_OUT, pointer)
+                },
+                onPressMove = state.pointerCallback(PropKey.ON_PRESS_MOVE) { pointer ->
+                    dispatchPressPointer(state, EVENT_PRESS_MOVE, pointer)
+                },
+            )
+            configurePressable(view, state)
+        } else {
+            if (state.properties[PropKey.ON_PRESS] != null) {
+                view.setOnClickListener { dispatch(state.id, EVENT_PRESS) }
+            } else {
+                view.setOnClickListener(null)
+            }
+            if (state.properties[PropKey.ON_LONG_PRESS] != null) {
+                view.setOnLongClickListener {
+                    dispatch(state.id, EVENT_LONG_PRESS)
+                    true
+                }
+            } else {
+                view.setOnLongClickListener(null)
+            }
         }
         installPressFeedback(view, state)
         if (view is EditText) installInputEvents(view, state)
@@ -1211,6 +1301,7 @@ class PamRenderer(
     @SuppressLint("ClickableViewAccessibility")
     private fun installPressFeedback(view: View, state: NodeState) {
         if (
+            view is PamPressable ||
             state.kind != NodeKind.PRESSABLE &&
             state.kind != NodeKind.BUTTON
         ) {
@@ -1234,6 +1325,53 @@ class PamRenderer(
             }
             false
         }
+    }
+
+    private fun configurePressable(view: View, state: NodeState) {
+        val pressable = view as? PamPressable ?: return
+        pressable.configure(
+            pressOpacity = state.pressOpacity,
+            targetOpacity = state.targetAlpha(),
+            delayLongPressMs = state.integer(PropKey.PRESS_DELAY_LONG_MS, 500L),
+            delayPressInMs = state.integer(PropKey.PRESS_DELAY_IN_MS, 0L),
+            delayPressOutMs = state.integer(PropKey.PRESS_DELAY_OUT_MS, 0L),
+            retentionLeft = dp(
+                state.number(PropKey.PRESS_RETENTION_LEFT, 20.0).toFloat(),
+            ).toFloat(),
+            retentionTop = dp(
+                state.number(PropKey.PRESS_RETENTION_TOP, 20.0).toFloat(),
+            ).toFloat(),
+            retentionRight = dp(
+                state.number(PropKey.PRESS_RETENTION_RIGHT, 20.0).toFloat(),
+            ).toFloat(),
+            retentionBottom = dp(
+                state.number(PropKey.PRESS_RETENTION_BOTTOM, 30.0).toFloat(),
+            ).toFloat(),
+            androidDisableSound = state.flag(PropKey.PRESS_ANDROID_DISABLE_SOUND, false),
+        )
+    }
+
+    private fun dispatchPressPointer(
+        state: NodeState,
+        event: Int,
+        pointer: PamPressPointer,
+    ) {
+        if (nodes[state.id] !== state) return
+        val density = resourcesDensity().coerceAtLeast(0.01f)
+        dispatchBytes(
+            state.id,
+            event,
+            WireMap.encode(
+                mapOf(
+                    "x" to WireValue.Decimal((pointer.x / density).toDouble()),
+                    "y" to WireValue.Decimal((pointer.y / density).toDouble()),
+                    "pageX" to WireValue.Decimal((pointer.pageX / density).toDouble()),
+                    "pageY" to WireValue.Decimal((pointer.pageY / density).toDouble()),
+                    "timestamp" to WireValue.Integer(pointer.timestamp),
+                    "pointerId" to WireValue.Integer(pointer.pointerId.toLong()),
+                ),
+            ),
+        )
     }
 
     private fun installInputEvents(input: EditText, state: NodeState) {
@@ -1508,6 +1646,9 @@ class PamRenderer(
             EVENT_INPUT_CONTENT_SIZE_CHANGE ->
                 PropKey.ON_INPUT_CONTENT_SIZE_CHANGE
             EVENT_INPUT_KEY_PRESS -> PropKey.ON_INPUT_KEY_PRESS
+            EVENT_PRESS_IN -> PropKey.ON_PRESS_IN
+            EVENT_PRESS_OUT -> PropKey.ON_PRESS_OUT
+            EVENT_PRESS_MOVE -> PropKey.ON_PRESS_MOVE
             else -> null
         }
 
@@ -1630,10 +1771,56 @@ class PamRenderer(
             }
         }
         val ripple = state.properties[PropKey.RIPPLE_COLOR]?.integer()?.toInt()
-        view.background = if (ripple != null) {
-            RippleDrawable(ColorStateList.valueOf(ripple), shape, null)
+        if (ripple == null || imageHost) {
+            view.background = shape
+            if (!imageHost) {
+                view.foreground = null
+            }
+            return
+        }
+
+        val rippleAlpha = state.number(PropKey.RIPPLE_ALPHA, 1.0)
+            .toFloat()
+            .coerceIn(0f, 1f)
+        val effectiveRipple = Color.argb(
+            (Color.alpha(ripple) * rippleAlpha).toInt().coerceIn(0, 255),
+            Color.red(ripple),
+            Color.green(ripple),
+            Color.blue(ripple),
+        )
+        val borderless = state.flag(PropKey.RIPPLE_BORDERLESS, false)
+        val foreground = state.flag(PropKey.RIPPLE_FOREGROUND, false)
+        val rippleMask = if (borderless) {
+            null
         } else {
-            shape
+            GradientDrawable().apply {
+                setColor(Color.WHITE)
+                cornerRadii = radii
+            }
+        }
+        val overlay = RippleDrawable(
+            ColorStateList.valueOf(effectiveRipple),
+            null,
+            rippleMask,
+        ).apply {
+            state.properties[PropKey.RIPPLE_RADIUS]?.decimal()?.let { radius ->
+                this.radius = dp(radius.toFloat().coerceAtLeast(0f))
+            }
+        }
+        if (foreground || borderless) {
+            view.background = shape
+            view.foreground = overlay
+        } else {
+            view.foreground = null
+            view.background = RippleDrawable(
+                ColorStateList.valueOf(effectiveRipple),
+                shape,
+                rippleMask,
+            ).apply {
+                state.properties[PropKey.RIPPLE_RADIUS]?.decimal()?.let { radius ->
+                    this.radius = dp(radius.toFloat().coerceAtLeast(0f))
+                }
+            }
         }
     }
 
@@ -2737,6 +2924,15 @@ class PamRenderer(
 
         fun textOrNull(key: PropKey): String? =
             (properties[key] as? PropValue.Text)?.value
+
+        fun callback(key: PropKey, callback: () -> Unit): (() -> Unit)? =
+            callback.takeIf { properties[key] != null }
+
+        fun pointerCallback(
+            key: PropKey,
+            callback: (PamPressPointer) -> Unit,
+        ): ((PamPressPointer) -> Unit)? =
+            callback.takeIf { properties[key] != null }
     }
 
     private companion object {
@@ -2762,6 +2958,9 @@ class PamRenderer(
         const val EVENT_INPUT_SELECTION_CHANGE = 25
         const val EVENT_INPUT_CONTENT_SIZE_CHANGE = 26
         const val EVENT_INPUT_KEY_PRESS = 27
+        const val EVENT_PRESS_IN = 28
+        const val EVENT_PRESS_OUT = 29
+        const val EVENT_PRESS_MOVE = 30
         const val MAX_EVENT_BYTES = 1024 * 1024
         const val INPUT_SYNC_NATIVE = 1
         const val INPUT_SYNC_DEBOUNCED = 2
@@ -2847,6 +3046,9 @@ class PamRenderer(
             PropKey.BLUR_RADIUS,
             PropKey.ON_PRESS,
             PropKey.ON_LONG_PRESS,
+            PropKey.ON_PRESS_IN,
+            PropKey.ON_PRESS_OUT,
+            PropKey.ON_PRESS_MOVE,
             PropKey.ACCESSIBILITY_LABEL,
             PropKey.ACCESSIBILITY_HINT,
             PropKey.ACCESSIBILITY_ROLE,
@@ -2873,7 +3075,24 @@ class PamRenderer(
             PropKey.REFRESH_INDICATOR_SIZE,
             PropKey.TEST_ID,
             PropKey.RIPPLE_COLOR,
+            PropKey.RIPPLE_BORDERLESS,
+            PropKey.RIPPLE_RADIUS,
+            PropKey.RIPPLE_FOREGROUND,
+            PropKey.RIPPLE_ALPHA,
             PropKey.PRESS_OPACITY,
+            PropKey.HIT_SLOP,
+            PropKey.HIT_SLOP_LEFT,
+            PropKey.HIT_SLOP_TOP,
+            PropKey.HIT_SLOP_RIGHT,
+            PropKey.HIT_SLOP_BOTTOM,
+            PropKey.PRESS_RETENTION_LEFT,
+            PropKey.PRESS_RETENTION_TOP,
+            PropKey.PRESS_RETENTION_RIGHT,
+            PropKey.PRESS_RETENTION_BOTTOM,
+            PropKey.PRESS_DELAY_LONG_MS,
+            PropKey.PRESS_DELAY_IN_MS,
+            PropKey.PRESS_DELAY_OUT_MS,
+            PropKey.PRESS_ANDROID_DISABLE_SOUND,
             PropKey.ELEVATION,
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
@@ -2911,6 +3130,9 @@ class PamRenderer(
             PropKey.ON_INPUT_SELECTION_CHANGE,
             PropKey.ON_INPUT_CONTENT_SIZE_CHANGE,
             PropKey.ON_INPUT_KEY_PRESS,
+            PropKey.ON_PRESS_IN,
+            PropKey.ON_PRESS_OUT,
+            PropKey.ON_PRESS_MOVE,
         )
         val IMAGE_EVENT_PROPERTIES = setOf(
             PropKey.ON_IMAGE_LOAD_START,

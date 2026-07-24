@@ -9,6 +9,36 @@
         { "name": "Text", "description": "Native Android text." },
         { "name": "Button", "description": "Accessible native Android button." },
         {
+            "name": "Pressable",
+            "description": "UI-thread press target with per-edge hit slop, retention, ripple and frame-coalesced move events.",
+            "attributes": [
+                { "name": "hitSlop" },
+                { "name": "hitSlopLeft" },
+                { "name": "hitSlopTop" },
+                { "name": "hitSlopRight" },
+                { "name": "hitSlopBottom" },
+                { "name": "pressRetentionOffset" },
+                { "name": "pressRetentionLeft" },
+                { "name": "pressRetentionTop" },
+                { "name": "pressRetentionRight" },
+                { "name": "pressRetentionBottom" },
+                { "name": "delayLongPress" },
+                { "name": "delayPressIn" },
+                { "name": "delayPressOut" },
+                { "name": "androidDisableSound", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "rippleColor" },
+                { "name": "rippleBorderless", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "rippleRadius" },
+                { "name": "rippleForeground", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "rippleAlpha" },
+                { "name": "on:press" },
+                { "name": "on:longPress" },
+                { "name": "on:pressIn" },
+                { "name": "on:pressOut" },
+                { "name": "on:pressMove" }
+            ]
+        },
+        {
             "name": "Input",
             "description": "Native text input with model binding and Android-owned editing state.",
             "attributes": [

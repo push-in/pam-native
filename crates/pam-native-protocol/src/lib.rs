@@ -309,6 +309,25 @@ pub enum PropKey {
     OnInputSelectionChange = 230,
     OnInputContentSizeChange = 231,
     OnInputKeyPress = 232,
+    HitSlopLeft = 233,
+    HitSlopTop = 234,
+    HitSlopRight = 235,
+    HitSlopBottom = 236,
+    PressRetentionLeft = 237,
+    PressRetentionTop = 238,
+    PressRetentionRight = 239,
+    PressRetentionBottom = 240,
+    PressDelayLongMs = 241,
+    PressDelayInMs = 242,
+    PressDelayOutMs = 243,
+    PressAndroidDisableSound = 244,
+    RippleBorderless = 245,
+    RippleRadius = 246,
+    RippleForeground = 247,
+    RippleAlpha = 248,
+    OnPressIn = 249,
+    OnPressOut = 250,
+    OnPressMove = 251,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -548,6 +567,25 @@ impl TryFrom<u16> for PropKey {
             230 => Ok(Self::OnInputSelectionChange),
             231 => Ok(Self::OnInputContentSizeChange),
             232 => Ok(Self::OnInputKeyPress),
+            233 => Ok(Self::HitSlopLeft),
+            234 => Ok(Self::HitSlopTop),
+            235 => Ok(Self::HitSlopRight),
+            236 => Ok(Self::HitSlopBottom),
+            237 => Ok(Self::PressRetentionLeft),
+            238 => Ok(Self::PressRetentionTop),
+            239 => Ok(Self::PressRetentionRight),
+            240 => Ok(Self::PressRetentionBottom),
+            241 => Ok(Self::PressDelayLongMs),
+            242 => Ok(Self::PressDelayInMs),
+            243 => Ok(Self::PressDelayOutMs),
+            244 => Ok(Self::PressAndroidDisableSound),
+            245 => Ok(Self::RippleBorderless),
+            246 => Ok(Self::RippleRadius),
+            247 => Ok(Self::RippleForeground),
+            248 => Ok(Self::RippleAlpha),
+            249 => Ok(Self::OnPressIn),
+            250 => Ok(Self::OnPressOut),
+            251 => Ok(Self::OnPressMove),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1351,10 +1389,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=232 {
+        for value in 1..=251 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(233).is_err());
+        assert!(PropKey::try_from(252).is_err());
     }
 
     fn tree(text: &str) -> Tree {

@@ -5,7 +5,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
 
-internal class PamContainer(context: Context) :
+internal open class PamContainer(context: Context) :
     FrameLayout(context),
     PamPointerEventsHost {
     private var pointerEvents = POINTER_EVENTS_AUTO
@@ -27,7 +27,7 @@ internal class PamContainer(context: Context) :
             else -> super.onInterceptTouchEvent(event)
         }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
+    open override fun onTouchEvent(event: MotionEvent): Boolean {
         if (pointerEvents == POINTER_EVENTS_BOX_NONE) return false
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             isPressed = false
@@ -36,9 +36,9 @@ internal class PamContainer(context: Context) :
         return super.onTouchEvent(event)
     }
 
-    override fun performClick(): Boolean = super.performClick()
+    open override fun performClick(): Boolean = super.performClick()
 
-    override fun setPointerEvents(mode: Int) {
+    final override fun setPointerEvents(mode: Int) {
         pointerEvents = mode.coerceIn(POINTER_EVENTS_AUTO, POINTER_EVENTS_BOX_ONLY)
     }
 

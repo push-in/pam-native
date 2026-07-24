@@ -226,6 +226,22 @@ final class TemplateRenderer
         'autoFocus' => PropKey::AutoFocus,
         'returnKeyType' => PropKey::ReturnKeyType,
         'hitSlop' => PropKey::HitSlop,
+        'hitSlopLeft' => PropKey::HitSlopLeft,
+        'hitSlopTop' => PropKey::HitSlopTop,
+        'hitSlopRight' => PropKey::HitSlopRight,
+        'hitSlopBottom' => PropKey::HitSlopBottom,
+        'pressRetentionLeft' => PropKey::PressRetentionLeft,
+        'pressRetentionTop' => PropKey::PressRetentionTop,
+        'pressRetentionRight' => PropKey::PressRetentionRight,
+        'pressRetentionBottom' => PropKey::PressRetentionBottom,
+        'delayLongPress' => PropKey::PressDelayLongMs,
+        'delayPressIn' => PropKey::PressDelayInMs,
+        'delayPressOut' => PropKey::PressDelayOutMs,
+        'androidDisableSound' => PropKey::PressAndroidDisableSound,
+        'rippleBorderless' => PropKey::RippleBorderless,
+        'rippleRadius' => PropKey::RippleRadius,
+        'rippleForeground' => PropKey::RippleForeground,
+        'rippleAlpha' => PropKey::RippleAlpha,
         'zIndex' => PropKey::ZIndex,
         'overflow' => PropKey::Overflow,
         'flexDirection' => PropKey::FlexDirection,
@@ -309,6 +325,9 @@ final class TemplateRenderer
         'on:selectionChange' => EventKind::InputSelectionChange,
         'on:contentSizeChange' => EventKind::InputContentSizeChange,
         'on:keyPress' => EventKind::InputKeyPress,
+        'on:pressIn' => EventKind::PressIn,
+        'on:pressOut' => EventKind::PressOut,
+        'on:pressMove' => EventKind::PressMove,
     ];
 
     private function __construct()
@@ -630,6 +649,13 @@ final class TemplateRenderer
                             $element->onKeyPress($handler),
                         default => $element->on($event, $handler),
                     };
+                } elseif ($factory === null && $element instanceof Pressable) {
+                    $element = match ($event) {
+                        EventKind::PressIn => $element->onPressIn($handler),
+                        EventKind::PressOut => $element->onPressOut($handler),
+                        EventKind::PressMove => $element->onPressMove($handler),
+                        default => $element->on($event, $handler),
+                    };
                 } else {
                     $element = $element->on($event, $handler);
                 }
@@ -711,6 +737,15 @@ final class TemplateRenderer
                     'Input scrollEnabled',
                 ));
             }
+        }
+
+        if (
+            $element instanceof Pressable
+            && is_numeric($attributes['pressRetentionOffset'] ?? null)
+        ) {
+            $element = $element->pressRetentionOffset(
+                max(0.0, (float) $attributes['pressRetentionOffset']),
+            );
         }
 
         if (array_key_exists('horizontal', $attributes)) {
@@ -1085,6 +1120,32 @@ final class TemplateRenderer
                 'none' => AnimationKind::None->value,
                 'pulse' => AnimationKind::Pulse->value,
             ]),
+            PropKey::PressAndroidDisableSound,
+            PropKey::RippleBorderless,
+            PropKey::RippleForeground,
+            => self::boolValue($value, "Pressable {$key->name}"),
+            PropKey::PressDelayLongMs,
+            PropKey::PressDelayInMs,
+            PropKey::PressDelayOutMs,
+            => min(
+                60_000,
+                max(0, (int) self::floatValue($value, "Pressable {$key->name}")),
+            ),
+            PropKey::HitSlop,
+            PropKey::HitSlopLeft,
+            PropKey::HitSlopTop,
+            PropKey::HitSlopRight,
+            PropKey::HitSlopBottom,
+            PropKey::PressRetentionLeft,
+            PropKey::PressRetentionTop,
+            PropKey::PressRetentionRight,
+            PropKey::PressRetentionBottom,
+            PropKey::RippleRadius,
+            => max(0.0, self::floatValue($value, "Pressable {$key->name}")),
+            PropKey::RippleAlpha => min(
+                1.0,
+                max(0.0, self::floatValue($value, 'Pressable ripple alpha')),
+            ),
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
                 ? $value
                 : null,

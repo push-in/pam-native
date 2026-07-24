@@ -33,4 +33,7 @@ enum EventKind: int
     case InputSelectionChange = 25;
     case InputContentSizeChange = 26;
     case InputKeyPress = 27;
+    case PressIn = 28;
+    case PressOut = 29;
+    case PressMove = 30;
 }

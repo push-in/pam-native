@@ -238,4 +238,23 @@ enum PropKey: int
     case OnInputSelectionChange = 230;
     case OnInputContentSizeChange = 231;
     case OnInputKeyPress = 232;
+    case HitSlopLeft = 233;
+    case HitSlopTop = 234;
+    case HitSlopRight = 235;
+    case HitSlopBottom = 236;
+    case PressRetentionLeft = 237;
+    case PressRetentionTop = 238;
+    case PressRetentionRight = 239;
+    case PressRetentionBottom = 240;
+    case PressDelayLongMs = 241;
+    case PressDelayInMs = 242;
+    case PressDelayOutMs = 243;
+    case PressAndroidDisableSound = 244;
+    case RippleBorderless = 245;
+    case RippleRadius = 246;
+    case RippleForeground = 247;
+    case RippleAlpha = 248;
+    case OnPressIn = 249;
+    case OnPressOut = 250;
+    case OnPressMove = 251;
 }
