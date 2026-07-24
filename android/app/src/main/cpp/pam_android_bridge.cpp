@@ -4,6 +4,7 @@
 #include <sapi/embed/php_embed.h>
 #include <Zend/zend_exceptions.h>
 
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstdlib>
@@ -46,6 +47,9 @@ struct RuntimeState {
     jmethodID on_error = nullptr;
     std::string entry;
     std::string state_dir;
+    std::string php_executable = "pam-native";
+    std::string php_entry_argument;
+    std::array<char*, 3> php_arguments = {nullptr, nullptr, nullptr};
     bool dark_appearance = false;
     PamNativeEngineHandle* engine = nullptr;
     std::mutex engine_mutex;
@@ -405,12 +409,14 @@ bool initialize_php(RuntimeState* state) {
     log_debug("Initializing embedded PHP.");
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
-    char executable[] = "pam-native";
-    std::unique_ptr<char[]> entry = std::make_unique<char[]>(state->entry.size() + 1);
-    std::memcpy(entry.get(), state->entry.c_str(), state->entry.size() + 1);
-    char* arguments[] = {executable, entry.get(), nullptr};
+    state->php_entry_argument = state->entry;
+    state->php_arguments = {
+        state->php_executable.data(),
+        state->php_entry_argument.data(),
+        nullptr,
+    };
 
-    if (php_embed_init(2, arguments) == FAILURE) {
+    if (php_embed_init(2, state->php_arguments.data()) == FAILURE) {
         report_error(state, "PHP Embed failed to initialize on Android.");
         return false;
     }
@@ -485,10 +491,15 @@ void runtime_loop(RuntimeState* state) {
         ) {
             log_debug("Restarting PHP request for hot reload.");
             php_request_shutdown(nullptr);
+            SG(request_info).argc = 2;
+            SG(request_info).argv = state->php_arguments.data();
             if (php_request_startup() == FAILURE) {
                 report_error(state, "PHP request failed to restart during hot reload.");
                 break;
             }
+            SG(headers_sent) = 1;
+            SG(request_info).no_headers = 1;
+            php_register_variable("PHP_SELF", "-", nullptr);
         }
         php_embed_shutdown();
     }
