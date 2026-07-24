@@ -27,6 +27,10 @@ use Pam\Native\SafeAreaMode;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TemplateException;
+use Pam\Native\TextBreakStrategy;
+use Pam\Native\TextDataDetectorType;
+use Pam\Native\TextEllipsizeMode;
+use Pam\Native\TextHyphenationFrequency;
 use Pam\Native\UI\ActivityIndicator;
 use Pam\Native\UI\Button;
 use Pam\Native\UI\Column;
@@ -142,6 +146,15 @@ final class TemplateRenderer
         'lineHeight' => PropKey::LineHeight,
         'placeholderColor' => PropKey::PlaceholderColor,
         'selectionColor' => PropKey::SelectionColor,
+        'selectable' => PropKey::TextSelectable,
+        'ellipsizeMode' => PropKey::TextEllipsizeMode,
+        'allowFontScaling' => PropKey::TextAllowFontScaling,
+        'maxFontSizeMultiplier' => PropKey::TextMaxFontSizeMultiplier,
+        'adjustsFontSizeToFit' => PropKey::TextAdjustsFontSizeToFit,
+        'minimumFontScale' => PropKey::TextMinimumFontScale,
+        'textBreakStrategy' => PropKey::TextBreakStrategy,
+        'androidHyphenationFrequency' => PropKey::TextHyphenationFrequency,
+        'dataDetectorType' => PropKey::TextDataDetectorType,
         'maxLength' => PropKey::MaxLength,
         'autoFocus' => PropKey::AutoFocus,
         'returnKeyType' => PropKey::ReturnKeyType,
@@ -741,6 +754,31 @@ final class TemplateRenderer
             PropKey::RefreshIndicatorSize => self::named($value, [
                 'default' => RefreshIndicatorSize::Default->value,
                 'large' => RefreshIndicatorSize::Large->value,
+            ]),
+            PropKey::TextEllipsizeMode => self::named($value, [
+                'tail' => TextEllipsizeMode::Tail->value,
+                'head' => TextEllipsizeMode::Head->value,
+                'middle' => TextEllipsizeMode::Middle->value,
+                'clip' => TextEllipsizeMode::Clip->value,
+            ]),
+            PropKey::TextBreakStrategy => self::named($value, [
+                'highQuality' => TextBreakStrategy::HighQuality->value,
+                'high-quality' => TextBreakStrategy::HighQuality->value,
+                'simple' => TextBreakStrategy::Simple->value,
+                'balanced' => TextBreakStrategy::Balanced->value,
+            ]),
+            PropKey::TextHyphenationFrequency => self::named($value, [
+                'none' => TextHyphenationFrequency::None->value,
+                'normal' => TextHyphenationFrequency::Normal->value,
+                'full' => TextHyphenationFrequency::Full->value,
+            ]),
+            PropKey::TextDataDetectorType => self::named($value, [
+                'none' => TextDataDetectorType::None->value,
+                'phoneNumber' => TextDataDetectorType::PhoneNumber->value,
+                'phone-number' => TextDataDetectorType::PhoneNumber->value,
+                'link' => TextDataDetectorType::Link->value,
+                'email' => TextDataDetectorType::Email->value,
+                'all' => TextDataDetectorType::All->value,
             ]),
             PropKey::AnimationKind => self::named($value, [
                 'none' => AnimationKind::None->value,

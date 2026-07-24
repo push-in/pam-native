@@ -166,4 +166,13 @@ enum PropKey: int
     case RefreshProgressBackgroundColor = 158;
     case RefreshProgressViewOffset = 159;
     case RefreshIndicatorSize = 160;
+    case TextSelectable = 161;
+    case TextEllipsizeMode = 162;
+    case TextAllowFontScaling = 163;
+    case TextMaxFontSizeMultiplier = 164;
+    case TextAdjustsFontSizeToFit = 165;
+    case TextMinimumFontScale = 166;
+    case TextBreakStrategy = 167;
+    case TextHyphenationFrequency = 168;
+    case TextDataDetectorType = 169;
 }

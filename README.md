@@ -123,6 +123,11 @@ top. Indicator visibility, drag feedback, multi-color animation, background,
 size and progress offset stay on the UI thread; PHP receives only the semantic
 refresh event and controls the final `refreshing` state.
 
+Native `TextView` handles selectable copy/paste, selection color, ellipsis,
+automatic font fitting, accessibility font scaling with an optional maximum,
+Android break/hyphenation strategies and local link/e-mail/phone detection.
+These behaviors never require a PHP callback.
+
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,

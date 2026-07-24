@@ -72,6 +72,11 @@ Pull-to-refresh is configured with `RefreshControl::colors()`,
 The Android gesture and indicator run locally; only `onRefresh` crosses into
 PHP.
 
+`Text` exposes `selectable()`, `selectionColor()`, `ellipsize()`,
+`allowFontScaling()`, `maxFontSizeMultiplier()`, `adjustsFontSizeToFit()`,
+`breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
+selection, fitting, line breaking and link detection inside `TextView`.
+
 Run `pam mobile benchmark .` on a physical device for release-like AndroidX
 Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in

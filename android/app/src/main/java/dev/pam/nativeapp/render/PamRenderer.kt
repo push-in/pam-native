@@ -20,10 +20,17 @@ import android.os.Looper
 import android.text.Editable
 import android.text.InputFilter
 import android.text.InputType
+import android.text.Layout
+import android.text.Spannable
+import android.text.TextUtils
 import android.text.TextWatcher
+import android.text.method.LinkMovementMethod
 import android.text.method.PasswordTransformationMethod
 import android.text.method.TransformationMethod
+import android.text.style.URLSpan
+import android.text.util.Linkify
 import android.util.LongSparseArray
+import android.util.TypedValue
 import android.view.Choreographer
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
@@ -66,6 +73,7 @@ import dev.pam.nativeapp.views.NativeViewRegistry
 import java.util.LinkedHashSet
 import java.util.Locale
 import kotlin.math.max
+import kotlin.math.min
 
 class PamRenderer(
     private val context: Context,
@@ -140,6 +148,9 @@ class PamRenderer(
         addChild(state.parent, state.id)
         if (!state.virtual) {
             val view = createView(spec.kind, state)
+            if (view is TextView) {
+                state.defaultHighlightColor = view.highlightColor
+            }
             views.put(spec.id, view)
             attachHosted(view, state)
             state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
@@ -431,6 +442,7 @@ class PamRenderer(
             PropKey.TEXT -> (view as? TextView)?.let { text ->
                 text.text = value.text()
                 state.baseText = value.text()
+                applyTextDataDetector(text, state)
             }
             PropKey.VALUE -> if (view is EditText) {
                 applyInputValue(view, state, value.text())
@@ -457,7 +469,7 @@ class PamRenderer(
             PropKey.RIPPLE_COLOR,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(value.integer().toInt())
-            PropKey.FONT_SIZE -> (view as? TextView)?.textSize = value.decimal().toFloat()
+            PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
             PropKey.ENABLED -> view.isEnabled = value.flag()
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text()
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text()
@@ -496,7 +508,8 @@ class PamRenderer(
                     else -> null
                 }
             }
-            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines = value.integer().toInt()
+            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines =
+                value.integer().toInt().takeIf { it > 0 } ?: Int.MAX_VALUE
             PropKey.MULTILINE -> (view as? EditText)?.let { input ->
                 input.isSingleLine = !value.flag()
                 input.inputType = if (value.flag()) {
@@ -626,7 +639,31 @@ class PamRenderer(
                 max(0.1f, value.decimal().toFloat() / max(1f, view.textSize / resourcesDensity())),
             )
             PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(value.integer().toInt())
-            PropKey.SELECTION_COLOR -> (view as? EditText)?.highlightColor = value.integer().toInt()
+            PropKey.SELECTION_COLOR -> (view as? TextView)?.highlightColor =
+                value.integer().toInt()
+            PropKey.TEXT_SELECTABLE -> (view as? TextView)?.let { text ->
+                text.setTextIsSelectable(value.flag())
+                applyTextDataDetector(text, state)
+            }
+            PropKey.TEXT_ELLIPSIZE_MODE -> (view as? TextView)?.ellipsize =
+                textEllipsize(value.integer().toInt())
+            PropKey.TEXT_ALLOW_FONT_SCALING,
+            PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER,
+            PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT,
+            PropKey.TEXT_MINIMUM_FONT_SCALE,
+            -> (view as? TextView)?.let { applyTextSizing(it, state) }
+            PropKey.TEXT_BREAK_STRATEGY -> (view as? TextView)?.let {
+                applyTextBreakStrategy(it, value.integer().toInt())
+            }
+            PropKey.TEXT_HYPHENATION_FREQUENCY ->
+                (view as? TextView)?.hyphenationFrequency =
+                    when (value.integer().toInt()) {
+                        TEXT_HYPHENATION_NORMAL -> Layout.HYPHENATION_FREQUENCY_NORMAL
+                        TEXT_HYPHENATION_FULL -> Layout.HYPHENATION_FREQUENCY_FULL
+                        else -> Layout.HYPHENATION_FREQUENCY_NONE
+                    }
+            PropKey.TEXT_DATA_DETECTOR_TYPE ->
+                (view as? TextView)?.let { applyTextDataDetector(it, state) }
             PropKey.MAX_LENGTH -> (view as? EditText)?.filters = arrayOf(
                 InputFilter.LengthFilter(value.integer().toInt()),
             )
@@ -747,12 +784,33 @@ class PamRenderer(
             PropKey.RIPPLE_COLOR,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> (view as? TextView)?.setTextColor(Color.BLACK)
-            PropKey.FONT_SIZE -> (view as? TextView)?.textSize = 14f
+            PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
             PropKey.FONT_FAMILY,
             -> (view as? TextView)?.let { applyTypeface(it, state) }
             PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines = Int.MAX_VALUE
+            PropKey.SELECTION_COLOR -> (view as? TextView)?.highlightColor =
+                state.defaultHighlightColor
+            PropKey.TEXT_SELECTABLE -> (view as? TextView)?.let { text ->
+                text.setTextIsSelectable(false)
+                applyTextDataDetector(text, state)
+            }
+            PropKey.TEXT_ELLIPSIZE_MODE -> (view as? TextView)?.ellipsize =
+                TextUtils.TruncateAt.END
+            PropKey.TEXT_ALLOW_FONT_SCALING,
+            PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER,
+            PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT,
+            PropKey.TEXT_MINIMUM_FONT_SCALE,
+            -> (view as? TextView)?.let { applyTextSizing(it, state) }
+            PropKey.TEXT_BREAK_STRATEGY -> (view as? TextView)?.let {
+                applyTextBreakStrategy(it, TEXT_BREAK_HIGH_QUALITY)
+            }
+            PropKey.TEXT_HYPHENATION_FREQUENCY ->
+                (view as? TextView)?.hyphenationFrequency =
+                    Layout.HYPHENATION_FREQUENCY_NONE
+            PropKey.TEXT_DATA_DETECTOR_TYPE ->
+                (view as? TextView)?.let { applyTextDataDetector(it, state) }
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
             PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(Color.GRAY)
             PropKey.ENABLED -> view.isEnabled = true
@@ -1198,6 +1256,82 @@ class PamRenderer(
             RippleDrawable(ColorStateList.valueOf(ripple), shape, null)
         } else {
             shape
+        }
+    }
+
+    private fun textEllipsize(mode: Int): TextUtils.TruncateAt? =
+        when (mode) {
+            TEXT_ELLIPSIZE_HEAD -> TextUtils.TruncateAt.START
+            TEXT_ELLIPSIZE_MIDDLE -> TextUtils.TruncateAt.MIDDLE
+            TEXT_ELLIPSIZE_CLIP -> null
+            else -> TextUtils.TruncateAt.END
+        }
+
+    private fun applyTextSizing(view: TextView, state: NodeState) {
+        view.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE)
+        val baseSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat().coerceAtLeast(1f)
+        val metrics = view.resources.displayMetrics
+        val allowScaling = state.flag(PropKey.TEXT_ALLOW_FONT_SCALING, true)
+        val deviceScale = view.resources.configuration.fontScale
+        val maximumMultiplier = state
+            .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
+            .toFloat()
+        val effectiveScale = if (!allowScaling) {
+            1f
+        } else if (maximumMultiplier > 0f) {
+            min(deviceScale, maximumMultiplier.coerceAtLeast(1f))
+        } else {
+            deviceScale
+        }
+        val maximumPx = max(1f, baseSize * metrics.density * effectiveScale)
+        view.setTextSize(TypedValue.COMPLEX_UNIT_PX, maximumPx)
+
+        if (!state.flag(PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT, false)) return
+        val minimumScale = state
+            .number(PropKey.TEXT_MINIMUM_FONT_SCALE, 0.01)
+            .toFloat()
+            .coerceIn(0.01f, 1f)
+        val minimumPx = max(1, (maximumPx * minimumScale).toInt())
+        val maximumPxInt = max(minimumPx, maximumPx.toInt())
+        view.setAutoSizeTextTypeUniformWithConfiguration(
+            minimumPx,
+            maximumPxInt,
+            1,
+            TypedValue.COMPLEX_UNIT_PX,
+        )
+    }
+
+    private fun applyTextDataDetector(view: TextView, state: NodeState) {
+        (view.text as? Spannable)?.let { text ->
+            text.getSpans(0, text.length, URLSpan::class.java)
+                .forEach(text::removeSpan)
+        }
+        val mask = when (
+            state.integer(PropKey.TEXT_DATA_DETECTOR_TYPE, TEXT_DATA_NONE.toLong()).toInt()
+        ) {
+            TEXT_DATA_PHONE -> Linkify.PHONE_NUMBERS
+            TEXT_DATA_LINK -> Linkify.WEB_URLS
+            TEXT_DATA_EMAIL -> Linkify.EMAIL_ADDRESSES
+            TEXT_DATA_ALL ->
+                Linkify.WEB_URLS or Linkify.EMAIL_ADDRESSES or Linkify.PHONE_NUMBERS
+            else -> 0
+        }
+        view.linksClickable = mask != 0
+        if (mask == 0) {
+            if (!state.flag(PropKey.TEXT_SELECTABLE, false)) {
+                view.movementMethod = null
+            }
+            return
+        }
+        Linkify.addLinks(view, mask)
+        view.movementMethod = LinkMovementMethod.getInstance()
+    }
+
+    private fun applyTextBreakStrategy(view: TextView, strategy: Int) {
+        view.breakStrategy = when (strategy) {
+            TEXT_BREAK_SIMPLE -> ANDROID_BREAK_SIMPLE
+            TEXT_BREAK_BALANCED -> ANDROID_BREAK_BALANCED
+            else -> ANDROID_BREAK_HIGH_QUALITY
         }
     }
 
@@ -1714,6 +1848,7 @@ class PamRenderer(
         var safeAreaRightInset: Int = 0,
         var safeAreaBottomInset: Int = 0,
         var keyboardInset: Int = 0,
+        var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var virtual: Boolean = false,
     ) {
@@ -1764,6 +1899,22 @@ class PamRenderer(
         const val SAFE_AREA_PADDING = 1
         const val SAFE_AREA_MARGIN = 2
         const val REFRESH_SIZE_DEFAULT = 1
+        const val TEXT_ELLIPSIZE_HEAD = 2
+        const val TEXT_ELLIPSIZE_MIDDLE = 3
+        const val TEXT_ELLIPSIZE_CLIP = 4
+        const val TEXT_BREAK_HIGH_QUALITY = 1
+        const val TEXT_BREAK_SIMPLE = 2
+        const val TEXT_BREAK_BALANCED = 3
+        const val ANDROID_BREAK_SIMPLE = 0
+        const val ANDROID_BREAK_HIGH_QUALITY = 1
+        const val ANDROID_BREAK_BALANCED = 2
+        const val TEXT_HYPHENATION_NORMAL = 2
+        const val TEXT_HYPHENATION_FULL = 3
+        const val TEXT_DATA_NONE = 1
+        const val TEXT_DATA_PHONE = 2
+        const val TEXT_DATA_LINK = 3
+        const val TEXT_DATA_EMAIL = 4
+        const val TEXT_DATA_ALL = 5
         const val MAX_VIRTUAL_DEPTH = 512
 
         val LAYOUT_ONLY_KINDS = setOf(

@@ -35,6 +35,10 @@ use Pam\Native\State;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TextDecoration;
+use Pam\Native\TextBreakStrategy;
+use Pam\Native\TextDataDetectorType;
+use Pam\Native\TextEllipsizeMode;
+use Pam\Native\TextHyphenationFrequency;
 use Pam\Native\TextTransform;
 use Pam\Native\Theme;
 use Pam\Native\View;
@@ -132,7 +136,11 @@ foreach ([
     ReturnKeyType::cases(),
     RefreshIndicatorSize::cases(),
     SafeAreaMode::cases(),
+    TextBreakStrategy::cases(),
+    TextDataDetectorType::cases(),
     TextDecoration::cases(),
+    TextEllipsizeMode::cases(),
+    TextHyphenationFrequency::cases(),
     TextTransform::cases(),
 ] as $cases) {
     foreach ($cases as $index => $case) {
@@ -231,6 +239,38 @@ $assert(
         && $refreshElement->properties()[PropKey::RefreshIndicatorSize->value]
             === RefreshIndicatorSize::Large->value,
     'Refresh control helpers must preserve Android indicator and gesture properties.',
+);
+
+$textElement = Text::make('Selectable https://pam.dev')
+    ->numberOfLines(2)
+    ->selectable()
+    ->selectionColor(0x66112233)
+    ->ellipsize(TextEllipsizeMode::Middle)
+    ->allowFontScaling()
+    ->maxFontSizeMultiplier(1.5)
+    ->adjustsFontSizeToFit(minimumScale: 0.5)
+    ->breakStrategy(TextBreakStrategy::Balanced)
+    ->hyphenation(TextHyphenationFrequency::Full)
+    ->dataDetector(TextDataDetectorType::Link);
+$assert(
+    $textElement->properties()[PropKey::NumberOfLines->value] === 2
+        && $textElement->properties()[PropKey::TextSelectable->value] === true
+        && $textElement->properties()[PropKey::SelectionColor->value] === 0x66112233
+        && $textElement->properties()[PropKey::TextEllipsizeMode->value]
+            === TextEllipsizeMode::Middle->value
+        && $textElement->properties()[PropKey::TextAllowFontScaling->value] === true
+        && $textElement
+            ->properties()[PropKey::TextMaxFontSizeMultiplier->value] === 1.5
+        && $textElement
+            ->properties()[PropKey::TextAdjustsFontSizeToFit->value] === true
+        && $textElement->properties()[PropKey::TextMinimumFontScale->value] === 0.5
+        && $textElement->properties()[PropKey::TextBreakStrategy->value]
+            === TextBreakStrategy::Balanced->value
+        && $textElement->properties()[PropKey::TextHyphenationFrequency->value]
+            === TextHyphenationFrequency::Full->value
+        && $textElement->properties()[PropKey::TextDataDetectorType->value]
+            === TextDataDetectorType::Link->value,
+    'Text helpers must preserve selection, fitting, breaking and detector properties.',
 );
 
 $first = (new TreeEncoder())->encode($tree);
