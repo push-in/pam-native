@@ -10,6 +10,8 @@ use Pam\Native\EventKind;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
+use Pam\Native\ScrollKeyboardDismissMode;
+use Pam\Native\ScrollOverScrollMode;
 
 final class Scroll extends Element
 {
@@ -18,14 +20,86 @@ final class Scroll extends Element
         return (new self(NodeKind::Scroll))->withChildren([$child]);
     }
 
-    public function scrollEnabled(bool $enabled): self
+    public function scrollEnabled(bool $enabled = true): self
     {
         return $this->withProperty(PropKey::ScrollEnabled, $enabled);
     }
 
-    public function showsIndicator(bool $visible): self
+    public function showsIndicator(bool $visible = true): self
     {
         return $this->withProperty(PropKey::ShowsScrollIndicator, $visible);
+    }
+
+    public function horizontal(bool $horizontal = true): self
+    {
+        return $this->withProperty(PropKey::ScrollHorizontal, $horizontal);
+    }
+
+    public function contentOffset(float $x = 0.0, float $y = 0.0): self
+    {
+        return $this
+            ->withProperty(PropKey::ScrollContentOffsetX, max(0.0, $x))
+            ->withProperty(PropKey::ScrollContentOffsetY, max(0.0, $y));
+    }
+
+    public function fillViewport(bool $fill = true): self
+    {
+        return $this->withProperty(PropKey::ScrollFillViewport, $fill);
+    }
+
+    public function overScrollMode(ScrollOverScrollMode $mode): self
+    {
+        return $this->withProperty(PropKey::ScrollOverScrollMode, $mode->value);
+    }
+
+    public function nestedScrollEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::ScrollNestedEnabled, $enabled);
+    }
+
+    public function fadingEdgeLength(float $length): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollFadingEdgeLength,
+            max(0.0, $length),
+        );
+    }
+
+    public function persistentScrollbar(bool $persistent = true): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollPersistentScrollbar,
+            $persistent,
+        );
+    }
+
+    public function pagingEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::ScrollPagingEnabled, $enabled);
+    }
+
+    public function snapToInterval(float $interval): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollSnapInterval,
+            max(0.0, $interval),
+        );
+    }
+
+    public function decelerationRate(float $rate): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollDecelerationRate,
+            min(1.0, max(0.0, $rate)),
+        );
+    }
+
+    public function keyboardDismissMode(ScrollKeyboardDismissMode $mode): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollKeyboardDismissMode,
+            $mode->value,
+        );
     }
 
     public function onScroll(Closure $handler): self

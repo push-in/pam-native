@@ -21,4 +21,16 @@ final class Toggle extends Element
     {
         return $this->withEvent(EventKind::Toggle, $handler);
     }
+
+    public function trackColors(int $off, int $on): self
+    {
+        return $this
+            ->withProperty(PropKey::SwitchTrackColorFalse, $off)
+            ->withProperty(PropKey::SwitchTrackColorTrue, $on);
+    }
+
+    public function thumbColor(int $color): self
+    {
+        return $this->withProperty(PropKey::SwitchThumbColor, $color);
+    }
 }

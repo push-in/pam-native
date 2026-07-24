@@ -82,6 +82,26 @@ appearance and visibility. Multiple mounted bars merge in order and restore
 the previous native window state when removed. Android 15+ follows mandatory
 edge-to-edge semantics.
 
+Both scroll directions use the same core host:
+
+```php
+Scroll::make($content)
+    ->horizontal()
+    ->contentOffset(x: 120)
+    ->pagingEnabled()
+    ->snapToInterval(320)
+    ->nestedScrollEnabled()
+    ->overScrollMode(ScrollOverScrollMode::Never)
+    ->keyboardDismissMode(ScrollKeyboardDismissMode::OnDrag)
+    ->onScroll($rememberOffset);
+```
+
+Android owns drag, fling, snapping, fading edges, scrollbars and IME dismissal.
+When `onScroll` is present PAM sends only the active-axis offset, coalesced once
+per display frame. `ActivityIndicator` exposes `animating()`,
+`hidesWhenStopped()`, `size()` and `color()`; `Toggle` exposes native off/on
+track and thumb colors.
+
 Virtualized lists are real AndroidX `RecyclerView` hosts:
 
 ```php

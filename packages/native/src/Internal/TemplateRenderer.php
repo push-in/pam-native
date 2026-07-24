@@ -11,6 +11,7 @@ use Pam\Native\AccessibilityRole;
 use Pam\Native\AccessibilityCheckedState;
 use Pam\Native\AccessibilityImportance;
 use Pam\Native\AccessibilityLiveRegion;
+use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -19,11 +20,14 @@ use Pam\Native\InputSyncMode;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
 use Pam\Native\ModalPresentation;
+use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\RefreshIndicatorSize;
 use Pam\Native\Renderable;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\SafeAreaMode;
+use Pam\Native\ScrollKeyboardDismissMode;
+use Pam\Native\ScrollOverScrollMode;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TemplateException;
@@ -125,6 +129,25 @@ final class TemplateRenderer
         'refreshIndicatorSize' => PropKey::RefreshIndicatorSize,
         'scrollEnabled' => PropKey::ScrollEnabled,
         'showsScrollIndicator' => PropKey::ShowsScrollIndicator,
+        'showsHorizontalScrollIndicator' => PropKey::ShowsScrollIndicator,
+        'showsVerticalScrollIndicator' => PropKey::ShowsScrollIndicator,
+        'contentOffsetX' => PropKey::ScrollContentOffsetX,
+        'contentOffsetY' => PropKey::ScrollContentOffsetY,
+        'fillViewport' => PropKey::ScrollFillViewport,
+        'overScrollMode' => PropKey::ScrollOverScrollMode,
+        'nestedScrollEnabled' => PropKey::ScrollNestedEnabled,
+        'fadingEdgeLength' => PropKey::ScrollFadingEdgeLength,
+        'persistentScrollbar' => PropKey::ScrollPersistentScrollbar,
+        'pagingEnabled' => PropKey::ScrollPagingEnabled,
+        'snapToInterval' => PropKey::ScrollSnapInterval,
+        'decelerationRate' => PropKey::ScrollDecelerationRate,
+        'keyboardDismissMode' => PropKey::ScrollKeyboardDismissMode,
+        'animating' => PropKey::ActivityAnimating,
+        'hidesWhenStopped' => PropKey::ActivityHidesWhenStopped,
+        'indicatorSize' => PropKey::ActivitySize,
+        'trackColorFalse' => PropKey::SwitchTrackColorFalse,
+        'trackColorTrue' => PropKey::SwitchTrackColorTrue,
+        'thumbColor' => PropKey::SwitchThumbColor,
         'selected' => PropKey::Selected,
         'rippleColor' => PropKey::RippleColor,
         'pressedOpacity' => PropKey::PressOpacity,
@@ -141,7 +164,6 @@ final class TemplateRenderer
         'animate' => PropKey::AnimateChanges,
         'rowHeight' => PropKey::ListRowHeight,
         'prefetch' => PropKey::ListPrefetch,
-        'horizontal' => PropKey::ListHorizontal,
         'numColumns' => PropKey::ListNumColumns,
         'inverted' => PropKey::ListInverted,
         'initialScrollIndex' => PropKey::ListInitialScrollIndex,
@@ -487,9 +509,15 @@ final class TemplateRenderer
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
             'Pressable', 'TouchableOpacity', 'TouchableHighlight',
             'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
-            'ActivityIndicator' => ActivityIndicator::make(
-                self::boolValue($values['visible'] ?? true, 'ActivityIndicator visible'),
-            ),
+            'ActivityIndicator' => ActivityIndicator::make(self::boolValue(
+                $values['animating'] ?? $values['visible'] ?? true,
+                'ActivityIndicator animating',
+            ))
+                ->hidesWhenStopped(self::boolValue(
+                    $values['hidesWhenStopped'] ?? true,
+                    'ActivityIndicator hidesWhenStopped',
+                ))
+                ->size(self::activityIndicatorSize($values['size'] ?? 'small')),
             'Switch' => Toggle::make(self::boolValue($values['checked'] ?? false, 'Switch checked')),
             'Modal' => Modal::make(
                 self::singleChild($children, $tag),
@@ -531,7 +559,10 @@ final class TemplateRenderer
 
         foreach (self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
-                $handler = $ownHandlers[$event->value];
+                $handler = $ownHandlers[$event->value]
+                    ?? throw new RuntimeException(
+                        "Template event {$name} was not resolved.",
+                    );
                 if ($factory !== null) {
                     $handler = TemplateRegistry::adaptEvent(
                         $tag,
@@ -592,8 +623,42 @@ final class TemplateRenderer
             ));
         }
 
+        if (array_key_exists('horizontal', $attributes)) {
+            $horizontal = self::boolValue(
+                $attributes['horizontal'],
+                'Horizontal',
+            );
+            $key = match ($element->kind()) {
+                NodeKind::Scroll => PropKey::ScrollHorizontal,
+                NodeKind::List, NodeKind::SectionList => PropKey::ListHorizontal,
+                default => null,
+            };
+            if ($key !== null) {
+                $element = $element->property($key, $horizontal);
+            }
+        }
+
+        if (
+            $element->kind() === NodeKind::Scroll
+            && is_numeric($attributes['contentOffset'] ?? null)
+        ) {
+            $offsetKey = self::boolValue(
+                $attributes['horizontal'] ?? false,
+                'Horizontal',
+            )
+                ? PropKey::ScrollContentOffsetX
+                : PropKey::ScrollContentOffsetY;
+            $element = $element->property(
+                $offsetKey,
+                max(0.0, (float) $attributes['contentOffset']),
+            );
+        }
+
         foreach (self::PROPERTIES as $name => $key) {
             if (!array_key_exists($name, $attributes)) {
+                continue;
+            }
+            if (!self::propertyAppliesToKind($key, $element->kind())) {
                 continue;
             }
 
@@ -605,6 +670,35 @@ final class TemplateRenderer
         }
 
         return $element;
+    }
+
+    private static function propertyAppliesToKind(
+        PropKey $key,
+        NodeKind $kind,
+    ): bool {
+        return match ($key) {
+            PropKey::ScrollContentOffsetX,
+            PropKey::ScrollContentOffsetY,
+            PropKey::ScrollFillViewport,
+            PropKey::ScrollOverScrollMode,
+            PropKey::ScrollNestedEnabled,
+            PropKey::ScrollFadingEdgeLength,
+            PropKey::ScrollPersistentScrollbar,
+            PropKey::ScrollPagingEnabled,
+            PropKey::ScrollSnapInterval,
+            PropKey::ScrollDecelerationRate,
+            PropKey::ScrollKeyboardDismissMode,
+            => $kind === NodeKind::Scroll,
+            PropKey::ActivityAnimating,
+            PropKey::ActivityHidesWhenStopped,
+            PropKey::ActivitySize,
+            => $kind === NodeKind::ActivityIndicator,
+            PropKey::SwitchTrackColorFalse,
+            PropKey::SwitchTrackColorTrue,
+            PropKey::SwitchThumbColor,
+            => $kind === NodeKind::Switch,
+            default => true,
+        };
     }
 
     private static function propertyValue(PropKey $key, mixed $value): string|int|float|bool|null
@@ -758,6 +852,23 @@ final class TemplateRenderer
                 'padding' => SafeAreaMode::Padding->value,
                 'margin' => SafeAreaMode::Margin->value,
             ]),
+            PropKey::ScrollOverScrollMode => self::named($value, [
+                'auto' => ScrollOverScrollMode::Auto->value,
+                'always' => ScrollOverScrollMode::Always->value,
+                'never' => ScrollOverScrollMode::Never->value,
+            ]),
+            PropKey::ScrollKeyboardDismissMode => self::named($value, [
+                'none' => ScrollKeyboardDismissMode::None->value,
+                'on-drag' => ScrollKeyboardDismissMode::OnDrag->value,
+                'interactive' => ScrollKeyboardDismissMode::Interactive->value,
+            ]),
+            PropKey::ActivitySize => match ($value) {
+                'small' => ActivityIndicatorSize::Small
+                    ->densityIndependentPixels(),
+                'large' => ActivityIndicatorSize::Large
+                    ->densityIndependentPixels(),
+                default => self::floatValue($value, 'ActivityIndicator size'),
+            },
             PropKey::RefreshIndicatorSize => self::named($value, [
                 'default' => RefreshIndicatorSize::Default->value,
                 'large' => RefreshIndicatorSize::Large->value,
@@ -794,6 +905,19 @@ final class TemplateRenderer
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
                 ? $value
                 : null,
+        };
+    }
+
+    private static function activityIndicatorSize(
+        mixed $value,
+    ): ActivityIndicatorSize|float {
+        return match ($value) {
+            'small' => ActivityIndicatorSize::Small,
+            'large' => ActivityIndicatorSize::Large,
+            default => max(
+                1.0,
+                self::floatValue($value, 'ActivityIndicator size'),
+            ),
         };
     }
 
@@ -945,9 +1069,24 @@ final class TemplateRenderer
                 return;
             }
 
-            $value = $kind === EventKind::Toggle
-                ? $payload === true || $payload === '1'
-                : (is_array($payload) ? $payload : (string) $payload);
+            if ($kind === EventKind::Toggle) {
+                $value = $payload === true || $payload === '1';
+            } elseif (is_array($payload)) {
+                $value = $payload;
+            } elseif (
+                is_string($payload)
+                || is_int($payload)
+                || is_float($payload)
+                || is_bool($payload)
+                || $payload === null
+                || $payload instanceof Stringable
+            ) {
+                $value = (string) $payload;
+            } else {
+                throw new RuntimeException(
+                    'Template event payload must be scalar, stringable, or an array.',
+                );
+            }
             $method->invoke($scope, $value);
         };
     }

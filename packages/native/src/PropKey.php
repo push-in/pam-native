@@ -182,4 +182,22 @@ enum PropKey: int
     case ListInverted = 174;
     case ListInitialScrollIndex = 175;
     case ListRemoveClippedSubviews = 176;
+    case ScrollHorizontal = 177;
+    case ScrollContentOffsetX = 178;
+    case ScrollContentOffsetY = 179;
+    case ScrollFillViewport = 180;
+    case ScrollOverScrollMode = 181;
+    case ScrollNestedEnabled = 182;
+    case ScrollFadingEdgeLength = 183;
+    case ScrollPersistentScrollbar = 184;
+    case ScrollPagingEnabled = 185;
+    case ScrollSnapInterval = 186;
+    case ScrollDecelerationRate = 187;
+    case ScrollKeyboardDismissMode = 188;
+    case ActivityAnimating = 189;
+    case ActivityHidesWhenStopped = 190;
+    case ActivitySize = 191;
+    case SwitchTrackColorFalse = 192;
+    case SwitchTrackColorTrue = 193;
+    case SwitchThumbColor = 194;
 }

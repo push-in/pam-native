@@ -12,8 +12,29 @@
         { "name": "TextInput", "description": "Alias of Input." },
         { "name": "Image", "description": "Cancelable, cached native image." },
         { "name": "ImageBackground", "description": "Image-backed container." },
-        { "name": "Scroll", "description": "Native vertical scroll container." },
-        { "name": "ScrollView", "description": "Alias of Scroll." },
+        {
+            "name": "Scroll",
+            "description": "Unified native vertical or horizontal scroll container.",
+            "attributes": [
+                { "name": "horizontal", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "contentOffset" },
+                { "name": "contentOffsetX" },
+                { "name": "contentOffsetY" },
+                { "name": "scrollEnabled", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "showsScrollIndicator", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "fillViewport", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "nestedScrollEnabled", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "overScrollMode", "values": [{ "name": "auto" }, { "name": "always" }, { "name": "never" }] },
+                { "name": "fadingEdgeLength" },
+                { "name": "persistentScrollbar", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "pagingEnabled", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "snapToInterval" },
+                { "name": "decelerationRate" },
+                { "name": "keyboardDismissMode", "values": [{ "name": "none" }, { "name": "on-drag" }, { "name": "interactive" }] },
+                { "name": "on:scroll" }
+            ]
+        },
+        { "name": "ScrollView", "description": "Alias of the unified Scroll primitive." },
         { "name": "FlatList", "description": "Virtualized native string list." },
         { "name": "NativeList", "description": "Alias of FlatList." },
         { "name": "VirtualizedList", "description": "Alias of FlatList." },
@@ -21,8 +42,27 @@
         { "name": "Pressable", "description": "Native press and long-press surface." },
         { "name": "TouchableOpacity", "description": "Pressable with native opacity feedback." },
         { "name": "TouchableHighlight", "description": "Pressable with native highlight feedback." },
-        { "name": "ActivityIndicator", "description": "Native progress indicator." },
-        { "name": "Switch", "description": "Native boolean switch." },
+        {
+            "name": "ActivityIndicator",
+            "description": "Native progress indicator.",
+            "attributes": [
+                { "name": "animating", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "hidesWhenStopped", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "size", "values": [{ "name": "small" }, { "name": "large" }] },
+                { "name": "progressColor" }
+            ]
+        },
+        {
+            "name": "Switch",
+            "description": "Native boolean switch.",
+            "attributes": [
+                { "name": "checked", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "trackColorFalse" },
+                { "name": "trackColorTrue" },
+                { "name": "thumbColor" },
+                { "name": "on:toggle" }
+            ]
+        },
         { "name": "Modal", "description": "Native modal, dialog, or sheet." },
         { "name": "KeyboardAvoidingView", "description": "Container that follows the software keyboard." },
         { "name": "RefreshControl", "description": "Native pull-to-refresh container." },

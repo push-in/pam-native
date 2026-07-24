@@ -522,6 +522,8 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::MaxHeightPercent
             | PropKey::Visible
             | PropKey::MarginLeftAuto
+            | PropKey::ScrollHorizontal
+            | PropKey::ScrollFillViewport
     )
 }
 
@@ -705,6 +707,14 @@ mod tests {
                 .iter()
                 .any(|mutation| matches!(mutation, Mutation::Layout { .. }))
         );
+    }
+
+    #[test]
+    fn scroll_extent_configuration_is_classified_as_layout_work() {
+        assert!(affects_layout(PropKey::ScrollHorizontal));
+        assert!(affects_layout(PropKey::ScrollFillViewport));
+        assert!(!affects_layout(PropKey::ScrollDecelerationRate));
+        assert!(!affects_layout(PropKey::ScrollContentOffsetX));
     }
 
     #[test]

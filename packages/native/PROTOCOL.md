@@ -31,10 +31,11 @@ The canonical enums are `NodeKind`, `PropKey`, `EventKind` and
 
 ## Compatibility gates
 
-Rust tests pin exact v1 tree, patch and batch bytes. PHP tests pin sequential
-integer enums and deterministic full/patch encoding. Android checks the
-protocol version before decoding. Changing a golden frame while retaining
-protocol v1 is a release blocker.
+Rust tests pin exact v1 tree, patch and batch bytes. PHP tests parse the PHP,
+Rust and Kotlin property enums and require identical names, values and
+append-only order, in addition to deterministic full/patch encoding. Android
+checks the protocol version before decoding. Changing a golden frame while
+retaining protocol v1 is a release blocker.
 
 ## Limits
 
@@ -46,4 +47,3 @@ protocol v1 is a release blocker.
 | properties per node | 128 |
 | string/opaque property | 1 MiB |
 | queued event payload | 1 MiB |
-

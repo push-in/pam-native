@@ -130,10 +130,55 @@ fn layout_node(
         width: (frame.width - padding_left - padding_right).max(0.0),
         height: (frame.height - padding_top - padding_bottom).max(0.0),
     };
-    if matches!(
-        node.kind,
-        NodeKind::Modal | NodeKind::RefreshControl | NodeKind::Scroll
-    ) {
+    if node.kind == NodeKind::Scroll {
+        let axis = if boolean(node, PropKey::ScrollHorizontal) {
+            Axis::Horizontal
+        } else {
+            Axis::Vertical
+        };
+        let fill_viewport = !matches!(
+            node.properties.get(&PropKey::ScrollFillViewport),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        );
+        for child in node_children {
+            if !visible(child) {
+                continue;
+            }
+            let available_main = match axis {
+                Axis::Vertical => inner.height,
+                Axis::Horizontal => inner.width,
+            };
+            let natural = natural_scroll_extent(children, child, axis, available_main, depth + 1)?;
+            let main = if fill_viewport {
+                natural.max(available_main)
+            } else {
+                natural
+            };
+            let content_frame = match axis {
+                Axis::Vertical => Layout {
+                    width: inner.width,
+                    height: main,
+                    ..inner
+                },
+                Axis::Horizontal => Layout {
+                    width: main,
+                    height: inner.height,
+                    ..inner
+                },
+            };
+            layout_node(
+                tree,
+                children,
+                child.id,
+                content_frame,
+                false,
+                depth + 1,
+                output,
+            )?;
+        }
+        return Ok(());
+    }
+    if matches!(node.kind, NodeKind::Modal | NodeKind::RefreshControl) {
         for child in node_children {
             if !visible(child) {
                 continue;
@@ -421,6 +466,81 @@ fn child_index(tree: &Tree) -> BTreeMap<u64, Vec<&Node>> {
         siblings.sort_by_key(|node| node.index);
     }
     children
+}
+
+fn natural_scroll_extent(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    axis: Axis,
+    available_main: f32,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    if depth > MAX_LAYOUT_DEPTH {
+        return Err(LayoutError::DepthExceeded);
+    }
+    let explicit = match axis {
+        Axis::Vertical => dimension(
+            node,
+            PropKey::Height,
+            PropKey::HeightPercent,
+            available_main,
+        ),
+        Axis::Horizontal => dimension(node, PropKey::Width, PropKey::WidthPercent, available_main),
+    };
+    if let Some(explicit) = explicit {
+        return finite_non_negative(explicit);
+    }
+    let visible_children = children
+        .get(&node.id)
+        .map_or(&[][..], Vec::as_slice)
+        .iter()
+        .copied()
+        .filter(|child| visible(child) && integer(child, PropKey::PositionType).unwrap_or(1) != 2)
+        .collect::<Vec<_>>();
+    if visible_children.is_empty() {
+        return finite_non_negative(intrinsic_main(node, axis));
+    }
+    let direction = integer(node, PropKey::FlexDirection)
+        .unwrap_or_else(|| if node.kind == NodeKind::Row { 2 } else { 1 });
+    let node_axis = if matches!(direction, 2 | 4) {
+        Axis::Horizontal
+    } else {
+        Axis::Vertical
+    };
+    let all_padding = finite_non_negative(number(node, PropKey::Padding).unwrap_or(0.0))?;
+    let horizontal_padding =
+        finite_non_negative(number(node, PropKey::PaddingHorizontal).unwrap_or(all_padding))?;
+    let vertical_padding =
+        finite_non_negative(number(node, PropKey::PaddingVertical).unwrap_or(all_padding))?;
+    let padding_before = match axis {
+        Axis::Vertical => {
+            finite_non_negative(number(node, PropKey::PaddingTop).unwrap_or(vertical_padding))?
+        }
+        Axis::Horizontal => {
+            finite_non_negative(number(node, PropKey::PaddingLeft).unwrap_or(horizontal_padding))?
+        }
+    };
+    let padding_after = match axis {
+        Axis::Vertical => {
+            finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(vertical_padding))?
+        }
+        Axis::Horizontal => {
+            finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(horizontal_padding))?
+        }
+    };
+    let mut extents = Vec::with_capacity(visible_children.len());
+    for child in visible_children {
+        let extent = natural_scroll_extent(children, child, axis, available_main, depth + 1)?;
+        let (before, after) = margin_main(child, axis);
+        extents.push(extent + before + after);
+    }
+    let content = if node_axis == axis {
+        let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
+        extents.iter().sum::<f32>() + gap * extents.len().saturating_sub(1) as f32
+    } else {
+        extents.into_iter().fold(0.0, f32::max)
+    };
+    finite_non_negative(padding_before + content + padding_after)
 }
 
 fn intrinsic_main(node: &Node, axis: Axis) -> f32 {
@@ -952,5 +1072,127 @@ mod tests {
 
         assert!(!layouts.contains_key(&2));
         assert_eq!(layouts[&3].x, 0.0);
+    }
+
+    #[test]
+    fn scroll_content_keeps_its_natural_extent_on_both_axes() {
+        let horizontal = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Scroll,
+                        [
+                            (PropKey::ScrollHorizontal, PropValue::Boolean(true)),
+                            (PropKey::ScrollFillViewport, PropValue::Boolean(false)),
+                        ],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Row,
+                        [
+                            (PropKey::FlexDirection, PropValue::Integer(2)),
+                            (PropKey::Gap, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Width, PropValue::Float(120.0))],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Width, PropValue::Float(120.0))],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        2,
+                        2,
+                        NodeKind::View,
+                        [(PropKey::Width, PropValue::Float(120.0))],
+                    ),
+                ),
+            ]),
+        };
+        let horizontal_layouts = calculate(
+            &horizontal,
+            Size {
+                width: 300.0,
+                height: 80.0,
+            },
+        )
+        .expect("horizontal scroll layout");
+        assert_eq!(horizontal_layouts[&2].width, 376.0);
+        assert_eq!(horizontal_layouts[&5].x, 256.0);
+
+        let vertical = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Scroll,
+                        [(PropKey::ScrollFillViewport, PropValue::Boolean(false))],
+                    ),
+                ),
+                (2, node(2, 1, 0, NodeKind::Column, [])),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(150.0))],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(150.0))],
+                    ),
+                ),
+            ]),
+        };
+        let vertical_layouts = calculate(
+            &vertical,
+            Size {
+                width: 100.0,
+                height: 200.0,
+            },
+        )
+        .expect("vertical scroll layout");
+        assert_eq!(vertical_layouts[&2].height, 300.0);
+        assert_eq!(vertical_layouts[&4].y, 150.0);
     }
 }

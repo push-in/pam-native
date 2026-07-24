@@ -53,8 +53,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.ProgressBar
-import android.widget.ScrollView
 import android.widget.Space
 import android.widget.Switch
 import android.widget.TextView
@@ -190,18 +188,15 @@ class PamRenderer(
                 scaleType = ImageView.ScaleType.CENTER_CROP
             }
             NodeKind.IMAGE_BACKGROUND -> PamImageBackground(context)
-            NodeKind.SCROLL -> ScrollView(context).apply {
-                isFillViewport = true
-                isVerticalScrollBarEnabled = false
-            }
+            NodeKind.SCROLL -> PamScrollContainer(context)
             NodeKind.LIST,
             NodeKind.SECTION_LIST,
             -> PamRecyclerList(context)
             NodeKind.SPACER,
             NodeKind.STATUS_BAR,
             -> Space(context)
-            NodeKind.ACTIVITY_INDICATOR -> ProgressBar(context)
-            NodeKind.SWITCH -> Switch(context)
+            NodeKind.ACTIVITY_INDICATOR -> PamActivityIndicator(context)
+            NodeKind.SWITCH -> PamSwitch(context)
             NodeKind.MODAL -> PamModalHost(context)
             NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {
                 installKeyboardInsets(it, requireNotNull(state))
@@ -310,10 +305,7 @@ class PamRenderer(
             is PamRefreshContainer -> parent.insert(view, index)
             is PamDrawerLayout -> parent.insert(view, index)
             is PamModalHost -> parent.insert(view, index)
-            is ScrollView -> {
-                check(parent.childCount == 0) { "Scroll accepts exactly one child" }
-                parent.addView(view)
-            }
+            is PamScrollContainer -> parent.insert(view)
             else -> {
                 if (parent is ViewGroup && nodes[parentId]?.kind == NodeKind.CUSTOM_VIEW) {
                     parent.addView(view, index.coerceIn(0, parent.childCount))
@@ -530,8 +522,8 @@ class PamRenderer(
                 state.updating = false
             }
             PropKey.LOADING -> applyLoading(view, state, value.flag())
-            PropKey.PROGRESS_COLOR -> (view as? ProgressBar)?.indeterminateTintList =
-                ColorStateList.valueOf(value.integer().toInt())
+            PropKey.PROGRESS_COLOR ->
+                (view as? PamActivityIndicator)?.setColor(value.integer().toInt())
             PropKey.IMAGE_FIT -> imageView(view)?.scaleType = when (value.integer().toInt()) {
                 2 -> ImageView.ScaleType.CENTER_INSIDE
                 3 -> ImageView.ScaleType.FIT_XY
@@ -543,6 +535,7 @@ class PamRenderer(
             PropKey.ELEVATION -> view.elevation = dp(value.decimal().toFloat()).toFloat()
             PropKey.VISIBLE -> when (view) {
                 is PamModalHost -> view.setVisible(value.flag())
+                is PamActivityIndicator -> view.setRequestedVisible(value.flag())
                 else -> view.visibility = if (value.flag()) View.VISIBLE else View.GONE
             }
             PropKey.MODAL_PRESENTATION -> (view as? PamModalHost)?.setPresentation(
@@ -582,13 +575,63 @@ class PamRenderer(
                     value.integer().toInt(),
                 )
             PropKey.SCROLL_ENABLED -> when (view) {
-                is ScrollView -> view.isEnabled = value.flag()
+                is PamScrollContainer -> view.setScrollEnabled(value.flag())
                 is PamRecyclerList -> view.setScrollEnabled(value.flag())
             }
             PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
-                is ScrollView -> view.isVerticalScrollBarEnabled = value.flag()
+                is PamScrollContainer -> view.setShowsScrollIndicator(value.flag())
                 is PamRecyclerList -> view.setShowsScrollIndicator(value.flag())
             }
+            PropKey.SCROLL_HORIZONTAL ->
+                (view as? PamScrollContainer)?.setHorizontal(value.flag())
+            PropKey.SCROLL_CONTENT_OFFSET_X ->
+                (view as? PamScrollContainer)?.setContentOffsetX(
+                    value.decimal().toFloat(),
+                )
+            PropKey.SCROLL_CONTENT_OFFSET_Y ->
+                (view as? PamScrollContainer)?.setContentOffsetY(
+                    value.decimal().toFloat(),
+                )
+            PropKey.SCROLL_FILL_VIEWPORT ->
+                (view as? PamScrollContainer)?.setFillViewport(value.flag())
+            PropKey.SCROLL_OVER_SCROLL_MODE ->
+                (view as? PamScrollContainer)?.setOverScrollModeValue(
+                    value.integer().toInt(),
+                )
+            PropKey.SCROLL_NESTED_ENABLED ->
+                (view as? PamScrollContainer)?.setNestedScrollEnabled(value.flag())
+            PropKey.SCROLL_FADING_EDGE_LENGTH ->
+                (view as? PamScrollContainer)?.setFadingEdgeLength(
+                    value.decimal().toFloat(),
+                )
+            PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
+                (view as? PamScrollContainer)?.setPersistentScrollbar(value.flag())
+            PropKey.SCROLL_PAGING_ENABLED ->
+                (view as? PamScrollContainer)?.setPagingEnabled(value.flag())
+            PropKey.SCROLL_SNAP_INTERVAL ->
+                (view as? PamScrollContainer)?.setSnapInterval(
+                    value.decimal().toFloat(),
+                )
+            PropKey.SCROLL_DECELERATION_RATE ->
+                (view as? PamScrollContainer)?.setDecelerationRate(
+                    value.decimal().toFloat(),
+                )
+            PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
+                (view as? PamScrollContainer)?.setKeyboardDismissMode(
+                    value.integer().toInt(),
+                )
+            PropKey.ACTIVITY_ANIMATING ->
+                (view as? PamActivityIndicator)?.setAnimating(value.flag())
+            PropKey.ACTIVITY_HIDES_WHEN_STOPPED ->
+                (view as? PamActivityIndicator)?.setHidesWhenStopped(value.flag())
+            PropKey.ACTIVITY_SIZE ->
+                (view as? PamActivityIndicator)?.setSize(value.decimal().toFloat())
+            PropKey.SWITCH_TRACK_COLOR_FALSE ->
+                (view as? PamSwitch)?.setTrackOffColor(value.integer().toInt())
+            PropKey.SWITCH_TRACK_COLOR_TRUE ->
+                (view as? PamSwitch)?.setTrackOnColor(value.integer().toInt())
+            PropKey.SWITCH_THUMB_COLOR ->
+                (view as? PamSwitch)?.setThumbColor(value.integer().toInt())
             PropKey.LIST_ROW_HEIGHT ->
                 (view as? PamRecyclerList)?.setRowHeight(value.decimal().toFloat())
             PropKey.LIST_PREFETCH ->
@@ -608,6 +651,7 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_ROLE -> {
                 val role = value.integer().toInt()
                 val className = accessibilityClass(role)
+                (view as? PamActivityIndicator)?.setHostAccessibility(true)
                 view.accessibilityDelegate = object : View.AccessibilityDelegate() {
                     override fun onInitializeAccessibilityNodeInfo(
                         host: View,
@@ -836,7 +880,10 @@ class PamRenderer(
             PropKey.ENABLED -> view.isEnabled = true
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
-            PropKey.ACCESSIBILITY_ROLE -> view.accessibilityDelegate = null
+            PropKey.ACCESSIBILITY_ROLE -> {
+                view.accessibilityDelegate = null
+                (view as? PamActivityIndicator)?.setHostAccessibility(false)
+            }
             PropKey.ACCESSIBLE -> view.isFocusable = false
             PropKey.ACCESSIBILITY_LIVE_REGION -> {
                 view.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_NONE
@@ -869,9 +916,38 @@ class PamRenderer(
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
             -> (view as? PamRecyclerList)?.setItems(null)
-            PropKey.SCROLL_ENABLED -> (view as? PamRecyclerList)?.setScrollEnabled(true)
-            PropKey.SHOWS_SCROLL_INDICATOR ->
-                (view as? PamRecyclerList)?.setShowsScrollIndicator(true)
+            PropKey.SCROLL_ENABLED -> when (view) {
+                is PamScrollContainer -> view.setScrollEnabled(true)
+                is PamRecyclerList -> view.setScrollEnabled(true)
+            }
+            PropKey.SHOWS_SCROLL_INDICATOR -> when (view) {
+                is PamScrollContainer -> view.setShowsScrollIndicator(false)
+                is PamRecyclerList -> view.setShowsScrollIndicator(true)
+            }
+            PropKey.SCROLL_HORIZONTAL ->
+                (view as? PamScrollContainer)?.setHorizontal(false)
+            PropKey.SCROLL_CONTENT_OFFSET_X ->
+                (view as? PamScrollContainer)?.setContentOffsetX(0f)
+            PropKey.SCROLL_CONTENT_OFFSET_Y ->
+                (view as? PamScrollContainer)?.setContentOffsetY(0f)
+            PropKey.SCROLL_FILL_VIEWPORT ->
+                (view as? PamScrollContainer)?.setFillViewport(true)
+            PropKey.SCROLL_OVER_SCROLL_MODE ->
+                (view as? PamScrollContainer)?.setOverScrollModeValue(1)
+            PropKey.SCROLL_NESTED_ENABLED ->
+                (view as? PamScrollContainer)?.setNestedScrollEnabled(true)
+            PropKey.SCROLL_FADING_EDGE_LENGTH ->
+                (view as? PamScrollContainer)?.setFadingEdgeLength(0f)
+            PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
+                (view as? PamScrollContainer)?.setPersistentScrollbar(false)
+            PropKey.SCROLL_PAGING_ENABLED ->
+                (view as? PamScrollContainer)?.setPagingEnabled(false)
+            PropKey.SCROLL_SNAP_INTERVAL ->
+                (view as? PamScrollContainer)?.setSnapInterval(0f)
+            PropKey.SCROLL_DECELERATION_RATE ->
+                (view as? PamScrollContainer)?.setDecelerationRate(0.985f)
+            PropKey.SCROLL_KEYBOARD_DISMISS_MODE ->
+                (view as? PamScrollContainer)?.setKeyboardDismissMode(1)
             PropKey.LIST_ROW_HEIGHT -> (view as? PamRecyclerList)?.setRowHeight(48f)
             PropKey.LIST_PREFETCH -> (view as? PamRecyclerList)?.setPrefetchItems(5)
             PropKey.LIST_HORIZONTAL -> (view as? PamRecyclerList)?.setHorizontal(false)
@@ -893,8 +969,24 @@ class PamRenderer(
             PropKey.SCALE_X -> view.scaleX = 1f
             PropKey.SCALE_Y -> view.scaleY = 1f
             PropKey.ROTATION -> view.rotation = 0f
-            PropKey.VISIBLE -> view.visibility = View.VISIBLE
+            PropKey.VISIBLE -> when (view) {
+                is PamActivityIndicator -> view.setRequestedVisible(true)
+                else -> view.visibility = View.VISIBLE
+            }
             PropKey.CHECKED -> (view as? Switch)?.isChecked = false
+            PropKey.ACTIVITY_ANIMATING ->
+                (view as? PamActivityIndicator)?.setAnimating(true)
+            PropKey.ACTIVITY_HIDES_WHEN_STOPPED ->
+                (view as? PamActivityIndicator)?.setHidesWhenStopped(true)
+            PropKey.ACTIVITY_SIZE ->
+                (view as? PamActivityIndicator)?.setSize(20f)
+            PropKey.SWITCH_TRACK_COLOR_FALSE ->
+                (view as? PamSwitch)?.setTrackOffColor(null)
+            PropKey.SWITCH_TRACK_COLOR_TRUE ->
+                (view as? PamSwitch)?.setTrackOnColor(null)
+            PropKey.SWITCH_THUMB_COLOR ->
+                (view as? PamSwitch)?.setThumbColor(null)
+            PropKey.PROGRESS_COLOR -> (view as? PamActivityIndicator)?.setColor(null)
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(false)
             PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(null)
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
@@ -983,7 +1075,7 @@ class PamRenderer(
                 }
             }
         }
-        if (view is ScrollView) installScrollEvents(view, state)
+        if (view is PamScrollContainer) installScrollEvents(view, state)
         if (view is PamRecyclerList) installListEvents(view, state)
         if (view is PamRefreshContainer) {
             view.setOnRefresh(
@@ -1110,17 +1202,25 @@ class PamRenderer(
         }
     }
 
-    private fun installScrollEvents(scroll: ScrollView, state: NodeState) {
+    private fun installScrollEvents(scroll: PamScrollContainer, state: NodeState) {
         if (state.properties[PropKey.ON_SCROLL] == null) {
-            scroll.setOnScrollChangeListener(null as View.OnScrollChangeListener?)
+            scroll.setOnViewportChanged(null)
             return
         }
-        scroll.setOnScrollChangeListener { _, _, scrollY, _, _ ->
-            if (state.scrollScheduled) return@setOnScrollChangeListener
-            state.scrollScheduled = true
-            Choreographer.getInstance().postFrameCallback {
-                state.scrollScheduled = false
-                dispatch(state.id, EVENT_SCROLL, (scrollY / resourcesDensity()).toString())
+        scroll.setOnViewportChanged { scrollX, scrollY ->
+            state.pendingScrollOffset = scroll.primaryOffset(scrollX, scrollY)
+            if (!state.scrollScheduled) {
+                state.scrollScheduled = true
+                Choreographer.getInstance().postFrameCallback {
+                    state.scrollScheduled = false
+                    if (nodes[state.id] === state) {
+                        dispatch(
+                            state.id,
+                            EVENT_SCROLL,
+                            state.pendingScrollOffset.toString(),
+                        )
+                    }
+                }
             }
         }
     }

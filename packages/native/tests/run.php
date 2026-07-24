@@ -8,6 +8,7 @@ use Pam\Native\AccessibilityRole;
 use Pam\Native\AccessibilityCheckedState;
 use Pam\Native\AccessibilityImportance;
 use Pam\Native\AccessibilityLiveRegion;
+use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
@@ -26,6 +27,8 @@ use Pam\Native\PointerEvents;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\RefreshIndicatorSize;
 use Pam\Native\SafeAreaMode;
+use Pam\Native\ScrollKeyboardDismissMode;
+use Pam\Native\ScrollOverScrollMode;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
@@ -45,6 +48,7 @@ use Pam\Native\Theme;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
+use Pam\Native\UI\ActivityIndicator;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\FlatList;
@@ -54,9 +58,11 @@ use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Screen;
+use Pam\Native\UI\Scroll;
 use Pam\Native\UI\SectionList;
 use Pam\Native\UI\StatusBar;
 use Pam\Native\UI\Text;
+use Pam\Native\UI\Toggle;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
@@ -128,6 +134,72 @@ foreach (PropKey::cases() as $index => $key) {
 foreach (EventKind::cases() as $index => $kind) {
     $assert($kind->value === $index + 1, 'Event kinds must remain sequential protocol integers.');
 }
+
+$repositoryRoot = dirname(__DIR__, 3);
+$kotlinProtocol = file_get_contents(
+    $repositoryRoot.'/android/app/src/main/java/dev/pam/nativeapp/protocol/PamProtocol.kt',
+);
+$rustProtocol = file_get_contents(
+    $repositoryRoot.'/crates/pam-native-protocol/src/lib.rs',
+);
+if ($kotlinProtocol === false || $rustProtocol === false) {
+    throw new RuntimeException('Cross-language protocol sources must be readable.');
+}
+if (
+    preg_match(
+        '/enum class PropKey\\(val value: Int\\) \\{(?<body>.*?)\\n\\}/s',
+        $kotlinProtocol,
+        $kotlinBlock,
+    ) !== 1
+    || preg_match(
+        '/pub enum PropKey \\{(?<body>.*?)\\n\\}/s',
+        $rustProtocol,
+        $rustBlock,
+    ) !== 1
+) {
+    throw new RuntimeException('Cross-language property enums must be discoverable.');
+}
+preg_match_all(
+    '/^\\s*([A-Z][A-Z0-9_]*)\\((\\d+)\\)[,;]/m',
+    $kotlinBlock['body'],
+    $kotlinValues,
+);
+preg_match_all(
+    '/^\\s*([A-Za-z][A-Za-z0-9_]*)\\s*=\\s*(\\d+),/m',
+    $rustBlock['body'],
+    $rustValues,
+);
+$phpPropertyValues = array_map(
+    static fn (PropKey $key): int => $key->value,
+    PropKey::cases(),
+);
+$kotlinPropertyValues = array_map('intval', $kotlinValues[2]);
+$rustPropertyValues = array_map('intval', $rustValues[2]);
+$normalizeProtocolName = static function (string $name): string {
+    $normalized = preg_replace(
+        ['/([a-z0-9])([A-Z])/', '/([A-Z])([A-Z][a-z])/'],
+        ['$1_$2', '$1_$2'],
+        $name,
+    );
+    if ($normalized === null) {
+        throw new RuntimeException('Protocol enum name could not be normalized.');
+    }
+
+    return strtoupper($normalized);
+};
+$phpPropertyNames = array_map(
+    static fn (PropKey $key): string => $normalizeProtocolName($key->name),
+    PropKey::cases(),
+);
+$rustPropertyNames = array_map($normalizeProtocolName, $rustValues[1]);
+$assert(
+    $kotlinPropertyValues === $phpPropertyValues
+        && $rustPropertyValues === $phpPropertyValues
+        && $kotlinValues[1] === $phpPropertyNames
+        && $rustPropertyNames === $phpPropertyNames,
+    'PHP, Kotlin, and Rust property protocol enums must remain byte-for-byte aligned.',
+);
+
 foreach ([
     AnimationKind::cases(),
     AccessibilityRole::cases(),
@@ -290,6 +362,119 @@ $assert(
         && $statusBarElement->properties()[PropKey::StatusBarAnimated->value] === true
         && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true,
     'Status bar helpers must preserve color, style, visibility and edge-to-edge properties.',
+);
+
+$scrollElement = Scroll::make(Text::make('Scrollable'))
+    ->horizontal()
+    ->contentOffset(24.0, 8.0)
+    ->fillViewport(false)
+    ->overScrollMode(ScrollOverScrollMode::Never)
+    ->nestedScrollEnabled()
+    ->fadingEdgeLength(12.0)
+    ->persistentScrollbar()
+    ->pagingEnabled()
+    ->snapToInterval(80.0)
+    ->decelerationRate(0.9)
+    ->keyboardDismissMode(ScrollKeyboardDismissMode::OnDrag)
+    ->scrollEnabled(false)
+    ->showsIndicator()
+    ->onScroll(static function (): void {
+    });
+$assert(
+    $scrollElement->properties()[PropKey::ScrollHorizontal->value] === true
+        && $scrollElement->properties()[PropKey::ScrollContentOffsetX->value] === 24.0
+        && $scrollElement->properties()[PropKey::ScrollContentOffsetY->value] === 8.0
+        && $scrollElement->properties()[PropKey::ScrollFillViewport->value] === false
+        && $scrollElement->properties()[PropKey::ScrollOverScrollMode->value]
+            === ScrollOverScrollMode::Never->value
+        && $scrollElement->properties()[PropKey::ScrollNestedEnabled->value] === true
+        && $scrollElement->properties()[PropKey::ScrollFadingEdgeLength->value] === 12.0
+        && $scrollElement
+            ->properties()[PropKey::ScrollPersistentScrollbar->value] === true
+        && $scrollElement->properties()[PropKey::ScrollPagingEnabled->value] === true
+        && $scrollElement->properties()[PropKey::ScrollSnapInterval->value] === 80.0
+        && $scrollElement->properties()[PropKey::ScrollDecelerationRate->value] === 0.9
+        && $scrollElement->properties()[PropKey::ScrollKeyboardDismissMode->value]
+            === ScrollKeyboardDismissMode::OnDrag->value
+        && isset($scrollElement->events()[EventKind::Scroll->value]),
+    'Scroll helpers must preserve Android-owned orientation, momentum and viewport behavior.',
+);
+
+$indicatorElement = ActivityIndicator::make(false)
+    ->hidesWhenStopped(false)
+    ->size(ActivityIndicatorSize::Large)
+    ->color(0xFF2563EB);
+$assert(
+    $indicatorElement->properties()[PropKey::ActivityAnimating->value] === false
+        && $indicatorElement
+            ->properties()[PropKey::ActivityHidesWhenStopped->value] === false
+        && $indicatorElement->properties()[PropKey::ActivitySize->value] === 36.0
+        && $indicatorElement->properties()[PropKey::ProgressColor->value] === 0xFF2563EB,
+    'Activity indicator helpers must preserve animation, stopped visibility, size and tint.',
+);
+
+$toggleElement = Toggle::make(true)
+    ->trackColors(0xFF64748B, 0xFF2563EB)
+    ->thumbColor(0xFFFFFFFF);
+$assert(
+    $toggleElement->properties()[PropKey::Checked->value] === true
+        && $toggleElement
+            ->properties()[PropKey::SwitchTrackColorFalse->value] === 0xFF64748B
+        && $toggleElement
+            ->properties()[PropKey::SwitchTrackColorTrue->value] === 0xFF2563EB
+        && $toggleElement->properties()[PropKey::SwitchThumbColor->value] === 0xFFFFFFFF,
+    'Switch helpers must preserve checked, track and thumb colors.',
+);
+
+$nativeControlTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile(<<<'PAM'
+<Screen>
+    <ScrollView
+        horizontal="true"
+        contentOffset="24"
+        pagingEnabled="true"
+        snapToInterval="80"
+        overScrollMode="never"
+        keyboardDismissMode="on-drag"
+    >
+        <Text>Scrollable</Text>
+    </ScrollView>
+    <ActivityIndicator
+        animating="false"
+        hidesWhenStopped="false"
+        size="large"
+        progressColor="#2563eb"
+    />
+    <Switch
+        checked="true"
+        trackColorFalse="#64748b"
+        trackColorTrue="#2563eb"
+        thumbColor="#ffffff"
+    />
+</Screen>
+PAM),
+    null,
+    [],
+);
+$templateScroll = $nativeControlTemplate->children()[0];
+$templateIndicator = $nativeControlTemplate->children()[1];
+$templateSwitch = $nativeControlTemplate->children()[2];
+$assert(
+    $templateScroll->properties()[PropKey::ScrollHorizontal->value] === true
+        && $templateScroll
+            ->properties()[PropKey::ScrollContentOffsetX->value] === 24.0
+        && $templateScroll->properties()[PropKey::ScrollPagingEnabled->value] === true
+        && $templateScroll->properties()[PropKey::ScrollSnapInterval->value] === 80
+        && $templateIndicator->properties()[PropKey::ActivityAnimating->value] === false
+        && $templateIndicator
+            ->properties()[PropKey::ActivityHidesWhenStopped->value] === false
+        && $templateIndicator->properties()[PropKey::ActivitySize->value] === 36.0
+        && $templateSwitch
+            ->properties()[PropKey::SwitchTrackColorFalse->value] === 0xFF64748B
+        && $templateSwitch
+            ->properties()[PropKey::SwitchTrackColorTrue->value] === 0xFF2563EB
+        && $templateSwitch->properties()[PropKey::SwitchThumbColor->value] === 0xFFFFFFFF,
+    'Native control tags must map to the same typed scroll, indicator and switch protocol.',
 );
 
 $listElement = FlatList::make(['One', 'Two', 'Three'])
@@ -506,20 +691,27 @@ $eventContextTemplate = TemplateCompiler::compile(
     '<EventParent value="framework" on:change="submit"><EventChild /></EventParent>',
 );
 TemplateRenderer::render($eventContextTemplate, $eventScope, []);
-$eventContext = is_array($capturedEventContexts)
-    ? ($capturedEventContexts['EventParent'] ?? null)
+if (!is_array($capturedEventContexts)) {
+    throw new RuntimeException('Declarative event contexts are missing.');
+}
+$eventContext = $capturedEventContexts['EventParent'] ?? null;
+if (!is_array($eventContext)) {
+    throw new RuntimeException('Declarative event context is missing.');
+}
+$eventContextEvents = $eventContext['events'] ?? null;
+$eventContextProps = $eventContext['props'] ?? null;
+$eventContextHandler = is_array($eventContextEvents)
+    ? ($eventContextEvents[EventKind::Change->value] ?? null)
     : null;
-$eventContextHandler = is_array($eventContext)
-    && is_array($eventContext['events'] ?? null)
-        ? ($eventContext['events'][EventKind::Change->value] ?? null)
-        : null;
 if (!$eventContextHandler instanceof Closure) {
     throw new RuntimeException('Declarative event context handler is missing.');
 }
+if (!is_array($eventContextProps)) {
+    throw new RuntimeException('Declarative event context props are missing.');
+}
 $eventContextHandler('laravel');
 $assert(
-    is_array($eventContext)
-        && ($eventContext['props']['value'] ?? null) === 'framework'
+    ($eventContextProps['value'] ?? null) === 'framework'
         && $eventScope->submission === 'laravel',
     'Registered child components must receive bounded ancestor event context.',
 );

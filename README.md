@@ -134,6 +134,14 @@ optional color animation run on the UI thread. Android 15+ keeps its enforced
 edge-to-edge behavior, where background color and translucency are system
 no-ops.
 
+Vertical and horizontal `ScrollView` share one core host. Content offsets,
+viewport filling, nested scrolling, overscroll, fading edges, persistent
+scrollbars, paging/snap, deceleration and keyboard dismissal remain in Android;
+an observed offset crosses the boundary at most once per VSYNC. Native
+`ActivityIndicator` controls animation, stopped visibility, tint and numeric or
+small/large size, while `Switch` owns checked state and disabled-aware
+off/on-track and thumb tints.
+
 System APIs include alert, toast, sharing, URL linking, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,
