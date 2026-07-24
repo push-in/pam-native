@@ -49,6 +49,7 @@ use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\DrawerLayoutAndroid;
 use Pam\Native\UI\FlatList;
+use Pam\Native\UI\Grid;
 use Pam\Native\UI\Image;
 use Pam\Native\UI\ImageBackground;
 use Pam\Native\UI\Input;
@@ -797,6 +798,7 @@ final class TemplateRenderer
             'Screen' => Screen::make(...$children),
             'Column' => Column::make(...$children),
             'Row' => Row::make(...$children),
+            'Grid' => Grid::make(...$children),
             'View' => NativeView::make(...$children),
             'Text' => Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
             'Button' => Button::make(self::stringValue(

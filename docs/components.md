@@ -133,14 +133,15 @@ current one-based number. Zero and negative integers render nothing:
 
 ## Responsive grid and flex
 
-`Row` and `Column` remain normal flex containers unless a positive `columns`
-value is set. A grid row uses 12 columns by convention, accepts any rich PAM
+`Grid` is the explicit rich-content grid and defaults to 12 columns. `Row` and
+`Column` remain normal flex containers unless a positive `columns` value is
+set. A grid row uses 12 columns by convention, accepts any rich PAM
 element as a child, wraps automatically, and measures every row from its
 tallest child. It works inside scroll views and reflows when the window,
 orientation, split-screen width, or foldable posture changes.
 
 ```xml
-<Row columns="12" gutterX="16" gutterY="16">
+<Grid gutterX="16" gutterY="16">
     <Column span="12" spanSm="6" spanMd="4">
         <Image :source="$photo->url" aspectRatio="1" />
         <Text>{{ $photo->title }}</Text>
@@ -153,8 +154,13 @@ orientation, split-screen width, or foldable posture changes.
         spanSm="6"
         spanLg="3"
     />
-</Row>
+</Grid>
 ```
+
+`Grid` is not the textual `FlatList`: every direct child is a complete retained
+PAM subtree, so cells may contain `Image`, `Pressable`, inputs, custom
+components, nested flex containers, or another grid. Use `FlatList` for large
+virtualized string datasets and `Grid` for arbitrary rich layouts.
 
 The responsive values are mobile-first. A missing value inherits the closest
 smaller breakpoint:

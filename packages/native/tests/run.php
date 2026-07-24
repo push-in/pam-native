@@ -975,7 +975,7 @@ $coreRoleElement = TemplateRenderer::render(
 );
 $gridElement = TemplateRenderer::render(
     TemplateCompiler::compile(
-        '<Row columns="12" gutterX="16" gutterY="8"><Column span="12" spanSm="6" spanMd="4" /><Column class="col-6 col-lg-3 offset-lg-1 order-md-2" /></Row>',
+        '<Grid gutterX="16" gutterY="8"><Column span="12" spanSm="6" spanMd="4"><Image source="cover.webp" aspectRatio="1" /><Pressable><Text>Open</Text></Pressable></Column><Column class="col-6 col-lg-3 offset-lg-1 order-md-2" /></Grid>',
     ),
     null,
     [],
@@ -990,8 +990,10 @@ $assert(
         && $gridElement->children()[1]->properties()[PropKey::GridSpan->value] === 6
         && $gridElement->children()[1]->properties()[PropKey::GridSpanLg->value] === 3
         && $gridElement->children()[1]->properties()[PropKey::GridOffsetLg->value] === 1
-        && $gridElement->children()[1]->properties()[PropKey::GridOrderMd->value] === 2,
-    'Responsive grids must compile identically from explicit properties and utility classes.',
+        && $gridElement->children()[1]->properties()[PropKey::GridOrderMd->value] === 2
+        && $gridElement->children()[0]->children()[0]->kind() === NodeKind::Image
+        && $gridElement->children()[0]->children()[1]->kind() === NodeKind::Pressable,
+    'Responsive grids must compile rich cells identically from explicit properties and utility classes.',
 );
 $assert(
     $coreRoleElement->properties()[PropKey::AccessibilityRole->value]
