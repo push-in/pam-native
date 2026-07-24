@@ -268,4 +268,22 @@ enum PropKey: int
     case OnModalShow = 260;
     case OnModalDismiss = 261;
     case OnModalOrientationChange = 262;
+    case GridColumns = 263;
+    case GridSpan = 264;
+    case GridSpanSm = 265;
+    case GridSpanMd = 266;
+    case GridSpanLg = 267;
+    case GridSpanXl = 268;
+    case GridOffset = 269;
+    case GridOffsetSm = 270;
+    case GridOffsetMd = 271;
+    case GridOffsetLg = 272;
+    case GridOffsetXl = 273;
+    case GridOrder = 274;
+    case GridOrderSm = 275;
+    case GridOrderMd = 276;
+    case GridOrderLg = 277;
+    case GridOrderXl = 278;
+    case GridColumnGap = 279;
+    case GridRowGap = 280;
 }

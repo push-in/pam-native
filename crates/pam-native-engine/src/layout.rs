@@ -34,6 +34,15 @@ struct LayoutContext<'a> {
     text_scale: f32,
 }
 
+#[derive(Clone, Copy)]
+struct GridPlacement<'a> {
+    child: &'a Node,
+    row: usize,
+    column: usize,
+    width: f32,
+    height: f32,
+}
+
 #[cfg(test)]
 fn calculate(tree: &Tree, viewport: Size) -> Result<BTreeMap<u64, Layout>, LayoutError> {
     calculate_with_text_scale(tree, viewport, 1.0)
@@ -250,6 +259,10 @@ fn layout_node(
             };
             layout_node(context, child.id, child_frame, false, depth + 1, output)?;
         }
+        return Ok(());
+    }
+    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+        layout_grid(context, node, node_children, inner, gap, depth, output)?;
         return Ok(());
     }
     let default_direction = if node.kind == NodeKind::Row { 2 } else { 1 };
@@ -523,6 +536,185 @@ fn layout_node(
     Ok(())
 }
 
+fn layout_grid(
+    context: &LayoutContext<'_>,
+    node: &Node,
+    node_children: &[&Node],
+    inner: Layout,
+    fallback_gap: f32,
+    depth: usize,
+    output: &mut BTreeMap<u64, Layout>,
+) -> Result<(), LayoutError> {
+    let columns = integer(node, PropKey::GridColumns)
+        .unwrap_or(12)
+        .clamp(1, 64) as usize;
+    let column_gap =
+        finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
+    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
+    let unit =
+        ((inner.width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
+    let mut children = node_children
+        .iter()
+        .copied()
+        .filter(|child| {
+            visible(child)
+                && child.kind != NodeKind::Modal
+                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
+        })
+        .collect::<Vec<_>>();
+    children.sort_by_key(|child| {
+        (
+            responsive_grid_value(child, inner.width, GridValue::Order, 0),
+            child.index,
+        )
+    });
+
+    let mut placements = Vec::with_capacity(children.len());
+    let mut row = 0_usize;
+    let mut cursor = 0_usize;
+    let mut row_heights = Vec::<f32>::new();
+    for child in children {
+        let span = responsive_grid_value(child, inner.width, GridValue::Span, columns as i64)
+            .clamp(1, columns as i64) as usize;
+        let offset = responsive_grid_value(child, inner.width, GridValue::Offset, 0)
+            .clamp(0, columns.saturating_sub(1) as i64) as usize;
+        if cursor > 0 && cursor + offset + span > columns {
+            row += 1;
+            cursor = 0;
+        }
+        let column = (cursor + offset).min(columns.saturating_sub(span));
+        let width = unit * span as f32 + column_gap * span.saturating_sub(1) as f32;
+        let (margin_top, margin_bottom) = margin_main(child, Axis::Vertical);
+        let (margin_left, margin_right) = margin_cross(child, Axis::Vertical);
+        let content_width = (width - margin_left - margin_right).max(0.0);
+        let height = child_main(
+            context.children,
+            child,
+            Axis::Vertical,
+            inner.height,
+            content_width,
+            context.text_scale,
+            depth + 1,
+        )?;
+        if row_heights.len() <= row {
+            row_heights.push(0.0);
+        }
+        row_heights[row] = row_heights[row].max(height + margin_top + margin_bottom);
+        placements.push(GridPlacement {
+            child,
+            row,
+            column,
+            width,
+            height,
+        });
+        cursor = column + span;
+        if cursor >= columns {
+            row += 1;
+            cursor = 0;
+        }
+    }
+    let mut row_offsets = Vec::with_capacity(row_heights.len());
+    let mut y = 0.0;
+    for height in &row_heights {
+        row_offsets.push(y);
+        y += *height + row_gap;
+    }
+    for placement in placements {
+        let (margin_top, _) = margin_main(placement.child, Axis::Vertical);
+        let (margin_left, margin_right) = margin_cross(placement.child, Axis::Vertical);
+        let x = inner.x + placement.column as f32 * (unit + column_gap) + margin_left;
+        let frame = Layout {
+            x,
+            y: inner.y + row_offsets[placement.row] + margin_top,
+            width: (placement.width - margin_left - margin_right).max(0.0),
+            height: placement.height,
+        };
+        layout_node(context, placement.child.id, frame, false, depth + 1, output)?;
+    }
+    // Absolute children remain relative to the grid's inner box.
+    for child in node_children.iter().copied().filter(|child| {
+        visible(child)
+            && child.kind != NodeKind::Modal
+            && integer(child, PropKey::PositionType).unwrap_or(1) == 2
+    }) {
+        let left = number(child, PropKey::Left).unwrap_or(0.0);
+        let top = number(child, PropKey::Top).unwrap_or(0.0);
+        let width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width)
+            .unwrap_or(inner.width);
+        let height = child_main(
+            context.children,
+            child,
+            Axis::Vertical,
+            inner.height,
+            width,
+            context.text_scale,
+            depth + 1,
+        )?;
+        layout_node(
+            context,
+            child.id,
+            Layout {
+                x: inner.x + left,
+                y: inner.y + top,
+                width,
+                height,
+            },
+            false,
+            depth + 1,
+            output,
+        )?;
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum GridValue {
+    Span,
+    Offset,
+    Order,
+}
+
+fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64) -> i64 {
+    let keys = match value {
+        GridValue::Span => [
+            PropKey::GridSpan,
+            PropKey::GridSpanSm,
+            PropKey::GridSpanMd,
+            PropKey::GridSpanLg,
+            PropKey::GridSpanXl,
+        ],
+        GridValue::Offset => [
+            PropKey::GridOffset,
+            PropKey::GridOffsetSm,
+            PropKey::GridOffsetMd,
+            PropKey::GridOffsetLg,
+            PropKey::GridOffsetXl,
+        ],
+        GridValue::Order => [
+            PropKey::GridOrder,
+            PropKey::GridOrderSm,
+            PropKey::GridOrderMd,
+            PropKey::GridOrderLg,
+            PropKey::GridOrderXl,
+        ],
+    };
+    let level = if width >= 1600.0 {
+        4
+    } else if width >= 1200.0 {
+        3
+    } else if width >= 840.0 {
+        2
+    } else if width >= 600.0 {
+        1
+    } else {
+        0
+    };
+    (0..=level)
+        .rev()
+        .find_map(|index| integer(node, keys[index]))
+        .unwrap_or(default)
+}
+
 fn child_index(tree: &Tree) -> BTreeMap<u64, Vec<&Node>> {
     let mut children = BTreeMap::<u64, Vec<&Node>>::new();
     for node in tree.nodes.values() {
@@ -552,6 +744,25 @@ fn natural_scroll_extent(
     };
     if let Some(explicit) = explicit {
         return finite_non_negative(explicit);
+    }
+    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+        return intrinsic_extent(
+            children,
+            node,
+            axis,
+            if axis == Axis::Vertical {
+                available_cross
+            } else {
+                available_main
+            },
+            if axis == Axis::Vertical {
+                available_main
+            } else {
+                available_cross
+            },
+            text_scale,
+            depth + 1,
+        );
     }
     let visible_children = children
         .get(&node.id)
@@ -713,6 +924,25 @@ fn intrinsic_extent(
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
     let inner_width = (available_width - padding_left - padding_right).max(0.0);
     let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
+    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+        let content = match requested_axis {
+            Axis::Horizontal => inner_width,
+            Axis::Vertical => grid_intrinsic_height(
+                children,
+                node,
+                &node_children,
+                inner_width,
+                inner_height,
+                text_scale,
+                depth + 1,
+            )?,
+        };
+        let padding_extent = match requested_axis {
+            Axis::Vertical => padding_top + padding_bottom,
+            Axis::Horizontal => padding_left + padding_right,
+        };
+        return finite_non_negative(content + padding_extent);
+    }
     let direction = integer(node, PropKey::FlexDirection)
         .unwrap_or_else(|| if node.kind == NodeKind::Row { 2 } else { 1 });
     let flow_axis = if matches!(direction, 2 | 4) {
@@ -750,6 +980,76 @@ fn intrinsic_extent(
     };
 
     finite_non_negative(content + padding_extent)
+}
+
+fn grid_intrinsic_height(
+    children_index: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    node_children: &[&Node],
+    width: f32,
+    available_height: f32,
+    text_scale: f32,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    let columns = integer(node, PropKey::GridColumns)
+        .unwrap_or(12)
+        .clamp(1, 64) as usize;
+    let fallback_gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
+    let column_gap =
+        finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
+    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
+    let unit = ((width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
+    let mut flow = node_children
+        .iter()
+        .copied()
+        .filter(|child| {
+            visible(child)
+                && child.kind != NodeKind::Modal
+                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
+        })
+        .collect::<Vec<_>>();
+    flow.sort_by_key(|child| {
+        (
+            responsive_grid_value(child, width, GridValue::Order, 0),
+            child.index,
+        )
+    });
+    let mut row_heights = Vec::<f32>::new();
+    let mut row = 0_usize;
+    let mut cursor = 0_usize;
+    for child in flow {
+        let span = responsive_grid_value(child, width, GridValue::Span, columns as i64)
+            .clamp(1, columns as i64) as usize;
+        let offset = responsive_grid_value(child, width, GridValue::Offset, 0)
+            .clamp(0, columns.saturating_sub(1) as i64) as usize;
+        if cursor > 0 && cursor + offset + span > columns {
+            row += 1;
+            cursor = 0;
+        }
+        let column = (cursor + offset).min(columns.saturating_sub(span));
+        let cell_width = unit * span as f32 + column_gap * span.saturating_sub(1) as f32;
+        let (margin_left, margin_right) = margin_cross(child, Axis::Vertical);
+        let (margin_top, margin_bottom) = margin_main(child, Axis::Vertical);
+        let child_height = child_main(
+            children_index,
+            child,
+            Axis::Vertical,
+            available_height,
+            (cell_width - margin_left - margin_right).max(0.0),
+            text_scale,
+            depth + 1,
+        )?;
+        if row_heights.len() <= row {
+            row_heights.push(0.0);
+        }
+        row_heights[row] = row_heights[row].max(child_height + margin_top + margin_bottom);
+        cursor = column + span;
+        if cursor >= columns {
+            row += 1;
+            cursor = 0;
+        }
+    }
+    Ok(row_heights.iter().sum::<f32>() + row_gap * row_heights.len().saturating_sub(1) as f32)
 }
 
 fn constrained_intrinsic_extent(
@@ -2210,5 +2510,66 @@ mod tests {
             .expect("padded text width")
                 > 48.0,
         );
+    }
+
+    #[test]
+    fn responsive_grid_wraps_spans_and_reflows_at_breakpoints() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::Row,
+                [
+                    (PropKey::GridColumns, PropValue::Integer(12)),
+                    (PropKey::GridColumnGap, PropValue::Float(12.0)),
+                    (PropKey::GridRowGap, PropValue::Float(8.0)),
+                ],
+            ),
+        );
+        for (index, id) in [2_u64, 3, 4].into_iter().enumerate() {
+            nodes.insert(
+                id,
+                node(
+                    id,
+                    1,
+                    index as u32,
+                    NodeKind::View,
+                    [
+                        (PropKey::GridSpan, PropValue::Integer(6)),
+                        (PropKey::GridSpanMd, PropValue::Integer(4)),
+                        (PropKey::Height, PropValue::Float(40.0)),
+                    ],
+                ),
+            );
+        }
+        let tree = Tree { root: 1, nodes };
+
+        let phone = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 300.0,
+            },
+        )
+        .expect("phone grid");
+        assert_eq!(phone[&2].width, 174.0);
+        assert_eq!(phone[&3].x, 186.0);
+        assert_eq!(phone[&4].y, 48.0);
+
+        let tablet = calculate(
+            &tree,
+            Size {
+                width: 900.0,
+                height: 300.0,
+            },
+        )
+        .expect("tablet grid");
+        assert_eq!(tablet[&2].width, 292.0);
+        assert_eq!(tablet[&3].x, 304.0);
+        assert_eq!(tablet[&4].x, 608.0);
+        assert_eq!(tablet[&4].y, 0.0);
     }
 }

@@ -306,6 +306,24 @@ final class TemplateRenderer
         'safeAreaMode' => PropKey::SafeAreaMode,
         'keyboardVerticalOffset' => PropKey::KeyboardVerticalOffset,
         'keyboardAvoidingEnabled' => PropKey::KeyboardAvoidingEnabled,
+        'columns' => PropKey::GridColumns,
+        'span' => PropKey::GridSpan,
+        'spanSm' => PropKey::GridSpanSm,
+        'spanMd' => PropKey::GridSpanMd,
+        'spanLg' => PropKey::GridSpanLg,
+        'spanXl' => PropKey::GridSpanXl,
+        'offset' => PropKey::GridOffset,
+        'offsetSm' => PropKey::GridOffsetSm,
+        'offsetMd' => PropKey::GridOffsetMd,
+        'offsetLg' => PropKey::GridOffsetLg,
+        'offsetXl' => PropKey::GridOffsetXl,
+        'order' => PropKey::GridOrder,
+        'orderSm' => PropKey::GridOrderSm,
+        'orderMd' => PropKey::GridOrderMd,
+        'orderLg' => PropKey::GridOrderLg,
+        'orderXl' => PropKey::GridOrderXl,
+        'gutterX' => PropKey::GridColumnGap,
+        'gutterY' => PropKey::GridRowGap,
     ];
 
     /** @var array<string, EventKind> */
@@ -1398,6 +1416,27 @@ final class TemplateRenderer
                 'none' => AnimationKind::None->value,
                 'pulse' => AnimationKind::Pulse->value,
             ]),
+            PropKey::GridColumns,
+            PropKey::GridSpan,
+            PropKey::GridSpanSm,
+            PropKey::GridSpanMd,
+            PropKey::GridSpanLg,
+            PropKey::GridSpanXl,
+            => max(1, min(64, (int) self::floatValue($value, "Grid {$key->name}"))),
+            PropKey::GridOffset,
+            PropKey::GridOffsetSm,
+            PropKey::GridOffsetMd,
+            PropKey::GridOffsetLg,
+            PropKey::GridOffsetXl,
+            PropKey::GridOrder,
+            PropKey::GridOrderSm,
+            PropKey::GridOrderMd,
+            PropKey::GridOrderLg,
+            PropKey::GridOrderXl,
+            => max(0, (int) self::floatValue($value, "Grid {$key->name}")),
+            PropKey::GridColumnGap,
+            PropKey::GridRowGap,
+            => max(0.0, self::floatValue($value, "Grid {$key->name}")),
             PropKey::PressAndroidDisableSound,
             PropKey::RippleBorderless,
             PropKey::RippleForeground,
@@ -1527,6 +1566,49 @@ final class TemplateRenderer
 
         if (preg_match('/^opacity-(\\d{1,3})$/', $class, $match) === 1) {
             return [PropKey::Opacity, min(100, (int) $match[1]) / 100];
+        }
+
+        if (preg_match('/^grid-(\\d{1,2})$/', $class, $match) === 1) {
+            return [PropKey::GridColumns, max(1, min(64, (int) $match[1]))];
+        }
+
+        if (preg_match('/^col(?:(-sm|-md|-lg|-xl))?-(\\d{1,2})$/', $class, $match) === 1) {
+            $key = match ($match[1] ?? '') {
+                '-sm' => PropKey::GridSpanSm,
+                '-md' => PropKey::GridSpanMd,
+                '-lg' => PropKey::GridSpanLg,
+                '-xl' => PropKey::GridSpanXl,
+                default => PropKey::GridSpan,
+            };
+
+            return [$key, max(1, min(64, (int) $match[2]))];
+        }
+
+        if (preg_match('/^(offset|order)(?:(-sm|-md|-lg|-xl))?-(\\d+)$/', $class, $match) === 1) {
+            $keys = $match[1] === 'offset'
+                ? [
+                    '' => PropKey::GridOffset,
+                    '-sm' => PropKey::GridOffsetSm,
+                    '-md' => PropKey::GridOffsetMd,
+                    '-lg' => PropKey::GridOffsetLg,
+                    '-xl' => PropKey::GridOffsetXl,
+                ]
+                : [
+                    '' => PropKey::GridOrder,
+                    '-sm' => PropKey::GridOrderSm,
+                    '-md' => PropKey::GridOrderMd,
+                    '-lg' => PropKey::GridOrderLg,
+                    '-xl' => PropKey::GridOrderXl,
+                ];
+
+            return [$keys[$match[2] ?? ''], (int) $match[3]];
+        }
+
+        if (preg_match('/^gutter-(x|y)-(\\d+(?:\\.\\d+)?)$/', $class, $match) === 1) {
+            return [
+                $match[1] === 'x' ? PropKey::GridColumnGap : PropKey::GridRowGap,
+                (float) $match[2] * 4.0,
+            ];
         }
 
         return null;

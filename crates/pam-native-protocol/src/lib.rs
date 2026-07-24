@@ -339,6 +339,24 @@ pub enum PropKey {
     OnModalShow = 260,
     OnModalDismiss = 261,
     OnModalOrientationChange = 262,
+    GridColumns = 263,
+    GridSpan = 264,
+    GridSpanSm = 265,
+    GridSpanMd = 266,
+    GridSpanLg = 267,
+    GridSpanXl = 268,
+    GridOffset = 269,
+    GridOffsetSm = 270,
+    GridOffsetMd = 271,
+    GridOffsetLg = 272,
+    GridOffsetXl = 273,
+    GridOrder = 274,
+    GridOrderSm = 275,
+    GridOrderMd = 276,
+    GridOrderLg = 277,
+    GridOrderXl = 278,
+    GridColumnGap = 279,
+    GridRowGap = 280,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -608,6 +626,24 @@ impl TryFrom<u16> for PropKey {
             260 => Ok(Self::OnModalShow),
             261 => Ok(Self::OnModalDismiss),
             262 => Ok(Self::OnModalOrientationChange),
+            263 => Ok(Self::GridColumns),
+            264 => Ok(Self::GridSpan),
+            265 => Ok(Self::GridSpanSm),
+            266 => Ok(Self::GridSpanMd),
+            267 => Ok(Self::GridSpanLg),
+            268 => Ok(Self::GridSpanXl),
+            269 => Ok(Self::GridOffset),
+            270 => Ok(Self::GridOffsetSm),
+            271 => Ok(Self::GridOffsetMd),
+            272 => Ok(Self::GridOffsetLg),
+            273 => Ok(Self::GridOffsetXl),
+            274 => Ok(Self::GridOrder),
+            275 => Ok(Self::GridOrderSm),
+            276 => Ok(Self::GridOrderMd),
+            277 => Ok(Self::GridOrderLg),
+            278 => Ok(Self::GridOrderXl),
+            279 => Ok(Self::GridColumnGap),
+            280 => Ok(Self::GridRowGap),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1411,10 +1447,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(25).is_err());
 
-        for value in 1..=262 {
+        for value in 1..=280 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(263).is_err());
+        assert!(PropKey::try_from(281).is_err());
     }
 
     fn tree(text: &str) -> Tree {

@@ -562,6 +562,24 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::MarginLeftAuto
             | PropKey::ScrollHorizontal
             | PropKey::ScrollFillViewport
+            | PropKey::GridColumns
+            | PropKey::GridSpan
+            | PropKey::GridSpanSm
+            | PropKey::GridSpanMd
+            | PropKey::GridSpanLg
+            | PropKey::GridSpanXl
+            | PropKey::GridOffset
+            | PropKey::GridOffsetSm
+            | PropKey::GridOffsetMd
+            | PropKey::GridOffsetLg
+            | PropKey::GridOffsetXl
+            | PropKey::GridOrder
+            | PropKey::GridOrderSm
+            | PropKey::GridOrderMd
+            | PropKey::GridOrderLg
+            | PropKey::GridOrderXl
+            | PropKey::GridColumnGap
+            | PropKey::GridRowGap
     )
 }
 

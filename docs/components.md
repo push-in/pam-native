@@ -131,6 +131,85 @@ current one-based number. Zero and negative integers render nothing:
 </Column>
 ```
 
+## Responsive grid and flex
+
+`Row` and `Column` remain normal flex containers unless a positive `columns`
+value is set. A grid row uses 12 columns by convention, accepts any rich PAM
+element as a child, wraps automatically, and measures every row from its
+tallest child. It works inside scroll views and reflows when the window,
+orientation, split-screen width, or foldable posture changes.
+
+```xml
+<Row columns="12" gutterX="16" gutterY="16">
+    <Column span="12" spanSm="6" spanMd="4">
+        <Image :source="$photo->url" aspectRatio="1" />
+        <Text>{{ $photo->title }}</Text>
+    </Column>
+
+    <ProfileCard
+        v-for="$profile in $profiles"
+        :key="$profile->id"
+        span="12"
+        spanSm="6"
+        spanLg="3"
+    />
+</Row>
+```
+
+The responsive values are mobile-first. A missing value inherits the closest
+smaller breakpoint:
+
+| Suffix | Active from |
+| --- | ---: |
+| base | `0dp` |
+| `Sm` | `600dp` |
+| `Md` | `840dp` |
+| `Lg` | `1200dp` |
+| `Xl` | `1600dp` |
+
+Grid properties:
+
+- `columns`: activates grid layout and defines its track count;
+- `span`, `spanSm`, `spanMd`, `spanLg`, `spanXl`: occupied columns;
+- `offset`, and its responsive variants: empty columns before the item;
+- `order`, and its responsive variants: visual order without changing data;
+- `gutterX` and `gutterY`: independent horizontal and vertical spacing;
+- `gap`: fallback used when a directional gutter is omitted.
+
+The same API is available as utility classes:
+
+```xml
+<Row class="grid-12 gutter-x-4 gutter-y-4">
+    <Column class="col-12 col-sm-6 col-md-4">...</Column>
+    <Column class="col-6 col-lg-3 offset-lg-1 order-md-2">...</Column>
+</Row>
+```
+
+Use regular flex whenever tracks are unnecessary:
+
+```xml
+<Row class="items-center gap-3">
+    <Column flexGrow="1">...</Column>
+    <Button @press="save">Save</Button>
+</Row>
+```
+
+The tree API exposes the identical features through `Style`:
+
+```php
+$grid = Row::make(...$cards)->style(new Style(
+    gridColumns: 12,
+    gridColumnGap: 16,
+    gridRowGap: 16,
+));
+
+$card = Column::make(...)->style(new Style(
+    gridSpan: 12,
+    gridSpanSm: 6,
+    gridSpanLg: 3,
+));
+```
+
 ## Lifecycle
 
 Override only the hooks a component needs:
