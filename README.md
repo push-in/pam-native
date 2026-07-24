@@ -65,7 +65,12 @@ Templates are parsed once, validated, kept in memory, and optionally stored as
 PHP array cache files. Expressions only read component/data paths; templates do
 not use `eval`. `If` and `Each` provide conditional and repeated content.
 `TemplateRegistry::component()` adds reusable PHP components and
-`TemplateRegistry::style()` adds project-specific classes.
+`TemplateRegistry::style()` adds project-specific classes. Registered
+components can use `TemplateRegistry::eventAdapter()` to preserve a richer
+public callback shape over PAM's bounded binary event channel. Declarative
+ancestor event context is composed into registered descendants before their
+native elements are built, so compound tags can wire triggers and items
+without a runtime tree lookup.
 
 `FunctionalComponent::make()` supports standalone functions. A project can mix
 functional trees, class components, tags, custom template factories, and direct

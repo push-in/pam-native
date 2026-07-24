@@ -264,6 +264,43 @@ $assert(
     $eventScope->submission === 'ui:payload',
     'Registered components must be able to adapt declarative event contracts.',
 );
+$capturedEventContexts = null;
+TemplateRegistry::component(
+    'EventParent',
+    static fn (array $_props, array $children): \Pam\Native\Renderable =>
+        Column::make(...$children),
+);
+TemplateRegistry::component(
+    'EventChild',
+    static function (
+        array $props,
+    ) use (&$capturedEventContexts): \Pam\Native\Renderable {
+        $capturedEventContexts = $props['__pamEventContexts'] ?? null;
+
+        return Text::make('Child');
+    },
+);
+$eventContextTemplate = TemplateCompiler::compile(
+    '<EventParent value="framework" on:change="submit"><EventChild /></EventParent>',
+);
+TemplateRenderer::render($eventContextTemplate, $eventScope, []);
+$eventContext = is_array($capturedEventContexts)
+    ? ($capturedEventContexts['EventParent'] ?? null)
+    : null;
+$eventContextHandler = is_array($eventContext)
+    && is_array($eventContext['events'] ?? null)
+        ? ($eventContext['events'][EventKind::Change->value] ?? null)
+        : null;
+if (!$eventContextHandler instanceof Closure) {
+    throw new RuntimeException('Declarative event context handler is missing.');
+}
+$eventContextHandler('laravel');
+$assert(
+    is_array($eventContext)
+        && ($eventContext['props']['value'] ?? null) === 'framework'
+        && $eventScope->submission === 'laravel',
+    'Registered child components must receive bounded ancestor event context.',
+);
 TemplateRegistry::reset();
 TemplateRegistry::styleResolver(
     static fn (string $class): ?array => $class === 'w-1/2'

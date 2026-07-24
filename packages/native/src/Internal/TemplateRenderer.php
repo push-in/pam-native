@@ -353,12 +353,35 @@ final class TemplateRenderer
             $values,
             self::isDeclarativeContextValue(...),
         );
+        $ownHandlers = [];
+        foreach (self::EVENTS as $name => $event) {
+            if (isset($attributes[$name])) {
+                $ownHandlers[$event->value] = self::handler(
+                    $attributes[$name],
+                    $event,
+                    $scope,
+                    $data,
+                );
+            }
+        }
+        $inheritedEventContexts = $data['__pamEventContexts'] ?? [];
+        if (!is_array($inheritedEventContexts)) {
+            $inheritedEventContexts = [];
+        }
+        $childEventContexts = $inheritedEventContexts;
+        if ($factory !== null && $ownHandlers !== []) {
+            $childEventContexts[$tag] = [
+                'props' => [...$inheritedVariants, ...$values],
+                'events' => $ownHandlers,
+            ];
+        }
         $childData = [
             ...$data,
             '__pamParentVariants' => [
                 ...$inheritedVariants,
                 ...$ownVariants,
             ],
+            '__pamEventContexts' => $childEventContexts,
         ];
         $renderedChildren = self::nodes($childNodes, $scope, $childData);
         $children = array_values(array_filter(
@@ -382,6 +405,9 @@ final class TemplateRenderer
         }
         if ($factory !== null && $inheritedVariants !== []) {
             $values['__parentVariants'] = $inheritedVariants;
+        }
+        if ($factory !== null && $inheritedEventContexts !== []) {
+            $values['__pamEventContexts'] = $inheritedEventContexts;
         }
 
         $element = $factory !== null
@@ -457,12 +483,7 @@ final class TemplateRenderer
 
         foreach (self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
-                $handler = self::handler(
-                    $attributes[$name],
-                    $event,
-                    $scope,
-                    $data,
-                );
+                $handler = $ownHandlers[$event->value];
                 if ($factory !== null) {
                     $handler = TemplateRegistry::adaptEvent(
                         $tag,

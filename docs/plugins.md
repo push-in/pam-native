@@ -148,6 +148,14 @@ final class MapsPluginProvider implements PluginProvider
                 ],
             ),
         );
+        TemplateRegistry::eventAdapter(
+            'RouteMap',
+            static fn (
+                \Pam\Native\EventKind $_kind,
+                \Closure $handler,
+                array $_props,
+            ): \Closure => $handler,
+        );
     }
 
     public function boot(): void
@@ -169,7 +177,10 @@ The application can then use a package as a tag library:
 ```
 
 Providers are optional. A package can be PHP-only, Android-only, or combine
-both sides.
+both sides. Event adapters run only for their registered tag and can translate
+one bounded native payload into the package's documented PHP callback value.
+Ancestor handlers are also carried as declarative composition context, which
+lets compound component libraries bind item/trigger behavior before rendering.
 
 ## Native module
 
