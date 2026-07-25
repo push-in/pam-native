@@ -15,9 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build Swift package for iOS
+        working-directory: ios
         run: >-
           xcodebuild
-          -packagePath ios
           -scheme PamNative
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO

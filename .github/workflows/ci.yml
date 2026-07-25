@@ -49,9 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build PamNative for the iOS Simulator
+        working-directory: ios
         run: >-
           xcodebuild
-          -packagePath ios
           -scheme PamNative
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
