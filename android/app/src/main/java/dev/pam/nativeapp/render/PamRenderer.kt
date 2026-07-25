@@ -132,6 +132,7 @@ class PamRenderer(
                 }
             }
         }
+        syncVirtualLists()
         dirtyLayouts.forEach(::applyLayout)
         retainedScrollOffsets.forEach { (id, offset) ->
             if (id !in explicitlyUpdatedScrollOffsets) {
@@ -180,7 +181,7 @@ class PamRenderer(
         )
         nodes.put(spec.id, state)
         addChild(state.parent, state.id)
-        if (!state.virtual) {
+        if (!state.virtual && virtualListAncestor(state.parent) == null) {
             val view = createView(spec.kind, state)
             if (view is TextView) {
                 state.defaultHighlightColor = view.highlightColor
@@ -220,6 +221,7 @@ class PamRenderer(
             NodeKind.SCROLL -> PamScrollContainer(context)
             NodeKind.LIST,
             NodeKind.SECTION_LIST,
+            NodeKind.VIRTUAL_LIST,
             -> PamRecyclerList(context)
             NodeKind.SPACER,
             NodeKind.STATUS_BAR,
@@ -277,6 +279,14 @@ class PamRenderer(
             state.properties[key] = value
         }
         val shouldBeVirtual = isLayoutOnly(state)
+        val cellRoot = virtualCellRoot(id)
+        if (cellRoot != null && state.virtual != shouldBeVirtual) {
+            val holder = virtualCellHolder(cellRoot)
+            state.virtual = shouldBeVirtual
+            dematerializeSubtree(cellRoot)
+            if (holder != null) materializeCell(cellRoot, holder)
+            return
+        }
         if (state.virtual && !shouldBeVirtual) {
             promote(state)
         } else if (!state.virtual && shouldBeVirtual) {
@@ -301,6 +311,7 @@ class PamRenderer(
 
     private fun move(id: Long, parent: Long, index: Int) {
         val state = nodes[id] ?: return
+        val wasVirtualized = virtualListAncestor(state.parent) != null
         val view = views[id]
         view?.let(::clearHitSlop)
         (view?.parent as? ViewGroup)?.removeView(view)
@@ -308,6 +319,11 @@ class PamRenderer(
         state.parent = parent
         state.index = index
         addChild(parent, id)
+        val isVirtualized = virtualListAncestor(parent) != null
+        if (wasVirtualized || isVirtualized) {
+            if (view != null) dematerializeSubtree(id)
+            return
+        }
         if (view != null) {
             attachHosted(view, state)
             applyHitSlop(view, state)
@@ -326,6 +342,117 @@ class PamRenderer(
     private fun removeChild(parent: Long, id: Long) {
         if (parent == 0L) return
         children[parent]?.remove(id)
+    }
+
+    private fun syncVirtualLists() {
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            if (state.kind != NodeKind.VIRTUAL_LIST) continue
+            val list = views[state.id] as? PamRecyclerList ?: continue
+            val itemIds = children[state.id]?.toList().orEmpty()
+            list.setRichItems(
+                ids = itemIds,
+                mount = { id, holder -> materializeCell(id, holder) },
+                unmount = { id, _ -> dematerializeSubtree(id) },
+            )
+        }
+    }
+
+    private fun virtualListAncestor(start: Long): Long? {
+        var current = start
+        var depth = 0
+        while (current != 0L) {
+            val state = nodes[current] ?: return null
+            if (state.kind == NodeKind.VIRTUAL_LIST) return current
+            current = state.parent
+            check(++depth <= MAX_VIRTUAL_DEPTH) { "Virtual list hierarchy is too deep" }
+        }
+        return null
+    }
+
+    private fun materializeCell(id: Long, holder: FrameLayout) {
+        val rootFrame = frames[id] ?: return
+        materializeCellNode(id, id, rootFrame, holder)
+    }
+
+    private fun materializeCellNode(
+        id: Long,
+        rootId: Long,
+        rootFrame: Frame,
+        holder: FrameLayout,
+    ) {
+        val state = nodes[id] ?: return
+        if (!state.virtual && views[id] == null) {
+            val view = createView(state.kind, state)
+            if (view is TextView) state.defaultHighlightColor = view.highlightColor
+            views.put(id, view)
+            attachCellView(view, state, rootId, holder)
+            state.properties.forEach { (key, value) ->
+                applyProperty(view, state, key, value)
+            }
+            installEvents(view, state)
+            applyCellLayout(id, rootId, rootFrame)
+        }
+        children[id]?.forEach { child ->
+            materializeCellNode(child, rootId, rootFrame, holder)
+        }
+    }
+
+    private fun attachCellView(
+        view: View,
+        state: NodeState,
+        rootId: Long,
+        holder: FrameLayout,
+    ) {
+        var parentId = state.parent
+        while (parentId != 0L && parentId != rootId && views[parentId] == null) {
+            parentId = nodes[parentId]?.parent ?: 0L
+        }
+        val parent = views[parentId]
+        if (parentId == rootId && state.id != rootId && parent != null) {
+            attach(view, parentId, state.index)
+        } else if (state.id != rootId && parent != null) {
+            attach(view, parentId, state.index)
+        } else {
+            (view.parent as? ViewGroup)?.removeView(view)
+            holder.addView(view)
+        }
+    }
+
+    private fun applyCellLayout(id: Long, rootId: Long, rootFrame: Frame) {
+        val frame = frames[id] ?: return
+        val view = views[id] ?: return
+        val state = nodes[id] ?: return
+        var hostedParent = state.parent
+        while (hostedParent != 0L && hostedParent != rootId && views[hostedParent] == null) {
+            hostedParent = nodes[hostedParent]?.parent ?: 0L
+        }
+        val parentFrame = if (id == rootId || hostedParent == rootId && views[rootId] == null) {
+            rootFrame
+        } else {
+            frames[hostedParent] ?: rootFrame
+        }
+        val width = dp(frame.width).coerceAtLeast(0)
+        val height = dp(frame.height).coerceAtLeast(0)
+        val left = if (id == rootId) 0 else dp(frame.x - parentFrame.x)
+        val top = if (id == rootId) 0 else dp(frame.y - parentFrame.y)
+        view.layoutParams = FrameLayout.LayoutParams(width, height).apply {
+            leftMargin = left
+            topMargin = top
+        }
+    }
+
+    private fun dematerializeSubtree(id: Long) {
+        children[id]?.forEach(::dematerializeSubtree)
+        val view = views[id] ?: return
+        val state = nodes[id] ?: return
+        state.propertyAnimator?.cancel()
+        state.pendingChange?.let(main::removeCallbacks)
+        pamImageView(view)?.let(imageLoader::cancel)
+        view.let(nativeViews::release)
+        clearHitSlop(view)
+        (view.parent as? ViewGroup)?.removeView(view)
+        views.remove(id)
     }
 
     private fun attach(view: View, parentId: Long, index: Int) {
@@ -454,6 +581,11 @@ class PamRenderer(
     }
 
     private fun applyLayout(id: Long) {
+        virtualCellRoot(id)?.let { rootId ->
+            val rootFrame = frames[rootId] ?: return
+            applyCellLayout(id, rootId, rootFrame)
+            return
+        }
         val frame = frames[id] ?: return
         val view = views[id] ?: return
         val state = nodes[id] ?: return
@@ -517,6 +649,32 @@ class PamRenderer(
         state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
             view.translationX = width * (percent / 100.0).toFloat()
         }
+    }
+
+    private fun virtualCellRoot(id: Long): Long? {
+        var current = id
+        var depth = 0
+        while (current != 0L) {
+            val state = nodes[current] ?: return null
+            val parent = nodes[state.parent] ?: return null
+            if (parent.kind == NodeKind.VIRTUAL_LIST) return current
+            current = state.parent
+            check(++depth <= MAX_VIRTUAL_DEPTH) { "Virtual cell hierarchy is too deep" }
+        }
+        return null
+    }
+
+    private fun virtualCellHolder(rootId: Long): FrameLayout? {
+        for (position in 0 until views.size()) {
+            val id = views.keyAt(position)
+            if (id != rootId && virtualCellRoot(id) != rootId) continue
+            var parent = views.valueAt(position).parent
+            while (parent is ViewGroup) {
+                if (parent is FrameLayout && parent.parent is PamRecyclerList) return parent
+                parent = parent.parent
+            }
+        }
+        return null
     }
 
     private fun applyProperty(

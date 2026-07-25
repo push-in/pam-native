@@ -67,6 +67,8 @@ use Pam\Native\UI\Spacer;
 use Pam\Native\UI\StatusBar;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\Toggle;
+use Pam\Native\UI\VirtualGrid;
+use Pam\Native\UI\VirtualizedList;
 use Pam\Native\UI\View as NativeView;
 use ReflectionMethod;
 use ReflectionProperty;
@@ -815,8 +817,18 @@ final class TemplateRenderer
                 ...$children,
             ),
             'Scroll', 'ScrollView' => Scroll::make(self::singleChild($children, $tag)),
-            'FlatList', 'NativeList', 'VirtualizedList' => FlatList::make(
+            'FlatList', 'NativeList' => FlatList::make(
                 self::stringItems($values['items'] ?? []),
+            ),
+            'VirtualizedList' => $children === []
+                ? FlatList::make(self::stringItems($values['items'] ?? []))
+                : VirtualizedList::make(...$children),
+            'VirtualGrid' => VirtualGrid::make(
+                max(1, self::intValue(
+                    $values['columns'] ?? $values['numColumns'] ?? 2,
+                    'VirtualGrid columns',
+                )),
+                ...$children,
             ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
@@ -1033,7 +1045,8 @@ final class TemplateRenderer
             );
             $key = match ($element->kind()) {
                 NodeKind::Scroll => PropKey::ScrollHorizontal,
-                NodeKind::List, NodeKind::SectionList => PropKey::ListHorizontal,
+                NodeKind::List, NodeKind::SectionList, NodeKind::VirtualList =>
+                    PropKey::ListHorizontal,
                 default => null,
             };
             if ($key !== null) {
@@ -1095,9 +1108,15 @@ final class TemplateRenderer
             PropKey::ScrollEnabled =>
                 in_array(
                     $kind,
-                    [NodeKind::Scroll, NodeKind::List, NodeKind::SectionList],
+                    [
+                        NodeKind::Scroll,
+                        NodeKind::List,
+                        NodeKind::SectionList,
+                        NodeKind::VirtualList,
+                    ],
                     true,
                 ),
+            PropKey::GridColumns => $kind !== NodeKind::VirtualList,
             PropKey::ActivityAnimating,
             PropKey::ActivityHidesWhenStopped,
             PropKey::ActivitySize,

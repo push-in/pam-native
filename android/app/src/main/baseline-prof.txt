@@ -1,7 +1,11 @@
 HSPLdev/pam/nativeapp/PamActivity;-><init>()V
 HSPLdev/pam/nativeapp/PamActivity;->onCreate(Landroid/os/Bundle;)V
 HSPLdev/pam/nativeapp/PamRuntime;-><init>(Landroid/content/Context;Ldev/pam/nativeapp/render/PamRenderer;Lkotlin/jvm/functions/Function1;Lkotlin/jvm/functions/Function1;)V
-HSPLdev/pam/nativeapp/PamRuntime;->start(Ljava/io/File;FF)V
+HSPLdev/pam/nativeapp/PamRuntime;->start(Ljava/io/File;FFFZ)V
+HSPLdev/pam/nativeapp/PamRuntime;->flushEvents()V
 HSPLdev/pam/nativeapp/PamRuntime;->flushBatches()V
 HSPLdev/pam/nativeapp/protocol/BatchDecoder;->decode(Ljava/nio/ByteBuffer;)Ljava/util/List;
 HSPLdev/pam/nativeapp/render/PamRenderer;->commit(Ljava/util/List;)V
+HSPLdev/pam/nativeapp/render/PamRenderer;->materializeCell(JLandroid/widget/FrameLayout;)V
+HSPLdev/pam/nativeapp/render/PamRenderer;->dematerializeSubtree(J)V
+HSPLdev/pam/nativeapp/render/PamRecyclerList;->setRichItems(Ljava/util/List;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;)V

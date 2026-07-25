@@ -264,6 +264,48 @@ fn layout_node(
         }
         return Ok(());
     }
+    if node.kind == NodeKind::VirtualList {
+        let horizontal = boolean(node, PropKey::ListHorizontal);
+        let columns = if horizontal {
+            1
+        } else {
+            integer(node, PropKey::ListNumColumns)
+                .unwrap_or(1)
+                .clamp(1, 64) as usize
+        };
+        let row_height = number(node, PropKey::ListRowHeight)
+            .unwrap_or(DEFAULT_CONTROL_HEIGHT)
+            .max(1.0);
+        let cell_width = if horizontal {
+            row_height
+        } else {
+            inner.width / columns as f32
+        };
+
+        for (position, child) in node_children
+            .iter()
+            .filter(|child| visible(child))
+            .enumerate()
+        {
+            let item_frame = if horizontal {
+                Layout {
+                    x: inner.x + position as f32 * row_height,
+                    y: inner.y,
+                    width: row_height,
+                    height: inner.height,
+                }
+            } else {
+                Layout {
+                    x: inner.x + (position % columns) as f32 * cell_width,
+                    y: inner.y + (position / columns) as f32 * row_height,
+                    width: cell_width,
+                    height: row_height,
+                }
+            };
+            layout_node(context, child.id, item_frame, false, depth + 1, output)?;
+        }
+        return Ok(());
+    }
     if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
         layout_grid(context, node, node_children, inner, gap, depth, output)?;
         return Ok(());
@@ -1134,7 +1176,11 @@ fn leaf_intrinsic(node: &Node, axis: Axis, text_scale: f32) -> f32 {
         (Axis::Vertical, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (
             Axis::Vertical,
-            NodeKind::List | NodeKind::SectionList | NodeKind::Scroll | NodeKind::RefreshControl,
+            NodeKind::List
+            | NodeKind::SectionList
+            | NodeKind::VirtualList
+            | NodeKind::Scroll
+            | NodeKind::RefreshControl,
         ) => DEFAULT_LIST_HEIGHT,
         (Axis::Vertical, NodeKind::Spacer) => 8.0,
         (Axis::Vertical, NodeKind::StatusBar) => 0.0,
@@ -2575,5 +2621,42 @@ mod tests {
         assert_eq!(tablet[&3].x, 304.0);
         assert_eq!(tablet[&4].x, 608.0);
         assert_eq!(tablet[&4].y, 0.0);
+    }
+
+    #[test]
+    fn virtual_grid_cells_receive_real_column_bounds() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListNumColumns, PropValue::Integer(2)),
+                    (PropKey::ListRowHeight, PropValue::Float(160.0)),
+                ],
+            ),
+        );
+        for (index, id) in [2_u64, 3, 4].into_iter().enumerate() {
+            nodes.insert(id, node(id, 1, index as u32, NodeKind::Column, []));
+        }
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("virtual grid");
+
+        assert_eq!(layout[&2].width, 180.0);
+        assert_eq!(layout[&2].height, 160.0);
+        assert_eq!(layout[&3].x, 180.0);
+        assert_eq!(layout[&3].y, 0.0);
+        assert_eq!(layout[&4].x, 0.0);
+        assert_eq!(layout[&4].y, 160.0);
     }
 }

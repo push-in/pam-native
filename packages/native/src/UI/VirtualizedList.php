@@ -12,30 +12,93 @@ use Pam\Native\Internal\BinaryValue;
 use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
+use Pam\Native\Renderable;
 
 final class VirtualizedList extends Element
 {
-    /** @param array<array-key, mixed> $items */
-    public static function make(array $items): self
+    /**
+     * Creates a lazily mounted native list from arbitrary PAM components.
+     *
+     * Assign stable keys to stateful or reorderable children.
+     */
+    public static function make(Renderable|array ...$items): self
     {
-        $values = [];
-
-        foreach ($items as $item) {
-            if (!is_string($item)) {
-                throw new InvalidArgumentException('VirtualizedList items must be strings.');
+        if (count($items) === 1 && is_array($items[0])) {
+            $strings = [];
+            foreach ($items[0] as $item) {
+                if (!is_string($item)) {
+                    throw new InvalidArgumentException(
+                        'Legacy VirtualizedList array items must be strings; '
+                        .'pass renderable elements as variadic arguments for rich cells.',
+                    );
+                }
+                $strings[] = $item;
             }
 
-            $values[] = $item;
+            return (new self(NodeKind::List))->withProperty(
+                PropKey::Items,
+                new BinaryValue(Wire::stringList($strings)),
+            );
         }
 
-        return (new self(NodeKind::List))->withProperty(
-            PropKey::Items,
-            new BinaryValue(Wire::stringList($values)),
-        );
+        /** @var list<Renderable> $items */
+        return (new self(NodeKind::VirtualList))->withChildren($items);
     }
 
-    public function onEndReached(Closure $handler): self
+    public function rowHeight(float $height): self
     {
-        return $this->withEvent(EventKind::EndReached, $handler);
+        return $this->withProperty(PropKey::ListRowHeight, max(1.0, $height));
+    }
+
+    public function prefetch(int $items): self
+    {
+        return $this->withProperty(PropKey::ListPrefetch, min(32, max(1, $items)));
+    }
+
+    public function horizontal(bool $horizontal = true): self
+    {
+        return $this->withProperty(PropKey::ListHorizontal, $horizontal);
+    }
+
+    public function columns(int $columns): self
+    {
+        return $this->withProperty(PropKey::ListNumColumns, max(1, $columns));
+    }
+
+    public function inverted(bool $inverted = true): self
+    {
+        return $this->withProperty(PropKey::ListInverted, $inverted);
+    }
+
+    public function initialScrollIndex(int $index): self
+    {
+        return $this->withProperty(PropKey::ListInitialScrollIndex, max(0, $index));
+    }
+
+    public function removeClippedSubviews(bool $remove = true): self
+    {
+        return $this->withProperty(PropKey::ListRemoveClippedSubviews, $remove);
+    }
+
+    public function scrollEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::ScrollEnabled, $enabled);
+    }
+
+    public function showsIndicator(bool $visible = true): self
+    {
+        return $this->withProperty(PropKey::ShowsScrollIndicator, $visible);
+    }
+
+    public function onScroll(Closure $handler): self
+    {
+        return $this->withEvent(EventKind::Scroll, $handler);
+    }
+
+    public function onEndReached(Closure $handler, float $threshold = 0.5): self
+    {
+        return $this
+            ->withProperty(PropKey::EndReachedThreshold, min(1.0, max(0.0, $threshold)))
+            ->withEvent(EventKind::EndReached, $handler);
     }
 }

@@ -31,4 +31,5 @@ enum NodeKind: int
     case InputAccessoryView = 23;
     case CustomView = 24;
     case NavigationHost = 25;
+    case VirtualList = 26;
 }

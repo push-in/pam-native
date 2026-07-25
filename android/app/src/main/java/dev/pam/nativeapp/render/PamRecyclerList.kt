@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ViewConfiguration
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -60,6 +61,22 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     fun setSections(sections: PackedSectionList?) {
         adapter = sections?.let { PackedSectionRecyclerAdapter(context, it) }
+        configureAdapter()
+        updateHeaderSpans()
+        applyInitialPosition()
+    }
+
+    fun setRichItems(
+        ids: List<Long>,
+        mount: (Long, FrameLayout) -> Unit,
+        unmount: (Long, FrameLayout) -> Unit,
+    ) {
+        val current = adapter as? RichRecyclerAdapter
+        if (current == null) {
+            adapter = RichRecyclerAdapter(context, ids, mount, unmount)
+        } else {
+            current.submit(ids)
+        }
         configureAdapter()
         updateHeaderSpans()
         applyInitialPosition()
@@ -254,6 +271,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             horizontal = horizontal,
             textColor = rowTextColor,
         )
+        (adapter as? RichRecyclerAdapter)?.configure(
+            extent = dp(rowHeight),
+            horizontal = horizontal,
+        )
     }
 
     private fun updateHeaderSpans() {
@@ -353,6 +374,99 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     private companion object {
         const val MAX_PREFETCH_ITEMS = 32
+    }
+}
+
+private class RichRecyclerAdapter(
+    private val context: Context,
+    ids: List<Long>,
+    private val mount: (Long, FrameLayout) -> Unit,
+    private val unmount: (Long, FrameLayout) -> Unit,
+) : RecyclerView.Adapter<RichRecyclerAdapter.RichHolder>() {
+    private var ids = ids.toList()
+    private var extent = dp(48f)
+    private var horizontal = false
+
+    init {
+        setHasStableIds(true)
+    }
+
+    fun submit(next: List<Long>) {
+        if (ids == next) return
+        ids = next.toList()
+        notifyDataSetChanged()
+    }
+
+    fun configure(extent: Int, horizontal: Boolean) {
+        if (this.extent == extent && this.horizontal == horizontal) return
+        this.extent = extent
+        this.horizontal = horizontal
+        notifyItemRangeChanged(0, itemCount, PAYLOAD_LAYOUT)
+    }
+
+    override fun getItemCount(): Int = ids.size
+
+    override fun getItemId(position: Int): Long = ids[position]
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RichHolder =
+        RichHolder(FrameLayout(context).apply {
+            clipChildren = false
+            clipToPadding = false
+            importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        })
+
+    override fun onBindViewHolder(holder: RichHolder, position: Int) {
+        bind(holder, ids[position])
+    }
+
+    override fun onBindViewHolder(
+        holder: RichHolder,
+        position: Int,
+        payloads: MutableList<Any>,
+    ) {
+        if (payloads.size == 1 && payloads[0] === PAYLOAD_LAYOUT) {
+            applyLayout(holder.container)
+        } else {
+            bind(holder, ids[position])
+        }
+    }
+
+    override fun onViewRecycled(holder: RichHolder) {
+        holder.boundId.takeIf { it != RecyclerView.NO_ID }?.let {
+            unmount(it, holder.container)
+        }
+        holder.boundId = RecyclerView.NO_ID
+        holder.container.removeAllViews()
+        super.onViewRecycled(holder)
+    }
+
+    private fun bind(holder: RichHolder, id: Long) {
+        val previous = holder.boundId
+        if (previous != RecyclerView.NO_ID && previous != id) {
+            unmount(previous, holder.container)
+            holder.container.removeAllViews()
+        }
+        applyLayout(holder.container)
+        mount(id, holder.container)
+        holder.boundId = id
+    }
+
+    private fun applyLayout(container: FrameLayout) {
+        container.layoutParams = RecyclerView.LayoutParams(
+            if (horizontal) extent else ViewGroup.LayoutParams.MATCH_PARENT,
+            if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else extent,
+        )
+    }
+
+    private fun dp(value: Float): Int =
+        (value * context.resources.displayMetrics.density + 0.5f).toInt()
+
+    class RichHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container) {
+        var boundId: Long = RecyclerView.NO_ID
+    }
+
+    private companion object {
+        val PAYLOAD_LAYOUT = Any()
     }
 }
 

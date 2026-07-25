@@ -30,9 +30,11 @@ class PamRuntime(
     private val handleLock = Any()
     private val ownedBatchHandles = ConcurrentHashMap.newKeySet<Long>()
     private val pendingBatches = ArrayDeque<PendingBatch>()
+    private val pendingEvents = LinkedHashMap<EventIdentity, ByteArray>()
     private var frameScheduled = false
     private val frameCallback = Choreographer.FrameCallback {
         frameScheduled = false
+        flushEvents()
         flushBatches()
     }
 
@@ -88,6 +90,20 @@ class PamRuntime(
 
     fun dispatchEvent(nodeId: Long, kind: Int, payload: ByteArray = ByteArray(0)) {
         if (payload.size > MAX_PAYLOAD_BYTES) return
+        if (kind in COALESCED_EVENTS) {
+            val enqueue = {
+                if (!closed.get()) {
+                    pendingEvents[EventIdentity(nodeId, kind)] = payload.copyOf()
+                    scheduleFrame()
+                }
+            }
+            if (Looper.myLooper() == Looper.getMainLooper()) enqueue() else main.post(enqueue)
+            return
+        }
+        dispatchEventImmediately(nodeId, kind, payload)
+    }
+
+    private fun dispatchEventImmediately(nodeId: Long, kind: Int, payload: ByteArray) {
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
@@ -143,6 +159,7 @@ class PamRuntime(
         while (pendingBatches.isNotEmpty()) {
             releaseBatch(pendingBatches.removeFirst().handle)
         }
+        pendingEvents.clear()
         ownedBatchHandles.toList().forEach(::releaseBatch)
         modules.close()
         renderer.close()
@@ -269,9 +286,26 @@ class PamRuntime(
     private external fun nativeStop(handle: Long)
 
     private fun scheduleFrame() {
-        if (frameScheduled || pendingBatches.isEmpty()) return
+        if (frameScheduled || pendingBatches.isEmpty() && pendingEvents.isEmpty()) return
         frameScheduled = true
         choreographer.postFrameCallback(frameCallback)
+    }
+
+    private fun flushEvents() {
+        if (pendingEvents.isEmpty()) return
+        if (closed.get()) {
+            pendingEvents.clear()
+            return
+        }
+        val current = pendingEvents.toMap()
+        pendingEvents.clear()
+        synchronized(handleLock) {
+            val active = handle
+            if (active == 0L) return
+            current.forEach { (identity, payload) ->
+                nativeDispatchEvent(active, identity.nodeId, identity.kind, payload)
+            }
+        }
     }
 
     private fun flushBatches() {
@@ -282,6 +316,10 @@ class PamRuntime(
             return
         }
 
+        if (pendingBatches.isEmpty()) {
+            scheduleFrame()
+            return
+        }
         val current = ArrayList<PendingBatch>(pendingBatches.size)
         while (pendingBatches.isNotEmpty()) {
             current += pendingBatches.removeFirst()
@@ -334,12 +372,25 @@ class PamRuntime(
         private const val EVENT_BACK = 3
         private const val MAX_PAYLOAD_BYTES = 1024 * 1024
         private const val PERFORMANCE_LOG_TAG = "PamNativePerf"
+        private val COALESCED_EVENTS = setOf(
+            9, // scroll
+            17, // dimensions
+            20, // image progress
+            25, // input selection
+            26, // input content size
+            30, // pointer move
+        )
 
         init {
             System.loadLibrary("pam_native_android")
         }
     }
 }
+
+private data class EventIdentity(
+    val nodeId: Long,
+    val kind: Int,
+)
 
 data class RuntimeStats(
     val commits: Long,

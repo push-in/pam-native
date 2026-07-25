@@ -39,6 +39,7 @@ pub enum NodeKind {
     InputAccessoryView = 23,
     CustomView = 24,
     NavigationHost = 25,
+    VirtualList = 26,
 }
 
 impl TryFrom<u8> for NodeKind {
@@ -71,6 +72,7 @@ impl TryFrom<u8> for NodeKind {
             23 => Ok(Self::InputAccessoryView),
             24 => Ok(Self::CustomView),
             25 => Ok(Self::NavigationHost),
+            26 => Ok(Self::VirtualList),
             other => Err(ProtocolError::UnknownNodeKind(other)),
         }
     }
@@ -1449,13 +1451,13 @@ mod tests {
 
     #[test]
     fn protocol_enums_are_sequential_and_append_only() {
-        for value in 1..=25 {
+        for value in 1..=26 {
             assert!(
                 NodeKind::try_from(value).is_ok(),
                 "missing node kind {value}"
             );
         }
-        assert!(NodeKind::try_from(26).is_err());
+        assert!(NodeKind::try_from(27).is_err());
 
         for value in 1..=284 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");

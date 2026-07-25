@@ -157,7 +157,33 @@
         { "name": "ScrollView", "description": "Alias of the unified Scroll primitive." },
         { "name": "FlatList", "description": "Virtualized native string list." },
         { "name": "NativeList", "description": "Alias of FlatList." },
-        { "name": "VirtualizedList", "description": "Alias of FlatList." },
+        {
+            "name": "VirtualizedList",
+            "description": "RecyclerView list whose children may be arbitrary keyed PAM component trees.",
+            "attributes": [
+                { "name": "rowHeight" },
+                { "name": "prefetch" },
+                { "name": "numColumns" },
+                { "name": "horizontal", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "inverted", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "initialScrollIndex" },
+                { "name": "scrollEnabled", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "on:scroll" },
+                { "name": "on:endReached" }
+            ]
+        },
+        {
+            "name": "VirtualGrid",
+            "description": "Virtualized rich-content grid backed by Android RecyclerView.",
+            "attributes": [
+                { "name": "columns" },
+                { "name": "rowHeight" },
+                { "name": "prefetch" },
+                { "name": "inverted", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "initialScrollIndex" },
+                { "name": "on:endReached" }
+            ]
+        },
         { "name": "SectionList", "description": "Virtualized sectioned native list." },
         { "name": "TouchableOpacity", "description": "Pressable with native opacity feedback." },
         { "name": "TouchableHighlight", "description": "Pressable with native highlight feedback." },

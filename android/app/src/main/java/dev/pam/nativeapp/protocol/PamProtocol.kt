@@ -34,7 +34,8 @@ enum class NodeKind(val value: Int) {
     DRAWER_LAYOUT(22),
     INPUT_ACCESSORY_VIEW(23),
     CUSTOM_VIEW(24),
-    NAVIGATION_HOST(25);
+    NAVIGATION_HOST(25),
+    VIRTUAL_LIST(26);
 
     companion object {
         fun from(value: Int): NodeKind =

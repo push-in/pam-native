@@ -89,6 +89,8 @@ use Pam\Native\UI\SectionList;
 use Pam\Native\UI\StatusBar;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\Toggle;
+use Pam\Native\UI\VirtualGrid;
+use Pam\Native\UI\VirtualizedList;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
@@ -859,6 +861,44 @@ $assert(
     'List helpers must preserve recycling, prefetch, layout and scroll event properties.',
 );
 
+$richListElement = VirtualizedList::make(
+    Column::make(
+        Image::make('https://example.com/one.png'),
+        Text::make('One'),
+    )->key('one'),
+    Pressable::make(Text::make('Two'))->key('two'),
+)
+    ->rowHeight(180.0)
+    ->columns(2)
+    ->prefetch(6);
+$assert(
+    $richListElement->kind() === NodeKind::VirtualList
+        && count($richListElement->children()) === 2
+        && $richListElement->children()[0]->children()[0]->kind() === NodeKind::Image
+        && $richListElement->properties()[PropKey::ListRowHeight->value] === 180.0
+        && $richListElement->properties()[PropKey::ListNumColumns->value] === 2
+        && $richListElement->properties()[PropKey::ListPrefetch->value] === 6,
+    'VirtualizedList must retain arbitrary keyed component trees as recyclable cells.',
+);
+$legacyVirtualizedList = VirtualizedList::make(['One', 'Two']);
+$assert(
+    $legacyVirtualizedList->kind() === NodeKind::List
+        && $legacyVirtualizedList->children() === [],
+    'VirtualizedList must remain source-compatible with legacy string-array call sites.',
+);
+
+$virtualGridElement = VirtualGrid::make(
+    3,
+    Text::make('A')->key('a'),
+    Image::make('https://example.com/b.png')->key('b'),
+);
+$assert(
+    $virtualGridElement->kind() === NodeKind::VirtualList
+        && count($virtualGridElement->children()) === 2
+        && $virtualGridElement->properties()[PropKey::ListNumColumns->value] === 3,
+    'VirtualGrid must expose rich virtual cells with an explicit native column count.',
+);
+
 $sectionListElement = SectionList::make([
     'Frameworks' => ['Laravel', 'PAM'],
 ])
@@ -998,6 +1038,22 @@ $assert(
         && $gridElement->children()[0]->children()[0]->kind() === NodeKind::Image
         && $gridElement->children()[0]->children()[1]->kind() === NodeKind::Pressable,
     'Responsive grids must compile rich cells identically from explicit properties and utility classes.',
+);
+$virtualGridTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<VirtualGrid columns="2" rowHeight="220" prefetch="7"><Column key="photo-1"><Image source="one.webp" /><Text>One</Text></Column><Pressable key="photo-2"><Image source="two.webp" /></Pressable></VirtualGrid>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $virtualGridTemplate->kind() === NodeKind::VirtualList
+        && count($virtualGridTemplate->children()) === 2
+        && $virtualGridTemplate->children()[0]->children()[0]->kind() === NodeKind::Image
+        && $virtualGridTemplate->properties()[PropKey::ListNumColumns->value] === 2
+        && $virtualGridTemplate->properties()[PropKey::ListRowHeight->value] === 220
+        && $virtualGridTemplate->properties()[PropKey::ListPrefetch->value] === 7,
+    'VirtualGrid markup must retain arbitrary keyed component trees and native list tuning.',
 );
 $assert(
     $coreRoleElement->properties()[PropKey::AccessibilityRole->value]

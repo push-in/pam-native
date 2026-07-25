@@ -157,10 +157,37 @@ orientation, split-screen width, or foldable posture changes.
 </Grid>
 ```
 
-`Grid` is not the textual `FlatList`: every direct child is a complete retained
-PAM subtree, so cells may contain `Image`, `Pressable`, inputs, custom
-components, nested flex containers, or another grid. Use `FlatList` for large
-virtualized string datasets and `Grid` for arbitrary rich layouts.
+Every direct `Grid` child is a complete retained PAM subtree, so cells may
+contain `Image`, `Pressable`, inputs, custom components, nested flex containers,
+or another grid. Use `Grid` when the complete layout should stay mounted.
+
+For large rich datasets, use `VirtualizedList` or `VirtualGrid`. Their cells
+are real component trees, but Android materializes only the visible and
+prefetched window through `RecyclerView`; recycled cells release their native
+views while preserving stable keyed identity and event routing:
+
+```php
+use Pam\Native\UI\{Column, Image, Pressable, Text, VirtualGrid};
+
+$cells = array_map(
+    fn (Photo $photo) => Pressable::make(
+        Column::make(
+            Image::make($photo->url),
+            Text::make($photo->title),
+        ),
+    )
+        ->key((string) $photo->id)
+        ->onPress(fn () => $this->open($photo->id)),
+    $this->photos,
+);
+
+return VirtualGrid::make(2, ...$cells)
+    ->rowHeight(224)
+    ->prefetch(6)
+    ->onEndReached(fn () => $this->loadNextPage(), 0.35);
+```
+
+`FlatList` remains source-compatible for lightweight string arrays.
 
 The responsive values are mobile-first. A missing value inherits the closest
 smaller breakpoint:
