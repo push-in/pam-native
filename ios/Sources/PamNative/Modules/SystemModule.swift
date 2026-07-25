@@ -222,7 +222,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "camera":
             AVCaptureDevice.requestAccess(for: .video, completionHandler: completion)
         case "microphone":
-            AVAudioSession.sharedInstance().requestRecordPermission(completionHandler: completion)
+            AVAudioSession.sharedInstance().requestRecordPermission(completion)
         case "photos":
             if #available(iOS 16.0, *) {
                 PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in

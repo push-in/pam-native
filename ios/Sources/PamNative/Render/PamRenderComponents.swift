@@ -470,14 +470,14 @@ final class PamRefreshContainer: UIView {
     }
 
     private func updateIndicatorLayout() {
-        let size = indicatorSize == 2 ? 44 : 32
+        let size = CGFloat(indicatorSize == 2 ? 44 : 32)
         indicatorContainer.frame = CGRect(
             x: (bounds.width - size) / 2,
             y: progressOffset + 8,
-            width: CGFloat(size),
-            height: CGFloat(size),
+            width: size,
+            height: size,
         )
-        indicatorContainer.layer.cornerRadius = CGFloat(size / 2)
+        indicatorContainer.layer.cornerRadius = size / 2
         indicator.transform = .identity
         indicator.frame = indicator.bounds
     }

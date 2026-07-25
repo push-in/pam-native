@@ -105,7 +105,7 @@ public final class PamRenderer {
         imageLoadContexts.removeAll()
 
         for (nodeId, view) in views {
-            nativeViews.release(view)
+            nativeViews.release(view: view)
             view.removeFromSuperview()
             nodes[nodeId]?.childrenNeedRethrow = nil
         }
@@ -174,7 +174,7 @@ public final class PamRenderer {
         cancelImageLoad(for: state)
 
         if let view = views[id] {
-            nativeViews.release(view)
+            nativeViews.release(view: view)
             view.removeFromSuperview()
         }
 
@@ -380,6 +380,8 @@ public final class PamRenderer {
             return UIView()
         case .refreshControl:
             return PamRefreshContainer()
+        case .customView:
+            return UIView()
         }
     }
 
@@ -776,7 +778,7 @@ public final class PamRenderer {
                 (view as? PamRefreshContainer)?.setProgressBackgroundColor(Int(color))
             }
         case PamConstants.refreshProgressViewOffset:
-            (view as? PamRefreshContainer)?.setProgressViewOffset(value.decimalOrZero())
+            (view as? PamRefreshContainer)?.setProgressViewOffset(Float(value.decimalOrZero()))
         case PamConstants.refreshIndicatorSize:
             (view as? PamRefreshContainer)?.setIndicatorSize(Int(value.integerOrNil() ?? 1))
         case PamConstants.scrollHorizontal:
@@ -1087,7 +1089,7 @@ public final class PamRenderer {
             pressPointer = recognizer
         }
 
-        func attachTextField(_ field: UITextField) {
+        func attachTextField(_ field: PamInputField) {
             field.addTarget(self, action: #selector(onTextChanged(_:)), for: .editingChanged)
             textField = field
         }
@@ -1319,7 +1321,7 @@ public final class PamRenderer {
             }
 
             let offset = isHorizontal ? scrollView.contentOffset.x : scrollView.contentOffset.y
-            scrollOffset = String(offset).data(using: .utf8) ?? Data()
+            scrollOffset = "\(offset)".data(using: .utf8) ?? Data()
             if scrollScheduled {
                 return
             }
@@ -1459,7 +1461,7 @@ public final class PamRenderer {
                 "y": .decimal(locationInView.y),
                 "pageX": .decimal(location.x),
                 "pageY": .decimal(location.y),
-                "timestamp": .integer(Int64(gesture.timestamp * 1000)),
+                "timestamp": .integer(Int64(ProcessInfo.processInfo.systemUptime * 1000)),
                 "pointerId": .integer(0),
             ])) ?? Data()
             dispatchEvent(nodeId, kind, payload)
@@ -1642,13 +1644,13 @@ private final class NodeState {
     }
 }
 
-private extension UIColor {
+extension UIColor {
     convenience init(argb: Int64) {
         let value = UInt64(truncatingIfNeeded: argb)
         let r = CGFloat((value >> 16) & 0xFF) / 255.0
         let g = CGFloat((value >> 8) & 0xFF) / 255.0
         let b = CGFloat(value & 0xFF) / 255.0
         let a = CGFloat((value >> 24) & 0xFF) / 255.0
-        self.init(red: r, g: g, b: b, alpha: a)
+        self.init(red: r, green: g, blue: b, alpha: a)
     }
 }
