@@ -6,6 +6,7 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.provider.Settings
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 
@@ -15,6 +16,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var durationMs: Long = 240L
     private var revision: Long = 0L
     private var running: ValueAnimator? = null
+    private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
+    private var pendingObserver: ViewTreeObserver? = null
 
     init {
         clipChildren = true
@@ -22,6 +25,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     fun insert(view: View, index: Int) {
+        val isInitialRoute = childCount == 0
+        view.visibility = if (isInitialRoute) View.VISIBLE else View.INVISIBLE
+        view.importantForAccessibility = if (isInitialRoute) {
+            View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        } else {
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        }
         addView(
             view,
             index.coerceIn(0, childCount),
@@ -32,7 +42,46 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     fun navigate(nextRevision: Long) {
         if (nextRevision == revision) return
         revision = nextRevision
-        post { runTransition() }
+        scheduleTransition()
+    }
+
+    override fun onDetachedFromWindow() {
+        clearPendingTransition()
+        running?.cancel()
+        running = null
+        super.onDetachedFromWindow()
+    }
+
+    private fun scheduleTransition() {
+        clearPendingTransition()
+        val observer = viewTreeObserver
+        if (!isAttachedToWindow || !observer.isAlive) {
+            post { runTransition() }
+            return
+        }
+        lateinit var listener: ViewTreeObserver.OnPreDrawListener
+        listener = ViewTreeObserver.OnPreDrawListener {
+            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            if (pendingPreDraw === listener) {
+                pendingPreDraw = null
+                pendingObserver = null
+            }
+            runTransition()
+            true
+        }
+        pendingPreDraw = listener
+        pendingObserver = observer
+        observer.addOnPreDrawListener(listener)
+        invalidate()
+    }
+
+    private fun clearPendingTransition() {
+        val listener = pendingPreDraw ?: return
+        pendingObserver
+            ?.takeIf { it.isAlive }
+            ?.removeOnPreDrawListener(listener)
+        pendingPreDraw = null
+        pendingObserver = null
     }
 
     private fun runTransition() {
