@@ -54,30 +54,58 @@ internal class AssetInstaller(private val context: Context) {
     }
 
     private fun verifyManifest(directory: File, expected: String) {
+        val canonical = manifestDigest(directory, legacyComponentOrder = false)
+        if (canonical == expected) return
+        val legacy = manifestDigest(directory, legacyComponentOrder = true)
+        require(legacy == expected) { "Pam Native application bundle failed integrity verification" }
+    }
+
+    private fun manifestDigest(directory: File, legacyComponentOrder: Boolean): String {
         val digest = MessageDigest.getInstance("SHA-256")
-        files(directory)
+        val files = files(directory)
             .filter { it.name != "manifest.sha256" }
-            .forEach { file ->
-                val relative = file.relativeTo(directory).invariantSeparatorsPath
-                digest.update(relative.toByteArray())
-                digest.update(0)
-                file.inputStream().use { input ->
-                    val buffer = ByteArray(8_192)
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        digest.update(buffer, 0, read)
+            .let { candidates ->
+                if (legacyComponentOrder) {
+                    candidates.sortedWith { left, right ->
+                        comparePathComponents(
+                            left.relativeTo(directory).invariantSeparatorsPath,
+                            right.relativeTo(directory).invariantSeparatorsPath,
+                        )
                     }
+                } else {
+                    candidates.sortedBy { it.relativeTo(directory).invariantSeparatorsPath }
                 }
             }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        require(actual == expected) { "Pam Native application bundle failed integrity verification" }
+        files.forEach { file ->
+            val relative = file.relativeTo(directory).invariantSeparatorsPath
+            digest.update(relative.toByteArray())
+            digest.update(0)
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8_192)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+        }
+        return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun comparePathComponents(left: String, right: String): Int {
+        val leftParts = left.split('/')
+        val rightParts = right.split('/')
+        val common = minOf(leftParts.size, rightParts.size)
+        for (index in 0 until common) {
+            val comparison = leftParts[index].compareTo(rightParts[index])
+            if (comparison != 0) return comparison
+        }
+        return leftParts.size.compareTo(rightParts.size)
     }
 
     private fun files(root: File): List<File> =
         root.walkTopDown()
             .filter { it.isFile }
-            .sortedBy { it.relativeTo(root).invariantSeparatorsPath }
             .toList()
 
     private companion object {
