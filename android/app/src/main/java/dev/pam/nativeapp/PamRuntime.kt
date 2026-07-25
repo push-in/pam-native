@@ -30,8 +30,10 @@ class PamRuntime(
     private val handleLock = Any()
     private val ownedBatchHandles = ConcurrentHashMap.newKeySet<Long>()
     private val pendingBatches = ArrayDeque<PendingBatch>()
+    private val pendingImmediateEvents = ArrayDeque<PendingEvent>()
     private val pendingEvents = LinkedHashMap<EventIdentity, ByteArray>()
     private var frameScheduled = false
+    private var readyForEvents = false
     private val frameCallback = Choreographer.FrameCallback {
         frameScheduled = false
         flushEvents()
@@ -106,8 +108,13 @@ class PamRuntime(
     private fun dispatchEventImmediately(nodeId: Long, kind: Int, payload: ByteArray) {
         synchronized(handleLock) {
             val active = handle
-            if (active != 0L) {
+            if (active != 0L && readyForEvents) {
                 nativeDispatchEvent(active, nodeId, kind, payload)
+            } else if (active != 0L) {
+                if (pendingImmediateEvents.size >= MAX_PENDING_EVENTS) {
+                    pendingImmediateEvents.removeFirst()
+                }
+                pendingImmediateEvents.addLast(PendingEvent(nodeId, kind, payload.copyOf()))
             }
         }
     }
@@ -120,6 +127,7 @@ class PamRuntime(
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
+                readyForEvents = false
                 nativeReload(active, entryPath)
             }
         }
@@ -160,6 +168,7 @@ class PamRuntime(
             releaseBatch(pendingBatches.removeFirst().handle)
         }
         pendingEvents.clear()
+        pendingImmediateEvents.clear()
         ownedBatchHandles.toList().forEach(::releaseBatch)
         modules.close()
         renderer.close()
@@ -194,6 +203,7 @@ class PamRuntime(
                     decodeNanos = decodeNanos,
                 ),
             )
+            markReadyForEvents()
             scheduleFrame()
         }
         return true
@@ -286,7 +296,10 @@ class PamRuntime(
     private external fun nativeStop(handle: Long)
 
     private fun scheduleFrame() {
-        if (frameScheduled || pendingBatches.isEmpty() && pendingEvents.isEmpty()) return
+        if (
+            frameScheduled ||
+            pendingBatches.isEmpty() && (pendingEvents.isEmpty() || !readyForEvents)
+        ) return
         frameScheduled = true
         choreographer.postFrameCallback(frameCallback)
     }
@@ -297,6 +310,7 @@ class PamRuntime(
             pendingEvents.clear()
             return
         }
+        if (!readyForEvents) return
         val current = pendingEvents.toMap()
         pendingEvents.clear()
         synchronized(handleLock) {
@@ -304,6 +318,19 @@ class PamRuntime(
             if (active == 0L) return
             current.forEach { (identity, payload) ->
                 nativeDispatchEvent(active, identity.nodeId, identity.kind, payload)
+            }
+        }
+    }
+
+    private fun markReadyForEvents() {
+        synchronized(handleLock) {
+            if (readyForEvents) return
+            readyForEvents = true
+            val active = handle
+            if (active == 0L) return
+            while (pendingImmediateEvents.isNotEmpty()) {
+                val event = pendingImmediateEvents.removeFirst()
+                nativeDispatchEvent(active, event.nodeId, event.kind, event.payload)
             }
         }
     }
@@ -371,6 +398,7 @@ class PamRuntime(
     companion object {
         private const val EVENT_BACK = 3
         private const val MAX_PAYLOAD_BYTES = 1024 * 1024
+        private const val MAX_PENDING_EVENTS = 256
         private const val PERFORMANCE_LOG_TAG = "PamNativePerf"
         private val COALESCED_EVENTS = setOf(
             9, // scroll
@@ -390,6 +418,12 @@ class PamRuntime(
 private data class EventIdentity(
     val nodeId: Long,
     val kind: Int,
+)
+
+private data class PendingEvent(
+    val nodeId: Long,
+    val kind: Int,
+    val payload: ByteArray,
 )
 
 data class RuntimeStats(
