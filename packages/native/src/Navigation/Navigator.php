@@ -12,19 +12,22 @@ use Pam\Native\Internal\Runtime;
 use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
+use ReflectionFunction;
 
 final class Navigator extends Component implements Restorable
 {
     /** @var array<string, Closure(): Renderable> */
     private array $routes;
 
-    /** @var list<array{name: string, id: int}> */
+    /** @var list<array{name: string, id: int, params: array<string, string|int|float|bool|null>}> */
     private array $stack;
     private string $persistenceKey;
     private int $nextId = 2;
     private int $revision = 0;
     private NavigationOperation $operation = NavigationOperation::Idle;
     private ?array $outgoing = null;
+    /** @var list<DeepLink> */
+    private array $deepLinks;
 
     /**
      * @param array<array-key, mixed> $routes
@@ -36,6 +39,7 @@ final class Navigator extends Component implements Restorable
         private NavigationTransition $transition = NavigationTransition::PlatformDefault,
         private int $transitionDurationMs = 240,
         bool $handleSystemBack = true,
+        array $deepLinks = [],
     )
     {
         $validated = [];
@@ -56,7 +60,13 @@ final class Navigator extends Component implements Restorable
         }
 
         $this->routes = $validated;
-        $this->stack = [['name' => $initialRoute, 'id' => 1]];
+        foreach ($deepLinks as $link) {
+            if (!$link instanceof DeepLink || !isset($validated[$link->route])) {
+                throw new InvalidArgumentException('Deep links must target registered routes.');
+            }
+        }
+        $this->deepLinks = array_values($deepLinks);
+        $this->stack = [['name' => $initialRoute, 'id' => 1, 'params' => []]];
         $this->persistenceKey = $persistenceKey;
         $this->transitionDurationMs = max(0, min(2_000, $transitionDurationMs));
         if ($handleSystemBack) {
@@ -73,14 +83,19 @@ final class Navigator extends Component implements Restorable
         }
     }
 
-    public function push(string $route): void
+    /** @param array<string, string|int|float|bool|null> $params */
+    public function push(string $route, array $params = []): void
     {
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
 
         $this->outgoing = null;
-        $this->stack[] = ['name' => $route, 'id' => $this->nextId++];
+        $this->stack[] = [
+            'name' => $route,
+            'id' => $this->nextId++,
+            'params' => self::validatedParams($params),
+        ];
         $this->operation = NavigationOperation::Push;
         $this->revision++;
     }
@@ -103,6 +118,13 @@ final class Navigator extends Component implements Restorable
         return $this->stack[count($this->stack) - 1]['name'];
     }
 
+    public function current(): RouteContext
+    {
+        $entry = $this->stack[count($this->stack) - 1];
+
+        return new RouteContext($entry['name'], $entry['params']);
+    }
+
     public function render(): Renderable
     {
         $entries = [];
@@ -119,7 +141,7 @@ final class Navigator extends Component implements Restorable
         }
 
         $screens = array_map(
-            fn (array $entry): Renderable => ($this->routes[$entry['name']])()
+            fn (array $entry): Renderable => $this->renderRoute($entry)
                 ->toElement()
                 ->key('navigation.'.$entry['id']),
             $entries,
@@ -139,26 +161,114 @@ final class Navigator extends Component implements Restorable
         return count($this->stack) > 1;
     }
 
-    public function replace(string $route): void
+    /** @param array<string, string|int|float|bool|null> $params */
+    public function replace(string $route, array $params = []): void
     {
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
         $this->outgoing = array_pop($this->stack);
-        $this->stack[] = ['name' => $route, 'id' => $this->nextId++];
+        $this->stack[] = [
+            'name' => $route,
+            'id' => $this->nextId++,
+            'params' => self::validatedParams($params),
+        ];
         $this->operation = NavigationOperation::Replace;
         $this->revision++;
     }
 
-    public function reset(string $route): void
+    /** @param array<string, string|int|float|bool|null> $params */
+    public function reset(string $route, array $params = []): void
     {
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
         $this->outgoing = null;
-        $this->stack = [['name' => $route, 'id' => $this->nextId++]];
+        $this->stack = [[
+            'name' => $route,
+            'id' => $this->nextId++,
+            'params' => self::validatedParams($params),
+        ]];
         $this->operation = NavigationOperation::Reset;
         $this->revision++;
+    }
+
+    /** @param array<string, string|int|float|bool|null> $params */
+    public function navigate(string $route, array $params = []): void
+    {
+        $target = null;
+        for ($index = count($this->stack) - 1; $index >= 0; $index--) {
+            if ($this->stack[$index]['name'] === $route) {
+                $target = $index;
+                break;
+            }
+        }
+        if ($target === null) {
+            $this->push($route, $params);
+            return;
+        }
+        if ($target === count($this->stack) - 1) {
+            if ($params !== []) {
+                $this->stack[$target]['params'] = self::validatedParams($params);
+                $this->operation = NavigationOperation::Idle;
+                $this->revision++;
+            }
+            return;
+        }
+        $this->outgoing = $this->stack[count($this->stack) - 1];
+        $this->stack = array_slice($this->stack, 0, $target + 1);
+        if ($params !== []) {
+            $this->stack[$target]['params'] = self::validatedParams($params);
+        }
+        $this->operation = NavigationOperation::Pop;
+        $this->revision++;
+    }
+
+    public function popTo(string $route): bool
+    {
+        if ($route === $this->currentRoute()) {
+            return true;
+        }
+        $before = count($this->stack);
+        $this->navigate($route);
+
+        return count($this->stack) < $before;
+    }
+
+    public function popToTop(): bool
+    {
+        if (count($this->stack) <= 1) return false;
+        $this->outgoing = $this->stack[count($this->stack) - 1];
+        $this->stack = [$this->stack[0]];
+        $this->operation = NavigationOperation::Pop;
+        $this->revision++;
+
+        return true;
+    }
+
+    public function open(string $uri): bool
+    {
+        if ($uri === '' || strlen($uri) > 8_192) return false;
+        $parts = parse_url($uri);
+        if ($parts === false) return false;
+        $path = $parts['path'] ?? '/';
+        foreach ($this->deepLinks as $link) {
+            $params = $link->match($path);
+            if ($params === null) continue;
+            if (isset($parts['query'])) {
+                parse_str($parts['query'], $query);
+                foreach ($query as $key => $value) {
+                    if (is_string($key) && is_scalar($value)) {
+                        $params[$key] = (string) $value;
+                    }
+                }
+            }
+            $this->navigate($link->route, $params);
+
+            return true;
+        }
+
+        return false;
     }
 
     public function transition(
@@ -185,12 +295,22 @@ final class Navigator extends Component implements Restorable
         }
         $restored = [];
 
-        foreach ($stack as $route) {
-            if (!is_string($route) || !isset($this->routes[$route])) {
+        foreach ($stack as $saved) {
+            $route = is_string($saved) ? $saved : ($saved['name'] ?? null);
+            $params = is_array($saved) ? ($saved['params'] ?? []) : [];
+            if (!is_string($route) || !isset($this->routes[$route]) || !is_array($params)) {
                 return;
             }
-
-            $restored[] = ['name' => $route, 'id' => $this->nextId++];
+            try {
+                $validatedParams = self::validatedParams($params);
+            } catch (InvalidArgumentException) {
+                return;
+            }
+            $restored[] = [
+                'name' => $route,
+                'id' => $this->nextId++,
+                'params' => $validatedParams,
+            ];
         }
         $this->stack = $restored;
         $this->operation = NavigationOperation::Reset;
@@ -199,6 +319,49 @@ final class Navigator extends Component implements Restorable
 
     public function saveState(): array
     {
-        return ['stack' => array_column($this->stack, 'name')];
+        return [
+            'version' => 2,
+            'stack' => array_map(
+                static fn (array $entry): array => [
+                    'name' => $entry['name'],
+                    'params' => $entry['params'],
+                ],
+                $this->stack,
+            ),
+        ];
+    }
+
+    /** @param array{name: string, id: int, params: array<string, string|int|float|bool|null>} $entry */
+    private function renderRoute(array $entry): Renderable
+    {
+        $route = $this->routes[$entry['name']];
+        $reflection = new ReflectionFunction($route);
+        return $reflection->getNumberOfParameters() === 0
+            ? $route()
+            : $route(new RouteContext($entry['name'], $entry['params']));
+    }
+
+    /** @param array<array-key, mixed> $params
+     *  @return array<string, string|int|float|bool|null>
+     */
+    private static function validatedParams(array $params): array
+    {
+        if (count($params) > 64) {
+            throw new InvalidArgumentException('Routes cannot contain more than 64 parameters.');
+        }
+        $validated = [];
+        foreach ($params as $key => $value) {
+            if (
+                !is_string($key)
+                || preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/', $key) !== 1
+                || !is_scalar($value) && $value !== null
+                || is_string($value) && strlen($value) > 16_384
+            ) {
+                throw new InvalidArgumentException('Route parameters require safe string keys and bounded scalar values.');
+            }
+            $validated[$key] = $value;
+        }
+
+        return $validated;
     }
 }

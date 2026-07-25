@@ -14,4 +14,7 @@ enum NavigationTransition: int
     case FadeFromBottom = 6;
     case Scale = 7;
     case None = 8;
+    case SlideFromTop = 9;
+    case SharedAxisX = 10;
+    case SharedAxisY = 11;
 }

@@ -15,6 +15,8 @@ final class Router
     private NavigationTransition $transition = NavigationTransition::PlatformDefault;
     private int $durationMs = 240;
     private bool $handleSystemBack = true;
+    /** @var list<DeepLink> */
+    private array $deepLinks = [];
 
     private function __construct(private readonly string $initialRoute)
     {
@@ -66,6 +68,14 @@ final class Router
         return $copy;
     }
 
+    public function deepLink(string $pattern, string $route): self
+    {
+        $copy = clone $this;
+        $copy->deepLinks[] = new DeepLink($pattern, $route);
+
+        return $copy;
+    }
+
     public function build(): Navigator
     {
         return new Navigator(
@@ -75,6 +85,7 @@ final class Router
             transition: $this->transition,
             transitionDurationMs: $this->durationMs,
             handleSystemBack: $this->handleSystemBack,
+            deepLinks: $this->deepLinks,
         );
     }
 }

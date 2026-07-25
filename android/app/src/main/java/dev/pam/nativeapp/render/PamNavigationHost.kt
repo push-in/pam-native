@@ -57,8 +57,14 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         }
 
         for (index in 0 until childCount) {
-            getChildAt(index).visibility =
-                if (getChildAt(index) === incoming || getChildAt(index) === outgoing) View.VISIBLE else View.INVISIBLE
+            getChildAt(index).apply {
+                visibility = if (this === incoming || this === outgoing) View.VISIBLE else View.INVISIBLE
+                importantForAccessibility = if (this === incoming) {
+                    View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                } else {
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                }
+            }
         }
 
         val actualTransition =
@@ -124,7 +130,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 else incoming.translationY = height * (1f - progress)
                 outgoing?.alpha = 1f - (progress * 0.12f)
             }
-            TRANSITION_FADE -> incoming.alpha = if (popping) progress else progress
+            TRANSITION_SLIDE_FROM_TOP -> {
+                if (popping) outgoing?.translationY = -height * progress
+                else incoming.translationY = -height * (1f - progress)
+                outgoing?.alpha = 1f - (progress * 0.12f)
+            }
+            TRANSITION_FADE -> {
+                incoming.alpha = progress
+                outgoing?.alpha = 1f - progress
+            }
             TRANSITION_FADE_FROM_BOTTOM -> {
                 incoming.alpha = progress
                 incoming.translationY = height * 0.08f * (1f - progress)
@@ -134,6 +148,20 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 val scale = 0.94f + (0.06f * progress)
                 incoming.scaleX = scale
                 incoming.scaleY = scale
+            }
+            TRANSITION_SHARED_AXIS_X -> {
+                val sign = if (popping) -semanticSign else semanticSign
+                incoming.alpha = progress
+                incoming.translationX = sign * width * 0.12f * (1f - progress)
+                outgoing?.alpha = 1f - progress
+                outgoing?.translationX = -sign * width * 0.08f * progress
+            }
+            TRANSITION_SHARED_AXIS_Y -> {
+                val sign = if (popping) -1f else 1f
+                incoming.alpha = progress
+                incoming.translationY = sign * height * 0.08f * (1f - progress)
+                outgoing?.alpha = 1f - progress
+                outgoing?.translationY = -sign * height * 0.05f * progress
             }
         }
     }
@@ -146,11 +174,22 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             it.visibility = View.INVISIBLE
         }
         incoming.visibility = View.VISIBLE
+        incoming.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        outgoing?.importantForAccessibility =
+            View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
     }
 
     private fun showOnlyTop() {
         for (index in 0 until childCount) {
-            getChildAt(index).visibility = if (index == childCount - 1) View.VISIBLE else View.INVISIBLE
+            getChildAt(index).apply {
+                val active = index == childCount - 1
+                visibility = if (active) View.VISIBLE else View.INVISIBLE
+                importantForAccessibility = if (active) {
+                    View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                } else {
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+                }
+            }
         }
     }
 
@@ -181,5 +220,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val TRANSITION_FADE_FROM_BOTTOM = 6
         const val TRANSITION_SCALE = 7
         const val TRANSITION_NONE = 8
+        const val TRANSITION_SLIDE_FROM_TOP = 9
+        const val TRANSITION_SHARED_AXIS_X = 10
+        const val TRANSITION_SHARED_AXIS_Y = 11
     }
 }

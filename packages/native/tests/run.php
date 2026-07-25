@@ -38,6 +38,7 @@ use Pam\Native\Navigation\NavigationOperation;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\Router;
+use Pam\Native\Navigation\RouteContext;
 use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalOrientation;
 use Pam\Native\ModalPresentation;
@@ -1978,5 +1979,60 @@ $fluentNavigator = Router::stack('home')
     ->transitions(NavigationTransition::Scale, 180)
     ->build();
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
+
+$advancedNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route(
+        'profile',
+        static fn (RouteContext $route) => Screen::make(
+            Text::make('Profile '.$route->integer('id')),
+        ),
+    )
+    ->route(
+        'article',
+        static fn (RouteContext $route) => Screen::make(
+            Text::make($route->string('slug') ?? ''),
+        ),
+    )
+    ->deepLink('/articles/{slug}', 'article')
+    ->build();
+$advancedNavigator->push('profile', ['id' => 42, 'preview' => true]);
+$assert(
+    $advancedNavigator->current()->integer('id') === 42
+        && $advancedNavigator->current()->boolean('preview') === true
+        && $advancedNavigator->render()->toElement()->children()[1]
+            ->children()[0]->properties()[PropKey::Text->value] === 'Profile 42',
+    'Route contexts must expose bounded typed parameters to screen factories.',
+);
+$advancedNavigator->push('article', ['slug' => 'temporary']);
+$assert(
+    $advancedNavigator->popTo('profile')
+        && $advancedNavigator->currentRoute() === 'profile',
+    'popTo must remove intermediate routes and retain the target entry.',
+);
+$savedNavigation = $advancedNavigator->saveState();
+$restoredNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn (RouteContext $route) => Screen::make(
+        Text::make((string) $route->integer('id')),
+    ))
+    ->build();
+$restoredNavigator->restoreState($savedNavigation);
+$assert(
+    $restoredNavigator->current()->integer('id') === 42,
+    'Navigator persistence must preserve route parameters.',
+);
+$assert(
+    $advancedNavigator->open('pam://docs/articles/native%20grid?source=notification')
+        && $advancedNavigator->currentRoute() === 'article'
+        && $advancedNavigator->current()->string('slug') === 'native grid'
+        && $advancedNavigator->current()->string('source') === 'notification',
+    'Deep links must resolve encoded path and scalar query parameters.',
+);
+$assert(
+    $advancedNavigator->popToTop()
+        && $advancedNavigator->currentRoute() === 'home',
+    'popToTop must restore the first stack entry.',
+);
 
 echo "Pam Native PHP SDK tests passed.\n";

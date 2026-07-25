@@ -43,14 +43,42 @@ $navigator = Router::stack('home')
 Navigate from a component or event handler:
 
 ```php
-$navigator->push('details');
+$navigator->push('details', ['id' => 42]);
 $navigator->pop();
-$navigator->replace('details');
+$navigator->replace('details', ['id' => 84]);
 $navigator->reset('home');
+$navigator->navigate('details', ['id' => 42]);
+$navigator->popTo('home');
+$navigator->popToTop();
 ```
+
+Route factories may remain zero-argument closures or receive a typed,
+immutable `RouteContext`:
+
+```php
+use Pam\Native\Navigation\RouteContext;
+
+Router::stack('home')
+    ->route('home', fn () => $home)
+    ->route('profile', fn (RouteContext $route) => new ProfileScreen(
+        userId: $route->integer('id'),
+        preview: $route->boolean('preview', false),
+    ))
+    ->deepLink('/profiles/{id}', 'profile')
+    ->build();
+```
+
+`open('pam://app/profiles/42?preview=1')` resolves percent-encoded path
+parameters and bounded scalar query values. `navigate()` returns to an existing
+stack entry when possible instead of duplicating it. Persistence format v2
+stores both route names and parameters; legacy name-only stacks still restore.
+Route parameters are limited to 64 safe keys, scalar values, and 16 KiB
+strings so untrusted deep links cannot inflate the retained tree.
 
 Available transitions are `PlatformDefault`, `SlideFromRight`,
 `SlideFromLeft`, `SlideFromBottom`, `Fade`, `FadeFromBottom`, `Scale`, and
-`None`. They are integer-backed enums and are rendered natively with transform
+`None`, plus `SlideFromTop`, `SharedAxisX`, and `SharedAxisY`. They are
+integer-backed enums and are rendered natively with transform
 and opacity. Android's disabled-animation accessibility setting is respected,
-and horizontal transitions automatically mirror in RTL layouts.
+horizontal transitions automatically mirror in RTL layouts, and only the
+incoming screen remains reachable by TalkBack during and after a transition.
