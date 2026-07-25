@@ -3,6 +3,7 @@ package dev.pam.nativeapp
 import android.content.Context
 import android.graphics.Color
 import android.os.Debug
+import android.view.Choreographer
 import android.view.Gravity
 import android.view.View
 import android.widget.FrameLayout
@@ -19,8 +20,31 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         contentDescription = "Pam Native DevTools"
     }
     private var visible = false
-    private var lastFrameNanos = 0L
     private var smoothedFps = 0.0
+    private var frameWindowStarted = 0L
+    private var frameCount = 0
+    private var latestMetrics: RuntimeFrameMetrics? = null
+    private val choreographer = Choreographer.getInstance()
+    private val frameCallback = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!visible) return
+            if (frameWindowStarted == 0L) frameWindowStarted = frameTimeNanos
+            frameCount++
+            val elapsed = frameTimeNanos - frameWindowStarted
+            if (elapsed >= FPS_WINDOW_NANOS) {
+                val measured = frameCount * 1_000_000_000.0 / elapsed
+                smoothedFps = if (smoothedFps == 0.0) {
+                    measured
+                } else {
+                    smoothedFps * 0.7 + measured * 0.3
+                }
+                frameWindowStarted = frameTimeNanos
+                frameCount = 0
+                renderMetrics()
+            }
+            choreographer.postFrameCallback(this)
+        }
+    }
 
     init {
         visibility = View.GONE
@@ -44,17 +68,29 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         } else {
             IMPORTANT_FOR_ACCESSIBILITY_NO
         }
+        if (visible) {
+            frameWindowStarted = 0L
+            frameCount = 0
+            choreographer.postFrameCallback(frameCallback)
+            renderMetrics()
+        } else {
+            choreographer.removeFrameCallback(frameCallback)
+        }
         return visible
     }
 
     fun update(metrics: RuntimeFrameMetrics) {
-        if (!visible) return
-        val now = System.nanoTime()
-        if (lastFrameNanos != 0L) {
-            val instantaneous = 1_000_000_000.0 / (now - lastFrameNanos).coerceAtLeast(1L)
-            smoothedFps = if (smoothedFps == 0.0) instantaneous else smoothedFps * 0.82 + instantaneous * 0.18
-        }
-        lastFrameNanos = now
+        latestMetrics = metrics
+        if (visible) renderMetrics()
+    }
+
+    override fun onDetachedFromWindow() {
+        choreographer.removeFrameCallback(frameCallback)
+        super.onDetachedFromWindow()
+    }
+
+    private fun renderMetrics() {
+        val metrics = latestMetrics ?: return
         val stats = metrics.stats
         val heapMiB = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
         text.text = String.format(
@@ -73,4 +109,8 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
 
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    private companion object {
+        const val FPS_WINDOW_NANOS = 500_000_000L
+    }
 }
