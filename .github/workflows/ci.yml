@@ -41,3 +41,18 @@ jobs:
           php packages/native/tests/run.php
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null
+
+  ios:
+    name: Swift and UIKit contracts
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build PamNative for the iOS Simulator
+        run: >-
+          xcodebuild
+          -packagePath ios
+          -scheme PamNative
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build

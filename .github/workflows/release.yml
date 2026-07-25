@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  ios:
+    name: Package iOS renderer
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build Swift package for iOS
+        run: >-
+          xcodebuild
+          -packagePath ios
+          -scheme PamNative
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Create versioned archive
+        shell: bash
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent ios \
+            "dist/pam-native-ios-${version}.zip"
+          shasum -a 256 "dist/pam-native-ios-${version}.zip" \
+            > "dist/pam-native-ios-${version}.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pam-native-ios
+          path: dist/pam-native-ios-*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs: ios
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-native-ios
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

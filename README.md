@@ -1,8 +1,26 @@
 # Pam Native
 
-Pam Native keeps PHP 8.4 alive inside the Android process and renders real
-Android Views. Rust owns reconciliation and layout; Kotlin only applies the
-resulting native mutations.
+Pam Native keeps PHP 8.4 alive inside Android and iOS processes and renders
+real platform controls. Rust owns reconciliation and layout; Kotlin and Swift
+only apply the resulting native mutations.
+
+## iOS renderer
+
+The UIKit renderer ships as a Swift Package in [`ios`](ios). It covers the
+same typed protocol and native component families as Android, including
+advanced press, input, modal, image, scroll, refresh, drawer, and semantic
+end-reached events. Display-linked mutation and event coalescing target the
+native 60–120 Hz refresh cadence without moving network, storage, decoding, or
+PHP work onto the main thread.
+
+Add the local package in Xcode and import it from the application host:
+
+```swift
+import PamNative
+```
+
+The low-level PHP/Rust host bridge remains in `ios/Sources/PamNative/Bridge`
+for application-host integration.
 
 ## One render tree, several authoring styles
 
