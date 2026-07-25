@@ -19,11 +19,13 @@ $navigator = new Navigator(
     transitionDurationMs: 240,
 );
 
-App::onBack(static function () use ($navigator): void {
-    $navigator->pop();
-});
 App::run($navigator);
 ```
+
+The Android back button and back gesture are connected automatically. They pop
+the stack when another route exists and close the activity from the root route.
+Use `handleSystemBack: false` on `Navigator`, or `->systemBack(false)` on
+`Router`, only when the application provides a custom `App::onBack()` handler.
 
 For a declarative route table, use the fluent router:
 

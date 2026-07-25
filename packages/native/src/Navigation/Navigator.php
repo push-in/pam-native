@@ -6,7 +6,10 @@ namespace Pam\Native\Navigation;
 
 use Closure;
 use InvalidArgumentException;
+use Pam\Native\App;
 use Pam\Native\Component;
+use Pam\Native\Internal\Runtime;
+use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
 
@@ -32,6 +35,7 @@ final class Navigator extends Component implements Restorable
         string $persistenceKey = 'main',
         private NavigationTransition $transition = NavigationTransition::PlatformDefault,
         private int $transitionDurationMs = 240,
+        bool $handleSystemBack = true,
     )
     {
         $validated = [];
@@ -55,6 +59,18 @@ final class Navigator extends Component implements Restorable
         $this->stack = [['name' => $initialRoute, 'id' => 1]];
         $this->persistenceKey = $persistenceKey;
         $this->transitionDurationMs = max(0, min(2_000, $transitionDurationMs));
+        if ($handleSystemBack) {
+            App::onBack(function (): void {
+                if (!$this->pop()) {
+                    Runtime::callNative(
+                        NativeOperation::CloseApp,
+                        '',
+                        static function (): void {
+                        },
+                    );
+                }
+            });
+        }
     }
 
     public function push(string $route): void

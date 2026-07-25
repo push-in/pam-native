@@ -31,6 +31,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
             NativeOperation.KEYBOARD_DISMISS,
             NativeOperation.PERMISSION_CHECK,
             NativeOperation.PERMISSION_REQUEST,
+            NativeOperation.CLOSE_APP,
             -> system.invoke(operation, payload, completion)
             null -> completion.complete(
                 ModuleResultStatus.FAILURE,
@@ -77,7 +78,8 @@ enum class NativeOperation(val value: Int) {
     DEVICE_INFO(10),
     KEYBOARD_DISMISS(11),
     PERMISSION_CHECK(12),
-    PERMISSION_REQUEST(13);
+    PERMISSION_REQUEST(13),
+    CLOSE_APP(14);
 
     companion object {
         fun from(value: Int): NativeOperation? =

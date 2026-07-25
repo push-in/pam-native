@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.modules
 
+import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
@@ -44,6 +45,7 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 NativeOperation.KEYBOARD_DISMISS -> dismissKeyboard(completion)
                 NativeOperation.PERMISSION_CHECK -> checkPermission(payload, completion)
                 NativeOperation.PERMISSION_REQUEST -> requestPermission(payload, completion)
+                NativeOperation.CLOSE_APP -> closeApp(completion)
                 else -> error("Operation ${operation.name} is not a system operation")
             }
         }.onFailure { error ->
@@ -51,6 +53,13 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 ModuleResultStatus.FAILURE,
                 (error.message ?: "System operation failed").toByteArray(),
             )
+        }
+    }
+
+    private fun closeApp(completion: ModuleCompletion) {
+        main.post {
+            (context as? Activity)?.finish()
+            completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
         }
     }
 

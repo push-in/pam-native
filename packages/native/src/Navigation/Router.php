@@ -14,6 +14,7 @@ final class Router
     private string $persistenceKey = 'main';
     private NavigationTransition $transition = NavigationTransition::PlatformDefault;
     private int $durationMs = 240;
+    private bool $handleSystemBack = true;
 
     private function __construct(private readonly string $initialRoute)
     {
@@ -57,6 +58,14 @@ final class Router
         return $copy;
     }
 
+    public function systemBack(bool $enabled = true): self
+    {
+        $copy = clone $this;
+        $copy->handleSystemBack = $enabled;
+
+        return $copy;
+    }
+
     public function build(): Navigator
     {
         return new Navigator(
@@ -65,6 +74,7 @@ final class Router
             persistenceKey: $this->persistenceKey,
             transition: $this->transition,
             transitionDurationMs: $this->durationMs,
+            handleSystemBack: $this->handleSystemBack,
         );
     }
 }

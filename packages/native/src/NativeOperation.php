@@ -19,4 +19,5 @@ enum NativeOperation: int
     case KeyboardDismiss = 11;
     case PermissionCheck = 12;
     case PermissionRequest = 13;
+    case CloseApp = 14;
 }
