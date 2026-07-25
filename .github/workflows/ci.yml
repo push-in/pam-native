@@ -40,3 +40,4 @@ jobs:
           composer install --working-dir=examples/showcase --no-interaction
           php packages/native/tests/run.php
           python3 -m unittest benchmarks/mobile/test_compare.py
+          python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null

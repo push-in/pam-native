@@ -34,6 +34,16 @@ python3 compare.py \
   --output results/comparison.md
 ```
 
+Block a release when startup, mount, memory or tail-frame latency regresses:
+
+```bash
+python3 gate.py --report results/pam
+```
+
+The checked-in `budgets.json` is intentionally stricter than a generic
+"benchmark completed" check: absent metrics fail, and list P95/P99 are gated
+independently so a good median cannot hide visible jank.
+
 Use a physical device, release-like non-debuggable targets, a stable thermal
 state and the same compilation mode. Keep raw JSON and Perfetto traces as CI
 artifacts. Record APK/AAB size separately because it is a build artifact rather

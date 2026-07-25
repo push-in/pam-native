@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "device": "SM-S918B",
+    "tolerancePolicy": "Reference plus a bounded regression margin for physical release gates.",
+    "budgets": [
+        { "scenario": "coldStartup", "metric": "timeToFullDisplayMs", "statistic": "median", "maximum": 550.0 },
+        { "scenario": "propertyPatches", "metric": "PamNative.decodeMs", "statistic": "median", "maximum": 2.0 },
+        { "scenario": "propertyPatches", "metric": "PamNative.mountMs", "statistic": "median", "maximum": 35.0 },
+        { "scenario": "propertyPatches", "metric": "memoryRssKb", "statistic": "median", "maximum": 60000.0 },
+        { "scenario": "propertyPatches", "metric": "frameOverrunMs", "statistic": "P95", "maximum": 2.0 },
+        { "scenario": "virtualizedListScroll", "metric": "frameOverrunMs", "statistic": "P95", "maximum": 35.0 },
+        { "scenario": "virtualizedListScroll", "metric": "frameOverrunMs", "statistic": "P99", "maximum": 85.0 }
+    ]
+}
