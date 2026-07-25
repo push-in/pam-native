@@ -3,7 +3,13 @@ package dev.pam.nativeapp.render
 import android.content.Context
 import android.os.SystemClock
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
+import android.widget.Button
+import android.widget.CompoundButton
+import android.widget.EditText
+import android.widget.SeekBar
 
 internal data class PamPressPointer(
     val x: Float,
@@ -153,6 +159,18 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         }
     }
 
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        if (super.onInterceptTouchEvent(event)) return true
+        if (!isEnabled || !isClickable || event.actionMasked != MotionEvent.ACTION_DOWN) {
+            return false
+        }
+
+        // Images and decorative containers may carry a composed ancestor callback,
+        // but the Pressable must own the gesture so its node id is dispatched.
+        // Keep genuinely interactive descendants independent.
+        return !hasIndependentTouchTargetAt(this, event.x, event.y)
+    }
+
     override fun performClick(): Boolean {
         super.performClick()
         val callback = onPress ?: return false
@@ -186,6 +204,44 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         }
         postDelayed(longPressRunnable, delayPressInMs + delayLongPressMs)
     }
+
+    private fun hasIndependentTouchTargetAt(
+        parent: ViewGroup,
+        x: Float,
+        y: Float,
+    ): Boolean {
+        for (index in parent.childCount - 1 downTo 0) {
+            val child = parent.getChildAt(index)
+            if (
+                child.visibility != View.VISIBLE ||
+                x < child.left + child.translationX ||
+                x >= child.right + child.translationX ||
+                y < child.top + child.translationY ||
+                y >= child.bottom + child.translationY
+            ) {
+                continue
+            }
+            val childX = x - child.left - child.translationX + child.scrollX
+            val childY = y - child.top - child.translationY + child.scrollY
+            if (isIndependentTouchTarget(child)) return true
+            if (
+                child is ViewGroup &&
+                hasIndependentTouchTargetAt(child, childX, childY)
+            ) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun isIndependentTouchTarget(view: View): Boolean =
+        view is PamPressable ||
+            view is Button ||
+            view is EditText ||
+            view is CompoundButton ||
+            view is SeekBar ||
+            view is PamScrollContainer ||
+            view is PamRecyclerList
 
     private fun moveGesture(event: MotionEvent, pointerIndex: Int) {
         lastPointer = pointer(event, pointerIndex)
