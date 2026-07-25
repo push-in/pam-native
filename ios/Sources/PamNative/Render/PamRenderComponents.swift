@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-private final class PamInputField: UITextField, UITextFieldDelegate {
+final class PamInputField: UITextField, UITextFieldDelegate {
     private static let maxKeyBytes = 64
 
     var onSelectionChange: ((Int, Int) -> Void)?
@@ -393,7 +393,7 @@ final class PamRefreshContainer: UIView {
         }
     }
 
-    override var isEnabled: Bool {
+    var isEnabled = true {
         didSet {
             if !isEnabled && !refreshing {
                 setRefreshing(false)

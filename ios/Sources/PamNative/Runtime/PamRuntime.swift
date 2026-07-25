@@ -12,7 +12,7 @@ private typealias PamNativeCallCallback = @convention(c) (
     UnsafePointer<CChar>?,
     UnsafePointer<CChar>?,
     UnsafePointer<UInt8>?,
-    Int,
+    Int
 ) -> Void
 private typealias PamNativeTypedCallCallback = @convention(c) (UInt64, Int64, Int32, UnsafePointer<UInt8>?, Int) -> Void
 private typealias PamNativeErrorCallback = @convention(c) (UInt64, UnsafePointer<CChar>?) -> Void

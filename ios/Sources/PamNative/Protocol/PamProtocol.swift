@@ -171,6 +171,16 @@ public struct PackedSectionList {
         let kind: Int
         let offset: Int
         let length: Int
+
+        fileprivate static func decode(source: inout BinaryReader, kind: Int) throws -> Entry {
+            let length = try source.u32()
+            guard length <= MAX_VALUE_BYTES else {
+                throw PamProtocolError.invalidPayload("Section value too large")
+            }
+            let value = source.offset
+            try source.skip(Int(length))
+            return Entry(kind: kind, offset: value, length: Int(length))
+        }
     }
 
     private let bytes: Data
@@ -224,17 +234,6 @@ public struct PackedSectionList {
         return PackedSectionList(source, entries)
     }
 
-    private struct Entry {
-        static func decode(source: inout BinaryReader, kind: Int) throws -> PackedSectionList.Entry {
-            let length = try source.u32()
-            guard length <= MAX_VALUE_BYTES else {
-                throw PamProtocolError.invalidPayload("Section value too large")
-            }
-            let value = source.offset
-            try source.skip(Int(length))
-            return PackedSectionList.Entry(kind: kind, offset: value, length: Int(length))
-        }
-    }
 }
 
 public struct NodeSpec {
