@@ -222,7 +222,7 @@ public final class PamRuntime {
     public typealias ReportError = (String) -> Void
     public typealias FrameCallback = (RuntimeFrameMetrics) -> Void
 
-    private let renderer: PamRenderer
+    private var renderer: PamRenderer!
     private let reportError: ReportError
     private let onFrameCommitted: FrameCallback
     private let modules = NativeModuleRegistry()
@@ -254,11 +254,11 @@ public final class PamRuntime {
         reportError: @escaping ReportError,
         onFrameCommitted: @escaping FrameCallback = { _ in },
     ) {
+        self.reportError = reportError
+        self.onFrameCommitted = onFrameCommitted
         self.renderer = PamRenderer(hostView: hostView) { [weak self] nodeId, kind, payload in
             self?.dispatchEvent(nodeId, kind: kind, payload: payload)
         }
-        self.reportError = reportError
-        self.onFrameCommitted = onFrameCommitted
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)
         displayLinkTarget = target
