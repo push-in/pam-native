@@ -11,6 +11,7 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
+import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -393,8 +394,23 @@ private class RichRecyclerAdapter(
 
     fun submit(next: List<Long>) {
         if (ids == next) return
-        ids = next.toList()
-        notifyDataSetChanged()
+        val previous = ids
+        val replacement = next.toList()
+        val diff = DiffUtil.calculateDiff(
+            object : DiffUtil.Callback() {
+                override fun getOldListSize(): Int = previous.size
+
+                override fun getNewListSize(): Int = replacement.size
+
+                override fun areItemsTheSame(oldPosition: Int, newPosition: Int): Boolean =
+                    previous[oldPosition] == replacement[newPosition]
+
+                override fun areContentsTheSame(oldPosition: Int, newPosition: Int): Boolean = true
+            },
+            true,
+        )
+        ids = replacement
+        diff.dispatchUpdatesTo(this)
     }
 
     fun configure(extent: Int, horizontal: Boolean) {
