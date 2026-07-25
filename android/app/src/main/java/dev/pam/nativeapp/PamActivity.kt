@@ -1,11 +1,17 @@
 package dev.pam.nativeapp
 
 import android.app.Activity
+import android.annotation.SuppressLint
 import android.content.pm.PackageManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsetsController
@@ -25,11 +31,14 @@ class PamActivity : Activity() {
     private var nextPermissionRequest = 40_000
     private var runtimeStarted = false
     private var fullyDrawnReported = false
+    private lateinit var devTools: PamDevToolsOverlay
+    private var devToolsReceiver: BroadcastReceiver? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val host = FrameLayout(this)
         errors = ErrorOverlay(this)
+        devTools = PamDevToolsOverlay(this)
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->
             runtime.dispatchEvent(nodeId, kind, payload)
         }
@@ -38,6 +47,7 @@ class PamActivity : Activity() {
             renderer = renderer,
             reportError = { message -> errors.showError(message) },
             onFrameCommitted = {
+                devTools.update(it)
                 errors.clearError()
                 if (!fullyDrawnReported) {
                     fullyDrawnReported = true
@@ -53,10 +63,18 @@ class PamActivity : Activity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
+        root.addView(
+            devTools,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
         root.addView(errors)
         setContentView(root)
         applyDefaultSystemBars()
         registerBackCallback()
+        registerDevTools()
 
         runCatching {
             val entry = AssetInstaller(this).install()
@@ -175,10 +193,28 @@ class PamActivity : Activity() {
             backCallback = null
         }
         hotReload?.close()
+        devToolsReceiver?.let(::unregisterReceiver)
+        devToolsReceiver = null
         runtimeStarted = false
         runtime.close()
         permissionCallbacks.clear()
         super.onDestroy()
+    }
+
+    @SuppressLint("InlinedApi")
+    private fun registerDevTools() {
+        if (!BuildConfig.DEBUG) return
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action == DEVTOOLS_ACTION) {
+                    val shown = devTools.toggle()
+                    Log.i("PamNativeDevTools", if (shown) "shown" else "hidden")
+                }
+            }
+        }
+        val filter = IntentFilter(DEVTOOLS_ACTION)
+        registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        devToolsReceiver = receiver
     }
 
     fun requestPamPermission(permission: String, callback: (Boolean) -> Unit) {
@@ -258,6 +294,7 @@ class PamActivity : Activity() {
         const val APP_STATE_INACTIVE = 2
         const val APP_STATE_BACKGROUND = 3
         const val MEMORY_PRESSURE_MODERATE = 1
+        const val DEVTOOLS_ACTION = "dev.pam.nativeapp.action.TOGGLE_DEVTOOLS"
         const val MEMORY_PRESSURE_CRITICAL = 2
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L

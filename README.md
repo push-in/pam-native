@@ -359,11 +359,15 @@ Run release-like AndroidX Macrobenchmarks on a physical device:
 ```bash
 pam mobile benchmark pam-native/examples/showcase
 pam mobile profile pam-native/examples/showcase
+pam mobile devtools pam-native/examples/showcase
 python3 pam-native/benchmarks/mobile/compare.py \
   --pam results/pam \
   --react-native results/react-native \
   --output results/comparison.md
 ```
+
+The debug-only [DevTools overlay](docs/devtools.md) exposes live FPS, render
+cost, commit behavior, node counts, and native heap usage directly on-device.
 
 On a Galaxy S23 Ultra debug build, a counter update used a 35-byte input patch
 and took about 0.90 ms to apply. Opening the 10,000-row details example sent its
