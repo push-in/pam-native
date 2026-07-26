@@ -120,11 +120,15 @@ jobs:
             --request POST \
             --header 'Content-Type: application/json' \
             --data "${payload}" \
-            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}"; then
+            --url-query "username=${PACKAGIST_USERNAME}" \
+            --url-query "apiToken=${PACKAGIST_TOKEN}" \
+            "https://packagist.org/api/update-package"; then
             curl --proto '=https' --tlsv1.2 \
               --fail --silent --show-error \
               --request POST \
               --header 'Content-Type: application/json' \
               --data "${payload}" \
-              "https://packagist.org/api/create-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_TOKEN}"
+              --url-query "username=${PACKAGIST_USERNAME}" \
+              --url-query "apiToken=${PACKAGIST_TOKEN}" \
+              "https://packagist.org/api/create-package"
           fi
