@@ -1754,8 +1754,8 @@ file_put_contents(
     "version": 1,
     "protocol": 1,
     "pamNative": {
-        "minimum": "0.2.0",
-        "maximumExclusive": "0.3.0"
+        "minimum": "0.3.0",
+        "maximumExclusive": "0.4.0"
     },
     "php": {
         "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
@@ -2207,6 +2207,10 @@ $lazyTabs->toElement();
 $assert(
     $homeTabRenders === 1 && $ordersTabRenders === 1,
     'Selecting a tab must lazily mount only the next destination.',
+);
+$assert(
+    \Pam\Native\Protocol::SDK_VERSION === '0.3.0',
+    'The runtime SDK contract must match the 0.3 package release line.',
 );
 
 echo "Pam Native PHP SDK tests passed.\n";
