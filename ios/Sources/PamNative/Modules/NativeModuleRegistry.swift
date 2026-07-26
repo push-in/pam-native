@@ -37,6 +37,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
              .keyboardDismiss,
              .permissionCheck,
              .permissionRequest,
+             .haptic,
              .closeApp:
             system.invoke(operation: NativeOperation(rawValue: operationValue)!, payload: payload, completion: completion)
         case .none:
