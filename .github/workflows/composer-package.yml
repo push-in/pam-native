@@ -115,20 +115,18 @@ jobs:
           test -n "${PACKAGIST_USERNAME}"
           test -n "${PACKAGIST_TOKEN}"
           payload='{"repository":{"url":"https://github.com/push-in/pam-native-php"}}'
+          encoded_username=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_USERNAME"));')
+          encoded_token=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_TOKEN"));')
           if ! curl --proto '=https' --tlsv1.2 \
             --fail --silent --show-error \
             --request POST \
             --header 'Content-Type: application/json' \
             --data "${payload}" \
-            --url-query "username=${PACKAGIST_USERNAME}" \
-            --url-query "apiToken=${PACKAGIST_TOKEN}" \
-            "https://packagist.org/api/update-package"; then
+            "https://packagist.org/api/update-package?username=${encoded_username}&apiToken=${encoded_token}"; then
             curl --proto '=https' --tlsv1.2 \
               --fail --silent --show-error \
               --request POST \
               --header 'Content-Type: application/json' \
               --data "${payload}" \
-              --url-query "username=${PACKAGIST_USERNAME}" \
-              --url-query "apiToken=${PACKAGIST_TOKEN}" \
-              "https://packagist.org/api/create-package"
+              "https://packagist.org/api/create-package?username=${encoded_username}&apiToken=${encoded_token}"
           fi
