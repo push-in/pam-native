@@ -764,6 +764,9 @@ public final class PamRenderer {
                 field.text = textValue
             } else if let boolValue = value.boolOrNil(), let switchView = view as? UISwitch {
                 switchView.isOn = boolValue
+            } else if let textValue = value.textOrNil(),
+                      textValue.hasPrefix("pam:") {
+                view.accessibilityIdentifier = textValue
             }
         case PamConstants.placeholder:
             if let textValue = value.textOrNil(), let field = view as? UITextField {

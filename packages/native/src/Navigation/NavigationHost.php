@@ -20,6 +20,7 @@ final class NavigationHost extends Element
     ): self {
         return (new self(NodeKind::NavigationHost))
             ->withChildren($screens)
+            ->withProperty(PropKey::FlexGrow, 1.0)
             ->withProperty(PropKey::NavigationOperation, $operation->value)
             ->withProperty(PropKey::NavigationTransition, $transition->value)
             ->withProperty(PropKey::NavigationDurationMs, max(0, min(2_000, $durationMs)))

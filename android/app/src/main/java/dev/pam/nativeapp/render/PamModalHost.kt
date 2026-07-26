@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.KeyEvent
@@ -217,7 +218,10 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     private fun applyWindowConfiguration(modal: Dialog) {
         modal.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setFormat(PixelFormat.TRANSLUCENT)
+            decorView.setBackgroundColor(Color.TRANSPARENT)
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            attributes = attributes.apply { dimAmount = 0f }
             setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             setGravity(
                 if (presentation == PRESENTATION_SHEET) {
@@ -248,6 +252,15 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun applyWindowLayout(modal: Dialog) {
+        if (presentation == PRESENTATION_SHEET) {
+            repeat(content.childCount) { index ->
+                content.getChildAt(index).layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.BOTTOM,
+                )
+            }
+        }
         modal.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
