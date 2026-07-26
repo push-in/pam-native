@@ -82,6 +82,13 @@ public enum EventKind: Int {
     case modalShow = 32
     case modalDismiss = 33
     case modalOrientationChange = 34
+    case clickOutside = 35
+    case intersect = 36
+    case mutate = 37
+    case resize = 38
+    case touchStart = 39
+    case touchMove = 40
+    case touchEnd = 41
 }
 
 public enum PropValue {
@@ -307,6 +314,11 @@ public enum PamConstants {
     public static let fontSize = 12
     public static let enabled = 13
     public static let borderRadius = 35
+    public static let rippleColor = 67
+    public static let rippleBorderless = 245
+    public static let rippleRadius = 246
+    public static let rippleForeground = 247
+    public static let rippleAlpha = 248
     public static let borderWidth = 36
     public static let borderColor = 37
     public static let margin = 26
@@ -345,6 +357,13 @@ public enum PamConstants {
     public static let onModalShow = 260
     public static let onModalDismiss = 261
     public static let onModalOrientationChange = 262
+    public static let onClickOutside = 285
+    public static let onIntersect = 286
+    public static let onMutate = 287
+    public static let onResize = 288
+    public static let onTouchStart = 289
+    public static let onTouchMove = 290
+    public static let onTouchEnd = 291
 }
 
 public enum BatchDecoder {

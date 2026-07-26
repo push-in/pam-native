@@ -361,6 +361,14 @@ final class TemplateRenderer
         'on:show' => EventKind::ModalShow,
         'on:dismiss' => EventKind::ModalDismiss,
         'on:orientationChange' => EventKind::ModalOrientationChange,
+        'p-click-outside' => EventKind::ClickOutside,
+        'p-intersect' => EventKind::Intersect,
+        'p-mutate' => EventKind::Mutate,
+        'p-resize' => EventKind::Resize,
+        'p-scroll' => EventKind::Scroll,
+        'p-touch-start' => EventKind::TouchStart,
+        'p-touch-move' => EventKind::TouchMove,
+        'p-touch-end' => EventKind::TouchEnd,
     ];
 
     private function __construct()
@@ -665,6 +673,8 @@ final class TemplateRenderer
                 isset(self::EVENTS[$name])
                 || $name === 'class'
                 || $name === ':class'
+                || $name === 'p-ripple'
+                || $name === ':p-ripple'
                 || str_starts_with($name, '@')
             ) {
                 continue;
@@ -673,6 +683,23 @@ final class TemplateRenderer
             $values[ltrim($name, ':')] = str_starts_with($name, ':')
                 ? self::dynamicValue($raw, $scope, $data)
                 : self::value($raw, $scope, $data);
+        }
+        $rippleAttribute = $attributes[':p-ripple'] ?? $attributes['p-ripple'] ?? null;
+        if (array_key_exists(':p-ripple', $attributes)) {
+            $rippleAttribute = self::dynamicValue($rippleAttribute, $scope, $data);
+        } elseif (array_key_exists('p-ripple', $attributes)) {
+            $rippleAttribute = self::value($rippleAttribute, $scope, $data);
+        }
+        if ($rippleAttribute !== null && $rippleAttribute !== false) {
+            $ripple = is_array($rippleAttribute) ? $rippleAttribute : [];
+            $values['rippleColor'] = $ripple['color']
+                ?? (is_int($rippleAttribute) ? $rippleAttribute : 0);
+            $values['rippleAlpha'] = $ripple['alpha'] ?? 0.12;
+            $values['rippleBorderless'] = $ripple['borderless'] ?? false;
+            $values['rippleForeground'] = $ripple['foreground'] ?? false;
+            if (isset($ripple['radius'])) {
+                $values['rippleRadius'] = $ripple['radius'];
+            }
         }
         $resolvedClass = self::classValue($attributes, $scope, $data);
         if ($factory !== null && $resolvedClass !== null) {

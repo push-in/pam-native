@@ -78,7 +78,14 @@ enum class EventKind(val value: Int) {
     MODAL_REQUEST_CLOSE(31),
     MODAL_SHOW(32),
     MODAL_DISMISS(33),
-    MODAL_ORIENTATION_CHANGE(34);
+    MODAL_ORIENTATION_CHANGE(34),
+    CLICK_OUTSIDE(35),
+    INTERSECT(36),
+    MUTATE(37),
+    RESIZE(38),
+    TOUCH_START(39),
+    TOUCH_MOVE(40),
+    TOUCH_END(41);
 }
 
 enum class PropKey(val value: Int) {
@@ -365,7 +372,14 @@ enum class PropKey(val value: Int) {
     NAVIGATION_OPERATION(281),
     NAVIGATION_TRANSITION(282),
     NAVIGATION_DURATION_MS(283),
-    NAVIGATION_REVISION(284);
+    NAVIGATION_REVISION(284),
+    ON_CLICK_OUTSIDE(285),
+    ON_INTERSECT(286),
+    ON_MUTATE(287),
+    ON_RESIZE(288),
+    ON_TOUCH_START(289),
+    ON_TOUCH_MOVE(290),
+    ON_TOUCH_END(291);
 
     companion object {
         fun from(value: Int): PropKey =

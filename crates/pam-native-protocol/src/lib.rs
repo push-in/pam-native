@@ -365,6 +365,13 @@ pub enum PropKey {
     NavigationTransition = 282,
     NavigationDurationMs = 283,
     NavigationRevision = 284,
+    OnClickOutside = 285,
+    OnIntersect = 286,
+    OnMutate = 287,
+    OnResize = 288,
+    OnTouchStart = 289,
+    OnTouchMove = 290,
+    OnTouchEnd = 291,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -656,6 +663,13 @@ impl TryFrom<u16> for PropKey {
             282 => Ok(Self::NavigationTransition),
             283 => Ok(Self::NavigationDurationMs),
             284 => Ok(Self::NavigationRevision),
+            285 => Ok(Self::OnClickOutside),
+            286 => Ok(Self::OnIntersect),
+            287 => Ok(Self::OnMutate),
+            288 => Ok(Self::OnResize),
+            289 => Ok(Self::OnTouchStart),
+            290 => Ok(Self::OnTouchMove),
+            291 => Ok(Self::OnTouchEnd),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1459,10 +1473,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(27).is_err());
 
-        for value in 1..=284 {
+        for value in 1..=291 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(285).is_err());
+        assert!(PropKey::try_from(292).is_err());
     }
 
     fn tree(text: &str) -> Tree {

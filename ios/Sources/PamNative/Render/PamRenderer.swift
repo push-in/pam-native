@@ -402,6 +402,46 @@ public final class PamRenderer {
             return
         }
 
+        if eventProperties.contains(PamConstants.onClickOutside) ||
+            eventProperties.contains(PamConstants.onIntersect) ||
+            eventProperties.contains(PamConstants.onMutate) ||
+            eventProperties.contains(PamConstants.onResize) ||
+            eventProperties.contains(PamConstants.onTouchStart) ||
+            eventProperties.contains(PamConstants.onTouchMove) ||
+            eventProperties.contains(PamConstants.onTouchEnd) {
+            let bridge = EventBridge(
+                nodeId: nodeId,
+                kind: EventKind.clickOutside.rawValue,
+                dispatchEvent: dispatchEvent
+            )
+            bridge.attachDirectives(
+                to: view,
+                host: host,
+                clickOutside: eventProperties.contains(PamConstants.onClickOutside),
+                intersect: eventProperties.contains(PamConstants.onIntersect),
+                mutate: eventProperties.contains(PamConstants.onMutate),
+                resize: eventProperties.contains(PamConstants.onResize),
+                touchStart: eventProperties.contains(PamConstants.onTouchStart),
+                touchMove: eventProperties.contains(PamConstants.onTouchMove),
+                touchEnd: eventProperties.contains(PamConstants.onTouchEnd)
+            )
+            eventBridges[nodeId]?[EventKind.clickOutside.rawValue] = bridge
+        }
+        if let rippleValue = state.properties[PamConstants.rippleColor] {
+            let bridge = EventBridge(
+                nodeId: nodeId,
+                kind: EventKind.press.rawValue,
+                dispatchEvent: dispatchEvent
+            )
+            bridge.attachRipple(
+                to: view,
+                color: rippleValue.integerOrNil() ?? 0,
+                alpha: state.properties[PamConstants.rippleAlpha]?.decimalOrNil() ?? 0.12,
+                radius: state.properties[PamConstants.rippleRadius]?.decimalOrNil()
+            )
+            eventBridges[nodeId]?[PamConstants.rippleColor] = bridge
+        }
+
         let inputField = view as? PamInputField
 
         if let button = view as? UIButton {
@@ -618,6 +658,13 @@ public final class PamRenderer {
             PamConstants.onModalOrientationChange,
             PamConstants.onDrawerOpen,
             PamConstants.onDrawerClose,
+            PamConstants.onClickOutside,
+            PamConstants.onIntersect,
+            PamConstants.onMutate,
+            PamConstants.onResize,
+            PamConstants.onTouchStart,
+            PamConstants.onTouchMove,
+            PamConstants.onTouchEnd,
         ].reduce(into: Set<Int>()) { $0.insert($1) }
     }
 
@@ -681,6 +728,20 @@ public final class PamRenderer {
             return PamConstants.onModalDismiss
         case EventKind.modalOrientationChange.rawValue:
             return PamConstants.onModalOrientationChange
+        case EventKind.clickOutside.rawValue:
+            return PamConstants.onClickOutside
+        case EventKind.intersect.rawValue:
+            return PamConstants.onIntersect
+        case EventKind.mutate.rawValue:
+            return PamConstants.onMutate
+        case EventKind.resize.rawValue:
+            return PamConstants.onResize
+        case EventKind.touchStart.rawValue:
+            return PamConstants.onTouchStart
+        case EventKind.touchMove.rawValue:
+            return PamConstants.onTouchMove
+        case EventKind.touchEnd.rawValue:
+            return PamConstants.onTouchEnd
         default:
             return nil
         }
@@ -1112,13 +1173,26 @@ public final class PamRenderer {
         )
     }
 
-    private final class EventBridge: NSObject, UIScrollViewDelegate {
+    private final class EventBridge: NSObject, UIScrollViewDelegate, UIGestureRecognizerDelegate {
         private let nodeId: Int64
         private let kind: Int
         private let dispatchEvent: (Int64, Int, Data) -> Void
         private weak var tap: UITapGestureRecognizer?
         private weak var longPress: UILongPressGestureRecognizer?
         private weak var pressPointer: UILongPressGestureRecognizer?
+        private weak var directiveTouch: UILongPressGestureRecognizer?
+        private weak var outsideTap: UITapGestureRecognizer?
+        private weak var rippleGesture: UILongPressGestureRecognizer?
+        private weak var rippleOverlay: UIView?
+        private weak var directiveView: UIView?
+        private var frameObservation: NSKeyValueObservation?
+        private var emitsIntersect = false
+        private var emitsMutate = false
+        private var emitsResize = false
+        private var emitsTouchStart = false
+        private var emitsTouchMove = false
+        private var emitsTouchEnd = false
+        private var lastIntersection: Bool?
         private weak var textField: PamInputField?
         private var focusField: PamInputField?
         private weak var control: UIControl?
@@ -1191,6 +1265,95 @@ public final class PamRenderer {
             recognizer.delaysTouchesEnded = false
             view.addGestureRecognizer(recognizer)
             pressPointer = recognizer
+        }
+
+        func attachDirectives(
+            to view: UIView,
+            host: UIView,
+            clickOutside: Bool,
+            intersect: Bool,
+            mutate: Bool,
+            resize: Bool,
+            touchStart: Bool,
+            touchMove: Bool,
+            touchEnd: Bool
+        ) {
+            directiveView = view
+            emitsIntersect = intersect
+            emitsMutate = mutate
+            emitsResize = resize
+            emitsTouchStart = touchStart
+            emitsTouchMove = touchMove
+            emitsTouchEnd = touchEnd
+
+            if intersect || mutate || resize {
+                frameObservation = view.observe(\.frame, options: [.initial, .old, .new]) {
+                    [weak self] _, change in
+                    self?.onDirectiveLayout(old: change.oldValue, new: change.newValue)
+                }
+            }
+            if touchStart || touchMove || touchEnd {
+                let recognizer = UILongPressGestureRecognizer(
+                    target: self,
+                    action: #selector(onDirectiveTouch(_:))
+                )
+                recognizer.minimumPressDuration = 0
+                recognizer.cancelsTouchesInView = false
+                recognizer.delaysTouchesEnded = false
+                view.addGestureRecognizer(recognizer)
+                directiveTouch = recognizer
+            }
+            if clickOutside {
+                let recognizer = UITapGestureRecognizer(
+                    target: self,
+                    action: #selector(onOutsideTap(_:))
+                )
+                recognizer.cancelsTouchesInView = false
+                recognizer.delegate = self
+                host.addGestureRecognizer(recognizer)
+                outsideTap = recognizer
+            }
+        }
+
+        func attachRipple(
+            to view: UIView,
+            color: Int64,
+            alpha: Double,
+            radius: Double?
+        ) {
+            let overlay = UIView(frame: view.bounds)
+            overlay.isUserInteractionEnabled = false
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            let inheritedColor: UIColor
+            if color != 0 {
+                inheritedColor = UIColor(argb: color)
+            } else if let label = view as? UILabel {
+                inheritedColor = label.textColor
+            } else if let button = view as? UIButton {
+                inheritedColor = button.titleColor(for: .normal) ?? button.tintColor
+            } else {
+                inheritedColor = view.tintColor
+            }
+            overlay.backgroundColor = inheritedColor.withAlphaComponent(
+                CGFloat(max(0, min(1, alpha)))
+            )
+            overlay.alpha = 0
+            overlay.layer.cornerRadius = radius.map { CGFloat($0) }
+                ?? view.layer.cornerRadius
+            overlay.clipsToBounds = true
+            view.addSubview(overlay)
+
+            let recognizer = UILongPressGestureRecognizer(
+                target: self,
+                action: #selector(onRipple(_:))
+            )
+            recognizer.minimumPressDuration = 0
+            recognizer.cancelsTouchesInView = false
+            recognizer.delaysTouchesEnded = false
+            recognizer.delegate = self
+            view.addGestureRecognizer(recognizer)
+            rippleGesture = recognizer
+            rippleOverlay = overlay
         }
 
         func attachTextField(_ field: PamInputField) {
@@ -1354,6 +1517,18 @@ public final class PamRenderer {
             if let pressPointer {
                 pressPointer.view?.removeGestureRecognizer(pressPointer)
             }
+            if let directiveTouch {
+                directiveTouch.view?.removeGestureRecognizer(directiveTouch)
+            }
+            if let outsideTap {
+                outsideTap.view?.removeGestureRecognizer(outsideTap)
+            }
+            if let rippleGesture {
+                rippleGesture.view?.removeGestureRecognizer(rippleGesture)
+            }
+            rippleOverlay?.removeFromSuperview()
+            frameObservation?.invalidate()
+            frameObservation = nil
             if let textField {
                 textField.setInputCallbacks()
                 textField.onInputEndEditing = nil
@@ -1399,6 +1574,11 @@ public final class PamRenderer {
             self.tap = nil
             self.longPress = nil
             self.pressPointer = nil
+            self.directiveTouch = nil
+            self.outsideTap = nil
+            self.rippleGesture = nil
+            self.rippleOverlay = nil
+            self.directiveView = nil
             self.textField = nil
             self.control = nil
             self.scrollView = nil
@@ -1414,6 +1594,107 @@ public final class PamRenderer {
             self.endReachedSent = false
             self.lastScrollContentLength = -1
             self.lastScrollViewportLength = -1
+            self.lastIntersection = nil
+        }
+
+        @objc private func onDirectiveTouch(_ sender: UILongPressGestureRecognizer) {
+            let eventKind: Int
+            switch sender.state {
+            case .began:
+                guard emitsTouchStart else { return }
+                eventKind = EventKind.touchStart.rawValue
+            case .changed:
+                guard emitsTouchMove else { return }
+                eventKind = EventKind.touchMove.rawValue
+            case .ended, .cancelled, .failed:
+                guard emitsTouchEnd else { return }
+                eventKind = EventKind.touchEnd.rawValue
+            default:
+                return
+            }
+            dispatchPressPointer(
+                sender,
+                kind: eventKind,
+                locationInView: sender.location(in: sender.view),
+                locationInWindow: sender.location(in: sender.view?.window)
+            )
+        }
+
+        @objc private func onOutsideTap(_ sender: UITapGestureRecognizer) {
+            guard sender.state == .ended, let view = directiveView else { return }
+            let point = sender.location(in: view)
+            if !view.bounds.contains(point) {
+                let windowPoint = sender.location(in: view.window)
+                let payload = (try? WireMap.encode([
+                    "pageX": .decimal(windowPoint.x),
+                    "pageY": .decimal(windowPoint.y),
+                ])) ?? Data()
+                dispatchEvent(nodeId, EventKind.clickOutside.rawValue, payload)
+            }
+        }
+
+        @objc private func onRipple(_ sender: UILongPressGestureRecognizer) {
+            guard let overlay = rippleOverlay else { return }
+            switch sender.state {
+            case .began:
+                UIView.animate(
+                    withDuration: 0.075,
+                    delay: 0,
+                    options: [.beginFromCurrentState, .allowUserInteraction]
+                ) {
+                    overlay.alpha = 1
+                }
+            case .ended, .cancelled, .failed:
+                UIView.animate(
+                    withDuration: 0.18,
+                    delay: 0,
+                    options: [.beginFromCurrentState, .allowUserInteraction]
+                ) {
+                    overlay.alpha = 0
+                }
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        private func onDirectiveLayout(old: CGRect?, new: CGRect?) {
+            guard let view = directiveView, let frame = new else { return }
+            if emitsResize, old?.size != frame.size {
+                let payload = (try? WireMap.encode([
+                    "width": .decimal(frame.width),
+                    "height": .decimal(frame.height),
+                ])) ?? Data()
+                dispatchEvent(nodeId, EventKind.resize.rawValue, payload)
+            }
+            if emitsMutate, old != frame {
+                let payload = (try? WireMap.encode([
+                    "x": .decimal(frame.minX),
+                    "y": .decimal(frame.minY),
+                    "width": .decimal(frame.width),
+                    "height": .decimal(frame.height),
+                ])) ?? Data()
+                dispatchEvent(nodeId, EventKind.mutate.rawValue, payload)
+            }
+            if emitsIntersect {
+                let intersecting = view.window != nil &&
+                    !view.isHidden &&
+                    view.alpha > 0 &&
+                    view.convert(view.bounds, to: nil).intersects(UIScreen.main.bounds)
+                if lastIntersection != intersecting {
+                    lastIntersection = intersecting
+                    let payload = (try? WireMap.encode([
+                        "intersecting": .flag(intersecting),
+                    ])) ?? Data()
+                    dispatchEvent(nodeId, EventKind.intersect.rawValue, payload)
+                }
+            }
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {

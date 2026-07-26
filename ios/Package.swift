@@ -16,6 +16,11 @@ let package = Package(
             path: "Sources/PamNative",
             exclude: ["Bridge"]
         ),
+        .testTarget(
+            name: "PamNativeTests",
+            dependencies: ["PamNative"],
+            path: "Tests/PamNativeTests"
+        ),
     ],
     swiftLanguageVersions: [.v5]
 )

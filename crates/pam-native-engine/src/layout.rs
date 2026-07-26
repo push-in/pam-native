@@ -1317,7 +1317,11 @@ fn estimated_text_width(text: &str, font_size: f32, letter_spacing: f32) -> f32 
             width += letter_spacing;
         }
     }
-    width
+    if width > 0.0 {
+        width * 1.06 + 1.0
+    } else {
+        0.0
+    }
 }
 
 fn estimated_character_width(character: char, font_size: f32) -> f32 {
@@ -2516,6 +2520,17 @@ mod tests {
             wrapped_text_lines(label, font_size, letter_spacing, intrinsic),
             vec![label],
         );
+    }
+
+    #[test]
+    fn intrinsic_text_width_keeps_safety_space_for_platform_font_metrics() {
+        let font_size = 14.0;
+        let raw_glyph_width = "Paid"
+            .chars()
+            .map(|character| estimated_character_width(character, font_size))
+            .sum::<f32>();
+
+        assert!(estimated_text_width("Paid", font_size, 0.0) > raw_glyph_width);
     }
 
     #[test]

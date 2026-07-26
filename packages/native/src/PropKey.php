@@ -290,4 +290,11 @@ enum PropKey: int
     case NavigationTransition = 282;
     case NavigationDurationMs = 283;
     case NavigationRevision = 284;
+    case OnClickOutside = 285;
+    case OnIntersect = 286;
+    case OnMutate = 287;
+    case OnResize = 288;
+    case OnTouchStart = 289;
+    case OnTouchMove = 290;
+    case OnTouchEnd = 291;
 }

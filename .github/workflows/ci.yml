@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -155,6 +156,19 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      - name: Test PamNative on an iOS Simulator
+        working-directory: ios
+        run: |
+          udid=$(
+            xcrun simctl list devices available |
+              awk -F '[()]' '/iPhone/ { print $2; exit }'
+          )
+          test -n "${udid}"
+          xcodebuild \
+            -scheme PamNative \
+            -destination "platform=iOS Simulator,id=${udid}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
       - name: Build PamNative for the iOS Simulator
         working-directory: ios
         run: >-
