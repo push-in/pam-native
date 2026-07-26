@@ -13,6 +13,7 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.view.HapticFeedbackConstants
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
 import dev.pam.nativeapp.PamActivity
@@ -46,6 +47,7 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 NativeOperation.PERMISSION_CHECK -> checkPermission(payload, completion)
                 NativeOperation.PERMISSION_REQUEST -> requestPermission(payload, completion)
                 NativeOperation.CLOSE_APP -> closeApp(completion)
+                NativeOperation.HAPTIC -> haptic(payload, completion)
                 else -> error("Operation ${operation.name} is not a system operation")
             }
         }.onFailure { error ->
@@ -137,6 +139,26 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         }
         vibrator.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE))
         completion.success()
+    }
+
+    private fun haptic(payload: ByteArray, completion: ModuleCompletion) {
+        val feedback = WireMap.decode(payload).integer("feedback", 1L).coerceIn(1L, 7L)
+        main.post {
+            val target = (context as? Activity)?.window?.decorView
+            val constant = when (feedback.toInt()) {
+                1 -> HapticFeedbackConstants.CLOCK_TICK
+                2 -> HapticFeedbackConstants.KEYBOARD_TAP
+                3 -> HapticFeedbackConstants.VIRTUAL_KEY
+                4 -> HapticFeedbackConstants.LONG_PRESS
+                5 -> if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM
+                    else HapticFeedbackConstants.VIRTUAL_KEY
+                6, 7 -> if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT
+                    else HapticFeedbackConstants.LONG_PRESS
+                else -> HapticFeedbackConstants.VIRTUAL_KEY
+            }
+            target?.performHapticFeedback(constant)
+            completion.success()
+        }
     }
 
     private fun deviceInfo(completion: ModuleCompletion) {

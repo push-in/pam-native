@@ -30,4 +30,5 @@ public enum NativeOperation: Int {
     case permissionCheck = 12
     case permissionRequest = 13
     case closeApp = 14
+    case haptic = 15
 }

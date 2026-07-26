@@ -2319,23 +2319,80 @@ class PamRenderer(
     private fun applyAnimationKind(view: View, state: NodeState, kind: Int) {
         state.propertyAnimator?.cancel()
         state.propertyAnimator = null
-        if (kind != 2 || !ValueAnimator.areAnimatorsEnabled()) {
+        view.animate().cancel()
+        if (!ValueAnimator.areAnimatorsEnabled() || kind == 1) {
             view.alpha = state.targetAlpha()
+            view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat()
+            view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()
+            view.scaleX = state.number(PropKey.SCALE_X, 1.0).toFloat()
+            view.scaleY = state.number(PropKey.SCALE_Y, 1.0).toFloat()
             return
         }
         val target = state.targetAlpha()
-        state.propertyAnimator = ObjectAnimator.ofFloat(
-            view,
-            View.ALPHA,
-            target * 0.55f,
-            target,
-        ).apply {
-            duration = state.integer(PropKey.ANIMATION_DURATION_MS, 1_500L)
-                .coerceIn(100L, 60_000L)
-            repeatMode = ValueAnimator.REVERSE
-            repeatCount = ValueAnimator.INFINITE
-            start()
+        val duration = state.integer(
+            PropKey.ANIMATION_DURATION_MS,
+            if (kind == 2) 1_500L else 240L,
+        ).coerceIn(100L, if (kind == 2) 60_000L else 2_000L)
+        if (kind == 2) {
+            state.propertyAnimator = ObjectAnimator.ofFloat(
+                view,
+                View.ALPHA,
+                target * 0.55f,
+                target,
+            ).apply {
+                this.duration = duration
+                repeatMode = ValueAnimator.REVERSE
+                repeatCount = ValueAnimator.INFINITE
+                start()
+            }
+            return
         }
+        val targetTranslationX = dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
+        val targetTranslationY = dp(state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()).toFloat()
+        val targetScaleX = state.number(PropKey.SCALE_X, 1.0).toFloat()
+        val targetScaleY = state.number(PropKey.SCALE_Y, 1.0).toFloat()
+        when (kind) {
+            3 -> view.alpha = 0f
+            4 -> {
+                view.alpha = 0f
+                view.scaleX = targetScaleX * 0.94f
+                view.scaleY = targetScaleY * 0.94f
+            }
+            5 -> {
+                view.alpha = 0f
+                view.translationY = targetTranslationY + dp(18f)
+            }
+            6 -> {
+                view.alpha = 0f
+                view.translationY = targetTranslationY - dp(18f)
+            }
+            7 -> {
+                view.alpha = target
+                view.scaleX = targetScaleX * 0.9f
+                view.scaleY = targetScaleY * 0.9f
+            }
+            8 -> {
+                view.alpha = target
+                view.translationX = targetTranslationX - dp(8f)
+            }
+        }
+        view.animate()
+            .alpha(target)
+            .translationX(targetTranslationX)
+            .translationY(targetTranslationY)
+            .scaleX(targetScaleX)
+            .scaleY(targetScaleY)
+            .setDuration(duration)
+            .setInterpolator(
+                when (state.integer(PropKey.ANIMATION_EASING, 3L).toInt()) {
+                    1 -> LinearInterpolator()
+                    2 -> AccelerateInterpolator()
+                    4 -> AccelerateDecelerateInterpolator()
+                    5 -> OvershootInterpolator()
+                    else -> DecelerateInterpolator()
+                },
+            )
+            .start()
     }
 
     private fun applyPointerEvents(view: View, state: NodeState, mode: Int) {

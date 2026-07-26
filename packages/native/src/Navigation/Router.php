@@ -30,6 +30,11 @@ final class Router
         return new self($initialRoute);
     }
 
+    public static function tabs(string $initialTab): TabRouter
+    {
+        return new TabRouter($initialTab);
+    }
+
     public function route(string $name, Closure $screen): self
     {
         if ($name === '') {

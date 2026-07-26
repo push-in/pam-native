@@ -82,3 +82,22 @@ integer-backed enums and are rendered natively with transform
 and opacity. Android's disabled-animation accessibility setting is respected,
 horizontal transitions automatically mirror in RTL layouts, and only the
 incoming screen remains reachable by TalkBack during and after a transition.
+
+## Adaptive tabs
+
+Use `Router::tabs()` for one to five top-level destinations:
+
+```php
+$tabs = Router::tabs('overview')
+    ->tab('overview', 'Overview', $overview, $overviewIcon)
+    ->tab('orders', 'Orders', $orders, $ordersIcon, badge: '3')
+    ->appearance(0xFF0F172A, 0xFF60A5FA, 0xFF94A3B8, 0xFF1E293B)
+    ->persistence('main-tabs')
+    ->build();
+```
+
+Adaptive presentation uses a bottom bar below 840 dp and a navigation rail at
+or above that width. Only the selected native screen is mounted to minimize
+cold-start work; PHP component instances and `State` preserve each
+destination's state. Selection exposes tab semantics and triggers native
+selection haptics.

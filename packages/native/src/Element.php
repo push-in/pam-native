@@ -157,6 +157,17 @@ abstract class Element implements Renderable
             ->withProperty(PropKey::AnimationEasing, $easing->value);
     }
 
+    final public function motion(
+        MotionPreset $preset,
+        int $durationMs = 240,
+        AnimationEasing $easing = AnimationEasing::EaseOut,
+    ): static {
+        return $this
+            ->withProperty(PropKey::AnimationKind, $preset->animationKind()->value)
+            ->withProperty(PropKey::AnimationDurationMs, max(1, min(2_000, $durationMs)))
+            ->withProperty(PropKey::AnimationEasing, $easing->value);
+    }
+
     final public function property(
         PropKey $key,
         string|int|float|bool|BinaryValue $value,

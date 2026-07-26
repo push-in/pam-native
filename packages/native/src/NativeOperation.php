@@ -20,4 +20,5 @@ enum NativeOperation: int
     case PermissionCheck = 12;
     case PermissionRequest = 13;
     case CloseApp = 14;
+    case Haptic = 15;
 }

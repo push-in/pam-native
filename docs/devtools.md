@@ -25,3 +25,26 @@ adb shell am broadcast \
 Use the overlay alongside `pam mobile benchmark .` and `pam mobile profile .`.
 The overlay helps identify an expensive interactive path; the benchmark and
 baseline-profile commands provide repeatable evidence suitable for CI.
+
+## iOS
+
+UIKit hosts can install the reusable `PamDevToolsOverlay` over their PAM host
+view. Forward the existing runtime frame callback and toggle it from a debug
+gesture:
+
+```swift
+let devTools = PamDevToolsOverlay()
+let runtime = PamRuntime(
+    hostView: hostView,
+    reportError: reportError,
+    onFrameCommitted: { [weak devTools] metrics in
+        devTools?.update(metrics)
+    }
+)
+
+devTools.toggle()
+```
+
+The iOS overlay reports smoothed FPS, mount/decode duration, node and batch
+counts, patch/full commits and retained renderer memory. Keep it out of the
+release view hierarchy.

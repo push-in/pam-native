@@ -79,6 +79,9 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
             DispatchQueue.main.async { impact.impactOccurred() }
             _ = milliseconds
             completion(.success, Data())
+        case "haptic":
+            haptic(payload)
+            completion(.success, Data())
         case "deviceInfo":
             do {
                 let screen = UIScreen.main
@@ -161,6 +164,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case .permissionCheck: return "permissionCheck"
         case .permissionRequest: return "permissionRequest"
         case .closeApp: return "closeApp"
+        case .haptic: return "haptic"
         default: return ""
         }
     }
@@ -255,6 +259,34 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         }
         let normalized = Int(milliseconds)
         return min(max(normalized, 1), 10_000)
+    }
+
+    private func haptic(_ payload: Data) {
+        let feedback: Int
+        if let values = try? WireMap.decode(payload),
+           case let .integer(value)? = values["feedback"] {
+            feedback = min(max(Int(value), 1), 7)
+        } else {
+            feedback = 1
+        }
+        DispatchQueue.main.async {
+            switch feedback {
+            case 1:
+                UISelectionFeedbackGenerator().selectionChanged()
+            case 2:
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case 3:
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            case 4:
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            case 5:
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            case 6:
+                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            default:
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
     }
 
     private struct RuntimeError: LocalizedError {

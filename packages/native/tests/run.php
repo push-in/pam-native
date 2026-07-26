@@ -10,6 +10,8 @@ use Pam\Native\AccessibilityImportance;
 use Pam\Native\AccessibilityLiveRegion;
 use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
+use Pam\Native\AsyncStatus;
+use Pam\Native\AsyncValue;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
 use Pam\Native\FontStyle;
@@ -34,11 +36,23 @@ use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\MemoryPressure;
+use Pam\Native\MotionPreset;
+use Pam\Native\HapticFeedback;
+use Pam\Native\NativeOperation;
+use Pam\Native\Forms\FormStatus;
+use Pam\Native\Forms\NativeForm;
+use Pam\Native\Forms\Attributes\Email;
+use Pam\Native\Forms\Attributes\Matches;
+use Pam\Native\Forms\Attributes\MaxLength;
+use Pam\Native\Forms\Attributes\MinLength;
+use Pam\Native\Forms\Attributes\Required;
 use Pam\Native\Navigation\NavigationOperation;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
+use Pam\Native\Navigation\TabNavigator;
+use Pam\Native\Navigation\TabPresentation;
 use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalOrientation;
 use Pam\Native\ModalPresentation;
@@ -59,6 +73,7 @@ use Pam\Native\PropKey;
 use Pam\Native\Restorable;
 use Pam\Native\State;
 use Pam\Native\StatusBarAppearance;
+use Pam\Native\System\Haptics;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TextDecoration;
@@ -117,6 +132,9 @@ final class TestDiagnostics
 
     /** @var array{requestId: int, module: string, method: string, payload: string}|null */
     public static ?array $moduleCall = null;
+
+    /** @var array{requestId: int, operation: int, payload: string}|null */
+    public static ?array $typedCall = null;
 }
 
 if (!function_exists('pam_native_error')) {
@@ -137,6 +155,20 @@ if (!function_exists('pam_native_call')) {
             'requestId' => $requestId,
             'module' => $module,
             'method' => $method,
+            'payload' => $payload,
+        ];
+    }
+}
+
+if (!function_exists('pam_native_call_typed')) {
+    function pam_native_call_typed(
+        int $requestId,
+        int $operation,
+        string $payload,
+    ): void {
+        TestDiagnostics::$typedCall = [
+            'requestId' => $requestId,
+            'operation' => $operation,
             'payload' => $payload,
         ];
     }
@@ -254,6 +286,11 @@ $assert(
 
 foreach ([
     AnimationKind::cases(),
+    AsyncStatus::cases(),
+    MotionPreset::cases(),
+    HapticFeedback::cases(),
+    FormStatus::cases(),
+    TabPresentation::cases(),
     AccessibilityRole::cases(),
     AccessibilityCheckedState::cases(),
     AccessibilityImportance::cases(),
@@ -286,6 +323,80 @@ foreach ([
         );
     }
 }
+
+$loadingState = AsyncValue::loading(['cached']);
+$assert(
+    $loadingState->status === AsyncStatus::Loading
+        && $loadingState->hasData()
+        && $loadingState->isBusy(),
+    'AsyncValue must preserve cached content while loading.',
+);
+$offlineState = AsyncValue::offline(['cached']);
+$assert(
+    $offlineState->status === AsyncStatus::Offline
+        && $offlineState->retryable
+        && $offlineState->hasData(),
+    'Offline state must retain cached content and recovery semantics.',
+);
+
+$registrationForm = new class extends NativeForm {
+    #[Required]
+    #[Email]
+    public string $email = '';
+
+    #[Required]
+    #[MinLength(12)]
+    #[MaxLength(64)]
+    public string $password = '';
+
+    #[Matches('password')]
+    public string $passwordConfirmation = '';
+};
+$registrationForm->fill([
+    'email' => 'invalid',
+    'password' => 'short',
+    'passwordConfirmation' => 'different',
+], touch: true);
+$assert(
+    !$registrationForm->beginSubmit()
+        && $registrationForm->status() === FormStatus::Failure
+        && $registrationForm->error('email') !== null
+        && $registrationForm->error('password') !== null
+        && $registrationForm->error('passwordConfirmation') !== null,
+    'NativeForm must validate attributed fields before submission.',
+);
+$registrationForm->fill([
+    'email' => 'developer@pam.dev',
+    'password' => 'a-secure-password',
+    'passwordConfirmation' => 'a-secure-password',
+]);
+$assert(
+    $registrationForm->beginSubmit()
+        && $registrationForm->status() === FormStatus::Submitting,
+    'NativeForm must enter submitting only after successful validation.',
+);
+$registrationForm->fail(['email' => ['This email is already registered.']]);
+$assert(
+    $registrationForm->status() === FormStatus::Failure
+        && $registrationForm->error('email') === 'This email is already registered.',
+    'NativeForm must map server errors to their fields.',
+);
+
+$motionElement = Text::make('Motion')->motion(MotionPreset::SlideUp, 260);
+$assert(
+    $motionElement->properties()[PropKey::AnimationKind->value]
+        === AnimationKind::SlideUp->value
+        && $motionElement->properties()[PropKey::AnimationDurationMs->value] === 260,
+    'Motion presets must compile to native animation properties.',
+);
+Haptics::trigger(HapticFeedback::Success);
+$assert(
+    TestDiagnostics::$typedCall !== null
+        && TestDiagnostics::$typedCall['operation'] === NativeOperation::Haptic->value
+        && Wire::decodeMap(TestDiagnostics::$typedCall['payload'])['feedback']
+            === HapticFeedback::Success->value,
+    'Semantic haptics must use the typed native operation channel.',
+);
 
 $tree = Screen::make(
     Column::make(
@@ -2033,6 +2144,69 @@ $assert(
     $advancedNavigator->popToTop()
         && $advancedNavigator->currentRoute() === 'home',
     'popToTop must restore the first stack entry.',
+);
+
+$tabNavigator = Router::tabs('home')
+    ->tab('home', 'Home', Screen::make(Text::make('Home tab')))
+    ->tab(
+        'orders',
+        'Orders',
+        Router::stack('orders.index')
+            ->route(
+                'orders.index',
+                static fn () => Screen::make(Text::make('Orders tab')),
+            )
+            ->build(),
+    )
+    ->presentation(TabPresentation::Bottom)
+    ->persistence('test-main-tabs')
+    ->build();
+$assert(
+    $tabNavigator instanceof TabNavigator
+        && $tabNavigator->selectedTab() === 'home'
+        && $tabNavigator->resolvedPresentation() === TabPresentation::Bottom,
+    'Tab router must build a typed native tab navigator.',
+);
+$assert(
+    $tabNavigator->select('orders')
+        && $tabNavigator->selectedTab() === 'orders'
+        && $tabNavigator->toElement()->kind() === NodeKind::SafeAreaView,
+    'Tab navigator must retain independent tab content and expose safe native navigation.',
+);
+$restoredTabs = Router::tabs('home')
+    ->tab('home', 'Home', Screen::make(Text::make('Home tab')))
+    ->tab('orders', 'Orders', Screen::make(Text::make('Orders tab')))
+    ->persistence('test-main-tabs')
+    ->build();
+$assert(
+    $restoredTabs->selectedTab() === 'orders',
+    'Tab navigator must restore the selected destination.',
+);
+
+$homeTabRenders = 0;
+$ordersTabRenders = 0;
+$lazyTabs = Router::tabs('home')
+    ->tab('home', 'Home', static function () use (&$homeTabRenders): Screen {
+        $homeTabRenders++;
+        return Screen::make(Text::make('Lazy home'));
+    })
+    ->tab('orders', 'Orders', static function () use (&$ordersTabRenders): Screen {
+        $ordersTabRenders++;
+        return Screen::make(Text::make('Lazy orders'));
+    })
+    ->appearance(0xFF0F172A, 0xFF60A5FA, 0xFF94A3B8, 0xFF1E293B)
+    ->persistence('test-lazy-tabs')
+    ->build();
+$lazyTabs->toElement();
+$assert(
+    $homeTabRenders === 1 && $ordersTabRenders === 0,
+    'Tab navigation must mount only the selected destination during cold start.',
+);
+$lazyTabs->select('orders');
+$lazyTabs->toElement();
+$assert(
+    $homeTabRenders === 1 && $ordersTabRenders === 1,
+    'Selecting a tab must lazily mount only the next destination.',
 );
 
 echo "Pam Native PHP SDK tests passed.\n";

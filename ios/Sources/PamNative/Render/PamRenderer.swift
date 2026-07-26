@@ -726,6 +726,30 @@ public final class PamRenderer {
             }
         case PamConstants.opacity:
             view.alpha = CGFloat(value.decimalOrZero())
+        case PamConstants.translationX:
+            view.transform.tx = CGFloat(value.decimalOrZero())
+        case PamConstants.translationY:
+            view.transform.ty = CGFloat(value.decimalOrZero())
+        case PamConstants.scaleX:
+            view.transform = view.transform.scaledBy(
+                x: CGFloat(value.decimalOrZero()),
+                y: 1
+            )
+        case PamConstants.scaleY:
+            view.transform = view.transform.scaledBy(
+                x: 1,
+                y: CGFloat(value.decimalOrZero())
+            )
+        case PamConstants.rotation:
+            view.transform = view.transform.rotated(
+                by: CGFloat(value.decimalOrZero()) * .pi / 180
+            )
+        case PamConstants.animationKind:
+            applyMotion(
+                view: view,
+                state: nodes[nodeId],
+                kind: Int(value.integerOrNil() ?? 1)
+            )
         case PamConstants.backgroundColor, PamConstants.borderColor:
             if let color = value.integerOrNil() {
                 view.backgroundColor = UIColor(argb: color)
@@ -833,6 +857,86 @@ public final class PamRenderer {
         scroll.showsHorizontalScrollIndicator = horizontal
         scroll.showsVerticalScrollIndicator = !horizontal
         scroll.isDirectionalLockEnabled = true
+    }
+
+    private func applyMotion(view: UIView, state: NodeState?, kind: Int) {
+        view.layer.removeAllAnimations()
+        guard !UIAccessibility.isReduceMotionEnabled, kind != 1 else {
+            view.alpha = targetAlpha(state)
+            return
+        }
+        let durationMs = state?.properties[PamConstants.animationDurationMs]?.integerOrNil() ?? 240
+        let duration = min(
+            max(TimeInterval(durationMs) / 1_000, 0.1),
+            kind == 2 ? 60 : 2
+        )
+        let target = targetAlpha(state)
+
+        if kind == 2 {
+            UIView.animate(
+                withDuration: duration,
+                delay: 0,
+                options: [
+                    .autoreverse,
+                    .repeat,
+                    .allowUserInteraction,
+                    .beginFromCurrentState,
+                ],
+                animations: { view.alpha = target * 0.55 }
+            )
+            return
+        }
+
+        let finalTransform = view.transform
+        switch kind {
+        case 3:
+            view.alpha = 0
+        case 4:
+            view.alpha = 0
+            view.transform = finalTransform.scaledBy(x: 0.94, y: 0.94)
+        case 5:
+            view.alpha = 0
+            view.transform = finalTransform.translatedBy(x: 0, y: 18)
+        case 6:
+            view.alpha = 0
+            view.transform = finalTransform.translatedBy(x: 0, y: -18)
+        case 7:
+            view.alpha = target
+            view.transform = finalTransform.scaledBy(x: 0.9, y: 0.9)
+        case 8:
+            view.alpha = target
+            view.transform = finalTransform.translatedBy(x: -8, y: 0)
+        default:
+            view.alpha = target
+        }
+
+        let easing = Int(
+            state?.properties[PamConstants.animationEasing]?.integerOrNil() ?? 3
+        )
+        let curve: UIView.AnimationOptions = switch easing {
+        case 1: .curveLinear
+        case 2: .curveEaseIn
+        case 4: .curveEaseInOut
+        default: .curveEaseOut
+        }
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            usingSpringWithDamping: easing == 5 ? 0.72 : 1,
+            initialSpringVelocity: easing == 5 ? 0.35 : 0,
+            options: [curve, .allowUserInteraction, .beginFromCurrentState],
+            animations: {
+                view.alpha = target
+                view.transform = finalTransform
+            }
+        )
+    }
+
+    private func targetAlpha(_ state: NodeState?) -> CGFloat {
+        guard let value = state?.properties[PamConstants.opacity] else {
+            return 1
+        }
+        return CGFloat(value.decimalOrZero())
     }
 
     private func loadImage(_ source: String, into imageView: UIImageView, nodeId: Int64) {

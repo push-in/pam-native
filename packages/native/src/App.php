@@ -8,6 +8,7 @@ use Closure;
 use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Plugin\PluginManager;
+use Pam\Native\Navigation\TabNavigator;
 
 final class App
 {
@@ -18,6 +19,9 @@ final class App
     public static function run(Renderable|Closure $root): void
     {
         PluginManager::boot();
+        if ($root instanceof TabNavigator) {
+            Runtime::onDimensions($root->dimensions(...));
+        }
         Runtime::boot($root);
     }
 

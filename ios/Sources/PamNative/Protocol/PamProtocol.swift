@@ -314,6 +314,15 @@ public enum PamConstants {
     public static let padding = 8
     public static let flexGrow = 7
     public static let accessibilityLabel = 17
+    public static let translationX = 72
+    public static let translationY = 73
+    public static let scaleX = 74
+    public static let scaleY = 75
+    public static let rotation = 76
+    public static let animationDurationMs = 77
+    public static let animationEasing = 78
+    public static let animateChanges = 79
+    public static let animationKind = 139
     public static let navigationOperation = 281
     public static let navigationTransition = 282
     public static let navigationDurationMs = 283
