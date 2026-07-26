@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "488678724b07beb4c17d57052598bc88",
+    "content-hash": "a0d34f6a7c246c10a67325431376aa11",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -12,11 +12,11 @@
             "dist": {
                 "type": "path",
                 "url": "../community-plugin",
-                "reference": "b40162c36dc021df25f7e01854e3af1843527718"
+                "reference": "7b060ac3858b8c8dec6fa4121e619e1de7bed149"
             },
             "require": {
                 "php": "^8.4",
-                "pushinbr/pam-native": "^0.1"
+                "pushinbr/pam-native": "^0.2"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -40,11 +40,11 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.1.1",
+            "version": "0.2.1",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "93624dd1c4045967d68a49030d452552193fe69c"
+                "reference": "a9562f8863fd3c13e8157c7e3dcced2e8372f277"
             },
             "require": {
                 "php": "^8.4"
@@ -66,8 +66,8 @@
             "license": [
                 "BUSL-1.1"
             ],
-            "description": "Build fast native Android applications with PHP and Pam.",
-            "homepage": "https://github.com/push-in/pam",
+            "description": "Build fast native Android and iOS applications with PHP and PAM.",
+            "homepage": "https://github.com/push-in/pam-native",
             "keywords": [
                 "android",
                 "mobile",
@@ -76,7 +76,7 @@
                 "php"
             ],
             "support": {
-                "issues": "https://github.com/push-in/pam/issues",
+                "issues": "https://github.com/push-in/pam-native/issues",
                 "source": "https://github.com/push-in/pam-native"
             },
             "transport-options": {

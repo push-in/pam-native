@@ -1,6 +1,6 @@
 # PAM licensing
 
-PAM 0.1.1 is source-available under the Business Source License 1.1
+PAM Native 0.2.1 is source-available under the Business Source License 1.1
 (`BUSL-1.1`). The complete and controlling terms are in [`LICENSE`](LICENSE).
 This summary is explanatory and does not replace the license.
 

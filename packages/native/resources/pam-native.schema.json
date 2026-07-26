@@ -39,7 +39,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64,
-            "default": "0.1.0"
+            "default": "0.2.1"
         },
         "android": {
             "type": "object",

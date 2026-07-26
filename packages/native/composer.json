@@ -1,6 +1,6 @@
 {
     "name": "pushinbr/pam-native",
-    "description": "Build fast native Android applications with PHP and Pam.",
+    "description": "Build fast native Android and iOS applications with PHP and PAM.",
     "type": "library",
     "license": "BUSL-1.1",
     "keywords": [
@@ -10,9 +10,9 @@
         "pam",
         "php"
     ],
-    "homepage": "https://github.com/push-in/pam",
+    "homepage": "https://github.com/push-in/pam-native",
     "support": {
-        "issues": "https://github.com/push-in/pam/issues",
+        "issues": "https://github.com/push-in/pam-native/issues",
         "source": "https://github.com/push-in/pam-native"
     },
     "require": {

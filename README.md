@@ -4,6 +4,16 @@ Pam Native keeps PHP 8.4 alive inside Android and iOS processes and renders
 real platform controls. Rust owns reconciliation and layout; Kotlin and Swift
 only apply the resulting native mutations.
 
+Install the versioned PHP SDK with Composer:
+
+```bash
+composer require pushinbr/pam-native:^0.2
+```
+
+Android supports API 26–36. Release CI compiles the production renderer,
+executes protocol and renderer tests at both API boundaries, and publishes the
+plugin API AAR with checksums and build provenance.
+
 ## iOS renderer
 
 The UIKit renderer ships as a Swift Package in [`ios`](ios). It covers the
@@ -141,10 +151,10 @@ React's JavaScript runtime:
 
 | Family | Pam Native |
 | --- | --- |
-| Layout | `Screen`, `View`, `Column`, `Row`, `SafeAreaView`, `Spacer` |
+| Layout | `Screen`, `View`, `Column`, `Row`, `Grid`, `SafeAreaView`, `Spacer` |
 | Content | `Text`, `Image`, `ImageBackground` |
 | Input | `Input`/`TextInput`, `Button`, `Pressable`, `Toggle`/`Switch` |
-| Scrolling | `ScrollView`, `FlatList`, `VirtualizedList`, `SectionList`, `RefreshControl` |
+| Scrolling | `ScrollView`, `FlatList`, `VirtualizedList`, `VirtualGrid`, `SectionList`, `RefreshControl` |
 | Presentation | `Modal`, `ActivityIndicator`, `StatusBar`, `KeyboardAvoidingView` |
 | Android | `DrawerLayoutAndroid`, `TouchableNativeFeedback`, `InputAccessoryView` |
 | Compatibility | `TouchableOpacity`, `TouchableHighlight`, `TouchableWithoutFeedback` |

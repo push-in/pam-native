@@ -57,8 +57,8 @@ The package advertises one descriptor:
     "version": 1,
     "protocol": 1,
     "pamNative": {
-        "minimum": "0.1.0",
-        "maximumExclusive": "0.2.0"
+        "minimum": "0.2.0",
+        "maximumExclusive": "0.3.0"
     },
     "php": {
         "provider": "Vendor\\Maps\\MapsPluginProvider"

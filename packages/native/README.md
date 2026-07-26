@@ -5,6 +5,12 @@ state and events, Rust performs retained layout and incremental diffing, and
 Kotlin mounts bounded mutation batches on the Android UI thread.
 
 ```bash
+composer require pushinbr/pam-native:^0.2
+```
+
+For a complete project:
+
+```bash
 pam init hello-native --template mobile
 cd hello-native
 pam composer install
@@ -143,15 +149,28 @@ per display frame. `ActivityIndicator` exposes `animating()`,
 `hidesWhenStopped()`, `size()` and `color()`; `Toggle` exposes native off/on
 track and thumb colors.
 
-Virtualized lists are real AndroidX `RecyclerView` hosts:
+Virtualized lists and grids are real AndroidX `RecyclerView` hosts. Rich cells
+accept complete PAM component trees, including images, pressables, inputs and
+custom native views:
 
 ```php
-FlatList::make($packages)
-    ->rowHeight(52)
+use Pam\Native\UI\{Column, Image, Pressable, Text, VirtualGrid};
+
+$cells = array_map(
+    fn (Photo $photo) => Pressable::make(
+        Column::make(
+            Image::make($photo->url),
+            Text::make($photo->title),
+        ),
+    )
+        ->key((string) $photo->id)
+        ->onPress(fn () => $this->open($photo->id)),
+    $this->photos,
+);
+
+VirtualGrid::make(2, ...$cells)
+    ->rowHeight(224)
     ->prefetch(8)
-    ->columns(2)
-    ->initialScrollIndex(20)
-    ->showsIndicator(false)
     ->onEndReached($loadMore);
 
 SectionList::make($groups)
@@ -163,9 +182,13 @@ SectionList::make($groups)
 `horizontal()`, `columns()`, `inverted()`, `initialScrollIndex()`,
 `removeClippedSubviews()`, `scrollEnabled()` and `showsIndicator()` map directly
 to the native host. Packed scalar and section payloads remain outside PHP while
-scrolling; Android binds only visible/prefetched rows and limits `onScroll` to
-one event per VSYNC. Rich heterogeneous rows can use keyed PAM composition or a
-specialized native plugin.
+scrolling; Android mounts only visible/prefetched rich cells, preserves keyed
+identity and event routing, and limits `onScroll` to one event per VSYNC.
+
+For non-virtualized responsive screens, `Grid::make(...$children)` provides a
+12-column retained grid with gutters, spans, offsets, ordering and mobile-first
+`sm`/`md`/`lg`/`xl` breakpoints. See `docs/components.md` for fluent and tag
+examples.
 
 Run `pam mobile benchmark .` on a physical device for release-like AndroidX
 Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile

@@ -8,7 +8,7 @@ renderer.
 
 | SDK | Protocol | PHP | Android |
 | --- | ---: | --- | --- |
-| `pushinbr/pam-native 0.1.x` | `1` | `8.4.x` | API 26–36 |
+| `pushinbr/pam-native 0.2.x` | `1` | `8.4.x` | API 26–36 |
 
 All three peers must support the exact protocol version. A mismatched version is
 rejected before any node or mutation is applied. Protocol identifiers are
@@ -19,7 +19,7 @@ New optional properties, node kinds, event kinds and native operations may only
 be appended. A change to an existing field's representation or meaning requires
 a new protocol version and an explicit compatibility adapter.
 
-Protocol v1 currently appends properties through ID `262` and events through
+Protocol v1 currently appends properties through ID `284` and events through
 ID `34`.
 
 ## Frames

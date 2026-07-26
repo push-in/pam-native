@@ -5,7 +5,7 @@ PHP, the Rust layout/diff engine and the Android renderer.
 
 | SDK | Protocol | PHP | Android |
 | --- | ---: | --- | --- |
-| `pushinbr/pam-native 0.1.x` | `1` | `8.4.x` | API 26–36 |
+| `pushinbr/pam-native 0.2.x` | `1` | `8.4.x` | API 26–36 |
 
 All peers must support the exact protocol version. Existing sequential integer
 identifiers are never renamed, reused or renumbered. Optional node kinds,
@@ -28,7 +28,7 @@ oversized payloads before applying mutations.
 The canonical enums are `NodeKind`, `PropKey`, `EventKind` and
 `NativeOperation` in PHP, the `pam-native-protocol` Rust crate, and
 `PamProtocol.kt` plus the Android registries. Protocol v1 currently appends
-properties through ID `262` and events through ID `34`.
+properties through ID `284` and events through ID `34`.
 
 ## Compatibility gates
 

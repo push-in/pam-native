@@ -7,13 +7,22 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
+
+env:
+  PAM_RUNTIME_RELEASE_TAG: v0.1.32
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
   ios:
     name: Package iOS renderer
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Build Swift package for iOS
         working-directory: ios
         run: >-
@@ -31,22 +40,92 @@ jobs:
             "dist/pam-native-ios-${version}.zip"
           shasum -a 256 "dist/pam-native-ios-${version}.zip" \
             > "dist/pam-native-ios-${version}.zip.sha256"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.zip
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-native-ios
           path: dist/pam-native-ios-*
           if-no-files-found: error
 
-  publish:
-    name: Publish GitHub release
-    needs: ios
+  android:
+    name: Package Android plugin API
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
         with:
-          name: pam-native-ios
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+      - name: Build plugin API
+        run: |
+          sdkmanager "platforms;android-36"
+          ./android/gradlew -p android :plugin-api:assembleRelease
+      - name: Create versioned artifact
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          cp android/plugin-api/build/outputs/aar/plugin-api-release.aar \
+            "dist/pam-native-android-plugin-api-${version}.aar"
+          sha256sum "dist/pam-native-android-plugin-api-${version}.aar" \
+            > "dist/pam-native-android-plugin-api-${version}.aar.sha256"
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.aar
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pam-native-android
+          path: dist/pam-native-android-*
+          if-no-files-found: error
+
+  php-sdk:
+    name: Package PHP SDK
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Create reproducible SDK archive
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          source_date_epoch=$(git log -1 --format=%ct)
+          mkdir -p dist
+          tar \
+            --sort=name \
+            --mtime="@${source_date_epoch}" \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            --transform="s,^,pam-native-php-${version}/," \
+            -cf "dist/pam-native-php-${version}.tar" \
+            -C packages/native .
+          gzip -n "dist/pam-native-php-${version}.tar"
+          sha256sum "dist/pam-native-php-${version}.tar.gz" \
+            > "dist/pam-native-php-${version}.tar.gz.sha256"
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.tar.gz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pam-native-php
+          path: dist/pam-native-php-*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub release
+    needs:
+      - ios
+      - android
+      - php-sdk
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: pam-native-*
           path: dist
-      - uses: softprops/action-gh-release@v2
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           generate_release_notes: true

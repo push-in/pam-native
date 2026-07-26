@@ -19,12 +19,14 @@ val pamPluginProperties = Properties().apply {
 }
 val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp")
 val pamApplicationName = pamProperties.getProperty("applicationName", "Pam Native")
-val pamNativeHome = pamProperties.getProperty("nativeHome")
-    ?: error("pam-native.properties must define nativeHome")
+val pamNativeHome = providers.gradleProperty("pamNativeRoot")
+    .orElse(providers.environmentVariable("PAM_NATIVE_ROOT"))
+    .orElse(pamProperties.getProperty("nativeHome"))
+    .get()
 val pamMinSdk = pamProperties.getProperty("minSdk", "26").toInt()
 val pamTargetSdk = pamProperties.getProperty("targetSdk", "36").toInt()
 val pamVersionCode = pamProperties.getProperty("versionCode", "1").toInt()
-val pamVersionName = pamProperties.getProperty("versionName", "0.1.0")
+val pamVersionName = pamProperties.getProperty("versionName", "0.2.1")
 val pamAbis = pamProperties.getProperty("abis", "arm64-v8a,x86_64")
     .split(',')
     .filter(String::isNotBlank)
@@ -40,6 +42,7 @@ android {
         targetSdk = pamTargetSdk
         versionCode = pamVersionCode
         versionName = pamVersionName
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["pamApplicationName"] = pamApplicationName
 
         externalNativeBuild {
@@ -132,6 +135,9 @@ dependencies {
     implementation(project(":plugin-api"))
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test:runner:1.7.0")
     val pluginCount = pamPluginProperties.getProperty("plugin.count", "0").toInt()
     repeat(pluginCount) { index ->
         val module = pamPluginProperties.getProperty("plugin.$index.module")
