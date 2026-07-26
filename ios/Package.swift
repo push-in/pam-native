@@ -18,7 +18,8 @@ let package = Package(
         ),
         .target(
             name: "PamNativeTestRuntimeShims",
-            path: "Sources/PamNativeTestRuntimeShims"
+            path: "Sources/PamNativeTestRuntimeShims",
+            publicHeadersPath: "include"
         ),
         .testTarget(
             name: "PamNativeTests",
