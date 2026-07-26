@@ -1317,11 +1317,7 @@ fn estimated_text_width(text: &str, font_size: f32, letter_spacing: f32) -> f32 
             width += letter_spacing;
         }
     }
-    if width > 0.0 {
-        width * 1.06 + 1.0
-    } else {
-        0.0
-    }
+    if width > 0.0 { width * 1.06 + 1.0 } else { 0.0 }
 }
 
 fn estimated_character_width(character: char, font_size: f32) -> f32 {

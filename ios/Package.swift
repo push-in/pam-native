@@ -16,9 +16,13 @@ let package = Package(
             path: "Sources/PamNative",
             exclude: ["Bridge"]
         ),
+        .target(
+            name: "PamNativeTestRuntimeShims",
+            path: "Sources/PamNativeTestRuntimeShims"
+        ),
         .testTarget(
             name: "PamNativeTests",
-            dependencies: ["PamNative"],
+            dependencies: ["PamNative", "PamNativeTestRuntimeShims"],
             path: "Tests/PamNativeTests"
         ),
     ],
