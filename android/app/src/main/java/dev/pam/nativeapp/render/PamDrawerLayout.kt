@@ -4,11 +4,14 @@ import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.drawable.ColorDrawable
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import kotlin.math.abs
@@ -38,6 +41,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private var drawerBaseBottomPadding = 0
     private var insetViewport: View? = null
     private var viewportBaseBottomPadding = 0
+    private var statusBarAppearanceBeforeOpen: Int? = null
 
     init {
         clipChildren = false
@@ -370,11 +374,47 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             } else {
                 window.insetsController?.show(WindowInsets.Type.statusBars())
             }
+            val controller = window.insetsController ?: return
+            if (open) {
+                if (statusBarAppearanceBeforeOpen == null) {
+                    statusBarAppearanceBeforeOpen = controller.systemBarsAppearance
+                }
+                val lightStatusBar = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                controller.setSystemBarsAppearance(
+                    if (drawerBackgroundIsLight()) lightStatusBar else 0,
+                    lightStatusBar,
+                )
+            } else {
+                statusBarAppearanceBeforeOpen?.let { appearance ->
+                    val lightStatusBar = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    controller.setSystemBarsAppearance(appearance, lightStatusBar)
+                }
+                statusBarAppearanceBeforeOpen = null
+            }
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility =
-                if (hideStatusBarOnOpen && open) View.SYSTEM_UI_FLAG_FULLSCREEN else 0
+            window.decorView.systemUiVisibility = when {
+                hideStatusBarOnOpen && open -> View.SYSTEM_UI_FLAG_FULLSCREEN
+                open && drawerBackgroundIsLight() ->
+                    window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                open ->
+                    window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                else -> window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN.inv()
+            }
         }
+    }
+
+    private fun drawerBackgroundIsLight(): Boolean {
+        val drawer = getChildAt(1) ?: return false
+        val color = (drawer.background as? ColorDrawable)?.color
+            ?: drawer.backgroundTintList?.defaultColor
+            ?: return false
+        val luminance = (
+            0.2126 * Color.red(color) +
+                0.7152 * Color.green(color) +
+                0.0722 * Color.blue(color)
+            ) / 255.0
+        return luminance > 0.5
     }
 
     private companion object {

@@ -2,7 +2,9 @@ package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
 import android.content.Intent
+import android.graphics.Color
 import android.view.View
+import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -14,6 +16,40 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
+    @Test
+    fun drawerAdaptsStatusBarIconsAndRestoresThemWhenClosed() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val lightStatusBar = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                activity.window.insetsController?.setSystemBarsAppearance(
+                    lightStatusBar,
+                    lightStatusBar,
+                )
+                val drawer = PamDrawerLayout(activity).apply {
+                    addView(View(activity))
+                    addView(View(activity).apply { setBackgroundColor(Color.rgb(8, 24, 43)) })
+                }
+                activity.host.addView(drawer)
+
+                drawer.setOpen(true, animated = false)
+                assertEquals(
+                    0,
+                    activity.window.insetsController?.systemBarsAppearance?.and(lightStatusBar),
+                )
+
+                drawer.setOpen(false, animated = false)
+                assertEquals(
+                    lightStatusBar,
+                    activity.window.insetsController?.systemBarsAppearance?.and(lightStatusBar),
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun pushAndPopExposeOnlyTheDestinationAfterTheStagedFrame() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
