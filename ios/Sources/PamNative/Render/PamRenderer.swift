@@ -15,6 +15,7 @@ public final class PamRenderer {
     private var children: [Int64: [Int64]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
     private var localModalActions: [Int64: UIAction.Identifier] = [:]
+    private var borderLayers: [Int64: PamBorderLayers] = [:]
     private var rootId: Int64 = 0
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
@@ -100,6 +101,7 @@ public final class PamRenderer {
         }
         eventBridges.removeAll()
         localModalActions.removeAll()
+        borderLayers.removeAll()
 
         for node in nodes.values {
             cancelImageLoad(for: node)
@@ -216,6 +218,8 @@ public final class PamRenderer {
         }
         eventBridges[id] = nil
         localModalActions[id] = nil
+        borderLayers[id]?.remove()
+        borderLayers[id] = nil
 
         cancelImageLoad(for: state)
 
@@ -355,6 +359,7 @@ public final class PamRenderer {
             width: max(0, width),
             height: max(0, height),
         )
+        applyBorder(view: view, nodeId: id)
     }
 
     private func addChild(to parent: Int64, child: Int64) {
@@ -452,7 +457,7 @@ public final class PamRenderer {
             return UILabel()
         case .input:
             let field = PamInputField()
-            field.borderStyle = .roundedRect
+            field.borderStyle = .none
             return field
         case .image, .imageBackground:
             return UIImageView()
@@ -931,10 +936,19 @@ public final class PamRenderer {
                 state: nodes[nodeId],
                 kind: Int(value.integerOrNil() ?? 1)
             )
-        case PamConstants.backgroundColor, PamConstants.borderColor:
+        case PamConstants.backgroundColor:
             if let color = value.integerOrNil() {
                 view.backgroundColor = UIColor(argb: color)
             }
+        case PamConstants.borderColor,
+             PamConstants.borderWidth,
+             PamConstants.borderLeftWidth,
+             PamConstants.borderTopWidth,
+             PamConstants.borderRightWidth,
+             PamConstants.borderBottomWidth:
+            applyBorder(view: view, nodeId: nodeId)
+        case PamConstants.borderRadius:
+            view.layer.cornerRadius = CGFloat(value.decimalOrZero())
         case PamConstants.enabled:
             if let enabled = value.boolOrNil() {
                 view.isUserInteractionEnabled = enabled
@@ -1058,8 +1072,19 @@ public final class PamRenderer {
         }
     }
 
-    private func resetProperty(view: UIView, nodeId _: Int64, key: Int, state: NodeState) {
+    private func resetProperty(view: UIView, nodeId: Int64, key: Int, state: NodeState) {
         switch key {
+        case PamConstants.backgroundColor:
+            view.backgroundColor = .clear
+        case PamConstants.borderColor,
+             PamConstants.borderWidth,
+             PamConstants.borderLeftWidth,
+             PamConstants.borderTopWidth,
+             PamConstants.borderRightWidth,
+             PamConstants.borderBottomWidth:
+            applyBorder(view: view, nodeId: nodeId)
+        case PamConstants.borderRadius:
+            view.layer.cornerRadius = 0
         case PamConstants.fontSize,
              PamConstants.fontWeight,
              PamConstants.fontStyle,
@@ -1120,6 +1145,46 @@ public final class PamRenderer {
         default:
             break
         }
+    }
+
+    private func applyBorder(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        let uniform = CGFloat(
+            state.properties[PamConstants.borderWidth]?.decimalOrNil() ?? 0
+        )
+        func width(_ key: Int) -> CGFloat {
+            CGFloat(state.properties[key]?.decimalOrNil() ?? Double(uniform))
+        }
+
+        let left = max(0, width(PamConstants.borderLeftWidth))
+        let top = max(0, width(PamConstants.borderTopWidth))
+        let right = max(0, width(PamConstants.borderRightWidth))
+        let bottom = max(0, width(PamConstants.borderBottomWidth))
+        let color = UIColor(
+            argb: state.properties[PamConstants.borderColor]?.integerOrNil() ?? 0
+        ).cgColor
+        let directional = left != top || left != right || left != bottom
+
+        if !directional {
+            borderLayers[nodeId]?.remove()
+            borderLayers[nodeId] = nil
+            view.layer.borderWidth = left
+            view.layer.borderColor = color
+            return
+        }
+
+        view.layer.borderWidth = 0
+        view.layer.borderColor = nil
+        let layers = borderLayers[nodeId] ?? PamBorderLayers(host: view.layer)
+        borderLayers[nodeId] = layers
+        layers.update(
+            bounds: view.bounds,
+            left: left,
+            top: top,
+            right: right,
+            bottom: bottom,
+            color: color,
+        )
     }
 
     private func applyTextSizing(view: UIView, state: NodeState?) {
@@ -2373,6 +2438,66 @@ private extension PropValue {
         default:
             nil
         }
+    }
+}
+
+private final class PamBorderLayers {
+    private let left = CALayer()
+    private let top = CALayer()
+    private let right = CALayer()
+    private let bottom = CALayer()
+
+    init(host: CALayer) {
+        for layer in [left, top, right, bottom] {
+            layer.zPosition = 10_000
+            host.addSublayer(layer)
+        }
+    }
+
+    func update(
+        bounds: CGRect,
+        left leftWidth: CGFloat,
+        top topWidth: CGFloat,
+        right rightWidth: CGFloat,
+        bottom bottomWidth: CGFloat,
+        color: CGColor
+    ) {
+        left.backgroundColor = color
+        top.backgroundColor = color
+        right.backgroundColor = color
+        bottom.backgroundColor = color
+
+        left.frame = CGRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: leftWidth,
+            height: bounds.height,
+        )
+        top.frame = CGRect(
+            x: bounds.minX,
+            y: bounds.minY,
+            width: bounds.width,
+            height: topWidth,
+        )
+        right.frame = CGRect(
+            x: bounds.maxX - rightWidth,
+            y: bounds.minY,
+            width: rightWidth,
+            height: bounds.height,
+        )
+        bottom.frame = CGRect(
+            x: bounds.minX,
+            y: bounds.maxY - bottomWidth,
+            width: bounds.width,
+            height: bottomWidth,
+        )
+    }
+
+    func remove() {
+        left.removeFromSuperlayer()
+        top.removeFromSuperlayer()
+        right.removeFromSuperlayer()
+        bottom.removeFromSuperlayer()
     }
 }
 

@@ -16,12 +16,14 @@ final readonly class NavigationDrawerItem
         public Renderable|Closure $content,
         public ?Renderable $icon = null,
         public ?string $badge = null,
+        public ?string $group = null,
     ) {
         if (
             preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,63}$/D', $name) !== 1
             || trim($label) === ''
             || strlen($label) > 64
             || $badge !== null && strlen($badge) > 12
+            || $group !== null && (trim($group) === '' || strlen($group) > 48)
         ) {
             throw new InvalidArgumentException(
                 'Drawer routes require safe names and bounded labels.',

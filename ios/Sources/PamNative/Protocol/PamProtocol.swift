@@ -328,6 +328,10 @@ public enum PamConstants {
     public static let rippleAlpha = 248
     public static let borderWidth = 36
     public static let borderColor = 37
+    public static let borderLeftWidth = 122
+    public static let borderTopWidth = 123
+    public static let borderRightWidth = 124
+    public static let borderBottomWidth = 125
     public static let margin = 26
     public static let testId = 18
     public static let padding = 8

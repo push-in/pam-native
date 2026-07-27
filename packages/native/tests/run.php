@@ -2270,6 +2270,52 @@ $assert(
     $homeTabRenders === 1 && $ordersTabRenders === 1,
     'Selecting a tab must lazily mount only the next destination.',
 );
+$groupedDrawer = Router::drawer('overview')
+    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
+    ->route(
+        'button',
+        'Button',
+        Screen::make(Text::make('Button')),
+        group: 'Actions',
+    )
+    ->route(
+        'field',
+        'Text field',
+        Screen::make(Text::make('Text field')),
+        group: 'Forms',
+    )
+    ->persistence('test-grouped-drawer')
+    ->build();
+$assert(
+    !$groupedDrawer->isGroupExpanded('Actions')
+        && $groupedDrawer->toggleGroup('Actions')
+        && $groupedDrawer->isGroupExpanded('Actions')
+        && $groupedDrawer->navigate('field')
+        && $groupedDrawer->isGroupExpanded('Forms'),
+    'Grouped drawer routes must collapse cleanly and keep every destination navigable.',
+);
+$restoredGroupedDrawer = Router::drawer('overview')
+    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
+    ->route(
+        'button',
+        'Button',
+        Screen::make(Text::make('Button')),
+        group: 'Actions',
+    )
+    ->route(
+        'field',
+        'Text field',
+        Screen::make(Text::make('Text field')),
+        group: 'Forms',
+    )
+    ->persistence('test-grouped-drawer')
+    ->build();
+$assert(
+    $restoredGroupedDrawer->selectedRoute() === 'field'
+        && $restoredGroupedDrawer->isGroupExpanded('Actions')
+        && $restoredGroupedDrawer->isGroupExpanded('Forms'),
+    'Grouped drawer state must restore selection and expanded sections.',
+);
 $assert(
     \Pam\Native\Protocol::SDK_VERSION === '0.4.3',
     'The runtime SDK contract must match the 0.4 package release line.',
