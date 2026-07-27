@@ -75,6 +75,28 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         requestApplyInsets()
+        post {
+            val insets = rootWindowInsets ?: return@post
+            val nextTop = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                insets.getInsets(WindowInsets.Type.statusBars()).top
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetTop
+            }
+            val nextBottom = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetBottom
+            }
+            if (statusInsetTop != nextTop || navigationInsetBottom != nextBottom) {
+                statusInsetTop = nextTop
+                navigationInsetBottom = nextBottom
+                if (childCount > 1) {
+                    enforceDrawerViewport(getChildAt(1))
+                }
+            }
+        }
     }
 
     fun insert(view: View, index: Int) {
