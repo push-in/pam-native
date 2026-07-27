@@ -382,6 +382,7 @@ pub enum PropKey {
     DrawerHideStatusBarOnOpen = 299,
     DrawerStatusBarAnimation = 300,
     DrawerPermanentBreakpoint = 301,
+    LayoutDirection = 302,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -690,6 +691,7 @@ impl TryFrom<u16> for PropKey {
             299 => Ok(Self::DrawerHideStatusBarOnOpen),
             300 => Ok(Self::DrawerStatusBarAnimation),
             301 => Ok(Self::DrawerPermanentBreakpoint),
+            302 => Ok(Self::LayoutDirection),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1493,10 +1495,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(27).is_err());
 
-        for value in 1..=301 {
+        for value in 1..=302 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(302).is_err());
+        assert!(PropKey::try_from(303).is_err());
     }
 
     fn tree(text: &str) -> Tree {
