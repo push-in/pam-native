@@ -601,7 +601,9 @@ final class PamDrawerLayout: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
         guard swipeEnabled && resolvedType() != 4 else { return false }
         guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             return true
