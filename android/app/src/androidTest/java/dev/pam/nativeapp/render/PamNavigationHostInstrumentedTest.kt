@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -131,6 +132,47 @@ class PamNavigationHostInstrumentedTest {
         }
     }
 
+    @Test
+    fun permanentDrawerStartsBelowTheStatusBar() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var drawer: View
+            onMain(instrumentation) {
+                val layout = PamDrawerLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    )
+                    addView(View(activity))
+                    drawer = View(activity)
+                    addView(drawer)
+                    setDrawerType(TYPE_PERMANENT)
+                }
+                activity.host.addView(layout)
+            }
+
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val expectedTop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    drawer.rootWindowInsets
+                        ?.getInsets(android.view.WindowInsets.Type.statusBars())
+                        ?.top ?: 0
+                } else {
+                    @Suppress("DEPRECATION")
+                    drawer.rootWindowInsets?.systemWindowInsetTop ?: 0
+                }
+                assertTrue(expectedTop > 0)
+                assertEquals(
+                    expectedTop,
+                    (drawer.layoutParams as FrameLayout.LayoutParams).topMargin,
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity =
         instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).apply {
@@ -146,5 +188,6 @@ class PamNavigationHostInstrumentedTest {
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3
         const val TRANSITION_NONE = 8
+        const val TYPE_PERMANENT = 4
     }
 }
