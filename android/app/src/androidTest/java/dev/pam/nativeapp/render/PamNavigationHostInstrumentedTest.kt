@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.app.Instrumentation
 import android.content.Intent
 import android.graphics.Color
+import android.os.Build
 import android.view.View
 import android.view.WindowInsetsController
 import android.widget.FrameLayout
@@ -23,10 +24,17 @@ class PamNavigationHostInstrumentedTest {
         try {
             onMain(instrumentation) {
                 val lightStatusBar = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
-                activity.window.insetsController?.setSystemBarsAppearance(
-                    lightStatusBar,
-                    lightStatusBar,
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    activity.window.insetsController?.setSystemBarsAppearance(
+                        lightStatusBar,
+                        lightStatusBar,
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    activity.window.decorView.systemUiVisibility =
+                        activity.window.decorView.systemUiVisibility or
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                }
                 val drawer = PamDrawerLayout(activity).apply {
                     addView(View(activity))
                     addView(View(activity).apply { setBackgroundColor(Color.rgb(8, 24, 43)) })
@@ -34,16 +42,34 @@ class PamNavigationHostInstrumentedTest {
                 activity.host.addView(drawer)
 
                 drawer.setOpen(true, animated = false)
-                assertEquals(
-                    0,
-                    activity.window.insetsController?.systemBarsAppearance?.and(lightStatusBar),
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    assertEquals(
+                        0,
+                        activity.window.insetsController?.systemBarsAppearance?.and(lightStatusBar),
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    assertEquals(
+                        0,
+                        activity.window.decorView.systemUiVisibility and
+                            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR,
+                    )
+                }
 
                 drawer.setOpen(false, animated = false)
-                assertEquals(
-                    lightStatusBar,
-                    activity.window.insetsController?.systemBarsAppearance?.and(lightStatusBar),
-                )
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    assertEquals(
+                        lightStatusBar,
+                        activity.window.insetsController?.systemBarsAppearance?.and(lightStatusBar),
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    assertEquals(
+                        View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR,
+                        activity.window.decorView.systemUiVisibility and
+                            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR,
+                    )
+                }
             }
         } finally {
             activity.finish()

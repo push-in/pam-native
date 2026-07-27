@@ -42,6 +42,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private var insetViewport: View? = null
     private var viewportBaseBottomPadding = 0
     private var statusBarAppearanceBeforeOpen: Int? = null
+    private var systemUiVisibilityBeforeOpen: Int? = null
 
     init {
         clipChildren = false
@@ -393,13 +394,22 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             }
         } else {
             @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = when {
-                hideStatusBarOnOpen && open -> View.SYSTEM_UI_FLAG_FULLSCREEN
-                open && drawerBackgroundIsLight() ->
-                    window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                open ->
-                    window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
-                else -> window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_FULLSCREEN.inv()
+            if (open) {
+                if (systemUiVisibilityBeforeOpen == null) {
+                    systemUiVisibilityBeforeOpen = window.decorView.systemUiVisibility
+                }
+                window.decorView.systemUiVisibility = when {
+                    hideStatusBarOnOpen -> View.SYSTEM_UI_FLAG_FULLSCREEN
+                    drawerBackgroundIsLight() ->
+                        window.decorView.systemUiVisibility or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                    else ->
+                        window.decorView.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
+                }
+            } else {
+                systemUiVisibilityBeforeOpen?.let { appearance ->
+                    window.decorView.systemUiVisibility = appearance
+                }
+                systemUiVisibilityBeforeOpen = null
             }
         }
     }
