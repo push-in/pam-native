@@ -906,7 +906,7 @@ class PamRenderer(
     ) {
         when (key) {
             PropKey.TEXT -> (view as? TextView)?.let { text ->
-                val semanticText = value.semanticValue()
+                val semanticText = value.semanticValue().toString()
                 text.text = semanticText
                 state.baseText = semanticText
                 applyTextDataDetector(text, state)
