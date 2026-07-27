@@ -912,11 +912,11 @@ class PamRenderer(
                 applyTextDataDetector(text, state)
             }
             PropKey.VALUE -> if (view is EditText) {
-                applyInputValue(view, state, value.text())
+                applyInputValue(view, state, value.text(key))
             } else {
                 view.tag = value.semanticValue()
             }
-            PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text()
+            PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text(key)
             PropKey.SOURCE -> loadImage(view, state)
             PropKey.BACKGROUND_COLOR,
             PropKey.BORDER_RADIUS,
@@ -945,9 +945,9 @@ class PamRenderer(
                 view.isEnabled = value.flag()
                 configurePressable(view, state)
             }
-            PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text()
-            PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text()
-            PropKey.TEST_ID -> view.transitionName = value.text()
+            PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text(key)
+            PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text(key)
+            PropKey.TEST_ID -> view.transitionName = value.text(key)
             PropKey.ITEMS -> applyStringList(view, state, value)
             PropKey.SECTION_ITEMS -> applySectionList(view, state, value)
             PropKey.NAVIGATION_OPERATION ->
@@ -1097,7 +1097,7 @@ class PamRenderer(
             PropKey.SAFE_AREA_MODE,
             -> applySafeAreaLayout(view, state)
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(value.flag())
-            PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text())
+            PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text(key))
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
                 (view as? PamRefreshContainer)?.setProgressBackgroundColor(
                     value.integer().toInt(),
@@ -3704,8 +3704,9 @@ class PamRenderer(
     private fun PropKey.isEventProperty(): Boolean =
         this in EVENT_PROPERTIES
 
-    private fun PropValue.text(): String =
-        (this as? PropValue.Text)?.value ?: error("Expected text property")
+    private fun PropValue.text(key: PropKey): String =
+        (this as? PropValue.Text)?.value
+            ?: error("Expected text property for $key, received ${this::class.simpleName}")
 
     private fun PropValue.integer(): Long =
         when (this) {
