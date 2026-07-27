@@ -10,9 +10,7 @@ import android.widget.ProgressBar
 import kotlin.math.max
 
 internal class PamActivityIndicator(context: Context) : FrameLayout(context) {
-    private val indicator = ProgressBar(context).apply {
-        isIndeterminate = true
-    }
+    private val indicator = PamVuetifySpinner(context)
     private val defaultTint = indicator.indeterminateTintList
     private var requestedVisible = true
     private var animating = true

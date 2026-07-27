@@ -26,6 +26,7 @@ use Pam\Native\InputSyncMode;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
+use Pam\Native\LayoutDirection;
 use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalPresentation;
 use Pam\Native\NodeKind;
@@ -219,6 +220,16 @@ final class TemplateRenderer
         'endReachedThreshold' => PropKey::EndReachedThreshold,
         'drawerOpen' => PropKey::DrawerOpen,
         'drawerPosition' => PropKey::DrawerPosition,
+        'drawerType' => PropKey::DrawerType,
+        'drawerWidth' => PropKey::DrawerWidth,
+        'drawerOverlayColor' => PropKey::DrawerOverlayColor,
+        'drawerSwipeEnabled' => PropKey::DrawerSwipeEnabled,
+        'drawerSwipeEdgeWidth' => PropKey::DrawerSwipeEdgeWidth,
+        'drawerSwipeMinDistance' => PropKey::DrawerSwipeMinDistance,
+        'drawerKeyboardDismissMode' => PropKey::DrawerKeyboardDismissMode,
+        'drawerHideStatusBarOnOpen' => PropKey::DrawerHideStatusBarOnOpen,
+        'drawerStatusBarAnimation' => PropKey::DrawerStatusBarAnimation,
+        'drawerPermanentBreakpoint' => PropKey::DrawerPermanentBreakpoint,
         'letterSpacing' => PropKey::LetterSpacing,
         'lineHeight' => PropKey::LineHeight,
         'placeholderColor' => PropKey::PlaceholderColor,
@@ -255,6 +266,7 @@ final class TemplateRenderer
         'zIndex' => PropKey::ZIndex,
         'overflow' => PropKey::Overflow,
         'flexDirection' => PropKey::FlexDirection,
+        'layoutDirection' => PropKey::LayoutDirection,
         'flexShrink' => PropKey::FlexShrink,
         'paddingLeft' => PropKey::PaddingLeft,
         'paddingTop' => PropKey::PaddingTop,
@@ -361,6 +373,14 @@ final class TemplateRenderer
         'on:show' => EventKind::ModalShow,
         'on:dismiss' => EventKind::ModalDismiss,
         'on:orientationChange' => EventKind::ModalOrientationChange,
+        'p-click-outside' => EventKind::ClickOutside,
+        'p-intersect' => EventKind::Intersect,
+        'p-mutate' => EventKind::Mutate,
+        'p-resize' => EventKind::Resize,
+        'p-scroll' => EventKind::Scroll,
+        'p-touch-start' => EventKind::TouchStart,
+        'p-touch-move' => EventKind::TouchMove,
+        'p-touch-end' => EventKind::TouchEnd,
     ];
 
     private function __construct()
@@ -665,6 +685,8 @@ final class TemplateRenderer
                 isset(self::EVENTS[$name])
                 || $name === 'class'
                 || $name === ':class'
+                || $name === 'p-ripple'
+                || $name === ':p-ripple'
                 || str_starts_with($name, '@')
             ) {
                 continue;
@@ -673,6 +695,23 @@ final class TemplateRenderer
             $values[ltrim($name, ':')] = str_starts_with($name, ':')
                 ? self::dynamicValue($raw, $scope, $data)
                 : self::value($raw, $scope, $data);
+        }
+        $rippleAttribute = $attributes[':p-ripple'] ?? $attributes['p-ripple'] ?? null;
+        if (array_key_exists(':p-ripple', $attributes)) {
+            $rippleAttribute = self::dynamicValue($rippleAttribute, $scope, $data);
+        } elseif (array_key_exists('p-ripple', $attributes)) {
+            $rippleAttribute = self::value($rippleAttribute, $scope, $data);
+        }
+        if ($rippleAttribute !== null && $rippleAttribute !== false) {
+            $ripple = is_array($rippleAttribute) ? $rippleAttribute : [];
+            $values['rippleColor'] = $ripple['color']
+                ?? (is_int($rippleAttribute) ? $rippleAttribute : 0);
+            $values['rippleAlpha'] = $ripple['alpha'] ?? 0.12;
+            $values['rippleBorderless'] = $ripple['borderless'] ?? false;
+            $values['rippleForeground'] = $ripple['foreground'] ?? false;
+            if (isset($ripple['radius'])) {
+                $values['rippleRadius'] = $ripple['radius'];
+            }
         }
         $resolvedClass = self::classValue($attributes, $scope, $data);
         if ($factory !== null && $resolvedClass !== null) {
@@ -1281,6 +1320,10 @@ final class TemplateRenderer
                 'row' => 2,
                 'column-reverse' => 3,
                 'row-reverse' => 4,
+            ]),
+            PropKey::LayoutDirection => self::named($value, [
+                'ltr' => LayoutDirection::LeftToRight->value,
+                'rtl' => LayoutDirection::RightToLeft->value,
             ]),
             PropKey::PositionType => self::named($value, [
                 'relative' => 1,

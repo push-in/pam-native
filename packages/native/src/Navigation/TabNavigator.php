@@ -7,6 +7,7 @@ namespace Pam\Native\Navigation;
 use InvalidArgumentException;
 use Pam\Native\AccessibilityRole;
 use Pam\Native\HapticFeedback;
+use Pam\Native\Overflow;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
@@ -27,6 +28,7 @@ final class TabNavigator implements Renderable, Restorable
     private array $tabs;
     private int $selected;
     private float $windowWidth = 0.0;
+    private float $windowHeight = 0.0;
 
     /**
      * @param list<NavigationTab> $tabs
@@ -91,6 +93,7 @@ final class TabNavigator implements Renderable, Restorable
     public function dimensions(WindowMetrics $metrics): void
     {
         $this->windowWidth = max(0.0, $metrics->width);
+        $this->windowHeight = max(0.0, $metrics->height);
     }
 
     public function resolvedPresentation(): TabPresentation
@@ -150,7 +153,14 @@ final class TabNavigator implements Renderable, Restorable
                 ->accessibilityLabel($tab->label);
             if ($selected) {
                 $screens[] = View::make($tab->render())
-                    ->style(new Style(flexGrow: 1.0, flexShrink: 1.0))
+                    ->style(new Style(
+                        positionType: \Pam\Native\PositionType::Absolute,
+                        top: 0.0,
+                        right: 0.0,
+                        bottom: 0.0,
+                        left: 0.0,
+                        overflow: Overflow::Hidden,
+                    ))
                     ->key('tab-screen-'.$tab->name);
             }
         }
@@ -167,13 +177,28 @@ final class TabNavigator implements Renderable, Restorable
                         borderColor: $this->dividerColor,
                     ))
                     ->accessibilityRole(AccessibilityRole::TabList),
-                Column::make(...$screens)->style(new Style(flexGrow: 1.0)),
+                Column::make(...$screens)->style(new Style(
+                    flexGrow: 1.0,
+                    overflow: Overflow::Hidden,
+                )),
             )->style(new Style(flexGrow: 1.0));
         } else {
             $layout = Column::make(
-                Column::make(...$screens)->style(new Style(flexGrow: 1.0, flexShrink: 1.0)),
+                Column::make(...$screens)->style(new Style(
+                    positionType: \Pam\Native\PositionType::Absolute,
+                    top: 0.0,
+                    right: 0.0,
+                    bottom: 68.0,
+                    left: 0.0,
+                    overflow: Overflow::Hidden,
+                )),
                 Row::make(...$destinations)
                     ->style(new Style(
+                        positionType: \Pam\Native\PositionType::Absolute,
+                        right: 0.0,
+                        bottom: 0.0,
+                        left: 0.0,
+                        height: 68.0,
                         minHeight: 68.0,
                         backgroundColor: $this->barBackground,
                         paddingHorizontal: 8.0,
@@ -183,11 +208,21 @@ final class TabNavigator implements Renderable, Restorable
                         borderColor: $this->dividerColor,
                     ))
                     ->accessibilityRole(AccessibilityRole::TabList),
-            )->style(new Style(flexGrow: 1.0));
+            )->style(new Style(
+                widthPercent: 100.0,
+                heightPercent: 100.0,
+                flexGrow: 1.0,
+            ));
         }
 
         return SafeAreaView::make($layout)
-            ->edges(top: true, right: true, bottom: true, left: true);
+            ->edges(top: true, right: true, bottom: true, left: true)
+            ->style(new Style(
+                widthPercent: 100.0,
+                height: $this->windowHeight > 0.0 ? $this->windowHeight : null,
+                heightPercent: $this->windowHeight > 0.0 ? null : 100.0,
+                flexGrow: 1.0,
+            ));
     }
 
     public function stateKey(): string

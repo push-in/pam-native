@@ -5,6 +5,7 @@ import android.app.Dialog
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.KeyEvent
@@ -12,6 +13,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import android.widget.FrameLayout
 import java.lang.ref.WeakReference
 
@@ -21,12 +24,13 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     private var presentation = PRESENTATION_DIALOG
     private var desiredVisible = true
     private var animationType = ANIMATION_NONE
-    private var backdropColor = Color.WHITE
+    private var backdropColor = Color.argb(82, 0, 0, 0)
     private var transparent = false
     private var hardwareAccelerated = false
     private var navigationBarTranslucent = false
     private var statusBarTranslucent = false
     private var allowSwipeDismissal = false
+    private var focusKeyboard = false
     private var onRequestClose: (() -> Unit)? = null
     private var onShow: (() -> Unit)? = null
     private var onDismiss: (() -> Unit)? = null
@@ -102,6 +106,10 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
     fun setAllowSwipeDismissal(value: Boolean) {
         allowSwipeDismissal = value
+    }
+
+    fun setFocusKeyboard(value: Boolean) {
+        focusKeyboard = value
     }
 
     fun setCallbacks(
@@ -197,7 +205,19 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             onShow?.invoke()
             content.post {
                 if (dialog === modal && modal.isShowing) {
-                    content.findFirstFocusable()?.requestFocus()
+                    val focus = if (focusKeyboard) {
+                        content.findFirstEditText()
+                    } else {
+                        content.findFirstFocusable()
+                    }
+                    focus?.let {
+                        focus.requestFocus()
+                        if (focusKeyboard && focus is EditText) {
+                            val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                                as? InputMethodManager
+                            keyboard?.showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT)
+                        }
+                    }
                 }
             }
         }
@@ -217,8 +237,18 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     private fun applyWindowConfiguration(modal: Dialog) {
         modal.window?.apply {
             setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setFormat(PixelFormat.TRANSLUCENT)
+            decorView.setBackgroundColor(Color.TRANSPARENT)
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+            attributes = attributes.apply { dimAmount = 0f }
+            setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                    if (focusKeyboard) {
+                        WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                    } else {
+                        WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+                    },
+            )
             setGravity(
                 if (presentation == PRESENTATION_SHEET) {
                     Gravity.BOTTOM
@@ -248,6 +278,19 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun applyWindowLayout(modal: Dialog) {
+        repeat(content.childCount) { index ->
+            content.getChildAt(index).layoutParams = when (presentation) {
+                PRESENTATION_SHEET -> FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    Gravity.BOTTOM,
+                )
+                else -> FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            }
+        }
         modal.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -255,13 +298,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun applyBackdrop() {
-        content.setBackgroundColor(
-            if (transparent) {
-                Color.TRANSPARENT
-            } else {
-                backdropColor
-            },
-        )
+        content.setBackgroundColor(backdropColor)
     }
 
     private fun animateEntrance() {
@@ -280,7 +317,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         content.animate()
             .alpha(1f)
             .translationY(0f)
-            .setDuration(MODAL_ANIMATION_DURATION_MS)
+            .setDuration(MODAL_ENTER_DURATION_MS)
             .start()
     }
 
@@ -306,7 +343,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
                         0f
                     },
                 )
-                .setDuration(MODAL_ANIMATION_DURATION_MS)
+                .setDuration(MODAL_EXIT_DURATION_MS)
                 .withEndAction {
                     if (
                         dialogGeneration == generation &&
@@ -329,10 +366,19 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         content.alpha = 1f
         content.translationY = 0f
         val wasShowing = modal.isShowing
+        if (focusKeyboard) {
+            modal.currentFocus?.let { focus ->
+                val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                    as? InputMethodManager
+                keyboard?.hideSoftInputFromWindow(focus.windowToken, 0)
+                focus.clearFocus()
+            }
+            previousFocus = null
+        }
         modal.dismiss()
         dialog = null
         lastOrientation = null
-        restoreFocus()
+        if (!focusKeyboard) restoreFocus()
         if (notify && wasShowing) {
             onDismiss?.invoke()
         }
@@ -368,6 +414,15 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         return null
     }
 
+    private fun View.findFirstEditText(): EditText? {
+        if (this is EditText && isEnabled && visibility == View.VISIBLE) return this
+        if (this !is ViewGroup) return null
+        repeat(childCount) { index ->
+            getChildAt(index).findFirstEditText()?.let { return it }
+        }
+        return null
+    }
+
     private companion object {
         const val PRESENTATION_DIALOG = 2
         const val PRESENTATION_SHEET = 3
@@ -376,7 +431,8 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         const val ANIMATION_FADE = 3
         const val ORIENTATION_PORTRAIT = 1
         const val ORIENTATION_LANDSCAPE = 2
-        const val MODAL_ANIMATION_DURATION_MS = 220L
+        const val MODAL_ENTER_DURATION_MS = 225L
+        const val MODAL_EXIT_DURATION_MS = 125L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
     }
 }

@@ -6,6 +6,7 @@ import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Activity
 import android.content.Context
+import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Paint
@@ -58,6 +59,7 @@ import android.widget.Space
 import android.widget.Switch
 import android.widget.TextView
 import dev.pam.nativeapp.protocol.Frame
+import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
 import dev.pam.nativeapp.protocol.NodeKind
 import dev.pam.nativeapp.protocol.NodeSpec
@@ -132,6 +134,8 @@ class PamRenderer(
                 }
             }
         }
+        syncLocalModalTriggers()
+        syncHostBackground()
         syncVirtualLists()
         dirtyLayouts.forEach(::applyLayout)
         retainedScrollOffsets.forEach { (id, offset) ->
@@ -142,6 +146,170 @@ class PamRenderer(
                 )
             }
         }
+    }
+
+    private fun syncHostBackground() {
+        host.setBackgroundColor(resolveHostBackground(rootId, 0))
+    }
+
+    private val localModalInputTargets =
+        java.util.WeakHashMap<EditText, PamModalHost>()
+
+    private fun openLocalModalInput(input: EditText) {
+        localModalInputTargets[input]?.setVisible(true)
+    }
+
+    private fun bindLocalModalInput(input: EditText, target: PamModalHost) {
+        if (!localModalInputTargets.containsKey(input)) {
+            val previous = input.onFocusChangeListener
+            input.onFocusChangeListener = View.OnFocusChangeListener { view, hasFocus ->
+                previous?.onFocusChange(view, hasFocus)
+                if (hasFocus) openLocalModalInput(input)
+            }
+        }
+        localModalInputTargets[input] = target
+        target.setFocusKeyboard(true)
+        input.setOnClickListener { openLocalModalInput(input) }
+    }
+
+    private fun syncLocalModalTriggers() {
+        val modals = HashMap<String, PamModalHost>()
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            if (state.kind != NodeKind.MODAL) continue
+            val marker = state.properties[PropKey.VALUE]?.text() ?: continue
+            if (marker.startsWith(LOCAL_MODAL_PREFIX)) {
+                (views[state.id] as? PamModalHost)?.let {
+                    modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = it
+                }
+            }
+        }
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            val trigger = views[state.id] as? PamPressable ?: continue
+            val marker = state.properties[PropKey.VALUE]?.text()
+            val modal = if (marker?.startsWith(LOCAL_MODAL_TRIGGER_PREFIX) == true) {
+                modals[marker.removePrefix(LOCAL_MODAL_TRIGGER_PREFIX)]
+            } else {
+                null
+            }
+            trigger.setLocalOnPress(modal?.let { target ->
+                { target.setVisible(true) }
+            })
+        }
+        val orderedModals = ArrayList<Pair<Int, PamModalHost>>()
+        val orderedInputs = ArrayList<Pair<Int, EditText>>()
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            val marker = state.properties[PropKey.VALUE]?.text() ?: continue
+            if (state.kind == NodeKind.MODAL && marker.startsWith(LOCAL_MODAL_PREFIX)) {
+                (views[state.id] as? PamModalHost)?.let { orderedModals += position to it }
+            }
+        }
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            (views[state.id] as? EditText)?.let { orderedInputs += position to it }
+        }
+        orderedInputs.forEach { (inputPosition, input) ->
+            val target = orderedModals.minByOrNull { (modalPosition, _) ->
+                kotlin.math.abs(modalPosition - inputPosition)
+            }?.second
+            if (target != null) bindLocalModalInput(input, target)
+        }
+    }
+
+    private fun updateLocalModalSelection(startId: Long) {
+        val selected = views[startId]?.contentDescription?.toString()?.takeIf(String::isNotBlank)
+            ?: return
+        var currentId = nodes[startId]?.parent ?: 0L
+        var modalKey: String? = null
+        var depth = 0
+        while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
+            val state = nodes[currentId] ?: break
+            if (state.kind == NodeKind.MODAL) {
+                val marker = state.properties[PropKey.VALUE]?.text()
+                if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
+                    modalKey = marker.removePrefix(LOCAL_MODAL_PREFIX)
+                }
+                break
+            }
+            currentId = state.parent
+        }
+        val key = modalKey ?: return
+        for (position in 0 until nodes.size()) {
+            val state = nodes.valueAt(position)
+            val marker = state.properties[PropKey.VALUE]?.text()
+            if (marker != LOCAL_MODAL_TRIGGER_PREFIX + key) continue
+            val trigger = views[state.id] as? ViewGroup ?: continue
+            val value = descendantTextViews(trigger)
+                .filter { it !is EditText && it.text.toString() !in setOf("⌄", "›") }
+                .maxByOrNull { it.width }
+            value?.text = selected
+            trigger.contentDescription = selected
+        }
+    }
+
+    private fun descendantTextViews(root: ViewGroup): List<TextView> {
+        val labels = ArrayList<TextView>()
+        fun collect(group: ViewGroup) {
+            for (index in 0 until group.childCount) {
+                when (val child = group.getChildAt(index)) {
+                    is TextView -> labels += child
+                    is ViewGroup -> collect(child)
+                }
+            }
+        }
+        collect(root)
+        return labels
+    }
+
+    private fun closeLocalModalAncestor(startId: Long) {
+        var currentId = nodes[startId]?.parent ?: 0L
+        var depth = 0
+        while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
+            val state = nodes[currentId] ?: return
+            if (state.kind == NodeKind.MODAL) {
+                val marker = state.properties[PropKey.VALUE]?.text()
+                if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
+                    views[startId]?.let { source ->
+                        val keyboard = source.context.getSystemService(
+                            Context.INPUT_METHOD_SERVICE,
+                        ) as? android.view.inputmethod.InputMethodManager
+                        keyboard?.hideSoftInputFromWindow(source.windowToken, 0)
+                    }
+                    (views[currentId] as? PamModalHost)?.setVisible(false)
+                    main.postDelayed({
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                            host.windowInsetsController?.hide(
+                                android.view.WindowInsets.Type.ime(),
+                            )
+                        } else {
+                            val keyboard = context.getSystemService(
+                                Context.INPUT_METHOD_SERVICE,
+                            ) as? android.view.inputmethod.InputMethodManager
+                            keyboard?.hideSoftInputFromWindow(host.windowToken, 0)
+                        }
+                    }, 180L)
+                }
+                return
+            }
+            currentId = state.parent
+        }
+    }
+
+    private fun resolveHostBackground(nodeId: Long, depth: Int): Int {
+        if (depth > 8) return Color.TRANSPARENT
+        val node = nodes[nodeId] ?: return Color.TRANSPARENT
+        node.properties[PropKey.BACKGROUND_COLOR]?.let { value ->
+            return value.integer().toInt()
+        }
+        val descendants = children[nodeId] ?: return Color.TRANSPARENT
+        for (childId in descendants) {
+            val color = resolveHostBackground(childId, depth + 1)
+            if (color != Color.TRANSPARENT) return color
+        }
+
+        return Color.TRANSPARENT
     }
 
     fun trimMemory(critical: Boolean) {
@@ -155,7 +323,14 @@ class PamRenderer(
             (views.valueAt(position) as? PamModalHost)?.close()
         }
         for (position in 0 until nodes.size()) {
-            nodes.valueAt(position).propertyAnimator?.cancel()
+            val state = nodes.valueAt(position)
+            state.propertyAnimator?.cancel()
+            state.outsidePointerObserver?.let { observer ->
+                (host as? PamRootHost)?.removePointerObserver(observer)
+            }
+            state.directiveLayoutListener?.let { listener ->
+                views[state.id]?.removeOnLayoutChangeListener(listener)
+            }
         }
         statusBarDefaults?.let(::applyStatusBarConfig)
         statusBarColorAnimator?.cancel()
@@ -243,6 +418,10 @@ class PamRenderer(
                 val name = custom.properties[PropKey.HOST_NAME]?.text()
                     ?: error("Custom native view is missing its generated name")
                 nativeViews.create(name) { kind, payload ->
+                    if (kind == EVENT_NATIVE) {
+                        updateLocalModalSelection(custom.id)
+                        closeLocalModalAncestor(custom.id)
+                    }
                     val eventProperty = nativeEventProperty(kind)
                     if (eventProperty != null && custom.properties[eventProperty] != null) {
                         dispatchBytes(custom.id, kind, payload)
@@ -261,6 +440,12 @@ class PamRenderer(
         pamImageView(view)?.let(imageLoader::cancel)
         view?.let(nativeViews::release)
         view?.let(::clearHitSlop)
+        state.directiveLayoutListener?.let { listener ->
+            view?.removeOnLayoutChangeListener(listener)
+        }
+        state.outsidePointerObserver?.let { observer ->
+            (host as? PamRootHost)?.removePointerObserver(observer)
+        }
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
         children.remove(id)
@@ -589,9 +774,41 @@ class PamRenderer(
         val frame = frames[id] ?: return
         val view = views[id] ?: return
         val state = nodes[id] ?: return
+        val parentState = nodes[state.parent]
         val parentFrame = frames[effectiveParent(state.parent)]
         val left = frame.x - (parentFrame?.x ?: 0f)
         val top = frame.y - (parentFrame?.y ?: 0f)
+        val parentSafePadding = parentState?.kind == NodeKind.SAFE_AREA_VIEW &&
+            parentState.integer(
+                PropKey.SAFE_AREA_MODE,
+                SAFE_AREA_PADDING.toLong(),
+            ).toInt() == SAFE_AREA_PADDING
+        val parentSafeHorizontal = if (parentSafePadding) {
+            (if (parentState?.flag(PropKey.SAFE_AREA_LEFT, true) == true) {
+                parentState.safeAreaLeftInset
+            } else {
+                0
+            }) + (if (parentState?.flag(PropKey.SAFE_AREA_RIGHT, true) == true) {
+                parentState.safeAreaRightInset
+            } else {
+                0
+            })
+        } else {
+            0
+        }
+        val parentSafeVertical = if (parentSafePadding) {
+            (if (parentState?.flag(PropKey.SAFE_AREA_TOP, true) == true) {
+                parentState.safeAreaTopInset
+            } else {
+                0
+            }) + (if (parentState?.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true) == true) {
+                parentState.safeAreaBottomInset
+            } else {
+                0
+            })
+        } else {
+            0
+        }
         val safeMargin = state.kind == NodeKind.SAFE_AREA_VIEW &&
             state.integer(PropKey.SAFE_AREA_MODE, SAFE_AREA_PADDING.toLong()).toInt() ==
             SAFE_AREA_MARGIN
@@ -618,8 +835,12 @@ class PamRenderer(
         } else {
             0
         }
-        val width = (dp(frame.width) - safeLeft - safeRight).coerceAtLeast(0)
-        val height = (dp(frame.height) - safeTop - safeBottom).coerceAtLeast(0)
+        val width = (
+            dp(frame.width) - safeLeft - safeRight - parentSafeHorizontal
+            ).coerceAtLeast(0)
+        val height = (
+            dp(frame.height) - safeTop - safeBottom - parentSafeVertical
+            ).coerceAtLeast(0)
         val leftPx = dp(left) + safeLeft
         val topPx = dp(top) + safeTop
         val current = view.layoutParams as? ViewGroup.MarginLayoutParams
@@ -1009,6 +1230,23 @@ class PamRenderer(
             PropKey.ROTATION,
             -> animateOrSet(view, state, key, value.decimal().toFloat())
             PropKey.DRAWER_OPEN -> (view as? PamDrawerLayout)?.setOpen(value.flag())
+            PropKey.DRAWER_TYPE -> (view as? PamDrawerLayout)?.setDrawerType(value.integer().toInt())
+            PropKey.DRAWER_POSITION -> (view as? PamDrawerLayout)?.setDrawerPosition(value.integer().toInt())
+            PropKey.DRAWER_WIDTH -> (view as? PamDrawerLayout)?.setDrawerWidth(value.decimal().toFloat())
+            PropKey.DRAWER_OVERLAY_COLOR -> (view as? PamDrawerLayout)?.setOverlayColor(value.integer().toInt())
+            PropKey.DRAWER_SWIPE_ENABLED -> (view as? PamDrawerLayout)?.setSwipeEnabled(value.flag())
+            PropKey.DRAWER_SWIPE_EDGE_WIDTH -> (view as? PamDrawerLayout)?.setSwipeEdgeWidth(value.decimal().toFloat())
+            PropKey.DRAWER_SWIPE_MIN_DISTANCE -> (view as? PamDrawerLayout)?.setSwipeMinDistance(value.decimal().toFloat())
+            PropKey.DRAWER_KEYBOARD_DISMISS_MODE -> (view as? PamDrawerLayout)?.setKeyboardDismissMode(value.integer().toInt())
+            PropKey.DRAWER_HIDE_STATUS_BAR_ON_OPEN -> (view as? PamDrawerLayout)?.setHideStatusBarOnOpen(value.flag())
+            PropKey.DRAWER_STATUS_BAR_ANIMATION -> (view as? PamDrawerLayout)?.setStatusBarAnimation(value.integer().toInt())
+            PropKey.DRAWER_PERMANENT_BREAKPOINT -> (view as? PamDrawerLayout)?.setPermanentBreakpoint(value.decimal().toFloat())
+            PropKey.LAYOUT_DIRECTION -> view.layoutDirection =
+                if (value.integer().toInt() == 2) {
+                    View.LAYOUT_DIRECTION_RTL
+                } else {
+                    View.LAYOUT_DIRECTION_LTR
+                }
             PropKey.LETTER_SPACING -> (view as? TextView)?.letterSpacing = value.decimal().toFloat()
             PropKey.LINE_HEIGHT -> (view as? TextView)?.setLineSpacing(
                 0f,
@@ -1149,6 +1387,13 @@ class PamRenderer(
             PropKey.ON_MODAL_SHOW,
             PropKey.ON_MODAL_DISMISS,
             PropKey.ON_MODAL_ORIENTATION_CHANGE,
+            PropKey.ON_CLICK_OUTSIDE,
+            PropKey.ON_INTERSECT,
+            PropKey.ON_MUTATE,
+            PropKey.ON_RESIZE,
+            PropKey.ON_TOUCH_START,
+            PropKey.ON_TOUCH_MOVE,
+            PropKey.ON_TOUCH_END,
             PropKey.FLEX_DIRECTION,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
@@ -1189,6 +1434,7 @@ class PamRenderer(
 
     private fun resetProperty(view: View, state: NodeState, key: PropKey) {
         when (key) {
+            PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
             PropKey.TEXT -> (view as? TextView)?.text = ""
             PropKey.VALUE -> if (view is EditText) {
                 view.setText("")
@@ -1577,6 +1823,14 @@ class PamRenderer(
             }
         }
         installPressFeedback(view, state)
+        if (
+            state.properties[PropKey.RIPPLE_COLOR] != null &&
+            state.properties[PropKey.ON_PRESS] == null &&
+            state.kind != NodeKind.CUSTOM_VIEW
+        ) {
+            view.isClickable = true
+        }
+        installDirectiveEvents(view, state)
         if (view is EditText) installInputEvents(view, state)
         if (view is Switch) {
             view.setOnCheckedChangeListener { _, checked ->
@@ -1663,9 +1917,14 @@ class PamRenderer(
         ) {
             return
         }
+        val hasTouchDirective =
+            state.properties[PropKey.ON_TOUCH_START] != null ||
+                state.properties[PropKey.ON_TOUCH_MOVE] != null ||
+                state.properties[PropKey.ON_TOUCH_END] != null
         if (
             state.properties[PropKey.ON_PRESS] == null &&
-            state.properties[PropKey.ON_LONG_PRESS] == null
+            state.properties[PropKey.ON_LONG_PRESS] == null &&
+            !hasTouchDirective
         ) {
             view.setOnTouchListener(null)
             return
@@ -1674,13 +1933,177 @@ class PamRenderer(
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     view.animate().alpha(state.pressOpacity).setDuration(70).start()
+                    dispatchDirectiveTouch(state, EventKind.TOUCH_START.value, event)
                 }
+                MotionEvent.ACTION_MOVE ->
+                    dispatchDirectiveTouch(state, EventKind.TOUCH_MOVE.value, event)
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL,
-                -> view.animate().alpha(state.targetAlpha()).setDuration(110).start()
+                -> {
+                    view.animate().alpha(state.targetAlpha()).setDuration(110).start()
+                    dispatchDirectiveTouch(state, EventKind.TOUCH_END.value, event)
+                }
             }
             false
         }
+    }
+
+    private fun installDirectiveEvents(view: View, state: NodeState) {
+        state.directiveLayoutListener?.let(view::removeOnLayoutChangeListener)
+        state.directiveLayoutListener = null
+        state.outsidePointerObserver?.let { observer ->
+            (host as? PamRootHost)?.removePointerObserver(observer)
+        }
+        state.outsidePointerObserver = null
+        state.lastDirectiveIntersection = null
+        if (
+            state.properties[PropKey.ON_RESIZE] == null &&
+            state.properties[PropKey.ON_MUTATE] == null &&
+            state.properties[PropKey.ON_INTERSECT] == null
+        ) {
+            if (state.properties[PropKey.ON_CLICK_OUTSIDE] == null) return
+        }
+
+        if (state.properties[PropKey.ON_CLICK_OUTSIDE] != null) {
+            val observer: (MotionEvent) -> Unit = observer@{ event ->
+                if (nodes[state.id] !== state || !view.isShown) return@observer
+                val location = IntArray(2)
+                val hostLocation = IntArray(2)
+                view.getLocationOnScreen(location)
+                host.getLocationOnScreen(hostLocation)
+                val pageX = event.x + hostLocation[0]
+                val pageY = event.y + hostLocation[1]
+                val inside =
+                    pageX >= location[0] &&
+                        pageX < location[0] + view.width &&
+                        pageY >= location[1] &&
+                        pageY < location[1] + view.height
+                if (!inside) {
+                    val density = resourcesDensity().coerceAtLeast(0.01f)
+                    dispatchBytes(
+                        state.id,
+                        EventKind.CLICK_OUTSIDE.value,
+                        WireMap.encode(
+                            mapOf(
+                                "pageX" to WireValue.Decimal(pageX / density.toDouble()),
+                                "pageY" to WireValue.Decimal(pageY / density.toDouble()),
+                            ),
+                        ),
+                    )
+                }
+            }
+            state.outsidePointerObserver = observer
+            (host as? PamRootHost)?.addPointerObserver(observer)
+        }
+
+        if (
+            state.properties[PropKey.ON_RESIZE] == null &&
+            state.properties[PropKey.ON_MUTATE] == null &&
+            state.properties[PropKey.ON_INTERSECT] == null
+        ) {
+            return
+        }
+
+        val listener = View.OnLayoutChangeListener {
+                target,
+                left,
+                top,
+                right,
+                bottom,
+                oldLeft,
+                oldTop,
+                oldRight,
+                oldBottom,
+            ->
+            val density = resourcesDensity().coerceAtLeast(0.01f)
+            val width = right - left
+            val height = bottom - top
+            if (
+                state.properties[PropKey.ON_RESIZE] != null &&
+                (width != oldRight - oldLeft || height != oldBottom - oldTop)
+            ) {
+                dispatchBytes(
+                    state.id,
+                    EventKind.RESIZE.value,
+                    WireMap.encode(
+                        mapOf(
+                            "width" to WireValue.Decimal(width / density.toDouble()),
+                            "height" to WireValue.Decimal(height / density.toDouble()),
+                        ),
+                    ),
+                )
+            }
+            if (
+                state.properties[PropKey.ON_MUTATE] != null &&
+                (left != oldLeft || top != oldTop || right != oldRight || bottom != oldBottom)
+            ) {
+                dispatchBytes(
+                    state.id,
+                    EventKind.MUTATE.value,
+                    WireMap.encode(
+                        mapOf(
+                            "x" to WireValue.Decimal(left / density.toDouble()),
+                            "y" to WireValue.Decimal(top / density.toDouble()),
+                            "width" to WireValue.Decimal(width / density.toDouble()),
+                            "height" to WireValue.Decimal(height / density.toDouble()),
+                        ),
+                    ),
+                )
+            }
+            if (state.properties[PropKey.ON_INTERSECT] != null) {
+                val visibleRect = Rect()
+                val intersecting =
+                    target.isShown &&
+                        target.alpha > 0f &&
+                        target.getGlobalVisibleRect(visibleRect) &&
+                        !visibleRect.isEmpty
+                if (state.lastDirectiveIntersection != intersecting) {
+                    state.lastDirectiveIntersection = intersecting
+                    dispatch(state.id, EventKind.INTERSECT.value, if (intersecting) "1" else "0")
+                }
+            }
+        }
+        state.directiveLayoutListener = listener
+        view.addOnLayoutChangeListener(listener)
+        view.post {
+            if (nodes[state.id] === state) {
+                listener.onLayoutChange(
+                    view,
+                    view.left,
+                    view.top,
+                    view.right,
+                    view.bottom,
+                    view.left,
+                    view.top,
+                    view.left,
+                    view.top,
+                )
+            }
+        }
+    }
+
+    private fun dispatchDirectiveTouch(state: NodeState, eventKind: Int, event: MotionEvent) {
+        val property = when (eventKind) {
+            EventKind.TOUCH_START.value -> PropKey.ON_TOUCH_START
+            EventKind.TOUCH_MOVE.value -> PropKey.ON_TOUCH_MOVE
+            EventKind.TOUCH_END.value -> PropKey.ON_TOUCH_END
+            else -> return
+        }
+        if (state.properties[property] == null) return
+        val density = resourcesDensity().coerceAtLeast(0.01f)
+        dispatchBytes(
+            state.id,
+            eventKind,
+            WireMap.encode(
+                mapOf(
+                    "x" to WireValue.Decimal(event.x / density.toDouble()),
+                    "y" to WireValue.Decimal(event.y / density.toDouble()),
+                    "pageX" to WireValue.Decimal(event.rawX / density.toDouble()),
+                    "pageY" to WireValue.Decimal(event.rawY / density.toDouble()),
+                    "pointerCount" to WireValue.Integer(event.pointerCount.toLong()),
+                ),
+            ),
+        )
     }
 
     private fun configurePressable(view: View, state: NodeState) {
@@ -2009,6 +2432,13 @@ class PamRenderer(
             EVENT_MODAL_SHOW -> PropKey.ON_MODAL_SHOW
             EVENT_MODAL_DISMISS -> PropKey.ON_MODAL_DISMISS
             EVENT_MODAL_ORIENTATION_CHANGE -> PropKey.ON_MODAL_ORIENTATION_CHANGE
+            EventKind.CLICK_OUTSIDE.value -> PropKey.ON_CLICK_OUTSIDE
+            EventKind.INTERSECT.value -> PropKey.ON_INTERSECT
+            EventKind.MUTATE.value -> PropKey.ON_MUTATE
+            EventKind.RESIZE.value -> PropKey.ON_RESIZE
+            EventKind.TOUCH_START.value -> PropKey.ON_TOUCH_START
+            EventKind.TOUCH_MOVE.value -> PropKey.ON_TOUCH_MOVE
+            EventKind.TOUCH_END.value -> PropKey.ON_TOUCH_END
             else -> null
         }
 
@@ -2130,7 +2560,23 @@ class PamRenderer(
                 null
             }
         }
-        val ripple = state.properties[PropKey.RIPPLE_COLOR]?.integer()?.toInt()
+        val configuredRipple = state.properties[PropKey.RIPPLE_COLOR]?.integer()?.toInt()
+        val ripple = configuredRipple?.let { color ->
+            if (color != 0) {
+                color
+            } else {
+                state.properties[PropKey.TEXT_COLOR]?.integer()?.toInt()
+                    ?: if (
+                        context.resources.configuration.uiMode and
+                            Configuration.UI_MODE_NIGHT_MASK ==
+                            Configuration.UI_MODE_NIGHT_YES
+                    ) {
+                        Color.WHITE
+                    } else {
+                        Color.BLACK
+                    }
+            }
+        }
         if (ripple == null || imageHost) {
             view.background = shape
             if (!imageHost) {
@@ -2139,7 +2585,7 @@ class PamRenderer(
             return
         }
 
-        val rippleAlpha = state.number(PropKey.RIPPLE_ALPHA, 1.0)
+        val rippleAlpha = state.number(PropKey.RIPPLE_ALPHA, 0.12)
             .toFloat()
             .coerceIn(0f, 1f)
         val effectiveRipple = Color.argb(
@@ -2461,6 +2907,10 @@ class PamRenderer(
     }
 
     private fun installSafeArea(view: View, state: NodeState) {
+        (view as? ViewGroup)?.let { safeArea ->
+            safeArea.clipChildren = true
+            safeArea.clipToPadding = true
+        }
         view.setOnApplyWindowInsetsListener { target, insets ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
@@ -2481,7 +2931,18 @@ class PamRenderer(
             applySafeAreaLayout(target, state)
             insets
         }
-        view.requestApplyInsets()
+        if (view.isAttachedToWindow) {
+            view.requestApplyInsets()
+        } else {
+            view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(attached: View) {
+                    attached.removeOnAttachStateChangeListener(this)
+                    attached.requestApplyInsets()
+                }
+
+                override fun onViewDetachedFromWindow(detached: View) = Unit
+            })
+        }
     }
 
     private fun applySafeAreaLayout(view: View, state: NodeState) {
@@ -2515,6 +2976,7 @@ class PamRenderer(
             },
         )
         applyLayout(state.id)
+        children[state.id]?.forEach(::applyLayout)
     }
 
     private fun installKeyboardInsets(view: View, state: NodeState) {
@@ -3313,6 +3775,9 @@ class PamRenderer(
         var imageProgressLoaded: Long = 0L,
         var imageProgressTotal: Long = 0L,
         var inputSelectionScheduled: Boolean = false,
+        var directiveLayoutListener: View.OnLayoutChangeListener? = null,
+        var outsidePointerObserver: ((MotionEvent) -> Unit)? = null,
+        var lastDirectiveIntersection: Boolean? = null,
         var inputSelectionStart: Int = 0,
         var inputSelectionEnd: Int = 0,
     ) {
@@ -3353,6 +3818,8 @@ class PamRenderer(
     }
 
     private companion object {
+        const val LOCAL_MODAL_PREFIX = "pam:local-modal:"
+        const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"
         const val EVENT_PRESS = 1
         const val EVENT_CHANGE = 2
         const val EVENT_LONG_PRESS = 5
@@ -3478,6 +3945,13 @@ class PamRenderer(
             PropKey.ON_MODAL_SHOW,
             PropKey.ON_MODAL_DISMISS,
             PropKey.ON_MODAL_ORIENTATION_CHANGE,
+            PropKey.ON_CLICK_OUTSIDE,
+            PropKey.ON_INTERSECT,
+            PropKey.ON_MUTATE,
+            PropKey.ON_RESIZE,
+            PropKey.ON_TOUCH_START,
+            PropKey.ON_TOUCH_MOVE,
+            PropKey.ON_TOUCH_END,
             PropKey.ACCESSIBILITY_LABEL,
             PropKey.ACCESSIBILITY_HINT,
             PropKey.ACCESSIBILITY_ROLE,
@@ -3566,6 +4040,13 @@ class PamRenderer(
             PropKey.ON_MODAL_SHOW,
             PropKey.ON_MODAL_DISMISS,
             PropKey.ON_MODAL_ORIENTATION_CHANGE,
+            PropKey.ON_CLICK_OUTSIDE,
+            PropKey.ON_INTERSECT,
+            PropKey.ON_MUTATE,
+            PropKey.ON_RESIZE,
+            PropKey.ON_TOUCH_START,
+            PropKey.ON_TOUCH_MOVE,
+            PropKey.ON_TOUCH_END,
         )
         val IMAGE_EVENT_PROPERTIES = setOf(
             PropKey.ON_IMAGE_LOAD_START,

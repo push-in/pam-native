@@ -1,6 +1,18 @@
 import Foundation
 import UIKit
 
+private final class ClosureNativeViewEmitter: NativeViewEmitter {
+    private let callback: (Int, Data) -> Void
+
+    init(_ callback: @escaping (Int, Data) -> Void) {
+        self.callback = callback
+    }
+
+    func emit(kind: NativeViewEventKind, payload: Data) {
+        callback(kind.rawValue, payload)
+    }
+}
+
 public final class NativeViewRegistry {
     private let factories: [String: NativeViewFactory]
     private var owners: [ObjectIdentifier: NativeViewFactory] = [:]
@@ -14,9 +26,10 @@ public final class NativeViewRegistry {
             fatalError("Unknown generated native view \(name)")
         }
 
-        let view = factory.create(context: nil) { payload in
-            emit(NativeViewEventKind.native.rawValue, payload)
-        }
+        let view = factory.create(
+            context: nil,
+            emitter: ClosureNativeViewEmitter(emit)
+        )
         owners[ObjectIdentifier(view)] = factory
         return view
     }

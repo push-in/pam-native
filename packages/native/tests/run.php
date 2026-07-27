@@ -1216,6 +1216,68 @@ $assert(
         && $pressScope->move->pageX === 12.0,
     'Core Pressable tags must retain gesture properties and typed move events.',
 );
+$directiveScope = new class {
+    /** @var list<string> */
+    public array $calls = [];
+
+    public function outside(): void { $this->calls[] = 'outside'; }
+    public function intersect(): void { $this->calls[] = 'intersect'; }
+    public function mutate(): void { $this->calls[] = 'mutate'; }
+    public function resize(): void { $this->calls[] = 'resize'; }
+    public function scroll(): void { $this->calls[] = 'scroll'; }
+    public function touchStart(): void { $this->calls[] = 'touchStart'; }
+    public function touchMove(): void { $this->calls[] = 'touchMove'; }
+    public function touchEnd(): void { $this->calls[] = 'touchEnd'; }
+};
+$directiveElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<View p-click-outside="outside" p-intersect="intersect" '
+        .'p-mutate="mutate" p-resize="resize" p-scroll="scroll" '
+        .'p-touch-start="touchStart" p-touch-move="touchMove" '
+        .'p-touch-end="touchEnd"><Text>Directives</Text></View>',
+    ),
+    $directiveScope,
+    [],
+);
+foreach ([
+    EventKind::ClickOutside,
+    EventKind::Intersect,
+    EventKind::Mutate,
+    EventKind::Resize,
+    EventKind::Scroll,
+    EventKind::TouchStart,
+    EventKind::TouchMove,
+    EventKind::TouchEnd,
+] as $directiveEvent) {
+    $directiveElement->events()[$directiveEvent->value]('');
+}
+$assert(
+    $directiveScope->calls === [
+        'outside',
+        'intersect',
+        'mutate',
+        'resize',
+        'scroll',
+        'touchStart',
+        'touchMove',
+        'touchEnd',
+    ],
+    'Native p-* directives must compile to distinct append-only event handlers.',
+);
+$rippleDirective = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<View p-ripple><Text>Ripple</Text></View>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $rippleDirective->properties()[PropKey::RippleColor->value] === 0
+        && $rippleDirective->properties()[PropKey::RippleAlpha->value] === 0.12
+        && $rippleDirective->properties()[PropKey::RippleBorderless->value] === false
+        && $rippleDirective->properties()[PropKey::RippleForeground->value] === false,
+    'p-ripple must compile to a theme-aware native MD3 state layer.',
+);
 $modalScope = new class {
     public ?ModalOrientation $orientation = null;
 

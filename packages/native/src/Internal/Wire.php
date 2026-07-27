@@ -62,6 +62,9 @@ final class Wire
                 is_int($value) => "\x02".pack('P', $value),
                 is_float($value) => "\x03".pack('e', $value),
                 is_bool($value) => "\x04".($value ? "\x01" : "\x00"),
+                default => throw new InvalidArgumentException(
+                    "Wire map value for {$key} must be a string, integer, float, or boolean.",
+                ),
             };
         }
 

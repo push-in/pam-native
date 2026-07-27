@@ -84,7 +84,13 @@ final class Runtime
                 self::$lastFrame = $frame;
 
                 if (function_exists('pam_native_commit')) {
-                    pam_native_commit($frame);
+                    $committed = pam_native_commit($frame);
+                    if (!$committed) {
+                        @file_put_contents(
+                            sys_get_temp_dir() . '/pam-native-invalid-frame.bin',
+                            $frame,
+                        );
+                    }
                 }
             }
         } finally {

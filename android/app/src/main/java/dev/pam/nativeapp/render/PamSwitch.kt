@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.widget.Switch
 import kotlin.math.roundToInt
 
@@ -15,6 +16,15 @@ internal class PamSwitch(context: Context) : Switch(context) {
 
     init {
         showText = false
+        splitTrack = false
+        switchMinWidth = dp(36)
+        minimumWidth = dp(40)
+        minimumHeight = dp(40)
+        trackDrawable = roundedDrawable(36, 14, 7)
+        thumbDrawable = roundedDrawable(20, 20, 10)
+        trackTintList = defaultTrackTint
+        thumbTintList = defaultThumbTint
+        elevation = dp(2).toFloat()
     }
 
     fun setTrackOffColor(color: Int?) {
@@ -82,6 +92,17 @@ internal class PamSwitch(context: Context) : Switch(context) {
             Color.green(color),
             Color.blue(color),
         )
+
+    private fun roundedDrawable(width: Int, height: Int, radius: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(radius).toFloat()
+            setSize(dp(width), dp(height))
+            setColor(Color.WHITE)
+        }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).roundToInt()
 
     private companion object {
         const val DISABLED_ALPHA = 0.38f

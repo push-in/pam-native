@@ -22,6 +22,7 @@ internal data class PamPressPointer(
 
 internal class PamPressable(context: Context) : PamContainer(context) {
     private var onPress: (() -> Unit)? = null
+    private var localOnPress: (() -> Unit)? = null
     private var onLongPress: (() -> Unit)? = null
     private var onPressIn: ((PamPressPointer) -> Unit)? = null
     private var onPressOut: ((PamPressPointer) -> Unit)? = null
@@ -123,6 +124,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         }
     }
 
+    fun setLocalOnPress(callback: (() -> Unit)?) {
+        localOnPress = callback
+        isClickable = callback != null || onPress != null || onPressIn != null ||
+            onPressOut != null || onPressMove != null || onLongPress != null
+        if (!isClickable) {
+            cancelGesture(emitOut = false)
+        }
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!isEnabled || !isClickable) return false
         return when (event.actionMasked) {
@@ -173,9 +183,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     override fun performClick(): Boolean {
         super.performClick()
-        val callback = onPress ?: return false
-        callback()
-        return true
+        localOnPress?.invoke()
+        onPress?.invoke()
+        return localOnPress != null || onPress != null
     }
 
     override fun performLongClick(): Boolean {

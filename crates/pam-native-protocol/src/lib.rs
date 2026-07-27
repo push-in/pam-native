@@ -365,6 +365,24 @@ pub enum PropKey {
     NavigationTransition = 282,
     NavigationDurationMs = 283,
     NavigationRevision = 284,
+    OnClickOutside = 285,
+    OnIntersect = 286,
+    OnMutate = 287,
+    OnResize = 288,
+    OnTouchStart = 289,
+    OnTouchMove = 290,
+    OnTouchEnd = 291,
+    DrawerType = 292,
+    DrawerWidth = 293,
+    DrawerOverlayColor = 294,
+    DrawerSwipeEnabled = 295,
+    DrawerSwipeEdgeWidth = 296,
+    DrawerSwipeMinDistance = 297,
+    DrawerKeyboardDismissMode = 298,
+    DrawerHideStatusBarOnOpen = 299,
+    DrawerStatusBarAnimation = 300,
+    DrawerPermanentBreakpoint = 301,
+    LayoutDirection = 302,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -656,6 +674,24 @@ impl TryFrom<u16> for PropKey {
             282 => Ok(Self::NavigationTransition),
             283 => Ok(Self::NavigationDurationMs),
             284 => Ok(Self::NavigationRevision),
+            285 => Ok(Self::OnClickOutside),
+            286 => Ok(Self::OnIntersect),
+            287 => Ok(Self::OnMutate),
+            288 => Ok(Self::OnResize),
+            289 => Ok(Self::OnTouchStart),
+            290 => Ok(Self::OnTouchMove),
+            291 => Ok(Self::OnTouchEnd),
+            292 => Ok(Self::DrawerType),
+            293 => Ok(Self::DrawerWidth),
+            294 => Ok(Self::DrawerOverlayColor),
+            295 => Ok(Self::DrawerSwipeEnabled),
+            296 => Ok(Self::DrawerSwipeEdgeWidth),
+            297 => Ok(Self::DrawerSwipeMinDistance),
+            298 => Ok(Self::DrawerKeyboardDismissMode),
+            299 => Ok(Self::DrawerHideStatusBarOnOpen),
+            300 => Ok(Self::DrawerStatusBarAnimation),
+            301 => Ok(Self::DrawerPermanentBreakpoint),
+            302 => Ok(Self::LayoutDirection),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1459,10 +1495,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(27).is_err());
 
-        for value in 1..=284 {
+        for value in 1..=302 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(285).is_err());
+        assert!(PropKey::try_from(303).is_err());
     }
 
     fn tree(text: &str) -> Tree {

@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.render
 
 import android.content.Context
+import android.graphics.Color
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -39,6 +40,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private val content = FrameLayout(context).apply {
         clipChildren = false
         clipToPadding = false
+        setBackgroundColor(Color.TRANSPARENT)
     }
     private var activeScroll: ViewGroup = createVerticalScroll()
 
@@ -46,6 +48,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         clipChildren = false
         clipToPadding = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
+        activeScroll.setBackgroundColor(Color.TRANSPARENT)
         activeScroll.addView(content, contentLayout())
         addView(activeScroll, matchParentLayout())
         applyConfiguration()
@@ -65,6 +68,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         removeView(previous)
         horizontal = value
         activeScroll = if (value) createHorizontalScroll() else createVerticalScroll()
+        activeScroll.setBackgroundColor(Color.TRANSPARENT)
         activeScroll.addView(content, contentLayout())
         addView(activeScroll, matchParentLayout())
         applyConfiguration()

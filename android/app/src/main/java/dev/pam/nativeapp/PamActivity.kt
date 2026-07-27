@@ -21,6 +21,7 @@ import android.widget.FrameLayout
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
+import dev.pam.nativeapp.render.PamRootHost
 
 class PamActivity : Activity() {
     private lateinit var runtime: PamRuntime
@@ -36,7 +37,7 @@ class PamActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val host = FrameLayout(this)
+        val host = PamRootHost(this)
         errors = ErrorOverlay(this)
         devTools = PamDevToolsOverlay(this)
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->

@@ -82,6 +82,13 @@ public enum EventKind: Int {
     case modalShow = 32
     case modalDismiss = 33
     case modalOrientationChange = 34
+    case clickOutside = 35
+    case intersect = 36
+    case mutate = 37
+    case resize = 38
+    case touchStart = 39
+    case touchMove = 40
+    case touchEnd = 41
 }
 
 public enum PropValue {
@@ -292,12 +299,19 @@ public enum PamConstants {
     public static let onDrawerClose = 88
     public static let visible = 57
     public static let refreshing = 63
+    public static let checked = 51
+    public static let loading = 52
+    public static let selected = 66
     public static let drawerOpen = 85
+    public static let drawerPosition = 86
     public static let modalPresentation = 58
     public static let refreshColors = 157
     public static let refreshProgressBackgroundColor = 158
     public static let refreshProgressViewOffset = 159
     public static let refreshIndicatorSize = 160
+    public static let switchTrackColorFalse = 192
+    public static let switchTrackColorTrue = 193
+    public static let switchThumbColor = 194
     public static let scrollHorizontal = 177
     public static let sectionItems = 80
     public static let hostProperties = 100
@@ -307,6 +321,11 @@ public enum PamConstants {
     public static let fontSize = 12
     public static let enabled = 13
     public static let borderRadius = 35
+    public static let rippleColor = 67
+    public static let rippleBorderless = 245
+    public static let rippleRadius = 246
+    public static let rippleForeground = 247
+    public static let rippleAlpha = 248
     public static let borderWidth = 36
     public static let borderColor = 37
     public static let margin = 26
@@ -314,6 +333,32 @@ public enum PamConstants {
     public static let padding = 8
     public static let flexGrow = 7
     public static let accessibilityLabel = 17
+    public static let fontWeight = 43
+    public static let letterSpacing = 89
+    public static let lineHeight = 90
+    public static let fontStyle = 128
+    public static let fontFamily = 136
+    public static let accessibilityRole = 70
+    public static let accessibilityHint = 71
+    public static let accessible = 140
+    public static let accessibilityLiveRegion = 141
+    public static let accessibilityImportance = 142
+    public static let accessibilityExpanded = 143
+    public static let accessibilityBusy = 144
+    public static let accessibilityCheckedState = 145
+    public static let accessibilityValueMin = 146
+    public static let accessibilityValueMax = 147
+    public static let accessibilityValueNow = 148
+    public static let accessibilityValueText = 149
+    public static let safeAreaBottom = 134
+    public static let safeAreaTop = 150
+    public static let safeAreaRight = 151
+    public static let safeAreaLeft = 153
+    public static let safeAreaMode = 154
+    public static let textAllowFontScaling = 163
+    public static let textMaxFontSizeMultiplier = 164
+    public static let textAdjustsFontSizeToFit = 165
+    public static let textMinimumFontScale = 166
     public static let translationX = 72
     public static let translationY = 73
     public static let scaleX = 74
@@ -345,6 +390,24 @@ public enum PamConstants {
     public static let onModalShow = 260
     public static let onModalDismiss = 261
     public static let onModalOrientationChange = 262
+    public static let onClickOutside = 285
+    public static let onIntersect = 286
+    public static let onMutate = 287
+    public static let onResize = 288
+    public static let onTouchStart = 289
+    public static let onTouchMove = 290
+    public static let onTouchEnd = 291
+    public static let drawerType = 292
+    public static let drawerWidth = 293
+    public static let drawerOverlayColor = 294
+    public static let drawerSwipeEnabled = 295
+    public static let drawerSwipeEdgeWidth = 296
+    public static let drawerSwipeMinDistance = 297
+    public static let drawerKeyboardDismissMode = 298
+    public static let drawerHideStatusBarOnOpen = 299
+    public static let drawerStatusBarAnimation = 300
+    public static let drawerPermanentBreakpoint = 301
+    public static let layoutDirection = 302
 }
 
 public enum BatchDecoder {

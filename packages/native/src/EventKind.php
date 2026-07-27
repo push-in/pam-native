@@ -40,4 +40,11 @@ enum EventKind: int
     case ModalShow = 32;
     case ModalDismiss = 33;
     case ModalOrientationChange = 34;
+    case ClickOutside = 35;
+    case Intersect = 36;
+    case Mutate = 37;
+    case Resize = 38;
+    case TouchStart = 39;
+    case TouchMove = 40;
+    case TouchEnd = 41;
 }

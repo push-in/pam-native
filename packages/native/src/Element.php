@@ -281,6 +281,13 @@ abstract class Element implements Renderable
             EventKind::ModalDismiss => PropKey::OnModalDismiss,
             EventKind::ModalOrientationChange =>
                 PropKey::OnModalOrientationChange,
+            EventKind::ClickOutside => PropKey::OnClickOutside,
+            EventKind::Intersect => PropKey::OnIntersect,
+            EventKind::Mutate => PropKey::OnMutate,
+            EventKind::Resize => PropKey::OnResize,
+            EventKind::TouchStart => PropKey::OnTouchStart,
+            EventKind::TouchMove => PropKey::OnTouchMove,
+            EventKind::TouchEnd => PropKey::OnTouchEnd,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,
