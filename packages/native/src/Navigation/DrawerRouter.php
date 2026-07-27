@@ -50,6 +50,7 @@ final class DrawerRouter
         Renderable|Closure $content,
         ?Renderable $icon = null,
         ?string $badge = null,
+        ?string $group = null,
     ): self {
         $copy = clone $this;
         $copy->routes[] = new NavigationDrawerItem(
@@ -58,6 +59,7 @@ final class DrawerRouter
             $content,
             $icon,
             $badge,
+            $group,
         );
 
         return $copy;

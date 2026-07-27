@@ -452,7 +452,7 @@ public final class PamRenderer {
             return UILabel()
         case .input:
             let field = PamInputField()
-            field.borderStyle = .roundedRect
+            field.borderStyle = .none
             return field
         case .image, .imageBackground:
             return UIImageView()

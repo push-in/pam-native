@@ -30,6 +30,8 @@ final class DrawerNavigator implements Renderable, Restorable
     private int $selected;
     private bool $open;
     private float $windowWidth = 0.0;
+    /** @var array<string, bool> */
+    private array $expandedGroups = [];
 
     /**
      * @param list<NavigationDrawerItem> $routes
@@ -115,6 +117,34 @@ final class DrawerNavigator implements Renderable, Restorable
         return false;
     }
 
+    public function toggleGroup(string $group): bool
+    {
+        $exists = false;
+        foreach ($this->routes as $route) {
+            if ($route->group === $group) {
+                $exists = true;
+                break;
+            }
+        }
+        if (!$exists) {
+            return false;
+        }
+
+        $this->expandedGroups[$group] = !$this->isGroupExpanded($group);
+        State::set($this->stateKey(), $this->saveState());
+
+        return true;
+    }
+
+    public function isGroupExpanded(string $group): bool
+    {
+        if (($this->expandedGroups[$group] ?? false) === true) {
+            return true;
+        }
+
+        return $this->routes[$this->selected - 1]->group === $group;
+    }
+
     public function openDrawer(): void
     {
         $this->open = true;
@@ -160,39 +190,98 @@ final class DrawerNavigator implements Renderable, Restorable
             heightPercent: 100.0,
             flexGrow: 1.0,
         ));
-        $items = [];
-        foreach ($this->routes as $index => $route) {
+        $routeItem = function (
+            NavigationDrawerItem $route,
+            int $index,
+        ): Pressable {
             $selected = $index + 1 === $this->selected;
             $label = Text::make($route->label)->style(new Style(
                 textColor: $selected
                     ? $this->activeColor
                     : $this->inactiveColor,
-                fontSize: 15.0,
-                fontWeight: $selected ? 700 : 500,
+                fontSize: 14.0,
+                lineHeight: 20.0,
+                fontWeight: $selected ? 600 : 400,
             ));
             $row = $route->icon === null
                 ? Row::make($label)
                 : Row::make($route->icon, $label);
-            $items[] = Pressable::make($row->style(new Style(
+
+            return Pressable::make($row->style(new Style(
                 gap: 16.0,
                 alignItems: \Pam\Native\Align::Center,
             )))
                 ->onPress(fn (): bool => $this->navigate($route->name))
                 ->style(new Style(
-                    minHeight: 52.0,
+                    minHeight: 48.0,
                     paddingHorizontal: 16.0,
-                    borderRadius: 14.0,
+                    borderRadius: 4.0,
                     backgroundColor: $selected
                         ? $this->activeBackgroundColor
                         : null,
+                    justifyContent: \Pam\Native\Justify::Center,
+                    animationDurationMs: 200,
+                    animateChanges: true,
                 ))
                 ->accessibilityRole(AccessibilityRole::Button)
                 ->accessibilityLabel($route->label);
+        };
+        $items = [];
+        /** @var array<string, list<array{0: NavigationDrawerItem, 1: int}>> $groups */
+        $groups = [];
+        foreach ($this->routes as $index => $route) {
+            if ($route->group === null) {
+                $items[] = $routeItem($route, $index);
+                continue;
+            }
+            $groups[$route->group][] = [$route, $index];
+        }
+        foreach ($groups as $group => $groupRoutes) {
+            $expanded = $this->isGroupExpanded($group);
+            $items[] = Pressable::make(
+                Row::make(
+                    Text::make($group)->style(new Style(
+                        textColor: $this->inactiveColor,
+                        fontSize: 12.0,
+                        lineHeight: 16.0,
+                        fontWeight: 700,
+                        letterSpacing: 0.08,
+                        flexGrow: 1.0,
+                    )),
+                    Text::make($expanded ? '-' : '+')->style(new Style(
+                        textColor: $this->inactiveColor,
+                        fontSize: 18.0,
+                        lineHeight: 20.0,
+                    )),
+                )->style(new Style(
+                    widthPercent: 100.0,
+                    alignItems: \Pam\Native\Align::Center,
+                )),
+            )
+                ->onPress(fn (): bool => $this->toggleGroup($group))
+                ->style(new Style(
+                    minHeight: 44.0,
+                    paddingHorizontal: 16.0,
+                    marginTop: 4.0,
+                    borderRadius: 4.0,
+                    justifyContent: \Pam\Native\Justify::Center,
+                ))
+                ->accessibilityRole(AccessibilityRole::Button)
+                ->accessibilityLabel($group);
+            if (!$expanded) {
+                continue;
+            }
+            foreach ($groupRoutes as [$route, $index]) {
+                $items[] = $routeItem($route, $index)->style(new Style(
+                    marginLeft: 8.0,
+                    paddingLeft: 12.0,
+                ));
+            }
         }
         $defaultDrawer = SafeAreaView::make(
             ScrollView::make(
                 Column::make(...$items)->style(new Style(
-                    padding: 12.0,
+                    padding: 8.0,
                     gap: 4.0,
                     widthPercent: 100.0,
                 )),
@@ -265,6 +354,20 @@ final class DrawerNavigator implements Renderable, Restorable
                     is_string($entry) && in_array($entry, $valid, true),
             ));
         }
+        if (is_array($state['expandedGroups'] ?? null)) {
+            $validGroups = [];
+            foreach ($this->routes as $item) {
+                if ($item->group !== null) {
+                    $validGroups[$item->group] = true;
+                }
+            }
+            $this->expandedGroups = [];
+            foreach ($state['expandedGroups'] as $group) {
+                if (is_string($group) && isset($validGroups[$group])) {
+                    $this->expandedGroups[$group] = true;
+                }
+            }
+        }
     }
 
     public function saveState(): array
@@ -274,6 +377,7 @@ final class DrawerNavigator implements Renderable, Restorable
             'selected' => $this->selectedRoute(),
             'open' => $this->open,
             'history' => $this->history,
+            'expandedGroups' => array_keys(array_filter($this->expandedGroups)),
         ];
     }
 }

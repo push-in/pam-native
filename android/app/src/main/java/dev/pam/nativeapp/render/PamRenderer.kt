@@ -389,7 +389,8 @@ class PamRenderer(
             NodeKind.INPUT -> PamEditText(context).apply {
                 isSingleLine = true
                 minHeight = 0
-                setPadding(dp(12f), 0, dp(12f), 0)
+                background = null
+                setPadding(0, 0, 0, 0)
             }
             NodeKind.IMAGE -> PamImageView(context)
             NodeKind.IMAGE_BACKGROUND -> PamImageBackground(context)
@@ -2522,13 +2523,29 @@ class PamRenderer(
         val bottomLeft = dp(
             state.number(PropKey.BORDER_BOTTOM_LEFT_RADIUS, logicalRadius).toFloat(),
         ).toFloat()
-        val borderWidth = listOf(
-            PropKey.BORDER_WIDTH,
-            PropKey.BORDER_LEFT_WIDTH,
-            PropKey.BORDER_TOP_WIDTH,
-            PropKey.BORDER_RIGHT_WIDTH,
-            PropKey.BORDER_BOTTOM_WIDTH,
-        ).maxOf { key -> dp(state.number(key, 0.0).toFloat()) }
+        val uniformBorderWidth = dp(state.number(PropKey.BORDER_WIDTH, 0.0).toFloat())
+        fun directionalBorderWidth(key: PropKey): Int {
+            return if (state.properties.containsKey(key)) {
+                dp(state.number(key, 0.0).toFloat())
+            } else {
+                uniformBorderWidth
+            }
+        }
+        val leftBorderWidth = directionalBorderWidth(PropKey.BORDER_LEFT_WIDTH)
+        val topBorderWidth = directionalBorderWidth(PropKey.BORDER_TOP_WIDTH)
+        val rightBorderWidth = directionalBorderWidth(PropKey.BORDER_RIGHT_WIDTH)
+        val bottomBorderWidth = directionalBorderWidth(PropKey.BORDER_BOTTOM_WIDTH)
+        val borderWidth = maxOf(
+            leftBorderWidth,
+            topBorderWidth,
+            rightBorderWidth,
+            bottomBorderWidth,
+        )
+        val hasDirectionalBorder = borderWidth > 0 && (
+            leftBorderWidth != rightBorderWidth ||
+                leftBorderWidth != topBorderWidth ||
+                leftBorderWidth != bottomBorderWidth
+            )
         val borderColor = state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
         val imageHost = state.kind == NodeKind.IMAGE ||
             state.kind == NodeKind.IMAGE_BACKGROUND
@@ -2545,9 +2562,73 @@ class PamRenderer(
         val shape = GradientDrawable().apply {
             setColor(color)
             cornerRadii = radii
-            if (!imageHost && borderWidth > 0) {
+            if (!imageHost && borderWidth > 0 && !hasDirectionalBorder) {
                 setStroke(borderWidth, borderColor)
             }
+        }
+        val background = if (!imageHost && hasDirectionalBorder) {
+            val borders = object : android.graphics.drawable.Drawable() {
+                private val paint = android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG,
+                ).apply {
+                    this.color = borderColor
+                    style = android.graphics.Paint.Style.FILL
+                }
+
+                override fun draw(canvas: android.graphics.Canvas) {
+                    val area = bounds
+                    if (leftBorderWidth > 0) {
+                        canvas.drawRect(
+                            area.left.toFloat(),
+                            area.top.toFloat(),
+                            (area.left + leftBorderWidth).toFloat(),
+                            area.bottom.toFloat(),
+                            paint,
+                        )
+                    }
+                    if (topBorderWidth > 0) {
+                        canvas.drawRect(
+                            area.left.toFloat(),
+                            area.top.toFloat(),
+                            area.right.toFloat(),
+                            (area.top + topBorderWidth).toFloat(),
+                            paint,
+                        )
+                    }
+                    if (rightBorderWidth > 0) {
+                        canvas.drawRect(
+                            (area.right - rightBorderWidth).toFloat(),
+                            area.top.toFloat(),
+                            area.right.toFloat(),
+                            area.bottom.toFloat(),
+                            paint,
+                        )
+                    }
+                    if (bottomBorderWidth > 0) {
+                        canvas.drawRect(
+                            area.left.toFloat(),
+                            (area.bottom - bottomBorderWidth).toFloat(),
+                            area.right.toFloat(),
+                            area.bottom.toFloat(),
+                            paint,
+                        )
+                    }
+                }
+
+                override fun setAlpha(alpha: Int) {
+                    paint.alpha = alpha
+                }
+
+                override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
+                    paint.colorFilter = colorFilter
+                }
+
+                @Suppress("DEPRECATION")
+                override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
+            }
+            android.graphics.drawable.LayerDrawable(arrayOf(shape, borders))
+        } else {
+            shape
         }
         pamImageView(view)?.setCornerRadii(radii)
         if (imageHost) {
@@ -2579,7 +2660,7 @@ class PamRenderer(
             }
         }
         if (ripple == null || imageHost) {
-            view.background = shape
+            view.background = background
             if (!imageHost) {
                 view.foreground = null
             }

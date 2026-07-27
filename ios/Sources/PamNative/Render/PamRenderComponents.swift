@@ -317,7 +317,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     override init(frame: CGRect) {
         super.init(frame: frame)
         delegate = self
-        borderStyle = .roundedRect
+        borderStyle = .none
         autocorrectionType = .default
         translatesAutoresizingMaskIntoConstraints = true
         syncFontCache()
@@ -326,7 +326,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         delegate = self
-        borderStyle = .roundedRect
+        borderStyle = .none
         syncFontCache()
     }
 
