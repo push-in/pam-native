@@ -2271,7 +2271,7 @@ $assert(
     'Selecting a tab must lazily mount only the next destination.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.4.0',
+    \Pam\Native\Protocol::SDK_VERSION === '0.4.1',
     'The runtime SDK contract must match the 0.4 package release line.',
 );
 
