@@ -1493,10 +1493,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(27).is_err());
 
-        for value in 1..=291 {
+        for value in 1..=301 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(292).is_err());
+        assert!(PropKey::try_from(302).is_err());
     }
 
     fn tree(text: &str) -> Tree {
