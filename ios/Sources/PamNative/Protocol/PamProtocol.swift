@@ -299,7 +299,11 @@ public enum PamConstants {
     public static let onDrawerClose = 88
     public static let visible = 57
     public static let refreshing = 63
+    public static let checked = 51
+    public static let loading = 52
+    public static let selected = 66
     public static let drawerOpen = 85
+    public static let drawerPosition = 86
     public static let modalPresentation = 58
     public static let refreshColors = 157
     public static let refreshProgressBackgroundColor = 158
@@ -346,6 +350,11 @@ public enum PamConstants {
     public static let accessibilityValueMax = 147
     public static let accessibilityValueNow = 148
     public static let accessibilityValueText = 149
+    public static let safeAreaBottom = 134
+    public static let safeAreaTop = 150
+    public static let safeAreaRight = 151
+    public static let safeAreaLeft = 153
+    public static let safeAreaMode = 154
     public static let textAllowFontScaling = 163
     public static let textMaxFontSizeMultiplier = 164
     public static let textAdjustsFontSizeToFit = 165

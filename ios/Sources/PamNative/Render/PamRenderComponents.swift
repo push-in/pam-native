@@ -511,7 +511,7 @@ final class PamDrawerLayout: UIView, UIGestureRecognizerDelegate {
     }
 
     func setOverlayColor(_ value: Int) {
-        overlayView.backgroundColor = UIColor(argb: value)
+        overlayView.backgroundColor = UIColor(argb: Int64(value))
     }
 
     func setSwipeEnabled(_ value: Bool) {
