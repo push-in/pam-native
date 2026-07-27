@@ -10,7 +10,7 @@ fn main() -> ExitCode {
     let frame = match fs::read(&path) {
         Ok(frame) => frame,
         Err(error) => {
-            eprintln!("failed to read {:?}: {error}", path);
+            eprintln!("failed to read {path:?}: {error}");
             return ExitCode::from(2);
         }
     };
