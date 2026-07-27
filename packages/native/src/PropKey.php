@@ -297,4 +297,15 @@ enum PropKey: int
     case OnTouchStart = 289;
     case OnTouchMove = 290;
     case OnTouchEnd = 291;
+    case DrawerType = 292;
+    case DrawerWidth = 293;
+    case DrawerOverlayColor = 294;
+    case DrawerSwipeEnabled = 295;
+    case DrawerSwipeEdgeWidth = 296;
+    case DrawerSwipeMinDistance = 297;
+    case DrawerKeyboardDismissMode = 298;
+    case DrawerHideStatusBarOnOpen = 299;
+    case DrawerStatusBarAnimation = 300;
+    case DrawerPermanentBreakpoint = 301;
+    case LayoutDirection = 302;
 }

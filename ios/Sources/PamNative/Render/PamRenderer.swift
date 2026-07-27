@@ -14,6 +14,7 @@ public final class PamRenderer {
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
+    private var localModalActions: [Int64: UIAction.Identifier] = [:]
     private var rootId: Int64 = 0
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
@@ -65,6 +66,7 @@ public final class PamRenderer {
             }
         }
 
+        syncLocalModalTriggers()
         dirtyLayouts.forEach { id in
             applyLayout(id)
         }
@@ -97,6 +99,7 @@ public final class PamRenderer {
             }
         }
         eventBridges.removeAll()
+        localModalActions.removeAll()
 
         for node in nodes.values {
             cancelImageLoad(for: node)
@@ -157,6 +160,48 @@ public final class PamRenderer {
         installEvents(for: state.id)
     }
 
+    private func syncLocalModalTriggers() {
+        let modalPrefix = "pam:local-modal:"
+        let triggerPrefix = "pam:local-modal-trigger:"
+        var modals: [String: PamModalHost] = [:]
+
+        for (nodeId, state) in nodes where state.kind == .modal {
+            guard
+                let marker = state.properties[PamConstants.value]?.textOrNil(),
+                marker.hasPrefix(modalPrefix),
+                let modal = views[nodeId] as? PamModalHost
+            else {
+                continue
+            }
+            modals[String(marker.dropFirst(modalPrefix.count))] = modal
+        }
+
+        for (nodeId, view) in views {
+            guard let button = view as? UIButton else { continue }
+            if let identifier = localModalActions.removeValue(forKey: nodeId) {
+                button.removeAction(identifiedBy: identifier, for: .touchUpInside)
+            }
+            guard
+                let marker = nodes[nodeId]?
+                    .properties[PamConstants.value]?.textOrNil(),
+                marker.hasPrefix(triggerPrefix),
+                let modal = modals[String(marker.dropFirst(triggerPrefix.count))]
+            else {
+                continue
+            }
+            let identifier = UIAction.Identifier(
+                "dev.pam.local-modal.\(nodeId)"
+            )
+            button.addAction(
+                UIAction(identifier: identifier) { [weak modal] _ in
+                    modal?.setVisible(true)
+                },
+                for: .touchUpInside
+            )
+            localModalActions[nodeId] = identifier
+        }
+    }
+
     private func remove(_ id: Int64) {
         guard let state = nodes[id] else {
             return
@@ -170,6 +215,7 @@ public final class PamRenderer {
             bridge.detach()
         }
         eventBridges[id] = nil
+        localModalActions[id] = nil
 
         cancelImageLoad(for: state)
 
@@ -256,16 +302,58 @@ public final class PamRenderer {
             height: Float(host.bounds.height),
         )
 
-        let left = frame.x - parentFrame.x
-        let top = frame.y - parentFrame.y
-        let width = max(0, frame.width)
-        let height = max(0, frame.height)
+        var left = CGFloat(frame.x - parentFrame.x)
+        var top = CGFloat(frame.y - parentFrame.y)
+        var width = CGFloat(max(0, frame.width))
+        var height = CGFloat(max(0, frame.height))
+
+        if let parentState = nodes[effectiveParent],
+           parentState.kind == .safeAreaView,
+           Int(parentState.properties[PamConstants.safeAreaMode]?.integer() ?? 1) == 1,
+           let parentView = views[effectiveParent] {
+            let insets = parentView.safeAreaInsets
+
+            if parentState.properties[PamConstants.safeAreaLeft]?.flag() ?? true {
+                left += insets.left
+                width -= insets.left
+            }
+            if parentState.properties[PamConstants.safeAreaRight]?.flag() ?? true {
+                width -= insets.right
+            }
+            if parentState.properties[PamConstants.safeAreaTop]?.flag() ?? true {
+                top += insets.top
+                height -= insets.top
+            }
+            if parentState.properties[PamConstants.safeAreaBottom]?.flag() ?? true {
+                height -= insets.bottom
+            }
+        }
+
+        if state.kind == .safeAreaView,
+           Int(state.properties[PamConstants.safeAreaMode]?.integer() ?? 1) == 2 {
+            let insets = view.safeAreaInsets
+
+            if state.properties[PamConstants.safeAreaLeft]?.flag() ?? true {
+                left += insets.left
+                width -= insets.left
+            }
+            if state.properties[PamConstants.safeAreaRight]?.flag() ?? true {
+                width -= insets.right
+            }
+            if state.properties[PamConstants.safeAreaTop]?.flag() ?? true {
+                top += insets.top
+                height -= insets.top
+            }
+            if state.properties[PamConstants.safeAreaBottom]?.flag() ?? true {
+                height -= insets.bottom
+            }
+        }
 
         view.frame = CGRect(
-            x: CGFloat(left),
-            y: CGFloat(top),
-            width: CGFloat(width),
-            height: CGFloat(height),
+            x: left,
+            y: top,
+            width: max(0, width),
+            height: max(0, height),
         )
     }
 
@@ -346,7 +434,15 @@ public final class PamRenderer {
         }
 
         switch spec.kind {
-        case .screen, .column, .row, .view, .keyboardAvoidingView, .safeAreaView, .inputAccessoryView:
+        case .safeAreaView:
+            let view = PamSafeAreaView()
+            view.onSafeAreaInsetsDidChange = { [weak self] in
+                guard let self else { return }
+                self.applyLayout(spec.id)
+                self.children[spec.id]?.forEach { self.applyLayout($0) }
+            }
+            return view
+        case .screen, .column, .row, .view, .keyboardAvoidingView, .inputAccessoryView:
             return UIView()
         case .pressable:
             return UIButton(type: .system)
@@ -365,11 +461,11 @@ public final class PamRenderer {
         case .spacer:
             return UIView()
         case .activityIndicator:
-            let indicator = UIActivityIndicatorView(style: .medium)
+            let indicator = PamVuetifySpinner()
             indicator.startAnimating()
             return indicator
         case .toggle:
-            return UISwitch()
+            return PamVuetifySwitch()
         case .modal:
             return PamModalHost()
         case .drawerLayout:
@@ -503,7 +599,7 @@ public final class PamRenderer {
             eventBridges[nodeId]?[EventKind.pressMove.rawValue] = bridge
         }
 
-        if eventProperties.contains(PamConstants.onToggle), let switchView = view as? UISwitch {
+        if eventProperties.contains(PamConstants.onToggle), let switchView = view as? PamVuetifySwitch {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.toggle.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachControlValueChanged(switchView)
             eventBridges[nodeId]?[EventKind.toggle.rawValue] = bridge
@@ -617,10 +713,31 @@ public final class PamRenderer {
 
     private func dispatchNativeViewEvent(nodeId: Int64, kind: Int, payload: Data) {
         guard let state = nodes[nodeId] else { return }
+        if kind == EventKind.native.rawValue {
+            closeLocalModalAncestor(startingAt: state.parent)
+        }
         guard let eventProperty = nativeEventProperty(kind), state.properties[eventProperty] != nil else {
             return
         }
         dispatchEvent(nodeId, kind, payload)
+    }
+
+    private func closeLocalModalAncestor(startingAt startId: Int64) {
+        let modalPrefix = "pam:local-modal:"
+        var currentId = startId
+        var depth = 0
+        while currentId != 0, depth < 64 {
+            guard let state = nodes[currentId] else { return }
+            if state.kind == .modal {
+                if state.properties[PamConstants.value]?
+                    .textOrNil()?.hasPrefix(modalPrefix) == true {
+                    (views[currentId] as? PamModalHost)?.setVisible(false)
+                }
+                return
+            }
+            currentId = state.parent
+            depth += 1
+        }
     }
 
     private func isEventProperty(_ key: Int) -> Bool {
@@ -762,7 +879,7 @@ public final class PamRenderer {
         case PamConstants.value:
             if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.text = textValue
-            } else if let boolValue = value.boolOrNil(), let switchView = view as? UISwitch {
+            } else if let boolValue = value.boolOrNil(), let switchView = view as? PamVuetifySwitch {
                 switchView.isOn = boolValue
             } else if let textValue = value.textOrNil(),
                       textValue.hasPrefix("pam:") {
@@ -827,6 +944,24 @@ public final class PamRenderer {
             }
         case PamConstants.accessibilityLabel:
             view.accessibilityLabel = value.textOrNil()
+            applyAccessibility(view: view, state: nodes[nodeId])
+        case PamConstants.accessibilityHint:
+            view.accessibilityHint = value.textOrNil()
+        case PamConstants.accessibilityRole,
+             PamConstants.accessible,
+             PamConstants.accessibilityLiveRegion,
+             PamConstants.accessibilityImportance,
+             PamConstants.accessibilityExpanded,
+             PamConstants.accessibilityBusy,
+             PamConstants.accessibilityCheckedState,
+             PamConstants.accessibilityValueMin,
+             PamConstants.accessibilityValueMax,
+             PamConstants.accessibilityValueNow,
+             PamConstants.accessibilityValueText,
+             PamConstants.selected,
+             PamConstants.checked,
+             PamConstants.loading:
+            applyAccessibility(view: view, state: nodes[nodeId])
         case PamConstants.testId:
             view.accessibilityIdentifier = value.textOrNil()
         case PamConstants.textColor:
@@ -835,18 +970,19 @@ public final class PamRenderer {
                     label.textColor = UIColor(argb: color)
                 }
             }
-        case PamConstants.fontSize:
-            if let size = value.decimalOrNil() {
-                if let label = view as? UILabel {
-                    label.font = UIFont.systemFont(ofSize: CGFloat(size))
-                } else if let button = view as? UIButton {
-                    button.titleLabel?.font = UIFont.systemFont(ofSize: CGFloat(size))
-                }
-            }
+        case PamConstants.fontSize,
+             PamConstants.fontWeight,
+             PamConstants.fontStyle,
+             PamConstants.fontFamily,
+             PamConstants.textAllowFontScaling,
+             PamConstants.textMaxFontSizeMultiplier,
+             PamConstants.textAdjustsFontSizeToFit,
+             PamConstants.textMinimumFontScale:
+            applyTextSizing(view: view, state: nodes[nodeId])
         case PamConstants.visible:
             if let modal = view as? PamModalHost {
                 modal.setVisible(value.boolOrNil() ?? true)
-            } else if let indicator = view as? UIActivityIndicatorView {
+            } else if let indicator = view as? PamVuetifySpinner {
                 if value.boolOrNil() ?? true {
                     indicator.startAnimating()
                 } else {
@@ -854,6 +990,18 @@ public final class PamRenderer {
                 }
             } else {
                 view.isHidden = !(value.boolOrNil() ?? true)
+            }
+        case PamConstants.switchTrackColorFalse:
+            if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
+                switchView.trackOffColor = UIColor(argb: color)
+            }
+        case PamConstants.switchTrackColorTrue:
+            if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
+                switchView.trackOnColor = UIColor(argb: color)
+            }
+        case PamConstants.switchThumbColor:
+            if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
+                switchView.thumbColor = UIColor(argb: color)
             }
         case PamConstants.modalPresentation:
             (view as? PamModalHost)?.setPresentation(Int(value.integerOrNil() ?? 2))
@@ -875,6 +1023,34 @@ public final class PamRenderer {
             }
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(value.boolOrNil() ?? false, animated: true)
+        case PamConstants.drawerType:
+            (view as? PamDrawerLayout)?.setDrawerType(Int(value.integerOrNil() ?? 1))
+        case PamConstants.drawerPosition:
+            (view as? PamDrawerLayout)?.setDrawerPosition(Int(value.integerOrNil() ?? 1))
+        case PamConstants.drawerWidth:
+            (view as? PamDrawerLayout)?.setDrawerWidth(CGFloat(value.decimalOrZero()))
+        case PamConstants.drawerOverlayColor:
+            if let color = value.integerOrNil() {
+                (view as? PamDrawerLayout)?.setOverlayColor(Int(color))
+            }
+        case PamConstants.drawerSwipeEnabled:
+            (view as? PamDrawerLayout)?.setSwipeEnabled(value.boolOrNil() ?? true)
+        case PamConstants.drawerSwipeEdgeWidth:
+            (view as? PamDrawerLayout)?.setSwipeEdgeWidth(CGFloat(value.decimalOrZero()))
+        case PamConstants.drawerSwipeMinDistance:
+            (view as? PamDrawerLayout)?.setSwipeMinDistance(CGFloat(value.decimalOrZero()))
+        case PamConstants.drawerKeyboardDismissMode:
+            (view as? PamDrawerLayout)?.setKeyboardDismissMode(Int(value.integerOrNil() ?? 1))
+        case PamConstants.drawerHideStatusBarOnOpen:
+            (view as? PamDrawerLayout)?.setHideStatusBarOnOpen(value.boolOrNil() ?? false)
+        case PamConstants.drawerStatusBarAnimation:
+            (view as? PamDrawerLayout)?.setStatusBarAnimation(Int(value.integerOrNil() ?? 1))
+        case PamConstants.drawerPermanentBreakpoint:
+            (view as? PamDrawerLayout)?.setPermanentBreakpoint(CGFloat(value.decimalOrZero()))
+        case PamConstants.layoutDirection:
+            view.semanticContentAttribute = value.integerOrNil() == 2
+                ? .forceRightToLeft
+                : .forceLeftToRight
         case PamConstants.hostProperties:
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
         default:
@@ -884,10 +1060,41 @@ public final class PamRenderer {
 
     private func resetProperty(view: UIView, nodeId _: Int64, key: Int, state: NodeState) {
         switch key {
+        case PamConstants.fontSize,
+             PamConstants.fontWeight,
+             PamConstants.fontStyle,
+             PamConstants.fontFamily,
+             PamConstants.textAllowFontScaling,
+             PamConstants.textMaxFontSizeMultiplier,
+             PamConstants.textAdjustsFontSizeToFit,
+             PamConstants.textMinimumFontScale:
+            applyTextSizing(view: view, state: state)
+        case PamConstants.accessibilityLabel:
+            view.accessibilityLabel = nil
+            applyAccessibility(view: view, state: state)
+        case PamConstants.accessibilityHint:
+            view.accessibilityHint = nil
+        case PamConstants.accessibilityRole,
+             PamConstants.accessible,
+             PamConstants.accessibilityLiveRegion,
+             PamConstants.accessibilityImportance,
+             PamConstants.accessibilityExpanded,
+             PamConstants.accessibilityBusy,
+             PamConstants.accessibilityCheckedState,
+             PamConstants.accessibilityValueMin,
+             PamConstants.accessibilityValueMax,
+             PamConstants.accessibilityValueNow,
+             PamConstants.accessibilityValueText,
+             PamConstants.selected,
+             PamConstants.checked,
+             PamConstants.loading:
+            applyAccessibility(view: view, state: state)
+        case PamConstants.layoutDirection:
+            view.semanticContentAttribute = .unspecified
         case PamConstants.visible:
             if let modal = view as? PamModalHost {
                 modal.setVisible(true)
-            } else if let indicator = view as? UIActivityIndicatorView {
+            } else if let indicator = view as? PamVuetifySpinner {
                 indicator.startAnimating()
             } else {
                 view.isHidden = false
@@ -913,6 +1120,183 @@ public final class PamRenderer {
         default:
             break
         }
+    }
+
+    private func applyTextSizing(view: UIView, state: NodeState?) {
+        guard let state else { return }
+        let baseSize = CGFloat(
+            state.properties[PamConstants.fontSize]?.decimalOrNil() ?? 14
+        )
+        let numericWeight = Int(
+            state.properties[PamConstants.fontWeight]?.integerOrNil() ?? 400
+        )
+        let weight: UIFont.Weight
+        switch numericWeight {
+        case 700...:
+            weight = .bold
+        case 600...:
+            weight = .semibold
+        case 500...:
+            weight = .medium
+        case ..<350:
+            weight = .light
+        default:
+            weight = .regular
+        }
+        let family = state.properties[PamConstants.fontFamily]?.textOrNil()
+        var baseFont = family.flatMap { UIFont(name: $0, size: baseSize) }
+            ?? UIFont.systemFont(ofSize: baseSize, weight: weight)
+        if state.properties[PamConstants.fontStyle]?.integerOrNil() == 2,
+           let italicDescriptor = baseFont.fontDescriptor
+            .withSymbolicTraits(.traitItalic) {
+            baseFont = UIFont(descriptor: italicDescriptor, size: baseSize)
+        }
+
+        let allowsScaling =
+            state.properties[PamConstants.textAllowFontScaling]?.boolOrNil() ?? true
+        let maximumMultiplier =
+            state.properties[PamConstants.textMaxFontSizeMultiplier]?.decimalOrNil() ?? 0
+        let font: UIFont
+        if allowsScaling {
+            let metrics = UIFontMetrics(forTextStyle: .body)
+            font = maximumMultiplier > 0
+                ? metrics.scaledFont(
+                    for: baseFont,
+                    maximumPointSize: baseSize * CGFloat(maximumMultiplier)
+                )
+                : metrics.scaledFont(for: baseFont)
+        } else {
+            font = baseFont
+        }
+
+        let adjustsToFit =
+            state.properties[PamConstants.textAdjustsFontSizeToFit]?.boolOrNil() ?? false
+        let minimumScale = max(
+            0,
+            min(
+                1,
+                CGFloat(
+                    state.properties[PamConstants.textMinimumFontScale]?.decimalOrNil() ?? 0
+                )
+            )
+        )
+        if let label = view as? UILabel {
+            label.font = font
+            label.adjustsFontForContentSizeCategory = allowsScaling
+            label.adjustsFontSizeToFitWidth = adjustsToFit
+            label.minimumScaleFactor = minimumScale
+        } else if let button = view as? UIButton {
+            button.titleLabel?.font = font
+            button.titleLabel?.adjustsFontForContentSizeCategory = allowsScaling
+            button.titleLabel?.adjustsFontSizeToFitWidth = adjustsToFit
+            button.titleLabel?.minimumScaleFactor = minimumScale
+        } else if let field = view as? UITextField {
+            field.font = font
+            field.adjustsFontForContentSizeCategory = allowsScaling
+            field.adjustsFontSizeToFitWidth = adjustsToFit
+            field.minimumFontSize = adjustsToFit ? baseSize * minimumScale : 0
+        }
+    }
+
+    private func applyAccessibility(view: UIView, state: NodeState?) {
+        guard let state else { return }
+        let role = Int(
+            state.properties[PamConstants.accessibilityRole]?.integerOrNil() ?? 1
+        )
+        let importance = Int(
+            state.properties[PamConstants.accessibilityImportance]?.integerOrNil() ?? 1
+        )
+        let explicitlyAccessible =
+            state.properties[PamConstants.accessible]?.boolOrNil()
+
+        var traits: UIAccessibilityTraits = []
+        switch role {
+        case 2, 5, 8, 11, 19, 25, 29:
+            traits.insert(.button)
+        case 4:
+            traits.insert(.image)
+        case 6, 23:
+            traits.insert(.adjustable)
+        case 10:
+            traits.insert(.header)
+        case 13:
+            traits.insert(.link)
+        case 18, 28:
+            traits.insert(.updatesFrequently)
+        case 22:
+            traits.insert(.searchField)
+        case 27:
+            traits.insert(.staticText)
+        default:
+            break
+        }
+
+        let selected =
+            state.properties[PamConstants.selected]?.boolOrNil() == true
+        let checkedState = Int(
+            state.properties[PamConstants.accessibilityCheckedState]?.integerOrNil() ?? 0
+        )
+        if selected || checkedState == 2 {
+            traits.insert(.selected)
+        }
+        if state.properties[PamConstants.enabled]?.boolOrNil() == false {
+            traits.insert(.notEnabled)
+        }
+        if state.properties[PamConstants.accessibilityBusy]?.boolOrNil() == true ||
+            state.properties[PamConstants.loading]?.boolOrNil() == true ||
+            Int(state.properties[PamConstants.accessibilityLiveRegion]?.integerOrNil() ?? 1) != 1 {
+            traits.insert(.updatesFrequently)
+        }
+
+        view.accessibilityTraits = traits
+        view.isAccessibilityElement =
+            explicitlyAccessible ??
+            (role != 1 && role != 17 && role != 34 && importance != 3)
+        view.accessibilityElementsHidden = importance == 4
+
+        let explicitValue =
+            state.properties[PamConstants.accessibilityValueText]?.textOrNil()
+        let maximum =
+            state.properties[PamConstants.accessibilityValueMax]?.decimalOrNil()
+        let current =
+            state.properties[PamConstants.accessibilityValueNow]?.decimalOrNil()
+        var values: [String] = []
+        if let explicitValue, !explicitValue.isEmpty {
+            values.append(explicitValue)
+        } else if let maximum, let current {
+            values.append(
+                "\(accessibilityNumber(current)) / \(accessibilityNumber(maximum))"
+            )
+        }
+        if checkedState != 0 {
+            values.append(
+                checkedState == 2 ? "Checked" :
+                    (checkedState == 3 ? "Mixed" : "Unchecked")
+            )
+        }
+        if let expanded =
+            state.properties[PamConstants.accessibilityExpanded]?.boolOrNil() {
+            values.append(expanded ? "Expanded" : "Collapsed")
+        }
+        if state.properties[PamConstants.accessibilityBusy]?.boolOrNil() == true ||
+            state.properties[PamConstants.loading]?.boolOrNil() == true {
+            values.append("Loading")
+        }
+        view.accessibilityValue = values.isEmpty ? nil : values.joined(separator: ", ")
+    }
+
+    private func accessibilityNumber(_ value: Double) -> String {
+        if value.rounded() == value {
+            return String(Int64(value))
+        }
+        var text = String(format: "%.2f", value)
+        while text.last == "0" {
+            text.removeLast()
+        }
+        if text.last == "." {
+            text.removeLast()
+        }
+        return text
     }
 
     private func configureScrollView(_ scroll: UIScrollView, horizontal: Bool) {
@@ -1638,6 +2022,10 @@ public final class PamRenderer {
 
         @objc private func onRipple(_ sender: UILongPressGestureRecognizer) {
             guard let overlay = rippleOverlay else { return }
+            if UIAccessibility.isReduceMotionEnabled {
+                overlay.alpha = sender.state == .began ? 1 : 0
+                return
+            }
             switch sender.state {
             case .began:
                 UIView.animate(
@@ -1821,7 +2209,7 @@ public final class PamRenderer {
         }
 
         @objc private func onToggle() {
-            guard let control = control as? UISwitch else {
+            guard let control = control as? PamVuetifySwitch else {
                 dispatchEvent(nodeId, EventKind.toggle.rawValue, Data())
                 return
             }

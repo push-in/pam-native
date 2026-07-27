@@ -305,6 +305,9 @@ public enum PamConstants {
     public static let refreshProgressBackgroundColor = 158
     public static let refreshProgressViewOffset = 159
     public static let refreshIndicatorSize = 160
+    public static let switchTrackColorFalse = 192
+    public static let switchTrackColorTrue = 193
+    public static let switchThumbColor = 194
     public static let scrollHorizontal = 177
     public static let sectionItems = 80
     public static let hostProperties = 100
@@ -326,6 +329,27 @@ public enum PamConstants {
     public static let padding = 8
     public static let flexGrow = 7
     public static let accessibilityLabel = 17
+    public static let fontWeight = 43
+    public static let letterSpacing = 89
+    public static let lineHeight = 90
+    public static let fontStyle = 128
+    public static let fontFamily = 136
+    public static let accessibilityRole = 70
+    public static let accessibilityHint = 71
+    public static let accessible = 140
+    public static let accessibilityLiveRegion = 141
+    public static let accessibilityImportance = 142
+    public static let accessibilityExpanded = 143
+    public static let accessibilityBusy = 144
+    public static let accessibilityCheckedState = 145
+    public static let accessibilityValueMin = 146
+    public static let accessibilityValueMax = 147
+    public static let accessibilityValueNow = 148
+    public static let accessibilityValueText = 149
+    public static let textAllowFontScaling = 163
+    public static let textMaxFontSizeMultiplier = 164
+    public static let textAdjustsFontSizeToFit = 165
+    public static let textMinimumFontScale = 166
     public static let translationX = 72
     public static let translationY = 73
     public static let scaleX = 74
@@ -364,6 +388,17 @@ public enum PamConstants {
     public static let onTouchStart = 289
     public static let onTouchMove = 290
     public static let onTouchEnd = 291
+    public static let drawerType = 292
+    public static let drawerWidth = 293
+    public static let drawerOverlayColor = 294
+    public static let drawerSwipeEnabled = 295
+    public static let drawerSwipeEdgeWidth = 296
+    public static let drawerSwipeMinDistance = 297
+    public static let drawerKeyboardDismissMode = 298
+    public static let drawerHideStatusBarOnOpen = 299
+    public static let drawerStatusBarAnimation = 300
+    public static let drawerPermanentBreakpoint = 301
+    public static let layoutDirection = 302
 }
 
 public enum BatchDecoder {

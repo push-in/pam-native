@@ -232,8 +232,14 @@ pub unsafe extern "C" fn pam_native_engine_commit(
             *output = leak_buffer(batch);
             PamStatus::Success
         }
-        Ok(Err(_)) => PamStatus::InvalidFrame,
-        Err(_) => PamStatus::Panic,
+        Ok(Err(error)) => {
+            eprintln!("Pam Native rejected render frame: {error:?}");
+            PamStatus::InvalidFrame
+        }
+        Err(payload) => {
+            eprintln!("Pam Native panicked while committing render frame: {payload:?}");
+            PamStatus::Panic
+        }
     }
 }
 

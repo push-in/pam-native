@@ -35,6 +35,11 @@ final class Router
         return new TabRouter($initialTab);
     }
 
+    public static function drawer(string $initialRoute): DrawerRouter
+    {
+        return new DrawerRouter($initialRoute);
+    }
+
     public function route(string $name, Closure $screen): self
     {
         if ($name === '') {

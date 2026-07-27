@@ -26,6 +26,7 @@ use Pam\Native\InputSyncMode;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\KeyboardType;
+use Pam\Native\LayoutDirection;
 use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalPresentation;
 use Pam\Native\NodeKind;
@@ -219,6 +220,16 @@ final class TemplateRenderer
         'endReachedThreshold' => PropKey::EndReachedThreshold,
         'drawerOpen' => PropKey::DrawerOpen,
         'drawerPosition' => PropKey::DrawerPosition,
+        'drawerType' => PropKey::DrawerType,
+        'drawerWidth' => PropKey::DrawerWidth,
+        'drawerOverlayColor' => PropKey::DrawerOverlayColor,
+        'drawerSwipeEnabled' => PropKey::DrawerSwipeEnabled,
+        'drawerSwipeEdgeWidth' => PropKey::DrawerSwipeEdgeWidth,
+        'drawerSwipeMinDistance' => PropKey::DrawerSwipeMinDistance,
+        'drawerKeyboardDismissMode' => PropKey::DrawerKeyboardDismissMode,
+        'drawerHideStatusBarOnOpen' => PropKey::DrawerHideStatusBarOnOpen,
+        'drawerStatusBarAnimation' => PropKey::DrawerStatusBarAnimation,
+        'drawerPermanentBreakpoint' => PropKey::DrawerPermanentBreakpoint,
         'letterSpacing' => PropKey::LetterSpacing,
         'lineHeight' => PropKey::LineHeight,
         'placeholderColor' => PropKey::PlaceholderColor,
@@ -255,6 +266,7 @@ final class TemplateRenderer
         'zIndex' => PropKey::ZIndex,
         'overflow' => PropKey::Overflow,
         'flexDirection' => PropKey::FlexDirection,
+        'layoutDirection' => PropKey::LayoutDirection,
         'flexShrink' => PropKey::FlexShrink,
         'paddingLeft' => PropKey::PaddingLeft,
         'paddingTop' => PropKey::PaddingTop,
@@ -1308,6 +1320,10 @@ final class TemplateRenderer
                 'row' => 2,
                 'column-reverse' => 3,
                 'row-reverse' => 4,
+            ]),
+            PropKey::LayoutDirection => self::named($value, [
+                'ltr' => LayoutDirection::LeftToRight->value,
+                'rtl' => LayoutDirection::RightToLeft->value,
             ]),
             PropKey::PositionType => self::named($value, [
                 'relative' => 1,

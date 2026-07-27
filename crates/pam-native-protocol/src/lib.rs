@@ -372,6 +372,16 @@ pub enum PropKey {
     OnTouchStart = 289,
     OnTouchMove = 290,
     OnTouchEnd = 291,
+    DrawerType = 292,
+    DrawerWidth = 293,
+    DrawerOverlayColor = 294,
+    DrawerSwipeEnabled = 295,
+    DrawerSwipeEdgeWidth = 296,
+    DrawerSwipeMinDistance = 297,
+    DrawerKeyboardDismissMode = 298,
+    DrawerHideStatusBarOnOpen = 299,
+    DrawerStatusBarAnimation = 300,
+    DrawerPermanentBreakpoint = 301,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -670,6 +680,16 @@ impl TryFrom<u16> for PropKey {
             289 => Ok(Self::OnTouchStart),
             290 => Ok(Self::OnTouchMove),
             291 => Ok(Self::OnTouchEnd),
+            292 => Ok(Self::DrawerType),
+            293 => Ok(Self::DrawerWidth),
+            294 => Ok(Self::DrawerOverlayColor),
+            295 => Ok(Self::DrawerSwipeEnabled),
+            296 => Ok(Self::DrawerSwipeEdgeWidth),
+            297 => Ok(Self::DrawerSwipeMinDistance),
+            298 => Ok(Self::DrawerKeyboardDismissMode),
+            299 => Ok(Self::DrawerHideStatusBarOnOpen),
+            300 => Ok(Self::DrawerStatusBarAnimation),
+            301 => Ok(Self::DrawerPermanentBreakpoint),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }

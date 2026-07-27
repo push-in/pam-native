@@ -1,6 +1,268 @@
 import Foundation
 import UIKit
 
+final class PamVuetifySwitch: UIControl {
+    private let trackLayer = CALayer()
+    private let thumbLayer = CALayer()
+
+    var trackOffColor = UIColor(white: 0.55, alpha: 0.60) {
+        didSet { updateAppearance(animated: false) }
+    }
+
+    var trackOnColor = UIColor.systemBlue {
+        didSet { updateAppearance(animated: false) }
+    }
+
+    var thumbColor = UIColor.white {
+        didSet { updateAppearance(animated: false) }
+    }
+
+    var isOn = false {
+        didSet {
+            guard oldValue != isOn else { return }
+            updateAppearance(animated: window != nil)
+            accessibilityValue = isOn ? "On" : "Off"
+        }
+    }
+
+    override var isEnabled: Bool {
+        didSet {
+            alpha = isEnabled ? 1.0 : 0.38
+            accessibilityTraits = isEnabled ? [.button] : [.button, .notEnabled]
+        }
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: 40, height: 40)
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = true
+        accessibilityTraits = [.button]
+        accessibilityValue = "Off"
+        layer.addSublayer(trackLayer)
+        layer.addSublayer(thumbLayer)
+        trackLayer.cornerRadius = 7
+        thumbLayer.cornerRadius = 10
+        thumbLayer.shadowColor = UIColor.black.cgColor
+        thumbLayer.shadowOpacity = 0.24
+        thumbLayer.shadowRadius = 2
+        thumbLayer.shadowOffset = CGSize(width: 0, height: 1)
+        addTarget(self, action: #selector(toggle), for: .touchUpInside)
+        updateAppearance(animated: false)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        updateFrames(animated: false)
+    }
+
+    @objc private func toggle() {
+        guard isEnabled else { return }
+        isOn.toggle()
+        sendActions(for: .valueChanged)
+    }
+
+    private func updateAppearance(animated: Bool) {
+        let changes = {
+            self.trackLayer.backgroundColor = (
+                self.isOn ? self.trackOnColor : self.trackOffColor
+            ).cgColor
+            self.thumbLayer.backgroundColor = self.thumbColor.cgColor
+            self.updateFrames(animated: false)
+        }
+        if animated {
+            CATransaction.begin()
+            CATransaction.setAnimationDuration(0.20)
+            CATransaction.setAnimationTimingFunction(
+                CAMediaTimingFunction(name: .easeInEaseOut)
+            )
+            changes()
+            CATransaction.commit()
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            changes()
+            CATransaction.commit()
+        }
+    }
+
+    private func updateFrames(animated _: Bool) {
+        let centerY = bounds.midY
+        let trackFrame = CGRect(
+            x: bounds.midX - 18,
+            y: centerY - 7,
+            width: 36,
+            height: 14
+        )
+        trackLayer.frame = trackFrame
+        let thumbCenterX = isOn ? trackFrame.maxX - 10 : trackFrame.minX + 10
+        thumbLayer.frame = CGRect(
+            x: thumbCenterX - 10,
+            y: centerY - 10,
+            width: 20,
+            height: 20
+        )
+    }
+}
+
+final class PamVuetifySpinner: UIView {
+    private let arcLayer = CAShapeLayer()
+    private var animating = false
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: 32, height: 32)
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isAccessibilityElement = true
+        accessibilityTraits = [.updatesFrequently]
+        accessibilityLabel = "Loading"
+        arcLayer.fillColor = UIColor.clear.cgColor
+        arcLayer.strokeColor = tintColor.cgColor
+        arcLayer.lineCap = .round
+        arcLayer.lineWidth = 3
+        layer.addSublayer(arcLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        arcLayer.frame = bounds
+        let inset = max(2, arcLayer.lineWidth / 2)
+        arcLayer.path = UIBezierPath(
+            ovalIn: bounds.insetBy(dx: inset, dy: inset)
+        ).cgPath
+    }
+
+    override func tintColorDidChange() {
+        super.tintColorDidChange()
+        arcLayer.strokeColor = tintColor.cgColor
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            arcLayer.removeAllAnimations()
+        } else if animating {
+            installAnimations()
+        }
+    }
+
+    func startAnimating() {
+        guard !animating else { return }
+        animating = true
+        isHidden = false
+        installAnimations()
+    }
+
+    func stopAnimating() {
+        animating = false
+        arcLayer.removeAllAnimations()
+        isHidden = true
+    }
+
+    private func installAnimations() {
+        guard window != nil else { return }
+        arcLayer.removeAllAnimations()
+        if UIAccessibility.isReduceMotionEnabled {
+            arcLayer.strokeStart = 0.08
+            arcLayer.strokeEnd = 0.82
+            return
+        }
+
+        let rotation = CABasicAnimation(keyPath: "transform.rotation")
+        rotation.fromValue = 0
+        rotation.toValue = CGFloat.pi * 2
+        rotation.duration = 1.4
+        rotation.repeatCount = .infinity
+        rotation.timingFunction = CAMediaTimingFunction(name: .linear)
+
+        let strokeEnd = CAKeyframeAnimation(keyPath: "strokeEnd")
+        strokeEnd.values = [0.08, 0.82, 0.98]
+        strokeEnd.keyTimes = [0, 0.55, 1]
+        strokeEnd.duration = 1.4
+        strokeEnd.repeatCount = .infinity
+        strokeEnd.timingFunctions = [
+            CAMediaTimingFunction(name: .easeInEaseOut),
+            CAMediaTimingFunction(name: .easeInEaseOut),
+        ]
+
+        let strokeStart = CAKeyframeAnimation(keyPath: "strokeStart")
+        strokeStart.values = [0, 0.04, 0.76]
+        strokeStart.keyTimes = [0, 0.45, 1]
+        strokeStart.duration = 1.4
+        strokeStart.repeatCount = .infinity
+        strokeStart.timingFunctions = [
+            CAMediaTimingFunction(name: .easeInEaseOut),
+            CAMediaTimingFunction(name: .easeInEaseOut),
+        ]
+
+        arcLayer.add(rotation, forKey: "pam.rotation")
+        arcLayer.add(strokeEnd, forKey: "pam.strokeEnd")
+        arcLayer.add(strokeStart, forKey: "pam.strokeStart")
+    }
+}
+
+private extension UIView {
+    func pamFirstResponder() -> UIView? {
+        if isFirstResponder {
+            return self
+        }
+        for child in subviews {
+            if let responder = child.pamFirstResponder() {
+                return responder
+            }
+        }
+        return nil
+    }
+
+    func pamFirstAccessibleView() -> UIView? {
+        if (
+            !isHidden
+            && alpha > 0.01
+            && isUserInteractionEnabled
+            && (isAccessibilityElement || canBecomeFirstResponder)
+        ) {
+            return self
+        }
+        for child in subviews {
+            if let accessible = child.pamFirstAccessibleView() {
+                return accessible
+            }
+        }
+        return nil
+    }
+}
+
+final class PamSafeAreaView: UIView {
+    var onSafeAreaInsetsDidChange: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        clipsToBounds = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        clipsToBounds = true
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        onSafeAreaInsetsDidChange?()
+    }
+}
+
 final class PamInputField: UITextField, UITextFieldDelegate {
     private static let maxKeyBytes = 64
 
@@ -155,11 +417,23 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 }
 
-final class PamDrawerLayout: UIView {
+final class PamDrawerLayout: UIView, UIGestureRecognizerDelegate {
     private let contentHost = UIView()
+    private let overlayView = UIView()
     private let drawerHost = UIView()
     private var open = false
+    private var drawerType = 1
+    private var drawerPosition = 1
+    private var preferredDrawerWidth: CGFloat = 256
+    private var swipeEnabled = true
+    private var swipeEdgeWidth: CGFloat = 32
+    private var swipeMinDistance: CGFloat = 56
+    private var keyboardDismissMode = 1
+    private var permanentBreakpoint: CGFloat = 840
+    private var hideStatusBarOnOpen = false
+    private var statusBarAnimation = 1
     private var downX: CGFloat = 0
+    private var gestureStartProgress: CGFloat = 0
     private var gestureInProgress = false
 
     private var onOpen: (() -> Void)?
@@ -169,11 +443,17 @@ final class PamDrawerLayout: UIView {
         super.init(frame: frame)
         clipsToBounds = false
         addSubview(contentHost)
+        overlayView.backgroundColor = UIColor(argb: 0x33000000)
+        overlayView.alpha = 0
+        overlayView.isUserInteractionEnabled = false
+        addSubview(overlayView)
         addSubview(drawerHost)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.cancelsTouchesInView = false
+        pan.delegate = self
         addGestureRecognizer(pan)
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
+        tap.cancelsTouchesInView = false
         addGestureRecognizer(tap)
     }
 
@@ -198,6 +478,7 @@ final class PamDrawerLayout: UIView {
 
     func setOpen(_ value: Bool, animated: Bool = true) {
         guard open != value else {
+            updateDrawer(animated: animated)
             return
         }
         open = value
@@ -214,45 +495,101 @@ final class PamDrawerLayout: UIView {
         onClose = closed
     }
 
+    func setDrawerType(_ value: Int) {
+        drawerType = min(4, max(1, value))
+        setNeedsLayout()
+    }
+
+    func setDrawerPosition(_ value: Int) {
+        drawerPosition = min(3, max(1, value))
+        setNeedsLayout()
+    }
+
+    func setDrawerWidth(_ value: CGFloat) {
+        preferredDrawerWidth = min(640, max(200, value))
+        setNeedsLayout()
+    }
+
+    func setOverlayColor(_ value: Int) {
+        overlayView.backgroundColor = UIColor(argb: value)
+    }
+
+    func setSwipeEnabled(_ value: Bool) {
+        swipeEnabled = value
+    }
+
+    func setSwipeEdgeWidth(_ value: CGFloat) {
+        swipeEdgeWidth = min(256, max(0, value))
+    }
+
+    func setSwipeMinDistance(_ value: CGFloat) {
+        swipeMinDistance = min(512, max(1, value))
+    }
+
+    func setKeyboardDismissMode(_ value: Int) {
+        keyboardDismissMode = min(2, max(1, value))
+    }
+
+    func setPermanentBreakpoint(_ value: CGFloat) {
+        permanentBreakpoint = max(0, value)
+        setNeedsLayout()
+    }
+
+    func setHideStatusBarOnOpen(_ value: Bool) {
+        hideStatusBarOnOpen = value
+    }
+
+    func setStatusBarAnimation(_ value: Int) {
+        statusBarAnimation = min(3, max(1, value))
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
-        contentHost.frame = bounds
-        let drawerWidth = min(bounds.width * 0.86, 320)
-        drawerHost.frame = CGRect(x: open ? 0 : -drawerWidth, y: 0, width: drawerWidth, height: bounds.height)
+        let type = resolvedType()
+        applyProgress(type == 4 || open ? 1 : 0)
     }
 
     @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
-        if !open && gestureInProgress {
-            return
-        }
+        guard open && resolvedType() != 4 else { return }
         let point = gesture.location(in: self)
-        if point.x >= bounds.width - 2 { }
+        if !drawerHost.frame.contains(point) {
+            setOpen(false, animated: true)
+        }
     }
 
     @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        guard swipeEnabled && resolvedType() != 4 else { return }
         switch gesture.state {
         case .began:
             downX = gesture.location(in: self).x
-            gestureInProgress = true
+            gestureStartProgress = open ? 1 : 0
+            let edgeEligible = isRight
+                ? downX >= bounds.width - swipeEdgeWidth
+                : downX <= swipeEdgeWidth
+            gestureInProgress = open || edgeEligible
+            if gestureInProgress && keyboardDismissMode == 1 {
+                endEditing(true)
+            }
         case .changed:
             guard gestureInProgress else { return }
             let point = gesture.location(in: self)
             let deltaX = point.x - downX
-            let drawerWidth = drawerHost.frame.width
-            let clamped = max(-drawerWidth, min(0, (open ? 0 : -drawerWidth) + deltaX * 0.62))
-            drawerHost.frame.origin.x = clamped
+            let directed = isRight ? -deltaX : deltaX
+            let width = max(1, min(bounds.width, preferredDrawerWidth))
+            applyProgress(max(0, min(1, gestureStartProgress + directed / width)))
         case .ended, .cancelled:
             let translation = gesture.translation(in: self).x
             gestureInProgress = false
+            let directed = isRight ? -translation : translation
             if open {
-                if translation <= -56 {
+                if directed <= -swipeMinDistance {
                     setOpen(false, animated: true)
                 } else {
                     setOpen(true, animated: true)
                 }
             } else {
-                if translation >= 56 {
+                if directed >= swipeMinDistance {
                     setOpen(true, animated: true)
                 } else {
                     setOpen(false, animated: true)
@@ -264,20 +601,91 @@ final class PamDrawerLayout: UIView {
         }
     }
 
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard swipeEnabled && resolvedType() != 4 else { return false }
+        guard let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+            return true
+        }
+        let point = pan.location(in: self)
+        if open && drawerHost.frame.contains(point) {
+            return false
+        }
+        if !open {
+            let edgeEligible = isRight
+                ? point.x >= bounds.width - swipeEdgeWidth
+                : point.x <= swipeEdgeWidth
+            guard edgeEligible else { return false }
+        }
+        let velocity = pan.velocity(in: self)
+        return abs(velocity.x) > abs(velocity.y)
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        gestureRecognizer is UIPanGestureRecognizer
+            || otherGestureRecognizer is UIPanGestureRecognizer
+    }
+
     private func updateDrawer(animated: Bool) {
-        let drawerWidth = drawerHost.frame.width
-        let target = open ? 0 : -drawerWidth
+        if resolvedType() == 4 {
+            open = true
+        }
         guard animated else {
-            drawerHost.frame.origin.x = target
+            setNeedsLayout()
+            layoutIfNeeded()
             return
         }
         UIView.animate(
-            withDuration: 0.18,
+            withDuration: 0.20,
             delay: 0,
             options: .curveEaseOut,
         ) {
-            self.drawerHost.frame.origin.x = target
+            self.setNeedsLayout()
+            self.layoutIfNeeded()
         }
+    }
+
+    private func applyProgress(_ rawProgress: CGFloat) {
+        let type = resolvedType()
+        let progress = max(0, min(1, rawProgress))
+        let width = min(bounds.width, preferredDrawerWidth)
+        let direction: CGFloat = isRight ? -1 : 1
+        let openX = isRight ? bounds.width - width : 0
+        let closedX = isRight ? bounds.width : -width
+        let drawerStart: CGFloat
+        switch type {
+        case 2, 4:
+            drawerStart = openX
+        case 3:
+            drawerStart = openX + (closedX - openX) * 0.35
+        default:
+            drawerStart = closedX
+        }
+        let drawerX = drawerStart + (openX - drawerStart) * progress
+        drawerHost.frame = CGRect(
+            x: drawerX,
+            y: 0,
+            width: width,
+            height: bounds.height
+        )
+        let contentOffset = type == 4
+            ? direction * width
+            : ((type == 2 || type == 3) ? direction * width * progress : 0)
+        contentHost.frame = bounds.offsetBy(dx: contentOffset, dy: 0)
+        overlayView.frame = bounds
+        overlayView.alpha = type == 4 ? 0 : progress
+        overlayView.isUserInteractionEnabled = progress > 0
+    }
+
+    private var isRight: Bool {
+        drawerPosition == 3 ||
+            (drawerPosition == 1 && effectiveUserInterfaceLayoutDirection == .rightToLeft)
+    }
+
+    private func resolvedType() -> Int {
+        permanentBreakpoint > 0 && bounds.width >= permanentBreakpoint ? 4 : drawerType
     }
 }
 
@@ -510,7 +918,7 @@ final class PamModalHost: UIView {
     private var currentlyVisible = false
     private var presentation = Presentation.dialog
     private var animationType = Animation.none
-    private var backdropColor = UIColor.white
+    private var backdropColor = UIColor.black.withAlphaComponent(0.32)
     private var transparent = false
     private var allowSwipeDismissal = false
     private var onRequestClose: (() -> Void)?
@@ -519,6 +927,22 @@ final class PamModalHost: UIView {
     private var onOrientationChange: ((Int) -> Void)?
     private var orientationToken: NSObjectProtocol?
     private var lastOrientation: Int?
+    private weak var previousFocus: UIView?
+
+    override var canBecomeFirstResponder: Bool {
+        true
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard currentlyVisible else { return nil }
+        return [
+            UIKeyCommand(
+                input: UIKeyCommand.inputEscape,
+                modifierFlags: [],
+                action: #selector(onEscape)
+            ),
+        ]
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -646,15 +1070,17 @@ final class PamModalHost: UIView {
 
     private func present() {
         guard !currentlyVisible else { return }
+        previousFocus = window?.pamFirstResponder()
         isHidden = false
         currentlyVisible = true
+        accessibilityViewIsModal = true
         backdropView.alpha = 0
         contentClip.alpha = 0
         contentClip.transform = presentation == Presentation.sheet ? CGAffineTransform(translationX: 0, y: bounds.height * 0.25) : .identity
         applyBackdropColor()
-        let animationDuration: TimeInterval = 0.22
+        let animationDuration: TimeInterval = 0.225
 
-        switch animationType {
+        switch UIAccessibility.isReduceMotionEnabled ? Animation.none : animationType {
         case Animation.slide:
             if presentation == Presentation.sheet {
                 contentClip.transform = CGAffineTransform(translationX: 0, y: bounds.height * 0.35)
@@ -680,6 +1106,9 @@ final class PamModalHost: UIView {
         }
 
         onShow?()
+        becomeFirstResponder()
+        let initialFocus = contentHost.pamFirstAccessibleView() ?? contentHost
+        UIAccessibility.post(notification: .screenChanged, argument: initialFocus)
         if onOrientationChange != nil {
             dispatchOrientation(force: true)
         }
@@ -692,11 +1121,13 @@ final class PamModalHost: UIView {
             isHidden = true
             return
         }
-        let animationDuration: TimeInterval = 0.16
+        let animationDuration: TimeInterval = 0.125
 
         let completion = {
             self.currentlyVisible = false
             self.isHidden = true
+            self.accessibilityViewIsModal = false
+            self.resignFirstResponder()
             if notify {
                 self.onDismiss?()
             }
@@ -704,9 +1135,19 @@ final class PamModalHost: UIView {
                 self.lastOrientation = nil
             }
             self.removeOrientationObserver()
+            if let previousFocus = self.previousFocus, previousFocus.window != nil {
+                previousFocus.becomeFirstResponder()
+                UIAccessibility.post(
+                    notification: .screenChanged,
+                    argument: previousFocus
+                )
+            } else {
+                UIAccessibility.post(notification: .screenChanged, argument: nil)
+            }
+            self.previousFocus = nil
         }
 
-        switch animationType {
+        switch UIAccessibility.isReduceMotionEnabled ? Animation.none : animationType {
         case Animation.slide:
             UIView.animate(withDuration: animationDuration, animations: {
                 self.backdropView.alpha = 0
@@ -742,6 +1183,10 @@ final class PamModalHost: UIView {
         requestClose()
     }
 
+    @objc private func onEscape() {
+        requestClose()
+    }
+
     @objc private func onModalPan(_ gesture: UIPanGestureRecognizer) {
         guard allowSwipeDismissal, currentlyVisible else { return }
         if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
@@ -753,12 +1198,12 @@ final class PamModalHost: UIView {
     }
 
     private func applyBackdropColor() {
-        backdropView.backgroundColor = transparent ? .clear : backdropColor.withAlphaComponent(0.55)
+        backdropView.backgroundColor = transparent ? .clear : backdropColor
     }
 
     private func updatePresentationLayout() {
         if presentation == Presentation.sheet {
-            contentHost.layer.cornerRadius = 14
+            contentHost.layer.cornerRadius = 0
             contentHost.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
             contentHost.clipsToBounds = true
         } else {
