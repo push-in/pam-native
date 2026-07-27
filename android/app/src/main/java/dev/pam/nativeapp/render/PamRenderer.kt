@@ -177,7 +177,7 @@ class PamRenderer(
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
             if (state.kind != NodeKind.MODAL) continue
-            val marker = state.properties[PropKey.VALUE]?.text() ?: continue
+            val marker = state.properties[PropKey.VALUE]?.textOrNull() ?: continue
             if (marker.startsWith(LOCAL_MODAL_PREFIX)) {
                 (views[state.id] as? PamModalHost)?.let {
                     modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = it
@@ -187,7 +187,7 @@ class PamRenderer(
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
             val trigger = views[state.id] as? PamPressable ?: continue
-            val marker = state.properties[PropKey.VALUE]?.text()
+            val marker = state.properties[PropKey.VALUE]?.textOrNull()
             val modal = if (marker?.startsWith(LOCAL_MODAL_TRIGGER_PREFIX) == true) {
                 modals[marker.removePrefix(LOCAL_MODAL_TRIGGER_PREFIX)]
             } else {
@@ -201,7 +201,7 @@ class PamRenderer(
         val orderedInputs = ArrayList<Pair<Int, EditText>>()
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
-            val marker = state.properties[PropKey.VALUE]?.text() ?: continue
+            val marker = state.properties[PropKey.VALUE]?.textOrNull() ?: continue
             if (state.kind == NodeKind.MODAL && marker.startsWith(LOCAL_MODAL_PREFIX)) {
                 (views[state.id] as? PamModalHost)?.let { orderedModals += position to it }
             }
@@ -227,7 +227,7 @@ class PamRenderer(
         while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
             val state = nodes[currentId] ?: break
             if (state.kind == NodeKind.MODAL) {
-                val marker = state.properties[PropKey.VALUE]?.text()
+                val marker = state.properties[PropKey.VALUE]?.textOrNull()
                 if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
                     modalKey = marker.removePrefix(LOCAL_MODAL_PREFIX)
                 }
@@ -238,7 +238,7 @@ class PamRenderer(
         val key = modalKey ?: return
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
-            val marker = state.properties[PropKey.VALUE]?.text()
+            val marker = state.properties[PropKey.VALUE]?.textOrNull()
             if (marker != LOCAL_MODAL_TRIGGER_PREFIX + key) continue
             val trigger = views[state.id] as? ViewGroup ?: continue
             val value = descendantTextViews(trigger)
@@ -269,7 +269,7 @@ class PamRenderer(
         while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
             val state = nodes[currentId] ?: return
             if (state.kind == NodeKind.MODAL) {
-                val marker = state.properties[PropKey.VALUE]?.text()
+                val marker = state.properties[PropKey.VALUE]?.textOrNull()
                 if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
                     views[startId]?.let { source ->
                         val keyboard = source.context.getSystemService(
@@ -415,7 +415,7 @@ class PamRenderer(
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
-                val name = custom.properties[PropKey.HOST_NAME]?.text()
+                val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
                     ?: error("Custom native view is missing its generated name")
                 nativeViews.create(name) { kind, payload ->
                     if (kind == EVENT_NATIVE) {
@@ -906,16 +906,17 @@ class PamRenderer(
     ) {
         when (key) {
             PropKey.TEXT -> (view as? TextView)?.let { text ->
-                text.text = value.text()
-                state.baseText = value.text()
+                val semanticText = value.semanticValue().toString()
+                text.text = semanticText
+                state.baseText = semanticText
                 applyTextDataDetector(text, state)
             }
             PropKey.VALUE -> if (view is EditText) {
-                applyInputValue(view, state, value.text())
+                applyInputValue(view, state, value.text(key))
             } else {
                 view.tag = value.semanticValue()
             }
-            PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text()
+            PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text(key)
             PropKey.SOURCE -> loadImage(view, state)
             PropKey.BACKGROUND_COLOR,
             PropKey.BORDER_RADIUS,
@@ -944,9 +945,9 @@ class PamRenderer(
                 view.isEnabled = value.flag()
                 configurePressable(view, state)
             }
-            PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text()
-            PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text()
-            PropKey.TEST_ID -> view.transitionName = value.text()
+            PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text(key)
+            PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text(key)
+            PropKey.TEST_ID -> view.transitionName = value.text(key)
             PropKey.ITEMS -> applyStringList(view, state, value)
             PropKey.SECTION_ITEMS -> applySectionList(view, state, value)
             PropKey.NAVIGATION_OPERATION ->
@@ -1096,7 +1097,7 @@ class PamRenderer(
             PropKey.SAFE_AREA_MODE,
             -> applySafeAreaLayout(view, state)
             PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(value.flag())
-            PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text())
+            PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text(key))
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
                 (view as? PamRefreshContainer)?.setProgressBackgroundColor(
                     value.integer().toInt(),
@@ -3703,8 +3704,11 @@ class PamRenderer(
     private fun PropKey.isEventProperty(): Boolean =
         this in EVENT_PROPERTIES
 
-    private fun PropValue.text(): String =
-        (this as? PropValue.Text)?.value ?: error("Expected text property")
+    private fun PropValue.text(key: PropKey): String =
+        (this as? PropValue.Text)?.value
+            ?: error("Expected text property for $key, received ${this::class.simpleName}")
+
+    private fun PropValue.textOrNull(): String? = (this as? PropValue.Text)?.value
 
     private fun PropValue.integer(): Long =
         when (this) {
