@@ -177,7 +177,7 @@ class PamRenderer(
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
             if (state.kind != NodeKind.MODAL) continue
-            val marker = state.properties[PropKey.VALUE]?.text() ?: continue
+            val marker = state.properties[PropKey.VALUE]?.text(PropKey.VALUE) ?: continue
             if (marker.startsWith(LOCAL_MODAL_PREFIX)) {
                 (views[state.id] as? PamModalHost)?.let {
                     modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = it
@@ -187,7 +187,7 @@ class PamRenderer(
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
             val trigger = views[state.id] as? PamPressable ?: continue
-            val marker = state.properties[PropKey.VALUE]?.text()
+            val marker = state.properties[PropKey.VALUE]?.text(PropKey.VALUE)
             val modal = if (marker?.startsWith(LOCAL_MODAL_TRIGGER_PREFIX) == true) {
                 modals[marker.removePrefix(LOCAL_MODAL_TRIGGER_PREFIX)]
             } else {
@@ -201,7 +201,7 @@ class PamRenderer(
         val orderedInputs = ArrayList<Pair<Int, EditText>>()
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
-            val marker = state.properties[PropKey.VALUE]?.text() ?: continue
+            val marker = state.properties[PropKey.VALUE]?.text(PropKey.VALUE) ?: continue
             if (state.kind == NodeKind.MODAL && marker.startsWith(LOCAL_MODAL_PREFIX)) {
                 (views[state.id] as? PamModalHost)?.let { orderedModals += position to it }
             }
@@ -227,7 +227,7 @@ class PamRenderer(
         while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
             val state = nodes[currentId] ?: break
             if (state.kind == NodeKind.MODAL) {
-                val marker = state.properties[PropKey.VALUE]?.text()
+                val marker = state.properties[PropKey.VALUE]?.text(PropKey.VALUE)
                 if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
                     modalKey = marker.removePrefix(LOCAL_MODAL_PREFIX)
                 }
@@ -238,7 +238,7 @@ class PamRenderer(
         val key = modalKey ?: return
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
-            val marker = state.properties[PropKey.VALUE]?.text()
+            val marker = state.properties[PropKey.VALUE]?.text(PropKey.VALUE)
             if (marker != LOCAL_MODAL_TRIGGER_PREFIX + key) continue
             val trigger = views[state.id] as? ViewGroup ?: continue
             val value = descendantTextViews(trigger)
@@ -269,7 +269,7 @@ class PamRenderer(
         while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
             val state = nodes[currentId] ?: return
             if (state.kind == NodeKind.MODAL) {
-                val marker = state.properties[PropKey.VALUE]?.text()
+                val marker = state.properties[PropKey.VALUE]?.text(PropKey.VALUE)
                 if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
                     views[startId]?.let { source ->
                         val keyboard = source.context.getSystemService(
@@ -415,7 +415,7 @@ class PamRenderer(
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
-                val name = custom.properties[PropKey.HOST_NAME]?.text()
+                val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
                     ?: error("Custom native view is missing its generated name")
                 nativeViews.create(name) { kind, payload ->
                     if (kind == EVENT_NATIVE) {
