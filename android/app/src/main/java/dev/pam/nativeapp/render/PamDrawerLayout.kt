@@ -37,6 +37,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private var onClose: (() -> Unit)? = null
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private var navigationInsetBottom = 0
+    private var statusInsetTop = 0
     private var insetDrawer: View? = null
     private var drawerBaseBottomPadding = 0
     private var insetViewport: View? = null
@@ -48,13 +49,20 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
         clipChildren = false
         setWillNotDraw(false)
         setOnApplyWindowInsetsListener { _, insets ->
+            val nextTop = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                insets.getInsets(WindowInsets.Type.statusBars()).top
+            } else {
+                @Suppress("DEPRECATION")
+                insets.systemWindowInsetTop
+            }
             val nextBottom = if (android.os.Build.VERSION.SDK_INT >= 30) {
                 insets.getInsets(WindowInsets.Type.navigationBars()).bottom
             } else {
                 @Suppress("DEPRECATION")
                 insets.systemWindowInsetBottom
             }
-            if (navigationInsetBottom != nextBottom) {
+            if (statusInsetTop != nextTop || navigationInsetBottom != nextBottom) {
+                statusInsetTop = nextTop
                 navigationInsetBottom = nextBottom
                 if (childCount > 1) {
                     enforceDrawerViewport(getChildAt(1))
@@ -62,6 +70,11 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             }
             insets
         }
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        requestApplyInsets()
     }
 
     fun insert(view: View, index: Int) {
@@ -91,6 +104,9 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     fun setDrawerType(value: Int) {
         drawerType = value.coerceIn(TYPE_FRONT, TYPE_PERMANENT)
         updateDrawer(false)
+        if (childCount > 1) {
+            enforceDrawerViewport(getChildAt(1))
+        }
     }
 
     fun setDrawerPosition(value: Int) {
@@ -339,13 +355,12 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             drawer.paddingRight,
             maxOf(drawerBaseBottomPadding, navigationInsetBottom),
         )
-        drawer.layoutParams = (drawer.layoutParams ?: LayoutParams(
-            drawerWidthPx().toInt(),
-            ViewGroup.LayoutParams.MATCH_PARENT,
-        )).apply {
-            width = drawerWidthPx().toInt()
-            height = ViewGroup.LayoutParams.MATCH_PARENT
-        }
+        val drawerParams = (drawer.layoutParams as? LayoutParams)
+            ?: LayoutParams(drawerWidthPx().toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
+        drawerParams.width = drawerWidthPx().toInt()
+        drawerParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+        drawerParams.topMargin = if (resolvedType() == TYPE_PERMANENT) statusInsetTop else 0
+        drawer.layoutParams = drawerParams
         val viewport = (drawer as? ViewGroup)?.getChildAt(0) ?: return
         if (insetViewport !== viewport) {
             insetViewport = viewport
