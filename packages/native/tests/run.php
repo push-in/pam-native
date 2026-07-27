@@ -1817,7 +1817,7 @@ file_put_contents(
     "protocol": 1,
     "pamNative": {
         "minimum": "0.3.0",
-        "maximumExclusive": "0.4.0"
+        "maximumExclusive": "0.5.0"
     },
     "php": {
         "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
