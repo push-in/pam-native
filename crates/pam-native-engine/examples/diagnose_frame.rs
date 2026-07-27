@@ -35,10 +35,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!(
-                "invalid render frame ({} bytes): {error:?}",
-                frame.len(),
-            );
+            eprintln!("invalid render frame ({} bytes): {error:?}", frame.len(),);
             ExitCode::FAILURE
         }
     }
