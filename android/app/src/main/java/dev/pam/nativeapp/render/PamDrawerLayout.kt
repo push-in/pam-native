@@ -188,6 +188,9 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         handleTouch(event)
+        if (event.actionMasked == MotionEvent.ACTION_UP) {
+            performClick()
+        }
         return true
     }
 
@@ -236,7 +239,6 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
                 } else {
                     setOpen(progress >= 0.5f)
                 }
-                performClick()
             }
         }
         return tracking
