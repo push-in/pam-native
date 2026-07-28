@@ -250,6 +250,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             return
         }
 
+        incoming.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        outgoing?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         running = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = actualDuration
             interpolator = DecelerateInterpolator(1.75f)
@@ -341,6 +343,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     private fun finish(incoming: View, outgoing: View?) {
         running = null
+        incoming.setLayerType(View.LAYER_TYPE_NONE, null)
+        outgoing?.setLayerType(View.LAYER_TYPE_NONE, null)
         reset(incoming)
         outgoing?.let {
             reset(it)
