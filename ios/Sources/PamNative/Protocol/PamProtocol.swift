@@ -338,6 +338,9 @@ public enum PamConstants {
     public static let switchTrackColorTrue = 193
     public static let switchThumbColor = 194
     public static let scrollHorizontal = 177
+    public static let scrollAnchorToEnd = 385
+    public static let scrollMaintainVisibleContentPosition = 386
+    public static let scrollAutoScrollToEndThreshold = 387
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

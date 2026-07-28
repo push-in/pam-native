@@ -15,6 +15,7 @@ use Pam\Native\BottomSheetKeyboardBehavior;
 use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
 use Pam\Native\Component;
+use Pam\Native\Contact;
 use Pam\Native\EventKind;
 use Pam\Native\FontStyle;
 use Pam\Native\GestureComposition;
@@ -100,6 +101,7 @@ use Pam\Native\Store\Stores;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
 use Pam\Native\System\Clipboard;
+use Pam\Native\System\Contacts;
 use Pam\Native\System\Sensors;
 use Pam\Native\SensorType;
 use Pam\Native\Style;
@@ -1009,6 +1011,9 @@ $nativeControlTemplate = TemplateRenderer::render(
     <ScrollView
         horizontal="true"
         contentOffset="24"
+        anchorToEnd="true"
+        maintainVisibleContentPosition="true"
+        autoScrollToEndThreshold="32"
         pagingEnabled="true"
         snapToInterval="80"
         overScrollMode="never"
@@ -1040,6 +1045,11 @@ $assert(
     $templateScroll->properties()[PropKey::ScrollHorizontal->value] === true
         && $templateScroll
             ->properties()[PropKey::ScrollContentOffsetX->value] === 24.0
+        && $templateScroll->properties()[PropKey::ScrollAnchorToEnd->value] === true
+        && $templateScroll
+            ->properties()[PropKey::ScrollMaintainVisibleContentPosition->value] === true
+        && $templateScroll
+            ->properties()[PropKey::ScrollAutoScrollToEndThreshold->value] === 32.0
         && $templateScroll->properties()[PropKey::ScrollPagingEnabled->value] === true
         && $templateScroll->properties()[PropKey::ScrollSnapInterval->value] === 80
         && $templateIndicator->properties()[PropKey::ActivityAnimating->value] === false
@@ -1610,6 +1620,43 @@ $assert(
         && $moduleResult->succeeded()
         && $moduleResult->values() === ['message' => 'fast'],
     'Public native module facade did not decode its result.',
+);
+
+$contacts = null;
+$contactsRequestId = Contacts::all(static function (array $items) use (&$contacts): void {
+    $contacts = $items;
+});
+$contactsCall = TestDiagnostics::$moduleCall;
+$assert(
+    $contactsCall !== null
+        && $contactsCall['requestId'] === $contactsRequestId
+        && $contactsCall['module'] === 'contacts'
+        && $contactsCall['method'] === 'list'
+        && Wire::decodeMap($contactsCall['payload']) === ['offset' => 0, 'limit' => 250],
+    'Contacts facade did not request the first bounded native page.',
+);
+Runtime::dispatchModuleResult(
+    $contactsRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map([
+        'items' => json_encode([[
+            'id' => '42',
+            'displayName' => 'Ada Lovelace',
+            'givenName' => 'Ada',
+            'familyName' => 'Lovelace',
+            'phoneNumbers' => ['+5511999999999'],
+            'emailAddresses' => ['ada@example.test'],
+        ]], JSON_THROW_ON_ERROR),
+        'hasMore' => false,
+    ]),
+);
+$assert(
+    is_array($contacts)
+        && count($contacts) === 1
+        && $contacts[0] instanceof Contact
+        && $contacts[0]->displayName === 'Ada Lovelace'
+        && $contacts[0]->phoneNumbers === ['+5511999999999'],
+    'Contacts facade did not decode native contacts into typed values.',
 );
 
 $httpResponse = null;
@@ -2490,8 +2537,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.1',
-    'The runtime SDK contract must match the 0.5 package release line.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.2',
+    'The runtime SDK contract must match the 0.5.2 package release.',
 );
 
 $bottomSheet = BottomSheet::make(
@@ -2644,6 +2691,7 @@ $permission = new PermissionDecision(
 $assert(
     $permission->granted()
         && PermissionKind::LocationWhenInUse->value === 5
+        && PermissionKind::Contacts->value === 6
         && PermissionStatus::Limited->value === 4
         && PushEventType::Opened->value === 2
         && PushProvider::Apns->value === 2,

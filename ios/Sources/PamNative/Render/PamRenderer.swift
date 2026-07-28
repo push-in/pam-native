@@ -495,7 +495,9 @@ public final class PamRenderer {
             return field
         case .image, .imageBackground:
             return UIImageView()
-        case .scroll, .list, .sectionList, .virtualList:
+        case .scroll:
+            return PamAnchoredScrollView()
+        case .list, .sectionList, .virtualList:
             return UIScrollView()
         case .spacer:
             return UIView()
@@ -1342,6 +1344,14 @@ public final class PamRenderer {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: value.boolOrNil() ?? false)
             }
+        case PamConstants.scrollAnchorToEnd:
+            (view as? PamAnchoredScrollView)?.anchorToEnd = value.boolOrNil() ?? false
+        case PamConstants.scrollMaintainVisibleContentPosition:
+            (view as? PamAnchoredScrollView)?.maintainVisibleContentPosition =
+                value.boolOrNil() ?? false
+        case PamConstants.scrollAutoScrollToEndThreshold:
+            (view as? PamAnchoredScrollView)?.autoScrollToEndThreshold =
+                max(0, CGFloat(value.decimalOrZero()))
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(value.boolOrNil() ?? false, animated: true)
         case PamConstants.drawerType:
@@ -1547,6 +1557,12 @@ public final class PamRenderer {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: false)
             }
+        case PamConstants.scrollAnchorToEnd:
+            (view as? PamAnchoredScrollView)?.anchorToEnd = false
+        case PamConstants.scrollMaintainVisibleContentPosition:
+            (view as? PamAnchoredScrollView)?.maintainVisibleContentPosition = false
+        case PamConstants.scrollAutoScrollToEndThreshold:
+            (view as? PamAnchoredScrollView)?.autoScrollToEndThreshold = 24
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(false, animated: true)
         default:
@@ -1772,6 +1788,7 @@ public final class PamRenderer {
     }
 
     private func configureScrollView(_ scroll: UIScrollView, horizontal: Bool) {
+        (scroll as? PamAnchoredScrollView)?.horizontal = horizontal
         scroll.alwaysBounceVertical = !horizontal
         scroll.alwaysBounceHorizontal = horizontal
         scroll.showsHorizontalScrollIndicator = horizontal

@@ -42,6 +42,27 @@ final class Scroll extends Element
             ->withProperty(PropKey::ScrollContentOffsetY, max(0.0, $y));
     }
 
+    public function anchorToEnd(bool $anchor = true): self
+    {
+        return $this->withProperty(PropKey::ScrollAnchorToEnd, $anchor);
+    }
+
+    public function maintainVisibleContentPosition(bool $maintain = true): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollMaintainVisibleContentPosition,
+            $maintain,
+        );
+    }
+
+    public function autoScrollToEndThreshold(float $threshold): self
+    {
+        return $this->withProperty(
+            PropKey::ScrollAutoScrollToEndThreshold,
+            max(0.0, $threshold),
+        );
+    }
+
     public function fillViewport(bool $fill = true): self
     {
         return $this->withProperty(PropKey::ScrollFillViewport, $fill);

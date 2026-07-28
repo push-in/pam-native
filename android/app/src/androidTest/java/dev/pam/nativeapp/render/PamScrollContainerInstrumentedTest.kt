@@ -56,6 +56,78 @@ class PamScrollContainerInstrumentedTest {
         }
     }
 
+    @Test
+    fun endAnchorTracksGrowthOnlyWhileViewportIsNearEnd() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            lateinit var content: View
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                content = View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                }
+                scroll.insert(content)
+                scroll.setAutoScrollToEndThreshold(24f)
+                scroll.setAnchorToEnd(true)
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+                assertEquals(600, scroll.snapshotOffsetPixels().second)
+
+                content.layoutParams = content.layoutParams.apply { height = 1_400 }
+                relayout(activity.host)
+                assertEquals(1_000, scroll.snapshotOffsetPixels().second)
+
+                scroll.restoreOffsetPixels(0, 200)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(200, scroll.snapshotOffsetPixels().second)
+                content.layoutParams = content.layoutParams.apply { height = 1_800 }
+                relayout(activity.host)
+                assertEquals(200, scroll.snapshotOffsetPixels().second)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun maintainedVisiblePositionCompensatesForContentGrowth() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            lateinit var content: View
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                content = View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                }
+                scroll.insert(content)
+                scroll.setMaintainVisibleContentPosition(true)
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+                scroll.restoreOffsetPixels(0, 200)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                content.layoutParams = content.layoutParams.apply { height = 1_400 }
+                relayout(activity.host)
+                assertEquals(600, scroll.snapshotOffsetPixels().second)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity {
         val intent = Intent(
             instrumentation.targetContext,
@@ -73,4 +145,9 @@ class PamScrollContainerInstrumentedTest {
 
     private fun exactly(size: Int): Int =
         View.MeasureSpec.makeMeasureSpec(size, View.MeasureSpec.EXACTLY)
+
+    private fun relayout(host: View) {
+        host.measure(exactly(300), exactly(400))
+        host.layout(0, 0, 300, 400)
+    }
 }

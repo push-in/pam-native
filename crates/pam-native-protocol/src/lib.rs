@@ -469,6 +469,9 @@ pub enum PropKey {
     OnMediaCacheProgress = 382,
     OnMediaCacheReady = 383,
     MediaCacheChecksum = 384,
+    ScrollAnchorToEnd = 385,
+    ScrollMaintainVisibleContentPosition = 386,
+    ScrollAutoScrollToEndThreshold = 387,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -860,6 +863,9 @@ impl TryFrom<u16> for PropKey {
             382 => Ok(Self::OnMediaCacheProgress),
             383 => Ok(Self::OnMediaCacheReady),
             384 => Ok(Self::MediaCacheChecksum),
+            385 => Ok(Self::ScrollAnchorToEnd),
+            386 => Ok(Self::ScrollMaintainVisibleContentPosition),
+            387 => Ok(Self::ScrollAutoScrollToEndThreshold),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1666,7 +1672,7 @@ mod tests {
         for value in 1..=384 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(385).is_err());
+        assert!(PropKey::try_from(388).is_err());
     }
 
     fn tree(text: &str) -> Tree {

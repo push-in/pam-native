@@ -32,6 +32,11 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var hasRequestedOffsetX = false
     private var hasRequestedOffsetY = false
     private var offsetScheduled = false
+    private var previousPrimaryMaxOffset = 0
+    private var anchorToEnd = false
+    private var initialEndAnchorApplied = false
+    private var maintainVisibleContentPosition = false
+    private var autoScrollToEndThresholdPx = 24
     private val applyOffsetRunnable = Runnable {
         offsetScheduled = false
         applyRequestedOffset()
@@ -163,6 +168,23 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         requestOffsetApplication()
     }
 
+    fun setAnchorToEnd(value: Boolean) {
+        if (anchorToEnd == value) return
+        anchorToEnd = value
+        if (value) {
+            initialEndAnchorApplied = false
+            requestOffsetApplication()
+        }
+    }
+
+    fun setMaintainVisibleContentPosition(value: Boolean) {
+        maintainVisibleContentPosition = value
+    }
+
+    fun setAutoScrollToEndThreshold(value: Float) {
+        autoScrollToEndThresholdPx = dp(value.coerceAtLeast(0f))
+    }
+
     fun setOnViewportChanged(listener: ((Float, Float) -> Unit)?) {
         viewportChanged = listener
     }
@@ -191,6 +213,38 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         applyRequestedOffset()
+    }
+
+    override fun onLayout(
+        changed: Boolean,
+        left: Int,
+        top: Int,
+        right: Int,
+        bottom: Int,
+    ) {
+        val previousMax = previousPrimaryMaxOffset
+        val previousOffset = primaryOffset(
+            scrollXOf(activeScroll).toFloat(),
+            scrollYOf(activeScroll).toFloat(),
+        ).roundToInt()
+        val distanceFromEnd = (previousMax - previousOffset).coerceAtLeast(0)
+        super.onLayout(changed, left, top, right, bottom)
+        val newMax = primaryMaxOffset()
+        previousPrimaryMaxOffset = newMax
+        when {
+            anchorToEnd && !initialEndAnchorApplied -> {
+                initialEndAnchorApplied = true
+                scrollToPrimary(newMax)
+                scheduleRequestedOffset()
+            }
+            anchorToEnd &&
+                newMax != previousMax &&
+                distanceFromEnd <= autoScrollToEndThresholdPx -> scrollToPrimary(newMax)
+            maintainVisibleContentPosition && newMax > previousMax ->
+                scrollToPrimary(previousOffset + newMax - previousMax)
+            distanceFromEnd <= 2 && (hasRequestedOffsetX || hasRequestedOffsetY) ->
+                requestOffsetApplication()
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -297,6 +351,21 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     private fun scrollXOf(view: View): Int = view.scrollX.coerceAtLeast(0)
     private fun scrollYOf(view: View): Int = view.scrollY.coerceAtLeast(0)
+
+    private fun primaryMaxOffset(): Int =
+        if (horizontal) {
+            (content.width - activeScroll.width).coerceAtLeast(0)
+        } else {
+            (content.height - activeScroll.height).coerceAtLeast(0)
+        }
+
+    private fun scrollToPrimary(offset: Int) {
+        if (horizontal) {
+            activeScroll.scrollTo(offset.coerceAtLeast(0), scrollYOf(activeScroll))
+        } else {
+            activeScroll.scrollTo(scrollXOf(activeScroll), offset.coerceAtLeast(0))
+        }
+    }
 
     private fun dp(value: Float): Int =
         (value * resources.displayMetrics.density + 0.5f).toInt()

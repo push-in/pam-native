@@ -1,6 +1,6 @@
 import Foundation
 
-public enum WireValue {
+public enum WireValue: Equatable {
     case text(String)
     case integer(Int64)
     case decimal(Double)

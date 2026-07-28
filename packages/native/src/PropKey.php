@@ -390,4 +390,7 @@ enum PropKey: int
     case OnMediaCacheProgress = 382;
     case OnMediaCacheReady = 383;
     case MediaCacheChecksum = 384;
+    case ScrollAnchorToEnd = 385;
+    case ScrollMaintainVisibleContentPosition = 386;
+    case ScrollAutoScrollToEndThreshold = 387;
 }
