@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.4
+
 - Add first-class native image/video/audio caching with memory and disk
   policies, TTL, stable keys, offline pinning, checksums, deduplicated
   downloads, bounded eviction, cache lifecycle events, and declarative tag
