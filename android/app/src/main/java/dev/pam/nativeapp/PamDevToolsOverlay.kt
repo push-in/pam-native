@@ -9,6 +9,21 @@ import android.view.View
 import android.widget.FrameLayout
 import android.widget.TextView
 import java.util.Locale
+import java.util.ArrayDeque
+
+enum class RuntimeDiagnosticKind(val value: Int) {
+    MODULE_CALL(1),
+    EVENT(2),
+    ERROR(3),
+    LIFECYCLE(4),
+}
+
+data class RuntimeDiagnostic(
+    val kind: RuntimeDiagnosticKind,
+    val label: String,
+    val durationNanos: Long = 0,
+    val failed: Boolean = false,
+)
 
 internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     private val text = TextView(context).apply {
@@ -24,6 +39,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     private var frameWindowStarted = 0L
     private var frameCount = 0
     private var latestMetrics: RuntimeFrameMetrics? = null
+    private val diagnostics = ArrayDeque<RuntimeDiagnostic>()
     private val choreographer = Choreographer.getInstance()
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -84,6 +100,14 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         if (visible) renderMetrics()
     }
 
+    fun record(diagnostic: RuntimeDiagnostic) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            appendDiagnostic(diagnostic)
+        } else {
+            post { appendDiagnostic(diagnostic) }
+        }
+    }
+
     override fun onDetachedFromWindow() {
         choreographer.removeFrameCallback(frameCallback)
         super.onDetachedFromWindow()
@@ -93,7 +117,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         val metrics = latestMetrics ?: return
         val stats = metrics.stats
         val heapMiB = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
-        text.text = String.format(
+        val summary = String.format(
             Locale.US,
             "PAM  %.0f fps\nmount %.2f ms  decode %.2f ms\nnodes %d  batches %d\npatch %d  full %d\nnative heap %.1f MiB",
             smoothedFps,
@@ -105,6 +129,26 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
             stats.fullCommits,
             heapMiB,
         )
+        val timeline = diagnostics.joinToString(separator = "\n") { item ->
+            val prefix = if (item.failed) "FAIL" else when (item.kind) {
+                RuntimeDiagnosticKind.MODULE_CALL -> "CALL"
+                RuntimeDiagnosticKind.EVENT -> "EVNT"
+                RuntimeDiagnosticKind.ERROR -> "ERR "
+                RuntimeDiagnosticKind.LIFECYCLE -> "LIFE"
+            }
+            if (item.durationNanos > 0) {
+                String.format(Locale.US, "%s %6.1fms  %s", prefix, item.durationNanos / 1_000_000.0, item.label)
+            } else {
+                "$prefix          ${item.label}"
+            }
+        }
+        text.text = if (timeline.isEmpty()) summary else "$summary\n\nCAPABILITIES\n$timeline"
+    }
+
+    private fun appendDiagnostic(diagnostic: RuntimeDiagnostic) {
+        if (diagnostics.size >= MAX_DIAGNOSTICS) diagnostics.removeFirst()
+        diagnostics.addLast(diagnostic)
+        if (visible) renderMetrics()
     }
 
     private fun dp(value: Int): Int =
@@ -112,5 +156,6 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
 
     private companion object {
         const val FPS_WINDOW_NANOS = 500_000_000L
+        const val MAX_DIAGNOSTICS = 8
     }
 }

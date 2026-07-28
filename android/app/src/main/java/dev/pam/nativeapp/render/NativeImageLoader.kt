@@ -37,6 +37,11 @@ internal data class NativeImageRequest(
     val resizeMultiplier: Float = 1f,
     val progressiveRenderingEnabled: Boolean = false,
     val cachePolicy: Int = IMAGE_CACHE_DEFAULT,
+    val mediaCachePolicy: Int = MEDIA_CACHE_MEMORY_AND_DISK,
+    val mediaCacheKey: String? = null,
+    val mediaCacheMaxAgeMs: Long = 0,
+    val mediaCacheMaxBytes: Long = 0,
+    val mediaCacheChecksum: String? = null,
     val repeat: Boolean = false,
 ) {
     fun signature(): String = listOf(
@@ -50,6 +55,11 @@ internal data class NativeImageRequest(
         resizeMultiplier,
         progressiveRenderingEnabled,
         cachePolicy,
+        mediaCachePolicy,
+        mediaCacheKey.orEmpty(),
+        mediaCacheMaxAgeMs,
+        mediaCacheMaxBytes,
+        mediaCacheChecksum.orEmpty(),
         repeat,
     ).joinToString("\u0000")
 }
@@ -67,6 +77,9 @@ internal class NativeImageCallbacks(
     val onSuccess: (NativeImageResult) -> Unit = {},
     val onError: (String) -> Unit = {},
     val onEnd: () -> Unit = {},
+    val onCacheHit: (Boolean, String) -> Unit = { _, _ -> },
+    val onCacheMiss: (String) -> Unit = {},
+    val onCacheReady: (String, Long) -> Unit = { _, _ -> },
 )
 
 internal class NativeImageLoader(
@@ -183,8 +196,14 @@ internal class NativeImageLoader(
         if (pending.decodedKey == key) return
         pending.decodedKey = key
 
-        if (pending.request.cachePolicy != IMAGE_CACHE_RELOAD) {
+        if (
+            pending.request.cachePolicy != IMAGE_CACHE_RELOAD &&
+            pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+            pending.request.mediaCachePolicy != MEDIA_CACHE_DISK &&
+            pending.request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
+        ) {
             synchronized(cache) { cache.get(key) }?.let { bitmap ->
+                pending.callbacks.onCacheHit(false, cacheIdentity(source, pending.request))
                 finishSuccess(
                     view,
                     pending,
@@ -236,7 +255,11 @@ internal class NativeImageLoader(
                             pending.request.resizeMethod,
                             pending.request.resizeMultiplier,
                         )
-                        if (!closed.get()) {
+                        if (
+                            !closed.get() &&
+                            pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+                            pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
+                        ) {
                             synchronized(cache) { cache.put(key, decoded) }
                         }
                         NativeImageResult(
@@ -429,17 +452,53 @@ internal class NativeImageLoader(
         validateRemote(URI(source), null)
         val headers = parseHeaders(request.requestHeaders)
         val origin = URI(source)
-        val cacheFile = diskFile(source, headers)
-        if (request.cachePolicy != IMAGE_CACHE_RELOAD) {
-            readDisk(cacheFile)?.let { return it }
+        val cacheFile = diskFile(source, headers, request.mediaCacheKey)
+        val identity = cacheIdentity(source, request)
+        val diskEnabled = request.mediaCachePolicy in setOf(
+            MEDIA_CACHE_DISK,
+            MEDIA_CACHE_MEMORY_AND_DISK,
+            MEDIA_CACHE_CACHE_FIRST,
+            MEDIA_CACHE_NETWORK_FIRST,
+            MEDIA_CACHE_CACHE_ONLY,
+            MEDIA_CACHE_STALE_WHILE_REVALIDATE,
+        )
+        val readDiskFirst = diskEnabled &&
+            request.cachePolicy != IMAGE_CACHE_RELOAD &&
+            request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
+        if (readDiskFirst) {
+            readDisk(cacheFile, request.mediaCacheMaxAgeMs)?.let {
+                requestCallbacks(identity) { callbacks -> callbacks.onCacheHit(true, identity) }
+                return it
+            }
+            if (request.mediaCachePolicy == MEDIA_CACHE_STALE_WHILE_REVALIDATE) {
+                readDisk(cacheFile)?.let { stale ->
+                    requestCallbacks(identity) { callbacks -> callbacks.onCacheHit(true, identity) }
+                    executor.execute {
+                        runCatching {
+                            loadRemote(
+                                source,
+                                request.copy(mediaCachePolicy = MEDIA_CACHE_NETWORK_FIRST),
+                                progress,
+                                partial,
+                            )
+                        }
+                    }
+                    return stale
+                }
+            }
         }
-        if (request.cachePolicy == IMAGE_CACHE_ONLY_IF_CACHED) {
+        requestCallbacks(identity) { callbacks -> callbacks.onCacheMiss(identity) }
+        if (
+            request.cachePolicy == IMAGE_CACHE_ONLY_IF_CACHED ||
+            request.mediaCachePolicy == MEDIA_CACHE_CACHE_ONLY
+        ) {
             error("Image is not available in the local cache.")
         }
 
-        var current = source
-        var previous: URI? = null
-        repeat(MAX_REDIRECTS + 1) { redirect ->
+        return try {
+            var current = source
+            var previous: URI? = null
+            repeat(MAX_REDIRECTS + 1) { redirect ->
             val uri = URI(current)
             validateRemote(uri, previous)
             val connection = URL(current).openConnection() as HttpURLConnection
@@ -496,14 +555,37 @@ internal class NativeImageLoader(
                         },
                     )
                 }
-                writeDisk(cacheFile, bytes)
-                return bytes
-            } finally {
-                connections -= connection
-                connection.disconnect()
+                if (request.mediaCacheChecksum != null) {
+                    require(sha256(bytes) == request.mediaCacheChecksum) {
+                        "Image checksum verification failed."
+                    }
+                }
+                if (diskEnabled) {
+                    writeDisk(
+                        cacheFile,
+                        bytes,
+                        request.mediaCacheMaxBytes.takeIf { it > 0 } ?: DISK_CACHE_BYTES,
+                    )
+                    requestCallbacks(identity) { callbacks ->
+                        callbacks.onCacheReady(identity, bytes.size.toLong())
+                    }
+                }
+                    return bytes
+                } finally {
+                    connections -= connection
+                    connection.disconnect()
+                }
             }
+            error("Image request could not be completed.")
+        } catch (error: Throwable) {
+            if (request.mediaCachePolicy == MEDIA_CACHE_NETWORK_FIRST) {
+                readDisk(cacheFile)?.let {
+                    requestCallbacks(identity) { callbacks -> callbacks.onCacheHit(true, identity) }
+                    return it
+                }
+            }
+            throw error
         }
-        error("Image request could not be completed.")
     }
 
     private fun decode(
@@ -637,8 +719,11 @@ internal class NativeImageLoader(
         return bytes
     }
 
-    private fun readDisk(file: File): ByteArray? = synchronized(diskLock) {
+    private fun readDisk(file: File, maxAgeMs: Long = 0): ByteArray? = synchronized(diskLock) {
         if (!file.isFile || file.length() !in 1..MAX_IMAGE_BYTES.toLong()) {
+            return@synchronized null
+        }
+        if (maxAgeMs > 0 && System.currentTimeMillis() - file.lastModified() > maxAgeMs) {
             return@synchronized null
         }
         runCatching {
@@ -647,7 +732,7 @@ internal class NativeImageLoader(
         }.getOrNull()
     }
 
-    private fun writeDisk(file: File, bytes: ByteArray) {
+    private fun writeDisk(file: File, bytes: ByteArray, limit: Long = DISK_CACHE_BYTES) {
         if (closed.get()) return
         synchronized(diskLock) {
             runCatching {
@@ -658,12 +743,12 @@ internal class NativeImageLoader(
                     file.outputStream().use { output -> output.write(bytes) }
                     temporary.delete()
                 }
-                trimDisk()
+                trimDisk(limit.coerceIn(8L * 1024 * 1024, MAX_DISK_CACHE_BYTES))
             }
         }
     }
 
-    private fun trimDisk() {
+    private fun trimDisk(limit: Long = DISK_CACHE_BYTES) {
         val files = diskDirectory.listFiles()
             ?.filter(File::isFile)
             ?.sortedByDescending(File::lastModified)
@@ -671,18 +756,19 @@ internal class NativeImageLoader(
         var size = 0L
         files.forEach { file ->
             size += file.length()
-            if (size > DISK_CACHE_BYTES) file.delete()
+            if (size > limit) file.delete()
         }
     }
 
     private fun diskFile(
         source: String,
         headers: Map<String, String>,
+        stableKey: String? = null,
     ): File {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest(
                 buildString {
-                    append(source)
+                    append(stableKey ?: source)
                     headers.toSortedMap().forEach { (name, value) ->
                         append('\u0000').append(name).append(':').append(value)
                     }
@@ -691,6 +777,26 @@ internal class NativeImageLoader(
             .joinToString("") { byte -> "%02x".format(byte) }
         return File(diskDirectory, "$digest.image")
     }
+
+    private fun cacheIdentity(source: String, request: NativeImageRequest): String =
+        request.mediaCacheKey ?: sha256(source.toByteArray())
+
+    private fun requestCallbacks(
+        identity: String,
+        callback: (NativeImageCallbacks) -> Unit,
+    ) {
+        active.values
+            .filter { request ->
+                cacheIdentity(request.request.source, request.request) == identity &&
+                    !request.finished
+            }
+            .forEach { request -> callback(request.callbacks) }
+    }
+
+    private fun sha256(bytes: ByteArray): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(bytes)
+            .joinToString("") { byte -> "%02x".format(byte) }
 
     private fun decodedKey(
         source: String,
@@ -813,6 +919,7 @@ internal class NativeImageLoader(
     private companion object {
         const val MEMORY_CACHE_BYTES = 32 * 1024 * 1024
         const val DISK_CACHE_BYTES = 96L * 1024 * 1024
+        const val MAX_DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024
         const val DISK_DIRECTORY = "pam-images-v1"
         const val MAX_IMAGE_BYTES = 16 * 1024 * 1024
         const val DEFAULT_IMAGE_CAPACITY = 64 * 1024
@@ -843,3 +950,11 @@ internal const val IMAGE_RESIZE_NONE = 4
 internal const val IMAGE_CACHE_DEFAULT = 1
 internal const val IMAGE_CACHE_RELOAD = 2
 internal const val IMAGE_CACHE_ONLY_IF_CACHED = 4
+internal const val MEDIA_CACHE_NONE = 1
+internal const val MEDIA_CACHE_MEMORY = 2
+internal const val MEDIA_CACHE_DISK = 3
+internal const val MEDIA_CACHE_MEMORY_AND_DISK = 4
+internal const val MEDIA_CACHE_CACHE_FIRST = 5
+internal const val MEDIA_CACHE_NETWORK_FIRST = 6
+internal const val MEDIA_CACHE_CACHE_ONLY = 7
+internal const val MEDIA_CACHE_STALE_WHILE_REVALIDATE = 8

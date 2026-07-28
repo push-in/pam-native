@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 import UIKit
 
 public final class PamRenderer {
@@ -14,6 +15,8 @@ public final class PamRenderer {
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
+    private var interactionBridges: [Int64: PamInteractionBridge] = [:]
+    private var animationDelegates: [Int64: PamAnimationDelegate] = [:]
     private var localModalActions: [Int64: UIAction.Identifier] = [:]
     private var borderLayers: [Int64: PamBorderLayers] = [:]
     private var rootId: Int64 = 0
@@ -84,6 +87,23 @@ public final class PamRenderer {
         for node in nodes.values {
             cancelImageLoad(for: node)
         }
+        PamMediaDiskCache.shared.trimMemory()
+    }
+
+    public func setApplicationActive(_ active: Bool) {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.setApplicationActive(active) }
+            return
+        }
+        for view in views.values {
+            if let media = view as? PamMediaView {
+                if active {
+                    media.onHostResume()
+                } else {
+                    media.onHostPause()
+                }
+            }
+        }
     }
 
     public func close() {
@@ -100,6 +120,9 @@ public final class PamRenderer {
             }
         }
         eventBridges.removeAll()
+        interactionBridges.values.forEach { $0.detach() }
+        interactionBridges.removeAll()
+        animationDelegates.removeAll()
         localModalActions.removeAll()
         borderLayers.removeAll()
 
@@ -217,6 +240,8 @@ public final class PamRenderer {
             bridge.detach()
         }
         eventBridges[id] = nil
+        interactionBridges.removeValue(forKey: id)?.detach()
+        animationDelegates[id] = nil
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
@@ -403,6 +428,15 @@ public final class PamRenderer {
             return
         }
 
+        if let navigation = parent as? PamNavigationHost {
+            navigation.insert(view, index: index)
+            return
+        }
+        if let modal = parent as? PamModalHost {
+            modal.insert(view, index: index)
+            return
+        }
+
         let target = min(max(index, 0), parent.subviews.count)
         if target >= parent.subviews.count {
             parent.addSubview(view)
@@ -478,7 +512,11 @@ public final class PamRenderer {
         case .statusBar:
             return UIView()
         case .navigationHost:
-            return UIView()
+            return PamNavigationHost()
+        case .webView:
+            return PamWebView()
+        case .media:
+            return PamMediaView()
         case .refreshControl:
             return PamRefreshContainer()
         case .customView:
@@ -541,6 +579,41 @@ public final class PamRenderer {
                 radius: state.properties[PamConstants.rippleRadius]?.decimalOrNil()
             )
             eventBridges[nodeId]?[PamConstants.rippleColor] = bridge
+        }
+        if let type = state.properties[PamConstants.gestureType]?.integerOrNil(),
+           (1...6).contains(type),
+           state.properties[PamConstants.gestureEnabled]?.boolOrNil() ?? true {
+            let bridge = EventBridge(
+                nodeId: nodeId,
+                kind: EventKind.gestureUpdate.rawValue,
+                dispatchEvent: dispatchEvent
+            )
+            bridge.attachSemanticGesture(
+                to: view,
+                type: Int(type),
+                minimumPointers: Int(
+                    state.properties[PamConstants.gestureMinPointers]?.integerOrNil() ?? 1
+                ),
+                maximumPointers: Int(
+                    state.properties[PamConstants.gestureMaxPointers]?.integerOrNil() ?? 1
+                ),
+                direction: Int(
+                    state.properties[PamConstants.gestureDirection]?.integerOrNil() ?? 1
+                ),
+                composition: Int(
+                    state.properties[PamConstants.gestureComposition]?.integerOrNil() ?? 1
+                ),
+                minimumDistance:
+                    state.properties[PamConstants.gestureMinDistance]?.decimalOrNil() ?? 12,
+                minimumDuration: Double(
+                    state.properties[PamConstants.gestureMinDurationMs]?.integerOrNil() ?? 0
+                ) / 1_000,
+                emitsBegin: eventProperties.contains(PamConstants.onGestureBegin),
+                emitsUpdate: eventProperties.contains(PamConstants.onGestureUpdate),
+                emitsEnd: eventProperties.contains(PamConstants.onGestureEnd),
+                emitsCancel: eventProperties.contains(PamConstants.onGestureCancel)
+            )
+            eventBridges[nodeId]?[EventKind.gestureUpdate.rawValue] = bridge
         }
 
         let inputField = view as? PamInputField
@@ -711,9 +784,74 @@ public final class PamRenderer {
                 handleShow: eventProperties.contains(PamConstants.onModalShow),
                 handleDismiss: eventProperties.contains(PamConstants.onModalDismiss),
                 handleOrientationChange: eventProperties.contains(PamConstants.onModalOrientationChange),
+                handleBottomSheetChange: eventProperties.contains(PamConstants.onBottomSheetChange),
+                handleBottomSheetDismiss: eventProperties.contains(PamConstants.onBottomSheetDismiss),
             )
             eventBridges[nodeId]?[EventKind.modalRequestClose.rawValue] = bridge
         }
+        if let webView = view as? PamWebView {
+            webView.onLoad = eventProperties.contains(PamConstants.onWebViewLoad) ? {
+                [weak self] in self?.dispatchEvent(nodeId, EventKind.webViewLoad.rawValue, Data())
+            } : nil
+            webView.onError = eventProperties.contains(PamConstants.onWebViewError) ? {
+                [weak self] message in
+                let payload = (try? WireMap.encode(["message": .text(message)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.webViewError.rawValue, payload)
+            } : nil
+            webView.onMessage = eventProperties.contains(PamConstants.onWebViewMessage) ? {
+                [weak self] message in
+                let payload = (try? WireMap.encode(["message": .text(message)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.webViewMessage.rawValue, payload)
+            } : nil
+        }
+        if let media = view as? PamMediaView {
+            media.onReady = eventProperties.contains(PamConstants.onMediaReady) ? {
+                [weak self] in self?.dispatchEvent(nodeId, EventKind.mediaReady.rawValue, Data())
+            } : nil
+            media.onProgress = eventProperties.contains(PamConstants.onMediaProgress) ? {
+                [weak self] current, duration in
+                let payload = (try? WireMap.encode([
+                    "currentTime": .decimal(current),
+                    "duration": .decimal(duration),
+                ])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.mediaProgress.rawValue, payload)
+            } : nil
+            media.onEnd = eventProperties.contains(PamConstants.onMediaEnd) ? {
+                [weak self] in self?.dispatchEvent(nodeId, EventKind.mediaEnd.rawValue, Data())
+            } : nil
+            media.onError = eventProperties.contains(PamConstants.onMediaError) ? {
+                [weak self] message in
+                let payload = (try? WireMap.encode(["message": .text(message)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.mediaError.rawValue, payload)
+            } : nil
+            media.onCacheHit = eventProperties.contains(PamConstants.onMediaCacheHit) ? {
+                [weak self] key in self?.dispatchMediaCacheEvent(
+                    nodeId: nodeId,
+                    kind: .mediaCacheHit,
+                    key: key,
+                    disk: true
+                )
+            } : nil
+            media.onCacheMiss = eventProperties.contains(PamConstants.onMediaCacheMiss) ? {
+                [weak self] key in self?.dispatchMediaCacheEvent(
+                    nodeId: nodeId,
+                    kind: .mediaCacheMiss,
+                    key: key
+                )
+            } : nil
+            media.onCacheReady = eventProperties.contains(PamConstants.onMediaCacheReady) ? {
+                [weak self] key, bytes in self?.dispatchMediaCacheEvent(
+                    nodeId: nodeId,
+                    kind: .mediaCacheReady,
+                    key: key,
+                    loaded: bytes,
+                    total: bytes,
+                    disk: true
+                )
+            } : nil
+        }
+        configureNativeInteraction(nodeId: nodeId, view: view)
+        configureGestureNavigation(nodeId: nodeId, view: view)
     }
 
     private func dispatchNativeViewEvent(nodeId: Int64, kind: Int, payload: Data) {
@@ -787,6 +925,29 @@ public final class PamRenderer {
             PamConstants.onTouchStart,
             PamConstants.onTouchMove,
             PamConstants.onTouchEnd,
+            PamConstants.onGestureBegin,
+            PamConstants.onGestureUpdate,
+            PamConstants.onGestureEnd,
+            PamConstants.onGestureCancel,
+            PamConstants.onBottomSheetChange,
+            PamConstants.onBottomSheetDismiss,
+            PamConstants.onWebViewLoad,
+            PamConstants.onWebViewError,
+            PamConstants.onWebViewMessage,
+            PamConstants.onMediaReady,
+            PamConstants.onMediaProgress,
+            PamConstants.onMediaEnd,
+            PamConstants.onMediaError,
+            PamConstants.onMediaCacheHit,
+            PamConstants.onMediaCacheMiss,
+            PamConstants.onMediaCacheProgress,
+            PamConstants.onMediaCacheReady,
+            PamConstants.onDragStart,
+            PamConstants.onDragEnd,
+            PamConstants.onDrop,
+            PamConstants.onMenuAction,
+            PamConstants.onNavigationGesturePop,
+            PamConstants.onAnimationComplete,
         ].reduce(into: Set<Int>()) { $0.insert($1) }
     }
 
@@ -850,6 +1011,44 @@ public final class PamRenderer {
             return PamConstants.onModalDismiss
         case EventKind.modalOrientationChange.rawValue:
             return PamConstants.onModalOrientationChange
+        case EventKind.bottomSheetChange.rawValue:
+            return PamConstants.onBottomSheetChange
+        case EventKind.bottomSheetDismiss.rawValue:
+            return PamConstants.onBottomSheetDismiss
+        case EventKind.webViewLoad.rawValue:
+            return PamConstants.onWebViewLoad
+        case EventKind.webViewError.rawValue:
+            return PamConstants.onWebViewError
+        case EventKind.webViewMessage.rawValue:
+            return PamConstants.onWebViewMessage
+        case EventKind.mediaReady.rawValue:
+            return PamConstants.onMediaReady
+        case EventKind.mediaProgress.rawValue:
+            return PamConstants.onMediaProgress
+        case EventKind.mediaEnd.rawValue:
+            return PamConstants.onMediaEnd
+        case EventKind.mediaError.rawValue:
+            return PamConstants.onMediaError
+        case EventKind.mediaCacheHit.rawValue:
+            return PamConstants.onMediaCacheHit
+        case EventKind.mediaCacheMiss.rawValue:
+            return PamConstants.onMediaCacheMiss
+        case EventKind.mediaCacheProgress.rawValue:
+            return PamConstants.onMediaCacheProgress
+        case EventKind.mediaCacheReady.rawValue:
+            return PamConstants.onMediaCacheReady
+        case EventKind.dragStart.rawValue:
+            return PamConstants.onDragStart
+        case EventKind.dragEnd.rawValue:
+            return PamConstants.onDragEnd
+        case EventKind.drop.rawValue:
+            return PamConstants.onDrop
+        case EventKind.menuAction.rawValue:
+            return PamConstants.onMenuAction
+        case EventKind.navigationGesturePop.rawValue:
+            return PamConstants.onNavigationGesturePop
+        case EventKind.animationComplete.rawValue:
+            return PamConstants.onAnimationComplete
         case EventKind.clickOutside.rawValue:
             return PamConstants.onClickOutside
         case EventKind.intersect.rawValue:
@@ -864,6 +1063,14 @@ public final class PamRenderer {
             return PamConstants.onTouchMove
         case EventKind.touchEnd.rawValue:
             return PamConstants.onTouchEnd
+        case EventKind.gestureBegin.rawValue:
+            return PamConstants.onGestureBegin
+        case EventKind.gestureUpdate.rawValue:
+            return PamConstants.onGestureUpdate
+        case EventKind.gestureEnd.rawValue:
+            return PamConstants.onGestureEnd
+        case EventKind.gestureCancel.rawValue:
+            return PamConstants.onGestureCancel
         default:
             return nil
         }
@@ -1005,6 +1212,19 @@ public final class PamRenderer {
             } else {
                 view.isHidden = !(value.boolOrNil() ?? true)
             }
+        case PamConstants.navigationOperation:
+            (view as? PamNavigationHost)?.operation = Int(value.integerOrNil() ?? 1)
+        case PamConstants.navigationTransition:
+            (view as? PamNavigationHost)?.transition = Int(value.integerOrNil() ?? 1)
+        case PamConstants.navigationDurationMs:
+            (view as? PamNavigationHost)?.duration =
+                TimeInterval(value.integerOrNil() ?? 240) / 1_000
+        case PamConstants.navigationRevision:
+            (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
+        case PamConstants.navigationGestureEnabled,
+             PamConstants.navigationGestureEdgeWidth,
+             PamConstants.navigationGestureThreshold:
+            configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.switchTrackColorFalse:
             if let color = value.integerOrNil(), let switchView = view as? PamVuetifySwitch {
                 switchView.trackOffColor = UIColor(argb: color)
@@ -1019,6 +1239,93 @@ public final class PamRenderer {
             }
         case PamConstants.modalPresentation:
             (view as? PamModalHost)?.setPresentation(Int(value.integerOrNil() ?? 2))
+        case PamConstants.bottomSheetSnapPoints:
+            (view as? PamModalHost)?.setBottomSheetSnapPoints(
+                decodeBottomSheetSnapPoints(value)
+            )
+        case PamConstants.bottomSheetIndex:
+            (view as? PamModalHost)?.setBottomSheetIndex(Int(value.integerOrNil() ?? 0))
+        case PamConstants.bottomSheetDismissible:
+            (view as? PamModalHost)?.setBottomSheetDismissible(value.boolOrNil() ?? true)
+        case PamConstants.bottomSheetBackdropDismiss:
+            (view as? PamModalHost)?.setBottomSheetBackdropDismiss(value.boolOrNil() ?? true)
+        case PamConstants.bottomSheetHandleVisible:
+            (view as? PamModalHost)?.setBottomSheetHandleVisible(value.boolOrNil() ?? true)
+        case PamConstants.bottomSheetDragEnabled:
+            (view as? PamModalHost)?.setBottomSheetDragEnabled(value.boolOrNil() ?? true)
+        case PamConstants.bottomSheetKeyboardBehavior:
+            (view as? PamModalHost)?.setBottomSheetKeyboardBehavior(
+                Int(value.integerOrNil() ?? 1)
+            )
+        case PamConstants.bottomSheetCornerRadius:
+            (view as? PamModalHost)?.setBottomSheetCornerRadius(
+                CGFloat(value.decimalOrZero())
+            )
+        case PamConstants.webViewSource:
+            (view as? PamWebView)?.setSource(value.textOrNil() ?? "")
+        case PamConstants.webViewJavaScriptEnabled:
+            (view as? PamWebView)?.setJavaScriptEnabled(value.boolOrNil() ?? true)
+        case PamConstants.webViewDomStorageEnabled:
+            (view as? PamWebView)?.setDomStorageEnabled(value.boolOrNil() ?? true)
+        case PamConstants.webViewUserAgent:
+            (view as? PamWebView)?.setUserAgent(value.textOrNil() ?? "")
+        case PamConstants.webViewInjectedJavaScript:
+            (view as? PamWebView)?.setInjectedJavaScript(value.textOrNil() ?? "")
+        case PamConstants.webViewAllowsInlineMedia:
+            (view as? PamWebView)?.setAllowsInlineMedia(value.boolOrNil() ?? true)
+        case PamConstants.webViewAllowedHosts:
+            (view as? PamWebView)?.setAllowedHosts(value.textOrNil() ?? "")
+        case PamConstants.mediaSource:
+            if let media = view as? PamMediaView, let state = nodes[nodeId] {
+                configureMediaCache(media, state: state)
+            }
+            (view as? PamMediaView)?.setSource(value.textOrNil() ?? "")
+        case PamConstants.mediaType:
+            break
+        case PamConstants.mediaAutoPlay:
+            (view as? PamMediaView)?.setAutoPlay(value.boolOrNil() ?? false)
+        case PamConstants.mediaControls:
+            (view as? PamMediaView)?.setControls(value.boolOrNil() ?? true)
+        case PamConstants.mediaLoop:
+            (view as? PamMediaView)?.setLoop(value.boolOrNil() ?? false)
+        case PamConstants.mediaMuted:
+            (view as? PamMediaView)?.setMuted(value.boolOrNil() ?? false)
+        case PamConstants.mediaVolume:
+            (view as? PamMediaView)?.setVolume(Float(value.decimalOrZero()))
+        case PamConstants.mediaCurrentTime:
+            (view as? PamMediaView)?.seek(value.decimalOrZero())
+        case PamConstants.mediaPlaybackRate:
+            (view as? PamMediaView)?.setPlaybackRate(Float(value.decimalOrZero()))
+        case PamConstants.mediaCachePolicy,
+             PamConstants.mediaCacheKey,
+             PamConstants.mediaCacheMaxAgeMs,
+             PamConstants.mediaCachePinOffline,
+             PamConstants.mediaCacheStreaming,
+             PamConstants.mediaCacheDownloadWhilePlaying,
+             PamConstants.mediaCacheMaxBytes,
+             PamConstants.mediaCacheChecksum:
+            if let media = view as? PamMediaView, let state = nodes[nodeId] {
+                configureMediaCache(media, state: state)
+            }
+        case PamConstants.mediaCacheTags,
+             PamConstants.mediaCachePreloadSeconds,
+             PamConstants.mediaThumbnailSource,
+             PamConstants.mediaResizeWidth,
+             PamConstants.mediaResizeHeight,
+             PamConstants.mediaPriority:
+            break
+        case PamConstants.draggable,
+             PamConstants.dragData,
+             PamConstants.dropEnabled,
+             PamConstants.contextMenuItems:
+            configureNativeInteraction(nodeId: nodeId, view: view)
+        case PamConstants.animationKeyframes,
+             PamConstants.animationIterations,
+             PamConstants.animationDelayMs,
+             PamConstants.animationFillMode,
+             PamConstants.animationPlayState,
+             PamConstants.animationAutoReverse:
+            configureKeyframeAnimation(nodeId: nodeId, view: view)
         case PamConstants.refreshing:
             (view as? PamRefreshContainer)?.setRefreshing(value.boolOrNil() ?? false)
         case PamConstants.refreshColors:
@@ -1065,6 +1372,15 @@ public final class PamRenderer {
             view.semanticContentAttribute = value.integerOrNil() == 2
                 ? .forceRightToLeft
                 : .forceLeftToRight
+        case PamConstants.gestureType,
+             PamConstants.gestureEnabled,
+             PamConstants.gestureMinPointers,
+             PamConstants.gestureMaxPointers,
+             PamConstants.gestureDirection,
+             PamConstants.gestureComposition,
+             PamConstants.gestureMinDistance,
+             PamConstants.gestureMinDurationMs:
+            installEvents(for: nodeId)
         case PamConstants.hostProperties:
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
         default:
@@ -1124,8 +1440,99 @@ public final class PamRenderer {
             } else {
                 view.isHidden = false
             }
+        case PamConstants.navigationOperation:
+            (view as? PamNavigationHost)?.operation = 1
+        case PamConstants.navigationTransition:
+            (view as? PamNavigationHost)?.transition = 1
+        case PamConstants.navigationDurationMs:
+            (view as? PamNavigationHost)?.duration = 0.24
+        case PamConstants.navigationRevision:
+            break
+        case PamConstants.navigationGestureEnabled,
+             PamConstants.navigationGestureEdgeWidth,
+             PamConstants.navigationGestureThreshold:
+            configureGestureNavigation(nodeId: nodeId, view: view)
         case PamConstants.modalPresentation:
             (view as? PamModalHost)?.setPresentation(2)
+        case PamConstants.bottomSheetSnapPoints:
+            (view as? PamModalHost)?.setBottomSheetSnapPoints([0.5, 0.9])
+        case PamConstants.bottomSheetIndex:
+            (view as? PamModalHost)?.setBottomSheetIndex(0)
+        case PamConstants.bottomSheetDismissible:
+            (view as? PamModalHost)?.setBottomSheetDismissible(true)
+        case PamConstants.bottomSheetBackdropDismiss:
+            (view as? PamModalHost)?.setBottomSheetBackdropDismiss(true)
+        case PamConstants.bottomSheetHandleVisible:
+            (view as? PamModalHost)?.setBottomSheetHandleVisible(true)
+        case PamConstants.bottomSheetDragEnabled:
+            (view as? PamModalHost)?.setBottomSheetDragEnabled(true)
+        case PamConstants.bottomSheetKeyboardBehavior:
+            (view as? PamModalHost)?.setBottomSheetKeyboardBehavior(1)
+        case PamConstants.bottomSheetCornerRadius:
+            (view as? PamModalHost)?.setBottomSheetCornerRadius(20)
+        case PamConstants.webViewSource:
+            (view as? PamWebView)?.setSource("")
+        case PamConstants.webViewJavaScriptEnabled:
+            (view as? PamWebView)?.setJavaScriptEnabled(true)
+        case PamConstants.webViewDomStorageEnabled:
+            (view as? PamWebView)?.setDomStorageEnabled(true)
+        case PamConstants.webViewUserAgent:
+            (view as? PamWebView)?.setUserAgent("")
+        case PamConstants.webViewInjectedJavaScript:
+            (view as? PamWebView)?.setInjectedJavaScript("")
+        case PamConstants.webViewAllowsInlineMedia:
+            (view as? PamWebView)?.setAllowsInlineMedia(true)
+        case PamConstants.webViewAllowedHosts:
+            (view as? PamWebView)?.setAllowedHosts("")
+        case PamConstants.mediaSource:
+            (view as? PamMediaView)?.setSource("")
+        case PamConstants.mediaType:
+            break
+        case PamConstants.mediaAutoPlay:
+            (view as? PamMediaView)?.setAutoPlay(false)
+        case PamConstants.mediaControls:
+            (view as? PamMediaView)?.setControls(true)
+        case PamConstants.mediaLoop:
+            (view as? PamMediaView)?.setLoop(false)
+        case PamConstants.mediaMuted:
+            (view as? PamMediaView)?.setMuted(false)
+        case PamConstants.mediaVolume:
+            (view as? PamMediaView)?.setVolume(1)
+        case PamConstants.mediaCurrentTime:
+            (view as? PamMediaView)?.seek(0)
+        case PamConstants.mediaPlaybackRate:
+            (view as? PamMediaView)?.setPlaybackRate(1)
+        case PamConstants.mediaCachePolicy,
+             PamConstants.mediaCacheKey,
+             PamConstants.mediaCacheMaxAgeMs,
+             PamConstants.mediaCachePinOffline,
+             PamConstants.mediaCacheStreaming,
+             PamConstants.mediaCacheDownloadWhilePlaying,
+             PamConstants.mediaCacheMaxBytes,
+             PamConstants.mediaCacheChecksum:
+            if let media = view as? PamMediaView {
+                configureMediaCache(media, state: state)
+            }
+        case PamConstants.mediaCacheTags,
+             PamConstants.mediaCachePreloadSeconds,
+             PamConstants.mediaThumbnailSource,
+             PamConstants.mediaResizeWidth,
+             PamConstants.mediaResizeHeight,
+             PamConstants.mediaPriority:
+            break
+        case PamConstants.draggable,
+             PamConstants.dragData,
+             PamConstants.dropEnabled,
+             PamConstants.contextMenuItems:
+            configureNativeInteraction(nodeId: nodeId, view: view)
+        case PamConstants.animationKeyframes,
+             PamConstants.animationIterations,
+             PamConstants.animationDelayMs,
+             PamConstants.animationFillMode,
+             PamConstants.animationPlayState,
+             PamConstants.animationAutoReverse:
+            view.layer.removeAnimation(forKey: "pam.keyframes")
+            animationDelegates[nodeId] = nil
         case PamConstants.refreshing:
             (view as? PamRefreshContainer)?.setRefreshing(false)
         case PamConstants.refreshColors:
@@ -1372,6 +1779,219 @@ public final class PamRenderer {
         scroll.isDirectionalLockEnabled = true
     }
 
+    private func decodeBottomSheetSnapPoints(_ value: PropValue) -> [CGFloat] {
+        guard let data = value.bytesOrNil(), data.count >= 10 else {
+            return [0.5, 0.9]
+        }
+        let bytes = [UInt8](data)
+        let count = Int(bytes[0]) | Int(bytes[1]) << 8
+        guard count >= 1, count <= 16, bytes.count == 2 + count * 8 else {
+            return [0.5, 0.9]
+        }
+        return (0..<count).map { index in
+            let offset = 2 + index * 8
+            var bits: UInt64 = 0
+            for byteIndex in 0..<8 {
+                bits |= UInt64(bytes[offset + byteIndex]) << UInt64(byteIndex * 8)
+            }
+            return CGFloat(Double(bitPattern: bits))
+        }
+    }
+
+    private func configureNativeInteraction(nodeId: Int64, view: UIView) {
+        interactionBridges.removeValue(forKey: nodeId)?.detach()
+        guard let state = nodes[nodeId] else { return }
+        let keys = [
+            PamConstants.draggable,
+            PamConstants.dragData,
+            PamConstants.dropEnabled,
+            PamConstants.contextMenuItems,
+            PamConstants.onDragStart,
+            PamConstants.onDragEnd,
+            PamConstants.onDrop,
+            PamConstants.onMenuAction,
+        ]
+        guard keys.contains(where: { state.properties[$0] != nil }) else { return }
+        let menuItems: [PamInteractionBridge.MenuItem]
+        if let data = state.properties[PamConstants.contextMenuItems]?.bytesOrNil(),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            menuItems = values.prefix(64).compactMap { item in
+                guard let id = item["id"] as? String,
+                      let title = item["title"] as? String else { return nil }
+                return PamInteractionBridge.MenuItem(
+                    id: id,
+                    title: title,
+                    destructive: item["destructive"] as? Bool ?? false,
+                    disabled: item["disabled"] as? Bool ?? false
+                )
+            }
+        } else {
+            menuItems = []
+        }
+        let bridge = PamInteractionBridge(
+            view: view,
+            draggable: state.properties[PamConstants.draggable]?.boolOrNil() ?? false,
+            dragData: state.properties[PamConstants.dragData]?.textOrNil() ?? "",
+            dropEnabled: state.properties[PamConstants.dropEnabled]?.boolOrNil() ?? false,
+            menuItems: menuItems,
+            onDragStart: state.properties[PamConstants.onDragStart] != nil ? {
+                [weak self] in self?.dispatchEvent(nodeId, EventKind.dragStart.rawValue, Data())
+            } : nil,
+            onDragEnd: state.properties[PamConstants.onDragEnd] != nil ? {
+                [weak self] in self?.dispatchEvent(nodeId, EventKind.dragEnd.rawValue, Data())
+            } : nil,
+            onDrop: state.properties[PamConstants.onDrop] != nil ? { [weak self] data in
+                let payload = (try? WireMap.encode(["data": .text(data)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.drop.rawValue, payload)
+            } : nil,
+            onMenuAction: state.properties[PamConstants.onMenuAction] != nil ? {
+                [weak self] id in
+                let payload = (try? WireMap.encode(["id": .text(id)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.menuAction.rawValue, payload)
+            } : nil
+        )
+        interactionBridges[nodeId] = bridge
+    }
+
+    private func configureGestureNavigation(nodeId: Int64, view: UIView) {
+        guard let navigation = view as? PamNavigationHost,
+              let state = nodes[nodeId] else { return }
+        navigation.setGestureNavigation(
+            enabled: state.properties[PamConstants.navigationGestureEnabled]?.boolOrNil() ?? true,
+            edgeWidth: CGFloat(
+                state.properties[PamConstants.navigationGestureEdgeWidth]?.decimalOrNil() ?? 24
+            ),
+            threshold: CGFloat(
+                state.properties[PamConstants.navigationGestureThreshold]?.decimalOrNil() ?? 0.35
+            ),
+            onPop: state.properties[PamConstants.onNavigationGesturePop] != nil ? {
+                [weak self] in
+                self?.dispatchEvent(
+                    nodeId,
+                    EventKind.navigationGesturePop.rawValue,
+                    Data()
+                )
+            } : nil
+        )
+    }
+
+    private func configureKeyframeAnimation(nodeId: Int64, view: UIView) {
+        guard let state = nodes[nodeId],
+              let data = state.properties[PamConstants.animationKeyframes]?.bytesOrNil(),
+              let frames = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              frames.count >= 2 else { return }
+        let parentWidth = view.superview?.bounds.width ?? 0
+        let translationReferenceWidth = parentWidth > 0 ? parentWidth : UIScreen.main.bounds.width
+        let resolvedFrames = frames.map { frame -> [String: Any] in
+            guard frame["translationX"] == nil,
+                  let percent = (frame["translationXPercent"] as? NSNumber)?.doubleValue else {
+                return frame
+            }
+            var resolved = frame
+            resolved["translationX"] = percent * Double(translationReferenceWidth) / 100
+            return resolved
+        }
+        if UIAccessibility.isReduceMotionEnabled {
+            view.layer.removeAnimation(forKey: "pam.keyframes")
+            animationDelegates[nodeId] = nil
+            if let last = resolvedFrames.last {
+                view.alpha = CGFloat((last["opacity"] as? NSNumber)?.doubleValue ?? 1)
+                let x = CGFloat((last["translationX"] as? NSNumber)?.doubleValue ?? 0)
+                let y = CGFloat((last["translationY"] as? NSNumber)?.doubleValue ?? 0)
+                let scaleX = CGFloat((last["scaleX"] as? NSNumber)?.doubleValue ?? 1)
+                let scaleY = CGFloat((last["scaleY"] as? NSNumber)?.doubleValue ?? 1)
+                let rotation = CGFloat((last["rotation"] as? NSNumber)?.doubleValue ?? 0)
+                view.transform = CGAffineTransform(translationX: x, y: y)
+                    .scaledBy(x: scaleX, y: scaleY)
+                    .rotated(by: rotation * .pi / 180)
+            }
+            return
+        }
+        let playState = Int(
+            state.properties[PamConstants.animationPlayState]?.integerOrNil() ?? 1
+        )
+        if playState == 2 {
+            if view.layer.speed != 0 {
+                view.layer.timeOffset = view.layer.convertTime(CACurrentMediaTime(), from: nil)
+                view.layer.speed = 0
+            }
+            return
+        }
+        if view.layer.speed == 0 {
+            let paused = view.layer.timeOffset
+            view.layer.speed = 1
+            view.layer.timeOffset = 0
+            view.layer.beginTime = view.layer.convertTime(CACurrentMediaTime(), from: nil) - paused
+        }
+        view.layer.removeAnimation(forKey: "pam.keyframes")
+        animationDelegates[nodeId] = nil
+        guard playState == 1 else { return }
+
+        let offsets = resolvedFrames.compactMap { ($0["offset"] as? NSNumber)?.doubleValue }
+        guard offsets.count == resolvedFrames.count else { return }
+        let specifications: [(String, String, (Double) -> Any)] = [
+            ("opacity", "opacity", { NSNumber(value: $0) }),
+            ("translationX", "transform.translation.x", { NSNumber(value: $0) }),
+            ("translationY", "transform.translation.y", { NSNumber(value: $0) }),
+            ("scaleX", "transform.scale.x", { NSNumber(value: $0) }),
+            ("scaleY", "transform.scale.y", { NSNumber(value: $0) }),
+            ("rotation", "transform.rotation.z", { NSNumber(value: $0 * .pi / 180) }),
+        ]
+        var animations: [CAAnimation] = []
+        for (property, keyPath, transform) in specifications {
+            let available = resolvedFrames.compactMap { ($0[property] as? NSNumber)?.doubleValue }
+            guard !available.isEmpty else { continue }
+            var last = available.first ?? 0
+            let values = resolvedFrames.map { frame -> Any in
+                if let value = (frame[property] as? NSNumber)?.doubleValue { last = value }
+                return transform(last)
+            }
+            let animation = CAKeyframeAnimation(keyPath: keyPath)
+            animation.values = values
+            animation.keyTimes = offsets.map { NSNumber(value: $0) }
+            animations.append(animation)
+        }
+        guard !animations.isEmpty else { return }
+        let durationMs = state.properties[PamConstants.animationDurationMs]?.integerOrNil() ?? 300
+        let iterations = state.properties[PamConstants.animationIterations]?.integerOrNil() ?? 1
+        let fill = Int(state.properties[PamConstants.animationFillMode]?.integerOrNil() ?? 2)
+        let group = CAAnimationGroup()
+        group.animations = animations
+        group.duration = min(max(Double(durationMs) / 1_000, 0.001), 60)
+        group.beginTime = CACurrentMediaTime() + min(
+            max(Double(state.properties[PamConstants.animationDelayMs]?.integerOrNil() ?? 0) / 1_000, 0),
+            60
+        )
+        group.repeatCount = iterations == 0 ? .infinity : Float(min(max(iterations, 1), 10_000))
+        group.autoreverses =
+            state.properties[PamConstants.animationAutoReverse]?.boolOrNil() ?? false
+        group.timingFunction = animationTimingFunction(
+            Int(state.properties[PamConstants.animationEasing]?.integerOrNil() ?? 4)
+        )
+        group.fillMode = fill == 1 ? .removed : (fill == 3 ? .backwards : .forwards)
+        group.isRemovedOnCompletion = fill == 1 || fill == 3
+        let delegate = PamAnimationDelegate { [weak self] finished in
+            guard finished, let self else { return }
+            self.animationDelegates[nodeId] = nil
+            guard self.nodes[nodeId]?.properties[PamConstants.onAnimationComplete] != nil else {
+                return
+            }
+            self.dispatchEvent(nodeId, EventKind.animationComplete.rawValue, Data())
+        }
+        group.delegate = delegate
+        animationDelegates[nodeId] = delegate
+        view.layer.add(group, forKey: "pam.keyframes")
+    }
+
+    private func animationTimingFunction(_ value: Int) -> CAMediaTimingFunction {
+        switch value {
+        case 1: return CAMediaTimingFunction(name: .linear)
+        case 2: return CAMediaTimingFunction(name: .easeIn)
+        case 3: return CAMediaTimingFunction(name: .easeOut)
+        default: return CAMediaTimingFunction(name: .easeInEaseOut)
+        }
+    }
+
     private func applyMotion(view: UIView, state: NodeState?, kind: Int) {
         view.layer.removeAllAnimations()
         guard !UIAccessibility.isReduceMotionEnabled, kind != 1 else {
@@ -1452,10 +2072,233 @@ public final class PamRenderer {
         return CGFloat(value.decimalOrZero())
     }
 
-    private func loadImage(_ source: String, into imageView: UIImageView, nodeId: Int64) {
-        guard let url = URL(string: source), let state = nodes[nodeId] else {
+    private func resolveImageSource(
+        fallback: String,
+        sourceSet: String?,
+        width: CGFloat
+    ) -> String {
+        guard let sourceSet else { return fallback }
+        let density = UIScreen.main.scale
+        let candidates: [(String, CGFloat)] = sourceSet.split(separator: ",").compactMap {
+            let parts = $0.trimmingCharacters(in: .whitespaces).split(separator: " ")
+            guard parts.count >= 2, let descriptor = parts.last else { return nil }
+            let source = parts.dropLast().joined(separator: " ")
+            if descriptor.hasSuffix("x"),
+               let scale = Double(descriptor.dropLast()) {
+                return (source, abs(CGFloat(scale) - density))
+            }
+            if descriptor.hasSuffix("w"),
+               let candidateWidth = Double(descriptor.dropLast()) {
+                return (source, abs(CGFloat(candidateWidth) - width) / max(width, 1))
+            }
+            return nil
+        }
+        return candidates.min(by: { $0.1 < $1.1 })?.0 ?? fallback
+    }
+
+    private func parseImageHeaders(_ value: String?) -> [String: String] {
+        guard let value else { return [:] }
+        return value.split(separator: "\n").prefix(32).reduce(into: [:]) { result, line in
+            guard let separator = line.firstIndex(of: ":") else { return }
+            let name = String(line[..<separator])
+            let header = String(line[line.index(after: separator)...])
+            if !name.isEmpty && header.utf8.count <= 4_096 {
+                result[name] = header
+            }
+        }
+    }
+
+    private func configureMediaCache(_ view: PamMediaView, state: NodeState) {
+        view.setCache(
+            policy: Int(
+                state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 1
+            ),
+            key: state.properties[PamConstants.mediaCacheKey]?.textOrNil(),
+            maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0,
+            maxBytes: state.properties[PamConstants.mediaCacheMaxBytes]?.integerOrNil() ?? 0,
+            checksum: state.properties[PamConstants.mediaCacheChecksum]?.textOrNil(),
+            pinned: state.properties[PamConstants.mediaCachePinOffline]?.boolOrNil() ?? false,
+            streaming: state.properties[PamConstants.mediaCacheStreaming]?.boolOrNil() ?? false,
+            downloadWhilePlaying:
+                state.properties[PamConstants.mediaCacheDownloadWhilePlaying]?.boolOrNil() ?? false
+        )
+    }
+
+    private func dispatchMediaCacheEvent(
+        nodeId: Int64,
+        kind: EventKind,
+        key: String,
+        loaded: Int64 = 0,
+        total: Int64 = 0,
+        disk: Bool = false
+    ) {
+        let payload = (try? WireMap.encode([
+            "key": .text(key),
+            "loaded": .integer(loaded),
+            "total": .integer(total),
+            "disk": .bool(disk),
+        ])) ?? Data()
+        dispatchEvent(nodeId, kind.rawValue, payload)
+    }
+
+    private func decodeImage(
+        _ data: Data,
+        targetSize: CGSize,
+        multiplier: CGFloat
+    ) -> UIImage? {
+        guard targetSize.width > 0, targetSize.height > 0,
+              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+            return UIImage(data: data)
+        }
+        let pixels = max(targetSize.width, targetSize.height)
+            * UIScreen.main.scale
+            * min(max(multiplier, 0.1), 8)
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(pixels, 1),
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        else {
+            return UIImage(data: data)
+        }
+        return UIImage(cgImage: image)
+    }
+
+    private func localImage(_ source: String) -> UIImage? {
+        if source.hasPrefix("asset://") {
+            return UIImage(named: String(source.dropFirst("asset://".count)))
+        }
+        if source.hasPrefix("file://"), let url = URL(string: source) {
+            return UIImage(contentsOfFile: url.path)
+        }
+        return UIImage(named: source)
+    }
+
+    private func loadImagePlaceholder(
+        _ source: String,
+        into imageView: UIImageView,
+        nodeId: Int64,
+        generation: Int
+    ) {
+        if let image = localImage(source) {
+            imageView.image = image
             return
         }
+        guard let url = URL(string: source),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else { return }
+        imageSession.dataTask(with: url) { [weak self, weak imageView] data, _, _ in
+            guard let self, let data, let image = UIImage(data: data) else { return }
+            DispatchQueue.main.async {
+                guard let state = self.nodes[nodeId],
+                      state.imageGeneration == generation,
+                      state.imageLoading else { return }
+                imageView?.image = image
+            }
+        }.resume()
+    }
+
+    private func loadImage(_ source: String, into imageView: UIImageView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        let resolvedSource = resolveImageSource(
+            fallback: source,
+            sourceSet: state.properties[PamConstants.imageSourceSet]?.textOrNil(),
+            width: max(imageView.bounds.width, 1)
+        )
+        guard let url = URL(string: resolvedSource),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else {
+            imageView.image = localImage(resolvedSource)
+            return
+        }
+        let policy = Int(
+            state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 4
+        )
+        guard [3, 4, 5, 7, 8].contains(policy) else {
+            loadImageFromNetwork(source, into: imageView, nodeId: nodeId)
+            return
+        }
+
+        cancelImageLoad(for: state)
+        state.imageGeneration += 1
+        state.imageLoading = true
+        let generation = state.imageGeneration
+        let key = state.properties[PamConstants.mediaCacheKey]?.textOrNil()
+        let identity = PamMediaDiskCache.shared.identity(source: resolvedSource, stableKey: key)
+        let targetSize = imageView.bounds.size
+        let multiplier = CGFloat(
+            state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
+        )
+        PamMediaDiskCache.shared.data(
+            source: resolvedSource,
+            stableKey: key,
+            maxAgeMs: state.properties[PamConstants.mediaCacheMaxAgeMs]?.integerOrNil() ?? 0
+        ) { [weak self, weak imageView] data in
+            guard let self else { return }
+            let image = data.flatMap {
+                self.decodeImage(
+                    $0,
+                    targetSize: targetSize,
+                    multiplier: multiplier
+                )
+            }
+            DispatchQueue.main.async {
+                guard let current = self.nodes[nodeId],
+                      current.imageGeneration == generation,
+                      let imageView else { return }
+                if let image {
+                    imageView.image = image
+                    current.imageLoading = false
+                    if current.properties[PamConstants.onMediaCacheHit] != nil {
+                        self.dispatchMediaCacheEvent(
+                            nodeId: nodeId,
+                            kind: .mediaCacheHit,
+                            key: identity,
+                            loaded: Int64(data?.count ?? 0),
+                            total: Int64(data?.count ?? 0),
+                            disk: true
+                        )
+                    }
+                    self.dispatchCachedImageLoad(
+                        nodeId: nodeId,
+                        source: resolvedSource,
+                        image: image
+                    )
+                    return
+                }
+                if current.properties[PamConstants.onMediaCacheMiss] != nil {
+                    self.dispatchMediaCacheEvent(
+                        nodeId: nodeId,
+                        kind: .mediaCacheMiss,
+                        key: identity
+                    )
+                }
+                if policy == 7 {
+                    current.imageLoading = false
+                    self.dispatchImageCacheOnlyError(nodeId: nodeId)
+                } else {
+                    self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId)
+                }
+            }
+        }
+    }
+
+    private func loadImageFromNetwork(
+        _ source: String,
+        into imageView: UIImageView,
+        nodeId: Int64
+    ) {
+        guard let state = nodes[nodeId] else {
+            return
+        }
+        let resolvedSource = resolveImageSource(
+            fallback: source,
+            sourceSet: state.properties[PamConstants.imageSourceSet]?.textOrNil(),
+            width: max(imageView.bounds.width, 1)
+        )
+        guard let url = URL(string: resolvedSource) else { return }
 
         cancelImageLoad(for: state)
         state.imageGeneration += 1
@@ -1465,13 +2308,38 @@ public final class PamRenderer {
         state.imageProgressScheduled = false
 
         let generation = state.imageGeneration
-        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
-        let task = imageSession.downloadTask(with: request)
+        if let placeholder = state.properties[PamConstants.imageLoadingIndicatorSource]?.textOrNil()
+            ?? state.properties[PamConstants.imageDefaultSource]?.textOrNil() {
+            loadImagePlaceholder(
+                placeholder,
+                into: imageView,
+                nodeId: nodeId,
+                generation: generation
+            )
+        }
+        let cachePolicy = Int(
+            state.properties[PamConstants.imageCachePolicy]?.integerOrNil() ?? 1
+        )
+        var request = URLRequest(
+            url: url,
+            cachePolicy: switch cachePolicy {
+            case 2: .reloadIgnoringLocalCacheData
+            case 3: .returnCacheDataElseLoad
+            case 4: .returnCacheDataDontLoad
+            default: .useProtocolCachePolicy
+            }
+        )
+        parseImageHeaders(
+            state.properties[PamConstants.imageRequestHeaders]?.textOrNil()
+        ).forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let task = imageSession.dataTask(with: request)
         let context = ImageLoadContext(
             nodeId: nodeId,
             generation: generation,
-            source: source,
+            source: resolvedSource,
             imageView: imageView,
+            progressive:
+                state.properties[PamConstants.imageProgressiveRendering]?.boolOrNil() ?? false
         )
         state.imageTask = task
 
@@ -1515,15 +2383,66 @@ public final class PamRenderer {
             guard let self else { return }
             guard let state = self.nodes[context.nodeId],
                   state.imageGeneration == context.generation,
-                  let image = UIImage(data: data),
                   let imageView = self.views[context.nodeId] as? UIImageView else {
                 return
+            }
+            let multiplier = state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
+            guard let image = self.decodeImage(
+                data,
+                targetSize: imageView.bounds.size,
+                multiplier: CGFloat(multiplier)
+            ) else { return }
+            let mediaPolicy = Int(
+                state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 4
+            )
+            if [3, 4, 5, 6, 8].contains(mediaPolicy) {
+                let key = state.properties[PamConstants.mediaCacheKey]?.textOrNil()
+                let identity = PamMediaDiskCache.shared.identity(
+                    source: context.source,
+                    stableKey: key
+                )
+                PamMediaDiskCache.shared.store(
+                    data,
+                    source: context.source,
+                    stableKey: key,
+                    checksum: state.properties[PamConstants.mediaCacheChecksum]?.textOrNil(),
+                    limit: state.properties[PamConstants.mediaCacheMaxBytes]?.integerOrNil() ?? 0,
+                    pinned:
+                        state.properties[PamConstants.mediaCachePinOffline]?.boolOrNil() ?? false
+                ) { [weak self] stored in
+                    guard stored else { return }
+                    DispatchQueue.main.async {
+                        guard let self, let current = self.nodes[context.nodeId],
+                              current.imageGeneration == context.generation,
+                              current.properties[PamConstants.onMediaCacheReady] != nil else {
+                            return
+                        }
+                        self.dispatchMediaCacheEvent(
+                            nodeId: context.nodeId,
+                            kind: .mediaCacheReady,
+                            key: identity,
+                            loaded: Int64(data.count),
+                            total: Int64(data.count),
+                            disk: true
+                        )
+                    }
+                }
             }
             DispatchQueue.main.async {
                 guard let state = self.nodes[context.nodeId], state.imageGeneration == context.generation else {
                     return
                 }
-                imageView.image = image
+                let fade = state.properties[PamConstants.imageFadeDurationMs]?.integerOrNil() ?? 300
+                if fade > 0 && !UIAccessibility.isReduceMotionEnabled {
+                    UIView.transition(
+                        with: imageView,
+                        duration: min(Double(fade) / 1_000, 10),
+                        options: .transitionCrossDissolve,
+                        animations: { imageView.image = image }
+                    )
+                } else {
+                    imageView.image = image
+                }
                 state.imageLoading = false
                 guard state.properties[PamConstants.onImageLoad] != nil else { return }
                 let payload = (try? WireMap.encode(
@@ -1539,6 +2458,15 @@ public final class PamRenderer {
                     payload,
                 )
             }
+        }
+
+        context.onPartial = { [weak self] context, data in
+            guard let self,
+                  let state = self.nodes[context.nodeId],
+                  state.imageGeneration == context.generation,
+                  let imageView = self.views[context.nodeId] as? UIImageView,
+                  let image = UIImage(data: data) else { return }
+            imageView.image = image
         }
 
         context.onError = { [weak self] context, error in
@@ -1578,6 +2506,34 @@ public final class PamRenderer {
         task.resume()
         if state.properties[PamConstants.onImageLoadStart] != nil {
             context.onStart?(context)
+        }
+    }
+
+    private func dispatchCachedImageLoad(nodeId: Int64, source: String, image: UIImage) {
+        guard let state = nodes[nodeId] else { return }
+        if state.properties[PamConstants.onImageLoad] != nil {
+            let payload = (try? WireMap.encode([
+                "uri": .text(source),
+                "width": .decimal(Double(image.size.width)),
+                "height": .decimal(Double(image.size.height)),
+            ])) ?? Data()
+            dispatchEvent(nodeId, EventKind.imageLoad.rawValue, payload)
+        }
+        if state.properties[PamConstants.onImageLoadEnd] != nil {
+            dispatchEvent(nodeId, EventKind.imageLoadEnd.rawValue, Data())
+        }
+    }
+
+    private func dispatchImageCacheOnlyError(nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        if state.properties[PamConstants.onImageError] != nil {
+            let payload = (try? WireMap.encode([
+                "error": .text("Image is not available in cache"),
+            ])) ?? Data()
+            dispatchEvent(nodeId, EventKind.imageError.rawValue, payload)
+        }
+        if state.properties[PamConstants.onImageLoadEnd] != nil {
+            dispatchEvent(nodeId, EventKind.imageLoadEnd.rawValue, Data())
         }
     }
 
@@ -1635,6 +2591,7 @@ public final class PamRenderer {
         private weak var directiveTouch: UILongPressGestureRecognizer?
         private weak var outsideTap: UITapGestureRecognizer?
         private weak var rippleGesture: UILongPressGestureRecognizer?
+        private weak var semanticGesture: UIGestureRecognizer?
         private weak var rippleOverlay: UIView?
         private weak var directiveView: UIView?
         private var frameObservation: NSKeyValueObservation?
@@ -1667,6 +2624,17 @@ public final class PamRenderer {
         private var inputSelectionStart = 0
         private var inputSelectionEnd = 0
         private var inputSelectionScheduled = false
+        private var semanticGestureType = 0
+        private var semanticGestureDirection = 1
+        private var semanticGestureComposition = 1
+        private var semanticGestureMinimumDistance: CGFloat = 12
+        private var semanticGestureBegan = false
+        private var emitsGestureBegin = false
+        private var emitsGestureUpdate = false
+        private var emitsGestureEnd = false
+        private var emitsGestureCancel = false
+        private var pendingGesturePayload: Data?
+        private var gestureUpdateScheduled = false
 
         init(nodeId: Int64, kind: Int, dispatchEvent: @escaping (Int64, Int, Data) -> Void) {
             self.nodeId = nodeId
@@ -1808,6 +2776,74 @@ public final class PamRenderer {
             rippleOverlay = overlay
         }
 
+        func attachSemanticGesture(
+            to view: UIView,
+            type: Int,
+            minimumPointers: Int,
+            maximumPointers: Int,
+            direction: Int,
+            composition: Int,
+            minimumDistance: Double,
+            minimumDuration: Double,
+            emitsBegin: Bool,
+            emitsUpdate: Bool,
+            emitsEnd: Bool,
+            emitsCancel: Bool
+        ) {
+            semanticGestureType = type
+            semanticGestureDirection = direction
+            semanticGestureComposition = composition
+            semanticGestureMinimumDistance = max(0, minimumDistance)
+            emitsGestureBegin = emitsBegin
+            emitsGestureUpdate = emitsUpdate
+            emitsGestureEnd = emitsEnd
+            emitsGestureCancel = emitsCancel
+
+            let minimum = min(max(minimumPointers, 1), 10)
+            let maximum = min(max(maximumPointers, minimum), 10)
+            let recognizer: UIGestureRecognizer
+            switch type {
+            case 1:
+                let tap = UITapGestureRecognizer(
+                    target: self,
+                    action: #selector(onSemanticGesture(_:))
+                )
+                tap.numberOfTouchesRequired = minimum
+                recognizer = tap
+            case 2, 5:
+                let pan = UIPanGestureRecognizer(
+                    target: self,
+                    action: #selector(onSemanticGesture(_:))
+                )
+                pan.minimumNumberOfTouches = minimum
+                pan.maximumNumberOfTouches = maximum
+                recognizer = pan
+            case 3:
+                recognizer = UIPinchGestureRecognizer(
+                    target: self,
+                    action: #selector(onSemanticGesture(_:))
+                )
+            case 4:
+                recognizer = UIRotationGestureRecognizer(
+                    target: self,
+                    action: #selector(onSemanticGesture(_:))
+                )
+            default:
+                let longPress = UILongPressGestureRecognizer(
+                    target: self,
+                    action: #selector(onSemanticGesture(_:))
+                )
+                longPress.minimumPressDuration = max(0.001, minimumDuration)
+                longPress.minimumNumberOfTouches = minimum
+                longPress.maximumNumberOfTouches = maximum
+                recognizer = longPress
+            }
+            recognizer.cancelsTouchesInView = composition == 1
+            recognizer.delegate = self
+            view.addGestureRecognizer(recognizer)
+            semanticGesture = recognizer
+        }
+
         func attachTextField(_ field: PamInputField) {
             field.addTarget(self, action: #selector(onTextChanged(_:)), for: .editingChanged)
             textField = field
@@ -1919,6 +2955,8 @@ public final class PamRenderer {
             handleShow: Bool,
             handleDismiss: Bool,
             handleOrientationChange: Bool,
+            handleBottomSheetChange: Bool,
+            handleBottomSheetDismiss: Bool,
         ) {
             modal.setCallbacks(
                 onRequestClose: handleRequestClose ? { [weak self] in
@@ -1955,6 +2993,28 @@ public final class PamRenderer {
                     )
                 } : nil,
             )
+            modal.setBottomSheetCallbacks(
+                onChange: handleBottomSheetChange ? { [weak self] index, position in
+                    guard let self else { return }
+                    let payload = (try? WireMap.encode([
+                        "index": .integer(Int64(index)),
+                        "position": .decimal(Double(position)),
+                    ])) ?? Data()
+                    self.dispatchEvent(
+                        self.nodeId,
+                        EventKind.bottomSheetChange.rawValue,
+                        payload
+                    )
+                } : nil,
+                onDismiss: handleBottomSheetDismiss ? { [weak self] in
+                    guard let self else { return }
+                    self.dispatchEvent(
+                        self.nodeId,
+                        EventKind.bottomSheetDismiss.rawValue,
+                        Data()
+                    )
+                } : nil
+            )
             self.modal = modal
             self.modalView = modal
         }
@@ -1977,6 +3037,9 @@ public final class PamRenderer {
             }
             if let rippleGesture {
                 rippleGesture.view?.removeGestureRecognizer(rippleGesture)
+            }
+            if let semanticGesture {
+                semanticGesture.view?.removeGestureRecognizer(semanticGesture)
             }
             rippleOverlay?.removeFromSuperview()
             frameObservation?.invalidate()
@@ -2029,6 +3092,7 @@ public final class PamRenderer {
             self.directiveTouch = nil
             self.outsideTap = nil
             self.rippleGesture = nil
+            self.semanticGesture = nil
             self.rippleOverlay = nil
             self.directiveView = nil
             self.textField = nil
@@ -2041,6 +3105,9 @@ public final class PamRenderer {
             self.pressInKind = nil
             self.pressOutKind = nil
             self.pressMoveKind = nil
+            self.pendingGesturePayload = nil
+            self.gestureUpdateScheduled = false
+            self.semanticGestureBegan = false
             self.emitsScroll = false
             self.emitsEndReached = false
             self.endReachedSent = false
@@ -2070,6 +3137,233 @@ public final class PamRenderer {
                 locationInView: sender.location(in: sender.view),
                 locationInWindow: sender.location(in: sender.view?.window)
             )
+        }
+
+        @objc private func onSemanticGesture(_ sender: UIGestureRecognizer) {
+            let viewPoint = sender.location(in: sender.view)
+            let windowPoint = sender.location(in: sender.view?.window)
+            var translation = CGPoint.zero
+            var velocity = CGPoint.zero
+            var scale: CGFloat = 1
+            var rotation: CGFloat = 0
+            if let pan = sender as? UIPanGestureRecognizer {
+                translation = pan.translation(in: sender.view)
+                velocity = pan.velocity(in: sender.view)
+            }
+            if let pinch = sender as? UIPinchGestureRecognizer {
+                scale = pinch.scale
+                velocity = CGPoint(x: pinch.velocity, y: 0)
+            }
+            if let rotationGesture = sender as? UIRotationGestureRecognizer {
+                rotation = rotationGesture.rotation
+                velocity = CGPoint(x: rotationGesture.velocity, y: 0)
+            }
+
+            if semanticGestureType == 2 || semanticGestureType == 5 {
+                guard matchesSemanticDirection(translation) else {
+                    if sender.state == .ended || sender.state == .cancelled {
+                        emitSemanticCancel(
+                            viewPoint: viewPoint,
+                            windowPoint: windowPoint,
+                            translation: translation,
+                            velocity: velocity,
+                            scale: scale,
+                            rotation: rotation,
+                            pointers: sender.numberOfTouches
+                        )
+                    }
+                    return
+                }
+                let distance = hypot(translation.x, translation.y)
+                if distance < semanticGestureMinimumDistance,
+                   sender.state != .cancelled,
+                   sender.state != .failed {
+                    return
+                }
+            }
+
+            let semanticState: Int
+            let eventKind: Int
+            switch sender.state {
+            case .began:
+                semanticGestureBegan = true
+                semanticState = 1
+                eventKind = EventKind.gestureBegin.rawValue
+                guard emitsGestureBegin else { return }
+            case .changed:
+                if !semanticGestureBegan {
+                    semanticGestureBegan = true
+                    if emitsGestureBegin {
+                        dispatchSemanticGesture(
+                            kind: EventKind.gestureBegin.rawValue,
+                            state: 1,
+                            viewPoint: viewPoint,
+                            windowPoint: windowPoint,
+                            translation: translation,
+                            velocity: velocity,
+                            scale: scale,
+                            rotation: rotation,
+                            pointers: sender.numberOfTouches
+                        )
+                    }
+                }
+                semanticState = 2
+                eventKind = EventKind.gestureUpdate.rawValue
+                guard emitsGestureUpdate else { return }
+            case .ended:
+                if semanticGestureType == 1 && !semanticGestureBegan {
+                    semanticGestureBegan = true
+                    if emitsGestureBegin {
+                        dispatchSemanticGesture(
+                            kind: EventKind.gestureBegin.rawValue,
+                            state: 1,
+                            viewPoint: viewPoint,
+                            windowPoint: windowPoint,
+                            translation: translation,
+                            velocity: velocity,
+                            scale: scale,
+                            rotation: rotation,
+                            pointers: sender.numberOfTouches
+                        )
+                    }
+                }
+                semanticState = 3
+                eventKind = EventKind.gestureEnd.rawValue
+                semanticGestureBegan = false
+                guard emitsGestureEnd else { return }
+            case .cancelled, .failed:
+                semanticState = sender.state == .failed ? 5 : 4
+                eventKind = EventKind.gestureCancel.rawValue
+                semanticGestureBegan = false
+                guard emitsGestureCancel else { return }
+            default:
+                return
+            }
+            let payload = semanticGesturePayload(
+                state: semanticState,
+                viewPoint: viewPoint,
+                windowPoint: windowPoint,
+                translation: translation,
+                velocity: velocity,
+                scale: scale,
+                rotation: rotation,
+                pointers: sender.numberOfTouches
+            )
+            if semanticState == 2 {
+                pendingGesturePayload = payload
+                scheduleSemanticGestureUpdate()
+            } else {
+                dispatchEvent(nodeId, eventKind, payload)
+            }
+        }
+
+        private func emitSemanticCancel(
+            viewPoint: CGPoint,
+            windowPoint: CGPoint,
+            translation: CGPoint,
+            velocity: CGPoint,
+            scale: CGFloat,
+            rotation: CGFloat,
+            pointers: Int
+        ) {
+            guard semanticGestureBegan, emitsGestureCancel else { return }
+            semanticGestureBegan = false
+            dispatchSemanticGesture(
+                kind: EventKind.gestureCancel.rawValue,
+                state: 4,
+                viewPoint: viewPoint,
+                windowPoint: windowPoint,
+                translation: translation,
+                velocity: velocity,
+                scale: scale,
+                rotation: rotation,
+                pointers: pointers
+            )
+        }
+
+        private func dispatchSemanticGesture(
+            kind: Int,
+            state: Int,
+            viewPoint: CGPoint,
+            windowPoint: CGPoint,
+            translation: CGPoint,
+            velocity: CGPoint,
+            scale: CGFloat,
+            rotation: CGFloat,
+            pointers: Int
+        ) {
+            dispatchEvent(
+                nodeId,
+                kind,
+                semanticGesturePayload(
+                    state: state,
+                    viewPoint: viewPoint,
+                    windowPoint: windowPoint,
+                    translation: translation,
+                    velocity: velocity,
+                    scale: scale,
+                    rotation: rotation,
+                    pointers: pointers
+                )
+            )
+        }
+
+        private func semanticGesturePayload(
+            state: Int,
+            viewPoint: CGPoint,
+            windowPoint: CGPoint,
+            translation: CGPoint,
+            velocity: CGPoint,
+            scale: CGFloat,
+            rotation: CGFloat,
+            pointers: Int
+        ) -> Data {
+            (try? WireMap.encode([
+                "type": .integer(Int64(semanticGestureType)),
+                "state": .integer(Int64(state)),
+                "x": .decimal(viewPoint.x),
+                "y": .decimal(viewPoint.y),
+                "pageX": .decimal(windowPoint.x),
+                "pageY": .decimal(windowPoint.y),
+                "translationX": .decimal(translation.x),
+                "translationY": .decimal(translation.y),
+                "velocityX": .decimal(velocity.x),
+                "velocityY": .decimal(velocity.y),
+                "scale": .decimal(scale),
+                "rotation": .decimal(rotation),
+                "pointerCount": .integer(Int64(max(pointers, 1))),
+                "timestamp": .integer(
+                    Int64(ProcessInfo.processInfo.systemUptime * 1_000)
+                ),
+            ])) ?? Data()
+        }
+
+        private func scheduleSemanticGestureUpdate() {
+            guard !gestureUpdateScheduled else { return }
+            gestureUpdateScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.gestureUpdateScheduled = false
+                guard let payload = self.pendingGesturePayload else { return }
+                self.pendingGesturePayload = nil
+                self.dispatchEvent(
+                    self.nodeId,
+                    EventKind.gestureUpdate.rawValue,
+                    payload
+                )
+            }
+        }
+
+        private func matchesSemanticDirection(_ translation: CGPoint) -> Bool {
+            switch semanticGestureDirection {
+            case 2: return translation.x < 0 && abs(translation.x) >= abs(translation.y)
+            case 3: return translation.x > 0 && abs(translation.x) >= abs(translation.y)
+            case 4: return translation.y < 0 && abs(translation.y) >= abs(translation.x)
+            case 5: return translation.y > 0 && abs(translation.y) >= abs(translation.x)
+            case 6: return abs(translation.x) >= abs(translation.y)
+            case 7: return abs(translation.y) >= abs(translation.x)
+            default: return true
+            }
         }
 
         @objc private func onOutsideTap(_ sender: UITapGestureRecognizer) {
@@ -2117,7 +3411,10 @@ public final class PamRenderer {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            true
+            if gestureRecognizer === semanticGesture {
+                return semanticGestureComposition == 2
+            }
+            return true
         }
 
         private func onDirectiveLayout(old: CGRect?, new: CGRect?) {
@@ -2431,6 +3728,15 @@ private extension PropValue {
         }
     }
 
+    func bytesOrNil() -> Data? {
+        switch self {
+        case let .bytes(value):
+            value
+        default:
+            nil
+        }
+    }
+
     func propertiesOrNil() -> [String: WireValue]? {
         switch self {
         case let .properties(value):
@@ -2508,7 +3814,7 @@ private final class NodeState {
     let kind: NodeKind
     var properties: [Int: PropValue]
     let mountOrder: Int64
-    var imageTask: URLSessionDownloadTask?
+    var imageTask: URLSessionTask?
     var childrenNeedRethrow: UIView?
     var imageGeneration: Int
     var imageLoading: Bool
@@ -2523,7 +3829,7 @@ private final class NodeState {
         kind: NodeKind,
         properties: [Int: PropValue],
         mountOrder: Int64,
-        imageTask: URLSessionDownloadTask?,
+        imageTask: URLSessionTask?,
         imageGeneration: Int,
         imageLoading: Bool,
         imageProgressLoaded: Int64,

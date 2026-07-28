@@ -6,9 +6,25 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val http = HttpModule()
     private val storage = StorageModule(context)
     private val system = SystemModule(context)
+    private val sqlite = SQLiteModule(context)
+    private val files = (context as? dev.pam.nativeapp.PamActivity)?.let(::FilesModule)
+    private val notifications =
+        (context as? dev.pam.nativeapp.PamActivity)?.let(::NotificationsModule)
+    private val background = BackgroundModule(context)
+    private val device = DeviceModule(context)
+    private val permissions =
+        (context as? dev.pam.nativeapp.PamActivity)?.let(::PermissionsModule)
+    private val sensors = SensorsModule(context)
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
         put("storage", storage)
+        put("sqlite", sqlite)
+        files?.let { put("files", it) }
+        notifications?.let { put("notifications", it) }
+        put("background", background)
+        put("device", device)
+        permissions?.let { put("permissions", it) }
+        put("sensors", sensors)
         putAll(GeneratedPamModules.create(context))
     }
 
@@ -33,6 +49,10 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
             NativeOperation.PERMISSION_REQUEST,
             NativeOperation.CLOSE_APP,
             NativeOperation.HAPTIC,
+            NativeOperation.CLIPBOARD_SET_TEXT,
+            NativeOperation.CLIPBOARD_GET_TEXT,
+            NativeOperation.CLIPBOARD_HAS_TEXT,
+            NativeOperation.SENSOR_READ,
             -> system.invoke(operation, payload, completion)
             null -> completion.complete(
                 ModuleResultStatus.FAILURE,
@@ -81,7 +101,11 @@ enum class NativeOperation(val value: Int) {
     PERMISSION_CHECK(12),
     PERMISSION_REQUEST(13),
     CLOSE_APP(14),
-    HAPTIC(15);
+    HAPTIC(15),
+    CLIPBOARD_SET_TEXT(16),
+    CLIPBOARD_GET_TEXT(17),
+    CLIPBOARD_HAS_TEXT(18),
+    SENSOR_READ(19);
 
     companion object {
         fun from(value: Int): NativeOperation? =

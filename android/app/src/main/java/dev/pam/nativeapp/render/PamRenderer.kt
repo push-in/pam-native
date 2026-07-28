@@ -2,9 +2,12 @@ package dev.pam.nativeapp.render
 
 import android.annotation.SuppressLint
 import android.animation.ArgbEvaluator
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
 import android.app.Activity
+import android.content.ClipData
 import android.content.Context
 import android.content.res.Configuration
 import android.content.res.ColorStateList
@@ -34,6 +37,7 @@ import android.text.util.Linkify
 import android.util.LongSparseArray
 import android.util.TypedValue
 import android.view.Choreographer
+import android.view.DragEvent
 import android.view.Gravity
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
@@ -55,6 +59,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.PopupMenu
 import android.widget.Space
 import android.widget.Switch
 import android.widget.TextView
@@ -69,10 +74,12 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
+import java.nio.ByteOrder
 import java.util.LinkedHashSet
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import org.json.JSONArray
 
 class PamRenderer(
     private val context: Context,
@@ -85,11 +92,30 @@ class PamRenderer(
     private val frames = LongSparseArray<Frame>()
     private val children = LongSparseArray<MutableList<Long>>()
     private val imageLoader = NativeImageLoader(context)
+    private val mediaCache = NativeMediaFileCache(context)
     private val nativeViews = NativeViewRegistry(context)
     private var rootId = 0L
     private var nextMountOrder = 1L
     private var statusBarDefaults: StatusBarConfig? = null
     private var statusBarColorAnimator: ValueAnimator? = null
+
+    fun onHostPause() {
+        for (index in 0 until views.size()) {
+            when (val view = views.valueAt(index)) {
+                is PamMediaView -> view.onHostPause()
+                is PamWebView -> view.onPause()
+            }
+        }
+    }
+
+    fun onHostResume() {
+        for (index in 0 until views.size()) {
+            when (val view = views.valueAt(index)) {
+                is PamMediaView -> view.onHostResume()
+                is PamWebView -> view.onResume()
+            }
+        }
+    }
 
     fun commit(batches: List<List<Mutation>>) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
@@ -188,14 +214,21 @@ class PamRenderer(
             val state = nodes.valueAt(position)
             val trigger = views[state.id] as? PamPressable ?: continue
             val marker = state.properties[PropKey.VALUE]?.textOrNull()
-            val modal = if (marker?.startsWith(LOCAL_MODAL_TRIGGER_PREFIX) == true) {
-                modals[marker.removePrefix(LOCAL_MODAL_TRIGGER_PREFIX)]
-            } else {
-                null
+            val accessibilityMarker =
+                state.properties[PropKey.ACCESSIBILITY_LABEL]?.textOrNull()
+            val localPress = when {
+                marker == MODAL_CLOSE_MARKER ||
+                    accessibilityMarker == MODAL_CLOSE_ACCESSIBILITY_LABEL -> {
+                    { closeLocalModalAncestor(state.id) }
+                }
+                marker?.startsWith(LOCAL_MODAL_TRIGGER_PREFIX) == true -> {
+                    modals[marker.removePrefix(LOCAL_MODAL_TRIGGER_PREFIX)]?.let { target ->
+                        { target.setVisible(true) }
+                    }
+                }
+                else -> null
             }
-            trigger.setLocalOnPress(modal?.let { target ->
-                { target.setVisible(true) }
-            })
+            trigger.setLocalOnPress(localPress)
         }
         val orderedModals = ArrayList<Pair<Int, PamModalHost>>()
         val orderedInputs = ArrayList<Pair<Int, EditText>>()
@@ -269,28 +302,25 @@ class PamRenderer(
         while (currentId != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
             val state = nodes[currentId] ?: return
             if (state.kind == NodeKind.MODAL) {
-                val marker = state.properties[PropKey.VALUE]?.textOrNull()
-                if (marker?.startsWith(LOCAL_MODAL_PREFIX) == true) {
-                    views[startId]?.let { source ->
-                        val keyboard = source.context.getSystemService(
+                views[startId]?.let { source ->
+                    val keyboard = source.context.getSystemService(
+                        Context.INPUT_METHOD_SERVICE,
+                    ) as? android.view.inputmethod.InputMethodManager
+                    keyboard?.hideSoftInputFromWindow(source.windowToken, 0)
+                }
+                (views[currentId] as? PamModalHost)?.setVisible(false)
+                main.postDelayed({
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        host.windowInsetsController?.hide(
+                            android.view.WindowInsets.Type.ime(),
+                        )
+                    } else {
+                        val keyboard = context.getSystemService(
                             Context.INPUT_METHOD_SERVICE,
                         ) as? android.view.inputmethod.InputMethodManager
-                        keyboard?.hideSoftInputFromWindow(source.windowToken, 0)
+                        keyboard?.hideSoftInputFromWindow(host.windowToken, 0)
                     }
-                    (views[currentId] as? PamModalHost)?.setVisible(false)
-                    main.postDelayed({
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-                            host.windowInsetsController?.hide(
-                                android.view.WindowInsets.Type.ime(),
-                            )
-                        } else {
-                            val keyboard = context.getSystemService(
-                                Context.INPUT_METHOD_SERVICE,
-                            ) as? android.view.inputmethod.InputMethodManager
-                            keyboard?.hideSoftInputFromWindow(host.windowToken, 0)
-                        }
-                    }, 180L)
-                }
+                }, 180L)
                 return
             }
             currentId = state.parent
@@ -325,6 +355,8 @@ class PamRenderer(
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
             state.propertyAnimator?.cancel()
+            state.keyframeAnimator?.cancel()
+            state.loadingDrawable?.stop()
             state.outsidePointerObserver?.let { observer ->
                 (host as? PamRootHost)?.removePointerObserver(observer)
             }
@@ -335,6 +367,7 @@ class PamRenderer(
         statusBarDefaults?.let(::applyStatusBarConfig)
         statusBarColorAnimator?.cancel()
         imageLoader.close()
+        mediaCache.close()
         nativeViews.close()
         host.removeAllViews()
         views.clear()
@@ -414,6 +447,8 @@ class PamRenderer(
             }
             NodeKind.DRAWER_LAYOUT -> PamDrawerLayout(context)
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context)
+            NodeKind.WEB_VIEW -> PamWebView(context)
+            NodeKind.MEDIA -> PamMediaView(context, mediaCache)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
@@ -436,9 +471,12 @@ class PamRenderer(
         val removedStatusBar = state.kind == NodeKind.STATUS_BAR
         val view = views[id]
         state.propertyAnimator?.cancel()
+        state.keyframeAnimator?.cancel()
+        state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
         pamImageView(view)?.let(imageLoader::cancel)
+        (view as? PamWebView)?.destroy()
         view?.let(nativeViews::release)
         view?.let(::clearHitSlop)
         state.directiveLayoutListener?.let { listener ->
@@ -633,8 +671,11 @@ class PamRenderer(
         val view = views[id] ?: return
         val state = nodes[id] ?: return
         state.propertyAnimator?.cancel()
+        state.keyframeAnimator?.cancel()
+        state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         pamImageView(view)?.let(imageLoader::cancel)
+        (view as? PamWebView)?.destroy()
         view.let(nativeViews::release)
         clearHitSlop(view)
         (view.parent as? ViewGroup)?.removeView(view)
@@ -899,6 +940,7 @@ class PamRenderer(
         return null
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     private fun applyProperty(
         view: View,
         state: NodeState,
@@ -938,7 +980,13 @@ class PamRenderer(
             PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> when (view) {
-                is TextView -> view.setTextColor(value.integer().toInt())
+                is TextView -> {
+                    val color = value.integer().toInt()
+                    view.setTextColor(color)
+                    if (view is Button && state.flag(PropKey.LOADING, false)) {
+                        state.loadingDrawable?.setColor(color)
+                    }
+                }
                 is PamRecyclerList -> view.setTextColor(value.integer().toInt())
             }
             PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
@@ -959,6 +1007,10 @@ class PamRenderer(
                 (view as? PamNavigationHost)?.durationMs = value.integer()
             PropKey.NAVIGATION_REVISION ->
                 (view as? PamNavigationHost)?.navigate(value.integer())
+            PropKey.NAVIGATION_GESTURE_ENABLED,
+            PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
+            PropKey.NAVIGATION_GESTURE_THRESHOLD,
+            -> configureGestureNavigation(view, state)
             PropKey.OPACITY -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
                     applyAnimationKind(view, state, 2)
@@ -1030,9 +1082,28 @@ class PamRenderer(
                 view.isChecked = value.flag()
                 state.updating = false
             }
-            PropKey.LOADING -> applyLoading(view, state, value.flag())
-            PropKey.PROGRESS_COLOR ->
-                (view as? PamActivityIndicator)?.setColor(value.integer().toInt())
+            PropKey.LOADING -> {
+                val loading = value.flag()
+                if (loading && view is Button) {
+                    view.post {
+                        if (
+                            nodes[state.id] === state
+                            && state.flag(PropKey.LOADING, false)
+                        ) {
+                            applyLoading(view, state, true)
+                        }
+                    }
+                } else {
+                    applyLoading(view, state, false)
+                }
+            }
+            PropKey.PROGRESS_COLOR -> {
+                val color = value.integer().toInt()
+                (view as? PamActivityIndicator)?.setColor(color)
+                if (view is Button && state.flag(PropKey.LOADING, false)) {
+                    state.loadingDrawable?.setColor(color)
+                }
+            }
             PropKey.IMAGE_FIT -> {
                 imageView(view)?.scaleType = when (value.integer().toInt()) {
                     2 -> ImageView.ScaleType.CENTER_INSIDE
@@ -1078,6 +1149,91 @@ class PamRenderer(
                 (view as? PamModalHost)?.setStatusBarTranslucent(value.flag())
             PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
                 (view as? PamModalHost)?.setAllowSwipeDismissal(value.flag())
+            PropKey.BOTTOM_SHEET_SNAP_POINTS ->
+                (view as? PamModalHost)?.setBottomSheetSnapPoints(
+                    decodeBottomSheetSnapPoints(value),
+                )
+            PropKey.BOTTOM_SHEET_INDEX ->
+                (view as? PamModalHost)?.setBottomSheetIndex(value.integer().toInt())
+            PropKey.BOTTOM_SHEET_DISMISSIBLE ->
+                (view as? PamModalHost)?.setBottomSheetDismissible(value.flag())
+            PropKey.BOTTOM_SHEET_BACKDROP_DISMISS ->
+                (view as? PamModalHost)?.setBottomSheetBackdropDismiss(value.flag())
+            PropKey.BOTTOM_SHEET_HANDLE_VISIBLE ->
+                (view as? PamModalHost)?.setBottomSheetHandleVisible(value.flag())
+            PropKey.BOTTOM_SHEET_DRAG_ENABLED ->
+                (view as? PamModalHost)?.setBottomSheetDragEnabled(value.flag())
+            PropKey.BOTTOM_SHEET_KEYBOARD_BEHAVIOR ->
+                (view as? PamModalHost)?.setBottomSheetKeyboardBehavior(
+                    value.integer().toInt(),
+                )
+            PropKey.BOTTOM_SHEET_CORNER_RADIUS ->
+                (view as? PamModalHost)?.setBottomSheetCornerRadius(
+                    value.decimal().toFloat(),
+                )
+            PropKey.WEB_VIEW_SOURCE -> (view as? PamWebView)?.setSource(value.text(key))
+            PropKey.WEB_VIEW_JAVA_SCRIPT_ENABLED ->
+                (view as? PamWebView)?.setJavaScriptEnabled(value.flag())
+            PropKey.WEB_VIEW_DOM_STORAGE_ENABLED ->
+                (view as? PamWebView)?.setDomStorageEnabled(value.flag())
+            PropKey.WEB_VIEW_USER_AGENT ->
+                (view as? PamWebView)?.setUserAgent(value.text(key))
+            PropKey.WEB_VIEW_INJECTED_JAVA_SCRIPT ->
+                (view as? PamWebView)?.setInjectedJavaScript(value.text(key))
+            PropKey.WEB_VIEW_ALLOWS_INLINE_MEDIA ->
+                (view as? PamWebView)?.setAllowsInlineMedia(value.flag())
+            PropKey.WEB_VIEW_ALLOWED_HOSTS ->
+                (view as? PamWebView)?.setAllowedHosts(value.text(key))
+            PropKey.MEDIA_SOURCE -> (view as? PamMediaView)?.let {
+                configureMediaCache(it, state)
+                it.setSource(value.text(key))
+            }
+            PropKey.MEDIA_TYPE -> Unit
+            PropKey.MEDIA_AUTO_PLAY -> (view as? PamMediaView)?.setAutoPlay(value.flag())
+            PropKey.MEDIA_CONTROLS -> (view as? PamMediaView)?.setControls(value.flag())
+            PropKey.MEDIA_LOOP -> (view as? PamMediaView)?.setLoop(value.flag())
+            PropKey.MEDIA_MUTED -> (view as? PamMediaView)?.setMuted(value.flag())
+            PropKey.MEDIA_VOLUME ->
+                (view as? PamMediaView)?.setVolume(value.decimal().toFloat())
+            PropKey.MEDIA_CURRENT_TIME ->
+                (view as? PamMediaView)?.seek(value.decimal())
+            PropKey.MEDIA_PLAYBACK_RATE ->
+                (view as? PamMediaView)?.setPlaybackRate(value.decimal().toFloat())
+            PropKey.MEDIA_CACHE_POLICY,
+            PropKey.MEDIA_CACHE_KEY,
+            PropKey.MEDIA_CACHE_MAX_AGE_MS,
+            PropKey.MEDIA_CACHE_TAGS,
+            PropKey.MEDIA_CACHE_PIN_OFFLINE,
+            PropKey.MEDIA_CACHE_STREAMING,
+            PropKey.MEDIA_CACHE_PRELOAD_SECONDS,
+            PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING,
+            PropKey.MEDIA_CACHE_MAX_BYTES,
+            PropKey.MEDIA_THUMBNAIL_SOURCE,
+            PropKey.MEDIA_RESIZE_WIDTH,
+            PropKey.MEDIA_RESIZE_HEIGHT,
+            PropKey.MEDIA_PRIORITY,
+            PropKey.MEDIA_CACHE_CHECKSUM,
+            -> when (view) {
+                is PamMediaView -> configureMediaCache(view, state)
+                is PamImageView -> loadImage(view, state)
+            }
+            PropKey.ON_MEDIA_CACHE_HIT,
+            PropKey.ON_MEDIA_CACHE_MISS,
+            PropKey.ON_MEDIA_CACHE_PROGRESS,
+            PropKey.ON_MEDIA_CACHE_READY,
+            -> installEvents(view, state)
+            PropKey.DRAGGABLE,
+            PropKey.DRAG_DATA,
+            PropKey.DROP_ENABLED,
+            PropKey.CONTEXT_MENU_ITEMS,
+            -> configureNativeInteractions(view, state)
+            PropKey.ANIMATION_KEYFRAMES,
+            PropKey.ANIMATION_ITERATIONS,
+            PropKey.ANIMATION_DELAY_MS,
+            PropKey.ANIMATION_FILL_MODE,
+            PropKey.ANIMATION_PLAY_STATE,
+            PropKey.ANIMATION_AUTO_REVERSE,
+            -> configureKeyframeAnimation(view, state)
             PropKey.STATUS_BAR_COLOR,
             PropKey.STATUS_BAR_STYLE,
             PropKey.STATUS_BAR_HIDDEN,
@@ -1332,6 +1488,14 @@ class PamRenderer(
             PropKey.PRESS_DELAY_IN_MS,
             PropKey.PRESS_DELAY_OUT_MS,
             PropKey.PRESS_ANDROID_DISABLE_SOUND,
+            PropKey.GESTURE_TYPE,
+            PropKey.GESTURE_ENABLED,
+            PropKey.GESTURE_MIN_POINTERS,
+            PropKey.GESTURE_MAX_POINTERS,
+            PropKey.GESTURE_DIRECTION,
+            PropKey.GESTURE_COMPOSITION,
+            PropKey.GESTURE_MIN_DISTANCE,
+            PropKey.GESTURE_MIN_DURATION_MS,
             -> configurePressable(view, state)
             PropKey.WIDTH,
             PropKey.HEIGHT,
@@ -1396,6 +1560,25 @@ class PamRenderer(
             PropKey.ON_TOUCH_START,
             PropKey.ON_TOUCH_MOVE,
             PropKey.ON_TOUCH_END,
+            PropKey.ON_GESTURE_BEGIN,
+            PropKey.ON_GESTURE_UPDATE,
+            PropKey.ON_GESTURE_END,
+            PropKey.ON_GESTURE_CANCEL,
+            PropKey.ON_BOTTOM_SHEET_CHANGE,
+            PropKey.ON_BOTTOM_SHEET_DISMISS,
+            PropKey.ON_WEB_VIEW_LOAD,
+            PropKey.ON_WEB_VIEW_ERROR,
+            PropKey.ON_WEB_VIEW_MESSAGE,
+            PropKey.ON_MEDIA_READY,
+            PropKey.ON_MEDIA_PROGRESS,
+            PropKey.ON_MEDIA_END,
+            PropKey.ON_MEDIA_ERROR,
+            PropKey.ON_DRAG_START,
+            PropKey.ON_DRAG_END,
+            PropKey.ON_DROP,
+            PropKey.ON_MENU_ACTION,
+            PropKey.ON_NAVIGATION_GESTURE_POP,
+            PropKey.ON_ANIMATION_COMPLETE,
             PropKey.FLEX_DIRECTION,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
@@ -1434,6 +1617,7 @@ class PamRenderer(
         }
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
     private fun resetProperty(view: View, state: NodeState, key: PropKey) {
         when (key) {
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
@@ -1663,6 +1847,85 @@ class PamRenderer(
                 (view as? PamModalHost)?.setStatusBarTranslucent(false)
             PropKey.MODAL_ALLOW_SWIPE_DISMISSAL ->
                 (view as? PamModalHost)?.setAllowSwipeDismissal(false)
+            PropKey.BOTTOM_SHEET_SNAP_POINTS ->
+                (view as? PamModalHost)?.setBottomSheetSnapPoints(listOf(0.5f, 0.9f))
+            PropKey.BOTTOM_SHEET_INDEX ->
+                (view as? PamModalHost)?.setBottomSheetIndex(0)
+            PropKey.BOTTOM_SHEET_DISMISSIBLE ->
+                (view as? PamModalHost)?.setBottomSheetDismissible(true)
+            PropKey.BOTTOM_SHEET_BACKDROP_DISMISS ->
+                (view as? PamModalHost)?.setBottomSheetBackdropDismiss(true)
+            PropKey.BOTTOM_SHEET_HANDLE_VISIBLE ->
+                (view as? PamModalHost)?.setBottomSheetHandleVisible(true)
+            PropKey.BOTTOM_SHEET_DRAG_ENABLED ->
+                (view as? PamModalHost)?.setBottomSheetDragEnabled(true)
+            PropKey.BOTTOM_SHEET_KEYBOARD_BEHAVIOR ->
+                (view as? PamModalHost)?.setBottomSheetKeyboardBehavior(1)
+            PropKey.BOTTOM_SHEET_CORNER_RADIUS ->
+                (view as? PamModalHost)?.setBottomSheetCornerRadius(20f)
+            PropKey.WEB_VIEW_SOURCE -> (view as? PamWebView)?.setSource("")
+            PropKey.WEB_VIEW_JAVA_SCRIPT_ENABLED ->
+                (view as? PamWebView)?.setJavaScriptEnabled(true)
+            PropKey.WEB_VIEW_DOM_STORAGE_ENABLED ->
+                (view as? PamWebView)?.setDomStorageEnabled(true)
+            PropKey.WEB_VIEW_USER_AGENT -> (view as? PamWebView)?.setUserAgent("")
+            PropKey.WEB_VIEW_INJECTED_JAVA_SCRIPT ->
+                (view as? PamWebView)?.setInjectedJavaScript("")
+            PropKey.WEB_VIEW_ALLOWS_INLINE_MEDIA ->
+                (view as? PamWebView)?.setAllowsInlineMedia(true)
+            PropKey.WEB_VIEW_ALLOWED_HOSTS ->
+                (view as? PamWebView)?.setAllowedHosts("")
+            PropKey.MEDIA_SOURCE -> (view as? PamMediaView)?.setSource("")
+            PropKey.MEDIA_TYPE -> Unit
+            PropKey.MEDIA_AUTO_PLAY -> (view as? PamMediaView)?.setAutoPlay(false)
+            PropKey.MEDIA_CONTROLS -> (view as? PamMediaView)?.setControls(true)
+            PropKey.MEDIA_LOOP -> (view as? PamMediaView)?.setLoop(false)
+            PropKey.MEDIA_MUTED -> (view as? PamMediaView)?.setMuted(false)
+            PropKey.MEDIA_VOLUME -> (view as? PamMediaView)?.setVolume(1f)
+            PropKey.MEDIA_CURRENT_TIME -> (view as? PamMediaView)?.seek(0.0)
+            PropKey.MEDIA_PLAYBACK_RATE -> (view as? PamMediaView)?.setPlaybackRate(1f)
+            PropKey.MEDIA_CACHE_POLICY,
+            PropKey.MEDIA_CACHE_KEY,
+            PropKey.MEDIA_CACHE_MAX_AGE_MS,
+            PropKey.MEDIA_CACHE_TAGS,
+            PropKey.MEDIA_CACHE_PIN_OFFLINE,
+            PropKey.MEDIA_CACHE_STREAMING,
+            PropKey.MEDIA_CACHE_PRELOAD_SECONDS,
+            PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING,
+            PropKey.MEDIA_CACHE_MAX_BYTES,
+            PropKey.MEDIA_THUMBNAIL_SOURCE,
+            PropKey.MEDIA_RESIZE_WIDTH,
+            PropKey.MEDIA_RESIZE_HEIGHT,
+            PropKey.MEDIA_PRIORITY,
+            PropKey.MEDIA_CACHE_CHECKSUM,
+            -> when (view) {
+                is PamMediaView -> configureMediaCache(view, state)
+                is PamImageView -> loadImage(view, state)
+            }
+            PropKey.ON_MEDIA_CACHE_HIT,
+            PropKey.ON_MEDIA_CACHE_MISS,
+            PropKey.ON_MEDIA_CACHE_PROGRESS,
+            PropKey.ON_MEDIA_CACHE_READY,
+            -> installEvents(view, state)
+            PropKey.NAVIGATION_GESTURE_ENABLED,
+            PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
+            PropKey.NAVIGATION_GESTURE_THRESHOLD,
+            -> configureGestureNavigation(view, state)
+            PropKey.DRAGGABLE,
+            PropKey.DRAG_DATA,
+            PropKey.DROP_ENABLED,
+            PropKey.CONTEXT_MENU_ITEMS,
+            -> configureNativeInteractions(view, state)
+            PropKey.ANIMATION_KEYFRAMES,
+            PropKey.ANIMATION_ITERATIONS,
+            PropKey.ANIMATION_DELAY_MS,
+            PropKey.ANIMATION_FILL_MODE,
+            PropKey.ANIMATION_PLAY_STATE,
+            PropKey.ANIMATION_AUTO_REVERSE,
+            -> {
+                state.keyframeAnimator?.cancel()
+                state.keyframeAnimator = null
+            }
             PropKey.CHECKED -> (view as? Switch)?.isChecked = false
             PropKey.ACTIVITY_ANIMATING ->
                 (view as? PamActivityIndicator)?.setAnimating(true)
@@ -1907,8 +2170,409 @@ class PamRenderer(
                     null
                 },
             )
+            view.setBottomSheetCallbacks(
+                onChange = if (
+                    state.properties[PropKey.ON_BOTTOM_SHEET_CHANGE] != null
+                ) {
+                    { index, position ->
+                        dispatchBytes(
+                            state.id,
+                            EVENT_BOTTOM_SHEET_CHANGE,
+                            WireMap.encode(
+                                mapOf(
+                                    "index" to WireValue.Integer(index.toLong()),
+                                    "position" to WireValue.Decimal(position.toDouble()),
+                                ),
+                            ),
+                        )
+                    }
+                } else {
+                    null
+                },
+                onDismiss = state.callback(PropKey.ON_BOTTOM_SHEET_DISMISS) {
+                    dispatch(state.id, EVENT_BOTTOM_SHEET_DISMISS)
+                },
+            )
+        }
+        if (view is PamWebView) {
+            view.onLoad = state.callback(PropKey.ON_WEB_VIEW_LOAD) {
+                dispatch(state.id, EventKind.WEB_VIEW_LOAD.value)
+            }
+            view.onError = if (state.properties[PropKey.ON_WEB_VIEW_ERROR] != null) {
+                { message ->
+                    dispatchBytes(
+                        state.id,
+                        EventKind.WEB_VIEW_ERROR.value,
+                        WireMap.encode(mapOf("message" to WireValue.Text(message))),
+                    )
+                }
+            } else null
+            view.onMessage = if (state.properties[PropKey.ON_WEB_VIEW_MESSAGE] != null) {
+                { message ->
+                    dispatchBytes(
+                        state.id,
+                        EventKind.WEB_VIEW_MESSAGE.value,
+                        WireMap.encode(mapOf("message" to WireValue.Text(message))),
+                    )
+                }
+            } else null
+        }
+        if (view is PamMediaView) {
+            view.onReady = state.callback(PropKey.ON_MEDIA_READY) {
+                dispatch(state.id, EventKind.MEDIA_READY.value)
+            }
+            view.onProgress = if (state.properties[PropKey.ON_MEDIA_PROGRESS] != null) {
+                { current, duration ->
+                    dispatchBytes(
+                        state.id,
+                        EventKind.MEDIA_PROGRESS.value,
+                        WireMap.encode(
+                            mapOf(
+                                "currentTime" to WireValue.Decimal(current),
+                                "duration" to WireValue.Decimal(duration),
+                            ),
+                        ),
+                    )
+                }
+            } else null
+            view.onEnd = state.callback(PropKey.ON_MEDIA_END) {
+                dispatch(state.id, EventKind.MEDIA_END.value)
+            }
+            view.onError = if (state.properties[PropKey.ON_MEDIA_ERROR] != null) {
+                { message ->
+                    dispatchBytes(
+                        state.id,
+                        EventKind.MEDIA_ERROR.value,
+                        WireMap.encode(mapOf("message" to WireValue.Text(message))),
+                    )
+                }
+            } else null
+            view.onCacheHit = mediaCacheCallback(state, PropKey.ON_MEDIA_CACHE_HIT, EventKind.MEDIA_CACHE_HIT)
+            view.onCacheMiss = mediaCacheCallback(state, PropKey.ON_MEDIA_CACHE_MISS, EventKind.MEDIA_CACHE_MISS)
+            view.onCacheProgress =
+                if (state.properties[PropKey.ON_MEDIA_CACHE_PROGRESS] != null) {
+                    { key, loaded, total ->
+                        dispatchBytes(
+                            state.id,
+                            EventKind.MEDIA_CACHE_PROGRESS.value,
+                            mediaCachePayload(key, loaded, total, true),
+                        )
+                    }
+                } else null
+            view.onCacheReady =
+                if (state.properties[PropKey.ON_MEDIA_CACHE_READY] != null) {
+                    { key, bytes ->
+                        dispatchBytes(
+                            state.id,
+                            EventKind.MEDIA_CACHE_READY.value,
+                            mediaCachePayload(key, bytes, bytes, true),
+                        )
+                    }
+                } else null
+        }
+        configureNativeInteractions(view, state)
+        configureGestureNavigation(view, state)
+    }
+
+    private fun mediaCacheCallback(
+        state: NodeState,
+        property: PropKey,
+        event: EventKind,
+    ): ((String) -> Unit)? =
+        if (state.properties[property] != null) {
+            { key ->
+                dispatchBytes(
+                    state.id,
+                    event.value,
+                    mediaCachePayload(key, 0, 0, event == EventKind.MEDIA_CACHE_HIT),
+                )
+            }
+        } else null
+
+    private fun configureMediaCache(view: PamMediaView, state: NodeState) {
+        view.setCacheRequest(
+            MediaCacheRequest(
+                source = state.textOrNull(PropKey.MEDIA_SOURCE).orEmpty(),
+                policy = state.integer(PropKey.MEDIA_CACHE_POLICY, MEDIA_CACHE_NONE.toLong()).toInt(),
+                key = state.textOrNull(PropKey.MEDIA_CACHE_KEY),
+                maxAgeMs = state.integer(PropKey.MEDIA_CACHE_MAX_AGE_MS, 0),
+                maxBytes = state.integer(PropKey.MEDIA_CACHE_MAX_BYTES, 0),
+                checksum = state.textOrNull(PropKey.MEDIA_CACHE_CHECKSUM),
+                pinOffline = state.flag(PropKey.MEDIA_CACHE_PIN_OFFLINE, false),
+                streaming = state.flag(PropKey.MEDIA_CACHE_STREAMING, false),
+                downloadWhilePlaying =
+                    state.flag(PropKey.MEDIA_CACHE_DOWNLOAD_WHILE_PLAYING, false),
+            ),
+        )
+    }
+
+    private fun decodeBottomSheetSnapPoints(value: PropValue): List<Float> {
+        val source = (value as? PropValue.Bytes)?.value?.duplicate()
+            ?: error("Bottom Sheet snap points must be bytes")
+        source.order(ByteOrder.LITTLE_ENDIAN)
+        require(source.remaining() >= 2) { "Invalid Bottom Sheet snap points" }
+        val count = source.short.toInt() and 0xffff
+        require(count in 1..16 && source.remaining() == count * 8) {
+            "Invalid Bottom Sheet snap points"
+        }
+        return List(count) { source.double.toFloat() }
+    }
+
+    private fun configureNativeInteractions(view: View, state: NodeState) {
+        val configured = listOf(
+            PropKey.DRAGGABLE,
+            PropKey.DRAG_DATA,
+            PropKey.DROP_ENABLED,
+            PropKey.CONTEXT_MENU_ITEMS,
+            PropKey.ON_DRAG_START,
+            PropKey.ON_DRAG_END,
+            PropKey.ON_DROP,
+            PropKey.ON_MENU_ACTION,
+        ).any(state.properties::containsKey)
+        if (!configured && !state.nativeInteractionsInstalled) return
+        state.nativeInteractionsInstalled = configured
+        val draggable = state.flag(PropKey.DRAGGABLE, false)
+        val dropEnabled = state.flag(PropKey.DROP_ENABLED, false)
+        val dragData = state.textOrNull(PropKey.DRAG_DATA).orEmpty()
+        val menuItems = decodeContextMenuItems(state.properties[PropKey.CONTEXT_MENU_ITEMS])
+
+        view.setOnLongClickListener(
+            when {
+                draggable -> View.OnLongClickListener {
+                    val started = it.startDragAndDrop(
+                        ClipData.newPlainText("Pam Native", dragData),
+                        View.DragShadowBuilder(it),
+                        dragData,
+                        0,
+                    )
+                    if (started && state.properties[PropKey.ON_DRAG_START] != null) {
+                        dispatch(state.id, EventKind.DRAG_START.value)
+                    }
+                    started
+                }
+                menuItems.isNotEmpty() -> View.OnLongClickListener {
+                    val popup = PopupMenu(context, it)
+                    menuItems.forEachIndexed { index, item ->
+                        popup.menu.add(0, index + 1, index, item.title).apply {
+                            isEnabled = !item.disabled
+                        }
+                    }
+                    popup.setOnMenuItemClickListener { selected ->
+                        val item = menuItems.getOrNull(selected.itemId - 1)
+                            ?: return@setOnMenuItemClickListener false
+                        if (state.properties[PropKey.ON_MENU_ACTION] != null) {
+                            dispatchBytes(
+                                state.id,
+                                EventKind.MENU_ACTION.value,
+                                WireMap.encode(mapOf("id" to WireValue.Text(item.id))),
+                            )
+                        }
+                        true
+                    }
+                    popup.show()
+                    true
+                }
+                else -> null
+            },
+        )
+
+        view.setOnDragListener(
+            if (dropEnabled || draggable) {
+                View.OnDragListener { _, event ->
+                    when (event.action) {
+                        DragEvent.ACTION_DRAG_STARTED ->
+                            dropEnabled && event.clipDescription?.hasMimeType("text/plain") == true
+                                || draggable
+                        DragEvent.ACTION_DROP -> {
+                            if (!dropEnabled) return@OnDragListener false
+                            val data = event.clipData?.getItemAt(0)?.coerceToText(context)?.toString()
+                                ?: event.localState?.toString().orEmpty()
+                            if (state.properties[PropKey.ON_DROP] != null) {
+                                dispatchBytes(
+                                    state.id,
+                                    EventKind.DROP.value,
+                                    WireMap.encode(mapOf("data" to WireValue.Text(data))),
+                                )
+                            }
+                            true
+                        }
+                        DragEvent.ACTION_DRAG_ENDED -> {
+                            if (draggable && state.properties[PropKey.ON_DRAG_END] != null) {
+                                dispatch(state.id, EventKind.DRAG_END.value)
+                            }
+                            true
+                        }
+                        else -> true
+                    }
+                }
+            } else {
+                null
+            },
+        )
+    }
+
+    private fun decodeContextMenuItems(value: PropValue?): List<NativeMenuItem> {
+        val buffer = (value as? PropValue.Bytes)?.value?.duplicate() ?: return emptyList()
+        val bytes = ByteArray(buffer.remaining()).also(buffer::get)
+        return runCatching {
+            val values = JSONArray(bytes.toString(Charsets.UTF_8))
+            List(values.length().coerceAtMost(64)) { index ->
+                values.getJSONObject(index).let {
+                    NativeMenuItem(
+                        id = it.getString("id"),
+                        title = it.getString("title"),
+                        disabled = it.optBoolean("disabled"),
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    private data class NativeMenuItem(
+        val id: String,
+        val title: String,
+        val disabled: Boolean,
+    )
+
+    private fun configureGestureNavigation(view: View, state: NodeState) {
+        val navigation = view as? PamNavigationHost ?: return
+        navigation.setGestureNavigation(
+            enabled = state.flag(PropKey.NAVIGATION_GESTURE_ENABLED, true),
+            edgeWidth = state.number(PropKey.NAVIGATION_GESTURE_EDGE_WIDTH, 24.0).toFloat(),
+            threshold = state.number(PropKey.NAVIGATION_GESTURE_THRESHOLD, 0.35).toFloat(),
+            onPop = state.callback(PropKey.ON_NAVIGATION_GESTURE_POP) {
+                dispatch(state.id, EventKind.NAVIGATION_GESTURE_POP.value)
+            },
+        )
+    }
+
+    private fun configureKeyframeAnimation(view: View, state: NodeState) {
+        val bytes = (state.properties[PropKey.ANIMATION_KEYFRAMES] as? PropValue.Bytes)
+            ?.value
+            ?.duplicate()
+            ?.let { buffer -> ByteArray(buffer.remaining()).also(buffer::get) }
+            ?: return
+        val frames = runCatching {
+            val array = JSONArray(bytes.toString(Charsets.UTF_8))
+            List(array.length()) { index ->
+                val value = array.getJSONObject(index)
+                NativeKeyframe(
+                    offset = value.getDouble("offset").toFloat().coerceIn(0f, 1f),
+                    opacity = value.optDoubleOrNull("opacity"),
+                    translationX = value.optDoubleOrNull("translationX")?.let {
+                        dp(it).toFloat()
+                    },
+                    translationXPercent = value.optDoubleOrNull("translationXPercent"),
+                    translationY = value.optDoubleOrNull("translationY")?.let {
+                        dp(it).toFloat()
+                    },
+                    scaleX = value.optDoubleOrNull("scaleX"),
+                    scaleY = value.optDoubleOrNull("scaleY"),
+                    rotation = value.optDoubleOrNull("rotation"),
+                )
+            }
+        }.getOrNull()?.takeIf { it.size in 2..64 } ?: return
+
+        val playState = state.integer(PropKey.ANIMATION_PLAY_STATE, 1L).toInt()
+        if (playState == 2) {
+            state.keyframeAnimator?.pause()
+            return
+        }
+        state.keyframeAnimator?.cancel()
+        state.keyframeAnimator = null
+        if (playState == 3) return
+
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            applyKeyframe(view, frames, 1f)
+            if (state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+                dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
+            }
+            return
+        }
+        state.keyframeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = state.integer(PropKey.ANIMATION_DURATION_MS, 300L).coerceIn(1L, 60_000L)
+            startDelay = state.integer(PropKey.ANIMATION_DELAY_MS, 0L).coerceIn(0L, 60_000L)
+            val iterations = state.integer(PropKey.ANIMATION_ITERATIONS, 1L).coerceIn(0L, 10_000L)
+            repeatCount = if (iterations == 0L) ValueAnimator.INFINITE else iterations.toInt() - 1
+            repeatMode = if (state.flag(PropKey.ANIMATION_AUTO_REVERSE, false)) {
+                ValueAnimator.REVERSE
+            } else {
+                ValueAnimator.RESTART
+            }
+            interpolator = animationInterpolator(
+                state.integer(PropKey.ANIMATION_EASING, 1L).toInt(),
+            )
+            addUpdateListener { applyKeyframe(view, frames, it.animatedValue as Float) }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: Animator) {
+                    if (cancelled || repeatCount == ValueAnimator.INFINITE) return
+                    if (state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+                        dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
+                    }
+                }
+            })
+            start()
         }
     }
+
+    private fun applyKeyframe(view: View, frames: List<NativeKeyframe>, progress: Float) {
+        val rightIndex = frames.indexOfFirst { it.offset >= progress }
+            .let { if (it < 0) frames.lastIndex else it }
+        val leftIndex = (rightIndex - 1).coerceAtLeast(0)
+        val left = frames[leftIndex]
+        val right = frames[rightIndex]
+        val local = if (right.offset == left.offset) 0f else {
+            ((progress - left.offset) / (right.offset - left.offset)).coerceIn(0f, 1f)
+        }
+        fun value(
+            start: Float?,
+            end: Float?,
+            fallback: Float,
+        ): Float {
+            val from = start ?: end ?: fallback
+            val to = end ?: start ?: fallback
+            return from + (to - from) * local
+        }
+        view.alpha = value(left.opacity, right.opacity, view.alpha).coerceIn(0f, 1f)
+        fun translationX(frame: NativeKeyframe): Float? =
+            frame.translationXPercent?.let { percent ->
+                ((view.parent as? View)?.width ?: view.rootView.width) * (percent / 100f)
+            } ?: frame.translationX
+        view.translationX = value(
+            translationX(left),
+            translationX(right),
+            view.translationX,
+        )
+        view.translationY = value(left.translationY, right.translationY, view.translationY)
+        view.scaleX = value(left.scaleX, right.scaleX, view.scaleX)
+        view.scaleY = value(left.scaleY, right.scaleY, view.scaleY)
+        view.rotation = value(left.rotation, right.rotation, view.rotation)
+    }
+
+    private fun animationInterpolator(value: Int): android.animation.TimeInterpolator =
+        when (value) {
+            1 -> LinearInterpolator()
+            2 -> AccelerateInterpolator()
+            3 -> DecelerateInterpolator()
+            5 -> OvershootInterpolator()
+            else -> AccelerateDecelerateInterpolator()
+        }
+
+    private fun org.json.JSONObject.optDoubleOrNull(name: String): Float? =
+        if (has(name) && !isNull(name)) getDouble(name).toFloat() else null
+
+    private data class NativeKeyframe(
+        val offset: Float,
+        val opacity: Float?,
+        val translationX: Float?,
+        val translationXPercent: Float?,
+        val translationY: Float?,
+        val scaleX: Float?,
+        val scaleY: Float?,
+        val rotation: Float?,
+    )
 
     @SuppressLint("ClickableViewAccessibility")
     private fun installPressFeedback(view: View, state: NodeState) {
@@ -2129,6 +2793,78 @@ class PamRenderer(
                 state.number(PropKey.PRESS_RETENTION_BOTTOM, 30.0).toFloat(),
             ).toFloat(),
             androidDisableSound = state.flag(PropKey.PRESS_ANDROID_DISABLE_SOUND, false),
+        )
+        val gestureType = state.integer(PropKey.GESTURE_TYPE, 0L).toInt()
+        val hasGesture = gestureType in 1..6
+        pressable.configureGesture(
+            config = if (hasGesture) {
+                PamGestureConfig(
+                    type = gestureType,
+                    enabled = state.flag(PropKey.GESTURE_ENABLED, true),
+                    minPointers = state.integer(PropKey.GESTURE_MIN_POINTERS, 1L)
+                        .toInt()
+                        .coerceIn(1, 10),
+                    maxPointers = state.integer(PropKey.GESTURE_MAX_POINTERS, 1L)
+                        .toInt()
+                        .coerceIn(1, 10),
+                    direction = state.integer(PropKey.GESTURE_DIRECTION, 1L).toInt(),
+                    composition = state.integer(PropKey.GESTURE_COMPOSITION, 1L).toInt(),
+                    minDistance = dp(
+                        state.number(PropKey.GESTURE_MIN_DISTANCE, 12.0).toFloat(),
+                    ).toFloat(),
+                    minDurationMs = state.integer(PropKey.GESTURE_MIN_DURATION_MS, 0L)
+                        .coerceIn(0L, 60_000L),
+                )
+            } else {
+                null
+            },
+            callback = if (hasGesture) {
+                { payload -> dispatchGesture(state, payload) }
+            } else {
+                null
+            },
+        )
+    }
+
+    private fun dispatchGesture(state: NodeState, payload: PamGesturePayload) {
+        if (nodes[state.id] !== state) return
+        val event = when (payload.state) {
+            1 -> EventKind.GESTURE_BEGIN to PropKey.ON_GESTURE_BEGIN
+            2 -> EventKind.GESTURE_UPDATE to PropKey.ON_GESTURE_UPDATE
+            3 -> EventKind.GESTURE_END to PropKey.ON_GESTURE_END
+            else -> EventKind.GESTURE_CANCEL to PropKey.ON_GESTURE_CANCEL
+        }
+        if (state.properties[event.second] == null) return
+        val density = resourcesDensity().coerceAtLeast(0.01f)
+        dispatchBytes(
+            state.id,
+            event.first.value,
+            WireMap.encode(
+                mapOf(
+                    "type" to WireValue.Integer(payload.type.toLong()),
+                    "state" to WireValue.Integer(payload.state.toLong()),
+                    "x" to WireValue.Decimal((payload.x / density).toDouble()),
+                    "y" to WireValue.Decimal((payload.y / density).toDouble()),
+                    "pageX" to WireValue.Decimal((payload.pageX / density).toDouble()),
+                    "pageY" to WireValue.Decimal((payload.pageY / density).toDouble()),
+                    "translationX" to WireValue.Decimal(
+                        (payload.translationX / density).toDouble(),
+                    ),
+                    "translationY" to WireValue.Decimal(
+                        (payload.translationY / density).toDouble(),
+                    ),
+                    "velocityX" to WireValue.Decimal(
+                        (payload.velocityX / density).toDouble(),
+                    ),
+                    "velocityY" to WireValue.Decimal(
+                        (payload.velocityY / density).toDouble(),
+                    ),
+                    "scale" to WireValue.Decimal(payload.scale.toDouble()),
+                    "rotation" to WireValue.Decimal(payload.rotation.toDouble()),
+                    "pointerCount" to WireValue.Integer(payload.pointerCount.toLong()),
+                    "timestamp" to WireValue.Integer(payload.timestamp),
+                ),
+            ),
         )
     }
 
@@ -2441,6 +3177,10 @@ class PamRenderer(
             EventKind.TOUCH_START.value -> PropKey.ON_TOUCH_START
             EventKind.TOUCH_MOVE.value -> PropKey.ON_TOUCH_MOVE
             EventKind.TOUCH_END.value -> PropKey.ON_TOUCH_END
+            EventKind.GESTURE_BEGIN.value -> PropKey.ON_GESTURE_BEGIN
+            EventKind.GESTURE_UPDATE.value -> PropKey.ON_GESTURE_UPDATE
+            EventKind.GESTURE_END.value -> PropKey.ON_GESTURE_END
+            EventKind.GESTURE_CANCEL.value -> PropKey.ON_GESTURE_CANCEL
             else -> null
         }
 
@@ -2479,8 +3219,24 @@ class PamRenderer(
 
     private fun applyLoading(view: View, state: NodeState, loading: Boolean) {
         val button = view as? Button ?: return
-        button.isEnabled = !loading && state.flag(PropKey.ENABLED, true)
-        button.text = if (loading) "…" else state.baseText
+        val enabled = state.flag(PropKey.ENABLED, true)
+        if (loading) {
+            val color = button.currentTextColor
+            val indicator = state.loadingDrawable
+                ?: PamButtonLoadingDrawable(dp(20f), color).also {
+                    state.loadingDrawable = it
+                }
+            indicator.setColor(color)
+            button.text = ""
+            button.setCompoundDrawables(indicator, null, null, null)
+            button.isEnabled = false
+            indicator.start()
+            return
+        }
+        state.loadingDrawable?.stop()
+        button.setCompoundDrawables(null, null, null, null)
+        button.text = state.baseText
+        button.isEnabled = enabled
     }
 
     private fun applyLeafPadding(view: View, state: NodeState) {
@@ -2686,11 +3442,11 @@ class PamRenderer(
                 cornerRadii = radii
             }
         }
-        val overlay = RippleDrawable(
+        val overlay = (RippleDrawable(
             ColorStateList.valueOf(effectiveRipple),
             null,
             rippleMask,
-        ).apply {
+        ).mutate() as RippleDrawable).apply {
             state.properties[PropKey.RIPPLE_RADIUS]?.decimal()?.let { radius ->
                 this.radius = dp(radius.toFloat().coerceAtLeast(0f))
             }
@@ -2700,11 +3456,11 @@ class PamRenderer(
             view.foreground = overlay
         } else {
             view.foreground = null
-            view.background = RippleDrawable(
+            view.background = (RippleDrawable(
                 ColorStateList.valueOf(effectiveRipple),
                 shape,
                 rippleMask,
-            ).apply {
+            ).mutate() as RippleDrawable).apply {
                 state.properties[PropKey.RIPPLE_RADIUS]?.decimal()?.let { radius ->
                     this.radius = dp(radius.toFloat().coerceAtLeast(0f))
                 }
@@ -3295,6 +4051,14 @@ class PamRenderer(
                 PropKey.IMAGE_CACHE_POLICY,
                 IMAGE_CACHE_DEFAULT.toLong(),
             ).toInt(),
+            mediaCachePolicy = state.integer(
+                PropKey.MEDIA_CACHE_POLICY,
+                MEDIA_CACHE_MEMORY_AND_DISK.toLong(),
+            ).toInt(),
+            mediaCacheKey = state.textOrNull(PropKey.MEDIA_CACHE_KEY),
+            mediaCacheMaxAgeMs = state.integer(PropKey.MEDIA_CACHE_MAX_AGE_MS, 0),
+            mediaCacheMaxBytes = state.integer(PropKey.MEDIA_CACHE_MAX_BYTES, 0),
+            mediaCacheChecksum = state.textOrNull(PropKey.MEDIA_CACHE_CHECKSUM),
             repeat = state.integer(PropKey.IMAGE_FIT, 1L) == 5L,
         )
         imageLoader.load(
@@ -3311,6 +4075,18 @@ class PamRenderer(
                     }
                 },
                 onProgress = { loaded, total ->
+                    if (state.properties[PropKey.ON_MEDIA_CACHE_PROGRESS] != null) {
+                        dispatchBytes(
+                            state.id,
+                            EventKind.MEDIA_CACHE_PROGRESS.value,
+                            mediaCachePayload(
+                                state.textOrNull(PropKey.MEDIA_CACHE_KEY).orEmpty(),
+                                loaded,
+                                total,
+                                false,
+                            ),
+                        )
+                    }
                     if (state.properties[PropKey.ON_IMAGE_PROGRESS] == null) {
                         return@NativeImageCallbacks
                     }
@@ -3382,9 +4158,50 @@ class PamRenderer(
                         dispatch(state.id, EVENT_IMAGE_LOAD_END)
                     }
                 },
+                onCacheHit = { disk, key ->
+                    if (state.properties[PropKey.ON_MEDIA_CACHE_HIT] != null) {
+                        dispatchBytes(
+                            state.id,
+                            EventKind.MEDIA_CACHE_HIT.value,
+                            mediaCachePayload(key, 0, 0, disk),
+                        )
+                    }
+                },
+                onCacheMiss = { key ->
+                    if (state.properties[PropKey.ON_MEDIA_CACHE_MISS] != null) {
+                        dispatchBytes(
+                            state.id,
+                            EventKind.MEDIA_CACHE_MISS.value,
+                            mediaCachePayload(key, 0, 0, false),
+                        )
+                    }
+                },
+                onCacheReady = { key, bytes ->
+                    if (state.properties[PropKey.ON_MEDIA_CACHE_READY] != null) {
+                        dispatchBytes(
+                            state.id,
+                            EventKind.MEDIA_CACHE_READY.value,
+                            mediaCachePayload(key, bytes, bytes, true),
+                        )
+                    }
+                },
             ),
         )
     }
+
+    private fun mediaCachePayload(
+        key: String,
+        loaded: Long,
+        total: Long,
+        disk: Boolean,
+    ): ByteArray = WireMap.encode(
+        mapOf(
+            "key" to WireValue.Text(key),
+            "loaded" to WireValue.Integer(loaded),
+            "total" to WireValue.Integer(total),
+            "disk" to WireValue.Flag(disk),
+        ),
+    )
 
     private fun dispatchImageProgress(state: NodeState) {
         state.imageProgressScheduled = false
@@ -3854,6 +4671,8 @@ class PamRenderer(
         var keyboardInset: Int = 0,
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
+        var keyframeAnimator: ValueAnimator? = null,
+        var loadingDrawable: PamButtonLoadingDrawable? = null,
         var virtual: Boolean = false,
         var imageLoading: Boolean = false,
         var imageProgressScheduled: Boolean = false,
@@ -3861,6 +4680,7 @@ class PamRenderer(
         var imageProgressTotal: Long = 0L,
         var inputSelectionScheduled: Boolean = false,
         var directiveLayoutListener: View.OnLayoutChangeListener? = null,
+        var nativeInteractionsInstalled: Boolean = false,
         var outsidePointerObserver: ((MotionEvent) -> Unit)? = null,
         var lastDirectiveIntersection: Boolean? = null,
         var inputSelectionStart: Int = 0,
@@ -3905,6 +4725,8 @@ class PamRenderer(
     private companion object {
         const val LOCAL_MODAL_PREFIX = "pam:local-modal:"
         const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"
+        const val MODAL_CLOSE_MARKER = "pam:modal-close"
+        const val MODAL_CLOSE_ACCESSIBILITY_LABEL = "Close modal"
         const val EVENT_PRESS = 1
         const val EVENT_CHANGE = 2
         const val EVENT_LONG_PRESS = 5
@@ -3934,6 +4756,8 @@ class PamRenderer(
         const val EVENT_MODAL_SHOW = 32
         const val EVENT_MODAL_DISMISS = 33
         const val EVENT_MODAL_ORIENTATION_CHANGE = 34
+        const val EVENT_BOTTOM_SHEET_CHANGE = 46
+        const val EVENT_BOTTOM_SHEET_DISMISS = 47
         const val MAX_EVENT_BYTES = 1024 * 1024
         const val INPUT_SYNC_NATIVE = 1
         const val INPUT_SYNC_DEBOUNCED = 2
@@ -4018,6 +4842,15 @@ class PamRenderer(
             PropKey.VISIBLE,
             PropKey.TRANSLATION_X_PERCENT,
             PropKey.ANIMATION_KIND,
+            PropKey.ANIMATION_KEYFRAMES,
+            PropKey.ANIMATION_DURATION_MS,
+            PropKey.ANIMATION_EASING,
+            PropKey.ANIMATION_ITERATIONS,
+            PropKey.ANIMATION_DELAY_MS,
+            PropKey.ANIMATION_FILL_MODE,
+            PropKey.ANIMATION_PLAY_STATE,
+            PropKey.ANIMATION_AUTO_REVERSE,
+            PropKey.ON_ANIMATION_COMPLETE,
             PropKey.POINTER_EVENTS,
             PropKey.SAFE_AREA_BOTTOM,
             PropKey.BLUR_RADIUS,
@@ -4132,6 +4965,25 @@ class PamRenderer(
             PropKey.ON_TOUCH_START,
             PropKey.ON_TOUCH_MOVE,
             PropKey.ON_TOUCH_END,
+            PropKey.ON_GESTURE_BEGIN,
+            PropKey.ON_GESTURE_UPDATE,
+            PropKey.ON_GESTURE_END,
+            PropKey.ON_GESTURE_CANCEL,
+            PropKey.ON_BOTTOM_SHEET_CHANGE,
+            PropKey.ON_BOTTOM_SHEET_DISMISS,
+            PropKey.ON_WEB_VIEW_LOAD,
+            PropKey.ON_WEB_VIEW_ERROR,
+            PropKey.ON_WEB_VIEW_MESSAGE,
+            PropKey.ON_MEDIA_READY,
+            PropKey.ON_MEDIA_PROGRESS,
+            PropKey.ON_MEDIA_END,
+            PropKey.ON_MEDIA_ERROR,
+            PropKey.ON_DRAG_START,
+            PropKey.ON_DRAG_END,
+            PropKey.ON_DROP,
+            PropKey.ON_MENU_ACTION,
+            PropKey.ON_NAVIGATION_GESTURE_POP,
+            PropKey.ON_ANIMATION_COMPLETE,
         )
         val IMAGE_EVENT_PROPERTIES = setOf(
             PropKey.ON_IMAGE_LOAD_START,

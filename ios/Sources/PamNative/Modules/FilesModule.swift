@@ -1,0 +1,329 @@
+import Foundation
+import UniformTypeIdentifiers
+import UIKit
+
+final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
+    UIDocumentPickerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+    private let queue = DispatchQueue(label: "dev.pam.native.files")
+    private let root: URL
+    private var pending: ModuleCompletion?
+    private var captureType = 1
+
+    override init() {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        root = base.appendingPathComponent("pam-files", isDirectory: true)
+        super.init()
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            switch method {
+            case "read":
+                queue.async { self.read(payload, completion) }
+            case "write":
+                queue.async { self.write(payload, completion) }
+            case "stat":
+                queue.async { self.stat(payload, completion) }
+            case "list":
+                queue.async { self.list(payload, completion) }
+            case "delete":
+                queue.async { self.delete(payload, completion) }
+            case "pick":
+                let values = try WireMap.decode(payload)
+                let type = values["type"]?.integerValue ?? 4
+                presentPicker(type: Int(type), completion: completion)
+            case "capture":
+                let values = try WireMap.decode(payload)
+                presentCapture(type: Int(values["type"]?.integerValue ?? 1), completion: completion)
+            default:
+                throw FileModuleError("Unknown files method \(method)")
+            }
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func stat(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let file = try requiredPath(payload)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                throw FileModuleError("File does not exist")
+            }
+            completion(.success, try WireMap.encode(reference(file)))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func list(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            let relative = values["path"]?.textValue ?? ""
+            let directory = relative.isEmpty ? root : try resolve(relative)
+            let urls = try FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+            let items = try urls
+                .filter { try $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true }
+                .sorted { $0.lastPathComponent.localizedCaseInsensitiveCompare($1.lastPathComponent) == .orderedAscending }
+                .map { url -> [String: Any] in
+                    let values = try url.resourceValues(forKeys: [.fileSizeKey])
+                    return [
+                        "path": relativePath(url),
+                        "name": url.lastPathComponent,
+                        "mimeType": mimeType(url),
+                        "size": values.fileSize ?? 0,
+                    ]
+                }
+            let data = try JSONSerialization.data(withJSONObject: items)
+            completion(.success, try WireMap.encode([
+                "items": .text(String(decoding: data, as: UTF8.self)),
+            ]))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func delete(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let file = try requiredPath(payload)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                throw FileModuleError("File does not exist")
+            }
+            try FileManager.default.removeItem(at: file)
+            completion(.success, Data())
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func read(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let path = try requiredPath(payload)
+            let data = try Data(contentsOf: path)
+            guard data.count <= 1_048_576 else { throw FileModuleError("File exceeds bridge limit") }
+            completion(.success, try WireMap.encode(["data": .text(data.base64EncodedString())]))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func write(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(path)? = values["path"],
+                  case let .text(encoded)? = values["data"],
+                  let data = Data(base64Encoded: encoded),
+                  data.count <= 1_048_576 else {
+                throw FileModuleError("Invalid file payload")
+            }
+            let destination = try resolve(path)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: destination, options: .atomic)
+            completion(.success, Data())
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func presentPicker(type: Int, completion: @escaping ModuleCompletion) {
+        DispatchQueue.main.async {
+            guard self.pending == nil, let presenter = Self.presenter() else {
+                completion(.failure, Data("Another picker is active".utf8))
+                return
+            }
+            let types: [UTType] = switch type {
+            case 1: [.image]
+            case 2: [.movie]
+            case 3: [.audio]
+            default: [.item]
+            }
+            self.pending = completion
+            let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
+            picker.delegate = self
+            picker.allowsMultipleSelection = false
+            presenter.present(picker, animated: true)
+        }
+    }
+
+    private func presentCapture(type: Int, completion: @escaping ModuleCompletion) {
+        DispatchQueue.main.async {
+            guard self.pending == nil,
+                  UIImagePickerController.isSourceTypeAvailable(.camera),
+                  let presenter = Self.presenter() else {
+                completion(.failure, Data("Camera is unavailable".utf8))
+                return
+            }
+            self.pending = completion
+            self.captureType = type
+            let picker = UIImagePickerController()
+            picker.delegate = self
+            picker.sourceType = .camera
+            picker.mediaTypes = [type == 2 ? UTType.movie.identifier : UTType.image.identifier]
+            presenter.present(picker, animated: true)
+        }
+    }
+
+    func documentPicker(
+        _ controller: UIDocumentPickerViewController,
+        didPickDocumentsAt urls: [URL]
+    ) {
+        guard let source = urls.first else { return finishFailure("No document was selected") }
+        queue.async { self.importFile(source, completion: self.takePending()) }
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        finishFailure("File selection was cancelled")
+    }
+
+    func imagePickerController(
+        _ picker: UIImagePickerController,
+        didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+    ) {
+        picker.dismiss(animated: true)
+        let completion = takePending()
+        queue.async {
+            if self.captureType == 2, let url = info[.mediaURL] as? URL {
+                self.importFile(url, completion: completion)
+            } else if let image = info[.originalImage] as? UIImage,
+                      let data = image.jpegData(compressionQuality: 0.92) {
+                self.store(data, name: "capture.jpg", mime: "image/jpeg", completion: completion)
+            } else {
+                completion?(.failure, Data("Camera returned no media".utf8))
+            }
+        }
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+        finishFailure("Media capture was cancelled")
+    }
+
+    private func importFile(_ source: URL, completion: ModuleCompletion?) {
+        guard let completion else { return }
+        let accessing = source.startAccessingSecurityScopedResource()
+        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+        do {
+            let values = try source.resourceValues(forKeys: [.fileSizeKey])
+            if let size = values.fileSize, size > 64 * 1_024 * 1_024 {
+                throw FileModuleError("Selected file exceeds 64 MiB")
+            }
+            let data = try Data(contentsOf: source)
+            guard data.count <= 64 * 1_024 * 1_024 else {
+                throw FileModuleError("Selected file exceeds 64 MiB")
+            }
+            store(
+                data,
+                name: source.lastPathComponent,
+                mime: UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
+                    ?? "application/octet-stream",
+                completion: completion
+            )
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func store(
+        _ data: Data,
+        name: String,
+        mime: String,
+        completion: ModuleCompletion?
+    ) {
+        guard let completion else { return }
+        do {
+            guard data.count <= 64 * 1_024 * 1_024 else {
+                throw FileModuleError("Selected file exceeds 64 MiB")
+            }
+            let safe = name.replacingOccurrences(
+                of: "[^A-Za-z0-9_.-]",
+                with: "_",
+                options: .regularExpression
+            )
+            let relative = "imports/\(Int(Date().timeIntervalSince1970 * 1000))-\(safe)"
+            let destination = try resolve(relative)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: destination, options: .atomic)
+            completion(.success, try WireMap.encode([
+                "path": .text(relative),
+                "name": .text(destination.lastPathComponent),
+                "mimeType": .text(mime),
+                "size": .integer(Int64(data.count)),
+            ]))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func requiredPath(_ payload: Data) throws -> URL {
+        let values = try WireMap.decode(payload)
+        guard case let .text(path)? = values["path"] else {
+            throw FileModuleError("Missing file path")
+        }
+        return try resolve(path)
+    }
+
+    private func reference(_ url: URL) throws -> [String: WireValue] {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
+        return [
+            "path": .text(relativePath(url)),
+            "name": .text(url.lastPathComponent),
+            "mimeType": .text(mimeType(url)),
+            "size": .integer(Int64(values.fileSize ?? 0)),
+        ]
+    }
+
+    private func relativePath(_ url: URL) -> String {
+        String(url.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count + 1))
+    }
+
+    private func mimeType(_ url: URL) -> String {
+        UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+    }
+
+    private func resolve(_ path: String) throws -> URL {
+        guard !path.isEmpty, !path.hasPrefix("/") else { throw FileModuleError("Invalid file path") }
+        let value = root.appendingPathComponent(path).standardizedFileURL
+        guard value.path.hasPrefix(root.standardizedFileURL.path + "/") else {
+            throw FileModuleError("File path escapes sandbox")
+        }
+        return value
+    }
+
+    private func takePending() -> ModuleCompletion? {
+        defer { pending = nil }
+        return pending
+    }
+
+    private func finishFailure(_ message: String) {
+        takePending()?(.failure, Data(message.utf8))
+    }
+
+    private static func presenter() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        var controller = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+        while let presented = controller?.presentedViewController { controller = presented }
+        return controller
+    }
+
+    func close() {
+        DispatchQueue.main.async { self.finishFailure("Files module closed") }
+    }
+}
+
+private struct FileModuleError: LocalizedError {
+    let message: String
+    init(_ message: String) { self.message = message }
+    var errorDescription: String? { message }
+}
+
+private extension WireValue {
+    var integerValue: Int64? {
+        if case let .integer(value) = self { return value }
+        return nil
+    }
+
+    var textValue: String? {
+        if case let .text(value) = self { return value }
+        return nil
+    }
+}

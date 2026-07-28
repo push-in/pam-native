@@ -13,8 +13,16 @@ use Pam\Native\AccessibilityImportance;
 use Pam\Native\AccessibilityLiveRegion;
 use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
+use Pam\Native\AnimationEasing;
+use Pam\Native\AnimationFillMode;
+use Pam\Native\AnimationKeyframe;
+use Pam\Native\AnimationPlayState;
+use Pam\Native\BottomSheetKeyboardBehavior;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
+use Pam\Native\GestureComposition;
+use Pam\Native\GestureDirection;
+use Pam\Native\GestureType;
 use Pam\Native\ImageFit;
 use Pam\Native\ImageCachePolicy;
 use Pam\Native\ImageResizeMethod;
@@ -45,7 +53,9 @@ use Pam\Native\TextDataDetectorType;
 use Pam\Native\TextEllipsizeMode;
 use Pam\Native\TextHyphenationFrequency;
 use Pam\Native\UI\ActivityIndicator;
+use Pam\Native\UI\Animated;
 use Pam\Native\UI\Button;
+use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\DrawerLayoutAndroid;
@@ -54,9 +64,11 @@ use Pam\Native\UI\Grid;
 use Pam\Native\UI\Image;
 use Pam\Native\UI\ImageBackground;
 use Pam\Native\UI\Input;
+use Pam\Native\UI\InteractionRegion;
 use Pam\Native\UI\InputAccessoryView;
 use Pam\Native\UI\KeyboardAvoidingView;
 use Pam\Native\UI\Modal;
+use Pam\Native\UI\MediaPlayer;
 use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\Row;
@@ -70,6 +82,10 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\Toggle;
 use Pam\Native\UI\VirtualGrid;
 use Pam\Native\UI\VirtualizedList;
+use Pam\Native\UI\WebView;
+use Pam\Native\NativeMenuItem;
+use Pam\Native\MediaCachePolicy;
+use Pam\Native\MediaPriority;
 use Pam\Native\UI\View as NativeView;
 use ReflectionMethod;
 use ReflectionProperty;
@@ -165,6 +181,22 @@ final class TemplateRenderer
         'hardwareAccelerated' => PropKey::ModalHardwareAccelerated,
         'navigationBarTranslucent' => PropKey::ModalNavigationBarTranslucent,
         'allowSwipeDismissal' => PropKey::ModalAllowSwipeDismissal,
+        'javaScriptEnabled' => PropKey::WebViewJavaScriptEnabled,
+        'domStorageEnabled' => PropKey::WebViewDomStorageEnabled,
+        'userAgent' => PropKey::WebViewUserAgent,
+        'injectedJavaScript' => PropKey::WebViewInjectedJavaScript,
+        'allowsInlineMedia' => PropKey::WebViewAllowsInlineMedia,
+        'allowedHosts' => PropKey::WebViewAllowedHosts,
+        'autoPlay' => PropKey::MediaAutoPlay,
+        'controls' => PropKey::MediaControls,
+        'loop' => PropKey::MediaLoop,
+        'muted' => PropKey::MediaMuted,
+        'volume' => PropKey::MediaVolume,
+        'currentTime' => PropKey::MediaCurrentTime,
+        'playbackRate' => PropKey::MediaPlaybackRate,
+        'draggable' => PropKey::Draggable,
+        'dragData' => PropKey::DragData,
+        'dropEnabled' => PropKey::DropEnabled,
         'statusBarColor' => PropKey::StatusBarColor,
         'statusBarStyle' => PropKey::StatusBarStyle,
         'statusBarHidden' => PropKey::StatusBarHidden,
@@ -267,6 +299,14 @@ final class TemplateRenderer
         'overflow' => PropKey::Overflow,
         'flexDirection' => PropKey::FlexDirection,
         'layoutDirection' => PropKey::LayoutDirection,
+        'gestureType' => PropKey::GestureType,
+        'gestureEnabled' => PropKey::GestureEnabled,
+        'gestureMinPointers' => PropKey::GestureMinPointers,
+        'gestureMaxPointers' => PropKey::GestureMaxPointers,
+        'gestureDirection' => PropKey::GestureDirection,
+        'gestureComposition' => PropKey::GestureComposition,
+        'gestureMinDistance' => PropKey::GestureMinDistance,
+        'gestureMinDuration' => PropKey::GestureMinDurationMs,
         'flexShrink' => PropKey::FlexShrink,
         'paddingLeft' => PropKey::PaddingLeft,
         'paddingTop' => PropKey::PaddingTop,
@@ -381,6 +421,28 @@ final class TemplateRenderer
         'p-touch-start' => EventKind::TouchStart,
         'p-touch-move' => EventKind::TouchMove,
         'p-touch-end' => EventKind::TouchEnd,
+        'on:gestureBegin' => EventKind::GestureBegin,
+        'on:gestureUpdate' => EventKind::GestureUpdate,
+        'on:gestureEnd' => EventKind::GestureEnd,
+        'on:gestureCancel' => EventKind::GestureCancel,
+        'on:sheetChange' => EventKind::BottomSheetChange,
+        'on:sheetDismiss' => EventKind::BottomSheetDismiss,
+        'on:webLoad' => EventKind::WebViewLoad,
+        'on:webError' => EventKind::WebViewError,
+        'on:message' => EventKind::WebViewMessage,
+        'on:ready' => EventKind::MediaReady,
+        'on:mediaProgress' => EventKind::MediaProgress,
+        'on:end' => EventKind::MediaEnd,
+        'on:mediaError' => EventKind::MediaError,
+        'on:dragStart' => EventKind::DragStart,
+        'on:dragEnd' => EventKind::DragEnd,
+        'on:drop' => EventKind::Drop,
+        'on:menuAction' => EventKind::MenuAction,
+        'on:animationComplete' => EventKind::AnimationComplete,
+        'on:cacheHit' => EventKind::MediaCacheHit,
+        'on:cacheMiss' => EventKind::MediaCacheMiss,
+        'on:cacheProgress' => EventKind::MediaCacheProgress,
+        'on:cacheReady' => EventKind::MediaCacheReady,
     ];
 
     private function __construct()
@@ -692,7 +754,15 @@ final class TemplateRenderer
                 continue;
             }
 
-            $values[ltrim($name, ':')] = str_starts_with($name, ':')
+            $valueName = ltrim($name, ':');
+            if ($factory === null && in_array($tag, ['Image', 'MediaPlayer'], true)) {
+                $valueName = preg_replace_callback(
+                    '/-([a-z])/',
+                    static fn (array $match): string => strtoupper($match[1]),
+                    $valueName,
+                ) ?? $valueName;
+            }
+            $values[$valueName] = str_starts_with($name, ':')
                 ? self::dynamicValue($raw, $scope, $data)
                 : self::value($raw, $scope, $data);
         }
@@ -871,7 +941,7 @@ final class TemplateRenderer
             ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
-            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
+            'Pressable', 'GestureDetector', 'TouchableOpacity', 'TouchableHighlight',
             'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
             'ActivityIndicator' => ActivityIndicator::make(self::boolValue(
                 $values['animating'] ?? $values['visible'] ?? true,
@@ -888,6 +958,97 @@ final class TemplateRenderer
                 self::boolValue($values['visible'] ?? true, 'Modal visible'),
                 self::modalPresentation($values['presentation'] ?? 'dialog'),
             ),
+            'BottomSheet' => BottomSheet::make(
+                self::singleChild($children, $tag),
+                self::bottomSheetSnapPoints($values['snapPoints'] ?? [0.5, 0.9]),
+                self::intValue($values['index'] ?? 0, 'BottomSheet index'),
+                self::boolValue($values['visible'] ?? true, 'BottomSheet visible'),
+            )
+                ->dismissible(self::boolValue(
+                    $values['dismissible'] ?? true,
+                    'BottomSheet dismissible',
+                ))
+                ->backdropDismiss(self::boolValue(
+                    $values['backdropDismiss'] ?? true,
+                    'BottomSheet backdropDismiss',
+                ))
+                ->handleVisible(self::boolValue(
+                    $values['handleVisible'] ?? true,
+                    'BottomSheet handleVisible',
+                ))
+                ->dragEnabled(self::boolValue(
+                    $values['dragEnabled'] ?? true,
+                    'BottomSheet dragEnabled',
+                ))
+                ->cornerRadius(self::floatValue(
+                    $values['cornerRadius'] ?? 20.0,
+                    'BottomSheet cornerRadius',
+                ))
+                ->keyboardBehavior(self::bottomSheetKeyboardBehavior(
+                    $values['keyboardBehavior'] ?? 'interactive',
+                )),
+            'WebView' => WebView::make(self::stringValue(
+                $values['source'] ?? $values['url'] ?? '',
+                'WebView source',
+            ))
+                ->javaScriptEnabled(self::boolValue(
+                    $values['javaScriptEnabled'] ?? true,
+                    'WebView javaScriptEnabled',
+                ))
+                ->domStorageEnabled(self::boolValue(
+                    $values['domStorageEnabled'] ?? true,
+                    'WebView domStorageEnabled',
+                ))
+                ->allowsInlineMedia(self::boolValue(
+                    $values['allowsInlineMedia'] ?? true,
+                    'WebView allowsInlineMedia',
+                )),
+            'Video', 'Audio', 'MediaPlayer' => MediaPlayer::make(
+                self::stringValue($values['source'] ?? '', 'Media source'),
+                $tag === 'Audio'
+                    ? \Pam\Native\MediaType::Audio
+                    : \Pam\Native\MediaType::Video,
+            )
+                ->autoPlay(self::boolValue($values['autoPlay'] ?? false, 'Media autoPlay'))
+                ->controls(self::boolValue($values['controls'] ?? true, 'Media controls'))
+                ->loop(self::boolValue($values['loop'] ?? false, 'Media loop'))
+                ->muted(self::boolValue($values['muted'] ?? false, 'Media muted'))
+                ->volume(self::floatValue($values['volume'] ?? 1.0, 'Media volume'))
+                ->currentTime(self::floatValue(
+                    $values['currentTime'] ?? 0.0,
+                    'Media currentTime',
+                ))
+                ->playbackRate(self::floatValue(
+                    $values['playbackRate'] ?? 1.0,
+                    'Media playbackRate',
+                )),
+            'InteractionRegion' => InteractionRegion::make(...$children)
+                ->draggable(
+                    self::stringValue($values['dragData'] ?? '', 'Interaction dragData'),
+                    self::boolValue($values['draggable'] ?? false, 'Interaction draggable'),
+                )
+                ->acceptsDrop(self::boolValue(
+                    $values['dropEnabled'] ?? false,
+                    'Interaction dropEnabled',
+                ))
+                ->contextMenu(self::nativeMenuItems($values['menuItems'] ?? [])),
+            'Animated' => Animated::make(
+                self::singleChild($children, $tag),
+                self::animationKeyframes($values['keyframes'] ?? []),
+                self::intValue($values['durationMs'] ?? 300, 'Animated durationMs'),
+                self::animationEasing($values['easing'] ?? 'easeInOut'),
+            )
+                ->iterations(self::intValue(
+                    $values['iterations'] ?? 1,
+                    'Animated iterations',
+                ))
+                ->delay(self::intValue($values['delayMs'] ?? 0, 'Animated delayMs'))
+                ->fillMode(self::animationFillMode($values['fillMode'] ?? 'forwards'))
+                ->playState(self::animationPlayState($values['playState'] ?? 'running'))
+                ->autoReverse(self::boolValue(
+                    $values['autoReverse'] ?? false,
+                    'Animated autoReverse',
+                )),
             'KeyboardAvoidingView' => KeyboardAvoidingView::make(
                 self::singleChild($children, $tag),
                 self::keyboardBehavior($values['behavior'] ?? $values['keyboardBehavior'] ?? 'resize'),
@@ -914,6 +1075,10 @@ final class TemplateRenderer
             ),
             default => self::custom($tag, $values, $children, $scope),
             };
+
+        if ($factory === null && ($element instanceof Image || $element instanceof MediaPlayer)) {
+            $element = self::mediaCacheAttributes($element, $values);
+        }
 
         if ($resolvedClass !== null) {
             $element = self::classes($element, $resolvedClass);
@@ -964,6 +1129,12 @@ final class TemplateRenderer
                             $element->onOrientationChange($handler),
                         default => $element->on($event, $handler),
                     };
+                } elseif ($factory === null && $element instanceof BottomSheet) {
+                    $element = match ($event) {
+                        EventKind::BottomSheetChange => $element->onChange($handler),
+                        EventKind::BottomSheetDismiss => $element->onDismiss($handler),
+                        default => $element->on($event, $handler),
+                    };
                 } else {
                     $element = $element->on($event, $handler);
                 }
@@ -993,6 +1164,150 @@ final class TemplateRenderer
         }
 
         return $element;
+    }
+
+    private static function mediaCacheAttributes(
+        Image|MediaPlayer $element,
+        array $values,
+    ): Image|MediaPlayer {
+        if (array_key_exists('cache', $values)) {
+            $element = $element->cache(self::mediaCachePolicy($values['cache']));
+        }
+        if (isset($values['cacheKey'])) {
+            $element = $element->cacheKey(self::stringValue($values['cacheKey'], 'Media cacheKey'));
+        }
+        if (isset($values['cacheMaxAge'])) {
+            $element = $element->maxAge(self::durationMs($values['cacheMaxAge'], 'Media cacheMaxAge'));
+        }
+        if (isset($values['cacheTags'])) {
+            $raw = $values['cacheTags'];
+            $tags = is_array($raw)
+                ? array_values($raw)
+                : (preg_split('/[,\n]+/', self::stringValue($raw, 'Media cacheTags')) ?: []);
+            $element = $element->cacheTags(array_map(
+                static fn (mixed $tag): string => trim(self::stringValue($tag, 'Media cache tag')),
+                $tags,
+            ));
+        }
+        if (isset($values['pinOffline'])) {
+            $element = $element->pinOffline(self::boolValue($values['pinOffline'], 'Media pinOffline'));
+        }
+        if (isset($values['priority'])) {
+            $element = $element->priority(self::mediaPriority($values['priority']));
+        }
+        if (isset($values['cacheMaxBytes'])) {
+            $element = $element->maxCacheSize(self::byteSize(
+                $values['cacheMaxBytes'],
+                'Media cacheMaxBytes',
+            ));
+        }
+        if (isset($values['checksum'])) {
+            $element = $element->checksum(self::stringValue($values['checksum'], 'Media checksum'));
+        }
+        if (isset($values['thumbnail'])) {
+            $element = $element->thumbnail(self::stringValue($values['thumbnail'], 'Media thumbnail'));
+        }
+        if ($element instanceof Image && isset($values['resizeWidth'], $values['resizeHeight'])) {
+            $element = $element->resize(
+                self::intValue($values['resizeWidth'], 'Image resizeWidth'),
+                self::intValue($values['resizeHeight'], 'Image resizeHeight'),
+            );
+        }
+        if ($element instanceof MediaPlayer) {
+            if (isset($values['streamingCache'])) {
+                $element = $element->streamingCache(self::boolValue(
+                    $values['streamingCache'],
+                    'Media streamingCache',
+                ));
+            }
+            if (isset($values['preloadSeconds'])) {
+                $element = $element->preloadSeconds(self::intValue(
+                    $values['preloadSeconds'],
+                    'Media preloadSeconds',
+                ));
+            }
+            if (isset($values['downloadWhilePlaying'])) {
+                $element = $element->downloadWhilePlaying(self::boolValue(
+                    $values['downloadWhilePlaying'],
+                    'Media downloadWhilePlaying',
+                ));
+            }
+        }
+
+        return $element;
+    }
+
+    private static function mediaCachePolicy(mixed $value): MediaCachePolicy
+    {
+        if ($value === true || $value === '' || $value === null) {
+            return MediaCachePolicy::MemoryAndDisk;
+        }
+        $normalized = strtolower(str_replace(['-', '_'], '', self::stringValue($value, 'Media cache')));
+
+        return match ($normalized) {
+            'none' => MediaCachePolicy::None,
+            'memory' => MediaCachePolicy::Memory,
+            'disk' => MediaCachePolicy::Disk,
+            'memoryanddisk' => MediaCachePolicy::MemoryAndDisk,
+            'cachefirst' => MediaCachePolicy::CacheFirst,
+            'networkfirst' => MediaCachePolicy::NetworkFirst,
+            'cacheonly' => MediaCachePolicy::CacheOnly,
+            'stalewhilerevalidate' => MediaCachePolicy::StaleWhileRevalidate,
+            default => throw new RuntimeException("Unknown media cache policy {$value}."),
+        };
+    }
+
+    private static function mediaPriority(mixed $value): MediaPriority
+    {
+        $normalized = strtolower(self::stringValue($value, 'Media priority'));
+
+        return match ($normalized) {
+            'background' => MediaPriority::Background,
+            'prefetch' => MediaPriority::Prefetch,
+            'normal' => MediaPriority::Normal,
+            'visible' => MediaPriority::Visible,
+            'immediate' => MediaPriority::Immediate,
+            default => throw new RuntimeException("Unknown media priority {$value}."),
+        };
+    }
+
+    private static function durationMs(mixed $value, string $context): int
+    {
+        if (is_int($value)) {
+            return max(0, $value);
+        }
+        $raw = strtolower(trim(self::stringValue($value, $context)));
+        if (preg_match('/^(\d+)(ms|s|m|h|d)$/D', $raw, $match) !== 1) {
+            throw new RuntimeException("{$context} must use ms, s, m, h or d.");
+        }
+        $factor = match ($match[2]) {
+            'ms' => 1,
+            's' => 1_000,
+            'm' => 60_000,
+            'h' => 3_600_000,
+            'd' => 86_400_000,
+        };
+
+        return min(31_536_000_000, (int) $match[1] * $factor);
+    }
+
+    private static function byteSize(mixed $value, string $context): int
+    {
+        if (is_int($value)) {
+            return max(0, $value);
+        }
+        $raw = strtolower(trim(self::stringValue($value, $context)));
+        if (preg_match('/^(\d+)(b|kb|mb|gb)$/D', $raw, $match) !== 1) {
+            throw new RuntimeException("{$context} must use b, kb, mb or gb.");
+        }
+        $factor = match ($match[2]) {
+            'b' => 1,
+            'kb' => 1_024,
+            'mb' => 1_048_576,
+            'gb' => 1_073_741_824,
+        };
+
+        return min(10_737_418_240, (int) $match[1] * $factor);
     }
 
     /**
@@ -1111,6 +1426,46 @@ final class TemplateRenderer
 
         foreach (self::PROPERTIES as $name => $key) {
             if (!array_key_exists($name, $attributes)) {
+                continue;
+            }
+            if (
+                ($element instanceof Image || $element instanceof MediaPlayer)
+                && in_array($name, [
+                    'cache',
+                    'cacheKey',
+                    'cacheMaxAge',
+                    'cacheTags',
+                    'pinOffline',
+                    'priority',
+                    'cacheMaxBytes',
+                    'checksum',
+                    'thumbnail',
+                    'resizeWidth',
+                    'resizeHeight',
+                    'streamingCache',
+                    'preloadSeconds',
+                    'downloadWhilePlaying',
+                ], true)
+            ) {
+                continue;
+            }
+            if (
+                $element instanceof BottomSheet
+                && in_array(
+                    $name,
+                    [
+                        'snapPoints',
+                        'index',
+                        'dismissible',
+                        'backdropDismiss',
+                        'handleVisible',
+                        'dragEnabled',
+                        'cornerRadius',
+                        'keyboardBehavior',
+                    ],
+                    true,
+                )
+            ) {
                 continue;
             }
             if (!self::propertyAppliesToKind($key, $element->kind())) {
@@ -1324,6 +1679,28 @@ final class TemplateRenderer
             PropKey::LayoutDirection => self::named($value, [
                 'ltr' => LayoutDirection::LeftToRight->value,
                 'rtl' => LayoutDirection::RightToLeft->value,
+            ]),
+            PropKey::GestureType => self::named($value, [
+                'tap' => GestureType::Tap->value,
+                'pan' => GestureType::Pan->value,
+                'pinch' => GestureType::Pinch->value,
+                'rotation' => GestureType::Rotation->value,
+                'swipe' => GestureType::Swipe->value,
+                'longPress' => GestureType::LongPress->value,
+            ]),
+            PropKey::GestureDirection => self::named($value, [
+                'any' => GestureDirection::Any->value,
+                'left' => GestureDirection::Left->value,
+                'right' => GestureDirection::Right->value,
+                'up' => GestureDirection::Up->value,
+                'down' => GestureDirection::Down->value,
+                'horizontal' => GestureDirection::Horizontal->value,
+                'vertical' => GestureDirection::Vertical->value,
+            ]),
+            PropKey::GestureComposition => self::named($value, [
+                'exclusive' => GestureComposition::Exclusive->value,
+                'simultaneous' => GestureComposition::Simultaneous->value,
+                'race' => GestureComposition::Race->value,
             ]),
             PropKey::PositionType => self::named($value, [
                 'relative' => 1,
@@ -2187,6 +2564,128 @@ final class TemplateRenderer
             1, 'fullScreen' => ModalPresentation::FullScreen,
             3, 'sheet' => ModalPresentation::Sheet,
             default => ModalPresentation::Dialog,
+        };
+    }
+
+    /** @return list<float> */
+    private static function bottomSheetSnapPoints(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new InvalidArgumentException('BottomSheet snapPoints must be an array.');
+        }
+
+        return array_values(array_map(
+            static function (mixed $point): float {
+                if (!is_int($point) && !is_float($point)) {
+                    throw new InvalidArgumentException(
+                        'BottomSheet snapPoints must contain only numbers.',
+                    );
+                }
+
+                return (float) $point;
+            },
+            $value,
+        ));
+    }
+
+    private static function bottomSheetKeyboardBehavior(
+        mixed $value,
+    ): BottomSheetKeyboardBehavior {
+        return match ($value) {
+            2, 'extend' => BottomSheetKeyboardBehavior::Extend,
+            3, 'fillParent' => BottomSheetKeyboardBehavior::FillParent,
+            default => BottomSheetKeyboardBehavior::Interactive,
+        };
+    }
+
+    /** @return list<NativeMenuItem> */
+    private static function nativeMenuItems(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new InvalidArgumentException('InteractionRegion menuItems must be an array.');
+        }
+
+        return array_values(array_map(
+            static function (mixed $item): NativeMenuItem {
+                if (!is_array($item)) {
+                    throw new InvalidArgumentException('Each native menu item must be an array.');
+                }
+
+                return new NativeMenuItem(
+                    id: self::stringValue($item['id'] ?? '', 'Native menu item id'),
+                    title: self::stringValue($item['title'] ?? '', 'Native menu item title'),
+                    destructive: self::boolValue(
+                        $item['destructive'] ?? false,
+                        'Native menu item destructive',
+                    ),
+                    disabled: self::boolValue(
+                        $item['disabled'] ?? false,
+                        'Native menu item disabled',
+                    ),
+                );
+            },
+            $value,
+        ));
+    }
+
+    /** @return list<AnimationKeyframe> */
+    private static function animationKeyframes(mixed $value): array
+    {
+        if (!is_array($value)) {
+            throw new InvalidArgumentException('Animated keyframes must be an array.');
+        }
+
+        return array_values(array_map(
+            static function (mixed $frame): AnimationKeyframe {
+                if (!is_array($frame)) {
+                    throw new InvalidArgumentException('Each animation keyframe must be an array.');
+                }
+                $number = static fn (string $key): ?float =>
+                    array_key_exists($key, $frame)
+                        ? self::floatValue($frame[$key], "Animation {$key}")
+                        : null;
+
+                return new AnimationKeyframe(
+                    offset: self::floatValue($frame['offset'] ?? -1, 'Animation offset'),
+                    opacity: $number('opacity'),
+                    translationX: $number('translationX'),
+                    translationY: $number('translationY'),
+                    scaleX: $number('scaleX'),
+                    scaleY: $number('scaleY'),
+                    rotation: $number('rotation'),
+                );
+            },
+            $value,
+        ));
+    }
+
+    private static function animationEasing(mixed $value): AnimationEasing
+    {
+        return match ($value) {
+            1, 'linear' => AnimationEasing::Linear,
+            2, 'easeIn' => AnimationEasing::EaseIn,
+            3, 'easeOut' => AnimationEasing::EaseOut,
+            5, 'spring' => AnimationEasing::Spring,
+            default => AnimationEasing::EaseInOut,
+        };
+    }
+
+    private static function animationFillMode(mixed $value): AnimationFillMode
+    {
+        return match ($value) {
+            1, 'none' => AnimationFillMode::None,
+            3, 'backwards' => AnimationFillMode::Backwards,
+            4, 'both' => AnimationFillMode::Both,
+            default => AnimationFillMode::Forwards,
+        };
+    }
+
+    private static function animationPlayState(mixed $value): AnimationPlayState
+    {
+        return match ($value) {
+            2, 'paused' => AnimationPlayState::Paused,
+            3, 'stopped' => AnimationPlayState::Stopped,
+            default => AnimationPlayState::Running,
         };
     }
 

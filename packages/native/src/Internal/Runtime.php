@@ -15,9 +15,15 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
 use Pam\Native\State;
+use Pam\Native\Store\Stores;
+use Pam\Native\Diagnostics\Profiler;
+use Pam\Native\Scheduling\Scheduler;
+use Pam\Native\Scheduling\TaskPriority;
 use Pam\Native\TemplateException;
 use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\WindowMetrics;
+use Pam\Native\BuildConfiguration;
+use Pam\Native\BuildMode;
 use Throwable;
 
 final class Runtime
@@ -37,6 +43,8 @@ final class Runtime
     private static ?Closure $dimensionsHandler = null;
     private static ?Closure $memoryPressureHandler = null;
     private static ?TreeEncoder $encoder = null;
+    private static bool $rendering = false;
+    private static bool $renderRequested = false;
 
     private function __construct()
     {
@@ -50,6 +58,7 @@ final class Runtime
 
         self::$root = $root;
         self::$encoder = new TreeEncoder();
+        Profiler::enabled(BuildConfiguration::mode() !== BuildMode::Production);
         try {
             self::render();
         } catch (Throwable $error) {
@@ -59,45 +68,89 @@ final class Runtime
 
     public static function render(): void
     {
+        if (self::$rendering) {
+            self::$renderRequested = true;
+
+            return;
+        }
         $root = self::$root;
 
         if ($root === null) {
             throw new LogicException('Pam Native has not been booted.');
         }
 
-        PamPhpRegistry::beginRender();
-        ComponentLifecycle::beginRender();
+        self::$rendering = true;
+        $renderStarted = hrtime(true);
         try {
-            $rendered = $root instanceof Renderable ? $root : $root();
-            $element = $rendered instanceof Renderable ? $rendered->toElement() : null;
+            do {
+                self::$renderRequested = false;
+                PamPhpRegistry::beginRender();
+                ComponentLifecycle::beginRender();
+                try {
+                $element = Profiler::measure('php.render', static function () use ($root): ?Element {
+                    $rendered = $root instanceof Renderable ? $root : $root();
 
-            if (!$element instanceof Element) {
-                throw new LogicException('The Pam Native root must be renderable.');
-            }
+                    return $rendered instanceof Renderable ? $rendered->toElement() : null;
+                });
 
-            $encoder = self::$encoder ??= new TreeEncoder();
-            $encoded = $encoder->encode($element);
-            self::$eventCallbacks = $encoded['callbacks'];
-            $frame = $encoded['frame'];
+                if (!$element instanceof Element) {
+                    throw new LogicException('The Pam Native root must be renderable.');
+                }
 
-            if ($frame !== null) {
-                self::$lastFrame = $frame;
+                $encoder = self::$encoder ??= new TreeEncoder();
+                $encoded = Profiler::measure(
+                    'php.encode',
+                    static fn (): array => $encoder->encode($element),
+                );
+                self::$eventCallbacks = $encoded['callbacks'];
+                $frame = $encoded['frame'];
 
-                if (function_exists('pam_native_commit')) {
-                    $committed = pam_native_commit($frame);
-                    if (!$committed) {
-                        @file_put_contents(
-                            sys_get_temp_dir() . '/pam-native-invalid-frame.bin',
+                if ($frame !== null) {
+                    $committed = true;
+                    if (function_exists('pam_native_commit')) {
+                        $committed = pam_native_commit($frame);
+                        if (!$committed) {
+                            @file_put_contents(
+                                sys_get_temp_dir() . '/pam-native-invalid-frame.bin',
+                                $frame,
+                            );
+                        }
+                    }
+                    if ($committed) {
+                        self::$lastFrame = $frame;
+                        RuntimeSupervisor::committed(
                             $frame,
+                            (hrtime(true) - $renderStarted) / 1_000_000,
                         );
                     }
                 }
-            }
+                } finally {
+                    ComponentLifecycle::finishRender();
+                    PamPhpRegistry::finishRender();
+                }
+                ComponentLifecycle::commit();
+            } while (self::$renderRequested);
         } finally {
-            ComponentLifecycle::finishRender();
-            PamPhpRegistry::finishRender();
+            self::$rendering = false;
         }
-        ComponentLifecycle::commit();
+    }
+
+    public static function requestRender(): void
+    {
+        if (self::$root === null) {
+            return;
+        }
+        if (self::$rendering) {
+            self::$renderRequested = true;
+
+            return;
+        }
+        Scheduler::schedule(
+            static fn () => self::render(),
+            TaskPriority::Render,
+            'runtime.render',
+        );
+        Scheduler::drain();
     }
 
     public static function dispatchEvent(int $nodeId, int $eventKind, string $payload): void
@@ -209,6 +262,7 @@ final class Runtime
 
     public static function reportError(Throwable $error): void
     {
+        RuntimeSupervisor::failed($error);
         if (function_exists('pam_native_error')) {
             try {
                 $template = $error instanceof TemplateException ? $error->template : null;
@@ -242,8 +296,14 @@ final class Runtime
         self::$dimensionsHandler = null;
         self::$memoryPressureHandler = null;
         self::$encoder = null;
+        self::$rendering = false;
+        self::$renderRequested = false;
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();
+        Stores::resetRuntime();
+        Scheduler::reset();
+        Profiler::reset();
+        RuntimeSupervisor::reset();
         State::resetCache();
     }
 

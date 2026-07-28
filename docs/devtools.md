@@ -2,7 +2,9 @@
 
 Debug builds include an on-device performance overlay. It reports smoothed frame
 rate, decode and mount time, rendered node and batch counts, patch versus full
-commits, and native heap use.
+commits, native heap use and the last eight capability diagnostics. Diagnostics
+include module latency, failures, semantic events, lifecycle changes and
+runtime errors.
 
 Start the application and toggle the overlay from another terminal:
 
@@ -39,12 +41,15 @@ let runtime = PamRuntime(
     reportError: reportError,
     onFrameCommitted: { [weak devTools] metrics in
         devTools?.update(metrics)
-    }
+    },
+    onDiagnostic: { [weak devTools] diagnostic in
+        devTools?.record(diagnostic)
+    },
 )
 
 devTools.toggle()
 ```
 
 The iOS overlay reports smoothed FPS, mount/decode duration, node and batch
-counts, patch/full commits and retained renderer memory. Keep it out of the
-release view hierarchy.
+counts, patch/full commits, retained renderer memory and the capability
+timeline. Keep it out of the release view hierarchy.

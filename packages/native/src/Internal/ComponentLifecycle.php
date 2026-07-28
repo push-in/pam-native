@@ -15,6 +15,7 @@ final class ComponentLifecycle
     /**
      * @var WeakMap<Component, array{
      *     booted: bool,
+     *     setup: bool,
      *     mounted: bool,
      *     attached: bool,
      *     resumed: bool,
@@ -35,33 +36,55 @@ final class ComponentLifecycle
         self::$pass++;
     }
 
+    public static function retain(Component $component): void
+    {
+        $states = self::$states;
+        $state = $states[$component] ?? null;
+        if ($state === null) {
+            return;
+        }
+        $state['seen'] = self::$pass;
+        $states[$component] = $state;
+    }
+
     /** @param Closure(): Element $render */
     public static function render(Component $component, Closure $render): Element
     {
         $states = self::$states ??= new WeakMap();
         $state = $states[$component] ?? [
             'booted' => false,
+            'setup' => false,
             'mounted' => false,
             'attached' => false,
             'resumed' => false,
             'seen' => 0,
         ];
 
-        if (!$state['booted']) {
-            $component->boot();
-            $state['booted'] = true;
-        }
-        if (!$state['mounted']) {
-            $component->mount();
-            $state['mounted'] = true;
-        }
         $state['seen'] = self::$pass;
         $states[$component] = $state;
+        try {
+            if (!$state['booted']) {
+                $component->boot();
+                $state['booted'] = true;
+            }
+            if (!$state['setup']) {
+                $component->__pamSetup();
+                $state['setup'] = true;
+            }
+            if (!$state['mounted']) {
+                $component->mount();
+                $state['mounted'] = true;
+            }
+            $states[$component] = $state;
 
-        $element = $render();
-        $component->rendered();
+            $element = $render();
+            $component->rendered();
 
-        return $element;
+            return $element;
+        } catch (\Throwable $error) {
+            $states[$component] = $state;
+            throw $error;
+        }
     }
 
     public static function finishRender(): void
@@ -107,6 +130,7 @@ final class ComponentLifecycle
                 $component->resumed();
                 $state['resumed'] = true;
             }
+            $component->__pamRunEffects();
             $states[$component] = $state;
         }
     }
@@ -151,8 +175,13 @@ final class ComponentLifecycle
         if ($state['resumed']) {
             $component->paused();
         }
-        if ($state['mounted']) {
-            $component->unmount();
+        try {
+            if ($state['mounted']) {
+                $component->unmount();
+            }
+        } finally {
+            $component->__pamCleanup();
+            DependencyTracker::forget($component);
         }
         unset($states[$component]);
     }
@@ -166,8 +195,13 @@ final class ComponentLifecycle
                 if ($state['resumed']) {
                     $component->paused();
                 }
-                if ($state['mounted']) {
-                    $component->unmount();
+                try {
+                    if ($state['mounted']) {
+                        $component->unmount();
+                    }
+                } finally {
+                    $component->__pamCleanup();
+                    DependencyTracker::forget($component);
                 }
             }
         }
@@ -175,5 +209,6 @@ final class ComponentLifecycle
         self::$states = null;
         self::$pass = 0;
         self::$active = true;
+        DependencyTracker::reset();
     }
 }

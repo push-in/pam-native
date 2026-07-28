@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- Add first-class native image/video/audio caching with memory and disk
+  policies, TTL, stable keys, offline pinning, checksums, deduplicated
+  downloads, bounded eviction, cache lifecycle events, and declarative tag
+  attributes on `Image` and `MediaPlayer`.
+- Add production runtime fast paths: bounded priority scheduler, render
+  coalescing, property-level dependency tracking, cached component factories,
+  strict compiler checks, correlated profiling, confirmed-frame checkpoints,
+  deterministic fuzzing and enforceable encoder performance budgets.
+- Expand `Component` with typed immutable props, setup/render hooks, reactive
+  local state, computed/memo values, update guards, effects/watchers, guaranteed
+  cleanup, render error boundaries, provide/inject context, typed slots/events,
+  exposed component refs and lifecycle-safe native refs.
+- Add Pam Store global reactive state with atomic actions, computed values,
+  selectors, transactions, subscriptions, versioned persistence, migrations,
+  middleware, action policies, optimistic rollback, undo/redo, time travel,
+  encrypted persistence and SQLite/API replica adapters.
+- Add typed permission decisions, push receive/open streams with deep-link
+  routing, continuous sensor/device observation and lifecycle-aware media.
+- Expand DevTools with capability latency/failure timelines and native
+  integration-test fixtures.
+- Harden WebView navigation, file streaming, SQLite result sizes and bounded
+  push payload queues.
+- Add semantic gestures, interactive stack navigation and native Bottom Sheets.
+- Add declarative keyframe animation, advanced image loading, WebView and native
+  video/audio playback.
+- Add typed files, document picking, camera capture, SQLite, background tasks,
+  local/push notification registration, clipboard, drag/drop, native menus,
+  sensors and device-state APIs across Android and iOS.
+
 ## 0.3.0
 
 - Add integer-backed async, form, motion, haptic and adaptive-tab contracts.

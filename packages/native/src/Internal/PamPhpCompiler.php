@@ -10,6 +10,7 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RuntimeException;
 use SplFileInfo;
+use Pam\Native\BuildConfiguration;
 
 final class PamPhpCompiler
 {
@@ -104,6 +105,7 @@ final class PamPhpCompiler
         }
 
         [$php, $template, $templateLine] = self::split($contents, $source);
+        self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
         $cacheKey = hash('sha256', $source);
         $classFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
@@ -133,10 +135,11 @@ final class PamPhpCompiler
                     JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
                 );
                 $encodedMetadata = json_encode([
-                    'version' => 1,
+                    'version' => 2,
                     'hash' => $hash,
                     'class' => $className,
                     'tag' => $tag,
+                    'strict' => BuildConfiguration::strict(),
                 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             } catch (JsonException $error) {
                 throw new RuntimeException(
@@ -155,6 +158,23 @@ final class PamPhpCompiler
             classFile: $classFile,
             template: $tree,
         );
+    }
+
+    private static function validateHotPath(string $php, string $source): void
+    {
+        if (!BuildConfiguration::strict()) {
+            return;
+        }
+        if (preg_match('/\\$this\\s*->\\s*\\{/', $php) === 1) {
+            throw new RuntimeException(
+                "PAM2104 {$source}: dynamic component property access prevents dependency tracking.",
+            );
+        }
+        if (preg_match('/\\b(eval|extract)\\s*\\(/i', $php, $match) === 1) {
+            throw new RuntimeException(
+                "PAM2105 {$source}: {$match[1]} is not allowed in strict production components.",
+            );
+        }
     }
 
     /** @return array{string, string, int} */
@@ -334,7 +354,7 @@ final class PamPhpCompiler
 
         if (
             !is_array($metadata)
-            || ($metadata['version'] ?? null) !== 1
+            || ($metadata['version'] ?? null) !== 2
             || ($metadata['hash'] ?? null) !== $hash
             || ($metadata['class'] ?? null) !== $className
         ) {

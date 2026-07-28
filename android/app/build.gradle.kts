@@ -138,6 +138,7 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     val pluginCount = pamPluginProperties.getProperty("plugin.count", "0").toInt()
     repeat(pluginCount) { index ->
         val module = pamPluginProperties.getProperty("plugin.$index.module")

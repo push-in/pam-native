@@ -8,6 +8,7 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\EventKind;
 use Pam\Native\ImageCachePolicy;
+use Pam\Native\MediaCachePolicy;
 use Pam\Native\ImageErrorEvent;
 use Pam\Native\ImageFit;
 use Pam\Native\ImageLoadEvent;
@@ -17,6 +18,7 @@ use Pam\Native\PropKey;
 
 trait HasImageBehavior
 {
+    use HasMediaCacheBehavior;
     public function fit(ImageFit $fit): static
     {
         return $this->withProperty(PropKey::ImageFit, $fit->value);
@@ -69,9 +71,25 @@ trait HasImageBehavior
         );
     }
 
-    public function cache(ImageCachePolicy $policy): static
+    public function cache(
+        ImageCachePolicy|MediaCachePolicy $policy = MediaCachePolicy::MemoryAndDisk,
+    ): static
     {
-        return $this->withProperty(PropKey::ImageCachePolicy, $policy->value);
+        return $policy instanceof ImageCachePolicy
+            ? $this->withProperty(PropKey::ImageCachePolicy, $policy->value)
+            : $this->withProperty(PropKey::MediaCachePolicy, $policy->value);
+    }
+
+    public function resize(int $width, int $height): static
+    {
+        return $this
+            ->withProperty(PropKey::MediaResizeWidth, max(1, min(8192, $width)))
+            ->withProperty(PropKey::MediaResizeHeight, max(1, min(8192, $height)));
+    }
+
+    public function thumbnail(string $source): static
+    {
+        return $this->withProperty(PropKey::MediaThumbnailSource, $source);
     }
 
     public function overlayColor(int $color): static

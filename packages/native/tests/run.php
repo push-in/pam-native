@@ -10,11 +10,27 @@ use Pam\Native\AccessibilityImportance;
 use Pam\Native\AccessibilityLiveRegion;
 use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
+use Pam\Native\AnimationKeyframe;
+use Pam\Native\BottomSheetKeyboardBehavior;
 use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
 use Pam\Native\Component;
 use Pam\Native\EventKind;
 use Pam\Native\FontStyle;
+use Pam\Native\GestureComposition;
+use Pam\Native\GestureDirection;
+use Pam\Native\GestureEvent;
+use Pam\Native\GestureState;
+use Pam\Native\GestureType;
+use Pam\Native\MediaType;
+use Pam\Native\MediaCachePolicy;
+use Pam\Native\MediaPriority;
+use Pam\Native\NativeMenuItem;
+use Pam\Native\PermissionDecision;
+use Pam\Native\PermissionKind;
+use Pam\Native\PermissionStatus;
+use Pam\Native\PushEventType;
+use Pam\Native\PushProvider;
 use Pam\Native\ImageCachePolicy;
 use Pam\Native\ImageErrorEvent;
 use Pam\Native\ImageFit;
@@ -30,6 +46,7 @@ use Pam\Native\InputSelectionEvent;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\TreeEncoder;
@@ -72,8 +89,17 @@ use Pam\Native\Plugin\PluginException;
 use Pam\Native\PropKey;
 use Pam\Native\Restorable;
 use Pam\Native\State;
+use Pam\Native\Store\Attributes\Computed as StoreComputed;
+use Pam\Native\Store\ActionPolicy;
+use Pam\Native\Store\Store;
+use Pam\Native\Store\StoreChangeKind;
+use Pam\Native\Store\StoreMiddleware;
+use Pam\Native\Store\Stores;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
+use Pam\Native\System\Clipboard;
+use Pam\Native\System\Sensors;
+use Pam\Native\SensorType;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TextDecoration;
@@ -87,15 +113,20 @@ use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
+use Pam\Native\UI\BottomSheet;
+use Pam\Native\UI\GestureDetector;
 use Pam\Native\UI\ActivityIndicator;
+use Pam\Native\UI\Animated;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Input;
+use Pam\Native\UI\InteractionRegion;
 use Pam\Native\UI\Image;
 use Pam\Native\UI\ImageBackground;
 use Pam\Native\UI\KeyboardAvoidingView;
 use Pam\Native\UI\Modal;
+use Pam\Native\UI\MediaPlayer;
 use Pam\Native\UI\Pressable;
 use Pam\Native\UI\RefreshControl;
 use Pam\Native\UI\SafeAreaView;
@@ -107,6 +138,7 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\Toggle;
 use Pam\Native\UI\VirtualGrid;
 use Pam\Native\UI\VirtualizedList;
+use Pam\Native\UI\WebView;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
@@ -195,6 +227,57 @@ foreach (PropKey::cases() as $index => $key) {
 foreach (EventKind::cases() as $index => $kind) {
     $assert($kind->value === $index + 1, 'Event kinds must remain sequential protocol integers.');
 }
+
+$gesture = GestureDetector::make(
+    GestureType::Pan,
+    Text::make('Drag me'),
+)
+    ->pointers(1, 2)
+    ->direction(GestureDirection::Horizontal)
+    ->composition(GestureComposition::Simultaneous)
+    ->minimumDistance(12.0)
+    ->minimumDuration(80)
+    ->onBegin(static function (): void {
+    })
+    ->onUpdate(static function (): void {
+    })
+    ->onEnd(static function (): void {
+    })
+    ->onCancel(static function (): void {
+    });
+$assert(
+    $gesture->kind() === NodeKind::Pressable
+        && $gesture->properties()[PropKey::GestureType->value]
+            === GestureType::Pan->value
+        && $gesture->properties()[PropKey::GestureMaxPointers->value] === 2
+        && $gesture->properties()[PropKey::GestureDirection->value]
+            === GestureDirection::Horizontal->value
+        && count($gesture->events()) === 4,
+    'GestureDetector must compile to an additive native Pressable contract.',
+);
+$gestureEvent = GestureEvent::fromPayload(Wire::map([
+    'type' => GestureType::Pinch->value,
+    'state' => GestureState::Changed->value,
+    'x' => 24.0,
+    'y' => 40.0,
+    'pageX' => 32.0,
+    'pageY' => 72.0,
+    'translationX' => 8.0,
+    'translationY' => 12.0,
+    'velocityX' => 120.0,
+    'velocityY' => 80.0,
+    'scale' => 1.25,
+    'rotation' => 0.2,
+    'pointerCount' => 2,
+    'timestamp' => 1234,
+]));
+$assert(
+    $gestureEvent->type === GestureType::Pinch
+        && $gestureEvent->state === GestureState::Changed
+        && $gestureEvent->scale === 1.25
+        && $gestureEvent->pointerCount === 2,
+    'GestureEvent must decode the bounded cross-platform semantic payload.',
+);
 
 $repositoryRoot = dirname(__DIR__, 3);
 $kotlinProtocol = file_get_contents(
@@ -396,6 +479,31 @@ $assert(
         && Wire::decodeMap(TestDiagnostics::$typedCall['payload'])['feedback']
             === HapticFeedback::Success->value,
     'Semantic haptics must use the typed native operation channel.',
+);
+Clipboard::setText('Pam Native');
+$assert(
+    TestDiagnostics::$typedCall !== null
+        && TestDiagnostics::$typedCall['operation']
+            === NativeOperation::ClipboardSetText->value
+        && Wire::decodeMap(TestDiagnostics::$typedCall['payload'])['text']
+            === 'Pam Native',
+    'Clipboard writes must use the bounded typed native operation channel.',
+);
+$assert(
+    array_map(
+        static fn (NativeOperation $operation): int => $operation->value,
+        NativeOperation::cases(),
+    ) === range(1, 19),
+    'Native operations must remain sequential and append-only.',
+);
+Sensors::read(SensorType::Gyroscope, static function (): void {
+}, 50_000);
+$sensorPayload = Wire::decodeMap(TestDiagnostics::$typedCall['payload']);
+$assert(
+    TestDiagnostics::$typedCall['operation'] === NativeOperation::SensorRead->value
+        && $sensorPayload['type'] === SensorType::Gyroscope->value
+        && $sensorPayload['timeoutMs'] === 10_000,
+    'Sensor reads must use integer types and bounded native timeouts.',
 );
 
 $tree = Screen::make(
@@ -2319,6 +2427,486 @@ $assert(
 $assert(
     \Pam\Native\Protocol::SDK_VERSION === '0.4.3',
     'The runtime SDK contract must match the 0.4 package release line.',
+);
+
+$bottomSheet = BottomSheet::make(
+    Text::make('Sheet content'),
+    [0.25, 0.6, 1.0],
+    1,
+)
+    ->dismissible(false)
+    ->backdropDismiss(false)
+    ->handleVisible(false)
+    ->dragEnabled(false)
+    ->cornerRadius(28)
+    ->keyboardBehavior(BottomSheetKeyboardBehavior::FillParent);
+$bottomSheetProperties = $bottomSheet->properties();
+$assert(
+    $bottomSheet->kind() === NodeKind::Modal
+        && $bottomSheetProperties[PropKey::BottomSheetIndex->value] === 1
+        && $bottomSheetProperties[PropKey::BottomSheetDismissible->value] === false
+        && $bottomSheetProperties[PropKey::BottomSheetKeyboardBehavior->value]
+            === BottomSheetKeyboardBehavior::FillParent->value,
+    'BottomSheet must compile its complete native configuration.',
+);
+$templateBottomSheet = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<BottomSheet index="1" keyboardBehavior="extend">'
+        .'<Text>Template sheet</Text></BottomSheet>',
+    ),
+    new class {
+    },
+    [],
+);
+$assert(
+    $templateBottomSheet->properties()[PropKey::BottomSheetIndex->value] === 1
+        && $templateBottomSheet->properties()[
+            PropKey::BottomSheetKeyboardBehavior->value
+        ] === BottomSheetKeyboardBehavior::Extend->value,
+    'BottomSheet must be available from declarative templates.',
+);
+
+$animated = Animated::make(
+    Text::make('Animated'),
+    [
+        new AnimationKeyframe(0.0, opacity: 0.0, translationY: 12.0),
+        new AnimationKeyframe(1.0, opacity: 1.0, translationY: 0.0),
+    ],
+    420,
+)->iterations(2)->autoReverse();
+$assert(
+    $animated->properties()[PropKey::AnimationIterations->value] === 2
+        && $animated->properties()[PropKey::AnimationAutoReverse->value] === true,
+    'Animated must encode declarative native keyframes.',
+);
+
+$interaction = InteractionRegion::make(Text::make('Card'))
+    ->draggable('card:42')
+    ->acceptsDrop()
+    ->contextMenu([
+        new NativeMenuItem('inspect', 'Inspect'),
+        new NativeMenuItem('delete', 'Delete', destructive: true),
+    ]);
+$assert(
+    $interaction->properties()[PropKey::Draggable->value] === true
+        && $interaction->properties()[PropKey::DropEnabled->value] === true
+        && isset($interaction->properties()[PropKey::ContextMenuItems->value]),
+    'InteractionRegion must encode drag, drop and native menu behavior.',
+);
+
+$webView = WebView::make('https://example.com')->javaScriptEnabled(false);
+$media = MediaPlayer::make('https://example.com/video.mp4', MediaType::Video)
+    ->autoPlay()
+    ->loop()
+    ->volume(0.5);
+$assert(
+    $webView->kind() === NodeKind::WebView
+        && $webView->properties()[PropKey::WebViewJavaScriptEnabled->value] === false
+        && $media->kind() === NodeKind::Media
+        && $media->properties()[PropKey::MediaLoop->value] === true,
+    'WebView and MediaPlayer must compile into dedicated native node kinds.',
+);
+
+$cachedImage = Image::make('https://example.com/hero.webp')
+    ->cache(MediaCachePolicy::StaleWhileRevalidate)
+    ->cacheKey('hero:v3')
+    ->maxAge(2_592_000_000)
+    ->cacheTags(['feed', 'hero'])
+    ->pinOffline()
+    ->priority(MediaPriority::Visible)
+    ->maxCacheSize(64 * 1024 * 1024)
+    ->resize(720, 1280)
+    ->thumbnail('https://example.com/hero-thumb.webp')
+    ->checksum(str_repeat('a', 64));
+$cachedImageProperties = $cachedImage->properties();
+$assert(
+    $cachedImageProperties[PropKey::MediaCachePolicy->value]
+        === MediaCachePolicy::StaleWhileRevalidate->value
+        && $cachedImageProperties[PropKey::MediaCacheKey->value] === 'hero:v3'
+        && $cachedImageProperties[PropKey::MediaCacheTags->value] === "feed\nhero"
+        && $cachedImageProperties[PropKey::MediaCachePinOffline->value] === true
+        && $cachedImageProperties[PropKey::MediaResizeWidth->value] === 720
+        && $cachedImageProperties[PropKey::MediaCacheChecksum->value] === str_repeat('a', 64),
+    'Image media-cache helpers must encode the complete append-only native contract.',
+);
+
+$cachedMedia = MediaPlayer::make('https://example.com/movie.mp4')
+    ->cache(MediaCachePolicy::Disk)
+    ->cacheKey('movie:42')
+    ->streamingCache()
+    ->preloadSeconds(12)
+    ->downloadWhilePlaying()
+    ->pinOffline();
+$assert(
+    $cachedMedia->properties()[PropKey::MediaCacheStreaming->value] === true
+        && $cachedMedia->properties()[PropKey::MediaCachePreloadSeconds->value] === 12
+        && $cachedMedia->properties()[PropKey::MediaCacheDownloadWhilePlaying->value] === true,
+    'MediaPlayer must expose streaming, preload and offline cache controls.',
+);
+
+$cachedTagImage = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Image source="https://example.com/tag.webp" cache="stale-while-revalidate" '.
+        'cache-key="tag:v2" cache-max-age="30d" cache-tags="feed,avatar" pin-offline '.
+        'priority="visible" cache-max-bytes="64mb" resize-width="512" resize-height="512" />',
+    ),
+    null,
+    [],
+);
+$assert(
+    $cachedTagImage->properties()[PropKey::MediaCachePolicy->value]
+        === MediaCachePolicy::StaleWhileRevalidate->value
+        && $cachedTagImage->properties()[PropKey::MediaCacheMaxAgeMs->value] === 2_592_000_000
+        && $cachedTagImage->properties()[PropKey::MediaCacheMaxBytes->value] === 67_108_864
+        && $cachedTagImage->properties()[PropKey::MediaResizeHeight->value] === 512,
+    'Tag media-cache attributes must normalize kebab-case values and bounded units.',
+);
+
+$hardenedWebView = WebView::make('https://example.com/app')
+    ->allowedHosts(['example.com', 'cdn.example.com']);
+$assert(
+    $hardenedWebView->properties()[PropKey::WebViewAllowedHosts->value]
+        === "example.com\ncdn.example.com"
+        && PropKey::WebViewAllowedHosts->value === 366,
+    'WebView host allowlists must use the append-only native protocol.',
+);
+
+$permission = new PermissionDecision(
+    PermissionKind::Photos,
+    PermissionStatus::Limited,
+    false,
+);
+$assert(
+    $permission->granted()
+        && PermissionKind::LocationWhenInUse->value === 5
+        && PermissionStatus::Limited->value === 4
+        && PushEventType::Opened->value === 2
+        && PushProvider::Apns->value === 2,
+    'Production capability variants must remain sequential integer enums.',
+);
+
+Stores::resetRuntime();
+$counterStore = Stores::get(new class extends Store {
+    protected function state(): array
+    {
+        return ['count' => 1, 'label' => 'Counter', 'temporary' => false];
+    }
+
+    protected function persist(): array
+    {
+        return ['count'];
+    }
+
+    public function increment(int $amount = 1): void
+    {
+        $this->count += $amount;
+    }
+
+    public function failAfterMutation(): void
+    {
+        $this->count = 999;
+        throw new RuntimeException('rollback');
+    }
+
+    #[StoreComputed]
+    protected function doubled(): int
+    {
+        return $this->count * 2;
+    }
+}::class);
+$observedChanges = [];
+$counterStore->subscribe(static function ($change) use (&$observedChanges): void {
+    $observedChanges[] = $change;
+});
+$counterStore->dispatch('increment', ['amount' => 2]);
+$assert(
+    $counterStore->count === 3
+        && $counterStore->doubled === 6
+        && count($observedChanges) === 1
+        && $observedChanges[0]->diff['count'] === ['before' => 1, 'after' => 3],
+    'Pam Store actions must batch mutations, invalidate computed values and publish diffs.',
+);
+$counterStore->undo();
+$assert($counterStore->count === 1, 'Pam Store must support undo.');
+$counterStore->redo();
+$assert($counterStore->count === 3, 'Pam Store must support redo.');
+try {
+    $counterStore->dispatch('failAfterMutation');
+    $assert(false, 'Failed store actions must throw.');
+} catch (RuntimeException) {
+    $assert($counterStore->count === 3, 'Failed store actions must roll state back atomically.');
+}
+try {
+    $counterStore->optimistic(
+        'optimistic-increment',
+        static function () use ($counterStore): void {
+            $counterStore->count = 10;
+        },
+        static fn () => throw new RuntimeException('network'),
+    );
+    $assert(false, 'Failed optimistic tasks must throw.');
+} catch (RuntimeException) {
+    $assert($counterStore->count === 3, 'Optimistic updates must roll back on failure.');
+}
+$changeId = $observedChanges[0]->id;
+$counterStore->dispatch('increment', ['amount' => 5], ActionPolicy::Every);
+$assert(
+    Stores::timeTravel($changeId)
+        && $counterStore->count === 3
+        && StoreChangeKind::TimeTravel->value === 5,
+    'Pam Store DevTools history must support time travel with integer change kinds.',
+);
+$middlewareCalls = 0;
+Stores::middleware(new class($middlewareCalls) implements StoreMiddleware {
+    public function __construct(private int &$calls)
+    {
+    }
+
+    public function handle(Store $store, string $action, array $arguments, Closure $next): mixed
+    {
+        $this->calls++;
+
+        return $next();
+    }
+});
+$counterStore->dispatch('increment');
+$assert($middlewareCalls === 1, 'Pam Store middleware must wrap actions.');
+
+$componentLog = [];
+$component = new class($componentLog) extends Component {
+    public int $renders = 0;
+
+    public function __construct(private array &$log)
+    {
+    }
+
+    protected function initialState(): array
+    {
+        return ['count' => 1];
+    }
+
+    public function setup(): void
+    {
+        $this->log[] = 'setup';
+    }
+
+    public function mount(): void
+    {
+        $this->log[] = 'mount';
+    }
+
+    public function rendering(): void
+    {
+        $this->log[] = 'rendering';
+    }
+
+    public function render(): \Pam\Native\Renderable
+    {
+        $this->renders++;
+
+        return Text::make((string) $this->doubled);
+    }
+
+    #[\Pam\Native\Attributes\Computed]
+    protected function doubled(): int
+    {
+        return $this->state->count * 2;
+    }
+
+    protected function effects(): array
+    {
+        return [
+            \Pam\Native\Effect::watch(
+                fn (): int => $this->state->count,
+                function (int $count): Closure {
+                    $this->log[] = "effect:{$count}";
+
+                    return function (): void {
+                        $this->log[] = 'effect:cleanup';
+                    };
+                },
+            ),
+        ];
+    }
+
+    public function increment(): void
+    {
+        $this->state->count++;
+    }
+
+    public function shouldUpdate(\Pam\Native\ComponentChanges $changes): bool
+    {
+        return !$changes->changed('ignored');
+    }
+
+    public function cleanup(): void
+    {
+        $this->log[] = 'cleanup';
+    }
+
+    #[\Pam\Native\Attributes\Expose]
+    public function exposedCount(): int
+    {
+        return $this->state->count;
+    }
+
+    public function bind(\Pam\Native\ComponentRef $ref): void
+    {
+        $this->exposeTo($ref);
+    }
+};
+ComponentLifecycle::beginRender();
+$component->toElement();
+ComponentLifecycle::finishRender();
+ComponentLifecycle::commit();
+$assert(
+    $componentLog === ['setup', 'mount', 'rendering', 'effect:1']
+        && $component->renders === 1,
+    'Component setup, render and effect hooks must run in deterministic order.',
+);
+$component->increment();
+ComponentLifecycle::beginRender();
+$component->toElement();
+ComponentLifecycle::finishRender();
+ComponentLifecycle::commit();
+$assert(
+    $component->renders === 2
+        && array_slice($componentLog, -3) === ['rendering', 'effect:cleanup', 'effect:2'],
+    'Local state must invalidate computed values, render and clean changed effects.',
+);
+ComponentLifecycle::beginRender();
+$component->toElement();
+ComponentLifecycle::finishRender();
+ComponentLifecycle::commit();
+$assert(
+    $component->renders === 2,
+    'Dependency tracking must skip clean component subtrees.',
+);
+$ref = new \Pam\Native\ComponentRef();
+$component->bind($ref);
+$assert($ref->call('exposedCount') === 2, 'Component refs may call only exposed methods.');
+
+$boundary = new class extends Component {
+    public function render(): \Pam\Native\Renderable
+    {
+        throw new RuntimeException('child failed');
+    }
+
+    public function failed(
+        Throwable $error,
+        \Pam\Native\ErrorContext $context,
+    ): ?\Pam\Native\Renderable {
+        return Text::make($context->phase.':'.$error->getMessage());
+    }
+};
+ComponentLifecycle::beginRender();
+$boundaryElement = $boundary->toElement();
+ComponentLifecycle::finishRender();
+ComponentLifecycle::commit();
+$assert(
+    $boundaryElement->kind() === NodeKind::Text,
+    'Component error boundaries must recover a failed render with a fallback element.',
+);
+
+$context = new \stdClass();
+$provider = new class($context) extends Component {
+    public function __construct(private object $context)
+    {
+    }
+
+    protected function provide(): array
+    {
+        return [\stdClass::class => $this->context];
+    }
+
+    public function render(): \Pam\Native\Renderable
+    {
+        return Text::make('provider');
+    }
+};
+$consumer = new class extends Component {
+    public function context(): object
+    {
+        return $this->inject(\stdClass::class);
+    }
+
+    protected function slots(): array
+    {
+        return ['content' => \Pam\Native\Slot::required()];
+    }
+
+    public function render(): \Pam\Native\Renderable
+    {
+        return Text::make('consumer');
+    }
+};
+$provider->__pamConfigure([], []);
+$consumer->__pamConfigure(['content' => [Text::make('slot')]], [], $provider);
+$assert(
+    $consumer->context() === $context,
+    'Component provide/inject context and typed slot validation must follow ancestry.',
+);
+
+$nativeRef = new \Pam\Native\NativeRef();
+$focused = false;
+$nativeRef->attach([
+    'focus' => static function () use (&$focused): void {
+        $focused = true;
+    },
+    'blur' => static function (): void {},
+    'measure' => static fn (): array => [
+        'x' => 0.0,
+        'y' => 0.0,
+        'width' => 100.0,
+        'height' => 40.0,
+    ],
+    'scrollIntoView' => static function (): void {},
+]);
+$nativeRef->focus();
+$assert(
+    $focused && $nativeRef->measure()['width'] === 100.0,
+    'Native refs must expose lifecycle-safe focus and measurement operations.',
+);
+$nativeRef->detach();
+
+$schedulerOrder = [];
+\Pam\Native\Scheduling\Scheduler::reset();
+\Pam\Native\Scheduling\Scheduler::schedule(
+    static function () use (&$schedulerOrder): void {
+        $schedulerOrder[] = 'background';
+    },
+    \Pam\Native\Scheduling\TaskPriority::Background,
+);
+\Pam\Native\Scheduling\Scheduler::schedule(
+    static function () use (&$schedulerOrder): void {
+        $schedulerOrder[] = 'input';
+    },
+    \Pam\Native\Scheduling\TaskPriority::UserBlocking,
+);
+$obsolete = \Pam\Native\Scheduling\Scheduler::schedule(
+    static function () use (&$schedulerOrder): void {
+        $schedulerOrder[] = 'obsolete';
+    },
+    coalesce: 'search',
+);
+\Pam\Native\Scheduling\Scheduler::schedule(
+    static function () use (&$schedulerOrder): void {
+        $schedulerOrder[] = 'latest';
+    },
+    coalesce: 'search',
+);
+\Pam\Native\Scheduling\Scheduler::drain(100);
+$assert(
+    $obsolete->token->cancelled()
+        && $schedulerOrder === ['input', 'latest', 'background'],
+    'Scheduler must prioritize user work and coalesce obsolete tasks.',
+);
+
+ComponentLifecycle::shutdown();
+$assert(
+    in_array('effect:cleanup', $componentLog, true)
+        && end($componentLog) === 'cleanup',
+    'Component shutdown must guarantee effect and component cleanup.',
 );
 
 echo "Pam Native PHP SDK tests passed.\n";

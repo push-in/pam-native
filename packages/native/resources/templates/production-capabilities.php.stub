@@ -1,0 +1,44 @@
+<?php
+
+declare(strict_types=1);
+
+use Pam\Native\PermissionKind;
+use Pam\Native\PushMessage;
+use Pam\Native\SensorReading;
+use Pam\Native\SensorType;
+use Pam\Native\System\DeviceStatus;
+use Pam\Native\System\Permissions;
+use Pam\Native\System\PushNotifications;
+use Pam\Native\System\Sensors;
+
+Permissions::status(PermissionKind::Notifications, static function ($decision): void {
+    if (!$decision->granted() && $decision->canAskAgain) {
+        Permissions::requestKind(PermissionKind::Notifications, static fn ($result) => null);
+    }
+});
+
+$pushSubscription = PushNotifications::listen(
+    static function (PushMessage $message): void {
+        // Route or update product state.
+    },
+);
+
+$sensorSubscription = Sensors::watch(
+    SensorType::Accelerometer,
+    static function (SensorReading $reading): void {
+        // Keep UI work small; samples are already rate-limited.
+    },
+    intervalMs: 100,
+);
+
+$deviceSubscription = DeviceStatus::watch(
+    static function ($status): void {
+        // React to connectivity and power changes.
+    },
+    intervalMs: 1_000,
+);
+
+// On teardown:
+// PushNotifications::unsubscribe($pushSubscription);
+// Sensors::unwatch($sensorSubscription);
+// DeviceStatus::unwatch($deviceSubscription);

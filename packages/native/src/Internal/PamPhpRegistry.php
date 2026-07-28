@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace Pam\Native\Internal;
 
 use Closure;
+use BackedEnum;
 use LogicException;
+use Pam\Native\Attributes\Prop;
 use Pam\Native\Component;
 use Pam\Native\Renderable;
 use Pam\Native\TemplateRegistry;
 use ReflectionClass;
-use ReflectionProperty;
 use RuntimeException;
 use WeakMap;
 
@@ -21,6 +22,20 @@ final class PamPhpRegistry
 
     /** @var array<class-string<Component>, string> */
     private static array $classFiles = [];
+
+    /**
+     * @var array<class-string<Component>, array{
+     *     factory: Closure(array): Component,
+     *     parameters: list<array{
+     *         name: string,
+     *         default: bool,
+     *         defaultValue: mixed,
+     *         prop: Prop|null,
+     *         mutable: bool
+     *     }>
+     * }>
+     */
+    private static array $metadata = [];
 
     /** @var WeakMap<object, array<string, Component>>|null */
     private static ?WeakMap $instances = null;
@@ -114,6 +129,23 @@ final class PamPhpRegistry
         return new CompiledComponentView($component, $definition->template);
     }
 
+    public static function retainScope(Component $owner): void
+    {
+        $instances = self::$instances;
+        $seen = self::$seen;
+        if ($instances === null || $seen === null) {
+            return;
+        }
+        $bucket = $instances[$owner] ?? [];
+        $active = $seen[$owner] ?? [];
+        foreach ($bucket as $cacheKey => $component) {
+            $active[$cacheKey] = true;
+            ComponentLifecycle::retain($component);
+            self::retainScope($component);
+        }
+        $seen[$owner] = $active;
+    }
+
     /** @param array<string, mixed> $props */
     public static function make(string $className, array $props = []): Component
     {
@@ -132,21 +164,7 @@ final class PamPhpRegistry
     /** @return array<string, mixed> */
     public static function publicProps(Component $component): array
     {
-        $props = [];
-        $reflection = new ReflectionClass($component);
-
-        foreach ($reflection->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
-            if (
-                $property->isStatic()
-                || $property->getDeclaringClass()->getName() === Component::class
-                || !$property->isInitialized($component)
-            ) {
-                continue;
-            }
-            $props[$property->getName()] = $property->getValue($component);
-        }
-
-        return $props;
+        return get_object_vars($component);
     }
 
     public static function reset(): void
@@ -154,6 +172,7 @@ final class PamPhpRegistry
         self::releaseInstances();
         self::$components = [];
         self::$classFiles = [];
+        self::$metadata = [];
     }
 
     public static function releaseInstances(): void
@@ -222,7 +241,11 @@ final class PamPhpRegistry
         $safeSlots = $slots;
         /** @var array<string, Closure> $safeListeners */
         $safeListeners = $listeners;
-        $instance->__pamConfigure($safeSlots, $safeListeners);
+        $instance->__pamConfigure(
+            $safeSlots,
+            $safeListeners,
+            $scope instanceof Component ? $scope : null,
+        );
         $bucket[$cacheKey] = $instance;
         $instances[$owner] = $bucket;
 
@@ -237,34 +260,25 @@ final class PamPhpRegistry
     {
         self::autoload($className);
 
-        $reflection = new ReflectionClass($className);
-        if (!$reflection->isSubclassOf(Component::class)) {
-            throw new RuntimeException(
-                "PAM component {$className} must extend ".Component::class.'.',
-            );
-        }
-
-        $constructor = $reflection->getConstructor();
-        if ($constructor === null) {
-            if ($props !== []) {
-                throw new RuntimeException(
-                    "PAM component {$className} does not accept props: "
-                    .implode(', ', array_keys($props)).'.',
-                );
-            }
-
-            return $reflection->newInstance();
-        }
-
+        $metadata = self::metadata($className);
         $arguments = [];
         $accepted = [];
-        foreach ($constructor->getParameters() as $parameter) {
-            $name = $parameter->getName();
+        foreach ($metadata['parameters'] as $parameter) {
+            $name = $parameter['name'];
             $accepted[$name] = true;
+            if (
+                !array_key_exists($name, $props)
+                && $parameter['prop']?->required === true
+            ) {
+                throw new RuntimeException(
+                    "Required prop {$className}::\${$name} is missing.",
+                );
+            }
             if (array_key_exists($name, $props)) {
+                self::validateProp($className, $name, $props[$name], $parameter['prop']);
                 $arguments[] = $props[$name];
-            } elseif ($parameter->isDefaultValueAvailable()) {
-                $arguments[] = $parameter->getDefaultValue();
+            } elseif ($parameter['default']) {
+                $arguments[] = $parameter['defaultValue'];
             } else {
                 throw new RuntimeException(
                     "Required prop {$className}::\${$name} is missing.",
@@ -279,7 +293,7 @@ final class PamPhpRegistry
             );
         }
 
-        return $reflection->newInstanceArgs($arguments);
+        return ($metadata['factory'])($arguments);
     }
 
     /**
@@ -290,34 +304,110 @@ final class PamPhpRegistry
      */
     private static function updateProps(Component $component, array $props): bool
     {
-        $reflection = new ReflectionClass($component);
-        $constructor = $reflection->getConstructor();
-
-        if ($constructor === null) {
+        $metadata = self::metadata($component::class);
+        if ($metadata['parameters'] === []) {
             return $props === [];
         }
 
-        foreach ($constructor->getParameters() as $parameter) {
-            $name = $parameter->getName();
-            if (!array_key_exists($name, $props) || !$reflection->hasProperty($name)) {
+        foreach ($metadata['parameters'] as $parameter) {
+            $name = $parameter['name'];
+            if (!array_key_exists($name, $props) || !property_exists($component, $name)) {
                 continue;
             }
-            $property = $reflection->getProperty($name);
-            if (!$property->isInitialized($component)) {
-                return false;
-            }
-            $previous = $property->getValue($component);
+            self::validateProp($component::class, $name, $props[$name], $parameter['prop']);
+            $previous = $component->{$name};
             if ($previous === $props[$name]) {
                 continue;
             }
-            if (!$property->isPublic() || $property->isReadOnly()) {
+            if (!$parameter['mutable']) {
                 return false;
             }
-            $property->setValue($component, $props[$name]);
+            $component->__pamNotifyUpdating($name, $props[$name], $previous);
+            $component->{$name} = $props[$name];
             $component->__pamNotifyUpdated($name);
         }
+        $component->__pamFlushChanges();
 
         return true;
+    }
+
+    private static function validateProp(
+        string $className,
+        string $name,
+        mixed $value,
+        ?Prop $prop,
+    ): void {
+        if ($prop === null) {
+            return;
+        }
+        if ($prop->required && $value === null) {
+            throw new RuntimeException("Required prop {$className}::\${$name} cannot be null.");
+        }
+        if ($prop->min !== null && (!is_int($value) && !is_float($value) || $value < $prop->min)) {
+            throw new RuntimeException("Prop {$className}::\${$name} is below its minimum.");
+        }
+        if ($prop->max !== null && (!is_int($value) && !is_float($value) || $value > $prop->max)) {
+            throw new RuntimeException("Prop {$className}::\${$name} exceeds its maximum.");
+        }
+        if ($prop->enum !== null) {
+            if (!enum_exists($prop->enum) || !is_a($prop->enum, BackedEnum::class, true)) {
+                throw new RuntimeException("Prop {$className}::\${$name} declares an invalid enum.");
+            }
+            if (!$value instanceof $prop->enum) {
+                throw new RuntimeException("Prop {$className}::\${$name} must be {$prop->enum}.");
+            }
+        }
+    }
+
+    /**
+     * @param class-string<Component> $className
+     * @return array{
+     *     factory: Closure(array): Component,
+     *     parameters: list<array{
+     *         name: string,
+     *         default: bool,
+     *         defaultValue: mixed,
+     *         prop: Prop|null,
+     *         mutable: bool
+     *     }>
+     * }
+     */
+    private static function metadata(string $className): array
+    {
+        if (isset(self::$metadata[$className])) {
+            return self::$metadata[$className];
+        }
+        $reflection = new ReflectionClass($className);
+        if (!$reflection->isSubclassOf(Component::class)) {
+            throw new RuntimeException(
+                "PAM component {$className} must extend ".Component::class.'.',
+            );
+        }
+        $parameters = [];
+        foreach ($reflection->getConstructor()?->getParameters() ?? [] as $parameter) {
+            $property = $reflection->hasProperty($parameter->getName())
+                ? $reflection->getProperty($parameter->getName())
+                : null;
+            $attribute = $parameter->getAttributes(Prop::class)[0] ?? null;
+            $parameters[] = [
+                'name' => $parameter->getName(),
+                'default' => $parameter->isDefaultValueAvailable(),
+                'defaultValue' => $parameter->isDefaultValueAvailable()
+                    ? $parameter->getDefaultValue()
+                    : null,
+                'prop' => $attribute?->newInstance(),
+                'mutable' => $property !== null
+                    && $property->isPublic()
+                    && !$property->isReadOnly()
+                    && ($attribute === null || !$attribute->newInstance()->immutable),
+            ];
+        }
+        $factory = static fn (array $arguments): Component => new $className(...$arguments);
+
+        return self::$metadata[$className] = [
+            'factory' => $factory,
+            'parameters' => $parameters,
+        ];
     }
 
     private static function registerAutoload(): void

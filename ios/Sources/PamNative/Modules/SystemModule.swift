@@ -3,8 +3,10 @@ import UIKit
 import AVFoundation
 import Photos
 import AudioToolbox
+import CoreMotion
 
 public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked Sendable {
+    private let motion = CMMotionManager()
     public init() {}
 
     public func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
@@ -82,6 +84,14 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "haptic":
             haptic(payload)
             completion(.success, Data())
+        case "clipboardSetText":
+            clipboardSetText(payload: payload, completion: completion)
+        case "clipboardGetText":
+            clipboardGetText(completion: completion)
+        case "clipboardHasText":
+            clipboardHasText(completion: completion)
+        case "sensorRead":
+            sensorRead(payload: payload, completion: completion)
         case "deviceInfo":
             do {
                 let screen = UIScreen.main
@@ -145,6 +155,9 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
     }
 
     public func close() {
+        motion.stopAccelerometerUpdates()
+        motion.stopGyroUpdates()
+        motion.stopMagnetometerUpdates()
     }
 
     public func invoke(operation: NativeOperation, payload: Data, completion: @escaping ModuleCompletion) {
@@ -165,7 +178,191 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case .permissionRequest: return "permissionRequest"
         case .closeApp: return "closeApp"
         case .haptic: return "haptic"
+        case .clipboardSetText: return "clipboardSetText"
+        case .clipboardGetText: return "clipboardGetText"
+        case .clipboardHasText: return "clipboardHasText"
+        case .sensorRead: return "sensorRead"
         default: return ""
+        }
+    }
+
+    private func sensorRead(payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .integer(type)? = values["type"] else {
+                throw RuntimeError("Missing sensor type")
+            }
+            let timeoutMs: Int
+            if case let .integer(value)? = values["timeoutMs"] {
+                timeoutMs = min(max(Int(value), 100), 10_000)
+            } else {
+                timeoutMs = 2_000
+            }
+            let state = SensorCompletion(completion)
+            let timeout = DispatchWorkItem { [weak self] in
+                guard state.finishFailure("Sensor read timed out") else { return }
+                self?.stopSensor(Int(type))
+            }
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + .milliseconds(timeoutMs),
+                execute: timeout
+            )
+            let handler: (Double, Double, Double, TimeInterval) -> Void = {
+                [weak self] x, y, z, timestamp in
+                guard state.finish(x: x, y: y, z: z, timestamp: timestamp) else { return }
+                timeout.cancel()
+                self?.stopSensor(Int(type))
+            }
+            switch Int(type) {
+            case 1:
+                guard motion.isAccelerometerAvailable else {
+                    throw RuntimeError("Requested sensor is unavailable")
+                }
+                motion.startAccelerometerUpdates(to: .main) { data, _ in
+                    guard let data else { return }
+                    handler(
+                        data.acceleration.x,
+                        data.acceleration.y,
+                        data.acceleration.z,
+                        data.timestamp
+                    )
+                }
+            case 2:
+                guard motion.isGyroAvailable else {
+                    throw RuntimeError("Requested sensor is unavailable")
+                }
+                motion.startGyroUpdates(to: .main) { data, _ in
+                    guard let data else { return }
+                    handler(
+                        data.rotationRate.x,
+                        data.rotationRate.y,
+                        data.rotationRate.z,
+                        data.timestamp
+                    )
+                }
+            case 3:
+                guard motion.isMagnetometerAvailable else {
+                    throw RuntimeError("Requested sensor is unavailable")
+                }
+                motion.startMagnetometerUpdates(to: .main) { data, _ in
+                    guard let data else { return }
+                    handler(
+                        data.magneticField.x,
+                        data.magneticField.y,
+                        data.magneticField.z,
+                        data.timestamp
+                    )
+                }
+            case 4:
+                guard motion.isDeviceMotionAvailable else {
+                    throw RuntimeError("Requested sensor is unavailable")
+                }
+                motion.startDeviceMotionUpdates(to: .main) { data, _ in
+                    guard let data else { return }
+                    handler(
+                        data.attitude.roll,
+                        data.attitude.pitch,
+                        data.attitude.yaw,
+                        data.timestamp
+                    )
+                }
+            default:
+                throw RuntimeError("Unknown sensor type \(type)")
+            }
+        } catch {
+            completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
+        }
+    }
+
+    private func stopSensor(_ type: Int) {
+        switch type {
+        case 1: motion.stopAccelerometerUpdates()
+        case 2: motion.stopGyroUpdates()
+        case 3: motion.stopMagnetometerUpdates()
+        case 4: motion.stopDeviceMotionUpdates()
+        default: break
+        }
+    }
+
+    private final class SensorCompletion: @unchecked Sendable {
+        private let lock = NSLock()
+        private var completed = false
+        private let completion: ModuleCompletion
+
+        init(_ completion: @escaping ModuleCompletion) {
+            self.completion = completion
+        }
+
+        func finish(x: Double, y: Double, z: Double, timestamp: TimeInterval) -> Bool {
+            guard claim() else { return false }
+            do {
+                completion(.success, try WireMap.encode([
+                    "x": .decimal(x),
+                    "y": .decimal(y),
+                    "z": .decimal(z),
+                    "timestamp": .integer(Int64(timestamp * 1_000)),
+                ]))
+            } catch {
+                completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
+            }
+            return true
+        }
+
+        func finishFailure(_ message: String) -> Bool {
+            guard claim() else { return false }
+            completion(.failure, message.data(using: .utf8) ?? Data())
+            return true
+        }
+
+        private func claim() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !completed else { return false }
+            completed = true
+            return true
+        }
+    }
+
+    private func clipboardSetText(payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(text)? = values["text"],
+                  text.utf8.count <= 1_048_576 else {
+                throw RuntimeError("Clipboard text exceeds one megabyte")
+            }
+            DispatchQueue.main.async {
+                UIPasteboard.general.string = text
+                completion(.success, Data())
+            }
+        } catch {
+            completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
+        }
+    }
+
+    private func clipboardGetText(completion: @escaping ModuleCompletion) {
+        DispatchQueue.main.async {
+            do {
+                let text = UIPasteboard.general.string ?? ""
+                guard text.utf8.count <= 1_048_576 else {
+                    throw RuntimeError("Clipboard text exceeds one megabyte")
+                }
+                completion(.success, try WireMap.encode(["text": .text(text)]))
+            } catch {
+                completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
+            }
+        }
+    }
+
+    private func clipboardHasText(completion: @escaping ModuleCompletion) {
+        DispatchQueue.main.async {
+            do {
+                completion(
+                    .success,
+                    try WireMap.encode(["hasText": .flag(UIPasteboard.general.hasStrings)])
+                )
+            } catch {
+                completion(.failure, error.localizedDescription.data(using: .utf8) ?? Data())
+            }
         }
     }
 

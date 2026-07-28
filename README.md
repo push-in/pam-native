@@ -10,6 +10,16 @@ Install the versioned PHP SDK with Composer:
 composer require pushinbr/pam-native:^0.2
 ```
 
+Use [Pam Store](docs/store.md) for global reactive state, atomic actions,
+computed selectors, persistence, undo/redo and DevTools time travel.
+See the [component runtime](docs/component-runtime.md) for typed props, local
+state, lifecycle, effects, boundaries, context, slots and refs.
+Production compilation, scheduling, dependency tracking and recovery are
+covered by the [runtime performance guide](docs/runtime-performance.md).
+Browse the [documentation index](docs/README.md) or the
+[capability cookbook](docs/examples.md) for copyable examples of every native
+feature family.
+
 Android supports API 26–36. Release CI compiles the production renderer,
 executes protocol and renderer tests at both API boundaries, and publishes the
 plugin API AAR with checksums and build provenance.
@@ -140,6 +150,24 @@ pam mobile make:native-view CameraPreview .
 pam mobile profile .
 ```
 
+Semantic tap, pan, pinch, rotation, swipe and long-press recognition is
+available through `GestureDetector`; movement is recognized natively and
+updates are coalesced before entering PHP. See
+[`docs/gestures.md`](docs/gestures.md).
+
+Native Bottom Sheets support snap points, dragging, backdrop dismissal,
+keyboard behavior and state-change callbacks on Android and iOS. See
+[`docs/bottom-sheet.md`](docs/bottom-sheet.md).
+
+WebView, native media, files/capture, background tasks, notifications, SQLite,
+keyframe animation, drag/drop, menus and device APIs are documented in
+[`docs/native-capabilities.md`](docs/native-capabilities.md).
+Typed permissions, push delivery/opening, continuous observation, lifecycle
+recovery, security limits and capability diagnostics are covered in
+[`docs/production-capabilities.md`](docs/production-capabilities.md). Before a
+release, follow [`docs/releasing.md`](docs/releasing.md) and the
+[migration notes](docs/migration-production-capabilities.md).
+
 The Composer package ships a JSON schema for `pam-native.json` and HTML custom
 data for `.pam` tag/attribute completion. New mobile templates wire both into
 the project automatically.
@@ -210,7 +238,8 @@ an observed offset crosses the boundary at most once per VSYNC. Native
 small/large size, while `Switch` owns checked state and disabled-aware
 off/on-track and thumb tints.
 
-System APIs include alert, toast, sharing, URL linking, vibration, device
+System APIs include alert, toast, sharing, URL linking, clipboard text,
+one-shot accelerometer, gyroscope and magnetometer reads, vibration, device
 dimensions/appearance/app state, keyboard dismissal, permission checks and
 permission requests. Their operation IDs are sequential integers across PHP,
 JNI, and Kotlin.
@@ -362,6 +391,13 @@ on the UI thread; slow module work remains off it.
 See the [Plugin SDK guide](docs/plugins.md) and the
 [complete reference plugin](examples/community-plugin).
 
+## Native media cache
+
+`Image` and `MediaPlayer` support memory/disk policies, stable keys, TTL,
+offline pinning, checksums, request deduplication, bounded downloads, native
+progress events, and background file caching directly from PHP or `.pam.php`
+tags. See the [native media-cache guide](docs/media-cache.md).
+
 ## Benchmarks
 
 Run the isolated encoders and engine:
@@ -395,7 +431,8 @@ python3 pam-native/benchmarks/mobile/compare.py \
 ```
 
 The debug-only [DevTools overlay](docs/devtools.md) exposes live FPS, render
-cost, commit behavior, node counts, and native heap usage directly on-device.
+cost, commit behavior, node counts, native heap usage and the bounded
+capability call/event timeline directly on-device.
 
 On a Galaxy S23 Ultra debug build, a counter update used a 35-byte input patch
 and took about 0.90 ms to apply. Opening the 10,000-row details example sent its

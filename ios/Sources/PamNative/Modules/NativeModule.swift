@@ -31,4 +31,8 @@ public enum NativeOperation: Int {
     case permissionRequest = 13
     case closeApp = 14
     case haptic = 15
+    case clipboardSetText = 16
+    case clipboardGetText = 17
+    case clipboardHasText = 18
+    case sensorRead = 19
 }

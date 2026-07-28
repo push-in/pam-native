@@ -132,6 +132,9 @@ final class Navigator extends Component implements Restorable
         if ($this->operation === NavigationOperation::Push && count($this->stack) > 1) {
             $entries[] = $this->stack[count($this->stack) - 2];
         }
+        if ($this->operation === NavigationOperation::Idle && count($this->stack) > 1) {
+            $entries[] = $this->stack[count($this->stack) - 2];
+        }
         if ($this->operation === NavigationOperation::Replace && $this->outgoing !== null) {
             $entries[] = $this->outgoing;
         }
@@ -153,7 +156,9 @@ final class Navigator extends Component implements Restorable
             $this->transitionDurationMs,
             $this->revision,
             ...$screens,
-        );
+        )->onGesturePop(function (): void {
+            $this->pop();
+        });
     }
 
     public function canGoBack(): bool

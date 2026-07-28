@@ -193,6 +193,7 @@ final class DrawerNavigator implements Renderable, Restorable
         $routeItem = function (
             NavigationDrawerItem $route,
             int $index,
+            bool $grouped = false,
         ): Pressable {
             $selected = $index + 1 === $this->selected;
             $label = Text::make($route->label)->style(new Style(
@@ -213,9 +214,10 @@ final class DrawerNavigator implements Renderable, Restorable
             )))
                 ->onPress(fn (): bool => $this->navigate($route->name))
                 ->style(new Style(
-                    minHeight: 48.0,
-                    paddingHorizontal: 16.0,
-                    borderRadius: 4.0,
+                    minHeight: 44.0,
+                    paddingLeft: $grouped ? 24.0 : 16.0,
+                    paddingRight: 16.0,
+                    borderRadius: 0.0,
                     backgroundColor: $selected
                         ? $this->activeBackgroundColor
                         : null,
@@ -260,10 +262,10 @@ final class DrawerNavigator implements Renderable, Restorable
             )
                 ->onPress(fn (): bool => $this->toggleGroup($group))
                 ->style(new Style(
-                    minHeight: 44.0,
+                    minHeight: 40.0,
                     paddingHorizontal: 16.0,
-                    marginTop: 4.0,
-                    borderRadius: 4.0,
+                    marginTop: 0.0,
+                    borderRadius: 0.0,
                     justifyContent: \Pam\Native\Justify::Center,
                 ))
                 ->accessibilityRole(AccessibilityRole::Button)
@@ -272,17 +274,14 @@ final class DrawerNavigator implements Renderable, Restorable
                 continue;
             }
             foreach ($groupRoutes as [$route, $index]) {
-                $items[] = $routeItem($route, $index)->style(new Style(
-                    marginLeft: 8.0,
-                    paddingLeft: 12.0,
-                ));
+                $items[] = $routeItem($route, $index, true);
             }
         }
         $defaultDrawer = SafeAreaView::make(
             ScrollView::make(
                 Column::make(...$items)->style(new Style(
-                    padding: 8.0,
-                    gap: 4.0,
+                    paddingVertical: 8.0,
+                    gap: 0.0,
                     widthPercent: 100.0,
                 )),
             )->style(new Style(

@@ -221,10 +221,12 @@ public struct RuntimeFrameMetrics {
 public final class PamRuntime {
     public typealias ReportError = (String) -> Void
     public typealias FrameCallback = (RuntimeFrameMetrics) -> Void
+    public typealias DiagnosticCallback = (RuntimeDiagnostic) -> Void
 
     private var renderer: PamRenderer!
     private let reportError: ReportError
     private let onFrameCommitted: FrameCallback
+    private let onDiagnostic: DiagnosticCallback
     private let modules = NativeModuleRegistry()
 
     private let stateLock = NSLock()
@@ -248,20 +250,38 @@ public final class PamRuntime {
 
     private var displayLink: CADisplayLink?
     private var displayLinkTarget: PamRuntimeDisplayLinkTarget?
+    private var lifecycleObservers: [NSObjectProtocol] = []
+    private var runtimeEntry: String?
+    private var recoveryAttempts = 0
+    private var recoveryWorkItem: DispatchWorkItem?
 
     public init(
         hostView: UIView,
         reportError: @escaping ReportError,
         onFrameCommitted: @escaping FrameCallback = { _ in },
+        onDiagnostic: @escaping DiagnosticCallback = { _ in },
     ) {
         self.reportError = reportError
         self.onFrameCommitted = onFrameCommitted
+        self.onDiagnostic = onDiagnostic
         self.renderer = PamRenderer(hostView: hostView) { [weak self] nodeId, kind, payload in
             self?.dispatchEvent(nodeId, kind: kind, payload: payload)
         }
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)
         displayLinkTarget = target
+        lifecycleObservers = [
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in self?.renderer.setApplicationActive(true) },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in self?.renderer.setApplicationActive(false) },
+        ]
     }
 
     deinit {
@@ -282,6 +302,7 @@ public final class PamRuntime {
             reportError("Cannot start Pam Native: invalid entry path")
             return
         }
+        runtimeEntry = normalizedEntry
 
         let stateDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             .map { $0.appendingPathComponent("pam/state").path } ?? NSTemporaryDirectory().appending("pam/state")
@@ -355,6 +376,7 @@ public final class PamRuntime {
     }
 
     public func dispatchLifecycle(kind: Int, payload: Data = Data()) {
+        reportDiagnostic(RuntimeDiagnostic(kind: .lifecycle, label: "event \(kind)"))
         dispatchEvent(0, kind: kind, payload: payload)
     }
 
@@ -405,6 +427,8 @@ public final class PamRuntime {
     }
 
     public func close() {
+        recoveryWorkItem?.cancel()
+        recoveryWorkItem = nil
         stateLock.lock()
         if closed {
             stateLock.unlock()
@@ -430,6 +454,8 @@ public final class PamRuntime {
 
         modules.close()
         renderer.close()
+        lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        lifecycleObservers.removeAll()
         displayLinkTarget = nil
 
         if currentHandle != 0 {
@@ -528,8 +554,15 @@ public final class PamRuntime {
         method: String,
         payload: Data,
     ) {
+        let started = DispatchTime.now().uptimeNanoseconds
         modules.invoke(module: module, method: method, payload: payload) { [weak self] status, result in
             guard let self else { return }
+            self.reportDiagnostic(RuntimeDiagnostic(
+                kind: .moduleCall,
+                label: "\(module).\(method)",
+                durationNanos: Int64(DispatchTime.now().uptimeNanoseconds - started),
+                failed: status == .failure
+            ))
             let active = self.currentHandle()
             guard active != 0 && !self.closed else {
                 return
@@ -551,11 +584,18 @@ public final class PamRuntime {
         operation: Int,
         payload: Data,
     ) {
+        let started = DispatchTime.now().uptimeNanoseconds
         modules.invoke(
             operationValue: operation,
             payload: payload,
         ) { [weak self] status, result in
             guard let self else { return }
+            self.reportDiagnostic(RuntimeDiagnostic(
+                kind: .moduleCall,
+                label: "system.operation.\(operation)",
+                durationNanos: Int64(DispatchTime.now().uptimeNanoseconds - started),
+                failed: status == .failure
+            ))
             let active = self.currentHandle()
             guard active != 0 && !self.closed else {
                 return
@@ -573,14 +613,43 @@ public final class PamRuntime {
     }
 
     fileprivate func onNativeError(_ message: String) {
-        DispatchQueue.main.async { [reportError] in
-            reportError(message)
+        reportDiagnostic(RuntimeDiagnostic(
+            kind: .error,
+            label: String(message.prefix(120)),
+            failed: true
+        ))
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+#if DEBUG
+            self.reportError(message)
+#else
+            guard
+                let entry = self.runtimeEntry,
+                self.recoveryAttempts < 3,
+                self.recoveryWorkItem == nil
+            else {
+                self.reportError(message)
+                return
+            }
+            self.recoveryAttempts += 1
+            let delay = min(0.25 * pow(2.0, Double(self.recoveryAttempts - 1)), 2.0)
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.recoveryWorkItem = nil
+                self.reload(entry: entry)
+            }
+            self.recoveryWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+#endif
         }
     }
 
     fileprivate func dispatchEvent(_ nodeId: Int64, kind: Int, payload: Data = Data()) {
         guard payload.count <= MAX_PAYLOAD_BYTES else {
             return
+        }
+        if kind >= 42 {
+            reportDiagnostic(RuntimeDiagnostic(kind: .event, label: "node \(nodeId) · event \(kind)"))
         }
 
         if coalescedEvents.contains(kind) {
@@ -624,6 +693,12 @@ public final class PamRuntime {
         }
         pendingImmediateEvents.append(PendingEvent(nodeId: nodeId, kind: kind, payload: payload))
         stateLock.unlock()
+    }
+
+    private func reportDiagnostic(_ diagnostic: RuntimeDiagnostic) {
+        DispatchQueue.main.async { [onDiagnostic] in
+            onDiagnostic(diagnostic)
+        }
     }
 
     fileprivate func didTick() {
@@ -706,6 +781,9 @@ public final class PamRuntime {
         )
 
         onFrameCommitted(metrics)
+        recoveryAttempts = 0
+        recoveryWorkItem?.cancel()
+        recoveryWorkItem = nil
 
         for batch in toProcess {
             releaseBatch(batch.handle)

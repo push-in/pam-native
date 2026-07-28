@@ -21,6 +21,7 @@ internal data class PamPressPointer(
 )
 
 internal class PamPressable(context: Context) : PamContainer(context) {
+    private val gestureRecognizer = PamGestureRecognizer(this)
     private var onPress: (() -> Unit)? = null
     private var localOnPress: (() -> Unit)? = null
     private var onLongPress: (() -> Unit)? = null
@@ -116,21 +117,26 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         this.onPressIn = onPressIn
         this.onPressOut = onPressOut
         this.onPressMove = onPressMove
-        isClickable = onPress != null || onPressIn != null || onPressOut != null ||
-            onPressMove != null || onLongPress != null
         isLongClickable = onLongPress != null
-        if (!isClickable) {
-            cancelGesture(emitOut = false)
-        }
+        updateClickable()
     }
 
     fun setLocalOnPress(callback: (() -> Unit)?) {
         localOnPress = callback
-        isClickable = callback != null || onPress != null || onPressIn != null ||
-            onPressOut != null || onPressMove != null || onLongPress != null
-        if (!isClickable) {
-            cancelGesture(emitOut = false)
-        }
+        updateClickable()
+    }
+
+    fun configureGesture(
+        config: PamGestureConfig?,
+        callback: ((PamGesturePayload) -> Unit)?,
+    ) {
+        gestureRecognizer.configure(config, callback)
+        updateClickable()
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        gestureRecognizer.onTouch(event)
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -171,9 +177,11 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (super.onInterceptTouchEvent(event)) return true
-        if (!isEnabled || !isClickable || event.actionMasked != MotionEvent.ACTION_DOWN) {
+        if (!isEnabled || !isClickable) {
             return false
         }
+        if (gestureRecognizer.ownsTouchStream()) return true
+        if (event.actionMasked != MotionEvent.ACTION_DOWN) return false
 
         // Images and decorative containers may carry a composed ancestor callback,
         // but the Pressable must own the gesture so its node id is dispatched.
@@ -196,6 +204,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     override fun onDetachedFromWindow() {
+        gestureRecognizer.cancel()
         cancelGesture(emitOut = false)
         super.onDetachedFromWindow()
     }
@@ -335,6 +344,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         eligibleForPress = false
         longPressDispatched = false
         activePointerId = MotionEvent.INVALID_POINTER_ID
+    }
+
+    private fun updateClickable() {
+        isClickable = localOnPress != null || onPress != null || onPressIn != null ||
+            onPressOut != null || onPressMove != null || onLongPress != null ||
+            gestureRecognizer.isEnabled()
+        if (!isClickable) {
+            cancelGesture(emitOut = false)
+        }
     }
 
     private fun scheduleMove(pointer: PamPressPointer) {

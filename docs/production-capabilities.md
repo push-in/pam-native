@@ -1,0 +1,88 @@
+# Production capabilities
+
+This guide covers the production layer added on top of the native capability
+APIs. Every coded status/type is an integer-backed PHP enum.
+
+The [capability cookbook](examples.md) includes complete permission,
+notification, push, observation and cleanup recipes.
+
+## Permissions
+
+Use `PermissionKind` instead of platform permission strings:
+
+```php
+Permissions::status(PermissionKind::Camera, function ($decision): void {
+    if (!$decision->granted() && $decision->canAskAgain) {
+        Permissions::requestKind(PermissionKind::Camera, fn ($result) => null);
+    }
+});
+```
+
+`PermissionStatus` distinguishes granted, denied, blocked and limited access.
+For blocked access, call `Permissions::openSettings()` after explaining why the
+application needs it.
+
+iOS hosts add the usage-description keys required by enabled capabilities:
+`NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
+`NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`.
+
+## Push delivery, opening and deep links
+
+```php
+$subscription = PushNotifications::listenAndRoute($navigator, $onMessage);
+```
+
+Android Firebase services forward data messages through
+`PamPushNotifications.reportReceived(...)`; Pam notification-opening intents
+are forwarded automatically. Custom intents can call `reportOpened(...)`.
+
+iOS notification delegates forward foreground delivery with
+`PamPushNotifications.didReceive(notification:)` and opening with
+`PamPushNotifications.didOpen(response:)`.
+
+Queued delivery uses a bounded 64-event buffer and 256 KiB data payload.
+`listenAndRoute()` only opens deep links for numeric event `Opened = 2`.
+
+## Continuous observation
+
+```php
+$sensor = Sensors::watch(SensorType::Accelerometer, $onReading, 50);
+$device = DeviceStatus::watch($onDeviceStatus, 1_000);
+
+Sensors::unwatch($sensor);
+DeviceStatus::unwatch($device);
+```
+
+The bridge is pull-driven with a four-value native queue. If PHP is busy, old
+samples are discarded in favor of recent state instead of growing memory.
+
+## Lifecycle and recovery
+
+Android pauses WebView timers and active media from `Activity.onPause()` and
+resumes only media that was playing. iOS observes active/inactive notifications
+and applies the same player behavior.
+
+Components implementing `Restorable` persist on lifecycle transitions.
+`Navigator`, `TabNavigator` and `DrawerNavigator` restore their stacks,
+selected destinations and parameters. Picker/camera operations cancelled by
+process death should be restarted from restored product state.
+
+## DevTools
+
+The overlay contains a bounded capability timeline with module latency,
+failure state, semantic events, lifecycle changes and runtime errors. On iOS,
+pass `onDiagnostic: overlay.record` to `PamRuntime`.
+
+The panel uses system monospaced text, accessible high contrast, screen-reader
+output and no decorative motion.
+
+## Security limits
+
+- `WebView::allowedHosts()` applies an exact main-frame host allowlist.
+- WebView roots reject executable/custom schemes; inline HTML remains explicit.
+- WebView main-frame navigation is cancelled after a 30-second timeout.
+- File paths stay canonicalized inside `pam-files`.
+- Imports stop while streaming at 64 MiB; bridge reads/writes remain 1 MiB.
+- SQLite queries stop at 1,000 rows or 256 columns; paginate larger results.
+- Push queues, identifiers, text, deep links and JSON data have bounded sizes.
+- Runtime event payloads remain bounded to one MiB.

@@ -6,6 +6,8 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.provider.Settings
 import android.view.View
+import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
@@ -18,6 +20,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingObserver: ViewTreeObserver? = null
+    private var gestureEnabled = true
+    private var gestureEdgeWidth = 24f
+    private var gestureThreshold = 0.35f
+    private var onGesturePop: (() -> Unit)? = null
+    private var gestureTracking = false
+    private var gestureStartX = 0f
+    private var velocityTracker: VelocityTracker? = null
 
     init {
         clipChildren = true
@@ -45,10 +54,125 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         scheduleTransition()
     }
 
+    fun setGestureNavigation(
+        enabled: Boolean,
+        edgeWidth: Float,
+        threshold: Float,
+        onPop: (() -> Unit)?,
+    ) {
+        gestureEnabled = enabled
+        gestureEdgeWidth = edgeWidth.coerceIn(8f, 96f)
+        gestureThreshold = threshold.coerceIn(0.1f, 0.9f)
+        onGesturePop = onPop
+    }
+
+    override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+        if (!gestureEnabled || childCount < 2 || running != null) return false
+        val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val edge = dp(gestureEdgeWidth)
+                val withinEdge = if (rtl) event.x >= width - edge else event.x <= edge
+                if (!withinEdge) return false
+                gestureStartX = event.x
+                gestureTracking = true
+                velocityTracker?.recycle()
+                velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
+                prepareGesture()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!gestureTracking) return false
+                val distance = if (rtl) gestureStartX - event.x else event.x - gestureStartX
+                if (distance > dp(6f)) return true
+            }
+        }
+        return false
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!gestureTracking) return false
+        velocityTracker?.addMovement(event)
+        val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
+        val distance = (if (rtl) gestureStartX - event.x else event.x - gestureStartX)
+            .coerceAtLeast(0f)
+        val progress = (distance / width.coerceAtLeast(1)).coerceIn(0f, 1f)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> applyGestureProgress(progress, rtl)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                velocityTracker?.computeCurrentVelocity(1_000)
+                val rawVelocity = velocityTracker?.xVelocity ?: 0f
+                val velocity = if (rtl) -rawVelocity else rawVelocity
+                val complete = event.actionMasked == MotionEvent.ACTION_UP &&
+                    (progress >= gestureThreshold || velocity >= dp(700f))
+                settleGesture(progress, complete, rtl)
+                gestureTracking = false
+                velocityTracker?.recycle()
+                velocityTracker = null
+                if (event.actionMasked == MotionEvent.ACTION_UP && progress == 0f) {
+                    performClick()
+                }
+            }
+        }
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    private fun prepareGesture() {
+        val incoming = getChildAt(childCount - 2)
+        val outgoing = getChildAt(childCount - 1)
+        incoming.visibility = View.VISIBLE
+        outgoing.visibility = View.VISIBLE
+    }
+
+    private fun applyGestureProgress(progress: Float, rtl: Boolean) {
+        val incoming = getChildAt(childCount - 2)
+        val outgoing = getChildAt(childCount - 1)
+        val sign = if (rtl) -1f else 1f
+        outgoing.translationX = sign * width * progress
+        incoming.translationX = -sign * width * 0.28f * (1f - progress)
+        incoming.alpha = 0.82f + 0.18f * progress
+    }
+
+    private fun settleGesture(start: Float, complete: Boolean, rtl: Boolean) {
+        ValueAnimator.ofFloat(start, if (complete) 1f else 0f).apply {
+            duration = ((if (complete) 1f - start else start) * 220)
+                .toLong()
+                .coerceAtLeast(80)
+            interpolator = DecelerateInterpolator(1.75f)
+            addUpdateListener { applyGestureProgress(it.animatedValue as Float, rtl) }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (childCount < 2) return
+                    val incoming = getChildAt(childCount - 2)
+                    val outgoing = getChildAt(childCount - 1)
+                    reset(incoming)
+                    reset(outgoing)
+                    if (complete) {
+                        outgoing.visibility = View.INVISIBLE
+                        incoming.visibility = View.VISIBLE
+                        onGesturePop?.invoke()
+                    } else {
+                        incoming.visibility = View.INVISIBLE
+                        outgoing.visibility = View.VISIBLE
+                    }
+                }
+            })
+            start()
+        }
+    }
+
+    private fun dp(value: Float): Float = value * resources.displayMetrics.density
+
     override fun onDetachedFromWindow() {
         clearPendingTransition()
         running?.cancel()
         running = null
+        velocityTracker?.recycle()
+        velocityTracker = null
         super.onDetachedFromWindow()
     }
 

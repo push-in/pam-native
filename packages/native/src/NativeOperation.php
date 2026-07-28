@@ -21,4 +21,8 @@ enum NativeOperation: int
     case PermissionRequest = 13;
     case CloseApp = 14;
     case Haptic = 15;
+    case ClipboardSetText = 16;
+    case ClipboardGetText = 17;
+    case ClipboardHasText = 18;
+    case SensorRead = 19;
 }

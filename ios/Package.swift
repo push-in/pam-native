@@ -14,7 +14,8 @@ let package = Package(
         .target(
             name: "PamNative",
             path: "Sources/PamNative",
-            exclude: ["Bridge"]
+            exclude: ["Bridge"],
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .target(
             name: "PamNativeTestRuntimeShims",

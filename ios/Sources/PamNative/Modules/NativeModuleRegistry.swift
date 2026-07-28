@@ -4,12 +4,26 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let http = HttpModule()
     private let storage = StorageModule()
     private let system = SystemModule()
+    private let sqlite = SQLiteModule()
+    private let files = FilesModule()
+    private let notifications = NotificationsModule()
+    private let background = BackgroundModule()
+    private let device = DeviceModule()
+    private let permissions = PermissionsModule()
+    private let sensors = SensorsModule()
     private let modules: [String: NativeModule]
 
     public init() {
         var values: [String: NativeModule] = [
             "http": http,
             "storage": storage,
+            "sqlite": sqlite,
+            "files": files,
+            "notifications": notifications,
+            "background": background,
+            "device": device,
+            "permissions": permissions,
+            "sensors": sensors,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
         self.modules = values
@@ -38,6 +52,10 @@ public final class NativeModuleRegistry: @unchecked Sendable {
              .permissionCheck,
              .permissionRequest,
              .haptic,
+             .clipboardSetText,
+             .clipboardGetText,
+             .clipboardHasText,
+             .sensorRead,
              .closeApp:
             system.invoke(operation: NativeOperation(rawValue: operationValue)!, payload: payload, completion: completion)
         case .none:

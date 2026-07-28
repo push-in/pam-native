@@ -3,10 +3,16 @@ package dev.pam.nativeapp.modules
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -20,10 +26,14 @@ import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.Collections
 
 internal class SystemModule(private val context: Context) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
     private val closed = AtomicBoolean()
+    private val sensorListeners = Collections.synchronizedSet(
+        mutableSetOf<SensorEventListener>(),
+    )
 
     fun invoke(
         operation: NativeOperation,
@@ -48,6 +58,10 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 NativeOperation.PERMISSION_REQUEST -> requestPermission(payload, completion)
                 NativeOperation.CLOSE_APP -> closeApp(completion)
                 NativeOperation.HAPTIC -> haptic(payload, completion)
+                NativeOperation.CLIPBOARD_SET_TEXT -> clipboardSetText(payload, completion)
+                NativeOperation.CLIPBOARD_GET_TEXT -> clipboardGetText(completion)
+                NativeOperation.CLIPBOARD_HAS_TEXT -> clipboardHasText(completion)
+                NativeOperation.SENSOR_READ -> sensorRead(payload, completion)
                 else -> error("Operation ${operation.name} is not a system operation")
             }
         }.onFailure { error ->
@@ -197,6 +211,108 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         completion.success()
     }
 
+    private fun clipboardSetText(payload: ByteArray, completion: ModuleCompletion) {
+        val text = WireMap.decode(payload).text("text")
+        require(text.toByteArray(Charsets.UTF_8).size <= MAX_CLIPBOARD_BYTES) {
+            "Clipboard text exceeds one megabyte"
+        }
+        main.post {
+            clipboard().setPrimaryClip(ClipData.newPlainText("", text))
+            completion.success()
+        }
+    }
+
+    private fun clipboardGetText(completion: ModuleCompletion) {
+        main.post {
+            val text = clipboard().primaryClip
+                ?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)
+                ?.coerceToText(context)
+                ?.toString()
+                ?.takeIf { it.toByteArray(Charsets.UTF_8).size <= MAX_CLIPBOARD_BYTES }
+                .orEmpty()
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf("text" to WireValue.Text(text))),
+            )
+        }
+    }
+
+    private fun clipboardHasText(completion: ModuleCompletion) {
+        main.post {
+            val hasText = clipboard().hasPrimaryClip() &&
+                (clipboard().primaryClipDescription?.hasMimeType("text/*") == true)
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf("hasText" to WireValue.Flag(hasText))),
+            )
+        }
+    }
+
+    private fun clipboard(): ClipboardManager =
+        context.getSystemService(ClipboardManager::class.java)
+
+    private fun sensorRead(payload: ByteArray, completion: ModuleCompletion) {
+        val values = WireMap.decode(payload)
+        val type = values.integer("type", 0L).toInt()
+        val timeoutMs = values.integer("timeoutMs", 2_000L).coerceIn(100L, 10_000L)
+        val platformType = when (type) {
+            1 -> Sensor.TYPE_ACCELEROMETER
+            2 -> Sensor.TYPE_GYROSCOPE
+            3 -> Sensor.TYPE_MAGNETIC_FIELD
+            4 -> Sensor.TYPE_ROTATION_VECTOR
+            else -> error("Unknown sensor type $type")
+        }
+        val manager = context.getSystemService(SensorManager::class.java)
+        val sensor = manager.getDefaultSensor(platformType)
+            ?: error("Requested sensor is unavailable")
+        val completed = AtomicBoolean()
+        lateinit var listener: SensorEventListener
+        val timeout = Runnable {
+            if (completed.compareAndSet(false, true)) {
+                manager.unregisterListener(listener)
+                sensorListeners.remove(listener)
+                completion.complete(
+                    ModuleResultStatus.FAILURE,
+                    "Sensor read timed out".toByteArray(),
+                )
+            }
+        }
+        listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                if (!completed.compareAndSet(false, true)) return
+                manager.unregisterListener(this)
+                sensorListeners.remove(this)
+                main.removeCallbacks(timeout)
+                completion.complete(
+                    ModuleResultStatus.SUCCESS,
+                    WireMap.encode(
+                        mapOf(
+                            "x" to WireValue.Decimal(event.values.getOrElse(0) { 0f }.toDouble()),
+                            "y" to WireValue.Decimal(event.values.getOrElse(1) { 0f }.toDouble()),
+                            "z" to WireValue.Decimal(event.values.getOrElse(2) { 0f }.toDouble()),
+                            "timestamp" to WireValue.Integer(event.timestamp / 1_000_000L),
+                        ),
+                    ),
+                )
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+        }
+        sensorListeners += listener
+        main.post {
+            if (!manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_UI)) {
+                sensorListeners.remove(listener)
+                completion.complete(
+                    ModuleResultStatus.FAILURE,
+                    "Could not start sensor".toByteArray(),
+                )
+                return@post
+            }
+            main.postDelayed(timeout, timeoutMs)
+        }
+    }
+
     private fun checkPermission(payload: ByteArray, completion: ModuleCompletion) {
         val permission = permission(payload)
         val granted = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
@@ -254,10 +370,14 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        val manager = context.getSystemService(SensorManager::class.java)
+        sensorListeners.toList().forEach(manager::unregisterListener)
+        sensorListeners.clear()
         main.removeCallbacksAndMessages(null)
     }
 
     private companion object {
+        const val MAX_CLIPBOARD_BYTES = 1_048_576
         const val APPEARANCE_LIGHT = 1
         const val APPEARANCE_DARK = 2
         const val APP_STATE_ACTIVE = 1

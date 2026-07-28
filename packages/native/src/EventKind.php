@@ -47,4 +47,27 @@ enum EventKind: int
     case TouchStart = 39;
     case TouchMove = 40;
     case TouchEnd = 41;
+    case GestureBegin = 42;
+    case GestureUpdate = 43;
+    case GestureEnd = 44;
+    case GestureCancel = 45;
+    case BottomSheetChange = 46;
+    case BottomSheetDismiss = 47;
+    case WebViewLoad = 48;
+    case WebViewError = 49;
+    case WebViewMessage = 50;
+    case MediaReady = 51;
+    case MediaProgress = 52;
+    case MediaEnd = 53;
+    case MediaError = 54;
+    case DragStart = 55;
+    case DragEnd = 56;
+    case Drop = 57;
+    case MenuAction = 58;
+    case NavigationGesturePop = 59;
+    case AnimationComplete = 60;
+    case MediaCacheHit = 61;
+    case MediaCacheMiss = 62;
+    case MediaCacheProgress = 63;
+    case MediaCacheReady = 64;
 }

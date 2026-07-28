@@ -893,7 +893,7 @@ final class PamRefreshContainer: UIView {
     }
 }
 
-final class PamModalHost: UIView {
+final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private enum Presentation {
         static let dialog = 2
         static let sheet = 3
@@ -913,16 +913,28 @@ final class PamModalHost: UIView {
     private let backdropView = UIControl()
     private let contentHost = UIView()
     private let contentClip = UIView()
+    private let sheetHandle = UIView()
     private let orientationObserver = NotificationCenter.default
+    private var contentHeightConstraint: NSLayoutConstraint!
 
     private var showScheduled = false
     private var desiredVisible = true
     private var currentlyVisible = false
+    private var visibilityGeneration = 0
     private var presentation = Presentation.dialog
     private var animationType = Animation.none
     private var backdropColor = UIColor.black.withAlphaComponent(0.32)
     private var transparent = false
     private var allowSwipeDismissal = false
+    private var bottomSheetSnapPoints: [CGFloat] = [0.5, 0.9]
+    private var bottomSheetIndex = 0
+    private var bottomSheetDismissible = true
+    private var bottomSheetBackdropDismiss = true
+    private var bottomSheetHandleVisible = true
+    private var bottomSheetDragEnabled = true
+    private var bottomSheetCornerRadius: CGFloat = 20
+    private var onBottomSheetChange: ((Int, CGFloat) -> Void)?
+    private var onBottomSheetDismiss: (() -> Void)?
     private var onRequestClose: (() -> Void)?
     private var onShow: (() -> Void)?
     private var onDismiss: (() -> Void)?
@@ -958,14 +970,21 @@ final class PamModalHost: UIView {
         contentClip.backgroundColor = .clear
         contentClip.addSubview(contentHost)
         contentHost.translatesAutoresizingMaskIntoConstraints = false
+        sheetHandle.translatesAutoresizingMaskIntoConstraints = false
+        sheetHandle.backgroundColor = UIColor.secondaryLabel.withAlphaComponent(0.45)
+        sheetHandle.layer.cornerRadius = 2
+        contentClip.addSubview(sheetHandle)
 
         addSubview(backdropView)
         addSubview(contentClip)
 
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onModalPan(_:)))
         pan.maximumNumberOfTouches = 1
+        pan.cancelsTouchesInView = false
+        pan.delegate = self
         contentClip.addGestureRecognizer(pan)
 
+        contentHeightConstraint = contentHost.heightAnchor.constraint(equalTo: contentClip.heightAnchor)
         NSLayoutConstraint.activate([
             backdropView.leadingAnchor.constraint(equalTo: leadingAnchor),
             backdropView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -979,8 +998,12 @@ final class PamModalHost: UIView {
 
             contentHost.leadingAnchor.constraint(equalTo: contentClip.leadingAnchor),
             contentHost.trailingAnchor.constraint(equalTo: contentClip.trailingAnchor),
-            contentHost.topAnchor.constraint(equalTo: contentClip.topAnchor),
             contentHost.bottomAnchor.constraint(equalTo: contentClip.bottomAnchor),
+            contentHeightConstraint,
+            sheetHandle.widthAnchor.constraint(equalToConstant: 36),
+            sheetHandle.heightAnchor.constraint(equalToConstant: 4),
+            sheetHandle.centerXAnchor.constraint(equalTo: contentHost.centerXAnchor),
+            sheetHandle.topAnchor.constraint(equalTo: contentHost.topAnchor, constant: 10),
         ])
 
         isUserInteractionEnabled = true
@@ -1007,6 +1030,7 @@ final class PamModalHost: UIView {
     }
 
     func setVisible(_ value: Bool) {
+        visibilityGeneration += 1
         desiredVisible = value
         scheduleUpdate()
     }
@@ -1032,6 +1056,41 @@ final class PamModalHost: UIView {
 
     func setAllowSwipeDismissal(_ value: Bool) {
         allowSwipeDismissal = value
+    }
+
+    func setBottomSheetSnapPoints(_ values: [CGFloat]) {
+        guard !values.isEmpty else { return }
+        bottomSheetSnapPoints = Array(values.map { min(max($0, 0.05), 1) }.sorted().prefix(16))
+        bottomSheetIndex = min(bottomSheetIndex, bottomSheetSnapPoints.count - 1)
+        updatePresentationLayout()
+    }
+
+    func setBottomSheetIndex(_ value: Int) {
+        bottomSheetIndex = min(max(value, 0), bottomSheetSnapPoints.count - 1)
+        updatePresentationLayout()
+    }
+
+    func setBottomSheetDismissible(_ value: Bool) { bottomSheetDismissible = value }
+    func setBottomSheetBackdropDismiss(_ value: Bool) { bottomSheetBackdropDismiss = value }
+    func setBottomSheetDragEnabled(_ value: Bool) { bottomSheetDragEnabled = value }
+    func setBottomSheetKeyboardBehavior(_: Int) {}
+
+    func setBottomSheetHandleVisible(_ value: Bool) {
+        bottomSheetHandleVisible = value
+        updatePresentationLayout()
+    }
+
+    func setBottomSheetCornerRadius(_ value: CGFloat) {
+        bottomSheetCornerRadius = min(max(value, 0), 128)
+        updatePresentationLayout()
+    }
+
+    func setBottomSheetCallbacks(
+        onChange: ((Int, CGFloat) -> Void)?,
+        onDismiss: (() -> Void)?,
+    ) {
+        onBottomSheetChange = onChange
+        onBottomSheetDismiss = onDismiss
     }
 
     func setHardwareAccelerated(_: Bool) {}
@@ -1071,7 +1130,16 @@ final class PamModalHost: UIView {
     }
 
     private func present() {
-        guard !currentlyVisible else { return }
+        backdropView.layer.removeAllAnimations()
+        contentClip.layer.removeAllAnimations()
+        if currentlyVisible {
+            isHidden = false
+            accessibilityViewIsModal = true
+            backdropView.alpha = 1
+            contentClip.alpha = 1
+            contentClip.transform = .identity
+            return
+        }
         previousFocus = window?.pamFirstResponder()
         isHidden = false
         currentlyVisible = true
@@ -1124,8 +1192,13 @@ final class PamModalHost: UIView {
             return
         }
         let animationDuration: TimeInterval = 0.125
+        let generation = visibilityGeneration
 
         let completion = {
+            guard generation == self.visibilityGeneration, !self.desiredVisible else {
+                self.present()
+                return
+            }
             self.currentlyVisible = false
             self.isHidden = true
             self.accessibilityViewIsModal = false
@@ -1173,15 +1246,16 @@ final class PamModalHost: UIView {
     }
 
     func requestClose() {
+        guard presentation != Presentation.sheet || bottomSheetDismissible else { return }
+        setVisible(false)
         if let onRequestClose {
             onRequestClose()
             return
         }
-        desiredVisible = false
-        dismiss(notify: true)
     }
 
     @objc private func onBackdropTap() {
+        guard presentation != Presentation.sheet || bottomSheetBackdropDismiss else { return }
         requestClose()
     }
 
@@ -1190,12 +1264,75 @@ final class PamModalHost: UIView {
     }
 
     @objc private func onModalPan(_ gesture: UIPanGestureRecognizer) {
-        guard allowSwipeDismissal, currentlyVisible else { return }
-        if gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed {
-            let velocity = gesture.velocity(in: self)
-            if velocity.y > 560 {
-                requestClose()
+        guard currentlyVisible else { return }
+        if presentation == Presentation.sheet, bottomSheetDragEnabled {
+            let translation = gesture.translation(in: self).y
+            switch gesture.state {
+            case .changed:
+                let minimum = -(bounds.height - contentHost.bounds.height)
+                let bounded = max(translation, minimum)
+                contentHost.transform = CGAffineTransform(translationX: 0, y: bounded)
+                sheetHandle.transform = contentHost.transform
+            case .ended:
+                settleBottomSheet(
+                    translation: translation,
+                    velocity: gesture.velocity(in: self).y
+                )
+            case .cancelled, .failed:
+                resetBottomSheetTransform()
+            default:
+                break
             }
+            return
+        }
+        if allowSwipeDismissal,
+           gesture.state == .ended || gesture.state == .cancelled || gesture.state == .failed,
+           gesture.velocity(in: self).y > 560 {
+            requestClose()
+        }
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard presentation == Presentation.sheet,
+              let pan = gestureRecognizer as? UIPanGestureRecognizer else {
+            return allowSwipeDismissal
+        }
+        let location = pan.location(in: self)
+        let handleBottom = contentHost.frame.minY + 48
+        return location.y <= handleBottom || pan.velocity(in: self).y > 0
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        presentation == Presentation.sheet
+    }
+
+    private func settleBottomSheet(translation: CGFloat, velocity: CGFloat) {
+        let height = max(bounds.height, 1)
+        let current = bottomSheetSnapPoints[bottomSheetIndex]
+        let projected = current - (translation + velocity * 0.12) / height
+        if bottomSheetDismissible,
+           bottomSheetIndex == 0,
+           projected < bottomSheetSnapPoints[0] * 0.55 {
+            onBottomSheetDismiss?()
+            requestClose()
+            return
+        }
+        bottomSheetIndex = bottomSheetSnapPoints.indices.min {
+            abs(bottomSheetSnapPoints[$0] - projected) <
+                abs(bottomSheetSnapPoints[$1] - projected)
+        } ?? bottomSheetIndex
+        updatePresentationLayout()
+        resetBottomSheetTransform()
+        onBottomSheetChange?(bottomSheetIndex, bottomSheetSnapPoints[bottomSheetIndex])
+    }
+
+    private func resetBottomSheetTransform() {
+        UIView.animate(withDuration: 0.18) {
+            self.contentHost.transform = .identity
+            self.sheetHandle.transform = .identity
         }
     }
 
@@ -1205,12 +1342,24 @@ final class PamModalHost: UIView {
 
     private func updatePresentationLayout() {
         if presentation == Presentation.sheet {
-            contentHost.layer.cornerRadius = 0
+            contentHeightConstraint.isActive = false
+            contentHeightConstraint = contentHost.heightAnchor.constraint(
+                equalTo: contentClip.heightAnchor,
+                multiplier: bottomSheetSnapPoints[bottomSheetIndex]
+            )
+            contentHeightConstraint.isActive = true
+            contentHost.layer.cornerRadius = bottomSheetCornerRadius
             contentHost.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
             contentHost.clipsToBounds = true
+            sheetHandle.isHidden = !bottomSheetHandleVisible
+            contentClip.bringSubviewToFront(sheetHandle)
         } else {
+            contentHeightConstraint.isActive = false
+            contentHeightConstraint = contentHost.heightAnchor.constraint(equalTo: contentClip.heightAnchor)
+            contentHeightConstraint.isActive = true
             contentHost.layer.cornerRadius = 0
             contentHost.clipsToBounds = false
+            sheetHandle.isHidden = true
         }
     }
 
@@ -1261,30 +1410,40 @@ final class ImageLoadContext {
     let generation: Int
     let source: String
     weak var imageView: UIImageView?
-    weak var task: URLSessionDownloadTask?
+    weak var task: URLSessionTask?
+    let progressive: Bool
+    var receivedData = Data()
     var onStart: ((ImageLoadContext) -> Void)?
     var onProgress: ((ImageLoadContext) -> Void)?
     var onSuccess: ((ImageLoadContext, Data) -> Void)?
+    var onPartial: ((ImageLoadContext, Data) -> Void)?
     var onError: ((ImageLoadContext, String) -> Void)?
     var onEnd: ((ImageLoadContext) -> Void)?
     var progressLoaded: Int64 = 0
     var progressTotal: Int64 = 0
     var progressScheduled = false
 
-    init(nodeId: Int64, generation: Int, source: String, imageView: UIImageView) {
+    init(
+        nodeId: Int64,
+        generation: Int,
+        source: String,
+        imageView: UIImageView,
+        progressive: Bool
+    ) {
         self.nodeId = nodeId
         self.generation = generation
         self.source = source
         self.imageView = imageView
+        self.progressive = progressive
     }
 }
 
-final class ImageLoadSessionDelegate: NSObject, URLSessionDownloadDelegate {
+final class ImageLoadSessionDelegate: NSObject, URLSessionDataDelegate {
     weak var renderer: PamRenderer?
     private var active = [Int: ImageLoadContext]()
     private let lock = NSLock()
 
-    func register(_ context: ImageLoadContext, for task: URLSessionDownloadTask) {
+    func register(_ context: ImageLoadContext, for task: URLSessionTask) {
         lock.lock()
         active[task.taskIdentifier] = context
         lock.unlock()
@@ -1299,53 +1458,51 @@ final class ImageLoadSessionDelegate: NSObject, URLSessionDownloadDelegate {
 
     func urlSession(
         _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didWriteData bytesWritten: Int64,
-        totalBytesWritten: Int64,
-        totalBytesExpectedToWrite: Int64,
+        dataTask: URLSessionDataTask,
+        didReceive response: URLResponse,
+        completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        guard let context = lookup(task: downloadTask) else {
+        guard let context = lookup(task: dataTask) else {
+            completionHandler(.cancel)
             return
         }
-        context.progressLoaded = totalBytesWritten
-        context.progressTotal = max(0, totalBytesExpectedToWrite)
-        context.onProgress?(context)
+        if let response = response as? HTTPURLResponse,
+           !(200...299).contains(response.statusCode) {
+            context.onError?(context, "Image request failed with HTTP \(response.statusCode)")
+            completionHandler(.cancel)
+            return
+        }
+        context.progressTotal = max(0, response.expectedContentLength)
+        completionHandler(.allow)
     }
 
     func urlSession(
         _ session: URLSession,
-        downloadTask: URLSessionDownloadTask,
-        didFinishDownloadingTo location: URL,
+        dataTask: URLSessionDataTask,
+        didReceive data: Data
     ) {
-        guard let context = lookup(task: downloadTask) else {
-            return
-        }
-        do {
-            let data = try Data(contentsOf: location)
-            context.onSuccess?(context, data)
-        } catch {
-            context.onError?(context, error.localizedDescription)
-        }
-        context.onEnd?(context)
-        unregister(taskIdentifier: downloadTask.taskIdentifier)
+        guard let context = lookup(task: dataTask) else { return }
+        context.receivedData.append(data)
+        context.progressLoaded = Int64(context.receivedData.count)
+        context.onProgress?(context)
+        if context.progressive { context.onPartial?(context, context.receivedData) }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        guard let downloadTask = task as? URLSessionDownloadTask,
-              let context = lookup(task: downloadTask) else {
-            return
-        }
+        guard let context = lookup(task: task) else { return }
         if let error {
             let nsError = error as NSError
             if nsError.domain != NSURLErrorDomain || nsError.code != NSURLErrorCancelled {
                 context.onError?(context, error.localizedDescription)
             }
-            context.onEnd?(context)
+        } else {
+            context.onSuccess?(context, context.receivedData)
         }
-        unregister(taskIdentifier: downloadTask.taskIdentifier)
+        context.onEnd?(context)
+        unregister(taskIdentifier: task.taskIdentifier)
     }
 
-    private func lookup(task: URLSessionDownloadTask) -> ImageLoadContext? {
+    private func lookup(task: URLSessionTask) -> ImageLoadContext? {
         lock.lock()
         defer { lock.unlock() }
         return active[task.taskIdentifier]

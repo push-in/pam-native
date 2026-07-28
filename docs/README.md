@@ -1,0 +1,25 @@
+# Pam Native documentation
+
+Every public feature added to Pam Native must include a copyable example. Start
+with the focused guide below or use the [capability cookbook](examples.md) for
+short end-to-end recipes.
+
+| Area | Guide with examples |
+| --- | --- |
+| Components, props, state, lifecycle, effects, slots, context and refs | [Component runtime](component-runtime.md) |
+| Global store, transactions, persistence, sync, undo and optimistic state | [Pam Store](store.md) |
+| Files, camera, notifications, SQLite, WebView, media, animation and device APIs | [Capability cookbook](examples.md) |
+| Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
+| Gestures and composition | [Gestures](gestures.md) |
+| Bottom sheets | [Bottom Sheet](bottom-sheet.md) |
+| Image, video and audio cache | [Native media cache](media-cache.md) |
+| Scheduler, compiler fast paths, profiling and recovery | [Runtime performance](runtime-performance.md) |
+| Native navigation | [Navigation](navigation.md) |
+| Components and tags reference | [Components](components.md) |
+| Debug overlay and diagnostics | [DevTools](devtools.md) |
+| Native/community plugins | [Plugins](plugins.md) |
+| Release process | [Releasing](releasing.md) |
+
+Examples use integer-backed enums for every coded status, type, state and
+priority. Imports are shown in the cookbook where they materially clarify a
+recipe.

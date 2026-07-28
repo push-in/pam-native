@@ -7,10 +7,15 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.Outline
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
+import android.view.VelocityTracker
 import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
@@ -19,7 +24,8 @@ import android.widget.FrameLayout
 import java.lang.ref.WeakReference
 
 internal class PamModalHost(context: Context) : FrameLayout(context) {
-    private val content = FrameLayout(context)
+    private val content = PamModalContent(context)
+    private val handle = View(context)
     private var dialog: Dialog? = null
     private var presentation = PRESENTATION_DIALOG
     private var desiredVisible = true
@@ -39,6 +45,20 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     private var lastOrientation: Int? = null
     private var dialogGeneration = 0L
     private var updateScheduled = false
+    private var bottomSheetSnapPoints = listOf(0.5f, 0.9f)
+    private var bottomSheetIndex = 0
+    private var bottomSheetDismissible = true
+    private var bottomSheetBackdropDismiss = true
+    private var bottomSheetHandleVisible = true
+    private var bottomSheetDragEnabled = true
+    private var bottomSheetCornerRadius = 20f
+    private var bottomSheetKeyboardBehavior = KEYBOARD_INTERACTIVE
+    private var onBottomSheetChange: ((Int, Float) -> Unit)? = null
+    private var onBottomSheetDismiss: (() -> Unit)? = null
+    private var dragStartY = 0f
+    private var dragActive = false
+    private var dragFromHandle = false
+    private var dragVelocity: VelocityTracker? = null
 
     private val updateRunnable = Runnable {
         updateScheduled = false
@@ -53,11 +73,25 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             if (dialog?.isShowing == true) {
                 dispatchOrientation(force = false)
             }
+            updateBottomSheetChrome()
         }
+        handle.background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = dp(2f)
+            setColor(Color.argb(112, 120, 120, 128))
+        }
+        content.addView(
+            handle,
+            FrameLayout.LayoutParams(dp(36f).toInt(), dp(4f).toInt()),
+        )
+        content.observeMotion = ::onBottomSheetMotion
     }
 
     fun insert(view: View, index: Int) {
-        content.addView(view, index.coerceIn(0, content.childCount))
+        val contentCount = content.childCount - 1
+        content.addView(view, index.coerceIn(0, contentCount))
+        handle.bringToFront()
+        updateBottomSheetChrome()
     }
 
     fun setPresentation(value: Int) {
@@ -108,6 +142,60 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         allowSwipeDismissal = value
     }
 
+    fun setBottomSheetSnapPoints(points: List<Float>) {
+        if (points.isEmpty()) return
+        bottomSheetSnapPoints = points
+            .map { it.coerceIn(0.05f, 1f) }
+            .distinct()
+            .sorted()
+            .take(16)
+        bottomSheetIndex = bottomSheetIndex.coerceIn(0, bottomSheetSnapPoints.lastIndex)
+        dialog?.let(::applyWindowLayout)
+    }
+
+    fun setBottomSheetIndex(value: Int, notify: Boolean = false) {
+        val next = value.coerceIn(0, bottomSheetSnapPoints.lastIndex)
+        if (bottomSheetIndex == next) return
+        bottomSheetIndex = next
+        dialog?.let(::applyWindowLayout)
+        if (notify) onBottomSheetChange?.invoke(next, bottomSheetSnapPoints[next])
+    }
+
+    fun setBottomSheetDismissible(value: Boolean) {
+        bottomSheetDismissible = value
+    }
+
+    fun setBottomSheetBackdropDismiss(value: Boolean) {
+        bottomSheetBackdropDismiss = value
+    }
+
+    fun setBottomSheetHandleVisible(value: Boolean) {
+        bottomSheetHandleVisible = value
+        updateBottomSheetChrome()
+    }
+
+    fun setBottomSheetDragEnabled(value: Boolean) {
+        bottomSheetDragEnabled = value
+    }
+
+    fun setBottomSheetCornerRadius(value: Float) {
+        bottomSheetCornerRadius = value.coerceIn(0f, 128f)
+        updateBottomSheetChrome()
+    }
+
+    fun setBottomSheetKeyboardBehavior(value: Int) {
+        bottomSheetKeyboardBehavior = value.coerceIn(KEYBOARD_INTERACTIVE, KEYBOARD_FILL_PARENT)
+        dialog?.let(::applyWindowConfiguration)
+    }
+
+    fun setBottomSheetCallbacks(
+        onChange: ((Int, Float) -> Unit)?,
+        onDismiss: (() -> Unit)?,
+    ) {
+        onBottomSheetChange = onChange
+        onBottomSheetDismiss = onDismiss
+    }
+
     fun setFocusKeyboard(value: Boolean) {
         focusKeyboard = value
     }
@@ -131,12 +219,16 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         desiredVisible = false
         removeCallbacks(updateRunnable)
         updateScheduled = false
-        dismiss(notify = false, animated = false)
+        destroyDialog(notify = false)
         content.removeAllViews()
         onRequestClose = null
         onShow = null
         onDismiss = null
         onOrientationChange = null
+        onBottomSheetChange = null
+        onBottomSheetDismiss = null
+        dragVelocity?.recycle()
+        dragVelocity = null
     }
 
     override fun onAttachedToWindow() {
@@ -147,7 +239,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     override fun onDetachedFromWindow() {
         removeCallbacks(updateRunnable)
         updateScheduled = false
-        dismiss(notify = false, animated = false)
+        destroyDialog(notify = false)
         super.onDetachedFromWindow()
     }
 
@@ -170,6 +262,22 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             content.translationY = 0f
             applyWindowConfiguration(active)
             applyWindowLayout(active)
+            return
+        }
+        if (active != null) {
+            previousFocus = WeakReference(rootView.findFocus())
+            val generation = ++dialogGeneration
+            active.show()
+            if (dialogGeneration != generation || !desiredVisible) {
+                active.hide()
+                return
+            }
+            applyWindowConfiguration(active)
+            applyWindowLayout(active)
+            animateEntrance()
+            dispatchOrientation(force = true)
+            onShow?.invoke()
+            focusModalContent(active)
             return
         }
 
@@ -203,20 +311,24 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             animateEntrance()
             dispatchOrientation(force = true)
             onShow?.invoke()
-            content.post {
-                if (dialog === modal && modal.isShowing) {
-                    val focus = if (focusKeyboard) {
-                        content.findFirstEditText()
-                    } else {
-                        content.findFirstFocusable()
-                    }
-                    focus?.let {
-                        focus.requestFocus()
-                        if (focusKeyboard && focus is EditText) {
-                            val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
-                                as? InputMethodManager
-                            keyboard?.showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT)
-                        }
+            focusModalContent(modal)
+        }
+    }
+
+    private fun focusModalContent(modal: Dialog) {
+        content.post {
+            if (dialog === modal && modal.isShowing) {
+                val focus = if (focusKeyboard) {
+                    content.findFirstEditText()
+                } else {
+                    content.findFirstFocusable()
+                }
+                focus?.let {
+                    focus.requestFocus()
+                    if (focusKeyboard && focus is EditText) {
+                        val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+                            as? InputMethodManager
+                        keyboard?.showSoftInput(focus, InputMethodManager.SHOW_IMPLICIT)
                     }
                 }
             }
@@ -224,12 +336,14 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun requestClose() {
+        if (!bottomSheetDismissible && presentation == PRESENTATION_SHEET) return
+        desiredVisible = false
         val callback = onRequestClose
         if (callback != null) {
             callback()
+            scheduleUpdate()
             return
         }
-        desiredVisible = false
         dismiss(notify = true, animated = true)
     }
 
@@ -241,8 +355,18 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             decorView.setBackgroundColor(Color.TRANSPARENT)
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             attributes = attributes.apply { dimAmount = 0f }
+            val adjustMode = when {
+                focusKeyboard -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                presentation != PRESENTATION_SHEET ->
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                bottomSheetKeyboardBehavior == KEYBOARD_EXTEND ->
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+                bottomSheetKeyboardBehavior == KEYBOARD_FILL_PARENT ->
+                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+                else -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+            }
             setSoftInputMode(
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                adjustMode or
                     if (focusKeyboard) {
                         WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
                     } else {
@@ -278,11 +402,17 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun applyWindowLayout(modal: Dialog) {
+        val availableHeight = resources.displayMetrics.heightPixels
+        val sheetHeight = (availableHeight * bottomSheetSnapPoints[bottomSheetIndex])
+            .toInt()
+            .coerceAtLeast(1)
         repeat(content.childCount) { index ->
-            content.getChildAt(index).layoutParams = when (presentation) {
+            val child = content.getChildAt(index)
+            if (child === handle) return@repeat
+            child.layoutParams = when (presentation) {
                 PRESENTATION_SHEET -> FrameLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    sheetHeight,
                     Gravity.BOTTOM,
                 )
                 else -> FrameLayout.LayoutParams(
@@ -295,7 +425,133 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
+        updateBottomSheetChrome()
     }
+
+    private fun onBottomSheetMotion(event: MotionEvent) {
+        if (presentation != PRESENTATION_SHEET) return
+        val sheet = sheetChild() ?: return
+        val sheetTop = content.height - sheet.height
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                dragStartY = event.y
+                dragFromHandle = event.y in sheetTop.toFloat()..(sheetTop + dp(44f))
+                dragActive = false
+                dragVelocity?.recycle()
+                dragVelocity = VelocityTracker.obtain().also { it.addMovement(event) }
+            }
+            MotionEvent.ACTION_MOVE -> {
+                dragVelocity?.addMovement(event)
+                val delta = event.y - dragStartY
+                if (
+                    bottomSheetDragEnabled &&
+                    !dragActive &&
+                    kotlin.math.abs(delta) >= dp(8f) &&
+                    (dragFromHandle || delta > 0 && !sheet.canScrollVertically(-1))
+                ) {
+                    dragActive = true
+                }
+                if (dragActive) {
+                    val translation = delta.coerceAtLeast(
+                        -(content.height - sheet.height).toFloat(),
+                    )
+                    sheetChildren().forEach { it.translationY = translation }
+                    handle.translationY = translation
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                dragVelocity?.addMovement(event)
+                dragVelocity?.computeCurrentVelocity(1_000)
+                val velocityY = dragVelocity?.yVelocity ?: 0f
+                val delta = event.y - dragStartY
+                if (dragActive && event.actionMasked != MotionEvent.ACTION_CANCEL) {
+                    settleBottomSheet(delta, velocityY)
+                } else {
+                    resetSheetTranslation()
+                    if (
+                        event.actionMasked == MotionEvent.ACTION_UP &&
+                        event.y < sheetTop &&
+                        bottomSheetBackdropDismiss
+                    ) {
+                        requestClose()
+                    }
+                }
+                dragVelocity?.recycle()
+                dragVelocity = null
+                dragActive = false
+            }
+        }
+    }
+
+    private fun settleBottomSheet(delta: Float, velocityY: Float) {
+        val height = content.height.coerceAtLeast(1)
+        val current = bottomSheetSnapPoints[bottomSheetIndex]
+        val projected = current - (delta + velocityY * 0.12f) / height
+        if (
+            bottomSheetDismissible &&
+            bottomSheetIndex == 0 &&
+            projected < bottomSheetSnapPoints.first() * 0.55f
+        ) {
+            onBottomSheetDismiss?.invoke()
+            requestClose()
+            return
+        }
+        val next = bottomSheetSnapPoints.indices.minByOrNull { index ->
+            kotlin.math.abs(bottomSheetSnapPoints[index] - projected)
+        } ?: bottomSheetIndex
+        bottomSheetIndex = next
+        dialog?.let(::applyWindowLayout)
+        resetSheetTranslation()
+        onBottomSheetChange?.invoke(next, bottomSheetSnapPoints[next])
+    }
+
+    private fun resetSheetTranslation() {
+        sheetChildren().forEach { child ->
+            child.animate().translationY(0f).setDuration(180L).start()
+        }
+        handle.animate().translationY(0f).setDuration(180L).start()
+    }
+
+    private fun sheetChildren(): List<View> =
+        buildList {
+            repeat(content.childCount) { index ->
+                content.getChildAt(index).takeIf { it !== handle }?.let(::add)
+            }
+        }
+
+    private fun sheetChild(): View? = sheetChildren().firstOrNull()
+
+    private fun updateBottomSheetChrome() {
+        val sheet = sheetChild()
+        handle.visibility = if (
+            presentation == PRESENTATION_SHEET &&
+            bottomSheetHandleVisible &&
+            desiredVisible
+        ) {
+            View.VISIBLE
+        } else {
+            View.GONE
+        }
+        if (sheet == null || presentation != PRESENTATION_SHEET) return
+        sheet.clipToOutline = bottomSheetCornerRadius > 0f
+        sheet.outlineProvider = object : ViewOutlineProvider() {
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(
+                    0,
+                    0,
+                    view.width,
+                    view.height + dp(bottomSheetCornerRadius).toInt(),
+                    dp(bottomSheetCornerRadius),
+                )
+            }
+        }
+        sheet.invalidateOutline()
+        handle.x = (content.width - handle.layoutParams.width) / 2f
+        handle.y = (content.height - sheet.height + dp(10f))
+        handle.bringToFront()
+    }
+
+    private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     private fun applyBackdrop() {
         content.setBackgroundColor(backdropColor)
@@ -375,10 +631,24 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             }
             previousFocus = null
         }
+        modal.hide()
+        lastOrientation = null
+        if (!focusKeyboard) restoreFocus()
+        if (notify && wasShowing) {
+            onDismiss?.invoke()
+        }
+    }
+
+    private fun destroyDialog(notify: Boolean) {
+        val modal = dialog ?: return
+        ++dialogGeneration
+        content.animate().cancel()
+        content.alpha = 1f
+        content.translationY = 0f
+        val wasShowing = modal.isShowing
         modal.dismiss()
         dialog = null
         lastOrientation = null
-        if (!focusKeyboard) restoreFocus()
         if (notify && wasShowing) {
             onDismiss?.invoke()
         }
@@ -431,8 +701,20 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         const val ANIMATION_FADE = 3
         const val ORIENTATION_PORTRAIT = 1
         const val ORIENTATION_LANDSCAPE = 2
+        const val KEYBOARD_INTERACTIVE = 1
+        const val KEYBOARD_EXTEND = 2
+        const val KEYBOARD_FILL_PARENT = 3
         const val MODAL_ENTER_DURATION_MS = 225L
         const val MODAL_EXIT_DURATION_MS = 125L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
+    }
+}
+
+private class PamModalContent(context: Context) : FrameLayout(context) {
+    var observeMotion: ((MotionEvent) -> Unit)? = null
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        observeMotion?.invoke(event)
+        return super.dispatchTouchEvent(event)
     }
 }

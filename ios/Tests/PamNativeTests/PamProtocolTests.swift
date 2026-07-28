@@ -45,8 +45,14 @@ final class PamProtocolTests: XCTestCase {
             .touchStart,
             .touchMove,
             .touchEnd,
+            .gestureBegin,
+            .gestureUpdate,
+            .gestureEnd,
+            .gestureCancel,
+            .bottomSheetChange,
+            .bottomSheetDismiss,
         ]
-        XCTAssertEqual(events.map(\.rawValue), Array(1...41))
+        XCTAssertEqual(events.map(\.rawValue), Array(1...60))
         XCTAssertEqual(PamConstants.onClickOutside, 285)
         XCTAssertEqual(PamConstants.onIntersect, 286)
         XCTAssertEqual(PamConstants.onMutate, 287)
@@ -54,6 +60,41 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.onTouchStart, 289)
         XCTAssertEqual(PamConstants.onTouchMove, 290)
         XCTAssertEqual(PamConstants.onTouchEnd, 291)
+        XCTAssertEqual(PamConstants.gestureType, 303)
+        XCTAssertEqual(PamConstants.onGestureCancel, 314)
+        XCTAssertEqual(PamConstants.bottomSheetSnapPoints, 315)
+        XCTAssertEqual(PamConstants.onBottomSheetDismiss, 324)
+        XCTAssertEqual(NodeKind.media.rawValue, 28)
+        XCTAssertEqual(PamConstants.onMediaError, 346)
+        XCTAssertEqual(PamConstants.onMenuAction, 354)
+        XCTAssertEqual(PamConstants.onNavigationGesturePop, 358)
+        XCTAssertEqual(PamConstants.onAnimationComplete, 365)
+        XCTAssertEqual(PamConstants.webViewAllowedHosts, 366)
+        XCTAssertEqual(PamConstants.mediaCacheChecksum, 384)
+        XCTAssertEqual(
+            [
+                NativeOperation.httpGet,
+                .storageGet,
+                .storageSet,
+                .alert,
+                .toast,
+                .share,
+                .openUrl,
+                .canOpenUrl,
+                .vibrate,
+                .deviceInfo,
+                .keyboardDismiss,
+                .permissionCheck,
+                .permissionRequest,
+                .closeApp,
+                .haptic,
+                .clipboardSetText,
+                .clipboardGetText,
+                .clipboardHasText,
+                .sensorRead,
+            ].map(\.rawValue),
+            Array(1...19)
+        )
     }
 
     func testRustGoldenSetRootBatchDecodesOnSwift() throws {

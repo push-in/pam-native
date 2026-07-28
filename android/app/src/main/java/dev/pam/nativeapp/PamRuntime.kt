@@ -22,6 +22,7 @@ class PamRuntime(
     private val renderer: PamRenderer,
     private val reportError: (String) -> Unit,
     private val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {},
+    private val onDiagnostic: (RuntimeDiagnostic) -> Unit = {},
 ) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
     private val choreographer = Choreographer.getInstance()
@@ -83,6 +84,7 @@ class PamRuntime(
     }
 
     fun dispatchLifecycle(kind: Int, payload: ByteArray) {
+        onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.LIFECYCLE, "event $kind"))
         dispatchEvent(0, kind, payload)
     }
 
@@ -90,8 +92,19 @@ class PamRuntime(
         renderer.trimMemory(critical)
     }
 
+    fun onHostPause() {
+        renderer.onHostPause()
+    }
+
+    fun onHostResume() {
+        renderer.onHostResume()
+    }
+
     fun dispatchEvent(nodeId: Long, kind: Int, payload: ByteArray = ByteArray(0)) {
         if (payload.size > MAX_PAYLOAD_BYTES) return
+        if (kind >= 42) {
+            onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.EVENT, "node $nodeId · event $kind"))
+        }
         if (kind in COALESCED_EVENTS) {
             val enqueue = {
                 if (!closed.get()) {
@@ -216,11 +229,20 @@ class PamRuntime(
         method: String,
         payload: ByteArray,
     ) {
+        val started = System.nanoTime()
         modules.invoke(
             module = module,
             method = method,
             payload = payload,
             completion = ModuleCompletion { status, result ->
+                onDiagnostic(
+                    RuntimeDiagnostic(
+                        RuntimeDiagnosticKind.MODULE_CALL,
+                        "$module.$method",
+                        System.nanoTime() - started,
+                        status == dev.pam.nativeapp.modules.ModuleResultStatus.FAILURE,
+                    ),
+                )
                 synchronized(handleLock) {
                     val active = handle
                     if (active != 0L) {
@@ -237,10 +259,19 @@ class PamRuntime(
         operation: Int,
         payload: ByteArray,
     ) {
+        val started = System.nanoTime()
         modules.invoke(
             operationValue = operation,
             payload = payload,
             completion = ModuleCompletion { status, result ->
+                onDiagnostic(
+                    RuntimeDiagnostic(
+                        RuntimeDiagnosticKind.MODULE_CALL,
+                        "system.operation.$operation",
+                        System.nanoTime() - started,
+                        status == dev.pam.nativeapp.modules.ModuleResultStatus.FAILURE,
+                    ),
+                )
                 synchronized(handleLock) {
                     val active = handle
                     if (active != 0L) {
@@ -253,6 +284,7 @@ class PamRuntime(
 
     @Suppress("unused")
     private fun onNativeError(message: String) {
+        onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, message.take(120), failed = true))
         main.post {
             if (!closed.get()) {
                 reportError(message)

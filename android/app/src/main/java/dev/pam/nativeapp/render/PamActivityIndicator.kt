@@ -2,6 +2,7 @@ package dev.pam.nativeapp.render
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.drawable.Animatable
 import android.view.Gravity
 import android.view.View
@@ -46,8 +47,11 @@ internal class PamActivityIndicator(context: Context) : FrameLayout(context) {
     }
 
     fun setColor(color: Int?) {
-        indicator.indeterminateTintList =
-            color?.let(ColorStateList::valueOf) ?: defaultTint
+        val tint = color?.let(ColorStateList::valueOf) ?: defaultTint
+        indicator.indeterminateTintList = tint
+        indicator.indeterminateDrawable.setTint(
+            color ?: tint?.defaultColor ?: Color.BLACK,
+        )
     }
 
     fun setHostAccessibility(enabled: Boolean) {

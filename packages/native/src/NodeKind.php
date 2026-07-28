@@ -32,4 +32,6 @@ enum NodeKind: int
     case CustomView = 24;
     case NavigationHost = 25;
     case VirtualList = 26;
+    case WebView = 27;
+    case Media = 28;
 }

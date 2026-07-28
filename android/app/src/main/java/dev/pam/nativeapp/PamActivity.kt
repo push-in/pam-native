@@ -22,6 +22,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
 import dev.pam.nativeapp.render.PamRootHost
+import dev.pam.nativeapp.modules.PamPushNotifications
 
 class PamActivity : Activity() {
     private lateinit var runtime: PamRuntime
@@ -29,9 +30,14 @@ class PamActivity : Activity() {
     private var backCallback: OnBackInvokedCallback? = null
     private lateinit var errors: ErrorOverlay
     private val permissionCallbacks = HashMap<Int, (Boolean) -> Unit>()
+    private val activityResultCallbacks = HashMap<Int, (Int, Intent?) -> Unit>()
     private var nextPermissionRequest = 40_000
+    private var nextActivityRequest = 50_000
     private var runtimeStarted = false
     private var fullyDrawnReported = false
+    private var runtimeEntryPath: String? = null
+    private var recoveryAttempts = 0
+    private var recoveryRunnable: Runnable? = null
     private lateinit var devTools: PamDevToolsOverlay
     private var devToolsReceiver: BroadcastReceiver? = null
 
@@ -46,15 +52,19 @@ class PamActivity : Activity() {
         runtime = PamRuntime(
             context = this,
             renderer = renderer,
-            reportError = { message -> errors.showError(message) },
+            reportError = { message -> handleRuntimeError(message) },
             onFrameCommitted = {
                 devTools.update(it)
                 errors.clearError()
+                recoveryAttempts = 0
+                recoveryRunnable?.let(window.decorView::removeCallbacks)
+                recoveryRunnable = null
                 if (!fullyDrawnReported) {
                     fullyDrawnReported = true
                     reportFullyDrawn()
                 }
             },
+            onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
         )
         val root = FrameLayout(this)
         root.addView(
@@ -76,9 +86,11 @@ class PamActivity : Activity() {
         applyDefaultSystemBars()
         registerBackCallback()
         registerDevTools()
+        reportNotificationOpen(intent)
 
         runCatching {
             val entry = AssetInstaller(this).install()
+            runtimeEntryPath = entry.absolutePath
             val density = resources.displayMetrics.density
             val widthDp = resources.displayMetrics.widthPixels / density
             val heightDp = resources.displayMetrics.heightPixels / density
@@ -108,12 +120,20 @@ class PamActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (runtimeStarted) {
+            runtime.onHostResume()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_ACTIVE.toString().toByteArray())
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        reportNotificationOpen(intent)
+    }
+
     override fun onPause() {
         if (runtimeStarted) {
+            runtime.onHostPause()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_INACTIVE.toString().toByteArray())
         }
         super.onPause()
@@ -188,7 +208,25 @@ class PamActivity : Activity() {
         return super.onKeyUp(keyCode, event)
     }
 
+    internal fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
+        val request = nextActivityRequest++
+        activityResultCallbacks[request] = callback
+        startActivityForResult(intent, request)
+    }
+
+    @Deprecated("Deprecated in Android")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        val callback = activityResultCallbacks.remove(requestCode)
+        if (callback != null) {
+            callback(resultCode, data)
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
     override fun onDestroy() {
+        recoveryRunnable?.let(window.decorView::removeCallbacks)
+        recoveryRunnable = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             backCallback?.let { onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it) }
             backCallback = null
@@ -200,6 +238,31 @@ class PamActivity : Activity() {
         runtime.close()
         permissionCallbacks.clear()
         super.onDestroy()
+    }
+
+    private fun handleRuntimeError(message: String) {
+        devTools.record(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, message.take(160)))
+        if (BuildConfig.DEBUG) {
+            errors.showError(message)
+            return
+        }
+        val entry = runtimeEntryPath
+        if (entry == null || recoveryAttempts >= MAX_RUNTIME_RECOVERY_ATTEMPTS) {
+            errors.showError(message)
+            return
+        }
+        if (recoveryRunnable != null) return
+        recoveryAttempts++
+        val delay = (250L shl (recoveryAttempts - 1)).coerceAtMost(2_000L)
+        recoveryRunnable = Runnable {
+            recoveryRunnable = null
+            if (!isFinishing && !isDestroyed && runtimeStarted) {
+                runCatching { runtime.reload(entry) }
+                    .onFailure {
+                        handleRuntimeError(it.message ?: "Pam Native recovery failed")
+                    }
+            }
+        }.also { window.decorView.postDelayed(it, delay) }
     }
 
     @SuppressLint("InlinedApi")
@@ -229,6 +292,17 @@ class PamActivity : Activity() {
         requestPermissions(arrayOf(permission), request)
     }
 
+    fun requestPamPermissions(permissions: Array<String>, callback: (Boolean) -> Unit) {
+        if (permissions.any { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+            callback(true)
+            return
+        }
+        val request = nextPermissionRequest++
+        if (nextPermissionRequest > 60_000) nextPermissionRequest = 40_000
+        permissionCallbacks[request] = callback
+        requestPermissions(permissions, request)
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -236,7 +310,7 @@ class PamActivity : Activity() {
     ) {
         val callback = permissionCallbacks.remove(requestCode)
         if (callback != null) {
-            callback(grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED)
+            callback(grantResults.any { it == PackageManager.PERMISSION_GRANTED })
             return
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -253,6 +327,18 @@ class PamActivity : Activity() {
                 callback,
             )
         }
+    }
+
+    private fun reportNotificationOpen(intent: Intent?) {
+        if (intent?.getBooleanExtra("pam.notification.opened", false) != true) return
+        PamPushNotifications.reportOpened(
+            id = intent.getStringExtra("pam.notification.id").orEmpty(),
+            title = intent.getStringExtra("pam.notification.title").orEmpty(),
+            body = intent.getStringExtra("pam.notification.body").orEmpty(),
+            dataJson = intent.getStringExtra("pam.notification.data").orEmpty().ifEmpty { "{}" },
+            deepLink = intent.getStringExtra("pam.notification.deepLink").orEmpty(),
+        )
+        intent.removeExtra("pam.notification.opened")
     }
 
     private fun isDarkAppearance(): Boolean =
@@ -299,5 +385,6 @@ class PamActivity : Activity() {
         const val MEMORY_PRESSURE_CRITICAL = 2
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L
+        const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
     }
 }
