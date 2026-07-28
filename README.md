@@ -1,8 +1,57 @@
-# Pam Native
+<div align="center">
+
+# PAM Native
+
+### PHP authors the experience. Rust makes it fast. The platform makes it native.
+
+**A retained native application runtime for building Android and iOS apps in
+PHP — with real platform controls, a Rust rendering engine, and no JavaScript
+runtime.**
+
+[![Documentation](https://img.shields.io/badge/docs-push--in.github.io-5b50d6?style=flat-square)](https://push-in.github.io/pam-docs/native/overview/)
+[![CI](https://img.shields.io/github/actions/workflow/status/push-in/pam-native/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/push-in/pam-native/actions/workflows/ci.yml)
+![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
+![Android](https://img.shields.io/badge/Android-API%2026–36-3DDC84?style=flat-square&logo=android&logoColor=white)
+![iOS](https://img.shields.io/badge/iOS-UIKit-000000?style=flat-square&logo=apple&logoColor=white)
+![License](https://img.shields.io/badge/license-BUSL--1.1-f59e0b?style=flat-square)
+
+**[Documentation](https://push-in.github.io/pam-docs/native/overview/) ·
+[Components](https://push-in.github.io/pam-docs/native/components/) ·
+[Component runtime](https://push-in.github.io/pam-docs/native/component-runtime/) ·
+[Global store](https://push-in.github.io/pam-docs/native/global-store/) ·
+[Contributing](https://push-in.github.io/pam-docs/community/contributing/)**
+
+</div>
+
+---
 
 Pam Native keeps PHP 8.4 alive inside Android and iOS processes and renders
 real platform controls. Rust owns reconciliation and layout; Kotlin and Swift
 only apply the resulting native mutations.
+
+This is not PHP drawing pixels through a browser surface. PAM Native owns a
+retained element tree, typed props, local reactive state, a Vuex-style global
+store, lifecycle, effects, dependency tracking, native navigation, recycled
+lists, gestures, media, disk cache, system APIs, diagnostics, and a bounded
+binary protocol shared by both platforms.
+
+The goal is unapologetically ambitious: give PHP developers an application
+platform they can be proud to put beside fully native stacks—then prove the
+claim with protocol tests, compiler checks, simulator builds, and instrumented
+Android contracts at both supported API boundaries.
+
+## Why it is different
+
+| PAM Native owns | What that means |
+| --- | --- |
+| Persistent PHP runtime | Application and store instances stay alive |
+| Rust reconciliation and layout | PHP does not manually diff or position native views |
+| Kotlin Views and Swift/UIKit | Users interact with real platform controls |
+| Frame-batched commits | Native mutations land once per display frame |
+| Native-owned interaction | Scroll, input, gestures, animation and media avoid per-frame PHP traffic |
+| Built-in store and component runtime | Props, state, computed values, actions, effects and DevTools are one coherent model |
+| Bounded binary protocol | Cross-runtime work is typed, measurable and defended by limits |
+| Production diagnostics | Profiling, capability checks, recovery and contract tests ship with the platform |
 
 Install the versioned PHP SDK with Composer:
 
