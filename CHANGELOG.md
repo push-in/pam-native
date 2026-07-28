@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.7
+
+- Keep the chat composer focused and the software keyboard visible after
+  sending while clearing the retained native input authoritatively.
+- Animate only newly sent bubbles with a short native spring using opacity,
+  translation and scale, then keep the conversation pinned to its end.
+
 ## 0.4.6
 
 - Give every Gallery detail screen a consistent, safe-area-aware header frame

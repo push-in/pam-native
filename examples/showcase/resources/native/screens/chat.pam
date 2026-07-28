@@ -54,6 +54,7 @@
                             </Row>
                             <Row v-if="$chatMessage['outgoing']" justifyContent="end">
                                 <Column
+                                    v-if="!$chatMessage['animate']"
                                     widthPercent="82"
                                     padding="13"
                                     gap="5"
@@ -64,6 +65,26 @@
                                     <Text minHeight="24" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
                                     <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
                                 </Column>
+                                <Animated
+                                    v-if="$chatMessage['animate']"
+                                    widthPercent="82"
+                                    :keyframes="$messageEntranceKeyframes"
+                                    durationMs="220"
+                                    easing="spring"
+                                    fillMode="forwards"
+                                >
+                                    <Column
+                                        flexGrow="1"
+                                        padding="13"
+                                        gap="5"
+                                        borderRadius="18"
+                                        borderTopRightRadius="5"
+                                        backgroundColor="#FF17A673"
+                                    >
+                                        <Text minHeight="24" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
+                                        <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
+                                    </Column>
+                                </Animated>
                             </Row>
                         </Column>
                     </Column>
@@ -91,7 +112,7 @@
                         placeholder="Message"
                         placeholderColor="#FF83958F"
                         model="message"
-                        sync="debounced"
+                        sync="immediate"
                         submitBehavior="submit"
                         on:submit="send"
                         accessibilityLabel="Message"

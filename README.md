@@ -56,7 +56,7 @@ Android contracts at both supported API boundaries.
 Install the versioned PHP SDK with Composer:
 
 ```bash
-composer require pushinbr/pam-native:^0.4.6
+composer require pushinbr/pam-native:^0.4.7
 ```
 
 Or go from an empty directory to a running native screen:
