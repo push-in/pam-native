@@ -1,7 +1,7 @@
 <Screen>
     <StatusBar backgroundColor="#FFF7FAF9" appearance="dark" />
     <SafeAreaView class="flex-1" backgroundColor="#FFF7FAF9">
-        <KeyboardAvoidingView class="flex-1" behavior="pan" keyboardVerticalOffset="0">
+        <KeyboardAvoidingView class="flex-1" behavior="pan" keyboardVerticalOffset="-56">
             <Column class="flex-1" backgroundColor="#FFEFF5F3">
                 <Row height="76" paddingHorizontal="14" paddingTop="12" paddingBottom="12" gap="10" alignItems="center" backgroundColor="#FFF7FAF9">
                     <Pressable
@@ -104,6 +104,8 @@
                     <Input
                         flexGrow="1"
                         minHeight="52"
+                        paddingHorizontal="16"
+                        paddingVertical="12"
                         borderRadius="18"
                         backgroundColor="#FFFFFFFF"
                         borderWidth="1"
