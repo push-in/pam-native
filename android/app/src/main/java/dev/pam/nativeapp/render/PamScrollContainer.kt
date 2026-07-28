@@ -38,6 +38,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var initialEndAnchorApplied = false
     private var maintainVisibleContentPosition = false
     private var autoScrollToEndThresholdPx = 24
+    private var keyboardAvoidanceInsetPx = 0
+    private var keyboardBaseContentExtentPx = 0
     private val applyOffsetRunnable = Runnable {
         offsetScheduled = false
         applyRequestedOffset()
@@ -185,6 +187,43 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     fun setAutoScrollToEndThreshold(value: Float) {
         autoScrollToEndThresholdPx = dp(value.coerceAtLeast(0f))
     }
+
+    fun setKeyboardAvoidanceInset(value: Int) {
+        val inset = value.coerceAtLeast(0)
+        if (keyboardAvoidanceInsetPx == inset) return
+        val wasNearEnd =
+            primaryMaxOffset() - primaryCurrentOffset() <= autoScrollToEndThresholdPx
+        if (keyboardAvoidanceInsetPx == 0 && inset > 0) {
+            keyboardBaseContentExtentPx = if (horizontal) content.width else content.height
+        }
+        keyboardAvoidanceInsetPx = inset
+        if (horizontal) {
+            content.setPadding(0, 0, inset, 0)
+            content.minimumWidth = if (inset > 0) {
+                keyboardBaseContentExtentPx + inset
+            } else {
+                0
+            }
+        } else {
+            content.setPadding(0, 0, 0, inset)
+            content.minimumHeight = if (inset > 0) {
+                keyboardBaseContentExtentPx + inset
+            } else {
+                0
+            }
+        }
+        if (inset == 0) keyboardBaseContentExtentPx = 0
+        content.requestLayout()
+        if (anchorToEnd && wasNearEnd) {
+            activeScroll.post {
+                if (isAttachedToWindow && keyboardAvoidanceInsetPx == inset) {
+                    scrollToPrimary(primaryMaxOffset())
+                }
+            }
+        }
+    }
+
+    fun keyboardAvoidanceInsetPixels(): Int = keyboardAvoidanceInsetPx
 
     fun setOnViewportChanged(listener: ((Float, Float) -> Unit)?) {
         viewportChanged = listener

@@ -133,6 +133,50 @@ class PamScrollContainerInstrumentedTest {
         }
     }
 
+    @Test
+    fun keyboardInsetKeepsEndAnchoredWithoutMovingAnOlderViewport() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                scroll.insert(View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                })
+                scroll.setAutoScrollToEndThreshold(24f)
+                scroll.setAnchorToEnd(true)
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+                assertEquals(600, scroll.snapshotOffsetPixels().second)
+
+                scroll.setKeyboardAvoidanceInset(200)
+                relayout(activity.host)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(200, scroll.keyboardAvoidanceInsetPixels())
+                assertEquals(800, scroll.snapshotOffsetPixels().second)
+
+                scroll.restoreOffsetPixels(0, 200)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                scroll.setKeyboardAvoidanceInset(300)
+                relayout(activity.host)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(200, scroll.snapshotOffsetPixels().second)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity {
         val intent = Intent(
             instrumentation.targetContext,

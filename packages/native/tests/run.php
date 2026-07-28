@@ -608,6 +608,16 @@ $assert(
         && $inputKey->key === 'Enter',
     'Input helpers must preserve native editing, selection, keyboard, size and key behavior.',
 );
+$secureAliasElement = TemplateRenderer::render(
+    TemplateCompiler::compile('<Input secureTextEntry="true" />'),
+    new class {
+    },
+    [],
+);
+$assert(
+    $secureAliasElement->properties()[PropKey::Secure->value] === true,
+    'Input secureTextEntry must remain a compatible alias for secure.',
+);
 $pressInEvent = null;
 $pressOutEvent = null;
 $pressMoveEvent = null;
@@ -1336,6 +1346,34 @@ $assert(
         && $pressScope->move instanceof PressEvent
         && $pressScope->move->pageX === 12.0,
     'Core Pressable tags must retain gesture properties and typed move events.',
+);
+$itemActionScope = new class {
+    public string $selected = '';
+
+    public function select(string $id): void
+    {
+        $this->selected = $id;
+    }
+};
+$itemActionElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column><Pressable v-for="$item in $items" '
+        .'on:longPress="select($item[\'id\'])"><Text>{{ $item[\'id\'] }}</Text>'
+        .'</Pressable></Column>',
+    ),
+    $itemActionScope,
+    ['items' => [['id' => 'first'], ['id' => 'second']]],
+);
+$assert(
+    $itemActionScope->selected === '',
+    'Native event expressions must not execute during template rendering.',
+);
+$itemActionElement
+    ->children()[1]
+    ->events()[EventKind::LongPress->value]('');
+$assert(
+    $itemActionScope->selected === 'second',
+    'Native event expressions must capture v-for item data until dispatch.',
 );
 $directiveScope = new class {
     /** @var list<string> */
