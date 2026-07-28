@@ -1644,6 +1644,11 @@ $assert(
         ],
     'SQLite executeMany did not emit one typed bridge call for the complete batch.',
 );
+Runtime::dispatchModuleResult(
+    $batchRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    '',
+);
 
 $contacts = null;
 $contactsRequestId = Contacts::all(static function (array $items) use (&$contacts): void {

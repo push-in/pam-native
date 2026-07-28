@@ -96,18 +96,19 @@ final class SQLite
                 if ($callback === null) {
                     return;
                 }
-                $values = Wire::decodeMap($result->payload);
-                if ($method === 'query') {
-                    $rows = json_decode(
-                        (string) ($values['rows'] ?? '[]'),
-                        true,
-                        512,
-                        JSON_THROW_ON_ERROR,
-                    );
-                    $callback(is_array($rows) ? $rows : []);
+                if ($method !== 'query') {
+                    $callback();
+
                     return;
                 }
-                $callback();
+                $values = Wire::decodeMap($result->payload);
+                $rows = json_decode(
+                    (string) ($values['rows'] ?? '[]'),
+                    true,
+                    512,
+                    JSON_THROW_ON_ERROR,
+                );
+                $callback(is_array($rows) ? $rows : []);
             },
         );
     }
