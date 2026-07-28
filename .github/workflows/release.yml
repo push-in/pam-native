@@ -38,8 +38,11 @@ jobs:
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent ios \
             "dist/pam-native-ios-${version}.zip"
-          shasum -a 256 "dist/pam-native-ios-${version}.zip" \
-            > "dist/pam-native-ios-${version}.zip.sha256"
+          (
+            cd dist
+            shasum -a 256 "pam-native-ios-${version}.zip" \
+              > "pam-native-ios-${version}.zip.sha256"
+          )
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.zip
@@ -50,7 +53,7 @@ jobs:
           if-no-files-found: error
 
   android:
-    name: Package Android plugin API
+    name: Package Android renderer and plugin API
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -60,21 +63,41 @@ jobs:
           java-version: '17'
           cache: gradle
       - uses: android-actions/setup-android@v4
-      - name: Build plugin API
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-release
+      - name: Build renderer, engines, and plugin API
         run: |
           sdkmanager "platforms;android-36"
-          ./android/gradlew -p android :plugin-api:assembleRelease
-      - name: Create versioned artifact
+          scripts/prepare-android-runtime.sh
+          ./android/gradlew -p android \
+            -PpamNativeRoot="$GITHUB_WORKSPACE" \
+            :app:assembleRelease \
+            :plugin-api:assembleRelease
+      - name: Create versioned artifacts
         run: |
           version=${GITHUB_REF_NAME#v}
           mkdir -p dist
           cp android/plugin-api/build/outputs/aar/plugin-api-release.aar \
             "dist/pam-native-android-plugin-api-${version}.aar"
-          sha256sum "dist/pam-native-android-plugin-api-${version}.aar" \
-            > "dist/pam-native-android-plugin-api-${version}.aar.sha256"
+          tar -czf "dist/pam-native-android-renderer-${version}.tar.gz" \
+            android/app/src/main \
+            android/app/build.gradle.kts \
+            target/aarch64-linux-android/release/libpam_native_engine.a \
+            target/x86_64-linux-android/release/libpam_native_engine.a
+          (
+            cd dist
+            sha256sum "pam-native-android-plugin-api-${version}.aar" \
+              > "pam-native-android-plugin-api-${version}.aar.sha256"
+            sha256sum "pam-native-android-renderer-${version}.tar.gz" \
+              > "pam-native-android-renderer-${version}.tar.gz.sha256"
+          )
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/*.aar
+          subject-path: |
+            dist/*.aar
+            dist/*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-android
@@ -101,8 +124,11 @@ jobs:
             -cf "dist/pam-native-php-${version}.tar" \
             -C packages/native .
           gzip -n "dist/pam-native-php-${version}.tar"
-          sha256sum "dist/pam-native-php-${version}.tar.gz" \
-            > "dist/pam-native-php-${version}.tar.gz.sha256"
+          (
+            cd dist
+            sha256sum "pam-native-php-${version}.tar.gz" \
+              > "pam-native-php-${version}.tar.gz.sha256"
+          )
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.tar.gz

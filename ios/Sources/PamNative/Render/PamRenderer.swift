@@ -358,6 +358,64 @@ public final class PamRenderer {
             }
         }
 
+        if let parentState = nodes[effectiveParent],
+           let parentView = views[effectiveParent] {
+            let horizontal = parentState.kind == .row
+            let vertical = parentState.kind == .column
+            if horizontal || vertical {
+                let engineExtent = horizontal
+                    ? CGFloat(parentFrame.width)
+                    : CGFloat(parentFrame.height)
+                let renderedExtent = horizontal
+                    ? parentView.bounds.width
+                    : parentView.bounds.height
+                let viewportReduction = engineExtent - renderedExtent
+                let siblings = (children[parentState.id] ?? [])
+                    .compactMap { nodes[$0] }
+                    .sorted { $0.index < $1.index }
+                let totalGrow = siblings.reduce(CGFloat.zero) { result, sibling in
+                    result + max(
+                        0,
+                        CGFloat(
+                            sibling.properties[PamConstants.flexGrow]?.decimal() ?? 0
+                        ),
+                    )
+                }
+                if renderedExtent > 0, viewportReduction > 0, totalGrow > 0 {
+                    var growBefore = CGFloat.zero
+                    for sibling in siblings {
+                        if sibling.id == state.id {
+                            break
+                        }
+                        growBefore += max(
+                            0,
+                            CGFloat(
+                                sibling.properties[PamConstants.flexGrow]?.decimal() ?? 0
+                            ),
+                        )
+                    }
+                    let ownGrow = max(
+                        0,
+                        CGFloat(state.properties[PamConstants.flexGrow]?.decimal() ?? 0),
+                    )
+                    let reductionBefore = (
+                        viewportReduction * growBefore / totalGrow
+                    ).rounded()
+                    let reductionThrough = (
+                        viewportReduction * (growBefore + ownGrow) / totalGrow
+                    ).rounded()
+                    let ownReduction = max(0, reductionThrough - reductionBefore)
+                    if horizontal {
+                        left -= reductionBefore
+                        width -= ownReduction
+                    } else {
+                        top -= reductionBefore
+                        height -= ownReduction
+                    }
+                }
+            }
+        }
+
         if state.kind == .safeAreaView,
            Int(state.properties[PamConstants.safeAreaMode]?.integer() ?? 1) == 2 {
             let insets = view.safeAreaInsets
@@ -378,12 +436,17 @@ public final class PamRenderer {
             }
         }
 
-        view.frame = CGRect(
+        let nextFrame = CGRect(
             x: left,
             y: top,
             width: max(0, width),
             height: max(0, height),
         )
+        let layoutChanged = view.frame != nextFrame
+        view.frame = nextFrame
+        if layoutChanged {
+            children[state.id]?.forEach { applyLayout($0) }
+        }
         applyBorder(view: view, nodeId: id)
     }
 

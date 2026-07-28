@@ -129,9 +129,12 @@ internal class NativeImageLoader(
         view.onImageSizeChanged = { width, height ->
             begin(view, token, width, height)
         }
-        view.setImageDrawable(null)
         callbacks.onStart()
-        showPlaceholder(view, pending)
+        // Keep already rendered pixels on screen while a changed request is
+        // resolved. Reconciliation must never flash a blank/placeholder frame.
+        if (view.drawable == null) {
+            showPlaceholder(view, pending)
+        }
         begin(view, token, view.width, view.height)
     }
 
@@ -213,6 +216,7 @@ internal class NativeImageLoader(
                         bitmap.width,
                         bitmap.height,
                     ),
+                    animate = false,
                 )
                 return
             }
@@ -347,6 +351,7 @@ internal class NativeImageLoader(
         view: PamImageView,
         pending: ActiveRequest,
         result: NativeImageResult,
+        animate: Boolean = true,
     ) {
         if (active[view] !== pending || pending.finished) return
         pending.finished = true
@@ -354,7 +359,7 @@ internal class NativeImageLoader(
             view,
             result.bitmap,
             pending.request.repeat,
-            pending.request.fadeDurationMs,
+            if (animate) pending.request.fadeDurationMs else 0,
         )
         pending.callbacks.onSuccess(result)
         pending.callbacks.onEnd()
