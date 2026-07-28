@@ -23,6 +23,10 @@ val pamNativeHome = providers.gradleProperty("pamNativeRoot")
     .orElse(providers.environmentVariable("PAM_NATIVE_ROOT"))
     .orElse(pamProperties.getProperty("nativeHome"))
     .get()
+val pamRuntimeHome = pamProperties.getProperty(
+    "runtimeHome",
+    "$pamNativeHome/runtime/android",
+)
 val pamMinSdk = pamProperties.getProperty("minSdk", "26").toInt()
 val pamTargetSdk = pamProperties.getProperty("targetSdk", "36").toInt()
 val pamVersionCode = pamProperties.getProperty("versionCode", "1").toInt()
@@ -48,6 +52,7 @@ android {
         externalNativeBuild {
             cmake {
                 arguments += "-DPAM_NATIVE_ROOT=$pamNativeHome"
+                arguments += "-DPAM_PHP_RUNTIME_ROOT=$pamRuntimeHome"
                 cppFlags += listOf(
                     "-std=c++20",
                     "-fexceptions",

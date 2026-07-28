@@ -3,8 +3,8 @@
     "version": 1,
     "protocol": 1,
     "pamNative": {
-        "minimum": "0.4.0",
-        "maximumExclusive": "0.5.0"
+        "minimum": "0.5.0",
+        "maximumExclusive": "0.6.0"
     },
     "php": {
         "provider": "PamCommunity\\Example\\ExamplePluginProvider"

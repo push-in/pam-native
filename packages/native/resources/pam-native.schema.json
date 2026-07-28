@@ -30,6 +30,24 @@
             "type": "string",
             "pattern": "^[^/\\\\][^\\u0000]*\\.php$"
         },
+        "runtime": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "php": {
+                    "type": "string",
+                    "pattern": "^8\\.[45]$",
+                    "default": "8.5"
+                },
+                "channel": {
+                    "type": "string",
+                    "enum": [
+                        "stable"
+                    ],
+                    "default": "stable"
+                }
+            }
+        },
         "versionCode": {
             "type": "integer",
             "minimum": 1,

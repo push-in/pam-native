@@ -8,7 +8,7 @@ renderer.
 
 | SDK | Protocol | PHP | Android |
 | --- | ---: | --- | --- |
-| `pushinbr/pam-native 0.2.x` | `1` | `8.4.x` | API 26–36 |
+| `pushinbr/pam-native 0.5.x` | `1` | `8.4.x`, `8.5.x` | API 26–36 |
 
 All three peers must support the exact protocol version. A mismatched version is
 rejected before any node or mutation is applied. Protocol identifiers are

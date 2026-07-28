@@ -19,7 +19,11 @@ endif()
 get_filename_component(PAM_NATIVE_ROOT "${PAM_NATIVE_ROOT}" ABSOLUTE)
 set(PAM_ENGINE_LIBRARY
     "${PAM_NATIVE_ROOT}/target/${PAM_RUST_TARGET}/release/libpam_native_engine.a")
-set(PAM_PHP_ROOT "${PAM_NATIVE_ROOT}/runtime/android/${ANDROID_ABI}")
+if(NOT DEFINED PAM_PHP_RUNTIME_ROOT)
+    set(PAM_PHP_RUNTIME_ROOT "${PAM_NATIVE_ROOT}/runtime/android")
+endif()
+get_filename_component(PAM_PHP_RUNTIME_ROOT "${PAM_PHP_RUNTIME_ROOT}" ABSOLUTE)
+set(PAM_PHP_ROOT "${PAM_PHP_RUNTIME_ROOT}/${ANDROID_ABI}")
 set(PAM_PHP_LIBRARY "${PAM_PHP_ROOT}/lib/libphp.a")
 
 if(NOT EXISTS "${PAM_ENGINE_LIBRARY}")

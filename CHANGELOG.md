@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.0
+
+- Consume independently versioned PHP 8.4 and 8.5 Android runtimes owned and
+  verified by PAM, with side-by-side layouts and project-level selection
+  compatible with reproducible CLI lock files.
+
 ## 0.4.8
 
 - Reapply explicit Android scroll offsets after retained content completes its

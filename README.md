@@ -83,7 +83,7 @@ hot reload and a virtualized list of 10,000 rows.
 Install the versioned PHP SDK with Composer:
 
 ```bash
-composer require pushinbr/pam-native:^0.4.8
+composer require pushinbr/pam-native:^0.5
 ```
 
 Or go from an empty directory to a running native screen:
