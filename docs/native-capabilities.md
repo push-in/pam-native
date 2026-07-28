@@ -80,7 +80,9 @@ forwarding and automatic deep-link routing.
 
 `Database\SQLite` opens databases under the private application directory.
 Statements execute on a serial native queue and positional values are bound,
-not interpolated. Query rows return typed JSON scalars.
+not interpolated. Query rows return typed JSON scalars. Databases use WAL with
+`synchronous=NORMAL` and a bounded busy timeout. `SQLite::executeMany()` reuses
+one prepared statement inside one native transaction for high-volume writes.
 
 ## Interaction and motion
 
