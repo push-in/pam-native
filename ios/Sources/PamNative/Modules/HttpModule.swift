@@ -1,11 +1,17 @@
 import Foundation
 
 public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Sendable {
-    private let session = URLSession(configuration: .default)
+    private let session: URLSession
     private let queue = DispatchQueue(label: "pam.native.http", qos: .userInitiated)
     private var closed = false
 
-    public init() {}
+    public convenience init() {
+        self.init(configuration: .default)
+    }
+
+    init(configuration: URLSessionConfiguration) {
+        session = URLSession(configuration: configuration)
+    }
 
     public func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         if closed {
@@ -13,7 +19,7 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
             return
         }
 
-        if method != "get" {
+        if method != "get" && method != "request" {
             completion(.failure, "Unknown HTTP method".data(using: .utf8) ?? Data())
             return
         }
@@ -24,7 +30,13 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                 guard case let .text(urlText)? = values["url"] else {
                     throw RuntimeError("HTTP URL is required")
                 }
-                guard let url = URL(string: urlText), let scheme = url.scheme?.lowercased() else {
+                guard
+                    let url = URL(string: urlText),
+                    let scheme = url.scheme?.lowercased(),
+                    url.host != nil,
+                    url.user == nil,
+                    url.password == nil
+                else {
                     throw RuntimeError("Invalid URL")
                 }
                 #if !DEBUG
@@ -38,9 +50,54 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                 #endif
 
                 var request = URLRequest(url: url)
-                request.httpMethod = "GET"
+                let requestMethod: String
+                if method == "get" {
+                    requestMethod = "GET"
+                } else {
+                    guard case let .text(value)? = values["method"] else {
+                        throw RuntimeError("HTTP method is required")
+                    }
+                    requestMethod = value
+                }
+                guard Self.allowedMethods.contains(requestMethod) else {
+                    throw RuntimeError("Unsupported HTTP method \(requestMethod)")
+                }
+                request.httpMethod = requestMethod
                 request.addValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
-                request.timeoutInterval = 30
+                if case let .integer(timeoutMs)? = values["timeoutMs"] {
+                    request.timeoutInterval = Double(min(120_000, max(1_000, timeoutMs))) / 1_000
+                } else {
+                    request.timeoutInterval = 30
+                }
+
+                if case let .text(headersText)? = values["headers"] {
+                    guard
+                        let headersData = headersText.data(using: .utf8),
+                        let headers = try JSONSerialization.jsonObject(with: headersData)
+                            as? [String: String],
+                        headers.count <= 32
+                    else {
+                        throw RuntimeError("Invalid HTTP headers")
+                    }
+                    for (name, value) in headers {
+                        guard
+                            name.range(of: Self.safeHeaderName, options: .regularExpression) != nil,
+                            value.utf8.count <= 8_192,
+                            !value.contains("\r"),
+                            !value.contains("\n")
+                        else {
+                            throw RuntimeError("Invalid HTTP header")
+                        }
+                        request.setValue(value, forHTTPHeaderField: name)
+                    }
+                }
+
+                if case let .text(body)? = values["body"] {
+                    guard body.utf8.count <= Self.maxRequestBytes else {
+                        throw RuntimeError("HTTP request body exceeds one MiB")
+                    }
+                    request.httpBody = body.data(using: .utf8)
+                }
 
                 let dataTask = self.session.dataTask(with: request) { data, response, error in
                     if let error {
@@ -80,4 +137,8 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
         init(_ value: String) { self.message = value }
         var errorDescription: String? { message }
     }
+
+    private static let allowedMethods = Set(["GET", "POST", "PUT", "PATCH", "DELETE"])
+    private static let safeHeaderName = "^[A-Za-z0-9-]{1,64}$"
+    private static let maxRequestBytes = 1_048_576
 }

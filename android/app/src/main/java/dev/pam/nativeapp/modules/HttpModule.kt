@@ -11,6 +11,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONObject
 
 internal class HttpModule : NativeModule, AutoCloseable {
     private val executor: ExecutorService = Executors.newFixedThreadPool(4) { runnable ->
@@ -24,7 +25,7 @@ internal class HttpModule : NativeModule, AutoCloseable {
         payload: ByteArray,
         completion: ModuleCompletion,
     ) {
-        if (method != "get") {
+        if (method != "get" && method != "request") {
             completion.complete(ModuleResultStatus.FAILURE, "Unknown HTTP method".toByteArray())
             return
         }
@@ -38,7 +39,18 @@ internal class HttpModule : NativeModule, AutoCloseable {
                     val values = WireMap.decode(payload)
                     val url = (values["url"] as? WireValue.Text)?.value
                         ?: error("HTTP URL is required")
-                    fetch(url)
+                    val requestMethod = if (method == "get") {
+                        "GET"
+                    } else {
+                        (values["method"] as? WireValue.Text)?.value
+                            ?: error("HTTP method is required")
+                    }
+                    val headersJson = (values["headers"] as? WireValue.Text)?.value ?: "{}"
+                    val body = (values["body"] as? WireValue.Text)?.value
+                    val timeoutMs = ((values["timeoutMs"] as? WireValue.Integer)?.value ?: 30_000L)
+                        .coerceIn(1_000L, 120_000L)
+                        .toInt()
+                    fetch(url, requestMethod, headersJson, body, timeoutMs)
                 }.fold(
                     onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
                     onFailure = {
@@ -61,7 +73,13 @@ internal class HttpModule : NativeModule, AutoCloseable {
         executor.shutdownNow()
     }
 
-    private fun fetch(source: String): ByteArray {
+    private fun fetch(
+        source: String,
+        requestMethod: String,
+        headersJson: String,
+        body: String?,
+        timeoutMs: Int,
+    ): ByteArray {
         val uri = URI(source)
         require(uri.scheme == "https" || (BuildConfig.DEBUG && uri.scheme == "http")) {
             "HTTP requests require HTTPS"
@@ -74,11 +92,29 @@ internal class HttpModule : NativeModule, AutoCloseable {
             connection.disconnect()
             error("HTTP module is closed")
         }
-        connection.requestMethod = "GET"
+        require(requestMethod in ALLOWED_METHODS) { "Unsupported HTTP method $requestMethod" }
+        require(body == null || body.toByteArray(Charsets.UTF_8).size <= MAX_REQUEST_BYTES) {
+            "HTTP request body exceeds one MiB"
+        }
+        connection.requestMethod = requestMethod
         connection.connectTimeout = 10_000
-        connection.readTimeout = 30_000
+        connection.readTimeout = timeoutMs
         connection.instanceFollowRedirects = false
         connection.setRequestProperty("Accept", "application/json, text/plain, */*")
+        val headers = JSONObject(headersJson)
+        require(headers.length() <= 32) { "HTTP requests support at most 32 headers" }
+        headers.keys().forEach { name ->
+            val value = headers.getString(name)
+            require(SAFE_HEADER_NAME.matches(name) && !value.contains('\r') && !value.contains('\n')) {
+                "Invalid HTTP header"
+            }
+            require(value.toByteArray(Charsets.UTF_8).size <= 8_192) { "HTTP header value is too large" }
+            connection.setRequestProperty(name, value)
+        }
+        if (body != null) {
+            connection.doOutput = true
+            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        }
         try {
             val status = connection.responseCode
             val input = if (status >= 400) connection.errorStream else connection.inputStream
@@ -108,6 +144,9 @@ internal class HttpModule : NativeModule, AutoCloseable {
     }
 
     private companion object {
+        val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "PATCH", "DELETE")
+        val SAFE_HEADER_NAME = Regex("^[A-Za-z0-9-]{1,64}$")
+        const val MAX_REQUEST_BYTES = 1_048_576
         const val MAX_RESPONSE_BYTES = 900 * 1024
     }
 }

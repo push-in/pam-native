@@ -419,13 +419,40 @@ void dispatch_event(const Event& event) {
     }
 }
 
+void apply_php_ini_defaults(HashTable* configuration) {
+    zval value;
+
+    ZVAL_STRING(&value, "0");
+    zend_hash_str_update(configuration, "opcache.enable", sizeof("opcache.enable") - 1, &value);
+
+    ZVAL_STRING(&value, "0");
+    zend_hash_str_update(
+        configuration,
+        "opcache.enable_cli",
+        sizeof("opcache.enable_cli") - 1,
+        &value
+    );
+
+    if (active_runtime != nullptr) {
+        ZVAL_STRINGL(
+            &value,
+            active_runtime->state_dir.data(),
+            active_runtime->state_dir.size()
+        );
+        zend_hash_str_update(
+            configuration,
+            "opcache.lockfile_path",
+            sizeof("opcache.lockfile_path") - 1,
+            &value
+        );
+    }
+}
+
 bool initialize_php(RuntimeState* state) {
     log_debug("Initializing embedded PHP.");
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
-    php_embed_module.ini_entries =
-        "max_execution_time=0\n"
-        "max_input_time=-1\n";
+    php_embed_module.ini_defaults = apply_php_ini_defaults;
     state->php_entry_argument = state->entry;
     state->php_arguments = {
         state->php_executable.data(),

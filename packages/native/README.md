@@ -196,6 +196,40 @@ Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in
 `PROTOCOL.md`.
 
+## HTTP
+
+`Http::get()` remains available for simple reads. Authenticated APIs can use the
+generic request API or the `post()`, `put()`, `patch()` and `delete()` helpers:
+
+```php
+use Pam\Native\Http\Http;
+use Pam\Native\Http\HttpResponse;
+
+Http::json(
+    method: 'POST',
+    url: 'https://api.example.com/login',
+    data: ['email' => $email, 'password' => $password],
+    callback: function (HttpResponse $response): void {
+        // Read $response->statusCode, $response->body and $response->successful().
+    },
+);
+
+Http::request(
+    method: 'PATCH',
+    url: 'https://api.example.com/profile',
+    callback: fn (HttpResponse $response) => $this->updated($response),
+    headers: [
+        'Authorization' => "Bearer {$token}",
+        'Content-Type' => 'application/json',
+    ],
+    body: json_encode(['name' => $name], JSON_THROW_ON_ERROR),
+);
+```
+
+Production builds require HTTPS. Requests support GET, POST, PUT, PATCH and
+DELETE, up to 32 bounded single-line headers, a one MiB request body and timeout
+values from one to 120 seconds.
+
 ## License
 
 Source-available under the [Business Source License 1.1](LICENSE). Android

@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.5.1 - 2026-07-28
+
+- Add generic native HTTP requests across Android and iOS with GET, POST, PUT,
+  PATCH and DELETE methods, bounded request bodies and timeouts, custom headers,
+  Bearer authentication and JSON helpers while preserving the existing GET API.
 
 ## 0.5.0
 

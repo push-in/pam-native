@@ -55,6 +55,8 @@ use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\MemoryPressure;
 use Pam\Native\MotionPreset;
 use Pam\Native\HapticFeedback;
+use Pam\Native\Http\Http;
+use Pam\Native\Http\HttpResponse;
 use Pam\Native\NativeOperation;
 use Pam\Native\Forms\FormStatus;
 use Pam\Native\Forms\NativeForm;
@@ -1609,6 +1611,69 @@ $assert(
         && $moduleResult->values() === ['message' => 'fast'],
     'Public native module facade did not decode its result.',
 );
+
+$httpResponse = null;
+$httpRequestId = Http::json(
+    method: 'post',
+    url: 'https://api.example.test/login',
+    data: ['email' => 'person@example.test', 'password' => 'secret'],
+    callback: static function (HttpResponse $response) use (&$httpResponse): void {
+        $httpResponse = $response;
+    },
+    headers: ['Authorization' => 'Bearer access-token'],
+    timeoutMs: 45_000,
+);
+$httpCall = TestDiagnostics::$moduleCall;
+$httpPayload = Wire::decodeMap($httpCall['payload'] ?? '');
+$httpHeaders = json_decode((string) ($httpPayload['headers'] ?? ''), true, flags: JSON_THROW_ON_ERROR);
+$httpBody = json_decode((string) ($httpPayload['body'] ?? ''), true, flags: JSON_THROW_ON_ERROR);
+$assert(
+    $httpCall !== null
+        && $httpCall['requestId'] === $httpRequestId
+        && $httpCall['module'] === 'http'
+        && $httpCall['method'] === 'request'
+        && $httpPayload['url'] === 'https://api.example.test/login'
+        && $httpPayload['method'] === 'POST'
+        && $httpPayload['timeoutMs'] === 45_000
+        && $httpHeaders === [
+            'Accept' => 'application/json',
+            'Content-Type' => 'application/json',
+            'Authorization' => 'Bearer access-token',
+        ]
+        && $httpBody === ['email' => 'person@example.test', 'password' => 'secret'],
+    'Generic HTTP JSON request did not preserve method, URL, headers, body and timeout.',
+);
+Runtime::dispatchModuleResult(
+    $httpRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map(['statusCode' => 201, 'body' => '{"token":"access-token"}']),
+);
+$assert(
+    $httpResponse instanceof HttpResponse
+        && $httpResponse->statusCode === 201
+        && $httpResponse->successful()
+        && $httpResponse->body === '{"token":"access-token"}',
+    'Generic HTTP request did not decode its response.',
+);
+
+foreach (['post' => 'POST', 'put' => 'PUT', 'patch' => 'PATCH', 'delete' => 'DELETE'] as $helper => $method) {
+    Http::{$helper}(
+        'https://api.example.test/resource',
+        static function (HttpResponse $response): void {},
+        ['Authorization' => 'Bearer access-token'],
+        '{"enabled":true}',
+    );
+    $helperCall = TestDiagnostics::$moduleCall;
+    $helperPayload = Wire::decodeMap($helperCall['payload'] ?? '');
+    $assert(
+        $helperCall !== null
+            && $helperCall['method'] === 'request'
+            && $helperPayload['method'] === $method
+            && $helperPayload['body'] === '{"enabled":true}',
+        "HTTP {$method} helper did not emit a generic native request.",
+    );
+}
+
 $encoded = (new TreeEncoder())->encode($counter->render());
 $eventKey = array_key_first($encoded['callbacks']);
 
@@ -2425,7 +2490,7 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.0',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.1',
     'The runtime SDK contract must match the 0.5 package release line.',
 );
 
