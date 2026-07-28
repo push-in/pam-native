@@ -1292,7 +1292,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
     }
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
         guard presentation == Presentation.sheet,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else {
             return allowSwipeDismissal

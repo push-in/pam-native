@@ -54,7 +54,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         edgeGesture.isEnabled = enabled
     }
 
-    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+    override func gestureRecognizerShouldBegin(
+        _ gestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
         guard gestureEnabled, subviews.count >= 2,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
