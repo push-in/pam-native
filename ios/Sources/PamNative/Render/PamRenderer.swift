@@ -2136,7 +2136,7 @@ public final class PamRenderer {
             "key": .text(key),
             "loaded": .integer(loaded),
             "total": .integer(total),
-            "disk": .bool(disk),
+            "disk": .flag(disk),
         ])) ?? Data()
         dispatchEvent(nodeId, kind.rawValue, payload)
     }
@@ -2320,15 +2320,18 @@ public final class PamRenderer {
         let cachePolicy = Int(
             state.properties[PamConstants.imageCachePolicy]?.integerOrNil() ?? 1
         )
-        var request = URLRequest(
-            url: url,
-            cachePolicy: switch cachePolicy {
-            case 2: .reloadIgnoringLocalCacheData
-            case 3: .returnCacheDataElseLoad
-            case 4: .returnCacheDataDontLoad
-            default: .useProtocolCachePolicy
-            }
-        )
+        let requestCachePolicy: URLRequest.CachePolicy
+        switch cachePolicy {
+        case 2:
+            requestCachePolicy = .reloadIgnoringLocalCacheData
+        case 3:
+            requestCachePolicy = .returnCacheDataElseLoad
+        case 4:
+            requestCachePolicy = .returnCacheDataDontLoad
+        default:
+            requestCachePolicy = .useProtocolCachePolicy
+        }
+        var request = URLRequest(url: url, cachePolicy: requestCachePolicy)
         parseImageHeaders(
             state.properties[PamConstants.imageRequestHeaders]?.textOrNil()
         ).forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
@@ -2834,8 +2837,7 @@ public final class PamRenderer {
                     action: #selector(onSemanticGesture(_:))
                 )
                 longPress.minimumPressDuration = max(0.001, minimumDuration)
-                longPress.minimumNumberOfTouches = minimum
-                longPress.maximumNumberOfTouches = maximum
+                longPress.numberOfTouchesRequired = minimum
                 recognizer = longPress
             }
             recognizer.cancelsTouchesInView = composition == 1

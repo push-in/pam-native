@@ -403,6 +403,16 @@ public enum PamConstants {
     public static let navigationRevision = 284
     public static let hostName = 99
     public static let onNativeEvent = 101
+    public static let imageDefaultSource = 195
+    public static let imageLoadingIndicatorSource = 196
+    public static let imageFadeDurationMs = 197
+    public static let imageResizeMethod = 198
+    public static let imageResizeMultiplier = 199
+    public static let imageProgressiveRendering = 200
+    public static let imageCachePolicy = 201
+    public static let imageOverlayColor = 202
+    public static let imageSourceSet = 203
+    public static let imageRequestHeaders = 204
     public static let onImageLoadStart = 205
     public static let onImageProgress = 206
     public static let onImageLoad = 207
