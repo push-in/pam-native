@@ -8,7 +8,8 @@
   next layout pass, keeping newly appended chat bubbles visible above the
   composer and software keyboard.
 - Tighten the showcase chat composer to the Android keyboard and add
-  comfortable native input padding.
+  comfortable native input padding while keeping its header fixed above the
+  keyboard-adjusted conversation.
 
 ## 0.4.7
 

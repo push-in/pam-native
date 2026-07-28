@@ -1,80 +1,62 @@
 <Screen>
     <StatusBar backgroundColor="#FFF7FAF9" appearance="dark" />
     <SafeAreaView class="flex-1" backgroundColor="#FFF7FAF9">
-        <KeyboardAvoidingView class="flex-1" behavior="pan" keyboardVerticalOffset="-56">
-            <Column class="flex-1" backgroundColor="#FFEFF5F3">
-                <Row height="76" paddingHorizontal="14" paddingTop="12" paddingBottom="12" gap="10" alignItems="center" backgroundColor="#FFF7FAF9">
-                    <Pressable
-                        width="48"
-                        height="48"
-                        borderRadius="16"
-                        backgroundColor="#FFE5F2ED"
-                        rippleColor="#3317A673"
-                        pressedOpacity="0.9"
-                        on:press="back"
-                        accessibilityLabel="Back to gallery"
-                    >
-                        <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="24" fontWeight="700">←</Text>
-                    </Pressable>
-                    <Column width="48" height="48" borderRadius="24" backgroundColor="#FF17A673">
-                        <Text height="48" textColor="#FFFFFFFF" textAlign="center" fontSize="15" fontWeight="700">LA</Text>
-                    </Column>
-                    <Column flexGrow="1">
-                        <Text height="27" textColor="#FF173D32" fontSize="17" fontWeight="700">Lia Andrade</Text>
-                        <Text height="22" textColor="#FF17A673" fontSize="12">online now</Text>
-                    </Column>
-                    <Pressable
-                        width="64"
-                        height="48"
-                        borderRadius="16"
-                        backgroundColor="#FFE5F2ED"
-                        rippleColor="#3317A673"
-                        pressedOpacity="0.9"
-                        accessibilityLabel="Start a call"
-                    >
-                        <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="12" fontWeight="700">CALL</Text>
-                    </Pressable>
-                </Row>
-                <ScrollView class="flex-1" :contentOffsetY="$scrollOffset" keyboardDismissMode="interactive">
-                    <Column padding="16" gap="12">
-                        <Text height="28" textColor="#FF799088" textAlign="center" fontSize="12">TODAY</Text>
-                        <Column v-for="$chatMessage in $messages">
-                            <Row v-if="!$chatMessage['outgoing']" justifyContent="start">
-                                <Column
-                                    widthPercent="78"
-                                    padding="13"
-                                    gap="5"
-                                    borderRadius="18"
-                                    borderTopLeftRadius="5"
-                                    backgroundColor="#FFFFFFFF"
-                                >
-                                    <Text minHeight="24" textColor="#FF29483F" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
-                                    <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
-                                </Column>
-                            </Row>
-                            <Row v-if="$chatMessage['outgoing']" justifyContent="end">
-                                <Column
-                                    v-if="!$chatMessage['animate']"
-                                    widthPercent="82"
-                                    padding="13"
-                                    gap="5"
-                                    borderRadius="18"
-                                    borderTopRightRadius="5"
-                                    backgroundColor="#FF17A673"
-                                >
-                                    <Text minHeight="24" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
-                                    <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
-                                </Column>
-                                <Animated
-                                    v-if="$chatMessage['animate']"
-                                    widthPercent="82"
-                                    :keyframes="$messageEntranceKeyframes"
-                                    durationMs="220"
-                                    easing="spring"
-                                    fillMode="forwards"
-                                >
+        <Column class="flex-1" backgroundColor="#FFEFF5F3">
+            <Row height="76" paddingHorizontal="14" paddingTop="12" paddingBottom="12" gap="10" alignItems="center" backgroundColor="#FFF7FAF9" zIndex="10">
+                <Pressable
+                    width="48"
+                    height="48"
+                    borderRadius="16"
+                    backgroundColor="#FFE5F2ED"
+                    rippleColor="#3317A673"
+                    pressedOpacity="0.9"
+                    on:press="back"
+                    accessibilityLabel="Back to gallery"
+                >
+                    <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="24" fontWeight="700">←</Text>
+                </Pressable>
+                <Column width="48" height="48" borderRadius="24" backgroundColor="#FF17A673">
+                    <Text height="48" textColor="#FFFFFFFF" textAlign="center" fontSize="15" fontWeight="700">LA</Text>
+                </Column>
+                <Column flexGrow="1">
+                    <Text height="27" textColor="#FF173D32" fontSize="17" fontWeight="700">Lia Andrade</Text>
+                    <Text height="22" textColor="#FF17A673" fontSize="12">online now</Text>
+                </Column>
+                <Pressable
+                    width="64"
+                    height="48"
+                    borderRadius="16"
+                    backgroundColor="#FFE5F2ED"
+                    rippleColor="#3317A673"
+                    pressedOpacity="0.9"
+                    accessibilityLabel="Start a call"
+                >
+                    <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="12" fontWeight="700">CALL</Text>
+                </Pressable>
+            </Row>
+            <KeyboardAvoidingView class="flex-1" behavior="pan" keyboardVerticalOffset="-56">
+                <Column class="flex-1" backgroundColor="#FFEFF5F3">
+                    <ScrollView class="flex-1" :contentOffsetY="$scrollOffset" keyboardDismissMode="interactive">
+                        <Column padding="16" gap="12">
+                            <Text height="28" textColor="#FF799088" textAlign="center" fontSize="12">TODAY</Text>
+                            <Column v-for="$chatMessage in $messages">
+                                <Row v-if="!$chatMessage['outgoing']" justifyContent="start">
                                     <Column
-                                        flexGrow="1"
+                                        widthPercent="78"
+                                        padding="13"
+                                        gap="5"
+                                        borderRadius="18"
+                                        borderTopLeftRadius="5"
+                                        backgroundColor="#FFFFFFFF"
+                                    >
+                                        <Text minHeight="24" textColor="#FF29483F" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
+                                        <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
+                                    </Column>
+                                </Row>
+                                <Row v-if="$chatMessage['outgoing']" justifyContent="end">
+                                    <Column
+                                        v-if="!$chatMessage['animate']"
+                                        widthPercent="82"
                                         padding="13"
                                         gap="5"
                                         borderRadius="18"
@@ -84,55 +66,75 @@
                                         <Text minHeight="24" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
                                         <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
                                     </Column>
-                                </Animated>
-                            </Row>
+                                    <Animated
+                                        v-if="$chatMessage['animate']"
+                                        widthPercent="82"
+                                        :keyframes="$messageEntranceKeyframes"
+                                        durationMs="220"
+                                        easing="spring"
+                                        fillMode="forwards"
+                                    >
+                                        <Column
+                                            flexGrow="1"
+                                            padding="13"
+                                            gap="5"
+                                            borderRadius="18"
+                                            borderTopRightRadius="5"
+                                            backgroundColor="#FF17A673"
+                                        >
+                                            <Text minHeight="24" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
+                                            <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
+                                        </Column>
+                                    </Animated>
+                                </Row>
+                            </Column>
                         </Column>
-                    </Column>
-                </ScrollView>
-                <Row height="72" padding="10" gap="8" alignItems="center" backgroundColor="#FFF7FAF9">
-                    <Pressable
-                        width="48"
-                        height="52"
-                        borderRadius="16"
-                        backgroundColor="#FFE5F2ED"
-                        rippleColor="#3317A673"
-                        pressedOpacity="0.9"
-                        accessibilityLabel="Attach media"
-                    >
-                        <Text height="52" textColor="#FF167D5D" textAlign="center" fontSize="22" fontWeight="700">+</Text>
-                    </Pressable>
-                    <Input
-                        flexGrow="1"
-                        minHeight="52"
-                        paddingHorizontal="16"
-                        paddingVertical="12"
-                        borderRadius="18"
-                        backgroundColor="#FFFFFFFF"
-                        borderWidth="1"
-                        borderColor="#FFDCE8E4"
-                        textColor="#FF173D32"
-                        placeholder="Message"
-                        placeholderColor="#FF83958F"
-                        model="message"
-                        sync="immediate"
-                        submitBehavior="submit"
-                        on:submit="send"
-                        accessibilityLabel="Message"
-                    />
-                    <Pressable
-                        width="68"
-                        height="52"
-                        borderRadius="18"
-                        backgroundColor="#FF17A673"
-                        rippleColor="#33FFFFFF"
-                        pressedOpacity="0.9"
-                        on:press="send"
-                        accessibilityLabel="Send message"
-                    >
-                        <Text height="52" textColor="#FFFFFFFF" textAlign="center" fontSize="12" fontWeight="700">SEND</Text>
-                    </Pressable>
-                </Row>
-            </Column>
-        </KeyboardAvoidingView>
+                    </ScrollView>
+                    <Row height="72" padding="10" gap="8" alignItems="center" backgroundColor="#FFF7FAF9">
+                        <Pressable
+                            width="48"
+                            height="52"
+                            borderRadius="16"
+                            backgroundColor="#FFE5F2ED"
+                            rippleColor="#3317A673"
+                            pressedOpacity="0.9"
+                            accessibilityLabel="Attach media"
+                        >
+                            <Text height="52" textColor="#FF167D5D" textAlign="center" fontSize="22" fontWeight="700">+</Text>
+                        </Pressable>
+                        <Input
+                            flexGrow="1"
+                            minHeight="52"
+                            paddingHorizontal="16"
+                            paddingVertical="12"
+                            borderRadius="18"
+                            backgroundColor="#FFFFFFFF"
+                            borderWidth="1"
+                            borderColor="#FFDCE8E4"
+                            textColor="#FF173D32"
+                            placeholder="Message"
+                            placeholderColor="#FF83958F"
+                            model="message"
+                            sync="immediate"
+                            submitBehavior="submit"
+                            on:submit="send"
+                            accessibilityLabel="Message"
+                        />
+                        <Pressable
+                            width="68"
+                            height="52"
+                            borderRadius="18"
+                            backgroundColor="#FF17A673"
+                            rippleColor="#33FFFFFF"
+                            pressedOpacity="0.9"
+                            on:press="send"
+                            accessibilityLabel="Send message"
+                        >
+                            <Text height="52" textColor="#FFFFFFFF" textAlign="center" fontSize="12" fontWeight="700">SEND</Text>
+                        </Pressable>
+                    </Row>
+                </Column>
+            </KeyboardAvoidingView>
+        </Column>
     </SafeAreaView>
 </Screen>
