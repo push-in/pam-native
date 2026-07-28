@@ -17,7 +17,7 @@ final class HttpModuleTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "PATCH")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
-            XCTAssertEqual(request.httpBody, Data(#"{"enabled":true}"#.utf8))
+            XCTAssertEqual(try requestBody(request), Data(#"{"enabled":true}"#.utf8))
             XCTAssertEqual(request.timeoutInterval, 45, accuracy: 0.01)
 
             return (
@@ -56,6 +56,30 @@ final class HttpModuleTests: XCTestCase {
         wait(for: [completed], timeout: 2)
         module.close()
     }
+}
+
+private func requestBody(_ request: URLRequest) throws -> Data? {
+    if let body = request.httpBody {
+        return body
+    }
+    guard let stream = request.httpBodyStream else {
+        return nil
+    }
+    stream.open()
+    defer { stream.close() }
+    var body = Data()
+    var buffer = [UInt8](repeating: 0, count: 4_096)
+    while stream.hasBytesAvailable {
+        let count = stream.read(&buffer, maxLength: buffer.count)
+        if count < 0 {
+            throw stream.streamError ?? URLError(.cannotDecodeContentData)
+        }
+        if count == 0 {
+            break
+        }
+        body.append(buffer, count: count)
+    }
+    return body
 }
 
 private final class HTTPURLProtocol: URLProtocol {
