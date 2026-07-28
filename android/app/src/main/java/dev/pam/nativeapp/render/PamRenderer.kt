@@ -46,6 +46,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowInsetsAnimation
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -80,6 +81,18 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import org.json.JSONArray
+
+internal fun resolvedKeyboardInset(
+    platformInset: Int,
+    baselineHeight: Int,
+    currentHeight: Int,
+    minimumKeyboardHeight: Int,
+): Int {
+    val resizedInset = (baselineHeight - currentHeight)
+        .takeIf { it >= minimumKeyboardHeight }
+        ?: 0
+    return max(platformInset, resizedInset)
+}
 
 class PamRenderer(
     private val context: Context,
@@ -484,6 +497,13 @@ class PamRenderer(
         }
         state.outsidePointerObserver?.let { observer ->
             (host as? PamRootHost)?.removePointerObserver(observer)
+        }
+        if (state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW) {
+            host.setOnApplyWindowInsetsListener(null)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                host.setWindowInsetsAnimationCallback(null)
+            }
+            state.keyboardLayoutListener?.let(host::removeOnLayoutChangeListener)
         }
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
@@ -3818,14 +3838,65 @@ class PamRenderer(
     }
 
     private fun installKeyboardInsets(view: View, state: NodeState) {
-        view.setOnApplyWindowInsetsListener { target, insets ->
+        val layoutListener = View.OnLayoutChangeListener {
+                _,
+                _,
+                _,
+                _,
+                bottom,
+                _,
+                _,
+                _,
+                oldBottom,
+            ->
+            val height = bottom.coerceAtLeast(0)
+            if (state.keyboardBaseHeight == 0 || height > state.keyboardBaseHeight) {
+                state.keyboardBaseHeight = height
+            }
+            if (oldBottom != bottom && state.keyboardBaseHeight > 0) {
+                val platformInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    host.rootWindowInsets
+                        ?.getInsets(WindowInsets.Type.ime())
+                        ?.bottom
+                        ?: 0
+                } else {
+                    0
+                }
+                state.keyboardInset = resolvedKeyboardInset(
+                    platformInset = platformInset,
+                    baselineHeight = state.keyboardBaseHeight,
+                    currentHeight = height,
+                    minimumKeyboardHeight = dp(80f),
+                )
+                applyKeyboardAvoidance(view, state)
+            }
+        }
+        state.keyboardLayoutListener = layoutListener
+        host.addOnLayoutChangeListener(layoutListener)
+        host.setOnApplyWindowInsetsListener { _, insets ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 state.keyboardInset = insets.getInsets(WindowInsets.Type.ime()).bottom
-                applyKeyboardAvoidance(target, state)
+                applyKeyboardAvoidance(view, state)
             }
             insets
         }
-        view.requestApplyInsets()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            host.setWindowInsetsAnimationCallback(
+                object : WindowInsetsAnimation.Callback(
+                    WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+                ) {
+                    override fun onProgress(
+                        insets: WindowInsets,
+                        runningAnimations: MutableList<WindowInsetsAnimation>,
+                    ): WindowInsets {
+                        state.keyboardInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+                        applyKeyboardAvoidance(view, state)
+                        return insets
+                    }
+                },
+            )
+        }
+        host.requestApplyInsets()
     }
 
     private fun applyKeyboardAvoidance(view: View, state: NodeState) {
@@ -4669,6 +4740,8 @@ class PamRenderer(
         var safeAreaRightInset: Int = 0,
         var safeAreaBottomInset: Int = 0,
         var keyboardInset: Int = 0,
+        var keyboardBaseHeight: Int = 0,
+        var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var keyframeAnimator: ValueAnimator? = null,

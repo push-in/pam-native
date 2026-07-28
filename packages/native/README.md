@@ -5,7 +5,7 @@ state and events, Rust performs retained layout and incremental diffing, and
 Kotlin mounts bounded mutation batches on the Android UI thread.
 
 ```bash
-composer require pushinbr/pam-native:^0.2
+composer require pushinbr/pam-native:^0.4.5
 ```
 
 For a complete project:
@@ -14,6 +14,7 @@ For a complete project:
 pam init hello-native --template mobile
 cd hello-native
 pam composer install
+pam mobile doctor .
 pam mobile dev .
 ```
 

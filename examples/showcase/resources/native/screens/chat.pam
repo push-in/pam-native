@@ -1,0 +1,112 @@
+<Screen>
+    <StatusBar backgroundColor="#FFF7FAF9" appearance="dark" />
+    <SafeAreaView class="flex-1" backgroundColor="#FFF7FAF9">
+        <KeyboardAvoidingView class="flex-1" behavior="pan" keyboardVerticalOffset="0">
+            <Column class="flex-1" backgroundColor="#FFEFF5F3">
+                <Row height="72" paddingHorizontal="14" gap="10" backgroundColor="#FFF7FAF9">
+                    <Pressable
+                        width="48"
+                        height="48"
+                        borderRadius="16"
+                        backgroundColor="#FFE5F2ED"
+                        rippleColor="#3317A673"
+                        pressedOpacity="0.9"
+                        on:press="back"
+                        accessibilityLabel="Voltar para galeria"
+                    >
+                        <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="24" fontWeight="700">←</Text>
+                    </Pressable>
+                    <Column width="48" height="48" borderRadius="24" backgroundColor="#FF17A673">
+                        <Text height="48" textColor="#FFFFFFFF" textAlign="center" fontSize="15" fontWeight="700">LA</Text>
+                    </Column>
+                    <Column flexGrow="1">
+                        <Text height="27" textColor="#FF173D32" fontSize="17" fontWeight="700">Lia Andrade</Text>
+                        <Text height="22" textColor="#FF17A673" fontSize="12">online agora</Text>
+                    </Column>
+                    <Pressable
+                        width="64"
+                        height="48"
+                        borderRadius="16"
+                        backgroundColor="#FFE5F2ED"
+                        rippleColor="#3317A673"
+                        pressedOpacity="0.9"
+                        accessibilityLabel="Iniciar chamada"
+                    >
+                        <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="12" fontWeight="700">LIGAR</Text>
+                    </Pressable>
+                </Row>
+                <ScrollView class="flex-1">
+                    <Column padding="16" gap="12">
+                        <Text height="28" textColor="#FF799088" textAlign="center" fontSize="12">HOJE</Text>
+                        <Column widthPercent="78" padding="13" gap="5" borderRadius="18" backgroundColor="#FFFFFFFF">
+                            <Text height="42" textColor="#FF29483F" fontSize="14" lineHeight="20">Consegui separar as fotos da campanha. Quer ver?</Text>
+                            <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">09:38</Text>
+                        </Column>
+                        <Column widthPercent="82" marginLeftAuto="true" padding="13" gap="8" borderRadius="18" backgroundColor="#FFDDF7EE">
+                            <Column height="142" padding="14" gap="8" borderRadius="14" backgroundColor="#FF163F55">
+                                <Text height="22" textColor="#FF7AE4C2" fontSize="11" fontWeight="700">CAMPANHA · JULHO</Text>
+                                <Text height="54" textColor="#FFFFFFFF" fontSize="21" fontWeight="700" lineHeight="25">Produto local. Alcance nacional.</Text>
+                                <Row height="28" gap="6">
+                                    <Column flexGrow="1" borderRadius="8" backgroundColor="#FF17A673" />
+                                    <Column flexGrow="1" borderRadius="8" backgroundColor="#FFF4B860" />
+                                    <Column flexGrow="1" borderRadius="8" backgroundColor="#FFF07D68" />
+                                </Row>
+                            </Column>
+                            <Text height="40" textColor="#FF17493A" fontSize="14" lineHeight="19">Essa direção ficou ótima. A luz está perfeita.</Text>
+                            <Text height="18" textColor="#FF5E897D" textAlign="end" fontSize="10">09:40 · Lida</Text>
+                        </Column>
+                        <Column widthPercent="78" padding="13" gap="5" borderRadius="18" backgroundColor="#FFFFFFFF">
+                            <Text height="42" textColor="#FF29483F" fontSize="14" lineHeight="20">Fechado. Vou levar os arquivos finais.</Text>
+                            <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">09:41</Text>
+                        </Column>
+                        <Column widthPercent="82" marginLeftAuto="true" padding="13" gap="5" borderRadius="18" backgroundColor="#FF17A673">
+                            <Text height="42" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $sentMessage }}</Text>
+                            <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $deliveryLabel }}</Text>
+                        </Column>
+                    </Column>
+                </ScrollView>
+                <Row minHeight="72" padding="10" gap="8" backgroundColor="#FFF7FAF9">
+                    <Pressable
+                        width="48"
+                        height="52"
+                        borderRadius="16"
+                        backgroundColor="#FFE5F2ED"
+                        rippleColor="#3317A673"
+                        pressedOpacity="0.9"
+                        accessibilityLabel="Anexar mídia"
+                    >
+                        <Text height="52" textColor="#FF167D5D" textAlign="center" fontSize="22" fontWeight="700">+</Text>
+                    </Pressable>
+                    <Input
+                        flexGrow="1"
+                        minHeight="52"
+                        borderRadius="18"
+                        backgroundColor="#FFFFFFFF"
+                        borderWidth="1"
+                        borderColor="#FFDCE8E4"
+                        textColor="#FF173D32"
+                        placeholder="Mensagem"
+                        placeholderColor="#FF83958F"
+                        model="message"
+                        sync="debounced"
+                        submitBehavior="submit"
+                        on:submit="send"
+                        accessibilityLabel="Mensagem"
+                    />
+                    <Pressable
+                        width="68"
+                        height="52"
+                        borderRadius="18"
+                        backgroundColor="#FF17A673"
+                        rippleColor="#33FFFFFF"
+                        pressedOpacity="0.9"
+                        on:press="send"
+                        accessibilityLabel="Enviar mensagem"
+                    >
+                        <Text height="52" textColor="#FFFFFFFF" textAlign="center" fontSize="12" fontWeight="700">ENVIAR</Text>
+                    </Pressable>
+                </Row>
+            </Column>
+        </KeyboardAvoidingView>
+    </SafeAreaView>
+</Screen>

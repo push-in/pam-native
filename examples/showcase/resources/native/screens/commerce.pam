@@ -1,0 +1,78 @@
+<Screen>
+    <StatusBar backgroundColor="#FFFFF8F2" appearance="dark" />
+    <SafeAreaView class="flex-1" backgroundColor="#FFFFF8F2">
+        <Column class="flex-1" backgroundColor="#FFFFF8F2">
+            <Row height="64" paddingHorizontal="18" gap="12">
+                <Pressable
+                    width="48"
+                    height="48"
+                    borderRadius="16"
+                    backgroundColor="#FFFFE8D8"
+                    rippleColor="#33FF6B21"
+                    pressedOpacity="0.9"
+                    on:press="back"
+                    accessibilityLabel="Voltar para galeria"
+                >
+                    <Text height="48" textColor="#FF9A3F1C" textAlign="center" fontSize="24" fontWeight="700">←</Text>
+                </Pressable>
+                <Column flexGrow="1">
+                    <Text height="22" textColor="#FF9A5B3B" fontSize="12">ENTREGAR EM</Text>
+                    <Text height="28" textColor="#FF32170C" fontSize="17" fontWeight="700">Casa · 25–35 min</Text>
+                </Column>
+                <Column width="48" height="48" borderRadius="16" backgroundColor="#FFFFE3CF">
+                    <Text height="48" textColor="#FFFF6B21" textAlign="center" fontSize="15" fontWeight="700">DB</Text>
+                </Column>
+            </Row>
+            <ScrollView class="flex-1">
+                <Column padding="18" gap="16">
+                    <Column height="184" padding="20" gap="8" borderRadius="24" backgroundColor="#FFFF6B21">
+                        <Text height="24" textColor="#FFFFE8D8" fontSize="13" fontWeight="700">SABORES DO BAIRRO</Text>
+                        <Text height="88" textColor="#FFFFFFFF" fontSize="27" fontWeight="700" lineHeight="31">Comida de verdade, bem perto.</Text>
+                        <Text height="24" textColor="#FFFFE8D8" fontSize="13">Frete grátis nos primeiros 2 km</Text>
+                    </Column>
+                    <Text height="28" textColor="#FF32170C" fontSize="19" fontWeight="700">Populares agora</Text>
+                    <Column height="190" padding="20" gap="10" borderRadius="22" backgroundColor="#FF3E7C53">
+                        <Row height="38" gap="8">
+                            <Column width="38" height="38" borderRadius="19" backgroundColor="#FFF4C95D" />
+                            <Column width="38" height="38" borderRadius="19" backgroundColor="#FFE56B4A" />
+                            <Column width="38" height="38" borderRadius="19" backgroundColor="#FFB9D979" />
+                        </Row>
+                        <Text height="58" textColor="#FFFFFFFF" fontSize="24" fontWeight="700" lineHeight="28">Bowl fresco da estação</Text>
+                        <Text height="38" textColor="#FFDDF0E2" fontSize="13" lineHeight="18">Ingredientes locais, preparo diário e entrega rápida.</Text>
+                    </Column>
+                    <Row height="58">
+                        <Column flexGrow="1">
+                            <Text height="28" textColor="#FF32170C" fontSize="19" fontWeight="700">Quintal da Ana</Text>
+                            <Text height="24" textColor="#FF8B6A5B" fontSize="13">Brasileira · 4,9 · 20–30 min</Text>
+                        </Column>
+                        <Column width="72" height="36" borderRadius="12" backgroundColor="#FFEAF8E7">
+                            <Text height="36" textColor="#FF267A32" textAlign="center" fontSize="13" fontWeight="700">ABERTO</Text>
+                        </Column>
+                    </Row>
+                    <Row height="92" padding="14" gap="12" borderRadius="18" backgroundColor="#FFFFFFFF">
+                        <Column flexGrow="1">
+                            <Text height="25" textColor="#FF32170C" fontSize="16" fontWeight="700">Bowl da estação</Text>
+                            <Text height="23" textColor="#FF8B6A5B" fontSize="13">Legumes, arroz e molho da casa</Text>
+                            <Text height="24" textColor="#FFFF6B21" fontSize="15" fontWeight="700">R$ 32,90</Text>
+                        </Column>
+                        <Column width="58" height="58" borderRadius="16" backgroundColor="#FFFFE3CF">
+                            <Text height="58" textColor="#FFFF6B21" textAlign="center" fontSize="20" fontWeight="700">+1</Text>
+                        </Column>
+                    </Row>
+                    <Text height="44" textColor="#FF9A7C6F" fontSize="13" lineHeight="20">Pedido local, interface nativa e atualização do carrinho sem round-trip de rede.</Text>
+                </Column>
+            </ScrollView>
+            <Column padding="12" backgroundColor="#FFFFF8F2">
+                <Button
+                    height="56"
+                    borderRadius="18"
+                    backgroundColor="#FFFF6B21"
+                    textColor="#FFFFFFFF"
+                    fontWeight="700"
+                    on:press="addToCart"
+                    accessibilityLabel="Adicionar item ao pedido"
+                >{{ $cartLabel }}</Button>
+            </Column>
+        </Column>
+    </SafeAreaView>
+</Screen>

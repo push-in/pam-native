@@ -56,8 +56,22 @@ Android contracts at both supported API boundaries.
 Install the versioned PHP SDK with Composer:
 
 ```bash
-composer require pushinbr/pam-native:^0.2
+composer require pushinbr/pam-native:^0.4.5
 ```
+
+Or go from an empty directory to a running native screen:
+
+```bash
+pam init hello-native --template mobile
+cd hello-native
+pam composer install
+pam mobile doctor .
+pam mobile dev .
+```
+
+The generated starter opens with a native counter and a second route, so the
+first run proves persistent PHP state, native input and navigation before the
+developer adds application code.
 
 Use [Pam Store](docs/store.md) for global reactive state, atomic actions,
 computed selectors, persistence, undo/redo and DevTools time travel.

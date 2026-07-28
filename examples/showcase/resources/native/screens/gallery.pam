@@ -1,0 +1,141 @@
+<Screen>
+    <StatusBar backgroundColor="#FF08111F" appearance="light" />
+    <SafeAreaView class="flex-1" backgroundColor="#FF08111F">
+        <ScrollView class="flex-1" backgroundColor="#FF08111F">
+            <Column padding="20" gap="16" backgroundColor="#FF08111F">
+                <Row height="52" gap="12">
+                    <Column flexGrow="1">
+                        <Text height="24" textColor="#FF63E6BE" fontSize="11" fontWeight="700" letterSpacing="0.1">PAM NATIVE GALLERY</Text>
+                        <Text height="32" textColor="#FFF7FAFC" fontSize="22" fontWeight="700">PHP que parece impossível.</Text>
+                    </Column>
+                    <Pressable
+                        width="52"
+                        height="52"
+                        borderRadius="16"
+                        backgroundColor="#FF142235"
+                        rippleColor="#3363E6BE"
+                        on:press="openLab"
+                        accessibilityLabel="Abrir laboratório técnico"
+                    >
+                        <Text height="52" textColor="#FFB7C5D8" textAlign="center" fontSize="12" fontWeight="700">LAB</Text>
+                    </Pressable>
+                </Row>
+
+                <Column
+                    padding="20"
+                    gap="8"
+                    borderRadius="24"
+                    backgroundColor="#FF10263A"
+                    borderWidth="1"
+                    borderColor="#FF244158"
+                >
+                    <Text height="24" textColor="#FF63E6BE" fontSize="13" fontWeight="700">REALMENTE NATIVO · ZERO JAVASCRIPT</Text>
+                    <Text height="136" textColor="#FFFFFFFF" fontSize="30" fontWeight="700" lineHeight="35">Quatro produtos. Um runtime PHP persistente.</Text>
+                    <Text height="72" textColor="#FFB7C5D8" fontSize="15" lineHeight="22">Abra cada experiência e toque na interface. Tudo abaixo é controle nativo reconciliado em Rust.</Text>
+                    <Row height="64" gap="8">
+                        <Column flexGrow="1" padding="10" borderRadius="14" backgroundColor="#FF163149">
+                            <Text height="25" textColor="#FFFFFFFF" fontSize="19" fontWeight="700">5,8 MiB</Text>
+                            <Text height="20" textColor="#FF8FA8C0" fontSize="12">APK benchmark</Text>
+                        </Column>
+                        <Column flexGrow="1" padding="10" borderRadius="14" backgroundColor="#FF163149">
+                            <Text height="25" textColor="#FFFFFFFF" fontSize="19" fontWeight="700">408 ms</Text>
+                            <Text height="20" textColor="#FF8FA8C0" fontSize="12">fully drawn</Text>
+                        </Column>
+                    </Row>
+                </Column>
+
+                <Text height="30" textColor="#FFF7FAFC" fontSize="18" fontWeight="700">Escolha uma experiência</Text>
+
+                <Pressable
+                    height="116"
+                    padding="16"
+                    borderRadius="20"
+                    backgroundColor="#FFFFF2E8"
+                    rippleColor="#22E66B21"
+                    pressedOpacity="0.94"
+                    on:press="openCommerce"
+                    accessibilityLabel="Abrir marketplace"
+                >
+                    <Row gap="14">
+                        <Column width="58" height="58" borderRadius="18" backgroundColor="#FFFF6B21">
+                            <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="20" fontWeight="700">GO</Text>
+                        </Column>
+                        <Column flexGrow="1" gap="3">
+                            <Text height="23" textColor="#FF41170A" fontSize="17" fontWeight="700">Mercado local</Text>
+                            <Text height="39" textColor="#FF89513A" fontSize="13" lineHeight="18">Descoberta, catálogo e pedido com resposta imediata.</Text>
+                        </Column>
+                        <Text width="24" height="58" textColor="#FFFF6B21" fontSize="22" fontWeight="700">›</Text>
+                    </Row>
+                </Pressable>
+
+                <Pressable
+                    height="116"
+                    padding="16"
+                    borderRadius="20"
+                    backgroundColor="#FFEAF2FF"
+                    rippleColor="#222D6CDF"
+                    pressedOpacity="0.94"
+                    on:press="openFinance"
+                    accessibilityLabel="Abrir dashboard financeiro"
+                >
+                    <Row gap="14">
+                        <Column width="58" height="58" borderRadius="18" backgroundColor="#FF2D6CDF">
+                            <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="20" fontWeight="700">R$</Text>
+                        </Column>
+                        <Column flexGrow="1" gap="3">
+                            <Text height="23" textColor="#FF102B55" fontSize="17" fontWeight="700">Finanças offline</Text>
+                            <Text height="39" textColor="#FF526C91" fontSize="13" lineHeight="18">Saldo, insights e atividade disponíveis sem rede.</Text>
+                        </Column>
+                        <Text width="24" height="58" textColor="#FF2D6CDF" fontSize="22" fontWeight="700">›</Text>
+                    </Row>
+                </Pressable>
+
+                <Pressable
+                    height="116"
+                    padding="16"
+                    borderRadius="20"
+                    backgroundColor="#FFE9FBF4"
+                    rippleColor="#2217A673"
+                    pressedOpacity="0.94"
+                    on:press="openChat"
+                    accessibilityLabel="Abrir chat com mídia"
+                >
+                    <Row gap="14">
+                        <Column width="58" height="58" borderRadius="18" backgroundColor="#FF17A673">
+                            <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="18" fontWeight="700">CH</Text>
+                        </Column>
+                        <Column flexGrow="1" gap="3">
+                            <Text height="23" textColor="#FF0D4938" fontSize="17" fontWeight="700">Chat com mídia</Text>
+                            <Text height="39" textColor="#FF49766A" fontSize="13" lineHeight="18">Composer nativo e atualizações otimistas em PHP.</Text>
+                        </Column>
+                        <Text width="24" height="58" textColor="#FF17A673" fontSize="22" fontWeight="700">›</Text>
+                    </Row>
+                </Pressable>
+
+                <Pressable
+                    height="116"
+                    padding="16"
+                    borderRadius="20"
+                    backgroundColor="#FFFFF8D9"
+                    rippleColor="#22B98A00"
+                    pressedOpacity="0.94"
+                    on:press="openField"
+                    accessibilityLabel="Abrir operações em campo"
+                >
+                    <Row gap="14">
+                        <Column width="58" height="58" borderRadius="18" backgroundColor="#FFB98A00">
+                            <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="18" fontWeight="700">OP</Text>
+                        </Column>
+                        <Column flexGrow="1" gap="3">
+                            <Text height="23" textColor="#FF493A08" fontSize="17" fontWeight="700">Operação em campo</Text>
+                            <Text height="39" textColor="#FF766A3D" fontSize="13" lineHeight="18">Rotas, captura e sincronização resiliente.</Text>
+                        </Column>
+                        <Text width="24" height="58" textColor="#FFB98A00" fontSize="22" fontWeight="700">›</Text>
+                    </Row>
+                </Pressable>
+
+                <Text height="42" textColor="#FF71859D" textAlign="center" fontSize="12">Android API 26–36 · iOS UIKit · PHP 8.4 · Rust</Text>
+            </Column>
+        </ScrollView>
+    </SafeAreaView>
+</Screen>

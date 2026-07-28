@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 0.4.5
+
+- Keep `KeyboardAvoidingView` composers and submit actions visible on
+  edge-to-edge Android hosts by combining animated IME insets with the actual
+  window-resize delta, including reliable listener cleanup on unmount.
+- Add the presentation-ready PAM Native Gallery with commerce, offline
+  finance, chat and field-operation experiences while preserving the original
+  runtime laboratory and 10,000-row benchmark route.
+- Replace default showcase header buttons with accessible 48 dp native
+  pressables, consistent state feedback and product-specific visual treatment.
+- Align the starter documentation, showcase and reference plugin with the
+  current `0.4.x` SDK and add `pam mobile doctor` to the first-run path.
+
 ## 0.4.4
 
 - Add first-class native image/video/audio caching with memory and disk
