@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.8
+
+- Reapply explicit Android scroll offsets after retained content completes its
+  next layout pass, keeping newly appended chat bubbles visible above the
+  composer and software keyboard.
+- Tighten the showcase chat composer to the Android keyboard and add
+  comfortable native input padding.
+
 ## 0.4.7
 
 - Keep the chat composer focused and the software keyboard visible after

@@ -56,7 +56,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     fun insert(child: View) {
         content.addView(child)
-        applyRequestedOffset()
+        requestOffsetApplication()
     }
 
     fun setHorizontal(value: Boolean) {
@@ -154,13 +154,13 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     fun setContentOffsetX(value: Float) {
         requestedOffsetX = dp(value.coerceAtLeast(0f))
         hasRequestedOffsetX = true
-        applyRequestedOffset()
+        requestOffsetApplication()
     }
 
     fun setContentOffsetY(value: Float) {
         requestedOffsetY = dp(value.coerceAtLeast(0f))
         hasRequestedOffsetY = true
-        applyRequestedOffset()
+        requestOffsetApplication()
     }
 
     fun setOnViewportChanged(listener: ((Float, Float) -> Unit)?) {
@@ -241,15 +241,23 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     private fun applyRequestedOffset() {
         if (!isLaidOut || activeScroll.childCount == 0) {
-            if (isAttachedToWindow && !offsetScheduled) {
-                offsetScheduled = true
-                post(applyOffsetRunnable)
-            }
+            scheduleRequestedOffset()
             return
         }
         val x = if (hasRequestedOffsetX) requestedOffsetX else scrollXOf(activeScroll)
         val y = if (hasRequestedOffsetY) requestedOffsetY else scrollYOf(activeScroll)
         activeScroll.scrollTo(x, y)
+    }
+
+    private fun requestOffsetApplication() {
+        applyRequestedOffset()
+        scheduleRequestedOffset()
+    }
+
+    private fun scheduleRequestedOffset() {
+        if (!isAttachedToWindow || offsetScheduled) return
+        offsetScheduled = true
+        post(applyOffsetRunnable)
     }
 
     private fun dispatchViewport(scrollX: Int, scrollY: Int) {
