@@ -2,7 +2,7 @@
     <StatusBar backgroundColor="#FF0B1D3A" appearance="light" />
     <SafeAreaView class="flex-1" backgroundColor="#FF0B1D3A">
         <Column class="flex-1" backgroundColor="#FFF4F7FC">
-            <Column paddingHorizontal="18" paddingTop="12" paddingBottom="22" gap="14" backgroundColor="#FF0B1D3A">
+            <Column paddingHorizontal="18" paddingTop="12" paddingBottom="22" gap="14" backgroundColor="#FF0B1D3A" zIndex="10">
                 <Row height="52" gap="12" alignItems="center">
                     <Pressable
                         width="48"

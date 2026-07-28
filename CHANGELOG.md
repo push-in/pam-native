@@ -10,6 +10,8 @@
 - Tighten the showcase chat composer to the Android keyboard and add
   comfortable native input padding while keeping its header fixed above the
   keyboard-adjusted conversation.
+- Keep showcase headers in a stable foreground layer and adapt Android 15+
+  status-bar icons to the platform-enforced dark system-bar background.
 
 ## 0.4.7
 

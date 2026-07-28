@@ -4015,8 +4015,10 @@ class PamRenderer(
         val decor = activity()?.window?.decorView ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val controller = decor.windowInsetsController ?: return
+            val useDarkIcons =
+                value == STATUS_BAR_DARK && Build.VERSION.SDK_INT < 35
             controller.setSystemBarsAppearance(
-                if (value == STATUS_BAR_DARK) {
+                if (useDarkIcons) {
                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
                 } else {
                     0
@@ -4052,8 +4054,11 @@ class PamRenderer(
 
     @Suppress("DEPRECATION")
     private fun applyStatusBarColor(color: Int, animated: Boolean) {
-        if (Build.VERSION.SDK_INT >= 35) return
         val window = activity()?.window ?: return
+        if (Build.VERSION.SDK_INT >= 35) {
+            window.decorView.setBackgroundColor(color)
+            return
+        }
         statusBarColorAnimator?.cancel()
         if (!animated || window.statusBarColor == color) {
             window.statusBarColor = color
