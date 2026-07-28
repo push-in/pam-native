@@ -27,7 +27,8 @@ class CapabilityIntegrationTest {
     fun devToolsRendersCapabilityTimelineAndFailureState() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val launched = instrumentation.startActivitySync(
-            Intent(instrumentation.targetContext, CapabilityTestActivity::class.java),
+            Intent(instrumentation.targetContext, CapabilityTestActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         ) as CapabilityTestActivity
         activity = launched
         instrumentation.runOnMainSync {
