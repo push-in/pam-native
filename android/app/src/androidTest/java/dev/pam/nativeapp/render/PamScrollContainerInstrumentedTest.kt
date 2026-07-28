@@ -82,6 +82,11 @@ class PamScrollContainerInstrumentedTest {
                 relayout(activity.host)
                 assertEquals(1_000, scroll.snapshotOffsetPixels().second)
 
+                // Renderer reconciliation may offer the offset captured before
+                // the content mutation. It must not undo end-following.
+                scroll.restoreOffsetPixels(0, 600)
+                assertEquals(1_000, scroll.snapshotOffsetPixels().second)
+
                 scroll.restoreOffsetPixels(0, 200)
             }
             instrumentation.waitForIdleSync()

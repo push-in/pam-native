@@ -80,6 +80,7 @@ import java.util.LinkedHashSet
 import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import org.json.JSONArray
 
 internal fun resolvedKeyboardInset(
@@ -92,6 +93,11 @@ internal fun resolvedKeyboardInset(
         .takeIf { it >= minimumKeyboardHeight }
         ?: 0
     return max(platformInset, resizedInset)
+}
+
+private enum class Axis {
+    HORIZONTAL,
+    VERTICAL,
 }
 
 class PamRenderer(
@@ -897,27 +903,42 @@ class PamRenderer(
         } else {
             0
         }
-        val width = (
+        var width = (
             dp(frame.width) - safeLeft - safeRight - parentSafeHorizontal
             ).coerceAtLeast(0)
-        val height = (
+        var height = (
             dp(frame.height) - safeTop - safeBottom - parentSafeVertical
             ).coerceAtLeast(0)
-        val leftPx = dp(left) + safeLeft
-        val topPx = dp(top) + safeTop
+        var leftPx = dp(left) + safeLeft
+        var topPx = dp(top) + safeTop
+        compensateFlexParentViewportReduction(
+            state = state,
+            parentState = parentState,
+            parentFrame = parentFrame,
+            parentView = views[state.parent],
+            applyHorizontal = { offset, reduction ->
+                leftPx -= offset
+                width = (width - reduction).coerceAtLeast(0)
+            },
+            applyVertical = { offset, reduction ->
+                topPx -= offset
+                height = (height - reduction).coerceAtLeast(0)
+            },
+        )
         val current = view.layoutParams as? ViewGroup.MarginLayoutParams
 
-        if (
+        val layoutChanged =
             current == null ||
             current.width != width ||
             current.height != height ||
             current.leftMargin != leftPx ||
             current.topMargin != topPx
-        ) {
+        if (layoutChanged) {
             view.layoutParams = FrameLayout.LayoutParams(width, height).apply {
                 leftMargin = leftPx
                 topMargin = topPx
             }
+            children[state.id]?.forEach(::applyLayout)
         }
         // Some plugin hosts (for example Calendar) draw against tagged child
         // bounds. A descendant frame can change without mutating the host's
@@ -931,6 +952,62 @@ class PamRenderer(
         applyHitSlop(view, state)
         state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
             view.translationX = width * (percent / 100.0).toFloat()
+        }
+    }
+
+    private fun compensateFlexParentViewportReduction(
+        state: NodeState,
+        parentState: NodeState?,
+        parentFrame: Frame?,
+        parentView: View?,
+        applyHorizontal: (offset: Int, reduction: Int) -> Unit,
+        applyVertical: (offset: Int, reduction: Int) -> Unit,
+    ) {
+        if (parentState == null || parentFrame == null || parentView == null) return
+        val axis = when (parentState.kind) {
+            NodeKind.ROW -> Axis.HORIZONTAL
+            NodeKind.COLUMN -> Axis.VERTICAL
+            else -> return
+        }
+        val engineExtent = when (axis) {
+            Axis.HORIZONTAL -> dp(parentFrame.width)
+            Axis.VERTICAL -> dp(parentFrame.height)
+        }
+        val layoutExtent = when (axis) {
+            Axis.HORIZONTAL -> parentView.layoutParams?.width ?: parentView.width
+            Axis.VERTICAL -> parentView.layoutParams?.height ?: parentView.height
+        }
+        val renderedExtent = layoutExtent.takeIf { it > 0 } ?: when (axis) {
+            Axis.HORIZONTAL -> parentView.width
+            Axis.VERTICAL -> parentView.height
+        }
+        if (renderedExtent <= 0) return
+        val viewportReduction = engineExtent - renderedExtent
+        if (viewportReduction <= 0) return
+
+        val siblings = children[parentState.id]
+            ?.mapNotNull(nodes::get)
+            ?.sortedBy(NodeState::index)
+            ?: return
+        val totalGrow = siblings.sumOf { sibling ->
+            sibling.number(PropKey.FLEX_GROW, 0.0).coerceAtLeast(0.0)
+        }
+        if (totalGrow <= 0.0) return
+
+        var growBefore = 0.0
+        for (sibling in siblings) {
+            if (sibling.id == state.id) break
+            growBefore += sibling.number(PropKey.FLEX_GROW, 0.0).coerceAtLeast(0.0)
+        }
+        val ownGrow = state.number(PropKey.FLEX_GROW, 0.0).coerceAtLeast(0.0)
+        val reductionBefore = (viewportReduction * growBefore / totalGrow).roundToInt()
+        val reductionThrough = (
+            viewportReduction * (growBefore + ownGrow) / totalGrow
+            ).roundToInt()
+        val ownReduction = (reductionThrough - reductionBefore).coerceAtLeast(0)
+        when (axis) {
+            Axis.HORIZONTAL -> applyHorizontal(reductionBefore, ownReduction)
+            Axis.VERTICAL -> applyVertical(reductionBefore, ownReduction)
         }
     }
 

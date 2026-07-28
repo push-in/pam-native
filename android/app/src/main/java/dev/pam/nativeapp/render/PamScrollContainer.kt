@@ -33,6 +33,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var hasRequestedOffsetY = false
     private var offsetScheduled = false
     private var previousPrimaryMaxOffset = 0
+    private var primaryMaxOffsetBeforeLastLayout = 0
     private var anchorToEnd = false
     private var initialEndAnchorApplied = false
     private var maintainVisibleContentPosition = false
@@ -50,8 +51,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var activeScroll: ViewGroup = createVerticalScroll()
 
     init {
-        clipChildren = false
-        clipToPadding = false
+        clipChildren = true
+        clipToPadding = true
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_AUTO
         activeScroll.setBackgroundColor(Color.TRANSPARENT)
         activeScroll.addView(content, contentLayout())
@@ -196,6 +197,19 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     fun restoreOffsetPixels(x: Int, y: Int) {
         if (hasRequestedOffsetX || hasRequestedOffsetY) return
+        val targetOffset = if (horizontal) x else y
+        val targetWasAtPreviousEnd =
+            abs(targetOffset - previousPrimaryMaxOffset) <= autoScrollToEndThresholdPx ||
+                abs(targetOffset - primaryMaxOffsetBeforeLastLayout) <=
+                autoScrollToEndThresholdPx
+        if (
+            anchorToEnd &&
+            targetWasAtPreviousEnd &&
+            (primaryMaxOffset() - primaryCurrentOffset())
+                .coerceAtLeast(0) <= autoScrollToEndThresholdPx
+        ) {
+            return
+        }
         activeScroll.post {
             if (
                 isAttachedToWindow
@@ -230,6 +244,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         val distanceFromEnd = (previousMax - previousOffset).coerceAtLeast(0)
         super.onLayout(changed, left, top, right, bottom)
         val newMax = primaryMaxOffset()
+        primaryMaxOffsetBeforeLastLayout = previousMax
         previousPrimaryMaxOffset = newMax
         when {
             anchorToEnd && !initialEndAnchorApplied -> {
@@ -268,7 +283,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         }
 
     private fun applyConfiguration() {
-        activeScroll.clipToPadding = false
+        activeScroll.clipChildren = true
+        activeScroll.clipToPadding = true
         activeScroll.isEnabled = scrollEnabled
         setShowsScrollIndicator(showsIndicator)
         setFillViewport(fillViewport)
@@ -358,6 +374,9 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         } else {
             (content.height - activeScroll.height).coerceAtLeast(0)
         }
+
+    private fun primaryCurrentOffset(): Int =
+        if (horizontal) scrollXOf(activeScroll) else scrollYOf(activeScroll)
 
     private fun scrollToPrimary(offset: Int) {
         if (horizontal) {

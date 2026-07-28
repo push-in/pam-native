@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.3 - 2026-07-28
+
+- Keep flex layouts consistent after safe-area insets reduce their native
+  viewport, so fixed headers and composers remain visible around flexible
+  scroll content.
+- Clip Android scroll content to its viewport and preserve end-following
+  during renderer reconciliation.
+- Ship the Android renderer sources and matching Rust engines together in the
+  GitHub release to prevent mixed protocol versions.
+
 ## 0.5.2 - 2026-07-28
 
 - Add typed, paginated Android and iOS contacts access with an explicit
