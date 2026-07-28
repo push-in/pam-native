@@ -12,8 +12,8 @@ final class FieldDemo extends Component
 {
     public Navigator $navigator;
     private SyncState $syncState = SyncState::Ready;
-    private string $syncLabel = 'Sincronizar 3 registros';
-    private string $connectionLabel = 'Offline · alterações protegidas';
+    private string $syncLabel = 'Sync 3 records';
+    private string $connectionLabel = 'Offline · changes protected';
 
     public function render(): View
     {
@@ -28,13 +28,13 @@ final class FieldDemo extends Component
         };
 
         if ($this->syncState === SyncState::Syncing) {
-            $this->syncLabel = 'Finalizar sincronização';
-            $this->connectionLabel = 'Sincronizando com segurança…';
+            $this->syncLabel = 'Finish sync';
+            $this->connectionLabel = 'Syncing securely…';
             return;
         }
 
-        $this->syncLabel = 'Tudo sincronizado';
-        $this->connectionLabel = 'Online · atualizado agora';
+        $this->syncLabel = 'Everything is synced';
+        $this->connectionLabel = 'Online · updated just now';
     }
 
     public function back(): void

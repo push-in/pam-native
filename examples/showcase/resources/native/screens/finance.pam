@@ -2,8 +2,8 @@
     <StatusBar backgroundColor="#FF0B1D3A" appearance="light" />
     <SafeAreaView class="flex-1" backgroundColor="#FF0B1D3A">
         <Column class="flex-1" backgroundColor="#FFF4F7FC">
-            <Column paddingHorizontal="18" paddingTop="8" paddingBottom="22" gap="14" backgroundColor="#FF0B1D3A">
-                <Row height="54" gap="12">
+            <Column paddingHorizontal="18" paddingTop="12" paddingBottom="22" gap="14" backgroundColor="#FF0B1D3A">
+                <Row height="52" gap="12" alignItems="center">
                     <Pressable
                         width="48"
                         height="48"
@@ -12,19 +12,19 @@
                         rippleColor="#339DBDFF"
                         pressedOpacity="0.9"
                         on:press="back"
-                        accessibilityLabel="Voltar para galeria"
+                        accessibilityLabel="Back to gallery"
                     >
                         <Text height="48" textColor="#FFCCE0FF" textAlign="center" fontSize="24" fontWeight="700">←</Text>
                     </Pressable>
                     <Column flexGrow="1">
-                        <Text height="23" textColor="#FF8FA8CF" fontSize="12">BOA TARDE</Text>
+                        <Text height="23" textColor="#FF8FA8CF" fontSize="12">GOOD AFTERNOON</Text>
                         <Text height="27" textColor="#FFFFFFFF" fontSize="18" fontWeight="700">David</Text>
                     </Column>
                     <Column width="48" height="48" borderRadius="16" backgroundColor="#FF19345E">
                         <Text height="48" textColor="#FF9DBDFF" textAlign="center" fontSize="14" fontWeight="700">DB</Text>
                     </Column>
                 </Row>
-                <Text height="22" textColor="#FF8FA8CF" fontSize="13">Saldo disponível</Text>
+                <Text height="22" textColor="#FF8FA8CF" fontSize="13">Available balance</Text>
                 <Text height="46" textColor="#FFFFFFFF" fontSize="32" fontWeight="700">{{ $balance }}</Text>
                 <Button
                     width="142"
@@ -33,26 +33,26 @@
                     backgroundColor="#FF19345E"
                     textColor="#FFCCE0FF"
                     on:press="toggleBalance"
-                    accessibilityLabel="Alternar visibilidade do saldo"
+                    accessibilityLabel="Toggle balance visibility"
                 >{{ $visibilityAction }}</Button>
             </Column>
             <ScrollView class="flex-1">
                 <Column padding="18" gap="16">
                     <Row height="90" gap="10">
                         <Column flexGrow="1" padding="14" borderRadius="18" backgroundColor="#FFFFFFFF">
-                            <Text height="22" textColor="#FF70809A" fontSize="12">ENTRADAS</Text>
-                            <Text height="29" textColor="#FF138B65" fontSize="18" fontWeight="700">R$ 8.240</Text>
-                            <Text height="20" textColor="#FF138B65" fontSize="11">+12% no mês</Text>
+                            <Text height="22" textColor="#FF70809A" fontSize="12">INCOME</Text>
+                            <Text height="29" textColor="#FF138B65" fontSize="18" fontWeight="700">$ 8,240</Text>
+                            <Text height="20" textColor="#FF138B65" fontSize="11">+12% this month</Text>
                         </Column>
                         <Column flexGrow="1" padding="14" borderRadius="18" backgroundColor="#FFFFFFFF">
-                            <Text height="22" textColor="#FF70809A" fontSize="12">SAÍDAS</Text>
-                            <Text height="29" textColor="#FFD14E61" fontSize="18" fontWeight="700">R$ 3.180</Text>
-                            <Text height="20" textColor="#FF70809A" fontSize="11">Dentro da meta</Text>
+                            <Text height="22" textColor="#FF70809A" fontSize="12">EXPENSES</Text>
+                            <Text height="29" textColor="#FFD14E61" fontSize="18" fontWeight="700">$ 3,180</Text>
+                            <Text height="20" textColor="#FF70809A" fontSize="11">Within budget</Text>
                         </Column>
                     </Row>
                     <Column padding="18" gap="12" borderRadius="20" backgroundColor="#FFFFFFFF">
                         <Row height="28">
-                            <Text flexGrow="1" height="28" textColor="#FF172A48" fontSize="17" fontWeight="700">Fluxo do mês</Text>
+                            <Text flexGrow="1" height="28" textColor="#FF172A48" fontSize="17" fontWeight="700">Monthly cash flow</Text>
                             <Text width="68" height="28" textColor="#FF2D6CDF" textAlign="center" fontSize="12">JUL 2026</Text>
                         </Row>
                         <Row height="106" gap="7" alignItems="end">
@@ -63,18 +63,18 @@
                             <Column flexGrow="1" height="74" borderRadius="8" backgroundColor="#FF6D96E8" />
                             <Column flexGrow="1" height="98" borderRadius="8" backgroundColor="#FF2D6CDF" />
                         </Row>
-                        <Text height="22" textColor="#FF70809A" fontSize="12">Dados locais · atualizado há 2 min</Text>
+                        <Text height="22" textColor="#FF70809A" fontSize="12">Local data · updated 2 min ago</Text>
                     </Column>
-                    <Text height="28" textColor="#FF172A48" fontSize="18" fontWeight="700">Atividade recente</Text>
+                    <Text height="28" textColor="#FF172A48" fontSize="18" fontWeight="700">Recent activity</Text>
                     <Row height="72" padding="12" gap="12" borderRadius="18" backgroundColor="#FFFFFFFF">
                         <Column width="46" height="46" borderRadius="15" backgroundColor="#FFE8F0FF">
                             <Text height="46" textColor="#FF2D6CDF" textAlign="center" fontSize="14" fontWeight="700">PX</Text>
                         </Column>
                         <Column flexGrow="1">
-                            <Text height="25" textColor="#FF172A48" fontSize="15" fontWeight="700">Pagamento recebido</Text>
-                            <Text height="22" textColor="#FF70809A" fontSize="12">Hoje, 10:32 · Pix</Text>
+                            <Text height="25" textColor="#FF172A48" fontSize="15" fontWeight="700">Payment received</Text>
+                            <Text height="22" textColor="#FF70809A" fontSize="12">Today, 10:32 · Transfer</Text>
                         </Column>
-                        <Text width="88" height="46" textColor="#FF138B65" textAlign="center" fontSize="14" fontWeight="700">+ R$ 480</Text>
+                        <Text width="88" height="46" textColor="#FF138B65" textAlign="center" fontSize="14" fontWeight="700">+ $480</Text>
                     </Row>
                 </Column>
             </ScrollView>

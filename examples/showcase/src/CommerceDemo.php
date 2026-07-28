@@ -12,7 +12,7 @@ final class CommerceDemo extends Component
 {
     public Navigator $navigator;
     private int $cartCount = 0;
-    private string $cartLabel = 'Adicionar ao pedido';
+    private string $cartLabel = 'Add to order';
 
     public function render(): View
     {
@@ -22,7 +22,7 @@ final class CommerceDemo extends Component
     public function addToCart(): void
     {
         $this->cartCount++;
-        $this->cartLabel = "Pedido · {$this->cartCount} item".($this->cartCount === 1 ? '' : 's');
+        $this->cartLabel = "Order · {$this->cartCount} item".($this->cartCount === 1 ? '' : 's');
     }
 
     public function back(): void

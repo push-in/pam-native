@@ -44,7 +44,7 @@ final class Showcase
                             fontWeight: 700,
                             letterSpacing: 1.2,
                         )),
-                    Text::make('PHP na lógica. Nativo na tela.')
+                    Text::make('PHP logic. Native pixels.')
                         ->key('title')
                         ->style(new Style(
                             height: 76,
@@ -53,7 +53,7 @@ final class Showcase
                             fontWeight: 700,
                             lineHeight: 36,
                         )),
-                    Text::make('Views Android reais, PHP persistente e diff incremental em Rust.')
+                    Text::make('Real Android views, persistent PHP and incremental Rust diffing.')
                         ->key('subtitle')
                         ->style(new Style(
                             height: 52,
@@ -65,7 +65,7 @@ final class Showcase
                         Column::make(
                             Text::make('10K')
                                 ->style(new Style(height: 32, textColor: 0xFF86EFAC, fontSize: 22, fontWeight: 700)),
-                            Text::make('linhas recicladas')
+                            Text::make('recycled rows')
                                 ->style(new Style(height: 24, textColor: 0xFFCBD5E1, fontSize: 13)),
                         )->style(new Style(
                             flexGrow: 1,
@@ -79,7 +79,7 @@ final class Showcase
                         Column::make(
                             Text::make('UI')
                                 ->style(new Style(height: 32, textColor: 0xFF86EFAC, fontSize: 22, fontWeight: 700)),
-                            Text::make('thread nativa')
+                            Text::make('native thread')
                                 ->style(new Style(height: 24, textColor: 0xFFCBD5E1, fontSize: 13)),
                         )->style(new Style(
                             flexGrow: 1,
@@ -93,8 +93,8 @@ final class Showcase
                     )->style(new Style(height: 84, gap: 10)),
                     Input::make($this->name)
                         ->key('name')
-                        ->placeholder('Seu nome')
-                        ->accessibilityLabel('Seu nome')
+                        ->placeholder('Your name')
+                        ->accessibilityLabel('Your name')
                         ->style(new Style(
                             height: 52,
                             paddingHorizontal: 14,
@@ -121,7 +121,7 @@ final class Showcase
                             ->onPress(function (): void {
                                 $this->count++;
                             }),
-                        Button::make('Lista 10K')
+                        Button::make('10K list')
                             ->key('details')
                             ->accessibilityLabel('benchmark-list-route')
                             ->style(new Style(
@@ -135,7 +135,7 @@ final class Showcase
                                 $this->navigator->push('details');
                             }),
                     )->key('actions')->style(new Style(height: 52, gap: 10)),
-                    Button::make('Tags, classes, props e slots')
+                    Button::make('Tags, classes, props and slots')
                         ->key('tags')
                         ->style(new Style(
                             height: 50,
@@ -148,14 +148,14 @@ final class Showcase
                         ->onPress(function (): void {
                             $this->navigator->push('tags');
                         }),
-                    Text::make("Olá, {$this->name}.")
+                    Text::make("Hello, {$this->name}.")
                         ->key('greeting')
                         ->style(new Style(height: 32, textColor: 0xFFF8FAFC, fontSize: 17)),
-                    Button::make('Testar HTTPS')
+                    Button::make('Test HTTPS')
                         ->key('http')
                         ->style(new Style(height: 48))
                         ->onPress(function (): void {
-                            $this->networkStatus = 'Carregando…';
+                            $this->networkStatus = 'Loading…';
                             Http::get(
                                 'https://httpbin.org/get',
                                 function (\Pam\Native\Http\HttpResponse $response): void {
@@ -166,12 +166,12 @@ final class Showcase
                     Text::make($this->networkStatus)
                         ->key('network-status')
                         ->style(new Style(height: 28, textColor: 0xFFCBD5E1, fontSize: 13)),
-                    Button::make('Persistir contador')
+                    Button::make('Persist counter')
                         ->key('storage')
                         ->style(new Style(height: 48))
                         ->onPress(function (): void {
                             Storage::set('count', (string) $this->count, function (): void {
-                                $this->storageStatus = 'Contador persistido nativamente.';
+                                $this->storageStatus = 'Counter persisted natively.';
                             });
                         }),
                     Text::make($this->storageStatus)

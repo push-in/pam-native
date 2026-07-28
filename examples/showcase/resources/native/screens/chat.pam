@@ -3,7 +3,7 @@
     <SafeAreaView class="flex-1" backgroundColor="#FFF7FAF9">
         <KeyboardAvoidingView class="flex-1" behavior="pan" keyboardVerticalOffset="0">
             <Column class="flex-1" backgroundColor="#FFEFF5F3">
-                <Row height="72" paddingHorizontal="14" gap="10" backgroundColor="#FFF7FAF9">
+                <Row height="76" paddingHorizontal="14" paddingTop="12" paddingBottom="12" gap="10" alignItems="center" backgroundColor="#FFF7FAF9">
                     <Pressable
                         width="48"
                         height="48"
@@ -12,7 +12,7 @@
                         rippleColor="#3317A673"
                         pressedOpacity="0.9"
                         on:press="back"
-                        accessibilityLabel="Voltar para galeria"
+                        accessibilityLabel="Back to gallery"
                     >
                         <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="24" fontWeight="700">←</Text>
                     </Pressable>
@@ -21,7 +21,7 @@
                     </Column>
                     <Column flexGrow="1">
                         <Text height="27" textColor="#FF173D32" fontSize="17" fontWeight="700">Lia Andrade</Text>
-                        <Text height="22" textColor="#FF17A673" fontSize="12">online agora</Text>
+                        <Text height="22" textColor="#FF17A673" fontSize="12">online now</Text>
                     </Column>
                     <Pressable
                         width="64"
@@ -30,42 +30,45 @@
                         backgroundColor="#FFE5F2ED"
                         rippleColor="#3317A673"
                         pressedOpacity="0.9"
-                        accessibilityLabel="Iniciar chamada"
+                        accessibilityLabel="Start a call"
                     >
-                        <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="12" fontWeight="700">LIGAR</Text>
+                        <Text height="48" textColor="#FF167D5D" textAlign="center" fontSize="12" fontWeight="700">CALL</Text>
                     </Pressable>
                 </Row>
-                <ScrollView class="flex-1">
+                <ScrollView class="flex-1" :contentOffsetY="$scrollOffset" keyboardDismissMode="interactive">
                     <Column padding="16" gap="12">
-                        <Text height="28" textColor="#FF799088" textAlign="center" fontSize="12">HOJE</Text>
-                        <Column widthPercent="78" padding="13" gap="5" borderRadius="18" backgroundColor="#FFFFFFFF">
-                            <Text height="42" textColor="#FF29483F" fontSize="14" lineHeight="20">Consegui separar as fotos da campanha. Quer ver?</Text>
-                            <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">09:38</Text>
-                        </Column>
-                        <Column widthPercent="82" marginLeftAuto="true" padding="13" gap="8" borderRadius="18" backgroundColor="#FFDDF7EE">
-                            <Column height="142" padding="14" gap="8" borderRadius="14" backgroundColor="#FF163F55">
-                                <Text height="22" textColor="#FF7AE4C2" fontSize="11" fontWeight="700">CAMPANHA · JULHO</Text>
-                                <Text height="54" textColor="#FFFFFFFF" fontSize="21" fontWeight="700" lineHeight="25">Produto local. Alcance nacional.</Text>
-                                <Row height="28" gap="6">
-                                    <Column flexGrow="1" borderRadius="8" backgroundColor="#FF17A673" />
-                                    <Column flexGrow="1" borderRadius="8" backgroundColor="#FFF4B860" />
-                                    <Column flexGrow="1" borderRadius="8" backgroundColor="#FFF07D68" />
-                                </Row>
-                            </Column>
-                            <Text height="40" textColor="#FF17493A" fontSize="14" lineHeight="19">Essa direção ficou ótima. A luz está perfeita.</Text>
-                            <Text height="18" textColor="#FF5E897D" textAlign="end" fontSize="10">09:40 · Lida</Text>
-                        </Column>
-                        <Column widthPercent="78" padding="13" gap="5" borderRadius="18" backgroundColor="#FFFFFFFF">
-                            <Text height="42" textColor="#FF29483F" fontSize="14" lineHeight="20">Fechado. Vou levar os arquivos finais.</Text>
-                            <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">09:41</Text>
-                        </Column>
-                        <Column widthPercent="82" marginLeftAuto="true" padding="13" gap="5" borderRadius="18" backgroundColor="#FF17A673">
-                            <Text height="42" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $sentMessage }}</Text>
-                            <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $deliveryLabel }}</Text>
+                        <Text height="28" textColor="#FF799088" textAlign="center" fontSize="12">TODAY</Text>
+                        <Column v-for="$chatMessage in $messages">
+                            <Row v-if="!$chatMessage['outgoing']" justifyContent="start">
+                                <Column
+                                    widthPercent="78"
+                                    padding="13"
+                                    gap="5"
+                                    borderRadius="18"
+                                    borderTopLeftRadius="5"
+                                    backgroundColor="#FFFFFFFF"
+                                >
+                                    <Text minHeight="24" textColor="#FF29483F" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
+                                    <Text height="18" textColor="#FF90A09B" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
+                                </Column>
+                            </Row>
+                            <Row v-if="$chatMessage['outgoing']" justifyContent="end">
+                                <Column
+                                    widthPercent="82"
+                                    padding="13"
+                                    gap="5"
+                                    borderRadius="18"
+                                    borderTopRightRadius="5"
+                                    backgroundColor="#FF17A673"
+                                >
+                                    <Text minHeight="24" textColor="#FFFFFFFF" fontSize="14" lineHeight="20">{{ $chatMessage['body'] }}</Text>
+                                    <Text height="18" textColor="#FFD7F7EC" textAlign="end" fontSize="10">{{ $chatMessage['time'] }}</Text>
+                                </Column>
+                            </Row>
                         </Column>
                     </Column>
                 </ScrollView>
-                <Row minHeight="72" padding="10" gap="8" backgroundColor="#FFF7FAF9">
+                <Row height="72" padding="10" gap="8" alignItems="center" backgroundColor="#FFF7FAF9">
                     <Pressable
                         width="48"
                         height="52"
@@ -73,7 +76,7 @@
                         backgroundColor="#FFE5F2ED"
                         rippleColor="#3317A673"
                         pressedOpacity="0.9"
-                        accessibilityLabel="Anexar mídia"
+                        accessibilityLabel="Attach media"
                     >
                         <Text height="52" textColor="#FF167D5D" textAlign="center" fontSize="22" fontWeight="700">+</Text>
                     </Pressable>
@@ -85,13 +88,13 @@
                         borderWidth="1"
                         borderColor="#FFDCE8E4"
                         textColor="#FF173D32"
-                        placeholder="Mensagem"
+                        placeholder="Message"
                         placeholderColor="#FF83958F"
                         model="message"
                         sync="debounced"
                         submitBehavior="submit"
                         on:submit="send"
-                        accessibilityLabel="Mensagem"
+                        accessibilityLabel="Message"
                     />
                     <Pressable
                         width="68"
@@ -101,9 +104,9 @@
                         rippleColor="#33FFFFFF"
                         pressedOpacity="0.9"
                         on:press="send"
-                        accessibilityLabel="Enviar mensagem"
+                        accessibilityLabel="Send message"
                     >
-                        <Text height="52" textColor="#FFFFFFFF" textAlign="center" fontSize="12" fontWeight="700">ENVIAR</Text>
+                        <Text height="52" textColor="#FFFFFFFF" textAlign="center" fontSize="12" fontWeight="700">SEND</Text>
                     </Pressable>
                 </Row>
             </Column>

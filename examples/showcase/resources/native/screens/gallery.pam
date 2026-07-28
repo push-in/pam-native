@@ -3,10 +3,10 @@
     <SafeAreaView class="flex-1" backgroundColor="#FF08111F">
         <ScrollView class="flex-1" backgroundColor="#FF08111F">
             <Column padding="20" gap="16" backgroundColor="#FF08111F">
-                <Row height="52" gap="12">
+                <Row height="56" gap="12" alignItems="center">
                     <Column flexGrow="1">
                         <Text height="24" textColor="#FF63E6BE" fontSize="11" fontWeight="700" letterSpacing="0.1">PAM NATIVE GALLERY</Text>
-                        <Text height="32" textColor="#FFF7FAFC" fontSize="22" fontWeight="700">PHP que parece impossível.</Text>
+                        <Text height="32" textColor="#FFF7FAFC" fontSize="22" fontWeight="700">PHP that feels impossible.</Text>
                     </Column>
                     <Pressable
                         width="52"
@@ -15,7 +15,7 @@
                         backgroundColor="#FF142235"
                         rippleColor="#3363E6BE"
                         on:press="openLab"
-                        accessibilityLabel="Abrir laboratório técnico"
+                        accessibilityLabel="Open the technical lab"
                     >
                         <Text height="52" textColor="#FFB7C5D8" textAlign="center" fontSize="12" fontWeight="700">LAB</Text>
                     </Pressable>
@@ -29,12 +29,12 @@
                     borderWidth="1"
                     borderColor="#FF244158"
                 >
-                    <Text height="24" textColor="#FF63E6BE" fontSize="13" fontWeight="700">REALMENTE NATIVO · ZERO JAVASCRIPT</Text>
-                    <Text height="136" textColor="#FFFFFFFF" fontSize="30" fontWeight="700" lineHeight="35">Quatro produtos. Um runtime PHP persistente.</Text>
-                    <Text height="72" textColor="#FFB7C5D8" fontSize="15" lineHeight="22">Abra cada experiência e toque na interface. Tudo abaixo é controle nativo reconciliado em Rust.</Text>
+                    <Text height="24" textColor="#FF63E6BE" fontSize="13" fontWeight="700">TRULY NATIVE · ZERO JAVASCRIPT</Text>
+                    <Text height="136" textColor="#FFFFFFFF" fontSize="30" fontWeight="700" lineHeight="35">Four products. One persistent PHP runtime.</Text>
+                    <Text height="72" textColor="#FFB7C5D8" fontSize="15" lineHeight="22">Open each experience and interact with it. Every control below is native and reconciled in Rust.</Text>
                     <Row height="64" gap="8">
                         <Column flexGrow="1" padding="10" borderRadius="14" backgroundColor="#FF163149">
-                            <Text height="25" textColor="#FFFFFFFF" fontSize="19" fontWeight="700">5,8 MiB</Text>
+                            <Text height="25" textColor="#FFFFFFFF" fontSize="19" fontWeight="700">5.8 MiB</Text>
                             <Text height="20" textColor="#FF8FA8C0" fontSize="12">APK benchmark</Text>
                         </Column>
                         <Column flexGrow="1" padding="10" borderRadius="14" backgroundColor="#FF163149">
@@ -44,7 +44,7 @@
                     </Row>
                 </Column>
 
-                <Text height="30" textColor="#FFF7FAFC" fontSize="18" fontWeight="700">Escolha uma experiência</Text>
+                <Text height="30" textColor="#FFF7FAFC" fontSize="18" fontWeight="700">Choose an experience</Text>
 
                 <Pressable
                     height="116"
@@ -54,15 +54,15 @@
                     rippleColor="#22E66B21"
                     pressedOpacity="0.94"
                     on:press="openCommerce"
-                    accessibilityLabel="Abrir marketplace"
+                    accessibilityLabel="Open local marketplace"
                 >
                     <Row gap="14">
                         <Column width="58" height="58" borderRadius="18" backgroundColor="#FFFF6B21">
                             <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="20" fontWeight="700">GO</Text>
                         </Column>
                         <Column flexGrow="1" gap="3">
-                            <Text height="23" textColor="#FF41170A" fontSize="17" fontWeight="700">Mercado local</Text>
-                            <Text height="39" textColor="#FF89513A" fontSize="13" lineHeight="18">Descoberta, catálogo e pedido com resposta imediata.</Text>
+                            <Text height="23" textColor="#FF41170A" fontSize="17" fontWeight="700">Local marketplace</Text>
+                            <Text height="39" textColor="#FF89513A" fontSize="13" lineHeight="18">Discovery, catalog and ordering with instant feedback.</Text>
                         </Column>
                         <Text width="24" height="58" textColor="#FFFF6B21" fontSize="22" fontWeight="700">›</Text>
                     </Row>
@@ -76,15 +76,15 @@
                     rippleColor="#222D6CDF"
                     pressedOpacity="0.94"
                     on:press="openFinance"
-                    accessibilityLabel="Abrir dashboard financeiro"
+                    accessibilityLabel="Open offline finance dashboard"
                 >
                     <Row gap="14">
                         <Column width="58" height="58" borderRadius="18" backgroundColor="#FF2D6CDF">
-                            <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="20" fontWeight="700">R$</Text>
+                            <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="20" fontWeight="700">$</Text>
                         </Column>
                         <Column flexGrow="1" gap="3">
-                            <Text height="23" textColor="#FF102B55" fontSize="17" fontWeight="700">Finanças offline</Text>
-                            <Text height="39" textColor="#FF526C91" fontSize="13" lineHeight="18">Saldo, insights e atividade disponíveis sem rede.</Text>
+                            <Text height="23" textColor="#FF102B55" fontSize="17" fontWeight="700">Offline finance</Text>
+                            <Text height="39" textColor="#FF526C91" fontSize="13" lineHeight="18">Balance, insights and activity available without a network.</Text>
                         </Column>
                         <Text width="24" height="58" textColor="#FF2D6CDF" fontSize="22" fontWeight="700">›</Text>
                     </Row>
@@ -98,15 +98,15 @@
                     rippleColor="#2217A673"
                     pressedOpacity="0.94"
                     on:press="openChat"
-                    accessibilityLabel="Abrir chat com mídia"
+                    accessibilityLabel="Open media chat"
                 >
                     <Row gap="14">
                         <Column width="58" height="58" borderRadius="18" backgroundColor="#FF17A673">
                             <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="18" fontWeight="700">CH</Text>
                         </Column>
                         <Column flexGrow="1" gap="3">
-                            <Text height="23" textColor="#FF0D4938" fontSize="17" fontWeight="700">Chat com mídia</Text>
-                            <Text height="39" textColor="#FF49766A" fontSize="13" lineHeight="18">Composer nativo e atualizações otimistas em PHP.</Text>
+                            <Text height="23" textColor="#FF0D4938" fontSize="17" fontWeight="700">Media chat</Text>
+                            <Text height="39" textColor="#FF49766A" fontSize="13" lineHeight="18">Native composer with optimistic updates driven by PHP.</Text>
                         </Column>
                         <Text width="24" height="58" textColor="#FF17A673" fontSize="22" fontWeight="700">›</Text>
                     </Row>
@@ -120,15 +120,15 @@
                     rippleColor="#22B98A00"
                     pressedOpacity="0.94"
                     on:press="openField"
-                    accessibilityLabel="Abrir operações em campo"
+                    accessibilityLabel="Open field operations"
                 >
                     <Row gap="14">
                         <Column width="58" height="58" borderRadius="18" backgroundColor="#FFB98A00">
                             <Text height="58" textColor="#FFFFFFFF" textAlign="center" fontSize="18" fontWeight="700">OP</Text>
                         </Column>
                         <Column flexGrow="1" gap="3">
-                            <Text height="23" textColor="#FF493A08" fontSize="17" fontWeight="700">Operação em campo</Text>
-                            <Text height="39" textColor="#FF766A3D" fontSize="13" lineHeight="18">Rotas, captura e sincronização resiliente.</Text>
+                            <Text height="23" textColor="#FF493A08" fontSize="17" fontWeight="700">Field operations</Text>
+                            <Text height="39" textColor="#FF766A3D" fontSize="13" lineHeight="18">Routes, capture and resilient synchronization.</Text>
                         </Column>
                         <Text width="24" height="58" textColor="#FFB98A00" fontSize="22" fontWeight="700">›</Text>
                     </Row>

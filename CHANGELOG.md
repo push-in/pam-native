@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.6
+
+- Give every Gallery detail screen a consistent, safe-area-aware header frame
+  with centered 48 dp controls and deliberate spacing below system UI.
+- Polish the chat with correctly aligned incoming and outgoing bubbles,
+  append-only messages, automatic end positioning and a keyboard-safe composer.
+- Translate the complete Gallery and engineering lab experience to English.
+
 ## 0.4.5
 
 - Keep `KeyboardAvoidingView` composers and submit actions visible on

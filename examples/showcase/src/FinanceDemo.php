@@ -12,8 +12,8 @@ final class FinanceDemo extends Component
 {
     public Navigator $navigator;
     private bool $balanceVisible = true;
-    private string $balance = 'R$ 12.480,36';
-    private string $visibilityAction = 'Ocultar saldo';
+    private string $balance = '$12,480.36';
+    private string $visibilityAction = 'Hide balance';
 
     public function render(): View
     {
@@ -23,8 +23,8 @@ final class FinanceDemo extends Component
     public function toggleBalance(): void
     {
         $this->balanceVisible = !$this->balanceVisible;
-        $this->balance = $this->balanceVisible ? 'R$ 12.480,36' : 'R$ ••••••';
-        $this->visibilityAction = $this->balanceVisible ? 'Ocultar saldo' : 'Mostrar saldo';
+        $this->balance = $this->balanceVisible ? '$12,480.36' : '$••••••';
+        $this->visibilityAction = $this->balanceVisible ? 'Hide balance' : 'Show balance';
     }
 
     public function back(): void

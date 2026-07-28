@@ -2,8 +2,8 @@
     <StatusBar backgroundColor="#FF172013" appearance="light" />
     <SafeAreaView class="flex-1" backgroundColor="#FF172013">
         <Column class="flex-1" backgroundColor="#FFF4F3EA">
-            <Column paddingHorizontal="18" paddingBottom="18" backgroundColor="#FF172013">
-                <Row height="62" gap="12">
+            <Column paddingHorizontal="18" paddingTop="12" paddingBottom="18" backgroundColor="#FF172013">
+                <Row height="52" gap="12" alignItems="center">
                     <Pressable
                         width="48"
                         height="48"
@@ -12,28 +12,28 @@
                         rippleColor="#33D4E6C5"
                         pressedOpacity="0.9"
                         on:press="back"
-                        accessibilityLabel="Voltar para galeria"
+                        accessibilityLabel="Back to gallery"
                     >
                         <Text height="48" textColor="#FFD4E6C5" textAlign="center" fontSize="24" fontWeight="700">←</Text>
                     </Pressable>
                     <Column flexGrow="1">
-                        <Text height="23" textColor="#FFAAB99C" fontSize="12">ROTA NORTE · EQUIPE 04</Text>
-                        <Text height="28" textColor="#FFFFFFFF" fontSize="18" fontWeight="700">Operação em campo</Text>
+                        <Text height="23" textColor="#FFAAB99C" fontSize="12">NORTH ROUTE · TEAM 04</Text>
+                        <Text height="28" textColor="#FFFFFFFF" fontSize="18" fontWeight="700">Field operations</Text>
                     </Column>
                     <Column width="48" height="48" borderRadius="15" backgroundColor="#FF2C3A25">
                         <Text height="48" textColor="#FFD4E6C5" textAlign="center" fontSize="13" fontWeight="700">04</Text>
                     </Column>
                 </Row>
                 <Column padding="16" gap="7" borderRadius="20" backgroundColor="#FF26351F">
-                    <Text height="22" textColor="#FFAAB99C" fontSize="12">PRÓXIMA VISITA</Text>
-                    <Text height="30" textColor="#FFFFFFFF" fontSize="20" fontWeight="700">Fazenda Boa Vista</Text>
+                    <Text height="22" textColor="#FFAAB99C" fontSize="12">NEXT VISIT</Text>
+                    <Text height="30" textColor="#FFFFFFFF" fontSize="20" fontWeight="700">Boa Vista Farm</Text>
                     <Text height="23" textColor="#FFD4E6C5" fontSize="13">BR-010, km 42 · 18 min</Text>
                     <Row height="44" gap="8">
                         <Column flexGrow="1" borderRadius="13" backgroundColor="#FF34472C">
-                            <Text height="44" textColor="#FFE8F4DF" textAlign="center" fontSize="12" fontWeight="700">ABRIR ROTA</Text>
+                            <Text height="44" textColor="#FFE8F4DF" textAlign="center" fontSize="12" fontWeight="700">OPEN ROUTE</Text>
                         </Column>
                         <Column flexGrow="1" borderRadius="13" backgroundColor="#FFB9D532">
-                            <Text height="44" textColor="#FF253000" textAlign="center" fontSize="12" fontWeight="700">INICIAR VISITA</Text>
+                            <Text height="44" textColor="#FF253000" textAlign="center" fontSize="12" fontWeight="700">START VISIT</Text>
                         </Column>
                     </Row>
                 </Column>
@@ -42,8 +42,8 @@
                 <Column padding="18" gap="14">
                     <Row height="54">
                         <Column flexGrow="1">
-                            <Text height="27" textColor="#FF283120" fontSize="18" fontWeight="700">Roteiro de hoje</Text>
-                            <Text height="22" textColor="#FF7A826F" fontSize="12">2 de 6 visitas concluídas</Text>
+                            <Text height="27" textColor="#FF283120" fontSize="18" fontWeight="700">Today's route</Text>
+                            <Text height="22" textColor="#FF7A826F" fontSize="12">2 of 6 visits completed</Text>
                         </Column>
                         <Column width="58" height="40" borderRadius="13" backgroundColor="#FFE6E8D8">
                             <Text height="40" textColor="#FF5F694F" textAlign="center" fontSize="12" fontWeight="700">33%</Text>
@@ -55,8 +55,8 @@
                                 <Text height="44" textColor="#FF4B7130" textAlign="center" fontSize="14" fontWeight="700">01</Text>
                             </Column>
                             <Column flexGrow="1">
-                                <Text height="25" textColor="#FF283120" fontSize="15" fontWeight="700">Cooperativa São José</Text>
-                                <Text height="21" textColor="#FF6F7C63" fontSize="12">Concluída · 08:20</Text>
+                                <Text height="25" textColor="#FF283120" fontSize="15" fontWeight="700">São José Cooperative</Text>
+                                <Text height="21" textColor="#FF6F7C63" fontSize="12">Completed · 08:20</Text>
                             </Column>
                             <Text width="28" height="44" textColor="#FF5C8B3B" fontSize="21" fontWeight="700">✓</Text>
                         </Row>
@@ -65,8 +65,8 @@
                                 <Text height="44" textColor="#FF8B6807" textAlign="center" fontSize="14" fontWeight="700">02</Text>
                             </Column>
                             <Column flexGrow="1">
-                                <Text height="25" textColor="#FF283120" fontSize="15" fontWeight="700">Fazenda Boa Vista</Text>
-                                <Text height="21" textColor="#FF8B6807" fontSize="12">Próxima · 10:15</Text>
+                                <Text height="25" textColor="#FF283120" fontSize="15" fontWeight="700">Boa Vista Farm</Text>
+                                <Text height="21" textColor="#FF8B6807" fontSize="12">Next · 10:15</Text>
                             </Column>
                             <Text width="28" height="44" textColor="#FF8B6807" fontSize="21" fontWeight="700">›</Text>
                         </Row>
@@ -75,15 +75,15 @@
                                 <Text height="44" textColor="#FF7A826F" textAlign="center" fontSize="14" fontWeight="700">03</Text>
                             </Column>
                             <Column flexGrow="1">
-                                <Text height="25" textColor="#FF283120" fontSize="15" fontWeight="700">Sítio Horizonte</Text>
+                                <Text height="25" textColor="#FF283120" fontSize="15" fontWeight="700">Horizonte Ranch</Text>
                                 <Text height="21" textColor="#FF7A826F" fontSize="12">11:40 · 14 km</Text>
                             </Column>
                         </Row>
                     </Column>
                     <Column padding="16" gap="8" borderRadius="18" backgroundColor="#FFFFF8DB" borderWidth="1" borderColor="#FFE7D890">
-                        <Text height="23" textColor="#FF6C570A" fontSize="13" fontWeight="700">MODO RESILIENTE</Text>
+                        <Text height="23" textColor="#FF6C570A" fontSize="13" fontWeight="700">RESILIENT MODE</Text>
                         <Text height="24" textColor="#FF39351F" fontSize="14">{{ $connectionLabel }}</Text>
-                        <Text height="38" textColor="#FF766F48" fontSize="12" lineHeight="18">Fotos, formulários e assinaturas ficam na fila local até a conexão voltar.</Text>
+                        <Text height="38" textColor="#FF766F48" fontSize="12" lineHeight="18">Photos, forms and signatures stay safely queued until the connection returns.</Text>
                     </Column>
                 </Column>
             </ScrollView>
@@ -95,7 +95,7 @@
                     textColor="#FF253000"
                     fontWeight="700"
                     on:press="sync"
-                    accessibilityLabel="Sincronizar registros locais"
+                    accessibilityLabel="Sync local records"
                 >{{ $syncLabel }}</Button>
             </Column>
         </Column>
