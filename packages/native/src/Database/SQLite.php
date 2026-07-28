@@ -41,7 +41,29 @@ final class SQLite
         return self::call('query', $database, $sql, $arguments, $callback);
     }
 
-    /** @param list<string|int|float|bool|null> $arguments */
+    /**
+     * Executes one prepared statement for every argument set inside one native transaction.
+     *
+     * @param list<list<string|int|float|bool|null>> $argumentSets
+     */
+    public static function executeMany(
+        string $database,
+        string $sql,
+        array $argumentSets,
+        ?Closure $callback = null,
+    ): int {
+        if ($argumentSets === [] || count($argumentSets) > 10_000) {
+            throw new InvalidArgumentException(
+                'SQLite executeMany requires between 1 and 10000 argument sets.',
+            );
+        }
+
+        return self::call('executeMany', $database, $sql, $argumentSets, $callback);
+    }
+
+    /**
+     * @param list<string|int|float|bool|null>|list<list<string|int|float|bool|null>> $arguments
+     */
     private static function call(
         string $method,
         string $database,
@@ -74,18 +96,19 @@ final class SQLite
                 if ($callback === null) {
                     return;
                 }
-                $values = Wire::decodeMap($result->payload);
-                if ($method === 'query') {
-                    $rows = json_decode(
-                        (string) ($values['rows'] ?? '[]'),
-                        true,
-                        512,
-                        JSON_THROW_ON_ERROR,
-                    );
-                    $callback(is_array($rows) ? $rows : []);
+                if ($method !== 'query') {
+                    $callback();
+
                     return;
                 }
-                $callback();
+                $values = Wire::decodeMap($result->payload);
+                $rows = json_decode(
+                    (string) ($values['rows'] ?? '[]'),
+                    true,
+                    512,
+                    JSON_THROW_ON_ERROR,
+                );
+                $callback(is_array($rows) ? $rows : []);
             },
         );
     }

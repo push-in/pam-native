@@ -15,9 +15,9 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
                     throw SQLiteError("Invalid SQLite payload")
                 }
                 let database = try self.open(name)
-                let arguments = try self.decodeArguments(argumentsJSON)
                 switch method {
                 case "execute":
+                    let arguments = try self.decodeArguments(argumentsJSON)
                     let statement = try self.prepare(database, sql)
                     defer { sqlite3_finalize(statement) }
                     try self.bind(arguments, to: statement)
@@ -26,10 +26,15 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
                     }
                     completion(.success, Data())
                 case "query":
+                    let arguments = try self.decodeArguments(argumentsJSON)
                     let rows = try self.query(database, sql, arguments)
                     let json = try JSONSerialization.data(withJSONObject: rows)
                     let text = String(data: json, encoding: .utf8) ?? "[]"
                     completion(.success, try WireMap.encode(["rows": .text(text)]))
+                case "executeMany":
+                    let argumentSets = try self.decodeArgumentSets(argumentsJSON)
+                    try self.executeMany(database, sql, argumentSets)
+                    completion(.success, Data())
                 default:
                     throw SQLiteError("Unknown SQLite method \(method)")
                 }
@@ -51,8 +56,19 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
               let database else {
             throw SQLiteError("Unable to open SQLite database")
         }
+        try execute(database, "PRAGMA journal_mode=WAL")
+        try execute(database, "PRAGMA synchronous=NORMAL")
+        try execute(database, "PRAGMA foreign_keys=ON")
+        try execute(database, "PRAGMA busy_timeout=5000")
+        try execute(database, "PRAGMA temp_store=MEMORY")
         databases[name] = database
         return database
+    }
+
+    private func execute(_ database: OpaquePointer, _ sql: String) throws {
+        guard sqlite3_exec(database, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteError(String(cString: sqlite3_errmsg(database)))
+        }
     }
 
     private func prepare(_ database: OpaquePointer, _ sql: String) throws -> OpaquePointer {
@@ -70,6 +86,39 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
             throw SQLiteError("SQLite arguments must be an array")
         }
         return arguments
+    }
+
+    private func decodeArgumentSets(_ json: String) throws -> [[Any]] {
+        let value = try JSONSerialization.jsonObject(with: Data(json.utf8))
+        guard let argumentSets = value as? [[Any]],
+              (1...10_000).contains(argumentSets.count) else {
+            throw SQLiteError("SQLite executeMany requires between 1 and 10000 argument sets")
+        }
+        return argumentSets
+    }
+
+    private func executeMany(
+        _ database: OpaquePointer,
+        _ sql: String,
+        _ argumentSets: [[Any]]
+    ) throws {
+        let statement = try prepare(database, sql)
+        defer { sqlite3_finalize(statement) }
+        try execute(database, "BEGIN IMMEDIATE")
+        do {
+            for arguments in argumentSets {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                try bind(arguments, to: statement)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw SQLiteError(String(cString: sqlite3_errmsg(database)))
+                }
+            }
+            try execute(database, "COMMIT")
+        } catch {
+            try? execute(database, "ROLLBACK")
+            throw error
+        }
     }
 
     private func bind(_ arguments: [Any], to statement: OpaquePointer) throws {

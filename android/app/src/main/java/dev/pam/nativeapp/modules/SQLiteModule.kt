@@ -3,6 +3,7 @@ package dev.pam.nativeapp.modules
 import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
+import android.database.sqlite.SQLiteStatement
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import org.json.JSONArray
@@ -20,19 +21,28 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
                 val values = WireMap.decode(payload)
                 val database = open(values.requiredText("database"))
                 val sql = values.requiredText("sql")
-                val arguments = decodeArguments(values.requiredText("arguments"))
                 when (method) {
                     "execute" -> {
+                        val arguments = decodeArguments(values.requiredText("arguments"))
                         database.execSQL(sql, arguments)
                         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                     }
                     "query" -> {
+                        val arguments = decodeArguments(values.requiredText("arguments"))
                         val rows = database.rawQuery(sql, arguments.map(::stringArgument).toTypedArray())
                             .use(::encodeRows)
                         completion.complete(
                             ModuleResultStatus.SUCCESS,
                             WireMap.encode(mapOf("rows" to WireValue.Text(rows.toString()))),
                         )
+                    }
+                    "executeMany" -> {
+                        executeMany(
+                            database,
+                            sql,
+                            decodeArgumentSets(values.requiredText("arguments")),
+                        )
+                        completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                     }
                     else -> error("Unknown SQLite method $method")
                 }
@@ -48,8 +58,20 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
     private fun open(name: String): SQLiteDatabase =
         databases.getOrPut(name) {
             val root = File(context.filesDir, "pam-databases").apply { mkdirs() }
-            SQLiteDatabase.openOrCreateDatabase(File(root, name), null)
+            SQLiteDatabase.openOrCreateDatabase(File(root, name), null).apply {
+                enableWriteAheadLogging()
+                setForeignKeyConstraintsEnabled(true)
+                pragma(this, "synchronous=NORMAL")
+                pragma(this, "busy_timeout=5000")
+                pragma(this, "temp_store=MEMORY")
+            }
         }
+
+    private fun pragma(database: SQLiteDatabase, expression: String) {
+        database.rawQuery("PRAGMA $expression", emptyArray()).use { cursor ->
+            cursor.moveToFirst()
+        }
+    }
 
     private fun decodeArguments(value: String): Array<Any?> {
         val array = JSONArray(value)
@@ -58,6 +80,51 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
                 JSONObject.NULL -> null
                 is Boolean -> if (item) 1L else 0L
                 is String, is Number -> item
+                else -> error("SQLite arguments must be scalar")
+            }
+        }
+    }
+
+    private fun decodeArgumentSets(value: String): List<Array<Any?>> {
+        val batches = JSONArray(value)
+        require(batches.length() in 1..MAX_BATCH_ROWS) {
+            "SQLite executeMany requires between 1 and 10000 argument sets"
+        }
+        return List(batches.length()) { index ->
+            decodeArguments(batches.getJSONArray(index).toString())
+        }
+    }
+
+    private fun executeMany(
+        database: SQLiteDatabase,
+        sql: String,
+        argumentSets: List<Array<Any?>>,
+    ) {
+        val statement = database.compileStatement(sql)
+        database.beginTransactionNonExclusive()
+        try {
+            argumentSets.forEach { arguments ->
+                statement.clearBindings()
+                bind(arguments, statement)
+                statement.execute()
+            }
+            database.setTransactionSuccessful()
+        } finally {
+            database.endTransaction()
+            statement.close()
+        }
+    }
+
+    private fun bind(arguments: Array<Any?>, statement: SQLiteStatement) {
+        arguments.forEachIndexed { offset, value ->
+            val index = offset + 1
+            when (value) {
+                null -> statement.bindNull(index)
+                is Boolean -> statement.bindLong(index, if (value) 1L else 0L)
+                is Byte, is Short, is Int, is Long ->
+                    statement.bindLong(index, (value as Number).toLong())
+                is Float, is Double -> statement.bindDouble(index, (value as Number).toDouble())
+                is String -> statement.bindString(index, value)
                 else -> error("SQLite arguments must be scalar")
             }
         }
@@ -109,5 +176,6 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
     private companion object {
         const val MAX_QUERY_ROWS = 1_000
         const val MAX_QUERY_COLUMNS = 256
+        const val MAX_BATCH_ROWS = 10_000
     }
 }

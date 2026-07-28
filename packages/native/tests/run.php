@@ -58,6 +58,7 @@ use Pam\Native\MotionPreset;
 use Pam\Native\HapticFeedback;
 use Pam\Native\Http\Http;
 use Pam\Native\Http\HttpResponse;
+use Pam\Native\Database\SQLite;
 use Pam\Native\NativeOperation;
 use Pam\Native\Forms\FormStatus;
 use Pam\Native\Forms\NativeForm;
@@ -1622,6 +1623,33 @@ $assert(
     'Public native module facade did not decode its result.',
 );
 
+$batchRequestId = SQLite::executeMany(
+    'nitro.db',
+    'INSERT INTO messages (id, body) VALUES (?, ?)',
+    [
+        ['m1', 'fast'],
+        ['m2', 'faster'],
+    ],
+);
+$batchCall = TestDiagnostics::$moduleCall;
+$batchPayload = $batchCall === null ? [] : Wire::decodeMap($batchCall['payload']);
+$assert(
+    $batchCall !== null
+        && $batchCall['requestId'] === $batchRequestId
+        && $batchCall['module'] === 'sqlite'
+        && $batchCall['method'] === 'executeMany'
+        && json_decode((string) ($batchPayload['arguments'] ?? ''), true) === [
+            ['m1', 'fast'],
+            ['m2', 'faster'],
+        ],
+    'SQLite executeMany did not emit one typed bridge call for the complete batch.',
+);
+Runtime::dispatchModuleResult(
+    $batchRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    '',
+);
+
 $contacts = null;
 $contactsRequestId = Contacts::all(static function (array $items) use (&$contacts): void {
     $contacts = $items;
@@ -2537,8 +2565,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.3',
-    'The runtime SDK contract must match the 0.5.3 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.4',
+    'The runtime SDK contract must match the 0.5.4 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

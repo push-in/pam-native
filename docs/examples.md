@@ -81,9 +81,20 @@ SQLite::query(
     [0, 50],
     fn (array $rows) => $this->notes = $rows,
 );
+
+SQLite::executeMany(
+    'app.db',
+    'INSERT INTO notes (id, body) VALUES (?, ?)',
+    [
+        [1, 'One bridge call'],
+        [2, 'One prepared statement'],
+        [3, 'One native transaction'],
+    ],
+);
 ```
 
 Never interpolate user input into SQL; positional arguments are bound natively.
+Use `executeMany()` for cache hydration, synchronization, and bulk writes.
 
 ## Permissions, local notifications and push
 
