@@ -60,12 +60,18 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
             val root = File(context.filesDir, "pam-databases").apply { mkdirs() }
             SQLiteDatabase.openOrCreateDatabase(File(root, name), null).apply {
                 enableWriteAheadLogging()
-                execSQL("PRAGMA synchronous=NORMAL")
-                execSQL("PRAGMA foreign_keys=ON")
-                execSQL("PRAGMA busy_timeout=5000")
-                execSQL("PRAGMA temp_store=MEMORY")
+                setForeignKeyConstraintsEnabled(true)
+                pragma(this, "synchronous=NORMAL")
+                pragma(this, "busy_timeout=5000")
+                pragma(this, "temp_store=MEMORY")
             }
         }
+
+    private fun pragma(database: SQLiteDatabase, expression: String) {
+        database.rawQuery("PRAGMA $expression", emptyArray()).use { cursor ->
+            cursor.moveToFirst()
+        }
+    }
 
     private fun decodeArguments(value: String): Array<Any?> {
         val array = JSONArray(value)
