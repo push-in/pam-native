@@ -40,6 +40,33 @@ platform they can be proud to put beside fully native stacks—then prove the
 claim with protocol tests, compiler checks, simulator builds, and instrumented
 Android contracts at both supported API boundaries.
 
+## Built with PAM Native
+
+These are screenshots from the same open-source showcase APK running on a
+physical Android device. Every control is a retained native view; PHP owns the
+application state, Rust reconciles and lays out the tree, and Kotlin renders
+the resulting mutations.
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/assets/showcase/marketplace.png" width="220" alt="Local marketplace built with PAM Native"></td>
+    <td align="center"><img src="docs/assets/showcase/finance.png" width="220" alt="Offline finance dashboard built with PAM Native"></td>
+    <td align="center"><img src="docs/assets/showcase/chat.png" width="220" alt="Native chat composer built with PAM Native"></td>
+    <td align="center"><img src="docs/assets/showcase/field-operations.png" width="220" alt="Offline field operations app built with PAM Native"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Local marketplace</strong><br>Catalog and instant cart feedback</td>
+    <td align="center"><strong>Offline finance</strong><br>Persistent balance and insights</td>
+    <td align="center"><strong>Native chat</strong><br>Focused composer and animated append</td>
+    <td align="center"><strong>Field operations</strong><br>Resilient offline synchronization</td>
+  </tr>
+</table>
+
+Explore the [visual showcase](docs/showcase.md), inspect its
+[PHP components and native templates](examples/showcase), or build the APK
+locally. The gallery also includes the engineering lab with persistent state,
+hot reload and a virtualized list of 10,000 rows.
+
 ## Why it is different
 
 | PAM Native owns | What that means |

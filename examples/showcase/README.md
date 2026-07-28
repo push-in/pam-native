@@ -22,3 +22,15 @@ pam mobile dev pam-native/examples/showcase
 
 The first screen is intentionally presentation-ready for screenshots and short
 product demos while every interaction continues to use the real PAM runtime.
+
+<table>
+  <tr>
+    <td><img src="../../docs/assets/showcase/marketplace.png" width="220" alt="Marketplace showcase"></td>
+    <td><img src="../../docs/assets/showcase/finance.png" width="220" alt="Finance showcase"></td>
+    <td><img src="../../docs/assets/showcase/chat.png" width="220" alt="Chat showcase"></td>
+    <td><img src="../../docs/assets/showcase/field-operations.png" width="220" alt="Field operations showcase"></td>
+  </tr>
+</table>
+
+See the [visual showcase guide](../../docs/showcase.md) for the source map,
+interaction checklist and APK build instructions.
