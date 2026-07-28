@@ -24,7 +24,30 @@ application needs it.
 
 iOS hosts add the usage-description keys required by enabled capabilities:
 `NSCameraUsageDescription`, `NSMicrophoneUsageDescription`,
-`NSPhotoLibraryUsageDescription` and `NSLocationWhenInUseUsageDescription`.
+`NSPhotoLibraryUsageDescription`, `NSLocationWhenInUseUsageDescription` and
+`NSContactsUsageDescription`.
+
+## Contacts
+
+Request the typed permission before reading the address book. Results include
+stable platform identifiers, names, phone numbers and email addresses:
+
+```php
+Permissions::requestKind(PermissionKind::Contacts, function ($decision): void {
+    if (!$decision->granted()) {
+        return;
+    }
+
+    Contacts::all(function (array $contacts): void {
+        foreach ($contacts as $contact) {
+            echo $contact->displayName;
+        }
+    });
+});
+```
+
+`Contacts::all()` transparently reads bounded pages so a large address book
+does not exceed the native bridge payload limit.
 
 ## Push delivery, opening and deep links
 

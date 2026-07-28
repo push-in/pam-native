@@ -1,6 +1,62 @@
 import Foundation
 import UIKit
 
+final class PamAnchoredScrollView: UIScrollView {
+    var anchorToEnd = false {
+        didSet {
+            if anchorToEnd && !oldValue {
+                initialEndAnchorApplied = false
+                setNeedsLayout()
+            }
+        }
+    }
+    var maintainVisibleContentPosition = false
+    var autoScrollToEndThreshold: CGFloat = 24
+    var horizontal = false
+
+    private var initialEndAnchorApplied = false
+    private var previousMaxOffset: CGFloat = 0
+
+    override func layoutSubviews() {
+        let oldMax = previousMaxOffset
+        let previousOffset = primaryOffset
+        let distanceFromEnd = max(0, oldMax - previousOffset)
+        super.layoutSubviews()
+
+        let newMax = primaryMaxOffset
+        previousMaxOffset = newMax
+        if anchorToEnd && !initialEndAnchorApplied {
+            initialEndAnchorApplied = true
+            setPrimaryOffset(newMax)
+        } else if anchorToEnd,
+                  newMax != oldMax,
+                  distanceFromEnd <= autoScrollToEndThreshold {
+            setPrimaryOffset(newMax)
+        } else if maintainVisibleContentPosition, newMax > oldMax {
+            setPrimaryOffset(previousOffset + newMax - oldMax)
+        }
+    }
+
+    private var primaryOffset: CGFloat {
+        horizontal ? contentOffset.x : contentOffset.y
+    }
+
+    private var primaryMaxOffset: CGFloat {
+        if horizontal {
+            return max(0, contentSize.width - bounds.width + adjustedContentInset.right)
+        }
+        return max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+    }
+
+    private func setPrimaryOffset(_ value: CGFloat) {
+        if horizontal {
+            contentOffset.x = max(-adjustedContentInset.left, value)
+        } else {
+            contentOffset.y = max(-adjustedContentInset.top, value)
+        }
+    }
+}
+
 final class PamVuetifySwitch: UIControl {
     private let trackLayer = CALayer()
     private let thumbLayer = CALayer()

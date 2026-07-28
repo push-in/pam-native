@@ -11,6 +11,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let device = DeviceModule()
     private let permissions = PermissionsModule()
     private let sensors = SensorsModule()
+    private let contacts = ContactsModule()
     private let modules: [String: NativeModule]
 
     public init() {
@@ -24,6 +25,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "device": device,
             "permissions": permissions,
             "sensors": sensors,
+            "contacts": contacts,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
         self.modules = values

@@ -144,6 +144,16 @@ Scroll::make($content)
     ->onScroll($rememberOffset);
 ```
 
+For chat timelines, use native end anchoring instead of a guessed content
+offset:
+
+```php
+Scroll::make($messages)
+    ->anchorToEnd()
+    ->maintainVisibleContentPosition()
+    ->autoScrollToEndThreshold(32);
+```
+
 Android owns drag, fling, snapping, fading edges, scrollbars and IME dismissal.
 When `onScroll` is present PAM sends only the active-axis offset, coalesced once
 per display frame. `ActivityIndicator` exposes `animating()`,

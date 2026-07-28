@@ -11,4 +11,5 @@ enum PermissionKind: int
     case Photos = 3;
     case Notifications = 4;
     case LocationWhenInUse = 5;
+    case Contacts = 6;
 }

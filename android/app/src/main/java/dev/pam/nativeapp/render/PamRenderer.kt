@@ -1305,6 +1305,16 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setContentOffsetY(
                     value.decimal().toFloat(),
                 )
+            PropKey.SCROLL_ANCHOR_TO_END ->
+                (view as? PamScrollContainer)?.setAnchorToEnd(value.flag())
+            PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION ->
+                (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(
+                    value.flag(),
+                )
+            PropKey.SCROLL_AUTO_SCROLL_TO_END_THRESHOLD ->
+                (view as? PamScrollContainer)?.setAutoScrollToEndThreshold(
+                    value.decimal().toFloat(),
+                )
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(value.flag())
             PropKey.SCROLL_OVER_SCROLL_MODE ->
@@ -1806,6 +1816,12 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setContentOffsetX(0f)
             PropKey.SCROLL_CONTENT_OFFSET_Y ->
                 (view as? PamScrollContainer)?.setContentOffsetY(0f)
+            PropKey.SCROLL_ANCHOR_TO_END ->
+                (view as? PamScrollContainer)?.setAnchorToEnd(false)
+            PropKey.SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION ->
+                (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(false)
+            PropKey.SCROLL_AUTO_SCROLL_TO_END_THRESHOLD ->
+                (view as? PamScrollContainer)?.setAutoScrollToEndThreshold(24f)
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)
             PropKey.SCROLL_OVER_SCROLL_MODE ->

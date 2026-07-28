@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreLocation
+import Contacts
 import Foundation
 import Photos
 import UIKit
@@ -66,6 +67,8 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
             }
         case 5:
             finish(location.authorizationStatus, completion)
+        case 6:
+            finishContacts(CNContactStore.authorizationStatus(for: .contacts), completion)
         default:
             completion(.failure, Data("Unknown permission kind \(kind)".utf8))
         }
@@ -103,6 +106,10 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
                 } else {
                     self.status(kind, completion)
                 }
+            }
+        case 6:
+            CNContactStore().requestAccess(for: .contacts) { _, _ in
+                self.status(kind, completion)
             }
         default:
             completion(.failure, Data("Unknown permission kind \(kind)".utf8))
@@ -167,6 +174,26 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
             "status": .integer(Int64(status)),
             "canAskAgain": .flag(canAskAgain),
         ])) ?? Data())
+    }
+
+    private func finishContacts(
+        _ status: CNAuthorizationStatus,
+        _ completion: @escaping ModuleCompletion
+    ) {
+        if #available(iOS 18.0, *), status == .limited {
+            finish(status: 4, canAskAgain: false, completion)
+            return
+        }
+        switch status {
+        case .authorized:
+            finish(status: 1, canAskAgain: false, completion)
+        case .notDetermined:
+            finish(status: 2, canAskAgain: true, completion)
+        case .denied, .restricted:
+            finish(status: 3, canAskAgain: false, completion)
+        @unknown default:
+            finish(status: 2, canAskAgain: false, completion)
+        }
     }
 
     private func kind(_ payload: Data) throws -> Int {

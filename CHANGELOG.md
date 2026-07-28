@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.2 - 2026-07-28
+
+- Add typed, paginated Android and iOS contacts access with an explicit
+  contacts permission.
+- Add native chat timeline anchoring, near-end auto-follow and visible-position
+  preservation to `ScrollView` across Android and iOS.
+
 ## 0.5.1 - 2026-07-28
 
 - Add generic native HTTP requests across Android and iOS with GET, POST, PUT,

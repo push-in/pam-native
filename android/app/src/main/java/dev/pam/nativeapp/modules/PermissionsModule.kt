@@ -96,6 +96,7 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
                 null
             }
         KIND_LOCATION -> error("Location uses a grouped permission request")
+        KIND_CONTACTS -> Manifest.permission.READ_CONTACTS
         else -> error("Unknown permission kind $kind")
     }
 
@@ -123,6 +124,7 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
         const val KIND_PHOTOS = 3
         const val KIND_NOTIFICATIONS = 4
         const val KIND_LOCATION = 5
+        const val KIND_CONTACTS = 6
         const val STATUS_GRANTED = 1
         const val STATUS_DENIED = 2
         const val STATUS_BLOCKED = 3
