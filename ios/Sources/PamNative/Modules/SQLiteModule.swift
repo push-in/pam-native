@@ -133,7 +133,9 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
 
     func close() {
         queue.sync {
-            databases.values.forEach(sqlite3_close)
+            databases.values.forEach { database in
+                _ = sqlite3_close(database)
+            }
             databases.removeAll()
         }
     }
