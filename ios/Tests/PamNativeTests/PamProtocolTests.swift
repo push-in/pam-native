@@ -51,6 +51,19 @@ final class PamProtocolTests: XCTestCase {
             .gestureCancel,
             .bottomSheetChange,
             .bottomSheetDismiss,
+            .webViewLoad,
+            .webViewError,
+            .webViewMessage,
+            .mediaReady,
+            .mediaProgress,
+            .mediaEnd,
+            .mediaError,
+            .dragStart,
+            .dragEnd,
+            .drop,
+            .menuAction,
+            .navigationGesturePop,
+            .animationComplete,
         ]
         XCTAssertEqual(events.map(\.rawValue), Array(1...60))
         XCTAssertEqual(PamConstants.onClickOutside, 285)
