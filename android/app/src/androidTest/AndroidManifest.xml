@@ -4,6 +4,6 @@
         <activity
             android:name="dev.pam.nativeapp.CapabilityTestActivity"
             android:exported="false"
-            android:theme="@style/Theme.PamNative" />
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
     </application>
 </manifest>
