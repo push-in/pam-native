@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.4 - 2026-07-28
+
+- Add a native SQLite bulk-write fast path that crosses the bridge once,
+  reuses one prepared statement and commits one transaction.
+- Enable WAL, normal synchronous durability, foreign keys, bounded lock waits,
+  and memory-backed temporary storage for private application databases.
+
 ## 0.5.3 - 2026-07-28
 
 - Keep flex layouts consistent after safe-area insets reduce their native
