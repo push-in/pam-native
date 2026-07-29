@@ -36,6 +36,10 @@ with controls, autoplay, looping, mute, volume, seek, rate and progress events.
 application sandbox and returns a `FileReference`. `Files::pickMany()` uses the
 native multi-selection picker, preserves selection order, imports off the UI
 thread, and returns up to 50 typed `FileReference` values in one bridge result.
+`FileReference::uri()` returns a sandboxed `pam-file:///...` source that can be
+passed directly to `Image` and rendered immediately without copying bytes
+through PHP or exposing an absolute device path. Image reads and decoding stay
+off the UI thread, and both renderers reject authority and path traversal.
 If any import fails, files already copied by that selection are removed.
 Each file is bounded to 64 MiB and a multi-selection is bounded to 256 MiB.
 `MediaCapture::capture()`

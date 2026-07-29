@@ -1817,6 +1817,7 @@ $assert(
     count($pickedFiles) === 2
         && $pickedFiles[0] instanceof FileReference
         && $pickedFiles[0]->path === 'imports/photo-one.jpg'
+        && $pickedFiles[0]->uri() === 'pam-file:///imports/photo-one.jpg'
         && $pickedFiles[1]->mimeType === 'image/webp'
         && $pickedFiles[1]->size === 2_048,
     'Files pickMany must decode every native file reference in selection order.',

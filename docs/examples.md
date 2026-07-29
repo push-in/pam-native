@@ -45,6 +45,7 @@ Files::write('drafts/message.txt', 'Hello', function (): void {
 
 Files::pick(MediaPickerType::Image, function ($file): void {
     $this->selectedPath = $file->path;
+    $this->selectedImageSource = $file->uri();
 });
 
 Files::pickMany(

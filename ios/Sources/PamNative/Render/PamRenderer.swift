@@ -2250,10 +2250,39 @@ public final class PamRenderer {
         if source.hasPrefix("asset://") {
             return UIImage(named: String(source.dropFirst("asset://".count)))
         }
+        if let url = sandboxFileURL(source) {
+            return UIImage(contentsOfFile: url.path)
+        }
         if source.hasPrefix("file://"), let url = URL(string: source) {
             return UIImage(contentsOfFile: url.path)
         }
         return UIImage(named: source)
+    }
+
+    private func sandboxFileURL(_ source: String) -> URL? {
+        guard let uri = URLComponents(string: source),
+              uri.scheme?.lowercased() == "pam-file",
+              uri.host == nil || uri.host?.isEmpty == true,
+              !uri.path.isEmpty else {
+            return nil
+        }
+        let base = FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+            .appendingPathComponent("pam-files", isDirectory: true)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        let relative = String(uri.path.drop(while: { $0 == "/" }))
+        let candidate = base
+            .appendingPathComponent(relative)
+            .resolvingSymlinksInPath()
+            .standardizedFileURL
+        guard candidate.path.hasPrefix(base.path + "/"),
+              FileManager.default.fileExists(atPath: candidate.path) else {
+            return nil
+        }
+        return candidate
     }
 
     private func loadImagePlaceholder(
