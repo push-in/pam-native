@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.32 - 2026-07-29
+
+- Parse template tags with a quote-aware scanner so comparison operators such
+  as `<` and `>` remain valid inside bound and conditional attributes.
+
 ## 0.5.31 - 2026-07-29
 
 - Added bounded incoming deep-link delivery for Android cold starts and

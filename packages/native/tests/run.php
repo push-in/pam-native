@@ -679,6 +679,17 @@ $assert(
     $dynamicColorElement->properties()[PropKey::TextColor->value] === 0xFF1B7A4E,
     'Dynamically bound hexadecimal colors must cross the native bridge as integers.',
 );
+$quotedComparisonTemplate = TemplateCompiler::compile(
+    '<Column><Text v-if="$count > 0">More</Text>'
+    .'<Text v-if="$count < 1">Less</Text></Column>',
+);
+$assert(
+    $quotedComparisonTemplate->children[0]->children[0]->attributes['v-if']
+        === '$count > 0'
+        && $quotedComparisonTemplate->children[0]->children[1]->attributes['v-if']
+            === '$count < 1',
+    'Template tags must keep angle-bracket operators inside quoted attributes.',
+);
 $pressInEvent = null;
 $pressOutEvent = null;
 $pressMoveEvent = null;
@@ -3065,8 +3076,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.31',
-    'The runtime SDK contract must match the 0.5.31 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.32',
+    'The runtime SDK contract must match the 0.5.32 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

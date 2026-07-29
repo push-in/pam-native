@@ -252,16 +252,75 @@ final class TemplateCompiler
     /** @return list<array{string, int}> */
     private static function tokens(string $source): array
     {
-        $matches = [];
-        preg_match_all(
-            '/<!--.*?-->|<\\/?[A-Za-z][^>]*>/s',
-            $source,
-            $matches,
-            PREG_OFFSET_CAPTURE,
-        );
         $tokens = [];
-        foreach ($matches[0] as $raw) {
-            $tokens[] = [$raw[0], $raw[1]];
+        $length = strlen($source);
+
+        for ($start = 0; $start < $length; $start++) {
+            if ($source[$start] !== '<') {
+                continue;
+            }
+
+            if (substr($source, $start, 4) === '<!--') {
+                $end = strpos($source, '-->', $start + 4);
+                if ($end === false) {
+                    continue;
+                }
+                $end += 3;
+                $tokens[] = [substr($source, $start, $end - $start), $start];
+                $start = $end - 1;
+
+                continue;
+            }
+
+            $nameOffset = $start + 1;
+            if (($source[$nameOffset] ?? '') === '/') {
+                $nameOffset++;
+            }
+            if (
+                $nameOffset >= $length
+                || !ctype_alpha($source[$nameOffset])
+            ) {
+                continue;
+            }
+
+            $quote = null;
+            $captured = false;
+            for ($end = $nameOffset + 1; $end < $length; $end++) {
+                $character = $source[$end];
+                if ($quote !== null) {
+                    if ($character === $quote) {
+                        $quote = null;
+                    }
+
+                    continue;
+                }
+                if ($character === '"' || $character === "'") {
+                    $quote = $character;
+
+                    continue;
+                }
+                if ($character !== '>') {
+                    continue;
+                }
+
+                $tokens[] = [
+                    substr($source, $start, $end - $start + 1),
+                    $start,
+                ];
+                $start = $end;
+                $captured = true;
+                break;
+            }
+            if (!$captured && $quote !== null) {
+                $fallbackEnd = strpos($source, '>', $nameOffset + 1);
+                if ($fallbackEnd !== false) {
+                    $tokens[] = [
+                        substr($source, $start, $fallbackEnd - $start + 1),
+                        $start,
+                    ];
+                    $start = $fallbackEnd;
+                }
+            }
         }
 
         return $tokens;
