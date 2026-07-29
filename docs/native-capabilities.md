@@ -19,6 +19,7 @@ table, see the [capability cookbook](examples.md).
 | Finite background work | `System\BackgroundTasks` |
 | Local and push notifications | `System\Notifications`, `System\PushNotifications` |
 | Incoming and outgoing links | `System\Linking` |
+| Content shared from other apps | `System\IncomingShares` |
 | SQLite | `Database\SQLite` |
 | Advanced images | `UI\Image` |
 | Clipboard, drag/drop and menus | `System\Clipboard`, `UI\InteractionRegion` |
@@ -54,6 +55,42 @@ escaping the application sandbox are rejected.
 Android declares no broad storage permission and uses the system document
 provider. iOS hosts must provide the standard camera/photo usage descriptions
 in the application `Info.plist`.
+
+## Incoming shares
+
+Declare only the MIME types the application accepts:
+
+```json
+{
+  "android": {
+    "shareTargets": ["image/*", "video/*", "text/plain"]
+  }
+}
+```
+
+`IncomingShares::initial()` consumes a cold-start share and
+`IncomingShares::listen()` receives warm-start `ACTION_SEND` and
+`ACTION_SEND_MULTIPLE` intents. Android copies every received file into the
+private application cache before notifying PHP. The resulting
+`IncomingShare::$files` are ordinary `FileReference` values and remain usable
+after the source activity and its temporary URI grant are gone. Incoming
+events are bounded to 10 files, 16 queued shares and 64 KiB of text.
+
+```php
+use Pam\Native\IncomingShare;
+use Pam\Native\System\IncomingShares;
+
+$openComposer = static function (IncomingShare $share): void {
+    // $share->text, $share->subject and $share->files
+};
+
+IncomingShares::initial(static function (?IncomingShare $share) use ($openComposer): void {
+    if ($share !== null) {
+        $openComposer($share);
+    }
+});
+IncomingShares::listen($openComposer);
+```
 
 ## Background, notifications and push
 

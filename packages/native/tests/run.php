@@ -49,6 +49,7 @@ use Pam\Native\InputMode;
 use Pam\Native\InputSelectionEvent;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
+use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\TemplateCompiler;
@@ -106,6 +107,7 @@ use Pam\Native\Store\StoreMiddleware;
 use Pam\Native\Store\Stores;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
+use Pam\Native\System\IncomingShares;
 use Pam\Native\System\Clipboard;
 use Pam\Native\System\Contacts;
 use Pam\Native\System\Sensors;
@@ -2026,6 +2028,45 @@ Runtime::dispatchModuleResult(
         'hasMore' => false,
     ]),
 );
+
+$incomingShare = null;
+$incomingShareRequestId = IncomingShares::initial(
+    static function (?IncomingShare $share) use (&$incomingShare): void {
+        $incomingShare = $share;
+    },
+);
+$incomingShareCall = TestDiagnostics::$moduleCall;
+$assert(
+    $incomingShareCall !== null
+        && $incomingShareCall['requestId'] === $incomingShareRequestId
+        && $incomingShareCall['module'] === 'incoming-share'
+        && $incomingShareCall['method'] === 'initial',
+    'IncomingShares facade did not request the cold-start payload.',
+);
+Runtime::dispatchModuleResult(
+    $incomingShareRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map([
+        'available' => true,
+        'text' => 'Shared caption',
+        'subject' => 'Shared subject',
+        'mimeType' => 'image/jpeg',
+        'files' => json_encode([[
+            'path' => '/data/user/0/app/cache/pam-incoming-shares/incoming-photo.jpg',
+            'name' => 'photo.jpg',
+            'mimeType' => 'image/jpeg',
+            'size' => 1234,
+        ]], JSON_THROW_ON_ERROR),
+    ]),
+);
+$assert(
+    $incomingShare instanceof IncomingShare
+        && $incomingShare->text === 'Shared caption'
+        && count($incomingShare->files) === 1
+        && $incomingShare->files[0]->name === 'photo.jpg'
+        && $incomingShare->files[0]->size === 1234,
+    'IncomingShares facade did not decode the sandboxed file payload.',
+);
 $assert(
     is_array($contacts)
         && count($contacts) === 1
@@ -3076,8 +3117,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.32',
-    'The runtime SDK contract must match the 0.5.32 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.33',
+    'The runtime SDK contract must match the 0.5.33 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

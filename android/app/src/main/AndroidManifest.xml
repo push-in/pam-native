@@ -62,6 +62,8 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- pam-native:share-targets:start -->
+            <!-- pam-native:share-targets:end -->
         </activity>
     </application>
 </manifest>

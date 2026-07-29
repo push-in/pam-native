@@ -24,6 +24,7 @@ import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
 import dev.pam.nativeapp.render.PamRootHost
 import dev.pam.nativeapp.modules.PamPushNotifications
+import dev.pam.nativeapp.modules.PamIncomingShares
 import dev.pam.nativeapp.modules.PamDeepLinks
 
 class PamActivity : Activity() {
@@ -90,6 +91,7 @@ class PamActivity : Activity() {
         registerBackCallback()
         registerDevTools()
         PamDeepLinks.captureInitial(intent?.dataString)
+        PamIncomingShares.captureInitial(this, intent)
         reportNotificationOpen(intent)
 
         runCatching {
@@ -133,6 +135,7 @@ class PamActivity : Activity() {
         super.onNewIntent(intent)
         setIntent(intent)
         PamDeepLinks.reportOpened(intent.dataString)
+        PamIncomingShares.reportOpened(this, intent)
         reportNotificationOpen(intent)
     }
 

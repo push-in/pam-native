@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.33 - 2026-07-29
+
+- Add configurable Android share targets and a typed `IncomingShares` API for
+  cold/warm `ACTION_SEND` and `ACTION_SEND_MULTIPLE`, importing shared files
+  into the app sandbox before dispatch.
+
 ## 0.5.32 - 2026-07-29
 
 - Parse template tags with a quote-aware scanner so comparison operators such
