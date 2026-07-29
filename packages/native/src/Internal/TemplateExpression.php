@@ -348,6 +348,31 @@ final class TemplateExpression
     /** @param list<mixed> $arguments */
     private function invoke(string $name, array $arguments): mixed
     {
+        $builtIn = strtolower($name);
+        if ($builtIn === 'count') {
+            if (count($arguments) !== 1 || (!is_array($arguments[0]) && !$arguments[0] instanceof \Countable)) {
+                throw new RuntimeException('Template count() expects exactly one countable value.');
+            }
+
+            return count($arguments[0]);
+        }
+        if ($builtIn === 'in_array') {
+            if (
+                (count($arguments) !== 2 && count($arguments) !== 3)
+                || !is_array($arguments[1])
+                || (isset($arguments[2]) && !is_bool($arguments[2]))
+            ) {
+                throw new RuntimeException(
+                    'Template in_array() expects a needle, an array, and an optional strict boolean.',
+                );
+            }
+
+            return in_array(
+                $arguments[0],
+                $arguments[1],
+                $arguments[2] ?? false,
+            );
+        }
         if ($this->scope === null || !method_exists($this->scope, $name)) {
             throw new RuntimeException("Template method {$name} does not exist.");
         }

@@ -2670,6 +2670,25 @@ $assert(
     ) === true,
     'Template logical OR must consume its right operand when the left operand is true.',
 );
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        'count($selected)',
+        null,
+        ['selected' => ['message-1', 'message-2']],
+    ) === 2,
+    'Template expressions must expose the safe count() collection helper.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        'in_array($messageId, $selected, true)',
+        null,
+        [
+            'messageId' => 'message-2',
+            'selected' => ['message-1', 'message-2'],
+        ],
+    ) === true,
+    'Template expressions must expose strict in_array() membership checks.',
+);
 
 TemplateRegistry::reset();
 App::components($pamPhpDirectory, $pamPhpCache);
@@ -3002,8 +3021,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.24',
-    'The runtime SDK contract must match the 0.5.24 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.25',
+    'The runtime SDK contract must match the 0.5.25 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

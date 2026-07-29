@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.25 - 2026-07-29
+
+- Add guarded `count()` and strict-capable `in_array()` collection helpers to
+  declarative template expressions, enabling efficient derived list state
+  without duplicating membership flags into every rendered item.
+
 ## 0.5.24 - 2026-07-29
 
 - Keep the resolved Android sandbox file URI after the media-cache pass instead
