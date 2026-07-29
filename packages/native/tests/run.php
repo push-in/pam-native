@@ -2938,6 +2938,18 @@ $assert(
         && $advancedNavigator->current()->string('source') === 'notification',
     'Deep links must resolve encoded path and scalar query parameters.',
 );
+$hostNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->deepLink('/profile/{username}', 'profile')
+    ->build();
+$assert(
+    $hostNavigator->open('pushin://profile/david?source=share')
+        && $hostNavigator->currentRoute() === 'profile'
+        && $hostNavigator->current()->string('username') === 'david'
+        && $hostNavigator->current()->string('source') === 'share',
+    'Custom-scheme deep links must also match host-plus-path route patterns.',
+);
 $assert(
     $advancedNavigator->popToTop()
         && $advancedNavigator->currentRoute() === 'home',

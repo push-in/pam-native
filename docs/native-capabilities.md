@@ -18,6 +18,7 @@ table, see the [capability cookbook](examples.md).
 | Files and documents | `System\Files` |
 | Finite background work | `System\BackgroundTasks` |
 | Local and push notifications | `System\Notifications`, `System\PushNotifications` |
+| Incoming and outgoing links | `System\Linking` |
 | SQLite | `Database\SQLite` |
 | Advanced images | `UI\Image` |
 | Clipboard, drag/drop and menus | `System\Clipboard`, `UI\InteractionRegion` |

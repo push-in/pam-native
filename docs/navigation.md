@@ -75,6 +75,38 @@ stores both route names and parameters; legacy name-only stacks still restore.
 Route parameters are limited to 64 safe keys, scalar values, and 16 KiB
 strings so untrusted deep links cannot inflate the retained tree.
 
+### Incoming application links
+
+Connect Android intents and iOS application links to the same router once:
+
+```php
+use Pam\Native\System\Linking;
+
+$linkSubscription = Linking::listenAndRoute(
+    $navigator,
+    static function (string $url, bool $handled): void {
+        // Optional analytics or fallback handling.
+    },
+);
+```
+
+`listenAndRoute()` consumes the Android cold-start URL, then keeps one bounded
+listener armed for warm-start URLs delivered through `singleTask`
+`onNewIntent()`. Call `Linking::unsubscribe($linkSubscription)` when a
+short-lived owner no longer needs it.
+
+On iOS, forward the initial and subsequent URLs from the application or scene
+delegate:
+
+```swift
+PamLinking.captureInitial(launchURL)
+PamLinking.open(incomingURL)
+```
+
+Custom schemes support both path-only matching and host-plus-path matching, so
+`pushin://profile/david` can resolve a `/profile/{username}` pattern without
+breaking existing schemes that intentionally ignore the host.
+
 Available transitions are `PlatformDefault`, `SlideFromRight`,
 `SlideFromLeft`, `SlideFromBottom`, `Fade`, `FadeFromBottom`, `Scale`, and
 `None`, plus `SlideFromTop`, `SharedAxisX`, and `SharedAxisY`. They are

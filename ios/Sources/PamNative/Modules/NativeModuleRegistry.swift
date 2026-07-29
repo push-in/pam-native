@@ -7,6 +7,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let sqlite = SQLiteModule()
     private let files = FilesModule()
     private let notifications = NotificationsModule()
+    private let linking = LinkingModule()
     private let background = BackgroundModule()
     private let device = DeviceModule()
     private let permissions = PermissionsModule()
@@ -23,6 +24,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "sqlite": sqlite,
             "files": files,
             "notifications": notifications,
+            "linking": linking,
             "background": background,
             "device": device,
             "permissions": permissions,

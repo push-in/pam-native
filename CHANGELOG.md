@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.31 - 2026-07-29
+
+- Added bounded incoming deep-link delivery for Android cold starts and
+  `singleTask` warm starts through `Linking::initial()` and
+  `Linking::listen()`.
+- Added `Linking::listenAndRoute()` to connect native URL delivery directly to
+  the existing typed navigator matcher.
+- Added the public `PamLinking` bridge for iOS application and scene delegates.
+- Custom schemes can match both URI path-only patterns and host-plus-path
+  patterns such as `pushin://profile/david`.
+
 ## 0.5.30 - 2026-07-29
 
 - Added cross-platform `MediaPickerType::Media` filtering for image-or-video

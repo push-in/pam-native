@@ -285,20 +285,30 @@ final class Navigator extends Component implements Restorable
         $parts = parse_url($uri);
         if ($parts === false) return false;
         $path = $parts['path'] ?? '/';
-        foreach ($this->deepLinks as $link) {
-            $params = $link->match($path);
-            if ($params === null) continue;
-            if (isset($parts['query'])) {
-                parse_str($parts['query'], $query);
-                foreach ($query as $key => $value) {
-                    if (is_string($key) && is_scalar($value)) {
-                        $params[$key] = (string) $value;
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $paths = [$path];
+        if ($scheme !== '' && !in_array($scheme, ['http', 'https'], true)) {
+            $host = trim((string) ($parts['host'] ?? ''), '/');
+            if ($host !== '') {
+                $paths[] = '/'.$host.($path === '/' ? '' : $path);
+            }
+        }
+        foreach (array_unique($paths) as $candidate) {
+            foreach ($this->deepLinks as $link) {
+                $params = $link->match($candidate);
+                if ($params === null) continue;
+                if (isset($parts['query'])) {
+                    parse_str($parts['query'], $query);
+                    foreach ($query as $key => $value) {
+                        if (is_string($key) && is_scalar($value)) {
+                            $params[$key] = (string) $value;
+                        }
                     }
                 }
-            }
-            $this->navigate($link->route, $params);
+                $this->navigate($link->route, $params);
 
-            return true;
+                return true;
+            }
         }
 
         return false;

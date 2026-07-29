@@ -10,6 +10,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val files = (context as? dev.pam.nativeapp.PamActivity)?.let(::FilesModule)
     private val notifications =
         (context as? dev.pam.nativeapp.PamActivity)?.let(::NotificationsModule)
+    private val linking = LinkingModule()
     private val background = BackgroundModule(context)
     private val device = DeviceModule(context)
     private val permissions =
@@ -24,6 +25,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         put("sqlite", sqlite)
         files?.let { put("files", it) }
         notifications?.let { put("notifications", it) }
+        put("linking", linking)
         put("background", background)
         put("device", device)
         permissions?.let { put("permissions", it) }
