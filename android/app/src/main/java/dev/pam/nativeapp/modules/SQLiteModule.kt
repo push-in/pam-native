@@ -12,6 +12,11 @@ import java.io.File
 import java.util.concurrent.Executors
 
 internal class SQLiteModule(private val context: Context) : NativeModule, AutoCloseable {
+    private data class TransactionStatement(
+        val sql: String,
+        val argumentSets: List<Array<Any?>>,
+    )
+
     private val executor = Executors.newSingleThreadExecutor()
     private val databases = mutableMapOf<String, SQLiteDatabase>()
 
@@ -41,6 +46,13 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
                             database,
                             sql,
                             decodeArgumentSets(values.requiredText("arguments")),
+                        )
+                        completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                    }
+                    "transaction" -> {
+                        executeTransaction(
+                            database,
+                            decodeStatements(values.requiredText("arguments")),
                         )
                         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                     }
@@ -115,6 +127,47 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
         }
     }
 
+    private fun decodeStatements(value: String): List<TransactionStatement> {
+        val statements = JSONArray(value)
+        require(statements.length() in 1..MAX_BATCH_ROWS) {
+            "SQLite transaction requires between 1 and 10000 statements"
+        }
+        return List(statements.length()) { index ->
+            val statement = statements.getJSONObject(index)
+            val sql = statement.getString("sql")
+            require(sql.isNotEmpty() && sql.toByteArray().size <= MAX_SQL_BYTES) {
+                "Invalid SQLite transaction SQL statement"
+            }
+            val argumentSets = if (statement.has("argumentSets")) {
+                decodeArgumentSets(statement.getJSONArray("argumentSets").toString())
+            } else {
+                listOf(decodeArguments(statement.getJSONArray("arguments").toString()))
+            }
+            TransactionStatement(sql, argumentSets)
+        }
+    }
+
+    private fun executeTransaction(
+        database: SQLiteDatabase,
+        statements: List<TransactionStatement>,
+    ) {
+        database.beginTransactionNonExclusive()
+        try {
+            statements.forEach { transactionStatement ->
+                database.compileStatement(transactionStatement.sql).use { statement ->
+                    transactionStatement.argumentSets.forEach { arguments ->
+                        statement.clearBindings()
+                        bind(arguments, statement)
+                        statement.execute()
+                    }
+                }
+            }
+            database.setTransactionSuccessful()
+        } finally {
+            database.endTransaction()
+        }
+    }
+
     private fun bind(arguments: Array<Any?>, statement: SQLiteStatement) {
         arguments.forEachIndexed { offset, value ->
             val index = offset + 1
@@ -177,5 +230,6 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
         const val MAX_QUERY_ROWS = 1_000
         const val MAX_QUERY_COLUMNS = 256
         const val MAX_BATCH_ROWS = 10_000
+        const val MAX_SQL_BYTES = 1_048_576
     }
 }

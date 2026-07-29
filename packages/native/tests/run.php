@@ -1801,6 +1801,53 @@ Runtime::dispatchModuleResult(
     '',
 );
 
+$transactionRequestId = SQLite::transaction(
+    'nitro.db',
+    [
+        [
+            'sql' => 'DELETE FROM messages WHERE chat_id = ?',
+            'arguments' => ['chat-1'],
+        ],
+        [
+            'sql' => 'INSERT INTO messages (id, chat_id, body) VALUES (?, ?, ?)',
+            'argumentSets' => [
+                ['m3', 'chat-1', 'atomic'],
+                ['m4', 'chat-1', 'batched'],
+            ],
+        ],
+    ],
+);
+$transactionCall = TestDiagnostics::$moduleCall;
+$transactionPayload = $transactionCall === null
+    ? []
+    : Wire::decodeMap($transactionCall['payload']);
+$assert(
+    $transactionCall !== null
+        && $transactionCall['requestId'] === $transactionRequestId
+        && $transactionCall['module'] === 'sqlite'
+        && $transactionCall['method'] === 'transaction'
+        && json_decode((string) ($transactionPayload['arguments'] ?? ''), true) === [
+            [
+                'sql' => 'DELETE FROM messages WHERE chat_id = ?',
+                'arguments' => ['chat-1'],
+            ],
+            [
+                'sql' => 'INSERT INTO messages (id, chat_id, body) VALUES (?, ?, ?)',
+                'arguments' => [],
+                'argumentSets' => [
+                    ['m3', 'chat-1', 'atomic'],
+                    ['m4', 'chat-1', 'batched'],
+                ],
+            ],
+        ],
+    'SQLite transaction did not emit one typed bridge call for heterogeneous statements.',
+);
+Runtime::dispatchModuleResult(
+    $transactionRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    '',
+);
+
 $contacts = null;
 $contactsRequestId = Contacts::all(static function (array $items) use (&$contacts): void {
     $contacts = $items;
@@ -2778,8 +2825,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.12',
-    'The runtime SDK contract must match the 0.5.12 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.13',
+    'The runtime SDK contract must match the 0.5.13 package release.',
 );
 
 $bottomSheet = BottomSheet::make(
