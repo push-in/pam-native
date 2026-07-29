@@ -1,6 +1,11 @@
 import CryptoKit
 import Foundation
 
+struct PamCacheUsage: Sendable {
+    let fileCount: Int64
+    let totalBytes: Int64
+}
+
 final class PamMediaDiskCache: @unchecked Sendable {
     struct Resolution: Sendable {
         let url: URL
@@ -157,6 +162,63 @@ final class PamMediaDiskCache: @unchecked Sendable {
         memory.removeAllObjects()
     }
 
+    func usage(completion: @escaping @Sendable (PamCacheUsage) -> Void) {
+        queue.async {
+            completion(self.currentUsage())
+        }
+    }
+
+    func clear(
+        preserveOffline: Bool,
+        completion: @escaping @Sendable (PamCacheUsage, Int64) -> Void
+    ) {
+        queue.async {
+            let before = self.currentUsage()
+            let files = (try? FileManager.default.contentsOfDirectory(
+                at: self.root,
+                includingPropertiesForKeys: nil
+            )) ?? []
+            let pinnedNames = Set(
+                files
+                    .filter { $0.pathExtension == "media" }
+                    .filter {
+                        FileManager.default.fileExists(atPath: self.pinForFile($0).path)
+                    }
+                    .map { $0.deletingPathExtension().lastPathComponent }
+            )
+            for file in files {
+                let pinned = pinnedNames.contains(
+                    file.deletingPathExtension().lastPathComponent
+                ) && ["media", "pin"].contains(file.pathExtension)
+                if !preserveOffline || !pinned {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+            self.memory.removeAllObjects()
+            let after = self.currentUsage()
+            completion(after, max(0, before.totalBytes - after.totalBytes))
+        }
+    }
+
+    private func currentUsage() -> PamCacheUsage {
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .fileSizeKey]
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: Array(keys)
+        )) ?? []
+        var bytes: Int64 = 0
+        var count: Int64 = 0
+        for file in files {
+            guard let values = try? file.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else {
+                continue
+            }
+            bytes += Int64(values.fileSize ?? 0)
+            count += 1
+        }
+        return PamCacheUsage(fileCount: count, totalBytes: bytes)
+    }
+
     private func finish(_ identity: String, _ result: Result<Resolution, Error>) {
         let callbacks = downloads.removeValue(forKey: identity) ?? []
         callbacks.forEach { $0(result) }
@@ -184,7 +246,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
         for file in media {
             size += Int64(file.fileSize ?? 0)
             if size > min(max(limit, 16 * 1024 * 1024), 4 * 1024 * 1024 * 1024),
-               !FileManager.default.fileExists(atPath: pin(file.deletingPathExtension().lastPathComponent).path) {
+               !FileManager.default.fileExists(atPath: pinForFile(file).path) {
                 try? FileManager.default.removeItem(at: file)
             }
         }
@@ -196,6 +258,10 @@ final class PamMediaDiskCache: @unchecked Sendable {
 
     private func pin(_ identity: String) -> URL {
         root.appendingPathComponent(sha256(Data(identity.utf8)) + ".pin")
+    }
+
+    private func pinForFile(_ file: URL) -> URL {
+        root.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".pin")
     }
 
     private func sha256(_ data: Data) -> String {

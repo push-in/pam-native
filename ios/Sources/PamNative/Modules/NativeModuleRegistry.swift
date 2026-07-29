@@ -8,6 +8,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let files = FilesModule()
     private let notifications = NotificationsModule()
     private let linking = LinkingModule()
+    private let cache = CacheModule()
     private let background = BackgroundModule()
     private let device = DeviceModule()
     private let permissions = PermissionsModule()
@@ -25,6 +26,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "files": files,
             "notifications": notifications,
             "linking": linking,
+            "cache": cache,
             "background": background,
             "device": device,
             "permissions": permissions,

@@ -108,6 +108,7 @@ use Pam\Native\Store\Stores;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
 use Pam\Native\System\IncomingShares;
+use Pam\Native\System\Caches;
 use Pam\Native\System\Clipboard;
 use Pam\Native\System\Contacts;
 use Pam\Native\System\Sensors;
@@ -2067,6 +2068,72 @@ $assert(
         && $incomingShare->files[0]->size === 1234,
     'IncomingShares facade did not decode the sandboxed file payload.',
 );
+
+$cacheUsage = null;
+$cacheRequestId = Caches::usage(
+    static function (\Pam\Native\CacheUsage $usage) use (&$cacheUsage): void {
+        $cacheUsage = $usage;
+    },
+);
+$cacheCall = TestDiagnostics::$moduleCall;
+$assert(
+    $cacheCall !== null
+        && $cacheCall['requestId'] === $cacheRequestId
+        && $cacheCall['module'] === 'cache'
+        && $cacheCall['method'] === 'usage',
+    'Caches facade did not request native cache usage.',
+);
+Runtime::dispatchModuleResult(
+    $cacheRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map([
+        'fileCount' => 12,
+        'freedBytes' => 0,
+        'imageBytes' => 1024,
+        'mediaBytes' => 4096,
+        'temporaryBytes' => 128,
+        'totalBytes' => 5248,
+    ]),
+);
+$assert(
+    $cacheUsage instanceof \Pam\Native\CacheUsage
+        && $cacheUsage->fileCount === 12
+        && $cacheUsage->totalBytes === 5248,
+    'Caches facade did not decode typed native cache usage.',
+);
+
+$cacheCleared = null;
+$cacheClearRequestId = Caches::clear(
+    static function (\Pam\Native\CacheUsage $usage) use (&$cacheCleared): void {
+        $cacheCleared = $usage;
+    },
+);
+$cacheClearCall = TestDiagnostics::$moduleCall;
+$assert(
+    $cacheClearCall !== null
+        && $cacheClearCall['module'] === 'cache'
+        && $cacheClearCall['method'] === 'clear'
+        && Wire::decodeMap($cacheClearCall['payload']) === ['preserveOffline' => true],
+    'Caches clear must preserve pinned offline media by default.',
+);
+Runtime::dispatchModuleResult(
+    $cacheClearRequestId,
+    \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map([
+        'fileCount' => 2,
+        'freedBytes' => 4096,
+        'imageBytes' => 0,
+        'mediaBytes' => 1024,
+        'temporaryBytes' => 0,
+        'totalBytes' => 1024,
+    ]),
+);
+$assert(
+    $cacheCleared instanceof \Pam\Native\CacheUsage
+        && $cacheCleared->freedBytes === 4096
+        && $cacheCleared->totalBytes === 1024,
+    'Caches clear did not decode the reclaimed byte count.',
+);
 $assert(
     is_array($contacts)
         && count($contacts) === 1
@@ -3117,8 +3184,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.33',
-    'The runtime SDK contract must match the 0.5.33 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.34',
+    'The runtime SDK contract must match the 0.5.34 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

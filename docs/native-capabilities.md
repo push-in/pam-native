@@ -20,6 +20,7 @@ table, see the [capability cookbook](examples.md).
 | Local and push notifications | `System\Notifications`, `System\PushNotifications` |
 | Incoming and outgoing links | `System\Linking` |
 | Content shared from other apps | `System\IncomingShares` |
+| Cache usage and cleanup | `System\Caches` |
 | SQLite | `Database\SQLite` |
 | Advanced images | `UI\Image` |
 | Clipboard, drag/drop and menus | `System\Clipboard`, `UI\InteractionRegion` |

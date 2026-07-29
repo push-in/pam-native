@@ -12,6 +12,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         (context as? dev.pam.nativeapp.PamActivity)?.let(::NotificationsModule)
     private val linking = LinkingModule()
     private val incomingShare = IncomingShareModule()
+    private val cache = CacheModule(context)
     private val background = BackgroundModule(context)
     private val device = DeviceModule(context)
     private val permissions =
@@ -28,6 +29,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         notifications?.let { put("notifications", it) }
         put("linking", linking)
         put("incoming-share", incomingShare)
+        put("cache", cache)
         put("background", background)
         put("device", device)
         permissions?.let { put("permissions", it) }

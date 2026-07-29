@@ -83,6 +83,31 @@ the runtime boundary.
 error path. A SHA-256 value supplied with `checksum()` must match before a downloaded
 file becomes visible in the cache.
 
+## Inspecting and clearing application cache
+
+Use the typed `Caches` facade from a settings or diagnostics screen. Both
+operations run off the UI thread.
+
+```php
+use Pam\Native\CacheUsage;
+use Pam\Native\System\Caches;
+
+Caches::usage(static function (CacheUsage $usage): void {
+    echo $usage->totalBytes;
+});
+
+Caches::clear(
+    static function (CacheUsage $usage): void {
+        echo "Freed {$usage->freedBytes} bytes";
+    },
+);
+```
+
+`Caches::clear()` removes decoded image files, ordinary media and temporary
+incoming-share files. Media explicitly marked `pinOffline()` is preserved by
+default. Pass `preserveOffline: false` only after explicit user confirmation to
+remove downloaded offline content as well.
+
 ## Runtime behavior
 
 - Memory and disk hits avoid a duplicate network request.

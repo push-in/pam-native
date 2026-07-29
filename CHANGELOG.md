@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.34 - 2026-07-29
+
+- Add cross-platform cache usage and cleanup through `Caches`, reporting image,
+  media and temporary bytes while preserving explicitly pinned offline media by
+  default.
+
 ## 0.5.33 - 2026-07-29
 
 - Add configurable Android share targets and a typed `IncomingShares` API for
