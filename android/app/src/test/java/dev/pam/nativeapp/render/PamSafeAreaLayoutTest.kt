@@ -50,40 +50,4 @@ class PamSafeAreaLayoutTest {
             ),
         )
     }
-
-    @Test
-    fun bottomAnchoredAbsoluteChildMovesInsideReducedViewport() {
-        assertEquals(
-            126 to 0,
-            absoluteViewportAdjustment(
-                viewportReduction = 126,
-                leadingEdge = false,
-                trailingEdge = true,
-            ),
-        )
-    }
-
-    @Test
-    fun stretchedAbsoluteChildShrinksWithReducedViewport() {
-        assertEquals(
-            0 to 126,
-            absoluteViewportAdjustment(
-                viewportReduction = 126,
-                leadingEdge = true,
-                trailingEdge = true,
-            ),
-        )
-    }
-
-    @Test
-    fun topAnchoredAbsoluteChildKeepsItsFrame() {
-        assertEquals(
-            0 to 0,
-            absoluteViewportAdjustment(
-                viewportReduction = 126,
-                leadingEdge = true,
-                trailingEdge = false,
-            ),
-        )
-    }
 }

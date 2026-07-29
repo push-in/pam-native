@@ -118,17 +118,6 @@ internal fun safeAreaFlexViewportExtent(
         }
     }
 
-internal fun absoluteViewportAdjustment(
-    viewportReduction: Int,
-    leadingEdge: Boolean,
-    trailingEdge: Boolean,
-): Pair<Int, Int> = when {
-    viewportReduction <= 0 -> 0 to 0
-    leadingEdge && trailingEdge -> 0 to viewportReduction
-    !leadingEdge && trailingEdge -> viewportReduction to 0
-    else -> 0 to 0
-}
-
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -1100,31 +1089,7 @@ class PamRenderer(
             windowVisibleExtent = windowVisibleExtent,
         )
         if (renderedExtent <= 0) return
-        val viewportReduction = (engineExtent - renderedExtent).coerceAtLeast(0)
-
-        if (state.integer(PropKey.POSITION_TYPE, 1L).toInt() == 2) {
-            val absoluteReduction = max(
-                viewportReduction,
-                inheritedSafeAreaInset(parentState.id, axis),
-            )
-            val (offset, reduction) = when (axis) {
-                Axis.HORIZONTAL -> absoluteViewportAdjustment(
-                    viewportReduction = absoluteReduction,
-                    leadingEdge = state.properties.containsKey(PropKey.LEFT),
-                    trailingEdge = state.properties.containsKey(PropKey.RIGHT),
-                )
-                Axis.VERTICAL -> absoluteViewportAdjustment(
-                    viewportReduction = absoluteReduction,
-                    leadingEdge = state.properties.containsKey(PropKey.TOP),
-                    trailingEdge = state.properties.containsKey(PropKey.BOTTOM),
-                )
-            }
-            when (axis) {
-                Axis.HORIZONTAL -> applyHorizontal(offset, reduction)
-                Axis.VERTICAL -> applyVertical(offset, reduction)
-            }
-            return
-        }
+        val viewportReduction = engineExtent - renderedExtent
         if (viewportReduction <= 0) return
 
         val siblings = children[parentState.id]
@@ -1151,51 +1116,6 @@ class PamRenderer(
             Axis.HORIZONTAL -> applyHorizontal(reductionBefore, ownReduction)
             Axis.VERTICAL -> applyVertical(reductionBefore, ownReduction)
         }
-    }
-
-    private fun inheritedSafeAreaInset(parentId: Long, axis: Axis): Int {
-        var currentId = parentId
-        var depth = 0
-        while (currentId != 0L) {
-            val current = nodes[currentId] ?: return 0
-            if (
-                current.kind == NodeKind.SAFE_AREA_VIEW &&
-                current.integer(
-                    PropKey.SAFE_AREA_MODE,
-                    SAFE_AREA_PADDING.toLong(),
-                ).toInt() == SAFE_AREA_PADDING
-            ) {
-                return when (axis) {
-                    Axis.HORIZONTAL ->
-                        (if (current.flag(PropKey.SAFE_AREA_LEFT, true)) {
-                            current.safeAreaLeftInset
-                        } else {
-                            0
-                        }) + (if (current.flag(PropKey.SAFE_AREA_RIGHT, true)) {
-                            current.safeAreaRightInset
-                        } else {
-                            0
-                        })
-                    Axis.VERTICAL ->
-                        (if (current.flag(PropKey.SAFE_AREA_TOP, true)) {
-                            current.safeAreaTopInset
-                        } else {
-                            0
-                        }) + (if (
-                            current.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true)
-                        ) {
-                            current.safeAreaBottomInset
-                        } else {
-                            0
-                        })
-                }
-            }
-            currentId = current.parent
-            check(++depth <= MAX_VIRTUAL_DEPTH) {
-                "Safe-area ancestor hierarchy is too deep"
-            }
-        }
-        return 0
     }
 
     private fun virtualCellRoot(id: Long): Long? {
