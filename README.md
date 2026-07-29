@@ -40,6 +40,17 @@ platform they can be proud to put beside fully native stacks—then prove the
 claim with protocol tests, compiler checks, simulator builds, and instrumented
 Android contracts at both supported API boundaries.
 
+## PAM Native ecosystem
+
+- [PAM Native Nitro](https://github.com/push-in/pam-native-nitro) —
+  ultra-fast offline-first models, queries and native SQLite caching.
+- [PAM Mobile UI](https://push-in.github.io/pam-docs/mobile-ui/overview/) — optional retained
+  Material Design 3 components built on this core.
+- [Official documentation](https://push-in.github.io/pam-docs/native/overview/)
+  — guides and complete public contracts.
+- [PAM platform](https://github.com/push-in/pam) — persistent PHP server
+  runtime, async I/O and the wider ecosystem.
+
 ## Built with PAM Native
 
 These are screenshots from the same open-source showcase APK running on a
