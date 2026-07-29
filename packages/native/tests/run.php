@@ -108,6 +108,7 @@ use Pam\Native\System\Sensors;
 use Pam\Native\System\Location;
 use Pam\Native\LocationPosition;
 use Pam\Native\System\AudioRecorder;
+use Pam\Native\Storage\Storage;
 use Pam\Native\AudioRecording;
 use Pam\Native\SensorType;
 use Pam\Native\Style;
@@ -1754,6 +1755,23 @@ $assert(
         && $recording->size === 19_200
         && $recording->mimeType === 'audio/mp4',
     'Audio recorder facade did not decode the native recording.',
+);
+
+$missingStoredValue = 'not-dispatched';
+$storageRequest = Storage::get(
+    'chat.draft.missing',
+    static function (?string $value) use (&$missingStoredValue): void {
+        $missingStoredValue = $value;
+    },
+);
+Runtime::dispatchModuleResult(
+    $storageRequest,
+    ModuleResultStatus::Success->value,
+    '',
+);
+$assert(
+    $missingStoredValue === null,
+    'Storage get must treat an empty successful payload as a cache miss.',
 );
 
 $batchRequestId = SQLite::executeMany(

@@ -28,6 +28,11 @@ final class Storage
                     throw new RuntimeException($payload);
                 }
 
+                if ($payload === '') {
+                    $callback(null);
+
+                    return;
+                }
                 $values = Wire::decodeMap($payload);
                 $callback(isset($values['value']) ? (string) $values['value'] : null);
             },

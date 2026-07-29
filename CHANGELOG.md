@@ -7,6 +7,8 @@
 - Template `&&` and `||` expressions now always consume their right operand,
   preventing valid compound conditions from failing with an unexpected-token
   error when PHP short-circuits the evaluated boolean value.
+- Empty successful storage reads are treated as cache misses instead of invalid
+  wire maps, and iOS now returns the same encoded empty-map contract as Android.
 
 ## 0.5.11 - 2026-07-29
 
