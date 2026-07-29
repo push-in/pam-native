@@ -132,6 +132,7 @@ final class TemplateRenderer
         'numberOfLines' => PropKey::NumberOfLines,
         'multiline' => PropKey::Multiline,
         'secure' => PropKey::Secure,
+        'secureTextEntry' => PropKey::Secure,
         'keyboardType' => PropKey::KeyboardType,
         'autoComplete' => PropKey::AutoComplete,
         'editable' => PropKey::InputEditable,
@@ -2267,6 +2268,29 @@ final class TemplateRenderer
         ?object $scope,
         array $data,
     ): Closure {
+        if (
+            is_string($raw)
+            && preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*\(/D', $raw) === 1
+        ) {
+            if ($scope === null) {
+                throw new RuntimeException(
+                    'Template event expressions require a component scope.',
+                );
+            }
+
+            return static function (mixed $payload = '') use (
+                $raw,
+                $scope,
+                $data,
+            ): void {
+                TemplateExpression::evaluate(
+                    $raw,
+                    $scope,
+                    [...$data, 'event' => $payload],
+                );
+            };
+        }
+
         $resolved = self::value($raw, $scope, $data);
 
         if ($resolved instanceof Closure) {

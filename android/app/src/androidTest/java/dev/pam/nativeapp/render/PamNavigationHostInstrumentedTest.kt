@@ -133,6 +133,41 @@ class PamNavigationHostInstrumentedTest {
     }
 
     @Test
+    fun transitionsReuseHardwareAcceleratedDisplayListsWithoutBitmapLayers() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var first: View
+            lateinit var second: View
+            onMain(instrumentation) {
+                val navigation = PamNavigationHost(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    )
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_SLIDE_FROM_RIGHT
+                    durationMs = 120
+                }
+                activity.host.addView(navigation)
+                first = View(activity)
+                second = View(activity)
+                navigation.insert(first, 0)
+                navigation.insert(second, 1)
+                navigation.navigate(1)
+            }
+
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(View.LAYER_TYPE_NONE, first.layerType)
+                assertEquals(View.LAYER_TYPE_NONE, second.layerType)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun permanentDrawerStartsBelowTheStatusBar() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -187,6 +222,7 @@ class PamNavigationHostInstrumentedTest {
     private companion object {
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3
+        const val TRANSITION_SLIDE_FROM_RIGHT = 2
         const val TRANSITION_NONE = 8
         const val TYPE_PERMANENT = 4
     }

@@ -227,6 +227,14 @@ ancestor event context is composed into registered descendants before their
 native elements are built, so compound tags can wire triggers and items
 without a runtime tree lookup.
 
+Native handlers may be a public method name or a bounded component expression.
+Expressions capture their render scope and run only when dispatched, which
+makes per-item actions concise: `on:longPress="select($item['id'])"`.
+
+Android route transitions animate the platform display lists directly instead
+of allocating full-screen bitmap layers. This keeps media-heavy first
+navigation responsive and avoids a large one-frame texture upload.
+
 `FunctionalComponent::make()` supports standalone functions. A project can mix
 functional trees, class components, tags, custom template factories, and direct
 `Element` construction in the same screen.

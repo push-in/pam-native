@@ -51,6 +51,7 @@
                 { "name": "readOnly", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "multiline", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "secure", "values": [{ "name": "true" }, { "name": "false" }] },
+                { "name": "secureTextEntry", "description": "React Native-compatible alias for secure.", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "autoCorrect", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "autoCapitalize", "values": [{ "name": "none" }, { "name": "sentences" }, { "name": "words" }, { "name": "characters" }] },
                 { "name": "autoComplete" },

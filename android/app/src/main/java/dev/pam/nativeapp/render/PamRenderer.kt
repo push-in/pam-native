@@ -505,6 +505,11 @@ class PamRenderer(
             (host as? PamRootHost)?.removePointerObserver(observer)
         }
         if (state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW) {
+            if (state.keyboardAvoidingScrollId != 0L) {
+                views[state.keyboardAvoidingScrollId]
+                    ?.let { it as? PamScrollContainer }
+                    ?.setKeyboardAvoidanceInset(0)
+            }
             host.setOnApplyWindowInsetsListener(null)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 host.setWindowInsetsAnimationCallback(null)
@@ -4009,13 +4014,70 @@ class PamRenderer(
             }
             KEYBOARD_PADDING -> {
                 view.translationY = 0f
-                view.setPadding(0, 0, 0, keyboard)
+                view.setPadding(0, 0, 0, 0)
             }
             else -> {
                 view.translationY = 0f
                 view.setPadding(0, 0, 0, 0)
             }
         }
+        val scroll = when (state.keyboardBehavior) {
+            KEYBOARD_PAN -> precedingScrollContainer(state)
+            KEYBOARD_PADDING -> containedScrollContainer(state)
+            else -> null
+        }
+        val scrollId = scroll?.first ?: 0L
+        if (state.keyboardAvoidingScrollId != scrollId) {
+            if (state.keyboardAvoidingScrollId != 0L) {
+                views[state.keyboardAvoidingScrollId]
+                    ?.let { it as? PamScrollContainer }
+                    ?.setKeyboardAvoidanceInset(0)
+            }
+            state.keyboardAvoidingScrollId = scrollId
+        }
+        scroll?.second?.setKeyboardAvoidanceInset(
+            keyboard,
+        )
+    }
+
+    private fun containedScrollContainer(
+        state: NodeState,
+    ): Pair<Long, PamScrollContainer>? {
+        val descendants = children[state.id] ?: return null
+        for (id in descendants) {
+            firstScrollContainer(id)?.let { return it }
+        }
+        return null
+    }
+
+    private fun firstScrollContainer(id: Long): Pair<Long, PamScrollContainer>? {
+        (views[id] as? PamScrollContainer)?.let { return id to it }
+        val descendants = children[id] ?: return null
+        for (descendant in descendants) {
+            firstScrollContainer(descendant)?.let { return it }
+        }
+        return null
+    }
+
+    private fun precedingScrollContainer(
+        state: NodeState,
+    ): Pair<Long, PamScrollContainer>? {
+        val siblings = children[state.parent] ?: return null
+        val position = siblings.indexOf(state.id)
+        if (position <= 0) return null
+        for (index in position - 1 downTo 0) {
+            lastScrollContainer(siblings[index])?.let { return it }
+        }
+        return null
+    }
+
+    private fun lastScrollContainer(id: Long): Pair<Long, PamScrollContainer>? {
+        (views[id] as? PamScrollContainer)?.let { return id to it }
+        val descendants = children[id] ?: return null
+        for (index in descendants.lastIndex downTo 0) {
+            lastScrollContainer(descendants[index])?.let { return it }
+        }
+        return null
     }
 
     private fun applyMergedStatusBar() {
@@ -4840,6 +4902,7 @@ class PamRenderer(
         var keyboardInset: Int = 0,
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
+        var keyboardAvoidingScrollId: Long = 0L,
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var keyframeAnimator: ValueAnimator? = null,
