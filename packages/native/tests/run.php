@@ -931,6 +931,7 @@ $scrollElement = Scroll::make(Text::make('Scrollable'))
     ->snapToInterval(80.0)
     ->decelerationRate(0.9)
     ->keyboardDismissMode(ScrollKeyboardDismissMode::OnDrag)
+    ->scrollRequest(7, 'first-unread')
     ->scrollEnabled(false)
     ->showsIndicator()
     ->onScroll(static function (): void {
@@ -951,6 +952,9 @@ $assert(
         && $scrollElement->properties()[PropKey::ScrollDecelerationRate->value] === 0.9
         && $scrollElement->properties()[PropKey::ScrollKeyboardDismissMode->value]
             === ScrollKeyboardDismissMode::OnDrag->value
+        && $scrollElement->properties()[PropKey::ScrollTargetTestId->value]
+            === 'first-unread'
+        && $scrollElement->properties()[PropKey::ScrollRequest->value] === 7
         && isset($scrollElement->events()[EventKind::Scroll->value]),
     'Scroll helpers must preserve Android-owned orientation, momentum and viewport behavior.',
 );
@@ -1086,6 +1090,8 @@ $nativeControlTemplate = TemplateRenderer::render(
         anchorToEnd="true"
         maintainVisibleContentPosition="true"
         autoScrollToEndThreshold="32"
+        scrollTargetTestId="first-unread"
+        scrollRequest="9"
         pagingEnabled="true"
         snapToInterval="80"
         overScrollMode="never"
@@ -1122,6 +1128,9 @@ $assert(
             ->properties()[PropKey::ScrollMaintainVisibleContentPosition->value] === true
         && $templateScroll
             ->properties()[PropKey::ScrollAutoScrollToEndThreshold->value] === 32.0
+        && $templateScroll
+            ->properties()[PropKey::ScrollTargetTestId->value] === 'first-unread'
+        && $templateScroll->properties()[PropKey::ScrollRequest->value] === 9
         && $templateScroll->properties()[PropKey::ScrollPagingEnabled->value] === true
         && $templateScroll->properties()[PropKey::ScrollSnapInterval->value] === 80
         && $templateIndicator->properties()[PropKey::ActivityAnimating->value] === false
@@ -3044,8 +3053,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.28',
-    'The runtime SDK contract must match the 0.5.28 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.29',
+    'The runtime SDK contract must match the 0.5.29 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

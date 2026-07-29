@@ -63,6 +63,13 @@ final class Scroll extends Element
         );
     }
 
+    public function scrollRequest(int $request, string $targetTestId = ''): self
+    {
+        return $this
+            ->withProperty(PropKey::ScrollTargetTestId, $targetTestId)
+            ->withProperty(PropKey::ScrollRequest, max(0, $request));
+    }
+
     public function fillViewport(bool $fill = true): self
     {
         return $this->withProperty(PropKey::ScrollFillViewport, $fill);

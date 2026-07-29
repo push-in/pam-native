@@ -1415,6 +1415,11 @@ public final class PamRenderer {
         case PamConstants.scrollAutoScrollToEndThreshold:
             (view as? PamAnchoredScrollView)?.autoScrollToEndThreshold =
                 max(0, CGFloat(value.decimalOrZero()))
+        case PamConstants.scrollTargetTestId:
+            (view as? PamAnchoredScrollView)?.scrollTargetTestId =
+                value.textOrNil() ?? ""
+        case PamConstants.scrollRequest:
+            (view as? PamAnchoredScrollView)?.requestScroll()
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(value.boolOrNil() ?? false, animated: true)
         case PamConstants.drawerType:
@@ -1626,6 +1631,10 @@ public final class PamRenderer {
             (view as? PamAnchoredScrollView)?.maintainVisibleContentPosition = false
         case PamConstants.scrollAutoScrollToEndThreshold:
             (view as? PamAnchoredScrollView)?.autoScrollToEndThreshold = 24
+        case PamConstants.scrollTargetTestId:
+            (view as? PamAnchoredScrollView)?.scrollTargetTestId = ""
+        case PamConstants.scrollRequest:
+            break
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(false, animated: true)
         default:
