@@ -1759,6 +1759,7 @@ Runtime::dispatchModuleResult(
     ModuleResultStatus::Success->value,
     Wire::map([
         'uri' => 'file:///tmp/pam-voice-test.m4a',
+        'relativePath' => 'recordings/pam-voice-test.m4a',
         'fileName' => 'pam-voice-test.m4a',
         'mimeType' => 'audio/mp4',
         'durationMs' => 2_400,
@@ -1769,6 +1770,7 @@ $assert(
     $recording instanceof AudioRecording
         && $recording->durationMs === 2_400
         && $recording->size === 19_200
+        && $recording->relativePath === 'recordings/pam-voice-test.m4a'
         && $recording->mimeType === 'audio/mp4',
     'Audio recorder facade did not decode the native recording.',
 );
@@ -2961,8 +2963,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.18',
-    'The runtime SDK contract must match the 0.5.18 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.19',
+    'The runtime SDK contract must match the 0.5.19 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

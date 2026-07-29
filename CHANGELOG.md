@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.19 - 2026-07-29
+
+- Persist completed audio recordings inside `pam-files/recordings` on Android
+  and iOS so voice-message outboxes survive process death and device restarts.
+- Expose the upload-ready sandbox `relativePath` while preserving the recording
+  URI for playback and guarded deletion.
+
 ## 0.5.18 - 2026-07-29
 
 - Deliver HTTP transport failures as status-zero `HttpResponse` values with a

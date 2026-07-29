@@ -40,7 +40,8 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
                 PackageManager.PERMISSION_GRANTED,
         ) { "Microphone permission is required" }
 
-        val file = File.createTempFile("pam-voice-", ".m4a", context.cacheDir)
+        val recordings = File(context.filesDir, "pam-files/recordings").apply { mkdirs() }
+        val file = File.createTempFile("pam-voice-", ".m4a", recordings)
         val next = MediaRecorder().apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
@@ -77,6 +78,7 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
             WireMap.encode(
                 mapOf(
                     "uri" to WireValue.Text(file.toURI().toString()),
+                    "relativePath" to WireValue.Text("recordings/${file.name}"),
                     "fileName" to WireValue.Text(file.name),
                     "mimeType" to WireValue.Text("audio/mp4"),
                     "durationMs" to WireValue.Integer(durationMs),
@@ -95,8 +97,9 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
         val uri = (WireMap.decode(payload)["uri"] as? WireValue.Text)?.value
             ?: error("Audio recording URI is required")
         val file = File(URI(uri)).canonicalFile
-        require(file.parentFile == context.cacheDir.canonicalFile && file.name.startsWith("pam-voice-")) {
-            "Audio recording URI is outside the recorder cache"
+        val recordings = File(context.filesDir, "pam-files/recordings").canonicalFile
+        require(file.parentFile == recordings && file.name.startsWith("pam-voice-")) {
+            "Audio recording URI is outside the recorder sandbox"
         }
         if (file.exists()) require(file.delete()) { "Unable to delete audio recording" }
         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
