@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.14 - 2026-07-29
+
+- Accept React Native/CSS-compatible `flex-start` and `flex-end` aliases for
+  template `alignItems`, `alignSelf`, and `justifyContent` properties.
+
 ## 0.5.13 - 2026-07-29
 
 ### Added
