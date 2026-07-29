@@ -4,6 +4,8 @@ import Foundation
 final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, AVAudioRecorderDelegate {
     private var recorder: AVAudioRecorder?
     private var outputURL: URL?
+    private var nextWatchId = 1
+    private var watches: [Int: RecorderWatch] = [:]
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         DispatchQueue.main.async {
@@ -19,6 +21,13 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
                     completion(.success, Data())
                 case "discard":
                     completion(.success, try self.discard(payload))
+                case "watch":
+                    try self.watch(payload, completion)
+                case "next":
+                    try self.recorderWatch(payload).channel.next(completion)
+                case "unwatch":
+                    self.stopWatch(try self.subscription(payload))
+                    completion(.success, Data())
                 default:
                     throw AudioRecorderError.message("Unknown audio recorder method \(method)")
                 }
@@ -64,6 +73,7 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
             throw AudioRecorderError.message("No audio recording is active")
         }
         let durationMs = max(0, Int64(active.currentTime * 1_000))
+        stopWatches()
         active.stop()
         recorder = nil
         outputURL = nil
@@ -81,6 +91,7 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
     }
 
     private func release(deleteOutput: Bool) {
+        stopWatches()
         recorder?.stop()
         recorder = nil
         if deleteOutput, let outputURL {
@@ -88,6 +99,68 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
         }
         outputURL = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func watch(_ payload: Data, _ completion: @escaping ModuleCompletion) throws {
+        guard recorder != nil else {
+            throw AudioRecorderError.message("No audio recording is active")
+        }
+        let values = try WireMap.decode(payload)
+        let requested: Int64
+        if case let .integer(value)? = values["intervalMs"] {
+            requested = value
+        } else {
+            requested = 100
+        }
+        let interval = min(max(requested, 50), 1_000)
+        let id = nextWatchId
+        nextWatchId += 1
+        let channel = WatchChannel()
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        watches[id] = RecorderWatch(channel: channel, timer: timer)
+        timer.schedule(deadline: .now(), repeating: .milliseconds(Int(interval)))
+        timer.setEventHandler { [weak self, weak channel] in
+            guard let self, let active = self.recorder else {
+                self?.stopWatch(id)
+                return
+            }
+            active.updateMeters()
+            let power = active.averagePower(forChannel: 0)
+            let amplitude = min(max(pow(10.0, Double(power) / 20.0), 0), 1)
+            let data = try? WireMap.encode([
+                "durationMs": .integer(max(0, Int64(active.currentTime * 1_000))),
+                "amplitude": .decimal(amplitude),
+            ])
+            if let data { channel?.offer(data) }
+        }
+        timer.resume()
+        completion(.success, try WireMap.encode(["subscription": .integer(Int64(id))]))
+    }
+
+    private func subscription(_ payload: Data) throws -> Int {
+        let values = try WireMap.decode(payload)
+        guard case let .integer(value)? = values["subscription"] else {
+            throw AudioRecorderError.message("Audio recorder subscription is required")
+        }
+        return Int(value)
+    }
+
+    private func recorderWatch(_ payload: Data) throws -> RecorderWatch {
+        let id = try subscription(payload)
+        guard let watch = watches[id] else {
+            throw AudioRecorderError.message("Audio recorder observation not found")
+        }
+        return watch
+    }
+
+    private func stopWatch(_ id: Int) {
+        guard let watch = watches.removeValue(forKey: id) else { return }
+        watch.timer.cancel()
+        watch.channel.close()
+    }
+
+    private func stopWatches() {
+        Array(watches.keys).forEach(stopWatch)
     }
 
     private func discard(_ payload: Data) throws -> Data {
@@ -130,6 +203,11 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
             self.release(deleteOutput: true)
         }
     }
+}
+
+private struct RecorderWatch {
+    let channel: WatchChannel
+    let timer: DispatchSourceTimer
 }
 
 private enum AudioRecorderError: LocalizedError {
