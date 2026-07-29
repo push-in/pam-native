@@ -365,9 +365,10 @@ Permissions::requestKind(PermissionKind::LocationWhenInUse, function ($decision)
 Native work completes away from PHP rendering and returns typed coordinates,
 accuracy, altitude, speed, bearing and capture timestamp.
 
-Voice capture is also asynchronous and writes an AAC/M4A file in the
-application cache. Request microphone permission first, then stop returns a
-typed file reference with its real duration and byte size:
+Voice capture is also asynchronous and writes an AAC/M4A file in the durable
+`pam-files/recordings` sandbox. Request microphone permission first, then stop
+returns both a renderable URI and an upload-ready relative path with its real
+duration and byte size:
 
 ```php
 use Pam\Native\PermissionKind;
@@ -381,7 +382,7 @@ Permissions::requestKind(PermissionKind::Microphone, function ($decision): void 
 });
 
 AudioRecorder::stop(function ($recording): void {
-    upload($recording->uri, $recording->mimeType);
+    upload($recording->relativePath, $recording->mimeType);
     AudioRecorder::discard($recording->uri, static function (): void {});
 });
 ```

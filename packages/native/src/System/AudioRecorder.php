@@ -51,6 +51,7 @@ final class AudioRecorder
                     mimeType: (string) ($values['mimeType'] ?? 'audio/mp4'),
                     durationMs: max(0, (int) ($values['durationMs'] ?? 0)),
                     size: max(0, (int) ($values['size'] ?? 0)),
+                    relativePath: (string) ($values['relativePath'] ?? ''),
                 ));
             },
         );

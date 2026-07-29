@@ -38,8 +38,8 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
         }
         try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker])
         try session.setActive(true)
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("pam-voice-\(UUID().uuidString).m4a")
+        let recordings = try recordingsDirectory()
+        let url = recordings.appendingPathComponent("pam-voice-\(UUID().uuidString).m4a")
         let next = try AVAudioRecorder(
             url: url,
             settings: [
@@ -72,6 +72,7 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
         let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
         return try WireMap.encode([
             "uri": .text(url.absoluteString),
+            "relativePath": .text("recordings/\(url.lastPathComponent)"),
             "fileName": .text(url.lastPathComponent),
             "mimeType": .text("audio/mp4"),
             "durationMs": .integer(durationMs),
@@ -95,16 +96,33 @@ final class AudioRecorderModule: NSObject, NativeModule, ClosableNativeModule, A
               let url = URL(string: uri) else {
             throw AudioRecorderError.message("Audio recording URI is required")
         }
-        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL
+        let recordings = try recordingsDirectory().standardizedFileURL
         let file = url.standardizedFileURL
-        guard file.deletingLastPathComponent() == temporary,
+        guard file.deletingLastPathComponent() == recordings,
               file.lastPathComponent.hasPrefix("pam-voice-") else {
-            throw AudioRecorderError.message("Audio recording URI is outside the recorder cache")
+            throw AudioRecorderError.message("Audio recording URI is outside the recorder sandbox")
         }
         if FileManager.default.fileExists(atPath: file.path) {
             try FileManager.default.removeItem(at: file)
         }
         return Data()
+    }
+
+    private func recordingsDirectory() throws -> URL {
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )
+        let recordings = support
+            .appendingPathComponent("pam-files", isDirectory: true)
+            .appendingPathComponent("recordings", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: recordings,
+            withIntermediateDirectories: true
+        )
+        return recordings
     }
 
     func close() {

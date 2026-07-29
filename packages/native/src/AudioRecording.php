@@ -12,6 +12,7 @@ final readonly class AudioRecording
         public string $mimeType,
         public int $durationMs,
         public int $size,
+        public string $relativePath = '',
     ) {
     }
 }
