@@ -107,6 +107,8 @@ use Pam\Native\System\Contacts;
 use Pam\Native\System\Sensors;
 use Pam\Native\System\Location;
 use Pam\Native\LocationPosition;
+use Pam\Native\System\AudioRecorder;
+use Pam\Native\AudioRecording;
 use Pam\Native\SensorType;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
@@ -1722,6 +1724,38 @@ $assert(
     'Location facade did not decode the native position.',
 );
 
+$recording = null;
+$audioRequest = AudioRecorder::stop(
+    static function (AudioRecording $value) use (&$recording): void {
+        $recording = $value;
+    },
+);
+$assert(
+    TestDiagnostics::$moduleCall !== null
+        && TestDiagnostics::$moduleCall['requestId'] === $audioRequest
+        && TestDiagnostics::$moduleCall['module'] === 'audio-recorder'
+        && TestDiagnostics::$moduleCall['method'] === 'stop',
+    'Audio recorder facade did not emit its typed native module call.',
+);
+Runtime::dispatchModuleResult(
+    $audioRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'uri' => 'file:///tmp/pam-voice-test.m4a',
+        'fileName' => 'pam-voice-test.m4a',
+        'mimeType' => 'audio/mp4',
+        'durationMs' => 2_400,
+        'size' => 19_200,
+    ]),
+);
+$assert(
+    $recording instanceof AudioRecording
+        && $recording->durationMs === 2_400
+        && $recording->size === 19_200
+        && $recording->mimeType === 'audio/mp4',
+    'Audio recorder facade did not decode the native recording.',
+);
+
 $batchRequestId = SQLite::executeMany(
     'nitro.db',
     'INSERT INTO messages (id, body) VALUES (?, ?)',
@@ -2709,8 +2743,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.10',
-    'The runtime SDK contract must match the 0.5.10 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.11',
+    'The runtime SDK contract must match the 0.5.11 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

@@ -13,6 +13,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let sensors = SensorsModule()
     private let contacts = ContactsModule()
     private let location = LocationModule()
+    private let audioRecorder = AudioRecorderModule()
     private let modules: [String: NativeModule]
 
     public init() {
@@ -28,6 +29,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "sensors": sensors,
             "contacts": contacts,
             "location": location,
+            "audio-recorder": audioRecorder,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
         self.modules = values

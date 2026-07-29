@@ -365,6 +365,27 @@ Permissions::requestKind(PermissionKind::LocationWhenInUse, function ($decision)
 Native work completes away from PHP rendering and returns typed coordinates,
 accuracy, altitude, speed, bearing and capture timestamp.
 
+Voice capture is also asynchronous and writes an AAC/M4A file in the
+application cache. Request microphone permission first, then stop returns a
+typed file reference with its real duration and byte size:
+
+```php
+use Pam\Native\PermissionKind;
+use Pam\Native\System\AudioRecorder;
+use Pam\Native\System\Permissions;
+
+Permissions::requestKind(PermissionKind::Microphone, function ($decision): void {
+    if ($decision->granted()) {
+        AudioRecorder::start(static function (): void {});
+    }
+});
+
+AudioRecorder::stop(function ($recording): void {
+    upload($recording->uri, $recording->mimeType);
+    AudioRecorder::discard($recording->uri, static function (): void {});
+});
+```
+
 ## Thread ownership
 
 The UI thread is reserved for work that must manipulate Android host views.
