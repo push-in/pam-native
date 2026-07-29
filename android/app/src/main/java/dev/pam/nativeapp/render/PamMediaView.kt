@@ -10,6 +10,26 @@ import android.widget.FrameLayout
 import android.widget.MediaController
 import android.widget.VideoView
 import java.io.File
+import java.net.URI
+
+internal fun resolvePamMediaFile(root: File, source: String): File {
+    val uri = URI(source)
+    require(uri.scheme.equals("pam-file", ignoreCase = true)) {
+        "Invalid sandbox media URI."
+    }
+    require(uri.authority.isNullOrEmpty()) {
+        "Sandbox media URI cannot contain an authority."
+    }
+    val sandbox = root.canonicalFile
+    val relative = uri.path.orEmpty().removePrefix("/")
+    require(relative.isNotEmpty()) { "Sandbox media path is empty." }
+    val candidate = File(sandbox, relative).canonicalFile
+    require(candidate.path.startsWith(sandbox.path + File.separator)) {
+        "Sandbox media path escapes the application sandbox."
+    }
+    require(candidate.isFile) { "Sandbox media does not exist." }
+    return candidate
+}
 
 @SuppressLint("ViewConstructor") // Programmatic renderer injects its shared cache coordinator.
 internal class PamMediaView(
@@ -79,16 +99,24 @@ internal class PamMediaView(
             video.stopPlayback()
         } else {
             val uri = Uri.parse(value)
-            val resolved = if (uri.scheme == null) {
-                val root = File(context.filesDir, "pam-files").canonicalFile
-                val file = File(root, value).canonicalFile
-                if (!file.path.startsWith(root.path + File.separator)) {
-                    onError?.invoke("Media path escapes the application sandbox")
-                    return
+            val resolved = runCatching {
+                when {
+                    uri.scheme == null -> {
+                        val root = File(context.filesDir, "pam-files").canonicalFile
+                        val file = File(root, value).canonicalFile
+                        require(file.path.startsWith(root.path + File.separator)) {
+                            "Media path escapes the application sandbox"
+                        }
+                        require(file.isFile) { "Media does not exist." }
+                        Uri.fromFile(file)
+                    }
+                    uri.scheme.equals("pam-file", ignoreCase = true) ->
+                        Uri.fromFile(resolvePamMediaFile(File(context.filesDir, "pam-files"), value))
+                    else -> uri
                 }
-                Uri.fromFile(file)
-            } else {
-                uri
+            }.getOrElse {
+                onError?.invoke(it.message ?: "Media source is invalid.")
+                return
             }
             val generation = sourceGeneration
             mediaCache.resolve(
