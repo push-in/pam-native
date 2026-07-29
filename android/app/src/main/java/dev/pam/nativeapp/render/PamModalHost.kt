@@ -17,6 +17,7 @@ import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.VelocityTracker
 import android.view.Window
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.window.OnBackInvokedCallback
@@ -378,8 +379,24 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun requestCloseFromBack() {
+        if (hideVisibleKeyboard()) return
         (context as? PamActivity)?.suppressNextPamBack()
         requestClose()
+    }
+
+    private fun hideVisibleKeyboard(): Boolean {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.R) {
+            return false
+        }
+        val focused = dialog?.currentFocus ?: return false
+        val decor = dialog?.window?.decorView ?: return false
+        if (decor.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) != true) {
+            return false
+        }
+        val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
+            as? InputMethodManager
+        keyboard?.hideSoftInputFromWindow(focused.windowToken, 0)
+        return true
     }
 
     @Suppress("DEPRECATION")
