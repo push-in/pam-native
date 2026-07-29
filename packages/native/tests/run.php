@@ -292,6 +292,45 @@ $assert(
         && $gestureEvent->pointerCount === 2,
     'GestureEvent must decode the bounded cross-platform semantic payload.',
 );
+$templateGestureScope = new class {
+    public ?GestureEvent $event = null;
+
+    public function changed(GestureEvent $event): void
+    {
+        $this->event = $event;
+    }
+};
+$templateGesture = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<GestureDetector gestureType="pan" on:gestureUpdate="changed">'
+        .'<Text>Drag</Text></GestureDetector>',
+    ),
+    $templateGestureScope,
+    [],
+);
+$templatePinch = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<GestureDetector gestureType="pinch"><Text>Zoom</Text></GestureDetector>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $templatePinch->properties()[PropKey::GestureMinPointers->value] === 2
+        && $templatePinch->properties()[PropKey::GestureMaxPointers->value] === 2,
+    'Template pinch gestures must retain the native two-pointer defaults.',
+);
+$templateGesture->events()[EventKind::GestureUpdate->value](Wire::map([
+    'type' => GestureType::Pan->value,
+    'state' => GestureState::Changed->value,
+    'translationX' => -96.0,
+    'pointerCount' => 1,
+]));
+$assert(
+    $templateGestureScope->event instanceof GestureEvent
+        && $templateGestureScope->event->translationX === -96.0,
+    'Template gesture handlers must hydrate their binary payload as GestureEvent.',
+);
 
 $repositoryRoot = dirname(__DIR__, 3);
 $kotlinProtocol = file_get_contents(
@@ -2963,8 +3002,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.19',
-    'The runtime SDK contract must match the 0.5.19 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.20',
+    'The runtime SDK contract must match the 0.5.20 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

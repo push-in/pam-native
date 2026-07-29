@@ -23,6 +23,7 @@ use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\GestureComposition;
 use Pam\Native\GestureDirection;
+use Pam\Native\GestureEvent;
 use Pam\Native\GestureType;
 use Pam\Native\ImageFit;
 use Pam\Native\ImageCachePolicy;
@@ -62,6 +63,7 @@ use Pam\Native\UI\CustomView;
 use Pam\Native\UI\DrawerLayoutAndroid;
 use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Grid;
+use Pam\Native\UI\GestureDetector;
 use Pam\Native\UI\Image;
 use Pam\Native\UI\ImageBackground;
 use Pam\Native\UI\Input;
@@ -946,7 +948,11 @@ final class TemplateRenderer
             ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
-            'Pressable', 'GestureDetector', 'TouchableOpacity', 'TouchableHighlight',
+            'GestureDetector' => GestureDetector::make(
+                self::gestureType($values['gestureType'] ?? 'tap'),
+                self::singleChild($children, $tag),
+            ),
+            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
             'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
             'ActivityIndicator' => ActivityIndicator::make(self::boolValue(
                 $values['animating'] ?? $values['visible'] ?? true,
@@ -1987,6 +1993,18 @@ final class TemplateRenderer
         return $values[$name];
     }
 
+    private static function gestureType(mixed $value): GestureType
+    {
+        return GestureType::from(self::named($value, [
+            'tap' => GestureType::Tap->value,
+            'pan' => GestureType::Pan->value,
+            'pinch' => GestureType::Pinch->value,
+            'rotation' => GestureType::Rotation->value,
+            'swipe' => GestureType::Swipe->value,
+            'longPress' => GestureType::LongPress->value,
+        ]));
+    }
+
     private static function classes(Element $element, string $classes): Element
     {
         foreach (preg_split('/\\s+/', trim($classes)) ?: [] as $class) {
@@ -2354,7 +2372,17 @@ final class TemplateRenderer
                 return;
             }
 
-            if ($kind === EventKind::Toggle) {
+            if (
+                is_string($payload)
+                && in_array($kind, [
+                    EventKind::GestureBegin,
+                    EventKind::GestureUpdate,
+                    EventKind::GestureEnd,
+                    EventKind::GestureCancel,
+                ], true)
+            ) {
+                $value = GestureEvent::fromPayload($payload);
+            } elseif ($kind === EventKind::Toggle) {
                 $value = $payload === true || $payload === '1';
             } elseif (is_array($payload)) {
                 $value = $payload;
