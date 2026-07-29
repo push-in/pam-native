@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.9 - 2026-07-28
+
+- Give Android dialogs an overlay-priority predictive-back callback so one
+  hardware Back gesture closes only the top modal instead of also popping the
+  underlying PAM Native route.
+- Decode cached GIF and animated WebP sources as native animated drawables on
+  Android 9+, without re-downloading or flashing the image between renders.
+
 ## 0.5.8 - 2026-07-28
 
 - Add typed, asynchronous current-location access on Android and iOS with

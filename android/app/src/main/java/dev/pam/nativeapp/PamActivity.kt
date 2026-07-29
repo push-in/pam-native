@@ -11,6 +11,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -28,6 +29,7 @@ class PamActivity : Activity() {
     private lateinit var runtime: PamRuntime
     private var hotReload: HotReloadClient? = null
     private var backCallback: OnBackInvokedCallback? = null
+    private var suppressBackUntil = 0L
     private lateinit var errors: ErrorOverlay
     private val permissionCallbacks = HashMap<Int, (Boolean) -> Unit>()
     private val activityResultCallbacks = HashMap<Int, (Int, Intent?) -> Unit>()
@@ -202,6 +204,7 @@ class PamActivity : Activity() {
             Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
             keyCode == KeyEvent.KEYCODE_BACK
         ) {
+            if (consumeSuppressedBack()) return true
             runtime.dispatchBack()
             return true
         }
@@ -320,6 +323,7 @@ class PamActivity : Activity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
 
         backCallback = OnBackInvokedCallback {
+            if (consumeSuppressedBack()) return@OnBackInvokedCallback
             runtime.dispatchBack()
         }.also { callback ->
             onBackInvokedDispatcher.registerOnBackInvokedCallback(
@@ -327,6 +331,16 @@ class PamActivity : Activity() {
                 callback,
             )
         }
+    }
+
+    internal fun suppressNextPamBack() {
+        suppressBackUntil = SystemClock.uptimeMillis() + BACK_SUPPRESSION_WINDOW_MS
+    }
+
+    private fun consumeSuppressedBack(): Boolean {
+        if (SystemClock.uptimeMillis() > suppressBackUntil) return false
+        suppressBackUntil = 0L
+        return true
     }
 
     private fun reportNotificationOpen(intent: Intent?) {
@@ -386,5 +400,6 @@ class PamActivity : Activity() {
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
+        const val BACK_SUPPRESSION_WINDOW_MS = 250L
     }
 }
