@@ -79,6 +79,7 @@ use Pam\Native\ModalOrientation;
 use Pam\Native\ModalPresentation;
 use Pam\Native\Modules\NativeModuleResult;
 use Pam\Native\Modules\NativeModules;
+use Pam\Native\ModuleResultStatus;
 use Pam\Native\NodeKind;
 use Pam\Native\PointerEvents;
 use Pam\Native\PressEvent;
@@ -104,6 +105,8 @@ use Pam\Native\System\Haptics;
 use Pam\Native\System\Clipboard;
 use Pam\Native\System\Contacts;
 use Pam\Native\System\Sensors;
+use Pam\Native\System\Location;
+use Pam\Native\LocationPosition;
 use Pam\Native\SensorType;
 use Pam\Native\Style;
 use Pam\Native\TemplateRegistry;
@@ -1672,6 +1675,53 @@ $assert(
     'Public native module facade did not decode its result.',
 );
 
+$location = null;
+$locationRequest = Location::current(
+    static function (LocationPosition $position) use (&$location): void {
+        $location = $position;
+    },
+    highAccuracy: false,
+    timeoutMs: 4_000,
+    maximumAgeMs: 12_000,
+);
+$locationCall = TestDiagnostics::$moduleCall;
+$locationPayload = $locationCall === null
+    ? []
+    : Wire::decodeMap($locationCall['payload']);
+$assert(
+    $locationCall !== null
+        && $locationCall['requestId'] === $locationRequest
+        && $locationCall['module'] === 'location'
+        && $locationCall['method'] === 'current'
+        && $locationPayload === [
+            'highAccuracy' => false,
+            'maximumAgeMs' => 12_000,
+            'timeoutMs' => 4_000,
+        ],
+    'Location facade did not emit its typed native module call.',
+);
+Runtime::dispatchModuleResult(
+    $locationRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'latitude' => -23.55052,
+        'longitude' => -46.633308,
+        'accuracy' => 3.5,
+        'altitude' => 760.0,
+        'speed' => 0.4,
+        'bearing' => 90.0,
+        'timestamp' => 1_785_000_000_000,
+    ]),
+);
+$assert(
+    $location instanceof LocationPosition
+        && $location->latitude === -23.55052
+        && $location->longitude === -46.633308
+        && $location->accuracy === 3.5
+        && $location->timestamp === 1_785_000_000_000,
+    'Location facade did not decode the native position.',
+);
+
 $batchRequestId = SQLite::executeMany(
     'nitro.db',
     'INSERT INTO messages (id, body) VALUES (?, ?)',
@@ -2634,8 +2684,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.7',
-    'The runtime SDK contract must match the 0.5.7 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.8',
+    'The runtime SDK contract must match the 0.5.8 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

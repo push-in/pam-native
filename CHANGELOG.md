@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.8 - 2026-07-28
+
+- Add typed, asynchronous current-location access on Android and iOS with
+  configurable accuracy, timeout and cached-position age.
+- Return coordinates, accuracy, altitude, speed, bearing and capture timestamp
+  through the public PHP SDK without blocking rendering.
+
 ## 0.5.7 - 2026-07-28
 
 - Coerce dynamically bound hexadecimal colors to native integer values across
