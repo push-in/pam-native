@@ -1995,6 +1995,28 @@ $assert(
     'Generic HTTP request did not decode its response.',
 );
 
+$transportFailure = null;
+$transportFailureId = Http::get(
+    'https://offline.example.test',
+    static function (HttpResponse $response) use (&$transportFailure): void {
+        $transportFailure = $response;
+    },
+);
+Runtime::dispatchModuleResult(
+    $transportFailureId,
+    \Pam\Native\ModuleResultStatus::Failure->value,
+    'Unable to resolve host.',
+);
+$assert(
+    $transportFailure instanceof HttpResponse
+        && $transportFailure->statusCode === 0
+        && $transportFailure->body === ''
+        && $transportFailure->error === 'Unable to resolve host.'
+        && $transportFailure->transportFailed()
+        && !$transportFailure->successful(),
+    'HTTP transport failures must reach the callback without crashing the runtime.',
+);
+
 foreach (['post' => 'POST', 'put' => 'PUT', 'patch' => 'PATCH', 'delete' => 'DELETE'] as $helper => $method) {
     Http::{$helper}(
         'https://api.example.test/resource',
