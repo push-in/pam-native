@@ -215,7 +215,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     private fun importUri(uri: Uri, completion: ModuleCompletion) {
         runCatching {
             val imported = importUri(uri)
-            completion.success(imported.file, imported.mime)
+            completion.success(imported.file, imported.mime, imported.name)
         }.onFailure { completion.failure(it) }
     }
 
@@ -234,7 +234,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             imported.forEach { item ->
                 items.put(JSONObject().apply {
                     put("path", item.file.relativeTo(root).path)
-                    put("name", item.file.name)
+                    put("name", item.name)
                     put("mimeType", item.mime)
                     put("size", item.file.length())
                 })
@@ -280,7 +280,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                     }
                 }
             }
-            ImportedFile(file, mime)
+            ImportedFile(file, mime, name)
         } catch (error: Throwable) {
             file.delete()
             throw error
@@ -301,13 +301,13 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }
     }
 
-    private fun ModuleCompletion.success(file: File, mime: String) {
+    private fun ModuleCompletion.success(file: File, mime: String, displayName: String = file.name) {
         complete(
             ModuleResultStatus.SUCCESS,
             WireMap.encode(
                 mapOf(
                     "path" to WireValue.Text(file.relativeTo(root).path),
-                    "name" to WireValue.Text(file.name),
+                    "name" to WireValue.Text(displayName),
                     "mimeType" to WireValue.Text(mime),
                     "size" to WireValue.Integer(file.length()),
                 ),
@@ -340,5 +340,5 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         const val MAX_MULTI_IMPORT_BYTES = 256L * 1024L * 1024L
     }
 
-    private data class ImportedFile(val file: File, val mime: String)
+    private data class ImportedFile(val file: File, val mime: String, val name: String)
 }

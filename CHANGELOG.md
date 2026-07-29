@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.23 - 2026-07-29
+
+- Preserve the provider's original display name when Android and iOS import a
+  picked file, while keeping the collision-resistant UUID exclusively in its
+  opaque sandbox path.
+
 ## 0.5.22 - 2026-07-29
 
 - Resolve `pam-file:///` video and audio sources into the application sandbox

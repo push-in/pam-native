@@ -320,7 +320,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             destination,
             [
                 "path": relative,
-                "name": destination.lastPathComponent,
+                "name": source.lastPathComponent,
                 "mimeType": mime,
                 "size": importedSize,
             ],
@@ -353,7 +353,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             try data.write(to: destination, options: .atomic)
             completion(.success, try WireMap.encode([
                 "path": .text(relative),
-                "name": .text(destination.lastPathComponent),
+                "name": .text(name),
                 "mimeType": .text(mime),
                 "size": .integer(Int64(data.count)),
             ]))
