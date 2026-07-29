@@ -3065,8 +3065,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.30',
-    'The runtime SDK contract must match the 0.5.30 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.31',
+    'The runtime SDK contract must match the 0.5.31 package release.',
 );
 
 $bottomSheet = BottomSheet::make(
