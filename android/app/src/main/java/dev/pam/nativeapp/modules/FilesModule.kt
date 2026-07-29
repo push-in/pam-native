@@ -116,6 +116,9 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             this.type = mime
+            if (type == 5L) {
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            }
         }
         activity.launchForResult(intent) { result, data ->
             if (result != Activity.RESULT_OK || data?.data == null) {
@@ -141,6 +144,9 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             this.type = mime
+            if (type == 5L) {
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+            }
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
         }
         activity.launchForResult(intent) { result, data ->

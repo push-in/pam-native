@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.30 - 2026-07-29
+
+- Added cross-platform `MediaPickerType::Media` filtering for image-or-video
+  social galleries without exposing unrelated documents.
+- Sync the current development bundle when Android reconnects after process
+  restart, eliminating stale embedded screens on the first render.
+
 ## 0.5.29 - 2026-07-29
 
 - Added tokenized native `ScrollView` requests for instant jumps to the end or

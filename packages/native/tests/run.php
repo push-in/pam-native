@@ -1848,7 +1848,7 @@ $assert(
 
 $pickedFiles = [];
 $pickManyRequest = Files::pickMany(
-    MediaPickerType::Image,
+    MediaPickerType::Media,
     static function (array $files) use (&$pickedFiles): void {
         $pickedFiles = $files;
     },
@@ -1863,7 +1863,7 @@ $assert(
         && $pickManyCall['requestId'] === $pickManyRequest
         && $pickManyCall['module'] === 'files'
         && $pickManyCall['method'] === 'pickMany'
-        && $pickManyPayload === ['limit' => 6, 'type' => MediaPickerType::Image->value],
+        && $pickManyPayload === ['limit' => 6, 'type' => MediaPickerType::Media->value],
     'Files pickMany must emit a bounded typed native module call.',
 );
 Runtime::dispatchModuleResult(
@@ -3053,8 +3053,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.29',
-    'The runtime SDK contract must match the 0.5.29 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.30',
+    'The runtime SDK contract must match the 0.5.30 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

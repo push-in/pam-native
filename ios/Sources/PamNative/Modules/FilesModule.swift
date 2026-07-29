@@ -148,6 +148,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             case 1: [.image]
             case 2: [.movie]
             case 3: [.audio]
+            case 5: [.image, .movie]
             default: [.item]
             }
             self.pending = completion

@@ -10,4 +10,5 @@ enum MediaPickerType: int
     case Video = 2;
     case Audio = 3;
     case Any = 4;
+    case Media = 5;
 }
