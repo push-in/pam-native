@@ -2271,6 +2271,7 @@ class PamRenderer(
             view.setOnLongClickListener(null)
             view.setCallbacks(
                 onPress = state.callback(PropKey.ON_PRESS) {
+                    flushFocusedNativeInputs()
                     dispatch(state.id, EVENT_PRESS)
                 },
                 onLongPress = state.callback(PropKey.ON_LONG_PRESS) {
@@ -2289,7 +2290,10 @@ class PamRenderer(
             configurePressable(view, state)
         } else if (state.kind != NodeKind.CUSTOM_VIEW) {
             if (state.properties[PropKey.ON_PRESS] != null) {
-                view.setOnClickListener { dispatch(state.id, EVENT_PRESS) }
+                view.setOnClickListener {
+                    flushFocusedNativeInputs()
+                    dispatch(state.id, EVENT_PRESS)
+                }
             } else {
                 view.setOnClickListener(null)
             }
@@ -3330,6 +3334,29 @@ class PamRenderer(
         state.pendingChange = null
         if (state.properties[PropKey.ON_CHANGE] != null) {
             dispatch(state.id, EVENT_CHANGE, state.nativeValue)
+        }
+    }
+
+    /**
+     * Native-synced inputs intentionally avoid a PHP round trip per keystroke.
+     * Drain their current value before another control fires so the following
+     * action observes exactly what is visible in the focused editor.
+     */
+    private fun flushFocusedNativeInputs() {
+        val pending = buildList {
+            for (index in 0 until nodes.size()) {
+                val state = nodes.valueAt(index)
+                if (
+                state.inputSyncMode() == INPUT_SYNC_NATIVE &&
+                    state.properties[PropKey.ON_CHANGE] != null &&
+                    (views[state.id] as? EditText)?.hasFocus() == true
+                ) {
+                    add(state)
+                }
+            }
+        }
+        pending.forEach { state ->
+            if (nodes[state.id] === state) dispatchInput(state)
         }
     }
 

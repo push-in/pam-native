@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.28 - 2026-07-29
+
+- Flush focused `sync="native"` input values before press actions so handlers
+  always receive the exact text visible on screen without per-keystroke bridge
+  traffic.
+- Let Android's IME consume Back inside PAM modals before dispatching the
+  modal's route-close callback.
+
 ## 0.5.27 - 2026-07-29
 
 - Let media capture callers handle camera unavailability and user cancellation
