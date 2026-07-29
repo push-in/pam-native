@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.modules
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.Location
@@ -15,6 +16,7 @@ import dev.pam.nativeapp.protocol.WireValue
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicBoolean
 
+@SuppressLint("MissingPermission")
 internal class LocationModule(private val context: Context) : NativeModule, AutoCloseable {
     private val manager = context.getSystemService(LocationManager::class.java)
     private val main = Handler(Looper.getMainLooper())
