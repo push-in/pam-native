@@ -9,6 +9,7 @@ use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Navigation\TabNavigator;
+use Throwable;
 
 final class App
 {
@@ -18,11 +19,17 @@ final class App
 
     public static function run(Renderable|Closure $root): void
     {
-        PluginManager::boot();
-        if ($root instanceof TabNavigator) {
-            Runtime::onDimensions($root->dimensions(...));
+        try {
+            PluginManager::boot();
+            if ($root instanceof TabNavigator) {
+                Runtime::onDimensions($root->dimensions(...));
+            }
+            Runtime::boot($root);
+        } catch (Throwable $error) {
+            Runtime::reportError($error);
+
+            throw $error;
         }
-        Runtime::boot($root);
     }
 
     public static function views(string $path, ?string $cachePath = null): void
@@ -34,10 +41,16 @@ final class App
         string $path,
         ?string $cachePath = null,
     ): void {
-        PamPhpRegistry::discover(
-            $path,
-            $cachePath ?? getcwd().'/.pam/components',
-        );
+        try {
+            PamPhpRegistry::discover(
+                $path,
+                $cachePath ?? getcwd().'/.pam/components',
+            );
+        } catch (Throwable $error) {
+            Runtime::reportError($error);
+
+            throw $error;
+        }
     }
 
     /** @param array<string, mixed> $props */
