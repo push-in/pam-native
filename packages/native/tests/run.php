@@ -2412,6 +2412,23 @@ final class Dashboard extends Component
 PAM,
 );
 
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$left && $right',
+        null,
+        ['left' => false, 'right' => true],
+    ) === false,
+    'Template logical AND must consume its right operand when the left operand is false.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$left || $right',
+        null,
+        ['left' => true, 'right' => false],
+    ) === true,
+    'Template logical OR must consume its right operand when the left operand is true.',
+);
+
 TemplateRegistry::reset();
 App::components($pamPhpDirectory, $pamPhpCache);
 $dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
@@ -2743,8 +2760,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.11',
-    'The runtime SDK contract must match the 0.5.11 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.12',
+    'The runtime SDK contract must match the 0.5.12 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

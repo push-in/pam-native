@@ -96,7 +96,8 @@ final class TemplateExpression
         $value = $this->logicalAnd();
 
         while ($this->take(T_BOOLEAN_OR) || $this->take('||')) {
-            $value = (bool) $value || (bool) $this->logicalAnd();
+            $right = $this->logicalAnd();
+            $value = (bool) $value || (bool) $right;
         }
 
         return $value;
@@ -107,7 +108,8 @@ final class TemplateExpression
         $value = $this->equality();
 
         while ($this->take(T_BOOLEAN_AND) || $this->take('&&')) {
-            $value = (bool) $value && (bool) $this->equality();
+            $right = $this->equality();
+            $value = (bool) $value && (bool) $right;
         }
 
         return $value;

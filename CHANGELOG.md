@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.12 - 2026-07-29
+
+### Fixed
+
+- Template `&&` and `||` expressions now always consume their right operand,
+  preventing valid compound conditions from failing with an unexpected-token
+  error when PHP short-circuits the evaluated boolean value.
+
 ## 0.5.11 - 2026-07-29
 
 - Add a typed, asynchronous audio recorder for Android and iOS with AAC/M4A
