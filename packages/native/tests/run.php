@@ -17,6 +17,7 @@ use Pam\Native\AsyncValue;
 use Pam\Native\Component;
 use Pam\Native\Contact;
 use Pam\Native\EventKind;
+use Pam\Native\FileReference;
 use Pam\Native\FontStyle;
 use Pam\Native\GestureComposition;
 use Pam\Native\GestureDirection;
@@ -24,6 +25,7 @@ use Pam\Native\GestureEvent;
 use Pam\Native\GestureState;
 use Pam\Native\GestureType;
 use Pam\Native\MediaType;
+use Pam\Native\MediaPickerType;
 use Pam\Native\MediaCachePolicy;
 use Pam\Native\MediaPriority;
 use Pam\Native\NativeMenuItem;
@@ -106,6 +108,7 @@ use Pam\Native\System\Clipboard;
 use Pam\Native\System\Contacts;
 use Pam\Native\System\Sensors;
 use Pam\Native\System\Location;
+use Pam\Native\System\Files;
 use Pam\Native\LocationPosition;
 use Pam\Native\System\AudioRecorder;
 use Pam\Native\Storage\Storage;
@@ -1770,6 +1773,55 @@ $assert(
     'Audio recorder facade did not decode the native recording.',
 );
 
+$pickedFiles = [];
+$pickManyRequest = Files::pickMany(
+    MediaPickerType::Image,
+    static function (array $files) use (&$pickedFiles): void {
+        $pickedFiles = $files;
+    },
+    6,
+);
+$pickManyCall = TestDiagnostics::$moduleCall;
+$pickManyPayload = $pickManyCall === null
+    ? []
+    : Wire::decodeMap($pickManyCall['payload']);
+$assert(
+    $pickManyCall !== null
+        && $pickManyCall['requestId'] === $pickManyRequest
+        && $pickManyCall['module'] === 'files'
+        && $pickManyCall['method'] === 'pickMany'
+        && $pickManyPayload === ['limit' => 6, 'type' => MediaPickerType::Image->value],
+    'Files pickMany must emit a bounded typed native module call.',
+);
+Runtime::dispatchModuleResult(
+    $pickManyRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'items' => json_encode([
+            [
+                'path' => 'imports/photo-one.jpg',
+                'name' => 'photo-one.jpg',
+                'mimeType' => 'image/jpeg',
+                'size' => 1_024,
+            ],
+            [
+                'path' => 'imports/photo-two.webp',
+                'name' => 'photo-two.webp',
+                'mimeType' => 'image/webp',
+                'size' => 2_048,
+            ],
+        ], JSON_THROW_ON_ERROR),
+    ]),
+);
+$assert(
+    count($pickedFiles) === 2
+        && $pickedFiles[0] instanceof FileReference
+        && $pickedFiles[0]->path === 'imports/photo-one.jpg'
+        && $pickedFiles[1]->mimeType === 'image/webp'
+        && $pickedFiles[1]->size === 2_048,
+    'Files pickMany must decode every native file reference in selection order.',
+);
+
 $missingStoredValue = 'not-dispatched';
 $storageRequest = Storage::get(
     'chat.draft.missing',
@@ -2838,8 +2890,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.14',
-    'The runtime SDK contract must match the 0.5.14 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.15',
+    'The runtime SDK contract must match the 0.5.15 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

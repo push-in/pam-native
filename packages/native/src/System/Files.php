@@ -10,6 +10,7 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\MediaPickerType;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
+use JsonException;
 use RuntimeException;
 
 final class Files
@@ -82,6 +83,49 @@ final class Files
             'pick',
             ['type' => $type->value],
             static fn (array $values): mixed => $callback(self::reference($values)),
+        );
+    }
+
+    /**
+     * @param Closure(list<FileReference>): void $callback
+     */
+    public static function pickMany(
+        MediaPickerType $type,
+        Closure $callback,
+        int $limit = 10,
+    ): int {
+        return self::invoke(
+            'pickMany',
+            [
+                'limit' => max(1, min(50, $limit)),
+                'type' => $type->value,
+            ],
+            static function (array $values) use ($callback): mixed {
+                try {
+                    $items = json_decode(
+                        (string) ($values['items'] ?? '[]'),
+                        true,
+                        flags: JSON_THROW_ON_ERROR,
+                    );
+                } catch (JsonException $error) {
+                    throw new RuntimeException(
+                        'Native multi-file payload is invalid.',
+                        previous: $error,
+                    );
+                }
+                if (!is_array($items)) {
+                    throw new RuntimeException('Native multi-file payload is invalid.');
+                }
+                $references = [];
+                foreach ($items as $item) {
+                    if (is_array($item)) {
+                        $references[] = self::reference($item);
+                    }
+                }
+                $callback($references);
+
+                return null;
+            },
         );
     }
 

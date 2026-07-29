@@ -13,6 +13,7 @@ import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.Executors
 import org.json.JSONArray
 import org.json.JSONObject
@@ -30,6 +31,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "list" -> executor.execute { list(payload, completion) }
                 "delete" -> executor.execute { delete(payload, completion) }
                 "pick" -> pick(payload, completion)
+                "pickMany" -> pickMany(payload, completion)
                 "capture" -> capture(payload, completion)
                 else -> error("Unknown files method $method")
             }
@@ -124,6 +126,52 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }
     }
 
+    private fun pickMany(payload: ByteArray, completion: ModuleCompletion) {
+        val values = WireMap.decode(payload)
+        val type = values.integer("type", 4)
+        val limit = values.integer("limit", DEFAULT_PICK_LIMIT.toLong())
+            .coerceIn(1, MAX_PICK_LIMIT.toLong())
+            .toInt()
+        val mime = when (type) {
+            1L -> "image/*"
+            2L -> "video/*"
+            3L -> "audio/*"
+            else -> "*/*"
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            this.type = mime
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+        }
+        activity.launchForResult(intent) { result, data ->
+            if (result != Activity.RESULT_OK || data == null) {
+                completion.complete(
+                    ModuleResultStatus.FAILURE,
+                    "File selection was cancelled".toByteArray(),
+                )
+                return@launchForResult
+            }
+            val uris = buildList {
+                data.clipData?.let { clips ->
+                    repeat(minOf(clips.itemCount, limit)) { index ->
+                        add(clips.getItemAt(index).uri)
+                    }
+                }
+                if (isEmpty()) {
+                    data.data?.let(::add)
+                }
+            }.distinct().take(limit)
+            if (uris.isEmpty()) {
+                completion.complete(
+                    ModuleResultStatus.FAILURE,
+                    "No file was selected".toByteArray(),
+                )
+                return@launchForResult
+            }
+            executor.execute { importUris(uris, completion) }
+        }
+    }
+
     private fun capture(payload: ByteArray, completion: ModuleCompletion) {
         val type = WireMap.decode(payload).integer("type", 1)
         val isVideo = type == 2L
@@ -166,15 +214,52 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
 
     private fun importUri(uri: Uri, completion: ModuleCompletion) {
         runCatching {
-            var name = "document"
-            var mime = activity.contentResolver.getType(uri) ?: "application/octet-stream"
-            activity.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (index >= 0) name = cursor.getString(index)
-                }
+            val imported = importUri(uri)
+            completion.success(imported.file, imported.mime)
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun importUris(uris: List<Uri>, completion: ModuleCompletion) {
+        val imported = mutableListOf<ImportedFile>()
+        runCatching {
+            var total = 0L
+            uris.forEach { uri ->
+                val remaining = MAX_MULTI_IMPORT_BYTES - total
+                require(remaining > 0) { "Selected files exceed 256 MiB" }
+                val item = importUri(uri, minOf(MAX_IMPORT_BYTES, remaining))
+                imported += item
+                total += item.file.length()
             }
-            val file = uniqueImport(name)
+            val items = JSONArray()
+            imported.forEach { item ->
+                items.put(JSONObject().apply {
+                    put("path", item.file.relativeTo(root).path)
+                    put("name", item.file.name)
+                    put("mimeType", item.mime)
+                    put("size", item.file.length())
+                })
+            }
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf("items" to WireValue.Text(items.toString()))),
+            )
+        }.onFailure { error ->
+            imported.forEach { it.file.delete() }
+            completion.failure(error)
+        }
+    }
+
+    private fun importUri(uri: Uri, maximumBytes: Long = MAX_IMPORT_BYTES): ImportedFile {
+        var name = "document"
+        val mime = activity.contentResolver.getType(uri) ?: "application/octet-stream"
+        activity.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index >= 0) name = cursor.getString(index)
+            }
+        }
+        val file = uniqueImport(name)
+        return try {
             activity.contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "Unable to read selected file" }
                 file.outputStream().use { output ->
@@ -184,16 +269,22 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                         val read = input.read(buffer)
                         if (read < 0) break
                         total += read
-                        require(total <= MAX_IMPORT_BYTES) {
-                            file.delete()
-                            "Selected file exceeds 64 MiB"
+                        require(total <= maximumBytes) {
+                            if (maximumBytes < MAX_IMPORT_BYTES) {
+                                "Selected files exceed 256 MiB"
+                            } else {
+                                "Selected file exceeds 64 MiB"
+                            }
                         }
                         output.write(buffer, 0, read)
                     }
                 }
             }
-            completion.success(file, mime)
-        }.onFailure { completion.failure(it) }
+            ImportedFile(file, mime)
+        } catch (error: Throwable) {
+            file.delete()
+            throw error
+        }
     }
 
     private fun resolve(path: String): File {
@@ -205,7 +296,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
 
     private fun uniqueImport(name: String): File {
         val safe = name.replace(Regex("[^A-Za-z0-9_.-]"), "_").take(128).ifEmpty { "file" }
-        return File(root, "imports/${System.currentTimeMillis()}-$safe").apply {
+        return File(root, "imports/${UUID.randomUUID()}-$safe").apply {
             parentFile?.mkdirs()
         }
     }
@@ -242,7 +333,12 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     }
 
     private companion object {
+        const val DEFAULT_PICK_LIMIT = 10
+        const val MAX_PICK_LIMIT = 50
         const val MAX_READ_BYTES = 1024 * 1024L
         const val MAX_IMPORT_BYTES = 64L * 1024L * 1024L
+        const val MAX_MULTI_IMPORT_BYTES = 256L * 1024L * 1024L
     }
+
+    private data class ImportedFile(val file: File, val mime: String)
 }
