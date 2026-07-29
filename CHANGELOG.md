@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.27 - 2026-07-29
+
+- Let media capture callers handle camera unavailability and user cancellation
+  through an optional failure callback instead of crashing the PHP runtime.
+
 ## 0.5.26 - 2026-07-29
 
 - Add cross-platform `AudioRecorder::watch()` telemetry with coalesced native

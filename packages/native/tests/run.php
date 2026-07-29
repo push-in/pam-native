@@ -16,6 +16,7 @@ use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
 use Pam\Native\Component;
 use Pam\Native\Contact;
+use Pam\Native\CaptureType;
 use Pam\Native\EventKind;
 use Pam\Native\FileReference;
 use Pam\Native\FontStyle;
@@ -98,6 +99,7 @@ use Pam\Native\Restorable;
 use Pam\Native\State;
 use Pam\Native\Store\Attributes\Computed as StoreComputed;
 use Pam\Native\Store\ActionPolicy;
+use Pam\Native\System\MediaCapture;
 use Pam\Native\Store\Store;
 use Pam\Native\Store\StoreChangeKind;
 use Pam\Native\Store\StoreMiddleware;
@@ -1731,6 +1733,27 @@ $assert(
         && $moduleResult->succeeded()
         && $moduleResult->values() === ['message' => 'fast'],
     'Public native module facade did not decode its result.',
+);
+
+$captureError = null;
+$captureSucceeded = false;
+$captureRequestId = MediaCapture::capture(
+    CaptureType::Photo,
+    static function (FileReference $_) use (&$captureSucceeded): void {
+        $captureSucceeded = true;
+    },
+    static function (string $message) use (&$captureError): void {
+        $captureError = $message;
+    },
+);
+Runtime::dispatchModuleResult(
+    $captureRequestId,
+    ModuleResultStatus::Failure->value,
+    'Camera is unavailable.',
+);
+$assert(
+    !$captureSucceeded && $captureError === 'Camera is unavailable.',
+    'Media capture failures must reach the optional failure callback.',
 );
 
 $location = null;

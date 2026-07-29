@@ -18,15 +18,26 @@ final class MediaCapture
     {
     }
 
-    /** @param Closure(FileReference): void $callback */
-    public static function capture(CaptureType $type, Closure $callback): int
-    {
+    /**
+     * @param Closure(FileReference): void $callback
+     * @param Closure(string): void|null $failure
+     */
+    public static function capture(
+        CaptureType $type,
+        Closure $callback,
+        ?Closure $failure = null,
+    ): int {
         return NativeModules::call(
             'files',
             'capture',
             ['type' => $type->value],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = Wire::decodeMap($result->payload);
