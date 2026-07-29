@@ -12,6 +12,11 @@ import java.io.File
 import java.util.concurrent.Executors
 
 internal class SQLiteModule(private val context: Context) : NativeModule, AutoCloseable {
+    private data class TransactionStatement(
+        val sql: String,
+        val argumentSets: List<Array<Any?>>,
+    )
+
     private val executor = Executors.newSingleThreadExecutor()
     private val databases = mutableMapOf<String, SQLiteDatabase>()
 
@@ -122,7 +127,7 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
         }
     }
 
-    private fun decodeStatements(value: String): List<Pair<String, Array<Any?>>> {
+    private fun decodeStatements(value: String): List<TransactionStatement> {
         val statements = JSONArray(value)
         require(statements.length() in 1..MAX_BATCH_ROWS) {
             "SQLite transaction requires between 1 and 10000 statements"
@@ -133,20 +138,28 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
             require(sql.isNotEmpty() && sql.toByteArray().size <= MAX_SQL_BYTES) {
                 "Invalid SQLite transaction SQL statement"
             }
-            sql to decodeArguments(statement.getJSONArray("arguments").toString())
+            val argumentSets = if (statement.has("argumentSets")) {
+                decodeArgumentSets(statement.getJSONArray("argumentSets").toString())
+            } else {
+                listOf(decodeArguments(statement.getJSONArray("arguments").toString()))
+            }
+            TransactionStatement(sql, argumentSets)
         }
     }
 
     private fun executeTransaction(
         database: SQLiteDatabase,
-        statements: List<Pair<String, Array<Any?>>>,
+        statements: List<TransactionStatement>,
     ) {
         database.beginTransactionNonExclusive()
         try {
-            statements.forEach { (sql, arguments) ->
-                database.compileStatement(sql).use { statement ->
-                    bind(arguments, statement)
-                    statement.execute()
+            statements.forEach { transactionStatement ->
+                database.compileStatement(transactionStatement.sql).use { statement ->
+                    transactionStatement.argumentSets.forEach { arguments ->
+                        statement.clearBindings()
+                        bind(arguments, statement)
+                        statement.execute()
+                    }
                 }
             }
             database.setTransactionSuccessful()

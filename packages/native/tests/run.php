@@ -1810,7 +1810,10 @@ $transactionRequestId = SQLite::transaction(
         ],
         [
             'sql' => 'INSERT INTO messages (id, chat_id, body) VALUES (?, ?, ?)',
-            'arguments' => ['m3', 'chat-1', 'atomic'],
+            'argumentSets' => [
+                ['m3', 'chat-1', 'atomic'],
+                ['m4', 'chat-1', 'batched'],
+            ],
         ],
     ],
 );
@@ -1830,7 +1833,11 @@ $assert(
             ],
             [
                 'sql' => 'INSERT INTO messages (id, chat_id, body) VALUES (?, ?, ?)',
-                'arguments' => ['m3', 'chat-1', 'atomic'],
+                'arguments' => [],
+                'argumentSets' => [
+                    ['m3', 'chat-1', 'atomic'],
+                    ['m4', 'chat-1', 'batched'],
+                ],
             ],
         ],
     'SQLite transaction did not emit one typed bridge call for heterogeneous statements.',

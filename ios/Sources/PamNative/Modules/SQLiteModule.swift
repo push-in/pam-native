@@ -125,7 +125,7 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
         }
     }
 
-    private func decodeStatements(_ json: String) throws -> [(String, [Any])] {
+    private func decodeStatements(_ json: String) throws -> [(String, [[Any]])] {
         let value = try JSONSerialization.jsonObject(with: Data(json.utf8))
         guard let rawStatements = value as? [[String: Any]],
               (1...10_000).contains(rawStatements.count) else {
@@ -134,26 +134,36 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
         return try rawStatements.map { raw in
             guard let sql = raw["sql"] as? String,
                   !sql.isEmpty,
-                  sql.utf8.count <= 1_048_576,
-                  let arguments = raw["arguments"] as? [Any] else {
+                  sql.utf8.count <= 1_048_576 else {
                 throw SQLiteError("Invalid SQLite transaction statement")
             }
-            return (sql, arguments)
+            if let argumentSets = raw["argumentSets"] as? [[Any]],
+               (1...10_000).contains(argumentSets.count) {
+                return (sql, argumentSets)
+            }
+            guard let arguments = raw["arguments"] as? [Any] else {
+                throw SQLiteError("Invalid SQLite transaction arguments")
+            }
+            return (sql, [arguments])
         }
     }
 
     private func executeTransaction(
         _ database: OpaquePointer,
-        _ statements: [(String, [Any])]
+        _ statements: [(String, [[Any]])]
     ) throws {
         try execute(database, "BEGIN IMMEDIATE")
         do {
-            for (sql, arguments) in statements {
+            for (sql, argumentSets) in statements {
                 let statement = try prepare(database, sql)
                 defer { sqlite3_finalize(statement) }
-                try bind(arguments, to: statement)
-                guard sqlite3_step(statement) == SQLITE_DONE else {
-                    throw SQLiteError(String(cString: sqlite3_errmsg(database)))
+                for arguments in argumentSets {
+                    sqlite3_reset(statement)
+                    sqlite3_clear_bindings(statement)
+                    try bind(arguments, to: statement)
+                    guard sqlite3_step(statement) == SQLITE_DONE else {
+                        throw SQLiteError(String(cString: sqlite3_errmsg(database)))
+                    }
                 }
             }
             try execute(database, "COMMIT")
