@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.11 - 2026-07-29
+
+- Add a typed, asynchronous audio recorder for Android and iOS with AAC/M4A
+  capture, real duration and file-size metadata.
+- Support cancellation and guarded deletion of temporary recorder files.
+- Release recorder resources and audio sessions deterministically during
+  shutdown and failure paths.
+
 ## 0.5.10 - 2026-07-29
 
 - Make template `bind:value` and `bind:checked` changes participate in the
