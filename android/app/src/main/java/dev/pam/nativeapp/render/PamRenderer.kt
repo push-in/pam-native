@@ -95,6 +95,29 @@ internal fun resolvedKeyboardInset(
     return max(platformInset, resizedInset)
 }
 
+internal fun safeAreaChildCrossAxisReduction(
+    mainAxisHorizontal: Boolean,
+    horizontalInsets: Int,
+    verticalInsets: Int,
+): Pair<Int, Int> = if (mainAxisHorizontal) {
+    0 to verticalInsets
+} else {
+    horizontalInsets to 0
+}
+
+internal fun safeAreaFlexViewportExtent(
+    layoutExtent: Int,
+    safeAreaInsets: Int,
+    windowVisibleExtent: Int = layoutExtent,
+): Int = (layoutExtent - safeAreaInsets).coerceAtLeast(0)
+    .let { paddedExtent ->
+        if (windowVisibleExtent in 1 until layoutExtent) {
+            windowVisibleExtent
+        } else {
+            paddedExtent
+        }
+    }
+
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -882,6 +905,24 @@ class PamRenderer(
         } else {
             0
         }
+        val parentMainAxisHorizontal = when (
+            parentState?.integer(
+                PropKey.FLEX_DIRECTION,
+                when (parentState.kind) {
+                    NodeKind.ROW -> 2L
+                    else -> 1L
+                },
+            )?.toInt()
+        ) {
+            2, 4 -> true
+            else -> false
+        }
+        val (parentSafeWidthReduction, parentSafeHeightReduction) =
+            safeAreaChildCrossAxisReduction(
+                mainAxisHorizontal = parentMainAxisHorizontal,
+                horizontalInsets = parentSafeHorizontal,
+                verticalInsets = parentSafeVertical,
+            )
         val safeMargin = state.kind == NodeKind.SAFE_AREA_VIEW &&
             state.integer(PropKey.SAFE_AREA_MODE, SAFE_AREA_PADDING.toLong()).toInt() ==
             SAFE_AREA_MARGIN
@@ -909,10 +950,10 @@ class PamRenderer(
             0
         }
         var width = (
-            dp(frame.width) - safeLeft - safeRight - parentSafeHorizontal
+            dp(frame.width) - safeLeft - safeRight - parentSafeWidthReduction
             ).coerceAtLeast(0)
         var height = (
-            dp(frame.height) - safeTop - safeBottom - parentSafeVertical
+            dp(frame.height) - safeTop - safeBottom - parentSafeHeightReduction
             ).coerceAtLeast(0)
         var leftPx = dp(left) + safeLeft
         var topPx = dp(top) + safeTop
@@ -972,20 +1013,81 @@ class PamRenderer(
         val axis = when (parentState.kind) {
             NodeKind.ROW -> Axis.HORIZONTAL
             NodeKind.COLUMN -> Axis.VERTICAL
+            NodeKind.SAFE_AREA_VIEW -> when (
+                parentState.integer(PropKey.FLEX_DIRECTION, 1L).toInt()
+            ) {
+                2, 4 -> Axis.HORIZONTAL
+                else -> Axis.VERTICAL
+            }
             else -> return
         }
         val engineExtent = when (axis) {
             Axis.HORIZONTAL -> dp(parentFrame.width)
             Axis.VERTICAL -> dp(parentFrame.height)
         }
-        val layoutExtent = when (axis) {
-            Axis.HORIZONTAL -> parentView.layoutParams?.width ?: parentView.width
-            Axis.VERTICAL -> parentView.layoutParams?.height ?: parentView.height
+        val measuredExtent = when (axis) {
+            Axis.HORIZONTAL -> parentView.width.takeIf { it > 0 }
+                ?: parentView.layoutParams?.width
+                ?: 0
+            Axis.VERTICAL -> parentView.height.takeIf { it > 0 }
+                ?: parentView.layoutParams?.height
+                ?: 0
         }
-        val renderedExtent = layoutExtent.takeIf { it > 0 } ?: when (axis) {
-            Axis.HORIZONTAL -> parentView.width
-            Axis.VERTICAL -> parentView.height
+        val hostExtent = when (axis) {
+            Axis.HORIZONTAL -> host.width
+            Axis.VERTICAL -> host.height
         }
+        val visibleExtent = if (hostExtent > 0) {
+            min(measuredExtent, hostExtent)
+        } else {
+            measuredExtent
+        }
+        val windowVisibleFrame = Rect().also(
+            parentView::getWindowVisibleDisplayFrame,
+        )
+        val windowVisibleExtent = when (axis) {
+            Axis.HORIZONTAL -> windowVisibleFrame.width()
+            Axis.VERTICAL -> windowVisibleFrame.height()
+        }
+        val parentUsesSafeAreaPadding =
+            parentState.kind == NodeKind.SAFE_AREA_VIEW &&
+                parentState.integer(
+                    PropKey.SAFE_AREA_MODE,
+                    SAFE_AREA_PADDING.toLong(),
+                ).toInt() == SAFE_AREA_PADDING
+        val safeAreaInsets = if (parentUsesSafeAreaPadding) {
+            when (axis) {
+                Axis.HORIZONTAL ->
+                    (if (parentState.flag(PropKey.SAFE_AREA_LEFT, true)) {
+                        parentState.safeAreaLeftInset
+                    } else {
+                        0
+                    }) + (if (parentState.flag(PropKey.SAFE_AREA_RIGHT, true)) {
+                        parentState.safeAreaRightInset
+                    } else {
+                        0
+                    })
+                Axis.VERTICAL ->
+                    (if (parentState.flag(PropKey.SAFE_AREA_TOP, true)) {
+                        parentState.safeAreaTopInset
+                    } else {
+                        0
+                    }) + (if (
+                        parentState.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true)
+                    ) {
+                        parentState.safeAreaBottomInset
+                    } else {
+                        0
+                    })
+            }
+        } else {
+            0
+        }
+        val renderedExtent = safeAreaFlexViewportExtent(
+            layoutExtent = visibleExtent,
+            safeAreaInsets = safeAreaInsets,
+            windowVisibleExtent = windowVisibleExtent,
+        )
         if (renderedExtent <= 0) return
         val viewportReduction = engineExtent - renderedExtent
         if (viewportReduction <= 0) return

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.20 - 2026-07-29
+
+- Keep fixed header and footer dimensions intact inside Android
+  `SafeAreaView`, while flex children consume the real visible window
+  viewport exactly once across edge-to-edge and consumed-system-bar modes.
+- Hydrate declarative gesture payloads as typed `GestureEvent` objects.
+- Give template `GestureDetector` tags the same pointer and distance defaults
+  as the imperative API, including two-pointer pinch and rotation gestures.
+
 ## 0.5.19 - 2026-07-29
 
 - Persist completed audio recordings inside `pam-files/recordings` on Android
