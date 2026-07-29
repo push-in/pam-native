@@ -1604,10 +1604,12 @@ final class TemplateRenderer
             PropKey::DrawerOverlayColor,
             => self::colorValue($value, "Template {$key->name}"),
             PropKey::AlignItems, PropKey::AlignSelf => self::named($value, [
-                'start' => 1, 'center' => 2, 'end' => 3, 'stretch' => 4,
+                'start' => 1, 'flex-start' => 1, 'center' => 2,
+                'end' => 3, 'flex-end' => 3, 'stretch' => 4,
             ]),
             PropKey::JustifyContent => self::named($value, [
-                'start' => 1, 'center' => 2, 'end' => 3, 'space-between' => 4,
+                'start' => 1, 'flex-start' => 1, 'center' => 2,
+                'end' => 3, 'flex-end' => 3, 'space-between' => 4,
                 'space-around' => 5, 'space-evenly' => 6,
             ]),
             PropKey::TextAlign => self::named($value, ['start' => 1, 'center' => 2, 'end' => 3]),
