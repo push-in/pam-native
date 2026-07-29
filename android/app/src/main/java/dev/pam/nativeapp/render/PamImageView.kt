@@ -13,7 +13,11 @@ internal class PamImageView(context: Context) : ImageView(context) {
     private var cornerRadii = FloatArray(8)
 
     init {
-        adjustViewBounds = true
+        // PAM's layout engine is authoritative for both dimensions. Letting
+        // ImageView adjust its own bounds from the drawable's intrinsic aspect
+        // ratio can collapse images inside RecyclerView/VirtualizedList cells
+        // even when the engine supplied an exact full-width frame.
+        adjustViewBounds = false
         scaleType = ScaleType.CENTER_CROP
     }
 

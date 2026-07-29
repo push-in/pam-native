@@ -18,6 +18,7 @@ import dev.pam.nativeapp.protocol.NodeSpec
 import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -26,6 +27,21 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun imageUsesEngineFrameInsteadOfIntrinsicDrawableBounds() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val image = PamImageView(activity)
+                assertFalse(image.adjustViewBounds)
+                assertEquals(android.widget.ImageView.ScaleType.CENTER_CROP, image.scaleType)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun rippleDirectiveUsesNativeDrawableWithoutPhpGestureRoundTrips() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

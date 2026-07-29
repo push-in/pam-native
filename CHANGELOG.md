@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.35 - 2026-07-29
+
+- Keep PAM layout frames authoritative for Android images so intrinsic drawable
+  proportions cannot collapse full-width media inside virtualized list cells.
+
 ## 0.5.34 - 2026-07-29
 
 - Add cross-platform cache usage and cleanup through `Caches`, reporting image,
