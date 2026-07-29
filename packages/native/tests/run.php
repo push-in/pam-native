@@ -2542,6 +2542,54 @@ final class Dashboard extends Component
 PAM,
 );
 
+$invalidPamPhpDirectory = $pamPhpDirectory.'-invalid';
+if (
+    !is_dir($invalidPamPhpDirectory)
+    && !mkdir($invalidPamPhpDirectory, 0o755, true)
+    && !is_dir($invalidPamPhpDirectory)
+) {
+    throw new RuntimeException('Cannot create the invalid component fixture directory.');
+}
+file_put_contents(
+    $invalidPamPhpDirectory.'/Invalid.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class Invalid extends Component
+{
+}
+?>
+
+<template>
+    <Text invalid="unterminated></Text>
+</template>
+PAM,
+);
+TestDiagnostics::$messages = [];
+$prebootError = null;
+try {
+    App::components($invalidPamPhpDirectory, $invalidPamPhpDirectory.'/.cache');
+} catch (RuntimeException $error) {
+    $prebootError = $error;
+}
+$assert(
+    $prebootError instanceof RuntimeException
+        && isset(TestDiagnostics::$messages[0])
+        && str_starts_with(TestDiagnostics::$messages[0], "PAMERR1\n")
+        && str_contains(TestDiagnostics::$messages[0], 'Invalid attributes'),
+    'Component compilation errors before runtime boot must emit structured diagnostics.',
+);
+unlink($invalidPamPhpDirectory.'/Invalid.pam.php');
+rmdir($invalidPamPhpDirectory.'/.cache');
+rmdir($invalidPamPhpDirectory);
+TestDiagnostics::$messages = [];
+
 $assert(
     \Pam\Native\Internal\TemplateExpression::evaluate(
         '$left && $right',
