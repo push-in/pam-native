@@ -34,25 +34,25 @@ final class ImageEditorModule: NativeModule {
     }
 
     private func render(_ values: [String: WireValue]) throws -> URL {
-        let source = try resolve(values["path"]?.textValue ?? "")
+        let source = try resolve(values["path"]?.imageEditorText ?? "")
         guard var image = UIImage(contentsOfFile: source.path) else {
             throw ImageEditorError("Unable to decode the image.")
         }
         image = orient(
             image,
-            turns: Int(values["quarterTurns"]?.integerValue ?? 0),
-            flip: values["flipHorizontal"]?.integerValue == 1
+            turns: Int(values["quarterTurns"]?.imageEditorInteger ?? 0),
+            flip: values["flipHorizontal"]?.imageEditorInteger == 1
         )
-        image = crop(image, ratio: Int(values["cropRatio"]?.integerValue ?? 1))
+        image = crop(image, ratio: Int(values["cropRatio"]?.imageEditorInteger ?? 1))
         image = try color(
             image,
-            filter: Int(values["filter"]?.integerValue ?? 1),
-            brightness: Int(values["brightness"]?.integerValue ?? 0),
-            contrast: Int(values["contrast"]?.integerValue ?? 0),
-            saturation: Int(values["saturation"]?.integerValue ?? 0)
+            filter: Int(values["filter"]?.imageEditorInteger ?? 1),
+            brightness: Int(values["brightness"]?.imageEditorInteger ?? 0),
+            contrast: Int(values["contrast"]?.imageEditorInteger ?? 0),
+            saturation: Int(values["saturation"]?.imageEditorInteger ?? 0)
         )
-        image = compose(image, text: String((values["overlayText"]?.textValue ?? "").prefix(120)), sticker: false)
-        image = compose(image, text: String((values["sticker"]?.textValue ?? "").prefix(8)), sticker: true)
+        image = compose(image, text: String((values["overlayText"]?.imageEditorText ?? "").prefix(120)), sticker: false)
+        image = compose(image, text: String((values["sticker"]?.imageEditorText ?? "").prefix(8)), sticker: true)
 
         let directory = root.appendingPathComponent("editor", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -60,7 +60,7 @@ final class ImageEditorModule: NativeModule {
         guard let data = image.jpegData(compressionQuality: 0.94) else {
             throw ImageEditorError("Unable to encode the edited image.")
         }
-        try data.write(to: output, options: .atomic)
+        try data.write(to: output, options: Data.WritingOptions.atomic)
         return output
     }
 
@@ -101,7 +101,7 @@ final class ImageEditorModule: NativeModule {
             x: (image.size.width - size.width) / 2,
             y: (image.size.height - size.height) / 2
         )
-        return UIGraphicsImageRenderer(size: size).image {
+        return UIGraphicsImageRenderer(size: size).image { _ in
             image.draw(at: CGPoint(x: -origin.x, y: -origin.y))
         }
     }
@@ -170,4 +170,16 @@ private struct ImageEditorError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+private extension WireValue {
+    var imageEditorText: String? {
+        if case let .text(value) = self { return value }
+        return nil
+    }
+
+    var imageEditorInteger: Int64? {
+        if case let .integer(value) = self { return value }
+        return nil
+    }
 }

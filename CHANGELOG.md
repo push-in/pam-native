@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.38 - 2026-07-29
+
+- Keep the iOS image-editor wire decoding contract local to its module so the
+  release renderer compiles independently from other module extensions.
+
 ## 0.5.37 - 2026-07-29
 
 - Add a typed, asynchronous native image editor with crop, rotation, horizontal
