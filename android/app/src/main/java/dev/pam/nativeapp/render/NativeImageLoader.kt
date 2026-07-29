@@ -87,6 +87,25 @@ internal class NativeImageCallbacks(
     val onCacheReady: (String, Long) -> Unit = { _, _ -> },
 )
 
+internal fun resolvePamImageFile(root: File, source: String): File {
+    val uri = URI(source)
+    require(uri.scheme.equals("pam-file", ignoreCase = true)) {
+        "Invalid sandbox image URI."
+    }
+    require(uri.authority.isNullOrEmpty()) {
+        "Sandbox image URI cannot contain an authority."
+    }
+    val sandbox = root.canonicalFile
+    val relative = uri.path.orEmpty().removePrefix("/")
+    require(relative.isNotEmpty()) { "Sandbox image path is empty." }
+    val candidate = File(sandbox, relative).canonicalFile
+    require(candidate.path.startsWith(sandbox.path + File.separator)) {
+        "Sandbox image path escapes the application sandbox."
+    }
+    require(candidate.isFile) { "Sandbox image does not exist." }
+    return candidate
+}
+
 internal class NativeImageLoader(
     private val context: Context,
 ) : AutoCloseable {
@@ -465,6 +484,11 @@ internal class NativeImageLoader(
                     android.net.Uri.parse(source),
                 )?.use(::readBounded)
                     ?: error("Image source cannot be opened.")
+            "pam-file" ->
+                resolvePamImageFile(
+                    File(context.filesDir, "pam-files"),
+                    source,
+                ).inputStream().use(::readBounded)
             "asset" -> context.assets.open(
                 uri.schemeSpecificPart.removePrefix("//").removePrefix("/"),
             ).use(::readBounded)
