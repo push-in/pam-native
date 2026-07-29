@@ -2433,6 +2433,26 @@ $assert($navigator->pop(), 'Navigator must pop a secondary route.');
 $popped = $navigator->render()->toElement();
 $assert(count($popped->children()) === 2, 'Pop must retain its outgoing screen until native animation completes.');
 $assert($navigator->currentRoute() === 'home', 'Pop must reveal the previous route.');
+$systemBackConsumed = false;
+$navigator->interceptSystemBack(static function () use (&$systemBackConsumed): bool {
+    $systemBackConsumed = true;
+
+    return true;
+});
+$assert(
+    $navigator->consumeSystemBack() && $systemBackConsumed,
+    'Navigator system Back interceptor must consume transient UI before changing routes.',
+);
+$navigator->interceptSystemBack(static fn (): bool => false);
+$assert(
+    !$navigator->consumeSystemBack(),
+    'Navigator system Back interceptor must allow route navigation when it returns false.',
+);
+$navigator->interceptSystemBack(null);
+$assert(
+    !$navigator->consumeSystemBack(),
+    'Navigator system Back interceptor must be removable.',
+);
 $fluentNavigator = Router::stack('home')
     ->route('home', static fn () => Screen::make(Text::make('Home')))
     ->transitions(NavigationTransition::Scale, 180)
@@ -2603,8 +2623,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.5',
-    'The runtime SDK contract must match the 0.5.5 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.6',
+    'The runtime SDK contract must match the 0.5.6 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

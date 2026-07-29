@@ -26,6 +26,8 @@ final class Navigator extends Component implements Restorable
     private int $revision = 0;
     private NavigationOperation $operation = NavigationOperation::Idle;
     private ?array $outgoing = null;
+    /** @var (Closure(): bool)|null */
+    private ?Closure $systemBackInterceptor = null;
     /** @var list<DeepLink> */
     private array $deepLinks;
 
@@ -71,6 +73,10 @@ final class Navigator extends Component implements Restorable
         $this->transitionDurationMs = max(0, min(2_000, $transitionDurationMs));
         if ($handleSystemBack) {
             App::onBack(function (): void {
+                if ($this->consumeSystemBack()) {
+                    return;
+                }
+
                 if (!$this->pop()) {
                     Runtime::callNative(
                         NativeOperation::CloseApp,
@@ -81,6 +87,28 @@ final class Navigator extends Component implements Restorable
                 }
             });
         }
+    }
+
+    /**
+     * Runs before Android system Back changes the navigation stack.
+     *
+     * Return true from the interceptor after dismissing transient UI such as
+     * selection, editing, search, or an in-screen viewer. Returning false lets
+     * the navigator pop the current route normally.
+     *
+     * @param (Closure(): bool)|null $interceptor
+     */
+    public function interceptSystemBack(?Closure $interceptor): self
+    {
+        $this->systemBackInterceptor = $interceptor;
+
+        return $this;
+    }
+
+    public function consumeSystemBack(): bool
+    {
+        return $this->systemBackInterceptor !== null
+            && ($this->systemBackInterceptor)() === true;
     }
 
     /** @param array<string, string|int|float|bool|null> $params */

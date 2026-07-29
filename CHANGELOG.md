@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.6 - 2026-07-28
+
+- Add a first-class system Back interceptor to stack navigation so screens can
+  dismiss transient editing, selection, search, sheet, and viewer states before
+  the route is popped.
+
 ## 0.5.4 - 2026-07-28
 
 - Add a native SQLite bulk-write fast path that crosses the bridge once,
