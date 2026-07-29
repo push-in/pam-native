@@ -618,6 +618,17 @@ $assert(
     $secureAliasElement->properties()[PropKey::Secure->value] === true,
     'Input secureTextEntry must remain a compatible alias for secure.',
 );
+$dynamicColorElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Text :textColor="$active ? \'#1B7A4E\' : \'#777770\'">Status</Text>',
+    ),
+    null,
+    ['active' => true],
+);
+$assert(
+    $dynamicColorElement->properties()[PropKey::TextColor->value] === 0xFF1B7A4E,
+    'Dynamically bound hexadecimal colors must cross the native bridge as integers.',
+);
 $pressInEvent = null;
 $pressOutEvent = null;
 $pressMoveEvent = null;
@@ -2623,8 +2634,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.6',
-    'The runtime SDK contract must match the 0.5.6 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.7',
+    'The runtime SDK contract must match the 0.5.7 package release.',
 );
 
 $bottomSheet = BottomSheet::make(

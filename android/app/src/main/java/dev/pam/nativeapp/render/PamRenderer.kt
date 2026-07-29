@@ -4842,7 +4842,7 @@ class PamRenderer(
     private fun PropValue.integer(): Long =
         when (this) {
             is PropValue.Integer -> value
-            else -> error("Expected integer property")
+            else -> error("Expected integer property, received ${this::class.simpleName}")
         }
 
     private fun PropValue.decimal(): Double =

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.7 - 2026-07-28
+
+- Coerce dynamically bound hexadecimal colors to native integer values across
+  all color properties, matching static template color behavior.
+- Include the received wire value type in Android integer-property errors.
+
 ## 0.5.6 - 2026-07-28
 
 - Add a first-class system Back interceptor to stack navigation so screens can

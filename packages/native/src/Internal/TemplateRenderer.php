@@ -1583,6 +1583,25 @@ final class TemplateRenderer
     private static function propertyValue(PropKey $key, mixed $value): string|int|float|bool|null
     {
         return match ($key) {
+            PropKey::BackgroundColor,
+            PropKey::TextColor,
+            PropKey::BorderColor,
+            PropKey::ProgressColor,
+            PropKey::TintColor,
+            PropKey::StatusBarColor,
+            PropKey::RippleColor,
+            PropKey::PlaceholderColor,
+            PropKey::SelectionColor,
+            PropKey::RefreshProgressBackgroundColor,
+            PropKey::SwitchTrackColorFalse,
+            PropKey::SwitchTrackColorTrue,
+            PropKey::SwitchThumbColor,
+            PropKey::ImageOverlayColor,
+            PropKey::InputCursorColor,
+            PropKey::InputUnderlineColor,
+            PropKey::ModalBackdropColor,
+            PropKey::DrawerOverlayColor,
+            => self::colorValue($value, "Template {$key->name}"),
             PropKey::AlignItems, PropKey::AlignSelf => self::named($value, [
                 'start' => 1, 'center' => 2, 'end' => 3, 'stretch' => 4,
             ]),
@@ -1918,6 +1937,22 @@ final class TemplateRenderer
                 ? $value
                 : null,
         };
+    }
+
+    private static function colorValue(mixed $value, string $context): int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+        $raw = self::stringValue($value, $context);
+        if (preg_match('/^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/D', $raw, $color) !== 1) {
+            throw new InvalidArgumentException(
+                "{$context} must be an integer or #RRGGBB/#AARRGGBB color.",
+            );
+        }
+        $hex = strlen($color[1]) === 6 ? 'FF'.$color[1] : $color[1];
+
+        return (int) hexdec($hex);
     }
 
     private static function activityIndicatorSize(
