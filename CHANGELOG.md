@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.10 - 2026-07-29
+
+- Make template `bind:value` and `bind:checked` changes participate in the
+  component lifecycle by invoking `updating`, `updated`, and `propsChanged`.
+- Avoid lifecycle work when a native binding reports an unchanged value.
+- Add PHP SDK contracts covering lifecycle-aware text and toggle bindings.
+
 ## 0.5.9 - 2026-07-28
 
 - Give Android dialogs an overlay-priority predictive-back callback so one
