@@ -26,7 +26,7 @@ public final class StorageModule: NativeModule, ClosableNativeModule, @unchecked
                     if let value = self.defaults.string(forKey: key) {
                         completion(.success, try WireMap.encode(["value": .text(value)]))
                     } else {
-                        completion(.success, Data())
+                        completion(.success, try WireMap.encode([:]))
                     }
                 case "set":
                     guard case let .text(value)? = values["value"] else {

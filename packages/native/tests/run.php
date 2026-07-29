@@ -108,6 +108,7 @@ use Pam\Native\System\Sensors;
 use Pam\Native\System\Location;
 use Pam\Native\LocationPosition;
 use Pam\Native\System\AudioRecorder;
+use Pam\Native\Storage\Storage;
 use Pam\Native\AudioRecording;
 use Pam\Native\SensorType;
 use Pam\Native\Style;
@@ -1756,6 +1757,23 @@ $assert(
     'Audio recorder facade did not decode the native recording.',
 );
 
+$missingStoredValue = 'not-dispatched';
+$storageRequest = Storage::get(
+    'chat.draft.missing',
+    static function (?string $value) use (&$missingStoredValue): void {
+        $missingStoredValue = $value;
+    },
+);
+Runtime::dispatchModuleResult(
+    $storageRequest,
+    ModuleResultStatus::Success->value,
+    '',
+);
+$assert(
+    $missingStoredValue === null,
+    'Storage get must treat an empty successful payload as a cache miss.',
+);
+
 $batchRequestId = SQLite::executeMany(
     'nitro.db',
     'INSERT INTO messages (id, body) VALUES (?, ?)',
@@ -2412,6 +2430,23 @@ final class Dashboard extends Component
 PAM,
 );
 
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$left && $right',
+        null,
+        ['left' => false, 'right' => true],
+    ) === false,
+    'Template logical AND must consume its right operand when the left operand is false.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$left || $right',
+        null,
+        ['left' => true, 'right' => false],
+    ) === true,
+    'Template logical OR must consume its right operand when the left operand is true.',
+);
+
 TemplateRegistry::reset();
 App::components($pamPhpDirectory, $pamPhpCache);
 $dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
@@ -2743,8 +2778,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.11',
-    'The runtime SDK contract must match the 0.5.11 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.12',
+    'The runtime SDK contract must match the 0.5.12 package release.',
 );
 
 $bottomSheet = BottomSheet::make(
