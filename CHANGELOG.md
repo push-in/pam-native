@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.13 - 2026-07-29
+
+### Added
+
+- Add `SQLite::transaction()` for up to 10,000 heterogeneous prepared
+  statements in one bridge call and one native Android/iOS transaction.
+- Roll back the complete statement batch on the first preparation, binding, or
+  execution failure, enabling atomic offline-first snapshot replacement.
+
 ## 0.5.12 - 2026-07-29
 
 ### Fixed
