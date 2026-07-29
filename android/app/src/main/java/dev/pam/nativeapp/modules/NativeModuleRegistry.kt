@@ -16,6 +16,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         (context as? dev.pam.nativeapp.PamActivity)?.let(::PermissionsModule)
     private val sensors = SensorsModule(context)
     private val contacts = ContactsModule(context)
+    private val location = LocationModule(context)
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
         put("storage", storage)
@@ -27,6 +28,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         permissions?.let { put("permissions", it) }
         put("sensors", sensors)
         put("contacts", contacts)
+        put("location", location)
         putAll(GeneratedPamModules.create(context))
     }
 

@@ -341,10 +341,29 @@ small/large size, while `Switch` owns checked state and disabled-aware
 off/on-track and thumb tints.
 
 System APIs include alert, toast, sharing, URL linking, clipboard text,
-one-shot accelerometer, gyroscope and magnetometer reads, vibration, device
-dimensions/appearance/app state, keyboard dismissal, permission checks and
-permission requests. Their operation IDs are sequential integers across PHP,
-JNI, and Kotlin.
+one-shot accelerometer, gyroscope and magnetometer reads, vibration, current
+location, device dimensions/appearance/app state, keyboard dismissal,
+permission checks and permission requests. Current location is asynchronous
+and accepts accuracy, timeout and maximum cached-age controls:
+
+```php
+use Pam\Native\PermissionKind;
+use Pam\Native\System\Location;
+use Pam\Native\System\Permissions;
+
+Permissions::requestKind(PermissionKind::LocationWhenInUse, function ($decision): void {
+    if (!$decision->granted()) {
+        return;
+    }
+
+    Location::current(function ($position): void {
+        echo $position->latitude.', '.$position->longitude;
+    });
+});
+```
+
+Native work completes away from PHP rendering and returns typed coordinates,
+accuracy, altitude, speed, bearing and capture timestamp.
 
 ## Thread ownership
 
