@@ -10,7 +10,7 @@ table, see the [capability cookbook](examples.md).
 | --- | --- |
 | Gestures | `UI\GestureDetector` |
 | Video and audio | `UI\MediaPlayer` |
-| Camera and gallery | `System\MediaCapture`, `System\Files::pick()` |
+| Camera and gallery | `System\MediaCapture`, `System\Files::pick()`, `System\Files::pickMany()` |
 | Gesture navigation | `Navigation\Navigator`, `NavigationHost` |
 | Bottom Sheet | `UI\BottomSheet` |
 | Declarative animations | `UI\Animated` |
@@ -33,7 +33,12 @@ with controls, autoplay, looping, mute, volume, seek, rate and progress events.
 ## Files, camera and gallery
 
 `Files::pick()` imports an image, video, audio file or document into the
-application sandbox and returns a `FileReference`. `MediaCapture::capture()`
+application sandbox and returns a `FileReference`. `Files::pickMany()` uses the
+native multi-selection picker, preserves selection order, imports off the UI
+thread, and returns up to 50 typed `FileReference` values in one bridge result.
+If any import fails, files already copied by that selection are removed.
+Each file is bounded to 64 MiB and a multi-selection is bounded to 256 MiB.
+`MediaCapture::capture()`
 captures a full-resolution photo or video. `Files::read()` and `Files::write()`
 only accept sandbox-relative paths and bridge at most one MiB per call; imports
 are bounded to 64 MiB. `Files::stat()` returns typed metadata,

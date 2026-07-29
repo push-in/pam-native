@@ -47,6 +47,16 @@ Files::pick(MediaPickerType::Image, function ($file): void {
     $this->selectedPath = $file->path;
 });
 
+Files::pickMany(
+    MediaPickerType::Image,
+    function (array $files): void {
+        foreach ($files as $file) {
+            // Upload $file->path without moving bytes through PHP.
+        }
+    },
+    limit: 10,
+);
+
 MediaCapture::capture(CaptureType::Photo, function ($photo): void {
     $this->photoPath = $photo->path;
 });

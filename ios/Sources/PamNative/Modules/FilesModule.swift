@@ -7,6 +7,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     private let queue = DispatchQueue(label: "dev.pam.native.files")
     private let root: URL
     private var pending: ModuleCompletion?
+    private var pendingMultiple = false
+    private var pendingLimit = 10
     private var captureType = 1
 
     override init() {
@@ -32,7 +34,12 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             case "pick":
                 let values = try WireMap.decode(payload)
                 let type = values["type"]?.integerValue ?? 4
-                presentPicker(type: Int(type), completion: completion)
+                presentPicker(type: Int(type), multiple: false, limit: 1, completion: completion)
+            case "pickMany":
+                let values = try WireMap.decode(payload)
+                let type = values["type"]?.integerValue ?? 4
+                let limit = min(50, max(1, Int(values["limit"]?.integerValue ?? 10)))
+                presentPicker(type: Int(type), multiple: true, limit: limit, completion: completion)
             case "capture":
                 let values = try WireMap.decode(payload)
                 presentCapture(type: Int(values["type"]?.integerValue ?? 1), completion: completion)
@@ -126,7 +133,12 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
-    private func presentPicker(type: Int, completion: @escaping ModuleCompletion) {
+    private func presentPicker(
+        type: Int,
+        multiple: Bool,
+        limit: Int,
+        completion: @escaping ModuleCompletion
+    ) {
         DispatchQueue.main.async {
             guard self.pending == nil, let presenter = Self.presenter() else {
                 completion(.failure, Data("Another picker is active".utf8))
@@ -139,9 +151,11 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             default: [.item]
             }
             self.pending = completion
+            self.pendingMultiple = multiple
+            self.pendingLimit = limit
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
             picker.delegate = self
-            picker.allowsMultipleSelection = false
+            picker.allowsMultipleSelection = multiple
             presenter.present(picker, animated: true)
         }
     }
@@ -168,8 +182,16 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         _ controller: UIDocumentPickerViewController,
         didPickDocumentsAt urls: [URL]
     ) {
-        guard let source = urls.first else { return finishFailure("No document was selected") }
-        queue.async { self.importFile(source, completion: self.takePending()) }
+        guard !urls.isEmpty else { return finishFailure("No document was selected") }
+        let multiple = pendingMultiple
+        let selected = Array(urls.prefix(pendingLimit))
+        queue.async {
+            if multiple {
+                self.importFiles(selected, completion: self.takePending())
+            } else if let source = selected.first {
+                self.importFile(source, completion: self.takePending())
+            }
+        }
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
@@ -222,6 +244,90 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
+    private func importFiles(_ sources: [URL], completion: ModuleCompletion?) {
+        guard let completion else { return }
+        var imported: [URL] = []
+        var totalBytes = 0
+        do {
+            let items = try sources.map { source -> [String: Any] in
+                let remaining = 256 * 1_024 * 1_024 - totalBytes
+                guard remaining > 0 else {
+                    throw FileModuleError("Selected files exceed 256 MiB")
+                }
+                let item = try importFileReference(
+                    source,
+                    maximumBytes: min(64 * 1_024 * 1_024, remaining)
+                )
+                imported.append(item.url)
+                totalBytes += item.size
+                return item.reference
+            }
+            let data = try JSONSerialization.data(withJSONObject: items)
+            completion(.success, try WireMap.encode([
+                "items": .text(String(decoding: data, as: UTF8.self)),
+            ]))
+        } catch {
+            imported.forEach { try? FileManager.default.removeItem(at: $0) }
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func importFileReference(
+        _ source: URL,
+        maximumBytes: Int
+    ) throws -> (url: URL, reference: [String: Any], size: Int) {
+        let accessing = source.startAccessingSecurityScopedResource()
+        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
+        let values = try source.resourceValues(forKeys: [.fileSizeKey])
+        if let size = values.fileSize, size > maximumBytes {
+            throw FileModuleError(
+                maximumBytes < 64 * 1_024 * 1_024
+                    ? "Selected files exceed 256 MiB"
+                    : "Selected file exceeds 64 MiB"
+            )
+        }
+        let safe = source.lastPathComponent.replacingOccurrences(
+            of: "[^A-Za-z0-9_.-]",
+            with: "_",
+            options: .regularExpression
+        )
+        let relative = "imports/\(UUID().uuidString)-\(safe)"
+        let destination = try resolve(relative)
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        do {
+            try FileManager.default.copyItem(at: source, to: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
+        let importedValues = try destination.resourceValues(forKeys: [.fileSizeKey])
+        let importedSize = importedValues.fileSize ?? 0
+        guard importedSize <= maximumBytes else {
+            try? FileManager.default.removeItem(at: destination)
+            throw FileModuleError(
+                maximumBytes < 64 * 1_024 * 1_024
+                    ? "Selected files exceed 256 MiB"
+                    : "Selected file exceeds 64 MiB"
+            )
+        }
+        let mime = UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
+            ?? "application/octet-stream"
+
+        return (
+            destination,
+            [
+                "path": relative,
+                "name": destination.lastPathComponent,
+                "mimeType": mime,
+                "size": importedSize,
+            ],
+            importedSize
+        )
+    }
+
     private func store(
         _ data: Data,
         name: String,
@@ -238,7 +344,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 with: "_",
                 options: .regularExpression
             )
-            let relative = "imports/\(Int(Date().timeIntervalSince1970 * 1000))-\(safe)"
+            let relative = "imports/\(UUID().uuidString)-\(safe)"
             let destination = try resolve(relative)
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(),
@@ -290,7 +396,11 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     }
 
     private func takePending() -> ModuleCompletion? {
-        defer { pending = nil }
+        defer {
+            pending = nil
+            pendingMultiple = false
+            pendingLimit = 10
+        }
         return pending
     }
 

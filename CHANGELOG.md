@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.15 - 2026-07-29
+
+- Add typed `Files::pickMany()` on Android and iOS with native multi-selection,
+  ordered background imports, bounded batches, unique sandbox paths, and
+  transactional cleanup when an import fails.
+
 ## 0.5.14 - 2026-07-29
 
 - Accept React Native/CSS-compatible `flex-start` and `flex-end` aliases for
