@@ -169,13 +169,20 @@ final class Http
     {
         return static function (ModuleResultStatus $status, string $payload) use ($callback): void {
             if ($status === ModuleResultStatus::Failure) {
-                throw new RuntimeException($payload);
+                $callback(new HttpResponse(
+                    statusCode: 0,
+                    body: '',
+                    error: $payload,
+                ));
+
+                return;
             }
 
             $values = Wire::decodeMap($payload);
             $callback(new HttpResponse(
                 statusCode: (int) ($values['statusCode'] ?? 0),
                 body: (string) ($values['body'] ?? ''),
+                error: '',
             ));
         };
     }

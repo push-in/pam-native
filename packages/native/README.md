@@ -220,6 +220,10 @@ Http::json(
     url: 'https://api.example.com/login',
     data: ['email' => $email, 'password' => $password],
     callback: function (HttpResponse $response): void {
+        if ($response->transportFailed()) {
+            // Status 0; inspect $response->error and keep offline work queued.
+            return;
+        }
         // Read $response->statusCode, $response->body and $response->successful().
     },
 );
@@ -238,7 +242,8 @@ Http::request(
 
 Production builds require HTTPS. Requests support GET, POST, PUT, PATCH and
 DELETE, up to 32 bounded single-line headers, a one MiB request body and timeout
-values from one to 120 seconds.
+values from one to 120 seconds. DNS, connectivity and timeout failures reach the
+same callback with status `0`; they never crash the component runtime.
 
 ## License
 
