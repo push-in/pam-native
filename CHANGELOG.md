@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.29 - 2026-07-29
+
+- Added tokenized native `ScrollView` requests for instant jumps to the end or
+  to a descendant identified by `testId`, without measuring content in PHP.
+- Added PHP builder and template APIs through `scrollRequest` and
+  `scrollTargetTestId`.
+- Added Android instrumentation coverage for deterministic target and end
+  scrolling.
+
 ## 0.5.28 - 2026-07-29
 
 - Flush focused `sync="native"` input values before press actions so handlers

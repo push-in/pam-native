@@ -1499,6 +1499,12 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setAutoScrollToEndThreshold(
                     value.decimal().toFloat(),
                 )
+            PropKey.SCROLL_TARGET_TEST_ID ->
+                (view as? PamScrollContainer)?.setScrollTargetTestId(
+                    value.text(key),
+                )
+            PropKey.SCROLL_REQUEST ->
+                (view as? PamScrollContainer)?.requestScroll()
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(value.flag())
             PropKey.SCROLL_OVER_SCROLL_MODE ->
@@ -2006,6 +2012,9 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setMaintainVisibleContentPosition(false)
             PropKey.SCROLL_AUTO_SCROLL_TO_END_THRESHOLD ->
                 (view as? PamScrollContainer)?.setAutoScrollToEndThreshold(24f)
+            PropKey.SCROLL_TARGET_TEST_ID ->
+                (view as? PamScrollContainer)?.setScrollTargetTestId("")
+            PropKey.SCROLL_REQUEST -> Unit
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)
             PropKey.SCROLL_OVER_SCROLL_MODE ->

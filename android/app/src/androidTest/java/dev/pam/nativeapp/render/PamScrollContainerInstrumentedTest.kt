@@ -177,6 +177,50 @@ class PamScrollContainerInstrumentedTest {
         }
     }
 
+    @Test
+    fun requestScrollJumpsToEndOrIdentifiedDescendant() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                val column = FrameLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_400,
+                    )
+                }
+                column.addView(
+                    View(activity).apply {
+                        transitionName = "first-unread"
+                    },
+                    FrameLayout.LayoutParams(300, 80).apply {
+                        topMargin = 720
+                    },
+                )
+                scroll.insert(column)
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+
+                scroll.setScrollTargetTestId("first-unread")
+                scroll.requestScroll()
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(720, scroll.snapshotOffsetPixels().second)
+                scroll.setScrollTargetTestId("")
+                scroll.requestScroll()
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(1_000, scroll.snapshotOffsetPixels().second)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity {
         val intent = Intent(
             instrumentation.targetContext,

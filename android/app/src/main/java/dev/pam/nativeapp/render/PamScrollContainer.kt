@@ -2,6 +2,7 @@ package dev.pam.nativeapp.render
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Rect
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -38,6 +39,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var initialEndAnchorApplied = false
     private var maintainVisibleContentPosition = false
     private var autoScrollToEndThresholdPx = 24
+    private var scrollTargetTestId = ""
     private var keyboardAvoidanceInsetPx = 0
     private var keyboardBaseContentExtentPx = 0
     private val applyOffsetRunnable = Runnable {
@@ -186,6 +188,25 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     fun setAutoScrollToEndThreshold(value: Float) {
         autoScrollToEndThresholdPx = dp(value.coerceAtLeast(0f))
+    }
+
+    fun setScrollTargetTestId(value: String) {
+        scrollTargetTestId = value
+    }
+
+    fun requestScroll() {
+        activeScroll.post {
+            if (!isAttachedToWindow) return@post
+            if (scrollTargetTestId.isEmpty()) {
+                scrollToPrimary(primaryMaxOffset())
+                return@post
+            }
+            val target = findDescendantByTestId(content, scrollTargetTestId)
+                ?: return@post
+            val rect = Rect(0, 0, target.width, target.height)
+            content.offsetDescendantRectToMyCoords(target, rect)
+            scrollToPrimary(if (horizontal) rect.left else rect.top)
+        }
     }
 
     fun setKeyboardAvoidanceInset(value: Int) {
@@ -423,6 +444,17 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         } else {
             activeScroll.scrollTo(scrollXOf(activeScroll), offset.coerceAtLeast(0))
         }
+    }
+
+    private fun findDescendantByTestId(root: View, testId: String): View? {
+        if (root.transitionName == testId) return root
+        if (root !is ViewGroup) return null
+        for (index in 0 until root.childCount) {
+            findDescendantByTestId(root.getChildAt(index), testId)?.let {
+                return it
+            }
+        }
+        return null
     }
 
     private fun dp(value: Float): Int =

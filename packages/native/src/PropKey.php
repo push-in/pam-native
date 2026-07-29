@@ -393,4 +393,6 @@ enum PropKey: int
     case ScrollAnchorToEnd = 385;
     case ScrollMaintainVisibleContentPosition = 386;
     case ScrollAutoScrollToEndThreshold = 387;
+    case ScrollTargetTestId = 388;
+    case ScrollRequest = 389;
 }
