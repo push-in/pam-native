@@ -3184,8 +3184,20 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.36',
-    'The runtime SDK contract must match the 0.5.36 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.37',
+    'The runtime SDK contract must match the 0.5.37 package release.',
+);
+$assert(
+    array_map(
+        static fn (\Pam\Native\ImageCropRatio $case): int => $case->value,
+        \Pam\Native\ImageCropRatio::cases(),
+    ) === [1, 2, 3, 4, 5]
+        && array_map(
+            static fn (\Pam\Native\ImageFilterType $case): int => $case->value,
+            \Pam\Native\ImageFilterType::cases(),
+        ) === [1, 2, 3, 4, 5]
+        && method_exists(\Pam\Native\System\ImageEditor::class, 'render'),
+    'The image editor contract must expose sequential typed crop and filter values.',
 );
 
 $bottomSheet = BottomSheet::make(

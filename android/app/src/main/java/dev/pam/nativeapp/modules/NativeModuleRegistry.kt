@@ -21,6 +21,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val contacts = ContactsModule(context)
     private val location = LocationModule(context)
     private val audioRecorder = AudioRecorderModule(context)
+    private val imageEditor = ImageEditorModule(context)
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
         put("storage", storage)
@@ -37,6 +38,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         put("contacts", contacts)
         put("location", location)
         put("audio-recorder", audioRecorder)
+        put("image-editor", imageEditor)
         putAll(GeneratedPamModules.create(context))
     }
 

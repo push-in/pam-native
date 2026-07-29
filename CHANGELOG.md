@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.37 - 2026-07-29
+
+- Add a typed, asynchronous native image editor with crop, rotation, horizontal
+  flip, filters, tonal adjustments, text overlays, and compact stickers.
+- Keep edited images inside the guarded PAM file sandbox as upload-ready JPEGs.
+
 ## 0.5.36 - 2026-07-29
 
 - Apply the shared `ImageFit` contract to native video players on Android and
