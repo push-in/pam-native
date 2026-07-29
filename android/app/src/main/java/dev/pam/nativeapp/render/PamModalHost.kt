@@ -19,14 +19,18 @@ import android.view.VelocityTracker
 import android.view.Window
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
+import android.window.OnBackInvokedCallback
+import android.window.OnBackInvokedDispatcher
 import android.widget.EditText
 import android.widget.FrameLayout
+import dev.pam.nativeapp.PamActivity
 import java.lang.ref.WeakReference
 
 internal class PamModalHost(context: Context) : FrameLayout(context) {
     private val content = PamModalContent(context)
     private val handle = View(context)
     private var dialog: Dialog? = null
+    private var dialogBackCallback: OnBackInvokedCallback? = null
     private var presentation = PRESENTATION_DIALOG
     private var desiredVisible = true
     private var animationType = ANIMATION_NONE
@@ -293,7 +297,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
                     keyCode == KeyEvent.KEYCODE_BACK
                     && event.action == KeyEvent.ACTION_UP
                 ) {
-                    requestClose()
+                    requestCloseFromBack()
                     true
                 } else {
                     false
@@ -306,6 +310,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
                 modal.dismiss()
                 return@also
             }
+            registerDialogBackCallback(modal)
             applyWindowConfiguration(modal)
             applyWindowLayout(modal)
             animateEntrance()
@@ -345,6 +350,36 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             return
         }
         dismiss(notify = true, animated = true)
+    }
+
+    private fun registerDialogBackCallback(modal: Dialog) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+            return
+        }
+        dialogBackCallback?.let {
+            modal.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it)
+        }
+        dialogBackCallback = OnBackInvokedCallback { requestCloseFromBack() }.also { callback ->
+            modal.onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                OnBackInvokedDispatcher.PRIORITY_OVERLAY,
+                callback,
+            )
+        }
+    }
+
+    private fun unregisterDialogBackCallback(modal: Dialog) {
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.TIRAMISU) {
+            return
+        }
+        dialogBackCallback?.let {
+            modal.onBackInvokedDispatcher.unregisterOnBackInvokedCallback(it)
+        }
+        dialogBackCallback = null
+    }
+
+    private fun requestCloseFromBack() {
+        (context as? PamActivity)?.suppressNextPamBack()
+        requestClose()
     }
 
     @Suppress("DEPRECATION")
@@ -646,6 +681,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         content.alpha = 1f
         content.translationY = 0f
         val wasShowing = modal.isShowing
+        unregisterDialogBackCallback(modal)
         modal.dismiss()
         dialog = null
         lastOrientation = null

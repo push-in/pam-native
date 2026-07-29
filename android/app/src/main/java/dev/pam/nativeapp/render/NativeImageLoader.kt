@@ -3,9 +3,12 @@ package dev.pam.nativeapp.render
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.graphics.Shader
+import android.graphics.drawable.AnimatedImageDrawable
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.TransitionDrawable
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
@@ -17,6 +20,7 @@ import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.util.WeakHashMap
 import java.util.concurrent.CompletableFuture
@@ -69,6 +73,7 @@ internal data class NativeImageResult(
     val bitmap: Bitmap,
     val width: Int,
     val height: Int,
+    val animatedBytes: ByteArray? = null,
 )
 
 internal class NativeImageCallbacks(
@@ -91,7 +96,7 @@ internal class NativeImageLoader(
     }
     private val cache = object : LruCache<String, DecodedBitmap>(MEMORY_CACHE_BYTES) {
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
-            value.bitmap.allocationByteCount
+            value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
     }
     private val inFlight =
         ConcurrentHashMap<String, CompletableFuture<NativeImageResult>>()
@@ -215,6 +220,7 @@ internal class NativeImageLoader(
                         bitmap.bitmap,
                         bitmap.width,
                         bitmap.height,
+                        bitmap.animatedBytes,
                     ),
                     animate = false,
                 )
@@ -271,6 +277,7 @@ internal class NativeImageLoader(
                             decoded.bitmap,
                             decoded.width,
                             decoded.height,
+                            decoded.animatedBytes,
                         )
                     },
                     executor,
@@ -355,12 +362,17 @@ internal class NativeImageLoader(
     ) {
         if (active[view] !== pending || pending.finished) return
         pending.finished = true
-        display(
-            view,
-            result.bitmap,
-            pending.request.repeat,
-            if (animate) pending.request.fadeDurationMs else 0,
-        )
+        val animated = result.animatedBytes?.let { bytes ->
+            displayAnimated(view, bytes)
+        } ?: false
+        if (!animated) {
+            display(
+                view,
+                result.bitmap,
+                pending.request.repeat,
+                if (animate) pending.request.fadeDurationMs else 0,
+            )
+        }
         pending.callbacks.onSuccess(result)
         pending.callbacks.onEnd()
     }
@@ -421,6 +433,20 @@ internal class NativeImageLoader(
         } else {
             view.setImageDrawable(next)
         }
+    }
+
+    private fun displayAnimated(view: PamImageView, bytes: ByteArray): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return false
+        val drawable = runCatching {
+            ImageDecoder.decodeDrawable(
+                ImageDecoder.createSource(ByteBuffer.wrap(bytes)),
+            )
+        }.getOrNull() as? AnimatedImageDrawable ?: return false
+        (view.drawable as? AnimatedImageDrawable)?.stop()
+        drawable.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
+        view.setImageDrawable(drawable)
+        drawable.start()
+        return true
     }
 
     private fun loadBytes(
@@ -656,7 +682,45 @@ internal class NativeImageLoader(
         ) {
             "Unsupported image format."
         }
-        return DecodedBitmap(bitmap, bounds.outWidth, bounds.outHeight)
+        return DecodedBitmap(
+            bitmap,
+            bounds.outWidth,
+            bounds.outHeight,
+            bytes.takeIf(::isAnimatedImage),
+        )
+    }
+
+    private fun isAnimatedImage(bytes: ByteArray): Boolean {
+        if (bytes.size < 12) return false
+        if (
+            bytes[0] == 'G'.code.toByte() &&
+            bytes[1] == 'I'.code.toByte() &&
+            bytes[2] == 'F'.code.toByte()
+        ) {
+            return true
+        }
+        if (
+            bytes[0] == 'R'.code.toByte() &&
+            bytes[1] == 'I'.code.toByte() &&
+            bytes[2] == 'F'.code.toByte() &&
+            bytes[3] == 'F'.code.toByte() &&
+            bytes[8] == 'W'.code.toByte() &&
+            bytes[9] == 'E'.code.toByte() &&
+            bytes[10] == 'B'.code.toByte() &&
+            bytes[11] == 'P'.code.toByte()
+        ) {
+            for (index in 12..bytes.size - 4) {
+                if (
+                    bytes[index] == 'A'.code.toByte() &&
+                    bytes[index + 1] == 'N'.code.toByte() &&
+                    bytes[index + 2] == 'I'.code.toByte() &&
+                    bytes[index + 3] == 'M'.code.toByte()
+                ) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     private fun readBounded(
@@ -919,6 +983,7 @@ internal class NativeImageLoader(
         val bitmap: Bitmap,
         val width: Int,
         val height: Int,
+        val animatedBytes: ByteArray? = null,
     )
 
     private companion object {
