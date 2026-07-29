@@ -40,10 +40,6 @@ internal class HotReloadClient(
                 .trim()
             if (next.isEmpty() || next == version) return
             require(next.matches(Regex("[a-f0-9]{16,64}"))) { "Invalid hot reload version" }
-            if (version == null) {
-                version = next
-                return
-            }
             val bundle = request("$BASE_URL/bundle?version=$next", MAX_BUNDLE_BYTES)
             val destination = context.filesDir.resolve("pam/dev/$next")
             val entry = DevBundle.extract(bundle, destination)
