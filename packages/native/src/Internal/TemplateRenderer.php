@@ -18,6 +18,7 @@ use Pam\Native\AnimationFillMode;
 use Pam\Native\AnimationKeyframe;
 use Pam\Native\AnimationPlayState;
 use Pam\Native\BottomSheetKeyboardBehavior;
+use Pam\Native\Component;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\GestureComposition;
@@ -2389,8 +2390,19 @@ final class TemplateRenderer
 
         $reflection = self::reflectionProperty($scope, $property);
 
-        return static function (string $value) use ($reflection, $scope): void {
+        return static function (string $value) use ($property, $reflection, $scope): void {
+            $previous = $reflection->getValue($scope);
+            if ($previous === $value) {
+                return;
+            }
+            if ($scope instanceof Component) {
+                $scope->__pamNotifyUpdating($property, $value, $previous);
+            }
             $reflection->setValue($scope, $value);
+            if ($scope instanceof Component) {
+                $scope->__pamNotifyUpdated($property);
+                $scope->__pamFlushChanges();
+            }
         };
     }
 
@@ -2415,11 +2427,20 @@ final class TemplateRenderer
             );
         }
 
-        return static function (mixed $payload) use ($reflection, $scope): void {
-            $reflection->setValue(
-                $scope,
-                $payload === true || $payload === 1 || $payload === '1',
-            );
+        return static function (mixed $payload) use ($property, $reflection, $scope): void {
+            $value = $payload === true || $payload === 1 || $payload === '1';
+            $previous = $reflection->getValue($scope);
+            if ($previous === $value) {
+                return;
+            }
+            if ($scope instanceof Component) {
+                $scope->__pamNotifyUpdating($property, $value, $previous);
+            }
+            $reflection->setValue($scope, $value);
+            if ($scope instanceof Component) {
+                $scope->__pamNotifyUpdated($property);
+                $scope->__pamFlushChanges();
+            }
         };
     }
 

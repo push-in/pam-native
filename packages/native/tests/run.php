@@ -2249,6 +2249,7 @@ final class CounterCard extends Component
 
     #[State]
     public bool $enabled = false;
+    public string $draft = '';
 
     /** @var list<string> */
     public array $items = ['One', 'Two'];
@@ -2326,6 +2327,7 @@ final class CounterCard extends Component
             {{ $count === 0 ? 'Ready' : $count }}
         </Button>
         <Switch bind:checked="$enabled" />
+        <Input bind:value="$draft" />
         <Slot name="action">
             <Text>Fallback action</Text>
         </Slot>
@@ -2386,6 +2388,7 @@ $sfcElement = $dashboard->toElement();
 $sfcEncoded = (new TreeEncoder())->encode($sfcElement);
 $pressKey = null;
 $toggleKey = null;
+$inputKey = null;
 
 foreach (array_keys($sfcEncoded['callbacks']) as $callbackKey) {
     [, $kind] = array_map('intval', explode(':', $callbackKey));
@@ -2393,13 +2396,16 @@ foreach (array_keys($sfcEncoded['callbacks']) as $callbackKey) {
         $pressKey = $callbackKey;
     } elseif ($kind === EventKind::Toggle->value) {
         $toggleKey = $callbackKey;
+    } elseif ($kind === EventKind::Change->value) {
+        $inputKey = $callbackKey;
     }
 }
 
 $assert($pressKey !== null, '.pam.php @press event was not compiled.');
 $assert($toggleKey !== null, '.pam.php bind:checked event was not compiled.');
+$assert($inputKey !== null, '.pam.php bind:value event was not compiled.');
 $assert(
-    count($sfcElement->children()) === 11,
+    count($sfcElement->children()) === 12,
     '.pam.php v-if, iterable/integer v-for and slots did not compose correctly.',
 );
 $assert(
@@ -2449,6 +2455,25 @@ $assert(
     $dashboard->toElement()->children()[8]
         ->properties()[PropKey::Checked->value] === true,
     'bind:checked must update component state and rerender the native toggle.',
+);
+$assert(
+    in_array('updated:enabled', $counterClass::$lifecycle, true),
+    'bind:checked must invoke the component updated lifecycle hook.',
+);
+
+if ($inputKey === null) {
+    throw new RuntimeException('.pam.php input callback is missing.');
+}
+[$inputNode, $inputKind] = array_map('intval', explode(':', $inputKey));
+Runtime::dispatchEvent($inputNode, $inputKind, 'Offline draft');
+$afterInput = $dashboard->toElement();
+$assert(
+    $afterInput->children()[9]->properties()[PropKey::Value->value] === 'Offline draft',
+    'bind:value must update component state and rerender the native input.',
+);
+$assert(
+    in_array('updated:draft', $counterClass::$lifecycle, true),
+    'bind:value must invoke the component updated lifecycle hook.',
 );
 
 Runtime::shutdown();
@@ -2684,8 +2709,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.9',
-    'The runtime SDK contract must match the 0.5.9 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.10',
+    'The runtime SDK contract must match the 0.5.10 package release.',
 );
 
 $bottomSheet = BottomSheet::make(
