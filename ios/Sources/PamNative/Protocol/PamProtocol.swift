@@ -368,6 +368,7 @@ public enum PamConstants {
     public static let flexGrow = 7
     public static let accessibilityLabel = 17
     public static let fontWeight = 43
+    public static let imageFit = 54
     public static let letterSpacing = 89
     public static let lineHeight = 90
     public static let fontStyle = 128

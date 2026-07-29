@@ -337,6 +337,13 @@ final class PamMediaView: UIView {
         if value, player?.currentItem?.status == .readyToPlay { play() }
     }
     func setControls(_ value: Bool) { controller.showsPlaybackControls = value }
+    func setResizeMode(_ value: Int) {
+        controller.videoGravity = switch value {
+        case 1: .resizeAspectFill
+        case 3: .resize
+        default: .resizeAspect
+        }
+    }
     func setLoop(_ value: Bool) { looping = value }
     func setMuted(_ value: Bool) { muted = value; player?.isMuted = value }
     func setVolume(_ value: Float) {

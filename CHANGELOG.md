@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.36 - 2026-07-29
+
+- Apply the shared `ImageFit` contract to native video players on Android and
+  iOS, including aspect-fill `cover`, aspect-fit `contain`, and `stretch`.
+- Expose `MediaPlayer::fit()` in the PHP SDK and keep its reset behavior
+  consistent with native images.
+
 ## 0.5.35 - 2026-07-29
 
 - Keep PAM layout frames authoritative for Android images so intrinsic drawable

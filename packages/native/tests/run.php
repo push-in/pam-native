@@ -3184,8 +3184,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.35',
-    'The runtime SDK contract must match the 0.5.35 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.36',
+    'The runtime SDK contract must match the 0.5.36 package release.',
 );
 
 $bottomSheet = BottomSheet::make(
@@ -3257,12 +3257,14 @@ $webView = WebView::make('https://example.com')->javaScriptEnabled(false);
 $media = MediaPlayer::make('https://example.com/video.mp4', MediaType::Video)
     ->autoPlay()
     ->loop()
+    ->fit(ImageFit::Cover)
     ->volume(0.5);
 $assert(
     $webView->kind() === NodeKind::WebView
         && $webView->properties()[PropKey::WebViewJavaScriptEnabled->value] === false
         && $media->kind() === NodeKind::Media
-        && $media->properties()[PropKey::MediaLoop->value] === true,
+        && $media->properties()[PropKey::MediaLoop->value] === true
+        && $media->properties()[PropKey::ImageFit->value] === ImageFit::Cover->value,
     'WebView and MediaPlayer must compile into dedicated native node kinds.',
 );
 

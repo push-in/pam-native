@@ -1170,6 +1170,17 @@ public final class PamRenderer {
             if let imageView = view as? UIImageView, let source = value.textOrNil() {
                 loadImage(source, into: imageView, nodeId: nodeId)
             }
+        case PamConstants.imageFit:
+            let mode = Int(value.integerOrNil() ?? 1)
+            if let imageView = view as? UIImageView {
+                imageView.contentMode = switch mode {
+                case 2: .scaleAspectFit
+                case 3: .scaleToFill
+                case 4, 5: .center
+                default: .scaleAspectFill
+                }
+            }
+            (view as? PamMediaView)?.setResizeMode(mode)
         case PamConstants.width:
             if let width = value.decimalOrNil() {
                 var frame = view.frame
@@ -1470,6 +1481,9 @@ public final class PamRenderer {
         switch key {
         case PamConstants.backgroundColor:
             view.backgroundColor = .clear
+        case PamConstants.imageFit:
+            (view as? UIImageView)?.contentMode = .scaleAspectFill
+            (view as? PamMediaView)?.setResizeMode(1)
         case PamConstants.borderColor,
              PamConstants.borderWidth,
              PamConstants.borderLeftWidth,

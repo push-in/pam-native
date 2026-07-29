@@ -42,4 +42,28 @@ class PamMediaFileTest {
         assertEquals(false, shouldUseResolvedMediaUri(false, "file"))
         assertEquals(false, shouldUseResolvedMediaUri(false, "https"))
     }
+
+    @Test
+    fun coverUniformlyScalesPortraitVideoPastContainerBounds() {
+        val scale = resolveVideoScale(1, 1028, 1024, 576, 1024)
+
+        assertEquals(1028f / 576f, scale.first, 0.0001f)
+        assertEquals(1028f / 576f, scale.second, 0.0001f)
+    }
+
+    @Test
+    fun containKeepsVideoViewAspectFitScale() {
+        val scale = resolveVideoScale(2, 1028, 1024, 576, 1024)
+
+        assertEquals(1f, scale.first, 0f)
+        assertEquals(1f, scale.second, 0f)
+    }
+
+    @Test
+    fun stretchIndependentlyScalesBothAxes() {
+        val scale = resolveVideoScale(3, 1028, 1024, 576, 1024)
+
+        assertEquals(1028f / 576f, scale.first, 0.0001f)
+        assertEquals(1f, scale.second, 0.0001f)
+    }
 }

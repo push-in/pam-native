@@ -8,6 +8,7 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
+use Pam\Native\ImageFit;
 use Pam\Native\Internal\Wire;
 use Pam\Native\MediaType;
 use Pam\Native\MediaCachePolicy;
@@ -69,6 +70,11 @@ final class MediaPlayer extends Element
     public function playbackRate(float $rate): self
     {
         return $this->withProperty(PropKey::MediaPlaybackRate, max(0.25, min(4.0, $rate)));
+    }
+
+    public function fit(ImageFit $fit): self
+    {
+        return $this->withProperty(PropKey::ImageFit, $fit->value);
     }
 
     public function cache(

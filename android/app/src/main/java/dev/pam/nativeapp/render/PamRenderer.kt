@@ -1315,6 +1315,7 @@ class PamRenderer(
                     4, 5 -> ImageView.ScaleType.CENTER
                     else -> ImageView.ScaleType.CENTER_CROP
                 }
+                (view as? PamMediaView)?.setResizeMode(value.integer().toInt())
                 loadImage(view, state)
             }
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList =
@@ -1907,6 +1908,7 @@ class PamRenderer(
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
             PropKey.IMAGE_FIT -> {
                 imageView(view)?.scaleType = ImageView.ScaleType.CENTER_CROP
+                (view as? PamMediaView)?.setResizeMode(1)
                 loadImage(view, state)
             }
             PropKey.IMAGE_DEFAULT_SOURCE,

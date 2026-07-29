@@ -34,6 +34,25 @@ internal fun resolvePamMediaFile(root: File, source: String): File {
 internal fun shouldUseResolvedMediaUri(cachedIsEmpty: Boolean, cachedScheme: String?): Boolean =
     cachedIsEmpty || cachedScheme.equals("pam-file", ignoreCase = true)
 
+internal fun resolveVideoScale(
+    resizeMode: Int,
+    containerWidth: Int,
+    containerHeight: Int,
+    videoWidth: Int,
+    videoHeight: Int,
+): Pair<Float, Float> {
+    if (containerWidth <= 0 || containerHeight <= 0 || videoWidth <= 0 || videoHeight <= 0) {
+        return 1f to 1f
+    }
+    val scaleX = containerWidth.toFloat() / videoWidth
+    val scaleY = containerHeight.toFloat() / videoHeight
+    return when (resizeMode) {
+        1 -> maxOf(scaleX, scaleY).let { it to it }
+        3 -> scaleX to scaleY
+        else -> 1f to 1f
+    }
+}
+
 @SuppressLint("ViewConstructor") // Programmatic renderer injects its shared cache coordinator.
 internal class PamMediaView(
     context: Context,
@@ -48,6 +67,7 @@ internal class PamMediaView(
     private var muted = false
     private var volume = 1f
     private var rate = 1f
+    private var resizeMode = 1
     private var currentTime = 0.0
     private var preparedPlayer: MediaPlayer? = null
     private var resumeAfterPause = false
@@ -72,7 +92,12 @@ internal class PamMediaView(
     }
 
     init {
-        addView(video, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(
+            video,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
+                gravity = android.view.Gravity.CENTER
+            },
+        )
         video.setOnPreparedListener { player ->
             preparedPlayer = player
             player.isLooping = looping
@@ -80,6 +105,7 @@ internal class PamMediaView(
             player.playbackParams = player.playbackParams.setSpeed(rate)
             if (currentTime > 0) video.seekTo((currentTime * 1_000).toInt())
             if (autoPlay) video.start()
+            video.post(::applyVideoTransform)
             onReady?.invoke()
         }
         video.setOnCompletionListener {
@@ -175,6 +201,11 @@ internal class PamMediaView(
         preparedPlayer?.let { it.playbackParams = it.playbackParams.setSpeed(rate) }
     }
 
+    fun setResizeMode(value: Int) {
+        resizeMode = value.coerceIn(1, 5)
+        video.post(::applyVideoTransform)
+    }
+
     fun onHostPause() {
         resumeAfterPause = video.isPlaying
         video.pause()
@@ -190,6 +221,25 @@ internal class PamMediaView(
     private fun applyAudio(player: MediaPlayer) {
         val actual = if (muted) 0f else volume
         player.setVolume(actual, actual)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        applyVideoTransform()
+    }
+
+    private fun applyVideoTransform() {
+        val (scaleX, scaleY) = resolveVideoScale(
+            resizeMode,
+            width,
+            height,
+            video.width,
+            video.height,
+        )
+        video.pivotX = video.width / 2f
+        video.pivotY = video.height / 2f
+        video.scaleX = scaleX
+        video.scaleY = scaleY
     }
 
     override fun onDetachedFromWindow() {
