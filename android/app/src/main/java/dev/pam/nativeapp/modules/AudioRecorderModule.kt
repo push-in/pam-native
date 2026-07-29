@@ -5,13 +5,20 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
 import android.os.SystemClock
+import android.os.Handler
+import android.os.Looper
 import androidx.core.content.ContextCompat
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
 import java.net.URI
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 internal class AudioRecorderModule(private val context: Context) : NativeModule, AutoCloseable {
+    private val main = Handler(Looper.getMainLooper())
+    private val nextWatchId = AtomicInteger(1)
+    private val watches = ConcurrentHashMap<Int, RecorderWatch>()
     private var recorder: MediaRecorder? = null
     private var output: File? = null
     private var startedAt = 0L
@@ -23,6 +30,12 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
                 "stop" -> stop(completion)
                 "cancel" -> cancel(completion)
                 "discard" -> discard(payload, completion)
+                "watch" -> watch(payload, completion)
+                "next" -> recorderWatch(payload).channel.next(completion)
+                "unwatch" -> {
+                    stopWatch(subscription(payload))
+                    completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                }
                 else -> error("Unknown audio recorder method $method")
             }
         }.onFailure { error ->
@@ -62,6 +75,7 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
         val active = recorder ?: error("No audio recording is active")
         val file = output ?: error("Audio recording output is unavailable")
         val durationMs = (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L)
+        stopWatches()
         recorder = null
         output = null
         startedAt = 0L
@@ -105,7 +119,63 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
     }
 
+    private fun watch(payload: ByteArray, completion: ModuleCompletion) {
+        require(recorder != null) { "No audio recording is active" }
+        val interval = ((WireMap.decode(payload)["intervalMs"] as? WireValue.Integer)?.value ?: 100)
+            .coerceIn(50, 1_000)
+        val id = nextWatchId.getAndIncrement()
+        val channel = WatchChannel()
+        lateinit var runnable: Runnable
+        runnable = Runnable {
+            val active = recorder
+            if (!watches.containsKey(id) || active == null) {
+                stopWatch(id)
+                return@Runnable
+            }
+            val amplitude = runCatching { active.maxAmplitude }.getOrDefault(0)
+                .toDouble()
+                .div(32_767.0)
+                .coerceIn(0.0, 1.0)
+            channel.offer(
+                WireMap.encode(
+                    mapOf(
+                        "durationMs" to WireValue.Integer(
+                            (SystemClock.elapsedRealtime() - startedAt).coerceAtLeast(0L),
+                        ),
+                        "amplitude" to WireValue.Decimal(amplitude),
+                    ),
+                ),
+            )
+            main.postDelayed(runnable, interval)
+        }
+        watches[id] = RecorderWatch(channel, runnable)
+        main.post(runnable)
+        completion.complete(
+            ModuleResultStatus.SUCCESS,
+            WireMap.encode(mapOf("subscription" to WireValue.Integer(id.toLong()))),
+        )
+    }
+
+    private fun subscription(payload: ByteArray): Int =
+        ((WireMap.decode(payload)["subscription"] as? WireValue.Integer)?.value
+            ?: error("Audio recorder subscription is required")).toInt()
+
+    private fun recorderWatch(payload: ByteArray): RecorderWatch =
+        watches[subscription(payload)] ?: error("Audio recorder observation not found")
+
+    private fun stopWatch(id: Int) {
+        watches.remove(id)?.let {
+            main.removeCallbacks(it.runnable)
+            it.channel.close()
+        }
+    }
+
+    private fun stopWatches() {
+        watches.keys.toList().forEach(::stopWatch)
+    }
+
     private fun release(deleteOutput: Boolean) {
+        stopWatches()
         recorder?.let { active ->
             runCatching { active.stop() }
             runCatching { active.reset() }
@@ -120,4 +190,9 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
     override fun close() {
         release(deleteOutput = true)
     }
+
+    private data class RecorderWatch(
+        val channel: WatchChannel,
+        val runnable: Runnable,
+    )
 }

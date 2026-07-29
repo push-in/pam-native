@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.26 - 2026-07-29
+
+- Add cross-platform `AudioRecorder::watch()` telemetry with coalesced native
+  duration and normalized amplitude samples on Android and iOS.
+- Stop recorder observations automatically when a recording is stopped,
+  cancelled or the runtime closes.
+
 ## 0.5.25 - 2026-07-29
 
 - Add guarded `count()` and strict-capable `in_array()` collection helpers to
