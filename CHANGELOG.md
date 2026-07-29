@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.22 - 2026-07-29
+
+- Resolve `pam-file:///` video and audio sources into the application sandbox
+  before Android playback, with the same authority, traversal, existence and
+  percent-decoding guarantees already used by native images.
+
 ## 0.5.21 - 2026-07-29
 
 - Cancel competing `Pressable` tap and long-press semantics as soon as a
