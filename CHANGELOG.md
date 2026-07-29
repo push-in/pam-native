@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.18 - 2026-07-29
 
 - Deliver HTTP transport failures as status-zero `HttpResponse` values with a
   typed error instead of throwing across the component runtime.
