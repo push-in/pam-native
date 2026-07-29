@@ -31,6 +31,9 @@ internal fun resolvePamMediaFile(root: File, source: String): File {
     return candidate
 }
 
+internal fun shouldUseResolvedMediaUri(cachedIsEmpty: Boolean, cachedScheme: String?): Boolean =
+    cachedIsEmpty || cachedScheme.equals("pam-file", ignoreCase = true)
+
 @SuppressLint("ViewConstructor") // Programmatic renderer injects its shared cache coordinator.
 internal class PamMediaView(
     context: Context,
@@ -130,7 +133,13 @@ internal class PamMediaView(
                 ),
             ) { cached ->
                 if (generation == sourceGeneration) {
-                    video.setVideoURI(if (cached == Uri.EMPTY) resolved else cached)
+                    video.setVideoURI(
+                        if (shouldUseResolvedMediaUri(cached == Uri.EMPTY, cached.scheme)) {
+                            resolved
+                        } else {
+                            cached
+                        },
+                    )
                 }
             }
         }

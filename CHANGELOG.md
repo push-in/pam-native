@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.24 - 2026-07-29
+
+- Keep the resolved Android sandbox file URI after the media-cache pass instead
+  of allowing its no-op result to restore the original `pam-file:///` source.
+
 ## 0.5.23 - 2026-07-29
 
 - Preserve the provider's original display name when Android and iOS import a

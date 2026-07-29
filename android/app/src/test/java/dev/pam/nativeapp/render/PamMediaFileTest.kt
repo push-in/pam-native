@@ -34,4 +34,12 @@ class PamMediaFileTest {
             resolvePamMediaFile(root, "pam-file:///missing.mp4")
         }
     }
+
+    @Test
+    fun cachePassCannotRestoreOpaqueSandboxScheme() {
+        assertEquals(true, shouldUseResolvedMediaUri(false, "pam-file"))
+        assertEquals(true, shouldUseResolvedMediaUri(true, null))
+        assertEquals(false, shouldUseResolvedMediaUri(false, "file"))
+        assertEquals(false, shouldUseResolvedMediaUri(false, "https"))
+    }
 }
