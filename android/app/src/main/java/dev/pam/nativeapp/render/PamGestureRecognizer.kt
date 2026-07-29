@@ -82,6 +82,8 @@ internal class PamGestureRecognizer(private val view: View) {
 
     fun isEnabled(): Boolean = config?.enabled == true && emit != null
 
+    fun hasRecognized(): Boolean = recognized
+
     fun ownsTouchStream(): Boolean =
         isEnabled() && (
             config?.composition == COMPOSITION_EXCLUSIVE ||

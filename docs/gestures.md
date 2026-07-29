@@ -47,3 +47,7 @@ Composition defaults to `exclusive`. `simultaneous` permits recognition
 alongside scroll and child recognizers. `race` lets the first recognizer that
 begins own the interaction. Critical actions must still expose a visible,
 non-gesture alternative for accessibility.
+
+Once movement recognizes a gesture, competing `Pressable` press and long-press
+semantics on that same node are cancelled. This prevents a pan or swipe from
+also triggering a tap or contextual menu when the pointer is released.

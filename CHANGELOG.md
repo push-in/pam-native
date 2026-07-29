@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.21 - 2026-07-29
+
+- Cancel competing `Pressable` tap and long-press semantics as soon as a
+  composed native gesture recognizes movement, preventing pan/swipe actions
+  from also opening contextual menus.
+
 ## 0.5.20 - 2026-07-29
 
 - Keep fixed header and footer dimensions intact inside Android
