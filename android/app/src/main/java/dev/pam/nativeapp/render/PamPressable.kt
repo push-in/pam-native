@@ -136,6 +136,13 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         gestureRecognizer.onTouch(event)
+        if (gestureRecognitionCancelsPress(
+                recognized = gestureRecognizer.hasRecognized(),
+                pressActive = gestureActive,
+            )
+        ) {
+            cancelGesture(emitOut = true)
+        }
         return super.dispatchTouchEvent(event)
     }
 
@@ -388,3 +395,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         const val PRESS_OUT_ANIMATION_MS = 110L
     }
 }
+
+internal fun gestureRecognitionCancelsPress(
+    recognized: Boolean,
+    pressActive: Boolean,
+): Boolean = recognized && pressActive
