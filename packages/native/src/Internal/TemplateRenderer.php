@@ -57,6 +57,7 @@ use Pam\Native\TextBreakStrategy;
 use Pam\Native\TextDataDetectorType;
 use Pam\Native\TextEllipsizeMode;
 use Pam\Native\TextHyphenationFrequency;
+use Pam\Native\TextAlignment;
 use Pam\Native\UI\ActivityIndicator;
 use Pam\Native\UI\Animated;
 use Pam\Native\UI\Button;
@@ -1691,7 +1692,13 @@ final class TemplateRenderer
                 'end' => 3, 'flex-end' => 3, 'space-between' => 4,
                 'space-around' => 5, 'space-evenly' => 6,
             ]),
-            PropKey::TextAlign => self::named($value, ['start' => 1, 'center' => 2, 'end' => 3]),
+            PropKey::TextAlign => self::named($value, [
+                'start' => TextAlignment::Start->value,
+                'left' => TextAlignment::Start->value,
+                'center' => TextAlignment::Center->value,
+                'end' => TextAlignment::End->value,
+                'right' => TextAlignment::End->value,
+            ]),
             PropKey::DrawingMode => self::named($value, [
                 'brush' => DrawingMode::Brush->value,
                 'eraser' => DrawingMode::Eraser->value,

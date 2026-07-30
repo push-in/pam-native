@@ -220,7 +220,8 @@ family and resolves the matching packaged `@font-face`.
 Conservative auto-width text frames follow the relevant flex alignment axis:
 `align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
 sized or growing text keeps normal start alignment unless `text-align` is
-authored.
+authored. `text-align` accepts the familiar CSS values `left`, `center`, and
+`right`, plus the logical aliases `start` and `end`.
 
 `pam-native-format` removes an empty `<style scoped>` block automatically, so
 components that rely only on `src/app.css` keep no placeholder markup.

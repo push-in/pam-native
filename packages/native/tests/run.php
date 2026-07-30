@@ -516,6 +516,35 @@ $assert(
         && $inheritText->properties()[PropKey::TextAlign->value] === 2,
     'Text CSS properties and logical font families must inherit through native layout containers.',
 );
+$textAlignmentCss = ScopedStyleCompiler::compile(
+    '.left { text-align: left; } .right { text-align: right; }',
+    'TextAlignmentCss.pam.php',
+);
+$textAlignmentTemplate = TemplateCompiler::compile(
+    '<Column><Text class="left">Left</Text><Text class="right">Right</Text></Column>',
+);
+$textAlignmentStyled = new CompiledTemplateNode(
+    kind: $textAlignmentTemplate->kind,
+    name: $textAlignmentTemplate->name,
+    attributes: [
+        ...$textAlignmentTemplate->attributes,
+        '__pamStyles' => json_encode($textAlignmentCss, JSON_THROW_ON_ERROR),
+    ],
+    source: $textAlignmentTemplate->source,
+    line: $textAlignmentTemplate->line,
+    column: $textAlignmentTemplate->column,
+    value: $textAlignmentTemplate->value,
+);
+$textAlignmentStyled->children = $textAlignmentTemplate->children;
+$textAlignmentChildren = TemplateRenderer::render($textAlignmentStyled, null, [])
+    ->children();
+$assert(
+    $textAlignmentChildren[0]->properties()[PropKey::TextAlign->value]
+        === \Pam\Native\TextAlignment::Start->value
+        && $textAlignmentChildren[1]->properties()[PropKey::TextAlign->value]
+        === \Pam\Native\TextAlignment::End->value,
+    'CSS text-align must accept the web left/right aliases.',
+);
 $cssImportRoot = sys_get_temp_dir().'/pam-native-css-import-'.getmypid();
 mkdir($cssImportRoot.'/src/styles', 0o755, true);
 mkdir($cssImportRoot.'/src/screens', 0o755, true);
@@ -4150,8 +4179,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.77',
-    'The runtime SDK contract must match the 0.5.77 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.78',
+    'The runtime SDK contract must match the 0.5.78 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

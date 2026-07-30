@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.78 - 2026-07-30
+
+- Accept the standard CSS `text-align: left` and `text-align: right` values as
+  aliases for PAM's direction-aware `start` and `end` alignment. Existing
+  templates keep their behavior, while web-style component CSS no longer
+  fails during mount.
+
 ## 0.5.77 - 2026-07-30
 
 - Position absolute flex children with automatic insets from their CSS static
