@@ -220,7 +220,11 @@ Absolute position edges accept percentages, and the familiar one-to-four-value
 Restricted template expressions support safe numeric arithmetic and PHP `.`
 string concatenation with normal operator precedence. Right-associative PHP
 `??` safely falls back from null or missing nested paths. No expression uses
-`eval`.
+`eval`. Pure string transforms are available through an explicit allowlist:
+`trim`, `ltrim`, `rtrim`, `strlen`, `mb_strlen`, `substr`, `mb_substr`,
+`strtolower`, `strtoupper`, `mb_strtolower`, and `mb_strtoupper`. Collection
+helpers remain limited to `count` and `in_array`; unlisted PHP functions cannot
+execute from a template.
 False conditional component roots render as inert zero-layout placeholders.
 
 `overflow: hidden` follows the authored native border path. A rounded

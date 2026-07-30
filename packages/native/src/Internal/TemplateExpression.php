@@ -480,6 +480,21 @@ final class TemplateExpression
                 $arguments[2] ?? false,
             );
         }
+        if (in_array($builtIn, [
+            'trim',
+            'ltrim',
+            'rtrim',
+            'strlen',
+            'mb_strlen',
+            'substr',
+            'mb_substr',
+            'strtolower',
+            'strtoupper',
+            'mb_strtolower',
+            'mb_strtoupper',
+        ], true)) {
+            return self::invokeStringHelper($builtIn, $arguments);
+        }
         if ($this->scope === null || !method_exists($this->scope, $name)) {
             throw new RuntimeException("Template method {$name} does not exist.");
         }
@@ -489,6 +504,156 @@ final class TemplateExpression
         }
 
         return $method->invokeArgs($this->scope, $arguments);
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function invokeStringHelper(string $name, array $arguments): mixed
+    {
+        return match ($name) {
+            'trim', 'ltrim', 'rtrim' => self::trimValue($name, $arguments),
+            'strlen', 'strtolower', 'strtoupper' =>
+                self::singleStringValue($name, $arguments),
+            'mb_strlen', 'mb_strtolower', 'mb_strtoupper' =>
+                self::multibyteStringValue($name, $arguments),
+            'substr' => self::substringValue($arguments),
+            'mb_substr' => self::multibyteSubstringValue($arguments),
+            default => throw new RuntimeException(
+                "Template string helper {$name} is not supported.",
+            ),
+        };
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function trimValue(string $name, array $arguments): string
+    {
+        if (
+            (count($arguments) !== 1 && count($arguments) !== 2)
+            || !is_string($arguments[0] ?? null)
+            || (isset($arguments[1]) && !is_string($arguments[1]))
+        ) {
+            throw new RuntimeException(
+                "Template {$name}() expects a string and an optional character mask.",
+            );
+        }
+
+        return match ($name) {
+            'trim' => count($arguments) === 2
+                ? trim($arguments[0], $arguments[1])
+                : trim($arguments[0]),
+            'ltrim' => count($arguments) === 2
+                ? ltrim($arguments[0], $arguments[1])
+                : ltrim($arguments[0]),
+            'rtrim' => count($arguments) === 2
+                ? rtrim($arguments[0], $arguments[1])
+                : rtrim($arguments[0]),
+            default => throw new RuntimeException(
+                "Template string helper {$name} is not supported.",
+            ),
+        };
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function singleStringValue(string $name, array $arguments): int|string
+    {
+        if (count($arguments) !== 1 || !is_string($arguments[0] ?? null)) {
+            throw new RuntimeException(
+                "Template {$name}() expects exactly one string.",
+            );
+        }
+
+        return match ($name) {
+            'strlen' => strlen($arguments[0]),
+            'strtolower' => strtolower($arguments[0]),
+            'strtoupper' => strtoupper($arguments[0]),
+            default => throw new RuntimeException(
+                "Template string helper {$name} is not supported.",
+            ),
+        };
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function multibyteStringValue(string $name, array $arguments): int|string
+    {
+        if (
+            (count($arguments) !== 1 && count($arguments) !== 2)
+            || !is_string($arguments[0] ?? null)
+            || (isset($arguments[1]) && !is_string($arguments[1]))
+        ) {
+            throw new RuntimeException(
+                "Template {$name}() expects a string and an optional encoding.",
+            );
+        }
+
+        return match ($name) {
+            'mb_strlen' => count($arguments) === 2
+                ? mb_strlen($arguments[0], $arguments[1])
+                : mb_strlen($arguments[0]),
+            'mb_strtolower' => count($arguments) === 2
+                ? mb_strtolower($arguments[0], $arguments[1])
+                : mb_strtolower($arguments[0]),
+            'mb_strtoupper' => count($arguments) === 2
+                ? mb_strtoupper($arguments[0], $arguments[1])
+                : mb_strtoupper($arguments[0]),
+            default => throw new RuntimeException(
+                "Template string helper {$name} is not supported.",
+            ),
+        };
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function substringValue(array $arguments): string
+    {
+        if (
+            count($arguments) < 2
+            || count($arguments) > 3
+            || !is_string($arguments[0] ?? null)
+            || !is_int($arguments[1] ?? null)
+            || (
+                count($arguments) === 3
+                && !is_int($arguments[2])
+                && $arguments[2] !== null
+            )
+        ) {
+            throw new RuntimeException(
+                'Template substr() expects a string, integer offset, and optional integer length.',
+            );
+        }
+
+        return count($arguments) === 3
+            ? substr($arguments[0], $arguments[1], $arguments[2])
+            : substr($arguments[0], $arguments[1]);
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function multibyteSubstringValue(array $arguments): string
+    {
+        if (
+            count($arguments) < 2
+            || count($arguments) > 4
+            || !is_string($arguments[0] ?? null)
+            || !is_int($arguments[1] ?? null)
+            || (
+                count($arguments) >= 3
+                && !is_int($arguments[2])
+                && $arguments[2] !== null
+            )
+            || (isset($arguments[3]) && !is_string($arguments[3]))
+        ) {
+            throw new RuntimeException(
+                'Template mb_substr() expects a string, integer offset, optional integer length, and optional encoding.',
+            );
+        }
+
+        return match (count($arguments)) {
+            2 => mb_substr($arguments[0], $arguments[1]),
+            3 => mb_substr($arguments[0], $arguments[1], $arguments[2]),
+            default => mb_substr(
+                $arguments[0],
+                $arguments[1],
+                $arguments[2],
+                $arguments[3],
+            ),
+        };
     }
 
     /** @return array{type: int|string, text: string}|null */

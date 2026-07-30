@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.87 - 2026-07-30
+
+- Add an explicit pure-function allowlist to restricted template expressions
+  for `trim`, `ltrim`, `rtrim`, byte/multibyte length, substring, and casing
+  helpers.
+- Compose those helpers in interpolations and conditional attributes without
+  `eval`, while preserving public component-method calls.
+- Reject filesystem, process, network, dynamic, and every other unlisted PHP
+  function, with regression coverage for the exact nested expressions used by
+  native search, comments, chat, and group-call screens.
+
 ## 0.5.86 - 2026-07-30
 
 - Resolve safe-area padding against the system-bar space already consumed by

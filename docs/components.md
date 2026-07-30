@@ -259,7 +259,11 @@ precedence: `+`, `-`, `*`, `/`, integer `%`, and parentheses. For example,
 PHP `.` concatenation accepts scalar, null, and `Stringable` operands, so
 `'@'.$username` is valid without allowing array-to-string warnings. PHP `??`
 returns the first present non-null value and safely handles missing nested
-array or property paths.
+array or property paths. Templates may compose the pure helpers `trim`,
+`ltrim`, `rtrim`, `strlen`, `mb_strlen`, `substr`, `mb_substr`, `strtolower`,
+`strtoupper`, `mb_strtolower`, `mb_strtoupper`, `count`, and `in_array`.
+Every other bare PHP function remains unavailable; application behavior stays
+in public component methods and expressions never use `eval`.
 
 Supported CSS covers PAM's common native layout and paint contracts:
 

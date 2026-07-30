@@ -3879,6 +3879,47 @@ $assert(
 );
 $assert(
     \Pam\Native\Internal\TemplateExpression::evaluate(
+        'mb_strlen(trim($query)) < 2',
+        null,
+        ['query' => ' á '],
+    ) === true,
+    'Template expressions must compose safe whitespace and multibyte string helpers.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        'mb_strtoupper(mb_substr($author, 0, 1))',
+        null,
+        ['author' => 'élida'],
+    ) === 'É',
+    'Template expressions must expose safe multibyte substring and casing helpers.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        'strtoupper(substr(trim($label), 0, 3))',
+        null,
+        ['label' => ' pam native '],
+    ) === 'PAM',
+    'Template expressions must expose safe byte-string helpers without eval.',
+);
+$unsafeTemplateFunctionRejected = false;
+try {
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        'file_get_contents($path)',
+        null,
+        ['path' => '/etc/passwd'],
+    );
+} catch (RuntimeException $error) {
+    $unsafeTemplateFunctionRejected = str_contains(
+        $error->getMessage(),
+        'does not exist',
+    );
+}
+$assert(
+    $unsafeTemplateFunctionRejected,
+    'Template expressions must reject functions outside the explicit pure helper allowlist.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
         '72 + $bottomSpacing * 2',
         null,
         ['bottomSpacing' => 12],
@@ -4338,8 +4379,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.86',
-    'The runtime SDK contract must match the 0.5.86 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.87',
+    'The runtime SDK contract must match the 0.5.87 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
