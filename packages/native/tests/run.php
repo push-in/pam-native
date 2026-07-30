@@ -3184,8 +3184,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.41',
-    'The runtime SDK contract must match the 0.5.41 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.42',
+    'The runtime SDK contract must match the 0.5.42 package release.',
 );
 $assert(
     array_map(

@@ -87,6 +87,22 @@ PHP.
 `breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
 selection, fitting, line breaking and link detection inside `TextView`.
 
+Android project fonts can be bundled in the application source and loaded
+through an asset family:
+
+```xml
+<Text
+    fontFamily="asset://assets/fonts/Brand-Bold.ttf"
+    fontSize="20"
+>
+    Brand title
+</Text>
+```
+
+The path resolves below the packaged `pam/` asset root. PAM accepts TTF and OTF
+files, rejects traversal, caches decoded `Typeface` instances, and keeps
+ordinary installed family names such as `sans-serif` working unchanged.
+
 `Input` and its `TextInput` alias keep composition, selection and the editable
 buffer inside a dedicated Android `EditText`. They support React
 Native-compatible capitalization, correction, input mode, autofill,

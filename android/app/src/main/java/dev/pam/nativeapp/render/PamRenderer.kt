@@ -136,6 +136,7 @@ class PamRenderer(
     private val imageLoader = NativeImageLoader(context)
     private val mediaCache = NativeMediaFileCache(context)
     private val nativeViews = NativeViewRegistry(context)
+    private val typefaces = NativeTypefaceLoader(context)
     private var rootId = 0L
     private var nextMountOrder = 1L
     private var statusBarDefaults: StatusBarConfig? = null
@@ -3812,11 +3813,7 @@ class PamRenderer(
             else -> Typeface.NORMAL
         }
         val family = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value
-        view.typeface = if (family != null) {
-            Typeface.create(family, style)
-        } else {
-            Typeface.defaultFromStyle(style)
-        }
+        view.typeface = typefaces.resolve(family, style)
     }
 
     private fun applySafeAreaBottom(view: View, state: NodeState, enabled: Boolean) {

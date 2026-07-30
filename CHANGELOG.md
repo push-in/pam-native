@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.42 - 2026-07-29
+
+- Load project-packaged TTF and OTF families through `fontFamily="asset://…"`
+  on Android, with guarded asset paths and a per-renderer native typeface cache.
+- Preserve Android installed-family behavior for ordinary font family names and
+  fall back safely when a packaged font cannot be decoded.
+
 ## 0.5.41 - 2026-07-29
 
 - Prune obsolete content-addressed Android application releases outside the
