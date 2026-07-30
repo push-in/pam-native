@@ -3756,6 +3756,39 @@ $assert(
     ) === 0,
     'Template arithmetic must support grouping and integer modulo.',
 );
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        "'@'.\$username.' · '.(\$count + 1)",
+        null,
+        ['username' => 'pam', 'count' => 2],
+    ) === '@pam · 3',
+    'Template expressions must support PHP string concatenation with arithmetic precedence.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$props.title',
+        null,
+        ['props' => ['title' => 'Profile']],
+    ) === 'Profile',
+    'Template dot-property paths must remain distinct from string concatenation.',
+);
+$concatenationRejected = false;
+try {
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        "'items: '.\$items",
+        null,
+        ['items' => ['one']],
+    );
+} catch (RuntimeException $error) {
+    $concatenationRejected = str_contains(
+        $error->getMessage(),
+        'requires scalar, null, or Stringable operands',
+    );
+}
+$assert(
+    $concatenationRejected,
+    'Template concatenation must reject arrays instead of coercing them with a warning.',
+);
 
 TemplateRegistry::reset();
 App::components($pamPhpDirectory, $pamPhpCache);
@@ -4117,8 +4150,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.75',
-    'The runtime SDK contract must match the 0.5.75 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.76',
+    'The runtime SDK contract must match the 0.5.76 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

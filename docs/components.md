@@ -228,6 +228,8 @@ components that rely only on `src/app.css` keep no placeholder markup.
 Template expressions support safe numeric arithmetic with conventional
 precedence: `+`, `-`, `*`, `/`, integer `%`, and parentheses. For example,
 `:height="72 + $bottomSpacing"` stays typed and is evaluated without `eval`.
+PHP `.` concatenation accepts scalar, null, and `Stringable` operands, so
+`'@'.$username` is valid without allowing array-to-string warnings.
 
 Supported CSS covers PAM's common native layout and paint contracts:
 

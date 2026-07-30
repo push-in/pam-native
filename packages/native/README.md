@@ -171,8 +171,9 @@ for source compatibility. Prefer stylesheet colors when authoring CSS-style
 hex, and CSS color functions.
 
 Template bindings support safe numeric `+`, `-`, `*`, `/`, integer `%`, and
-parentheses with ordinary precedence; the restricted interpreter does not use
-`eval`.
+parentheses with ordinary precedence. PHP `.` concatenation accepts scalar,
+null, and `Stringable` operands while rejecting arrays; the restricted
+interpreter does not use `eval`.
 Conditional component roots may use `p-if`; a false root becomes an inert
 invisible placeholder with no layout footprint.
 

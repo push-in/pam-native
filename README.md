@@ -200,8 +200,8 @@ Native retained layout also supports `flex-wrap`; `inset` and
 `translation-x/y` compile directly to typed native properties.
 Absolute position edges accept percentages, and the familiar one-to-four-value
 `border-radius` shorthand compiles to native per-corner radii.
-Restricted template expressions support safe numeric arithmetic with normal
-operator precedence and no `eval`.
+Restricted template expressions support safe numeric arithmetic and PHP `.`
+string concatenation with normal operator precedence and no `eval`.
 False conditional component roots render as inert zero-layout placeholders.
 
 `overflow: hidden` follows the authored native border path. A rounded

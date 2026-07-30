@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.76 - 2026-07-30
+
+- Add safe PHP `.` string concatenation to template expressions with PHP 8
+  arithmetic precedence, while preserving PAM's `$object.property` shorthand.
+  Only scalar, null, and `Stringable` operands are accepted; arrays and other
+  unsafe coercions fail during rendering.
+
 ## 0.5.75 - 2026-07-30
 
 - Resolve Android `StatusBar` from the active retained navigation route instead

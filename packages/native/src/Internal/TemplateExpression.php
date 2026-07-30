@@ -144,7 +144,7 @@ final class TemplateExpression
 
     private function comparison(): mixed
     {
-        $value = $this->additive();
+        $value = $this->concatenation();
 
         while (true) {
             $operator = $this->takeOne([
@@ -156,7 +156,7 @@ final class TemplateExpression
             if ($operator === null) {
                 return $value;
             }
-            $right = $this->additive();
+            $right = $this->concatenation();
             $value = match ($operator) {
                 T_IS_GREATER_OR_EQUAL => $value >= $right,
                 T_IS_SMALLER_OR_EQUAL => $value <= $right,
@@ -167,6 +167,18 @@ final class TemplateExpression
                 ),
             };
         }
+    }
+
+    private function concatenation(): mixed
+    {
+        $value = $this->additive();
+
+        while ($this->take('.')) {
+            $right = $this->additive();
+            $value = self::stringOperand($value).self::stringOperand($right);
+        }
+
+        return $value;
     }
 
     private function additive(): mixed
@@ -349,7 +361,7 @@ final class TemplateExpression
         }
 
         while (true) {
-            if ($this->take(T_OBJECT_OPERATOR) || $this->take('.')) {
+            if ($this->take(T_OBJECT_OPERATOR) || $this->takePropertyDot()) {
                 $segment = $this->peek();
                 if ($segment === null || $segment['type'] !== T_STRING) {
                     throw new RuntimeException('Template property path is invalid.');
@@ -383,6 +395,22 @@ final class TemplateExpression
         }
 
         return $value;
+    }
+
+    private function takePropertyDot(): bool
+    {
+        if (($this->tokens[$this->position]['type'] ?? null) !== '.') {
+            return false;
+        }
+        if (($this->tokens[$this->position + 1]['type'] ?? null) !== T_STRING) {
+            return false;
+        }
+        if (($this->tokens[$this->position + 2]['type'] ?? null) === '(') {
+            return false;
+        }
+        $this->position++;
+
+        return true;
     }
 
     /** @param list<mixed> $arguments */
@@ -526,5 +554,23 @@ final class TemplateExpression
                 "Template operator {$operator} requires numeric operands.",
             );
         }
+    }
+
+    private static function stringOperand(mixed $value): string
+    {
+        if (
+            $value === null
+            || is_string($value)
+            || is_int($value)
+            || is_float($value)
+            || is_bool($value)
+            || $value instanceof Stringable
+        ) {
+            return (string) $value;
+        }
+
+        throw new RuntimeException(
+            'Template concatenation requires scalar, null, or Stringable operands.',
+        );
     }
 }
