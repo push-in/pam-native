@@ -3398,6 +3398,87 @@ mod tests {
     }
 
     #[test]
+    fn icon_and_packaged_font_label_stay_centered_as_one_group() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Row,
+                        [
+                            (PropKey::Height, PropValue::Float(56.0)),
+                            (PropKey::Gap, PropValue::Float(8.0)),
+                            (PropKey::AlignItems, PropValue::Integer(2)),
+                            (PropKey::JustifyContent, PropValue::Integer(2)),
+                        ],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Image,
+                        [
+                            (PropKey::Width, PropValue::Float(18.0)),
+                            (PropKey::Height, PropValue::Float(18.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::Text,
+                        [
+                            (PropKey::Text, PropValue::String("Zé Chat".into())),
+                            (PropKey::FontSize, PropValue::Float(18.0)),
+                            (PropKey::LineHeight, PropValue::Float(24.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+        let metrics = TextMetrics::from([(
+            3,
+            std::sync::Arc::new(BTreeMap::from([
+                ('Z', 0.62),
+                ('é', 0.54),
+                (' ', 0.25),
+                ('C', 0.64),
+                ('h', 0.56),
+                ('a', 0.53),
+                ('t', 0.34),
+            ])),
+        )]);
+
+        let layouts = calculate_with_text_metrics(
+            &tree,
+            Size {
+                width: 320.0,
+                height: 56.0,
+            },
+            1.1,
+            &metrics,
+        )
+        .expect("centered icon and text layout");
+        let icon = layouts[&2];
+        let label = layouts[&3];
+
+        assert!((label.x - (icon.x + icon.width) - 8.0).abs() < f32::EPSILON);
+        assert!(((icon.x + label.x + label.width) / 2.0 - 160.0).abs() < 0.001);
+        assert!(((icon.y + icon.height / 2.0) - 28.0).abs() < 0.001);
+        assert!(((label.y + label.height / 2.0) - 28.0).abs() < 0.001);
+    }
+
+    #[test]
     fn logical_letter_spacing_is_not_multiplied_by_font_size() {
         let compact = node(
             1,
