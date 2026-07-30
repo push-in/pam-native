@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.65 - 2026-07-30
+
+- Add safe numeric `+`, `-`, `*`, `/`, and integer `%` operators to template
+  expressions with conventional precedence, grouping, numeric type checks, and
+  division-by-zero protection.
+
 ## 0.5.64 - 2026-07-30
 
 - Compile the complete one-to-four-value CSS `border-radius` shorthand into

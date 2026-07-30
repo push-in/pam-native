@@ -210,6 +210,10 @@ child component's template.
 `pam-native-format` removes an empty `<style scoped>` block automatically, so
 components that rely only on `src/app.css` keep no placeholder markup.
 
+Template expressions support safe numeric arithmetic with conventional
+precedence: `+`, `-`, `*`, `/`, integer `%`, and parentheses. For example,
+`:height="72 + $bottomSpacing"` stays typed and is evaluated without `eval`.
+
 Supported CSS covers PAM's common native layout and paint contracts:
 
 - dimensions, min/max dimensions, `aspect-ratio`, position edges and `z-index`;

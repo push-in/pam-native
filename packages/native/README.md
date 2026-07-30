@@ -142,7 +142,9 @@ supported. `border` and the directional `border-top`, `border-right`,
 `flex-wrap` are supported. Directional colors currently resolve to the shared
 native border color. Absolute position edges accept percentages and
 `border-radius` accepts one to four circular corner values. Unknown web-only
-CSS fails compilation.
+CSS fails compilation. Template bindings support safe numeric `+`, `-`, `*`,
+`/`, integer `%`, and parentheses with ordinary precedence; the restricted
+interpreter does not use `eval`.
 
 For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
 image/video metadata and `System\MediaLibrary::albums()` reads album summaries

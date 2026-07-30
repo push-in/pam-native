@@ -144,7 +144,7 @@ final class TemplateExpression
 
     private function comparison(): mixed
     {
-        $value = $this->unary();
+        $value = $this->additive();
 
         while (true) {
             $operator = $this->takeOne([
@@ -156,7 +156,7 @@ final class TemplateExpression
             if ($operator === null) {
                 return $value;
             }
-            $right = $this->unary();
+            $right = $this->additive();
             $value = match ($operator) {
                 T_IS_GREATER_OR_EQUAL => $value >= $right,
                 T_IS_SMALLER_OR_EQUAL => $value <= $right,
@@ -167,6 +167,46 @@ final class TemplateExpression
                 ),
             };
         }
+    }
+
+    private function additive(): mixed
+    {
+        $value = $this->multiplicative();
+
+        while (($operator = $this->takeOne(['+', '-'])) !== null) {
+            $right = $this->multiplicative();
+            self::requireNumeric($value, $operator);
+            self::requireNumeric($right, $operator);
+            $value = $operator === '+' ? $value + $right : $value - $right;
+        }
+
+        return $value;
+    }
+
+    private function multiplicative(): mixed
+    {
+        $value = $this->unary();
+
+        while (($operator = $this->takeOne(['*', '/', '%'])) !== null) {
+            $right = $this->unary();
+            self::requireNumeric($value, $operator);
+            self::requireNumeric($right, $operator);
+            if (($operator === '/' || $operator === '%') && $right == 0) {
+                throw new RuntimeException('Division by zero in template expression.');
+            }
+            if ($operator === '%' && (!is_int($value) || !is_int($right))) {
+                throw new RuntimeException(
+                    'Template modulo requires integer operands.',
+                );
+            }
+            $value = match ($operator) {
+                '*' => $value * $right,
+                '/' => $value / $right,
+                '%' => $value % $right,
+            };
+        }
+
+        return $value;
     }
 
     private function unary(): mixed
@@ -458,7 +498,7 @@ final class TemplateExpression
                 $tokens[] = ['type' => $token[0], 'text' => $token[1]];
                 continue;
             }
-            if (!str_contains('()[],:?!-.<>', $token)) {
+            if (!str_contains('()[],:?!-.<>+*/%', $token)) {
                 throw new RuntimeException(
                     "Unsupported token {$token} in template expression.",
                 );
@@ -477,5 +517,14 @@ final class TemplateExpression
         return $quote === "'"
             ? str_replace(["\\\\", "\\'"], ["\\", "'"], $body)
             : stripcslashes($body);
+    }
+
+    private static function requireNumeric(mixed $value, string $operator): void
+    {
+        if (!is_int($value) && !is_float($value)) {
+            throw new RuntimeException(
+                "Template operator {$operator} requires numeric operands.",
+            );
+        }
     }
 }

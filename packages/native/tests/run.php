@@ -3509,6 +3509,22 @@ $assert(
     ) === true,
     'Template expressions must expose strict in_array() membership checks.',
 );
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '72 + $bottomSpacing * 2',
+        null,
+        ['bottomSpacing' => 12],
+    ) === 96,
+    'Template arithmetic must preserve multiplication precedence over addition.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '($mediaIndex + 1) % 3',
+        null,
+        ['mediaIndex' => 2],
+    ) === 0,
+    'Template arithmetic must support grouping and integer modulo.',
+);
 
 TemplateRegistry::reset();
 App::components($pamPhpDirectory, $pamPhpCache);
@@ -3864,8 +3880,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.64',
-    'The runtime SDK contract must match the 0.5.64 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.65',
+    'The runtime SDK contract must match the 0.5.65 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
