@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.48 - 2026-07-30
+
+- Let rich `VirtualizedList` and `VirtualGrid` cells keep their authored
+  heights, or widths for horizontal lists, while `rowHeight` remains the
+  fallback and prefetch estimate.
+- Size each Android `RecyclerView` holder from the Rust-computed cell frame and
+  patch changed extents without remounting stable cells.
+- Add the clearer `estimatedRowHeight` PHP and template alias while preserving
+  existing `rowHeight` call sites.
+
 ## 0.5.47 - 2026-07-29
 
 - Clip Android container descendants to the authored rounded border path when

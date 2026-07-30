@@ -32,6 +32,105 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun richVirtualListUsesPerItemExtentsInsteadOfForcingItsEstimate() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val list = PamRecyclerList(activity)
+                activity.host.addView(
+                    list,
+                    FrameLayout.LayoutParams(
+                        dp(activity.host, 300f),
+                        dp(activity.host, 400f),
+                    ),
+                )
+                list.setRowHeight(48f)
+                list.setRichItems(
+                    ids = listOf(101L, 102L),
+                    extents = mapOf(101L to 100f, 102L to 180f),
+                    mount = { id, holder ->
+                        holder.addView(
+                            View(activity).apply {
+                                tag = id
+                                background = ColorDrawable(Color.RED)
+                            },
+                            FrameLayout.LayoutParams(
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                                FrameLayout.LayoutParams.MATCH_PARENT,
+                            ),
+                        )
+                    },
+                    unmount = { _, holder -> holder.removeAllViews() },
+                )
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 300f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 400f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                )
+                list.layout(
+                    0,
+                    0,
+                    dp(activity.host, 300f),
+                    dp(activity.host, 400f),
+                )
+
+                assertEquals(
+                    roundedDp(activity.host, 100f),
+                    requireNotNull(list.findViewHolderForAdapterPosition(0))
+                        .itemView.layoutParams.height,
+                )
+                assertEquals(
+                    roundedDp(activity.host, 180f),
+                    requireNotNull(list.findViewHolderForAdapterPosition(1))
+                        .itemView.layoutParams.height,
+                )
+
+                val retainedFirst = requireNotNull(
+                    list.findViewHolderForAdapterPosition(0),
+                ).itemView
+                list.setRichItems(
+                    ids = listOf(101L, 102L),
+                    extents = mapOf(101L to 120f, 102L to 180f),
+                    mount = { _, _ -> },
+                    unmount = { _, _ -> },
+                )
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 300f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 400f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                )
+                list.layout(
+                    0,
+                    0,
+                    dp(activity.host, 300f),
+                    dp(activity.host, 400f),
+                )
+                val updatedFirst = requireNotNull(
+                    list.findViewHolderForAdapterPosition(0),
+                ).itemView
+                assertSame(retainedFirst, updatedFirst)
+                assertEquals(
+                    roundedDp(activity.host, 120f),
+                    updatedFirst.layoutParams.height,
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun overflowHiddenClipsChildrenToRoundedContainerAndCanBeDisabled() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -381,6 +480,9 @@ class PamRendererInstrumentedTest {
 
     private fun dp(view: View, value: Float): Int =
         (value * view.resources.displayMetrics.density).toInt()
+
+    private fun roundedDp(view: View, value: Float): Int =
+        (value * view.resources.displayMetrics.density + 0.5f).toInt()
 
     private fun View.findByTransitionName(name: String): View? {
         if (transitionName == name) {

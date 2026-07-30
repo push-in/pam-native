@@ -281,28 +281,44 @@ fn layout_node(
         } else {
             inner.width / columns as f32
         };
-
-        for (position, child) in node_children
+        let visible_children = node_children
             .iter()
             .filter(|child| visible(child))
-            .enumerate()
-        {
-            let item_frame = if horizontal {
-                Layout {
-                    x: inner.x + position as f32 * row_height,
+            .collect::<Vec<_>>();
+
+        if horizontal {
+            let mut cursor = inner.x;
+            for child in visible_children {
+                let item_width = number(child, PropKey::Width).unwrap_or(row_height).max(1.0);
+                let item_frame = Layout {
+                    x: cursor,
                     y: inner.y,
-                    width: row_height,
+                    width: item_width,
                     height: inner.height,
+                };
+                layout_node(context, child.id, item_frame, false, depth + 1, output)?;
+                cursor += item_width;
+            }
+        } else {
+            let mut cursor = inner.y;
+            for row in visible_children.chunks(columns) {
+                let item_height = row
+                    .iter()
+                    .filter_map(|child| number(child, PropKey::Height))
+                    .reduce(f32::max)
+                    .unwrap_or(row_height)
+                    .max(1.0);
+                for (column, child) in row.iter().enumerate() {
+                    let item_frame = Layout {
+                        x: inner.x + column as f32 * cell_width,
+                        y: cursor,
+                        width: cell_width,
+                        height: item_height,
+                    };
+                    layout_node(context, child.id, item_frame, false, depth + 1, output)?;
                 }
-            } else {
-                Layout {
-                    x: inner.x + (position % columns) as f32 * cell_width,
-                    y: inner.y + (position / columns) as f32 * row_height,
-                    width: cell_width,
-                    height: row_height,
-                }
-            };
-            layout_node(context, child.id, item_frame, false, depth + 1, output)?;
+                cursor += item_height;
+            }
         }
         return Ok(());
     }
@@ -2905,5 +2921,110 @@ mod tests {
         assert_eq!(layout[&3].y, 0.0);
         assert_eq!(layout[&4].x, 0.0);
         assert_eq!(layout[&4].y, 160.0);
+    }
+
+    #[test]
+    fn virtual_list_uses_authored_cell_heights_and_keeps_row_height_as_estimate() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListRowHeight, PropValue::Float(120.0))],
+            ),
+        );
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [(PropKey::Height, PropValue::Float(240.0))],
+            ),
+        );
+        nodes.insert(3, node(3, 1, 1, NodeKind::Column, []));
+        nodes.insert(
+            4,
+            node(
+                4,
+                1,
+                2,
+                NodeKind::Column,
+                [(PropKey::Height, PropValue::Float(180.0))],
+            ),
+        );
+        nodes.insert(
+            5,
+            node(
+                5,
+                1,
+                3,
+                NodeKind::Column,
+                [(PropKey::Height, PropValue::Float(60.0))],
+            ),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("adaptive virtual list");
+
+        assert_eq!(layout[&2].height, 240.0);
+        assert_eq!(layout[&3].y, 240.0);
+        assert_eq!(layout[&3].height, 120.0);
+        assert_eq!(layout[&4].y, 360.0);
+        assert_eq!(layout[&4].height, 180.0);
+        assert_eq!(layout[&5].y, 540.0);
+        assert_eq!(layout[&5].height, 60.0);
+    }
+
+    #[test]
+    fn horizontal_virtual_list_uses_authored_cell_widths() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListHorizontal, PropValue::Boolean(true)),
+                    (PropKey::ListRowHeight, PropValue::Float(80.0)),
+                ],
+            ),
+        );
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [(PropKey::Width, PropValue::Float(140.0))],
+            ),
+        );
+        nodes.insert(3, node(3, 1, 1, NodeKind::Column, []));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 240.0,
+            },
+        )
+        .expect("adaptive horizontal virtual list");
+
+        assert_eq!(layout[&2].width, 140.0);
+        assert_eq!(layout[&3].x, 140.0);
+        assert_eq!(layout[&3].width, 80.0);
     }
 }

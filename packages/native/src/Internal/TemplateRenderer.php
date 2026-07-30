@@ -254,6 +254,7 @@ final class TemplateRenderer
         'animationEasing' => PropKey::AnimationEasing,
         'animate' => PropKey::AnimateChanges,
         'rowHeight' => PropKey::ListRowHeight,
+        'estimatedRowHeight' => PropKey::ListRowHeight,
         'prefetch' => PropKey::ListPrefetch,
         'numColumns' => PropKey::ListNumColumns,
         'inverted' => PropKey::ListInverted,

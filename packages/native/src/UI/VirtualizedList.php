@@ -50,6 +50,15 @@ final class VirtualizedList extends Element
         return $this->withProperty(PropKey::ListRowHeight, max(1.0, $height));
     }
 
+    /**
+     * Sets the fallback and prefetch estimate for cells without an authored
+     * main-axis size. Explicit cell heights or widths remain authoritative.
+     */
+    public function estimatedRowHeight(float $height): self
+    {
+        return $this->rowHeight($height);
+    }
+
     public function prefetch(int $items): self
     {
         return $this->withProperty(PropKey::ListPrefetch, min(32, max(1, $items)));

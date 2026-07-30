@@ -165,7 +165,8 @@
             "name": "VirtualizedList",
             "description": "RecyclerView list whose children may be arbitrary keyed PAM component trees.",
             "attributes": [
-                { "name": "rowHeight" },
+                { "name": "estimatedRowHeight", "description": "Fallback and prefetch estimate; an explicit cell height remains authoritative." },
+                { "name": "rowHeight", "description": "Compatibility alias of estimatedRowHeight." },
                 { "name": "prefetch" },
                 { "name": "numColumns" },
                 { "name": "horizontal", "values": [{ "name": "true" }, { "name": "false" }] },
@@ -181,7 +182,8 @@
             "description": "Virtualized rich-content grid backed by Android RecyclerView.",
             "attributes": [
                 { "name": "columns" },
-                { "name": "rowHeight" },
+                { "name": "estimatedRowHeight", "description": "Fallback and prefetch estimate; explicit cell heights determine each native row." },
+                { "name": "rowHeight", "description": "Compatibility alias of estimatedRowHeight." },
                 { "name": "prefetch" },
                 { "name": "inverted", "values": [{ "name": "true" }, { "name": "false" }] },
                 { "name": "initialScrollIndex" },

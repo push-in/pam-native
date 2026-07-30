@@ -1329,7 +1329,7 @@ $richListElement = VirtualizedList::make(
     )->key('one'),
     Pressable::make(Text::make('Two'))->key('two'),
 )
-    ->rowHeight(180.0)
+    ->estimatedRowHeight(180.0)
     ->columns(2)
     ->prefetch(6);
 $assert(
@@ -1340,6 +1340,18 @@ $assert(
         && $richListElement->properties()[PropKey::ListNumColumns->value] === 2
         && $richListElement->properties()[PropKey::ListPrefetch->value] === 6,
     'VirtualizedList must retain arbitrary keyed component trees as recyclable cells.',
+);
+$adaptiveListTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<VirtualizedList estimatedRowHeight="180"><Column height="240" /></VirtualizedList>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $adaptiveListTemplate->properties()[PropKey::ListRowHeight->value] == 180.0
+        && $adaptiveListTemplate->children()[0]->properties()[PropKey::Height->value] == 240.0,
+    'VirtualizedList estimatedRowHeight must preserve an explicit rich-cell extent.',
 );
 $legacyVirtualizedList = VirtualizedList::make(['One', 'Two']);
 $assert(
@@ -3351,8 +3363,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.47',
-    'The runtime SDK contract must match the 0.5.47 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.48',
+    'The runtime SDK contract must match the 0.5.48 package release.',
 );
 $assert(
     array_map(

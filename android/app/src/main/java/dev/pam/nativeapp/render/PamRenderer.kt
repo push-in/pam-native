@@ -653,8 +653,16 @@ class PamRenderer(
             if (state.kind != NodeKind.VIRTUAL_LIST) continue
             val list = views[state.id] as? PamRecyclerList ?: continue
             val itemIds = children[state.id]?.toList().orEmpty()
+            val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
+            val fallbackExtent = state.number(PropKey.LIST_ROW_HEIGHT, 48.0).toFloat()
+            val itemExtents = itemIds.associateWith { id ->
+                frames[id]?.let { frame ->
+                    if (horizontal) frame.width else frame.height
+                }?.coerceAtLeast(1f) ?: fallbackExtent
+            }
             list.setRichItems(
                 ids = itemIds,
+                extents = itemExtents,
                 mount = { id, holder -> materializeCell(id, holder) },
                 unmount = { id, _ -> dematerializeSubtree(id) },
             )

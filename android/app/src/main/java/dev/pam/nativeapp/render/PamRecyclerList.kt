@@ -69,14 +69,22 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     fun setRichItems(
         ids: List<Long>,
+        extents: Map<Long, Float>,
         mount: (Long, FrameLayout) -> Unit,
         unmount: (Long, FrameLayout) -> Unit,
     ) {
+        val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(1f)) }
         val current = adapter as? RichRecyclerAdapter
         if (current == null) {
-            adapter = RichRecyclerAdapter(context, ids, mount, unmount)
+            adapter = RichRecyclerAdapter(
+                context,
+                ids,
+                pixelExtents,
+                mount,
+                unmount,
+            )
         } else {
-            current.submit(ids)
+            current.submit(ids, pixelExtents)
         }
         configureAdapter()
         updateHeaderSpans()
@@ -381,10 +389,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 private class RichRecyclerAdapter(
     private val context: Context,
     ids: List<Long>,
+    extents: Map<Long, Int>,
     private val mount: (Long, FrameLayout) -> Unit,
     private val unmount: (Long, FrameLayout) -> Unit,
 ) : RecyclerView.Adapter<RichRecyclerAdapter.RichHolder>() {
     private var ids = ids.toList()
+    private var extents = extents.toMap()
     private var extent = dp(48f)
     private var horizontal = false
 
@@ -392,10 +402,12 @@ private class RichRecyclerAdapter(
         setHasStableIds(true)
     }
 
-    fun submit(next: List<Long>) {
-        if (ids == next) return
+    fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
+        if (ids == next && extents == nextExtents) return
         val previous = ids
+        val previousExtents = extents
         val replacement = next.toList()
+        val replacementExtents = nextExtents.toMap()
         val diff = DiffUtil.calculateDiff(
             object : DiffUtil.Callback() {
                 override fun getOldListSize(): Int = previous.size
@@ -405,11 +417,16 @@ private class RichRecyclerAdapter(
                 override fun areItemsTheSame(oldPosition: Int, newPosition: Int): Boolean =
                     previous[oldPosition] == replacement[newPosition]
 
-                override fun areContentsTheSame(oldPosition: Int, newPosition: Int): Boolean = true
+                override fun areContentsTheSame(oldPosition: Int, newPosition: Int): Boolean {
+                    val oldId = previous[oldPosition]
+                    val newId = replacement[newPosition]
+                    return previousExtents[oldId] == replacementExtents[newId]
+                }
             },
             true,
         )
         ids = replacement
+        extents = replacementExtents
         diff.dispatchUpdatesTo(this)
     }
 
@@ -441,7 +458,7 @@ private class RichRecyclerAdapter(
         payloads: MutableList<Any>,
     ) {
         if (payloads.size == 1 && payloads[0] === PAYLOAD_LAYOUT) {
-            applyLayout(holder.container)
+            applyLayout(holder.container, ids[position])
         } else {
             bind(holder, ids[position])
         }
@@ -462,15 +479,16 @@ private class RichRecyclerAdapter(
             unmount(previous, holder.container)
             holder.container.removeAllViews()
         }
-        applyLayout(holder.container)
+        applyLayout(holder.container, id)
         mount(id, holder.container)
         holder.boundId = id
     }
 
-    private fun applyLayout(container: FrameLayout) {
+    private fun applyLayout(container: FrameLayout, id: Long) {
+        val itemExtent = extents[id] ?: extent
         container.layoutParams = RecyclerView.LayoutParams(
-            if (horizontal) extent else ViewGroup.LayoutParams.MATCH_PARENT,
-            if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else extent,
+            if (horizontal) itemExtent else ViewGroup.LayoutParams.MATCH_PARENT,
+            if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else itemExtent,
         )
     }
 

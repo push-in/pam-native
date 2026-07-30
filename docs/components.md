@@ -322,10 +322,16 @@ $cells = array_map(
 );
 
 return VirtualGrid::make(2, ...$cells)
-    ->rowHeight(224)
+    ->estimatedRowHeight(224)
     ->prefetch(6)
     ->onEndReached(fn () => $this->loadNextPage(), 0.35);
 ```
+
+`estimatedRowHeight` controls prefetch distance and is the fallback for a cell
+without an authored main-axis size. An explicit cell `height` (or `width` in a
+horizontal list) remains authoritative, so one recycled list can render
+different media aspect ratios without measuring them on the UI thread.
+`rowHeight` remains a compatibility alias.
 
 `FlatList` remains source-compatible for lightweight string arrays.
 
