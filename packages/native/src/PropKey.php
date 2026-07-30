@@ -406,4 +406,9 @@ enum PropKey: int
     case TopPercent = 398;
     case RightPercent = 399;
     case BottomPercent = 400;
+    case ShadowOffsetX = 401;
+    case ShadowOffsetY = 402;
+    case ShadowBlurRadius = 403;
+    case ShadowSpreadRadius = 404;
+    case ShadowColor = 405;
 }

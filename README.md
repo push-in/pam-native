@@ -175,6 +175,7 @@ final class Card extends Component
         padding: 16px;
         border: 1px solid #D8D7CF;
         border-radius: 12px;
+        box-shadow: 3px 3px 0 #FFD23F;
     }
 
     .card-title {

@@ -239,7 +239,7 @@ Supported CSS covers PAM's common native layout and paint contracts:
   `border-top/right/bottom/left` `<width> solid <color>` shorthands, including
   `border: none`;
 - background colors (including `background: none`), text color, percentage or
-  numeric opacity, elevation, overflow and visibility;
+  numeric opacity, `box-shadow`, elevation, overflow and visibility;
 - font family stacks, size/weight/style, letter/line spacing, text alignment,
   decoration and case;
 - `object-fit`, `box-sizing: border-box`, and `aspect-ratio: 16 / 9`.
@@ -253,6 +253,9 @@ shorthand; elliptical slash syntax is intentionally rejected.
 Directional border colors are accepted for familiar CSS authoring; Android
 and iOS currently paint one shared native border color, so the last authored
 directional color applies to every edge.
+`box-shadow` accepts one native shadow in standard CSS order:
+`x-offset y-offset [blur-radius] [spread-radius] [color]`, or `none`.
+Multiple comma-separated shadows and inset shadows are rejected explicitly.
 
 CSS custom properties are declared in `:root`, may reference one another, and
 support nested fallbacks such as `var(--brand, var(--fallback, rebeccapurple))`.

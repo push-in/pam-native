@@ -487,6 +487,11 @@ pub enum PropKey {
     TopPercent = 398,
     RightPercent = 399,
     BottomPercent = 400,
+    ShadowOffsetX = 401,
+    ShadowOffsetY = 402,
+    ShadowBlurRadius = 403,
+    ShadowSpreadRadius = 404,
+    ShadowColor = 405,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -894,6 +899,11 @@ impl TryFrom<u16> for PropKey {
             398 => Ok(Self::TopPercent),
             399 => Ok(Self::RightPercent),
             400 => Ok(Self::BottomPercent),
+            401 => Ok(Self::ShadowOffsetX),
+            402 => Ok(Self::ShadowOffsetY),
+            403 => Ok(Self::ShadowBlurRadius),
+            404 => Ok(Self::ShadowSpreadRadius),
+            405 => Ok(Self::ShadowColor),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1697,10 +1707,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(30).is_err());
 
-        for value in 1..=400 {
+        for value in 1..=405 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(401).is_err());
+        assert!(PropKey::try_from(406).is_err());
     }
 
     fn tree(text: &str) -> Tree {

@@ -514,7 +514,12 @@ enum class PropKey(val value: Int) {
     LEFT_PERCENT(397),
     TOP_PERCENT(398),
     RIGHT_PERCENT(399),
-    BOTTOM_PERCENT(400);
+    BOTTOM_PERCENT(400),
+    SHADOW_OFFSET_X(401),
+    SHADOW_OFFSET_Y(402),
+    SHADOW_BLUR_RADIUS(403),
+    SHADOW_SPREAD_RADIUS(404),
+    SHADOW_COLOR(405);
 
     companion object {
         fun from(value: Int): PropKey =

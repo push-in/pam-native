@@ -17,6 +17,9 @@ internal open class PamContainer(context: Context) :
     private val overflowClipBounds = RectF()
     private var overflowClipRadii = FloatArray(CORNER_RADII_SIZE)
     private var overflowClipPathDirty = true
+    private val boxShadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+    private val boxShadowPath = Path()
+    private val boxShadowBounds = RectF()
 
     init {
         clipChildren = false
@@ -60,6 +63,18 @@ internal open class PamContainer(context: Context) :
         }
         super.dispatchDraw(canvas)
         canvas.restoreToCount(checkpoint)
+    }
+
+    override fun drawChild(canvas: Canvas, child: View, drawingTime: Long): Boolean {
+        PamBoxShadows.draw(
+            canvas,
+            child,
+            boxShadowPaint,
+            boxShadowPath,
+            boxShadowBounds,
+        )
+
+        return super.drawChild(canvas, child, drawingTime)
     }
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {

@@ -464,6 +464,7 @@ class PamRenderer(
             views.put(spec.id, view)
             attachHosted(view, state)
             state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
+            (view as? TextView)?.let { applyTextAlignment(it, state) }
             installEvents(view, state)
         }
     }
@@ -1029,6 +1030,7 @@ class PamRenderer(
             ancestor = ancestor.parent
         }
         applyHitSlop(view, state)
+        (view as? TextView)?.let { applyTextAlignment(it, state) }
         state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
             view.translationX = width * (percent / 100.0).toFloat()
         }
@@ -1216,6 +1218,12 @@ class PamRenderer(
             PropKey.RIPPLE_FOREGROUND,
             PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
+            PropKey.SHADOW_OFFSET_X,
+            PropKey.SHADOW_OFFSET_Y,
+            PropKey.SHADOW_BLUR_RADIUS,
+            PropKey.SHADOW_SPREAD_RADIUS,
+            PropKey.SHADOW_COLOR,
+            -> applyBoxShadow(view, state)
             PropKey.TEXT_COLOR -> when (view) {
                 is TextView -> {
                     val color = value.integer().toInt()
@@ -1263,12 +1271,7 @@ class PamRenderer(
             PropKey.TEXT_ALIGN -> if (view is PamEditText) {
                 applyInputConfiguration(view, state)
             } else {
-                (view as? TextView)?.gravity =
-                    when (value.integer().toInt()) {
-                        2 -> Gravity.CENTER
-                        3 -> Gravity.END or Gravity.CENTER_VERTICAL
-                        else -> Gravity.START or Gravity.CENTER_VERTICAL
-                    }
+                (view as? TextView)?.let { applyTextAlignment(it, state) }
             }
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
@@ -3754,6 +3757,7 @@ class PamRenderer(
             shape
         }
         pamImageView(view)?.setCornerRadii(radii)
+        applyBoxShadow(view, state, radii)
         if (imageHost) {
             view.foreground = if (borderWidth > 0) {
                 GradientDrawable().apply {
@@ -3835,6 +3839,44 @@ class PamRenderer(
         }
     }
 
+    private fun applyBoxShadow(
+        view: View,
+        state: NodeState,
+        resolvedRadii: FloatArray? = null,
+    ) {
+        val color = state.integer(PropKey.SHADOW_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        if (Color.alpha(color) == 0) {
+            PamBoxShadows.set(view, null)
+            return
+        }
+        val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
+        val radii = resolvedRadii ?: floatArrayOf(
+            dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_TOP_RIGHT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_TOP_RIGHT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_BOTTOM_RIGHT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_BOTTOM_RIGHT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_BOTTOM_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
+            dp(state.number(PropKey.BORDER_BOTTOM_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
+        )
+        PamBoxShadows.set(
+            view,
+            PamBoxShadow(
+                offsetX = dp(state.number(PropKey.SHADOW_OFFSET_X, 0.0).toFloat()).toFloat(),
+                offsetY = dp(state.number(PropKey.SHADOW_OFFSET_Y, 0.0).toFloat()).toFloat(),
+                blurRadius = dp(
+                    state.number(PropKey.SHADOW_BLUR_RADIUS, 0.0).toFloat(),
+                ).toFloat(),
+                spreadRadius = dp(
+                    state.number(PropKey.SHADOW_SPREAD_RADIUS, 0.0).toFloat(),
+                ).toFloat(),
+                color = color,
+                cornerRadii = radii,
+            ),
+        )
+    }
+
     private fun applyOverflowClip(view: View, state: NodeState) {
         val enabled = state.integer(PropKey.OVERFLOW, OVERFLOW_VISIBLE) == OVERFLOW_HIDDEN
         if (view is PamContainer) {
@@ -3895,6 +3937,38 @@ class PamRenderer(
             state.number(PropKey.LETTER_SPACING, 0.0).toFloat(),
             state.number(PropKey.FONT_SIZE, 14.0).toFloat(),
         )
+    }
+
+    private fun applyTextAlignment(view: TextView, state: NodeState) {
+        if (view is PamEditText) return
+        val authored = state.properties[PropKey.TEXT_ALIGN]?.integer()?.toInt()
+        val horizontal = when (authored) {
+            2 -> Gravity.CENTER_HORIZONTAL
+            3 -> Gravity.END
+            1 -> Gravity.START
+            else -> {
+                val parent = nodes[state.parent]
+                val parentDirection = parent?.integer(
+                    PropKey.FLEX_DIRECTION,
+                    if (parent.kind == NodeKind.ROW) 2L else 1L,
+                )?.toInt() ?: 1
+                val parentIsColumn = parentDirection == 1 || parentDirection == 3
+                val alignment = state.properties[PropKey.ALIGN_SELF]
+                    ?.integer()
+                    ?.toInt()
+                    ?.takeUnless { it == 4 }
+                    ?: parent?.integer(PropKey.ALIGN_ITEMS, 4L)?.toInt()
+                    ?: 4
+                if (parentIsColumn && alignment == 2) {
+                    Gravity.CENTER_HORIZONTAL
+                } else if (parentIsColumn && alignment == 3) {
+                    Gravity.END
+                } else {
+                    Gravity.START
+                }
+            }
+        }
+        view.gravity = horizontal or Gravity.CENTER_VERTICAL
     }
 
     private fun applyLineHeight(view: TextView, state: NodeState) {

@@ -725,21 +725,23 @@ rmdir($cssImportRoot.'/src/screens');
 rmdir($cssImportRoot.'/src/styles');
 rmdir($cssImportRoot.'/src');
 rmdir($cssImportRoot);
-$invalidCssRejected = false;
-try {
-    ScopedStyleCompiler::compile(
-        '.card { box-shadow: 0 1px 2px #000; }',
-        'InvalidStyle.pam.php',
-    );
-} catch (RuntimeException $error) {
-    $invalidCssRejected = str_contains(
-        $error->getMessage(),
-        'Unsupported native CSS property box-shadow',
-    );
-}
+$shadowStyles = ScopedStyleCompiler::compile(
+    '.card { box-shadow: 3px 4px 0 1px #FFD23F; }'
+        .'.first { box-shadow: rgba(1, 2, 3, 0.5) 0 2px; }'
+        .'.flat { box-shadow: none; }',
+    'ShadowStyle.pam.php',
+);
 $assert(
-    $invalidCssRejected,
-    'Scoped CSS must fail fast when a property has no native contract.',
+    $shadowStyles['classes']['card'] === [
+        'shadowOffsetX' => '3',
+        'shadowOffsetY' => '4',
+        'shadowBlurRadius' => '0',
+        'shadowSpreadRadius' => '1',
+        'shadowColor' => 0xFFFFD23F,
+    ]
+        && $shadowStyles['classes']['first']['shadowColor'] === 0x80010203
+        && $shadowStyles['classes']['flat']['shadowColor'] === 0,
+    'Scoped CSS box-shadow must compile to the typed native shadow contract.',
 );
 $unformattedPam = <<<'PAM'
 <?php

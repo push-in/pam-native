@@ -355,6 +355,11 @@ public enum PamConstants {
     public static let topPercent = 398
     public static let rightPercent = 399
     public static let bottomPercent = 400
+    public static let shadowOffsetX = 401
+    public static let shadowOffsetY = 402
+    public static let shadowBlurRadius = 403
+    public static let shadowSpreadRadius = 404
+    public static let shadowColor = 405
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

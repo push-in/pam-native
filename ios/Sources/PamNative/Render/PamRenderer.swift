@@ -449,6 +449,8 @@ public final class PamRenderer {
             children[state.id]?.forEach { applyLayout($0) }
         }
         applyBorder(view: view, nodeId: id)
+        applyBoxShadow(view: view, nodeId: id)
+        applyTextAlignment(view: view, nodeId: id)
     }
 
     private func addChild(to parent: Int64, child: Int64) {
@@ -1243,6 +1245,13 @@ public final class PamRenderer {
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             view.layer.cornerRadius = CGFloat(value.decimalOrZero())
+            applyBoxShadow(view: view, nodeId: nodeId)
+        case PamConstants.shadowOffsetX,
+             PamConstants.shadowOffsetY,
+             PamConstants.shadowBlurRadius,
+             PamConstants.shadowSpreadRadius,
+             PamConstants.shadowColor:
+            applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.overflow:
             view.layer.masksToBounds = value.integerOrNil() == 2
         case PamConstants.enabled:
@@ -1280,6 +1289,8 @@ public final class PamRenderer {
                     label.textColor = UIColor(argb: color)
                 }
             }
+        case PamConstants.textAlign:
+            applyTextAlignment(view: view, nodeId: nodeId)
         case PamConstants.fontSize,
              PamConstants.fontWeight,
              PamConstants.fontStyle,
@@ -1519,6 +1530,15 @@ public final class PamRenderer {
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             view.layer.cornerRadius = 0
+            applyBoxShadow(view: view, nodeId: nodeId)
+        case PamConstants.textAlign:
+            applyTextAlignment(view: view, nodeId: nodeId)
+        case PamConstants.shadowOffsetX,
+             PamConstants.shadowOffsetY,
+             PamConstants.shadowBlurRadius,
+             PamConstants.shadowSpreadRadius,
+             PamConstants.shadowColor:
+            applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.overflow:
             view.layer.masksToBounds = false
         case PamConstants.fontSize,
@@ -1734,6 +1754,84 @@ public final class PamRenderer {
             bottom: bottom,
             color: color,
         )
+    }
+
+    private func applyBoxShadow(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId],
+              let colorValue = state.properties[PamConstants.shadowColor]?.integerOrNil()
+        else {
+            view.layer.shadowColor = nil
+            view.layer.shadowOpacity = 0
+            view.layer.shadowPath = nil
+            return
+        }
+
+        let color = UIColor(argb: colorValue)
+        let alpha = color.cgColor.alpha
+        if alpha == 0 {
+            view.layer.shadowColor = nil
+            view.layer.shadowOpacity = 0
+            view.layer.shadowPath = nil
+            return
+        }
+        let x = CGFloat(
+            state.properties[PamConstants.shadowOffsetX]?.decimalOrNil() ?? 0
+        )
+        let y = CGFloat(
+            state.properties[PamConstants.shadowOffsetY]?.decimalOrNil() ?? 0
+        )
+        let blur = max(
+            0,
+            CGFloat(state.properties[PamConstants.shadowBlurRadius]?.decimalOrNil() ?? 0),
+        )
+        let spread = CGFloat(
+            state.properties[PamConstants.shadowSpreadRadius]?.decimalOrNil() ?? 0
+        )
+        let cornerRadius = max(
+            0,
+            CGFloat(state.properties[PamConstants.borderRadius]?.decimalOrNil() ?? 0)
+                + spread,
+        )
+        view.layer.shadowColor = color.cgColor
+        view.layer.shadowOpacity = 1
+        view.layer.shadowOffset = CGSize(width: x, height: y)
+        view.layer.shadowRadius = blur / 2
+        let shadowBounds = view.bounds.insetBy(dx: -spread, dy: -spread)
+        view.layer.shadowPath = UIBezierPath(
+            roundedRect: shadowBounds,
+            cornerRadius: cornerRadius,
+        ).cgPath
+    }
+
+    private func applyTextAlignment(view: UIView, nodeId: Int64) {
+        guard let label = view as? UILabel, let state = nodes[nodeId] else { return }
+        if let authored = state.properties[PamConstants.textAlign]?.integerOrNil() {
+            label.textAlignment = switch authored {
+            case 2: .center
+            case 3: .right
+            default: .left
+            }
+            return
+        }
+        guard let parent = nodes[state.parent] else {
+            label.textAlignment = .left
+            return
+        }
+        let defaultDirection: Int64 = parent.kind == .row ? 2 : 1
+        let direction = parent.properties[PamConstants.flexDirection]?.integerOrNil()
+            ?? defaultDirection
+        let parentIsColumn = direction == 1 || direction == 3
+        let authoredSelf = state.properties[PamConstants.alignSelf]?.integerOrNil()
+        let alignment = authoredSelf == 4 || authoredSelf == nil
+            ? parent.properties[PamConstants.alignItems]?.integerOrNil() ?? 4
+            : authoredSelf!
+        if parentIsColumn && alignment == 2 {
+            label.textAlignment = .center
+        } else if parentIsColumn && alignment == 3 {
+            label.textAlignment = .right
+        } else {
+            label.textAlignment = .left
+        }
     }
 
     private func applyTextSizing(view: UIView, state: NodeState?) {

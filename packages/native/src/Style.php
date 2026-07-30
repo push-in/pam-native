@@ -112,6 +112,11 @@ final readonly class Style
         public ?float $topPercent = null,
         public ?float $rightPercent = null,
         public ?float $bottomPercent = null,
+        public ?float $shadowOffsetX = null,
+        public ?float $shadowOffsetY = null,
+        public ?float $shadowBlurRadius = null,
+        public ?float $shadowSpreadRadius = null,
+        public ?int $shadowColor = null,
     ) {
     }
 
@@ -226,6 +231,11 @@ final readonly class Style
             PropKey::TopPercent->value => $this->topPercent,
             PropKey::RightPercent->value => $this->rightPercent,
             PropKey::BottomPercent->value => $this->bottomPercent,
+            PropKey::ShadowOffsetX->value => $this->shadowOffsetX,
+            PropKey::ShadowOffsetY->value => $this->shadowOffsetY,
+            PropKey::ShadowBlurRadius->value => $this->shadowBlurRadius,
+            PropKey::ShadowSpreadRadius->value => $this->shadowSpreadRadius,
+            PropKey::ShadowColor->value => $this->shadowColor,
         ] as $key => $value) {
             if ($value !== null) {
                 $properties[$key] = $value;

@@ -492,6 +492,10 @@ final class ScopedStyleCompiler
                 self::expandTransform($output, $value, $name);
                 continue;
             }
+            if ($property === 'box-shadow') {
+                self::expandBoxShadow($output, $value, $name);
+                continue;
+            }
             if ($property === 'object-fit') {
                 $output['resizeMode'] = match (strtolower(trim($value))) {
                     'contain', 'cover', 'fill' => strtolower(trim($value)),
@@ -810,6 +814,125 @@ final class ScopedStyleCompiler
         ] as $attribute => $cornerValue) {
             $output[$attribute] = self::scalar($cornerValue, $name);
         }
+    }
+
+    /** @param array<string, string|int|bool> $output */
+    private static function expandBoxShadow(
+        array &$output,
+        string $value,
+        string $name,
+    ): void {
+        $trimmed = trim($value);
+        if (strtolower($trimmed) === 'none') {
+            $output['shadowOffsetX'] = '0';
+            $output['shadowOffsetY'] = '0';
+            $output['shadowBlurRadius'] = '0';
+            $output['shadowSpreadRadius'] = '0';
+            $output['shadowColor'] = 0;
+
+            return;
+        }
+        if (self::containsTopLevelComma($trimmed)) {
+            throw new RuntimeException(
+                "Native box-shadow in {$name} supports one shadow.",
+            );
+        }
+        $parts = self::cssValueParts($trimmed, $name);
+        if (in_array('inset', array_map('strtolower', $parts), true)) {
+            throw new RuntimeException(
+                "Inset box-shadow is not supported in {$name}.",
+            );
+        }
+        $color = CssColor::parse('rgba(0, 0, 0, 0.33)', "Box shadow in {$name}");
+        $colorParts = array_values(array_filter(
+            $parts,
+            static fn (string $part): bool => !self::isScalarToken($part),
+        ));
+        if (count($colorParts) > 1) {
+            throw new RuntimeException("Invalid box-shadow color in {$name}.");
+        }
+        if ($colorParts !== []) {
+            $color = CssColor::parse($colorParts[0], "Box shadow color in {$name}");
+            $parts = array_values(array_filter(
+                $parts,
+                static fn (string $part): bool => self::isScalarToken($part),
+            ));
+        }
+        if (count($parts) < 2 || count($parts) > 4) {
+            throw new RuntimeException(
+                "Native box-shadow in {$name} expects x-offset, y-offset, optional blur/spread, and an optional color.",
+            );
+        }
+        $numbers = array_map(
+            static fn (string $part): string => self::scalar($part, $name),
+            $parts,
+        );
+        $output['shadowOffsetX'] = $numbers[0];
+        $output['shadowOffsetY'] = $numbers[1];
+        $output['shadowBlurRadius'] = $numbers[2] ?? '0';
+        $output['shadowSpreadRadius'] = $numbers[3] ?? '0';
+        $output['shadowColor'] = $color;
+    }
+
+    /** @return list<string> */
+    private static function cssValueParts(string $value, string $name): array
+    {
+        $parts = [];
+        $start = null;
+        $depth = 0;
+        $length = strlen($value);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $value[$index];
+            if ($character === '(') {
+                $depth++;
+            } elseif ($character === ')') {
+                $depth--;
+                if ($depth < 0) {
+                    throw new RuntimeException("Invalid CSS value in {$name}.");
+                }
+            }
+            if (ctype_space($character) && $depth === 0) {
+                if ($start !== null) {
+                    $parts[] = substr($value, $start, $index - $start);
+                    $start = null;
+                }
+            } elseif ($start === null) {
+                $start = $index;
+            }
+        }
+        if ($depth !== 0) {
+            throw new RuntimeException("Invalid CSS value in {$name}.");
+        }
+        if ($start !== null) {
+            $parts[] = substr($value, $start);
+        }
+
+        return $parts;
+    }
+
+    private static function containsTopLevelComma(string $value): bool
+    {
+        $depth = 0;
+        $length = strlen($value);
+        for ($index = 0; $index < $length; $index++) {
+            if ($value[$index] === '(') {
+                $depth++;
+            } elseif ($value[$index] === ')') {
+                $depth--;
+            } elseif ($value[$index] === ',' && $depth === 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function isScalarToken(string $value): bool
+    {
+        return preg_match(
+            '/^-?(?:\d+(?:\.\d+)?|\.\d+)(?:px|dp|pt|rem)?$/iD',
+            trim($value),
+        ) === 1;
     }
 
     private static function propertyValue(

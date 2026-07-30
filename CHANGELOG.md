@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.73 - 2026-07-30
+
+- Add typed, zero-selector-runtime CSS `box-shadow` with color, x/y offset,
+  blur, spread, and `none` across Android and iOS.
+- Center auto-width native text inside its deliberately conservative intrinsic
+  frame whenever the parent cross-axis alignment is centered or trailing,
+  eliminating visible drift without sacrificing glyph-clipping protection.
+- Apply CSS `text-align` on iOS with the same start/center/end behavior as
+  Android.
+
 ## 0.5.72 - 2026-07-30
 
 - Resolve every `asset://…` image and packaged font relative to the PAM
