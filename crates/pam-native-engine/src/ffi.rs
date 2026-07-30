@@ -75,6 +75,36 @@ pub extern "C" fn pam_native_engine_new() -> *mut PamNativeEngineHandle {
 }
 
 #[unsafe(no_mangle)]
+/// Sets the root directory used to resolve `asset://` font families.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine. `data` must reference `length` readable
+/// bytes containing a valid UTF-8 path for the duration of this call.
+pub unsafe extern "C" fn pam_native_engine_set_asset_root(
+    handle: *mut PamNativeEngineHandle,
+    data: *const u8,
+    length: usize,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    if data.is_null() || length == 0 {
+        return PamStatus::InvalidArgument;
+    }
+    // SAFETY: The caller guarantees that `data` references `length` readable
+    // bytes for the duration of this call.
+    let bytes = unsafe { std::slice::from_raw_parts(data, length) };
+    let Ok(path) = std::str::from_utf8(bytes) else {
+        return PamStatus::InvalidArgument;
+    };
+    match catch_unwind(AssertUnwindSafe(|| handle.engine.set_asset_root(path))) {
+        Ok(()) => PamStatus::Success,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Releases an engine allocated by [`pam_native_engine_new`].
 ///
 /// # Safety

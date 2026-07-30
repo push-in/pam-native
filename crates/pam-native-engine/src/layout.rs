@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 
 use pam_native_protocol::{Layout, Node, NodeKind, PropKey, Tree};
 
+use crate::font_metrics::TextMetrics;
+
 const DEFAULT_TEXT_HEIGHT: f32 = 28.0;
 const DEFAULT_CONTROL_HEIGHT: f32 = 48.0;
 const DEFAULT_IMAGE_HEIGHT: f32 = 160.0;
@@ -32,6 +34,7 @@ struct LayoutContext<'a> {
     tree: &'a Tree,
     children: &'a BTreeMap<u64, Vec<&'a Node>>,
     text_scale: f32,
+    text_metrics: &'a TextMetrics,
 }
 
 #[derive(Clone, Copy)]
@@ -48,10 +51,20 @@ fn calculate(tree: &Tree, viewport: Size) -> Result<BTreeMap<u64, Layout>, Layou
     calculate_with_text_scale(tree, viewport, 1.0)
 }
 
-pub fn calculate_with_text_scale(
+#[cfg(test)]
+fn calculate_with_text_scale(
     tree: &Tree,
     viewport: Size,
     text_scale: f32,
+) -> Result<BTreeMap<u64, Layout>, LayoutError> {
+    calculate_with_text_metrics(tree, viewport, text_scale, &TextMetrics::new())
+}
+
+pub fn calculate_with_text_metrics(
+    tree: &Tree,
+    viewport: Size,
+    text_scale: f32,
+    text_metrics: &TextMetrics,
 ) -> Result<BTreeMap<u64, Layout>, LayoutError> {
     if !viewport.width.is_finite()
         || !viewport.height.is_finite()
@@ -67,6 +80,7 @@ pub fn calculate_with_text_scale(
         tree,
         children: &children,
         text_scale,
+        text_metrics,
     };
     let mut result = BTreeMap::new();
     layout_node(
@@ -211,6 +225,7 @@ fn layout_node(
                 available_main,
                 available_cross,
                 context.text_scale,
+                context.text_metrics,
                 depth + 1,
             )?;
             let main = if fill_viewport {
@@ -396,6 +411,7 @@ fn layout_node(
                 available_main,
                 available_cross,
                 context.text_scale,
+                context.text_metrics,
                 depth + 1,
             )?,
         );
@@ -499,6 +515,7 @@ fn layout_node(
                     available_main,
                     available_cross,
                     context.text_scale,
+                    context.text_metrics,
                     depth + 1,
                 )
                 .unwrap_or(0.0)
@@ -549,6 +566,7 @@ fn layout_node(
                     inner.width,
                     inner.height,
                     context.text_scale,
+                    context.text_metrics,
                     depth + 1,
                 )
                 .unwrap_or(0.0)
@@ -565,6 +583,7 @@ fn layout_node(
                     width,
                     inner.height,
                     context.text_scale,
+                    context.text_metrics,
                     depth + 1,
                 )
                 .unwrap_or(0.0)
@@ -647,6 +666,7 @@ fn layout_wrapped_children(
             available_main,
             available_cross,
             context.text_scale,
+            context.text_metrics,
             depth + 1,
         )?;
         base_main.insert(child.id, main);
@@ -706,6 +726,7 @@ fn layout_wrapped_children(
                 available_main,
                 available_cross,
                 context.text_scale,
+                context.text_metrics,
                 depth + 1,
             )?;
             let cross = explicit.unwrap_or(intrinsic);
@@ -822,6 +843,7 @@ fn layout_grid(
             inner.height,
             content_width,
             context.text_scale,
+            context.text_metrics,
             depth + 1,
         )?;
         if row_heights.len() <= row {
@@ -877,6 +899,7 @@ fn layout_grid(
             inner.height,
             width,
             context.text_scale,
+            context.text_metrics,
             depth + 1,
         )?;
         layout_node(
@@ -955,6 +978,7 @@ fn child_index(tree: &Tree) -> BTreeMap<u64, Vec<&Node>> {
     children
 }
 
+#[allow(clippy::too_many_arguments)]
 fn natural_scroll_extent(
     children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
@@ -962,6 +986,7 @@ fn natural_scroll_extent(
     available_main: f32,
     available_cross: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     if depth > MAX_LAYOUT_DEPTH {
@@ -990,6 +1015,7 @@ fn natural_scroll_extent(
                 available_cross
             },
             text_scale,
+            text_metrics,
             depth + 1,
         );
     }
@@ -1020,6 +1046,7 @@ fn natural_scroll_extent(
                 available_cross
             },
             text_scale,
+            text_metrics,
             depth + 1,
         );
     }
@@ -1060,6 +1087,7 @@ fn natural_scroll_extent(
             available_main,
             available_cross,
             text_scale,
+            text_metrics,
             depth + 1,
         )?;
         let (before, after) = margin_main(child, axis);
@@ -1074,6 +1102,7 @@ fn natural_scroll_extent(
     finite_non_negative(padding_before + content + padding_after)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn intrinsic_extent(
     children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
@@ -1081,6 +1110,7 @@ fn intrinsic_extent(
     available_width: f32,
     available_height: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     if depth > MAX_LAYOUT_DEPTH {
@@ -1114,7 +1144,13 @@ fn intrinsic_extent(
         let padding_bottom =
             finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
         let inner_width = (available_width - padding_left - padding_right).max(0.0);
-        let text = text_extent(node, requested_axis, inner_width, text_scale);
+        let text = text_extent(
+            node,
+            requested_axis,
+            inner_width,
+            text_scale,
+            text_metrics.get(&node.id).map(AsRef::as_ref),
+        );
         let padding_extent = match requested_axis {
             Axis::Vertical => padding_top + padding_bottom,
             Axis::Horizontal => padding_left + padding_right,
@@ -1135,7 +1171,12 @@ fn intrinsic_extent(
         })
         .collect::<Vec<_>>();
     if node_children.is_empty() || !content_sized(node) {
-        return finite_non_negative(leaf_intrinsic(node, requested_axis, text_scale));
+        return finite_non_negative(leaf_intrinsic(
+            node,
+            requested_axis,
+            text_scale,
+            text_metrics.get(&node.id).map(AsRef::as_ref),
+        ));
     }
 
     let padding = finite_non_negative(number(node, PropKey::Padding).unwrap_or(0.0))?;
@@ -1163,6 +1204,7 @@ fn intrinsic_extent(
                 inner_width,
                 inner_height,
                 text_scale,
+                text_metrics,
                 depth + 1,
             )?,
         };
@@ -1194,6 +1236,7 @@ fn intrinsic_extent(
             inner_height,
             gap,
             text_scale,
+            text_metrics,
             depth + 1,
         )?;
         let padding_extent = match requested_axis {
@@ -1211,6 +1254,7 @@ fn intrinsic_extent(
             inner_width,
             inner_height,
             text_scale,
+            text_metrics,
             depth + 1,
         )?;
         let (before, after) = if requested_axis == flow_axis {
@@ -1243,6 +1287,7 @@ fn wrapped_intrinsic_cross(
     available_height: f32,
     gap: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     let cross_axis = match flow_axis {
@@ -1263,6 +1308,7 @@ fn wrapped_intrinsic_cross(
             available_width,
             available_height,
             text_scale,
+            text_metrics,
             depth + 1,
         )?;
         let cross = constrained_intrinsic_extent(
@@ -1272,6 +1318,7 @@ fn wrapped_intrinsic_cross(
             available_width,
             available_height,
             text_scale,
+            text_metrics,
             depth + 1,
         )?;
         let (main_before, main_after) = margin_main(child, flow_axis);
@@ -1301,6 +1348,7 @@ fn wrapped_intrinsic_cross(
     finite_non_negative(total_cross)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn grid_intrinsic_height(
     children_index: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
@@ -1308,6 +1356,7 @@ fn grid_intrinsic_height(
     width: f32,
     available_height: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     let columns = integer(node, PropKey::GridColumns)
@@ -1356,6 +1405,7 @@ fn grid_intrinsic_height(
             available_height,
             (cell_width - margin_left - margin_right).max(0.0),
             text_scale,
+            text_metrics,
             depth + 1,
         )?;
         if row_heights.len() <= row {
@@ -1371,6 +1421,7 @@ fn grid_intrinsic_height(
     Ok(row_heights.iter().sum::<f32>() + row_gap * row_heights.len().saturating_sub(1) as f32)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn constrained_intrinsic_extent(
     children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
@@ -1378,6 +1429,7 @@ fn constrained_intrinsic_extent(
     available_width: f32,
     available_height: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     let extent = intrinsic_extent(
@@ -1387,6 +1439,7 @@ fn constrained_intrinsic_extent(
         available_width,
         available_height,
         text_scale,
+        text_metrics,
         depth,
     )?;
     let (minimum, maximum) = match axis {
@@ -1430,9 +1483,16 @@ fn content_sized(node: &Node) -> bool {
     }
 }
 
-fn leaf_intrinsic(node: &Node, axis: Axis, text_scale: f32) -> f32 {
+fn leaf_intrinsic(
+    node: &Node,
+    axis: Axis,
+    text_scale: f32,
+    glyph_advances: Option<&BTreeMap<char, f32>>,
+) -> f32 {
     match (axis, node.kind) {
-        (Axis::Horizontal, NodeKind::Text) => text_extent(node, axis, f32::INFINITY, text_scale),
+        (Axis::Horizontal, NodeKind::Text) => {
+            text_extent(node, axis, f32::INFINITY, text_scale, glyph_advances)
+        }
         (Axis::Horizontal, NodeKind::Switch) => 52.0,
         (Axis::Horizontal, NodeKind::ActivityIndicator) => DEFAULT_CONTROL_HEIGHT,
         (Axis::Horizontal, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
@@ -1462,7 +1522,13 @@ fn leaf_intrinsic(node: &Node, axis: Axis, text_scale: f32) -> f32 {
     }
 }
 
-fn text_extent(node: &Node, axis: Axis, available_width: f32, device_text_scale: f32) -> f32 {
+fn text_extent(
+    node: &Node,
+    axis: Axis,
+    available_width: f32,
+    device_text_scale: f32,
+    glyph_advances: Option<&BTreeMap<char, f32>>,
+) -> f32 {
     let allow_scaling = !matches!(
         node.properties.get(&PropKey::TextAllowFontScaling),
         Some(pam_native_protocol::PropValue::Boolean(false))
@@ -1492,7 +1558,13 @@ fn text_extent(node: &Node, axis: Axis, available_width: f32, device_text_scale:
         source_text,
         integer(node, PropKey::TextTransform).unwrap_or(1),
     );
-    let lines = wrapped_text_lines(&text, font_size, letter_spacing, available_width);
+    let lines = wrapped_text_lines_with_metrics(
+        &text,
+        font_size,
+        letter_spacing,
+        available_width,
+        glyph_advances,
+    );
     match axis {
         Axis::Vertical => {
             let maximum_lines = integer(node, PropKey::NumberOfLines)
@@ -1502,7 +1574,7 @@ fn text_extent(node: &Node, axis: Axis, available_width: f32, device_text_scale:
         }
         Axis::Horizontal => lines
             .iter()
-            .map(|line| estimated_text_width(line, font_size, letter_spacing))
+            .map(|line| measured_text_width(line, font_size, letter_spacing, glyph_advances))
             .fold(0.0, f32::max)
             .min(available_width.max(0.0)),
     }
@@ -1533,12 +1605,23 @@ fn transformed_text_for_measurement(text: &str, transform: i64) -> String {
     }
 }
 
+#[cfg(test)]
 fn wrapped_text_lines(
     text: &str,
     font_size: f32,
     letter_spacing: f32,
     available_width: f32,
 ) -> Vec<&str> {
+    wrapped_text_lines_with_metrics(text, font_size, letter_spacing, available_width, None)
+}
+
+fn wrapped_text_lines_with_metrics<'a>(
+    text: &'a str,
+    font_size: f32,
+    letter_spacing: f32,
+    available_width: f32,
+    glyph_advances: Option<&BTreeMap<char, f32>>,
+) -> Vec<&'a str> {
     let hard_lines = text.split('\n').collect::<Vec<_>>();
     if !available_width.is_finite() || available_width <= 0.0 {
         return hard_lines;
@@ -1553,7 +1636,8 @@ fn wrapped_text_lines(
         let mut last_break = None;
         let mut width = 0.0;
         for (offset, character) in hard_line.char_indices() {
-            let advance = estimated_character_width(character, font_size) + letter_spacing;
+            let advance =
+                measured_character_width(character, font_size, glyph_advances) + letter_spacing;
             if character.is_whitespace() {
                 last_break = Some(offset);
             }
@@ -1576,7 +1660,12 @@ fn wrapped_text_lines(
                     offset
                 };
                 last_break = None;
-                width = estimated_text_width(&hard_line[start..offset], font_size, letter_spacing);
+                width = measured_text_width(
+                    &hard_line[start..offset],
+                    font_size,
+                    letter_spacing,
+                    glyph_advances,
+                );
             }
             width += advance;
         }
@@ -1585,14 +1674,27 @@ fn wrapped_text_lines(
     result
 }
 
+#[cfg(test)]
 fn estimated_text_width(text: &str, font_size: f32, letter_spacing: f32) -> f32 {
+    measured_text_width(text, font_size, letter_spacing, None)
+}
+
+fn measured_text_width(
+    text: &str,
+    font_size: f32,
+    letter_spacing: f32,
+    glyph_advances: Option<&BTreeMap<char, f32>>,
+) -> f32 {
     let mut characters = text.chars().peekable();
     let mut width = 0.0;
     while let Some(character) = characters.next() {
-        width += estimated_character_width(character, font_size);
+        width += measured_character_width(character, font_size, glyph_advances);
         if characters.peek().is_some() {
             width += letter_spacing;
         }
+    }
+    if glyph_advances.is_some() {
+        return width;
     }
     // Bounding-box based em classes need a small conversion to platform glyph
     // advances. The old broad classes plus a 6% safety margin substantially
@@ -1600,6 +1702,20 @@ fn estimated_text_width(text: &str, font_size: f32, letter_spacing: f32) -> f32 
     // even though their frames were centered. These classes track Android's
     // modern sans metrics closely; keep only a sub-pixel wrapping tolerance.
     if width > 0.0 { width * 1.09 + 0.5 } else { 0.0 }
+}
+
+fn measured_character_width(
+    character: char,
+    font_size: f32,
+    glyph_advances: Option<&BTreeMap<char, f32>>,
+) -> f32 {
+    glyph_advances
+        .and_then(|advances| advances.get(&character))
+        .filter(|advance| **advance > 0.0)
+        .map_or_else(
+            || estimated_character_width(character, font_size),
+            |advance| *advance * font_size,
+        )
 }
 
 fn estimated_character_width(character: char, font_size: f32) -> f32 {
@@ -1624,6 +1740,7 @@ fn estimated_character_width(character: char, font_size: f32) -> f32 {
     font_size * em
 }
 
+#[allow(clippy::too_many_arguments)]
 fn intrinsic_cross(
     children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
@@ -1631,6 +1748,7 @@ fn intrinsic_cross(
     available_main: f32,
     available_cross: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     let (requested_axis, available_width, available_height) = match parent_axis {
@@ -1644,6 +1762,7 @@ fn intrinsic_cross(
         available_width,
         available_height,
         text_scale,
+        text_metrics,
         depth,
     )
 }
@@ -1748,6 +1867,7 @@ fn flex_main_bounds(
     Ok((minimum, maximum.max(minimum)))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn child_main(
     children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
@@ -1755,6 +1875,7 @@ fn child_main(
     available_main: f32,
     available_cross: f32,
     text_scale: f32,
+    text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
     let explicit_main = match axis {
@@ -1791,6 +1912,7 @@ fn child_main(
                 available_width,
                 available_height,
                 text_scale,
+                text_metrics,
                 depth,
             )
             .unwrap_or(0.0)
@@ -3150,7 +3272,7 @@ mod tests {
             ],
         );
 
-        assert_eq!(text_extent(&text, Axis::Vertical, 70.0, 1.0), 60.0);
+        assert_eq!(text_extent(&text, Axis::Vertical, 70.0, 1.0, None), 60.0);
     }
 
     #[test]
@@ -3179,8 +3301,11 @@ mod tests {
             ],
         );
 
-        assert_eq!(text_extent(&scalable, Axis::Vertical, 200.0, 1.5), 42.0,);
-        assert_eq!(text_extent(&fixed, Axis::Vertical, 200.0, 1.5), 28.0);
+        assert_eq!(
+            text_extent(&scalable, Axis::Vertical, 200.0, 1.5, None),
+            42.0,
+        );
+        assert_eq!(text_extent(&fixed, Axis::Vertical, 200.0, 1.5, None), 28.0);
     }
 
     #[test]
@@ -3214,8 +3339,8 @@ mod tests {
         );
 
         assert!(
-            text_extent(&uppercase, Axis::Horizontal, 400.0, 1.0)
-                > text_extent(&plain, Axis::Horizontal, 400.0, 1.0),
+            text_extent(&uppercase, Axis::Horizontal, 400.0, 1.0, None)
+                > text_extent(&plain, Axis::Horizontal, 400.0, 1.0, None),
         );
     }
 
@@ -3248,6 +3373,31 @@ mod tests {
     }
 
     #[test]
+    fn loaded_font_advances_replace_the_generic_width_estimator() {
+        let advances = BTreeMap::from([
+            ('S', 0.61),
+            ('e', 0.54),
+            ('g', 0.56),
+            ('u', 0.56),
+            ('i', 0.25),
+            ('d', 0.57),
+            ('o', 0.56),
+            ('r', 0.36),
+            ('s', 0.49),
+        ]);
+        let font_size = 15.0;
+        let expected = "Seguidores"
+            .chars()
+            .map(|character| advances[&character] * font_size)
+            .sum::<f32>();
+
+        assert_eq!(
+            measured_text_width("Seguidores", font_size, 0.0, Some(&advances)),
+            expected,
+        );
+    }
+
+    #[test]
     fn logical_letter_spacing_is_not_multiplied_by_font_size() {
         let compact = node(
             1,
@@ -3261,7 +3411,7 @@ mod tests {
             ],
         );
         let without_spacing = estimated_text_width("ABC", 20.0, 0.0);
-        let with_spacing = text_extent(&compact, Axis::Horizontal, 320.0, 1.0);
+        let with_spacing = text_extent(&compact, Axis::Horizontal, 320.0, 1.0, None);
 
         assert!((with_spacing - without_spacing - 1.308).abs() < 0.01);
     }
@@ -3290,6 +3440,7 @@ mod tests {
                 320.0,
                 640.0,
                 1.0,
+                &TextMetrics::new(),
                 0,
             )
             .expect("padded text height"),
@@ -3303,6 +3454,7 @@ mod tests {
                 320.0,
                 640.0,
                 1.0,
+                &TextMetrics::new(),
                 0,
             )
             .expect("padded text width")

@@ -1,4 +1,5 @@
 mod ffi;
+mod font_metrics;
 mod layout;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -12,7 +13,8 @@ pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
-    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_asset_root, pam_native_engine_set_text_scale,
+    pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 
 #[derive(Debug)]
@@ -20,6 +22,7 @@ pub struct Engine {
     current: Option<Tree>,
     viewport: layout::Size,
     text_scale: f32,
+    font_metrics: font_metrics::FontMetricsCache,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
     created: u64,
@@ -40,6 +43,7 @@ impl Default for Engine {
                 height: 800.0,
             },
             text_scale: 1.0,
+            font_metrics: font_metrics::FontMetricsCache::default(),
             layouts: BTreeMap::new(),
             commits: 0,
             created: 0,
@@ -75,6 +79,10 @@ impl Engine {
         Ok(())
     }
 
+    pub fn set_asset_root(&mut self, asset_root: impl Into<std::path::PathBuf>) {
+        self.font_metrics.set_asset_root(asset_root);
+    }
+
     pub fn relayout(&mut self, width: f32, height: f32) -> Result<Vec<u8>, EngineError> {
         self.relayout_with_metrics(width, height, self.text_scale)
     }
@@ -90,8 +98,13 @@ impl Engine {
         let Some(current) = self.current.as_ref() else {
             return Ok(Vec::new());
         };
-        let next_layouts =
-            layout::calculate_with_text_scale(current, self.viewport, self.text_scale)?;
+        let text_metrics = self.font_metrics.measure_tree(current);
+        let next_layouts = layout::calculate_with_text_metrics(
+            current,
+            self.viewport,
+            self.text_scale,
+            &text_metrics,
+        )?;
         let mutations = next_layouts
             .iter()
             .filter_map(|(id, frame)| {
@@ -136,8 +149,13 @@ impl Engine {
 
     fn commit_tree(&mut self, frame: &[u8]) -> Result<Vec<u8>, EngineError> {
         let next = Tree::decode(frame).map_err(EngineError::Protocol)?;
-        let next_layouts =
-            layout::calculate_with_text_scale(&next, self.viewport, self.text_scale)?;
+        let text_metrics = self.font_metrics.measure_tree(&next);
+        let next_layouts = layout::calculate_with_text_metrics(
+            &next,
+            self.viewport,
+            self.text_scale,
+            &text_metrics,
+        )?;
         let mut mutations = Vec::new();
         let next_children = child_index(&next);
 
@@ -218,12 +236,16 @@ impl Engine {
         }
 
         let next_layouts = if layout_dirty {
-            let calculated = layout::calculate_with_text_scale(
-                self.current
-                    .as_ref()
-                    .expect("current tree remains available"),
+            let current = self
+                .current
+                .as_ref()
+                .expect("current tree remains available");
+            let text_metrics = self.font_metrics.measure_tree(current);
+            let calculated = layout::calculate_with_text_metrics(
+                current,
                 self.viewport,
                 self.text_scale,
+                &text_metrics,
             );
             let calculated = match calculated {
                 Ok(layouts) => layouts,
@@ -318,8 +340,13 @@ impl Engine {
         }
         next.validate().map_err(EngineError::Protocol)?;
 
-        let next_layouts =
-            layout::calculate_with_text_scale(&next, self.viewport, self.text_scale)?;
+        let text_metrics = self.font_metrics.measure_tree(&next);
+        let next_layouts = layout::calculate_with_text_metrics(
+            &next,
+            self.viewport,
+            self.text_scale,
+            &text_metrics,
+        )?;
         let next_children = child_index(&next);
         let mut mutations = Vec::new();
         diff(current, &next, &next_children, &mut mutations);

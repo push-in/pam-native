@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 pam-native-protocol = { path = "../pam-native-protocol" }
+ttf-parser = { version = "0.25.1", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

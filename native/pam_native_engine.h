@@ -38,6 +38,11 @@ typedef struct PamNativeStats {
 } PamNativeStats;
 
 PamNativeEngineHandle *pam_native_engine_new(void);
+PamStatus pam_native_engine_set_asset_root(
+    PamNativeEngineHandle *handle,
+    const uint8_t *data,
+    size_t length
+);
 void pam_native_engine_free(PamNativeEngineHandle *handle);
 PamStatus pam_native_engine_set_viewport(
     PamNativeEngineHandle *handle,

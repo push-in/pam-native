@@ -124,9 +124,12 @@ The path resolves below the packaged `pam/` asset root. Declare another
 `font-family`, `font-weight`, and `font-style` rules. PAM preserves the logical
 family through inherited text styles and selects the closest face for each
 element, so there is no font registry, CSS parser, or selector work in the
-native application runtime. PAM accepts TTF and OTF files,
-rejects traversal, caches decoded native typefaces, and keeps ordinary
-installed family names such as `sans-serif` working unchanged.
+native application runtime. PAM accepts TTF and OTF files, rejects traversal,
+caches decoded native typefaces, and keeps ordinary installed family names such
+as `sans-serif` working unchanged. The Rust layout engine also reads and caches
+the selected asset face before the first mount, so intrinsic width and wrapping
+use its real glyph advances without a UI-thread measurement or corrective
+second render.
 The conventional `src/app.css` sheet is prepended automatically to every PAM
 component. Use it for fonts, design tokens, tag defaults, and reusable classes;
 local `<style scoped>` rules win the cascade. Relative `.css` imports are
@@ -142,10 +145,10 @@ inheritance as private render context instead of public component props, so
 strict constructors receive only attributes authored on their component tag.
 Auto-width text uses the parent's relevant flex axis to align visible glyphs:
 cross-axis alignment in columns and main-axis justification in rows. Since
-0.5.83, intrinsic widths follow native sans-serif glyph advances with only a
-sub-pixel wrapping tolerance, so text-and-icon controls stay optically centered
-under platform font scaling. Explicit widths and growing text preserve normal
-start alignment unless `text-align` is authored.
+0.5.84, packaged fonts use their own cached advances instead of the generic
+sans-serif estimator, so labels neither clip nor shift a centered text-and-icon
+control under platform font scaling. Explicit widths and growing text preserve
+normal start alignment unless `text-align` is authored.
 
 Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
 short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),

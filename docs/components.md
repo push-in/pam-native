@@ -221,6 +221,13 @@ CSS travels as private render context and never becomes a constructor prop or
 component variant; typed components therefore receive only attributes authored
 on their tag. A child that changes only `font-weight` keeps the inherited
 logical family and resolves the matching packaged `@font-face`.
+Before the first native mount, the Rust layout engine reads each selected TTF
+or OTF face directly from the extracted application assets and caches its
+normalized glyph advances. Intrinsic widths, wrapping, accessibility font
+scaling, and flex centering therefore use the metrics of the font Android and
+iOS actually render. A missing or unsupported face falls back to PAM's
+allocation-free generic estimator; layout never waits for a native measurement
+round trip and does not visibly correct itself after mount.
 Conservative auto-width text frames follow the relevant flex alignment axis:
 `align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
 sized or growing text keeps normal start alignment unless `text-align` is

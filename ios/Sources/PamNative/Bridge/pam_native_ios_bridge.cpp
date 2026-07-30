@@ -582,8 +582,20 @@ uint64_t pam_native_runtime_start(
     state->text_scale = text_scale;
 
     state->engine = pam_native_engine_new();
+    const auto entry_separator = state->entry.find_last_of("/\\");
+    const auto asset_root = entry_separator == std::string::npos
+        ? std::string()
+        : state->entry.substr(0, entry_separator);
+    const auto asset_root_status = asset_root.empty()
+        ? PAM_STATUS_SUCCESS
+        : pam_native_engine_set_asset_root(
+            state->engine,
+            reinterpret_cast<const uint8_t*>(asset_root.data()),
+            asset_root.size()
+        );
     if (
         state->engine == nullptr
+        || asset_root_status != PAM_STATUS_SUCCESS
         || pam_native_engine_set_viewport(state->engine, width_dp, height_dp)
             != PAM_STATUS_SUCCESS
         || pam_native_engine_set_text_scale(state->engine, text_scale)

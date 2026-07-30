@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.84 - 2026-07-30
+
+- Measure intrinsic text with the actual packaged TTF/OTF face selected by
+  `@font-face`, eliminating clipped labels and font-specific centering drift.
+- Cache font bytes and normalized glyph advances by asset face, sharing each
+  immutable metric snapshot across every text node that uses it.
+- Resolve asset fonts before the first native mount on Android and iOS, with no
+  UI-thread measurement, post-render correction, or extra frame.
+- Keep safe path resolution and the allocation-free generic estimator as the
+  fallback for installed, missing, or unsupported font families.
+
 ## 0.5.83 - 2026-07-30
 
 - Calibrate intrinsic text widths against Android sans-serif glyph advances
