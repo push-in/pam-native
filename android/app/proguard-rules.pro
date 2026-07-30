@@ -12,3 +12,7 @@
 -keepclasseswithmembernames class * {
     native <methods>;
 }
+
+# AndroidJUnitRunner enters the benchmark target process before application
+# code and requires this class there.
+-keep class androidx.tracing.Trace { *; }

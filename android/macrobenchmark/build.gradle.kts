@@ -22,9 +22,11 @@ android {
 
     buildTypes {
         create("benchmark") {
-            isDebuggable = true
+            isDebuggable = false
+            isMinifyEnabled = true
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("benchmark", "release")
+            testProguardFiles(file("proguard-rules.pro"))
         }
     }
 
@@ -32,7 +34,6 @@ android {
         buildConfig = true
     }
 
-    experimentalProperties["android.experimental.self-instrumenting"] = true
 }
 
 dependencies {

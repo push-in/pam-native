@@ -10,6 +10,9 @@
   texture-backed player.
 - Clip the complete Android virtual-list draw pass, including overlays and
   foregrounds, at the authored viewport.
+- Install the release-like Android application target before Macrobenchmark
+  instrumentation instead of treating the benchmark module as a
+  self-instrumenting application.
 
 ## 0.5.50 - 2026-07-30
 

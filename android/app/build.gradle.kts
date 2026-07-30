@@ -140,6 +140,7 @@ dependencies {
     implementation(project(":plugin-api"))
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    add("benchmarkImplementation", "androidx.tracing:tracing:1.1.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")

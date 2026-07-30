@@ -86,6 +86,7 @@ jobs:
           :app:testDebugUnitTest
           :app:lintDebug
           :app:assembleDebug
+          :macrobenchmark:assembleBenchmark
           :plugin-api:assembleRelease
       - name: Package instrumented-test prerequisites
         run: |

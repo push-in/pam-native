@@ -13,6 +13,11 @@ Run Pam Native:
 pam mobile benchmark path/to/project
 ```
 
+The benchmark module is a separate instrumented application. Gradle installs
+the minified `benchmark` target and its test APK together, so the measurement
+never falls back to an already-running `.debug` application. The command fails
+when the target cannot be installed or discovered.
+
 Generate the startup Baseline Profile independently with:
 
 ```bash
