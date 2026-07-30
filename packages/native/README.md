@@ -145,8 +145,26 @@ user selects one, `System\Files::importUri()` materializes only that asset as a
 sandboxed `FileReference`. Request `PermissionKind::Photos` first and accept
 both granted and limited access; use `Files::pick()` as the portable fallback.
 
+`UI\DrawingCanvas` captures freehand brush and eraser strokes directly in the
+native view. Pointer moves never enter PHP; one bounded, normalized drawing
+document is emitted after each completed stroke. Increment request tokens to
+undo or clear without making either command controlled state:
+
+```xml
+<DrawingCanvas
+    :source="$previewSource"
+    :value="$drawing"
+    brushColor="#FFFFFFFF"
+    brushWidth="6"
+    drawingMode="brush"
+    :undoRequest="$undoRequest"
+    :clearRequest="$clearRequest"
+    on:change="updateDrawing"
+/>
+```
+
 `System\ImageEditor::render()` crops, rotates, flips, filters, adjusts, and
-composes imported images on a dedicated native worker. Set `maxWidth` and
+composes imported images and native drawings on a dedicated native worker. Set `maxWidth` and
 `maxHeight` to bound the encoded dimensions and `outputQuality` from 1 to 100.
 Android reads image bounds first and chooses a decode sample before allocating
 the bitmap, then performs one final high-quality resize. This keeps profile
@@ -165,6 +183,7 @@ ImageEditor::render(
     maxWidth: 1080,
     maxHeight: 1080,
     outputQuality: 92,
+    drawing: $drawing,
 );
 ```
 

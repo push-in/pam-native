@@ -78,6 +78,8 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.bottomSheetSnapPoints, 315)
         XCTAssertEqual(PamConstants.onBottomSheetDismiss, 324)
         XCTAssertEqual(NodeKind.media.rawValue, 28)
+        XCTAssertEqual(NodeKind.drawingCanvas.rawValue, 29)
+        XCTAssertEqual(PamConstants.drawingUndoRequest, 395)
         XCTAssertEqual(PamConstants.onMediaError, 346)
         XCTAssertEqual(PamConstants.onMenuAction, 354)
         XCTAssertEqual(PamConstants.onNavigationGesturePop, 358)

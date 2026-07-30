@@ -516,6 +516,7 @@ class PamRenderer(
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context)
             NodeKind.WEB_VIEW -> PamWebView(context)
             NodeKind.MEDIA -> PamMediaView(context, mediaCache)
+            NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
@@ -1190,10 +1191,10 @@ class PamRenderer(
                 state.baseText = semanticText
                 applyTextDataDetector(text, state)
             }
-            PropKey.VALUE -> if (view is EditText) {
-                applyInputValue(view, state, value.text(key))
-            } else {
-                view.tag = value.semanticValue()
+            PropKey.VALUE -> when (view) {
+                is EditText -> applyInputValue(view, state, value.text(key))
+                is PamDrawingCanvas -> view.setDrawing(value.text(key))
+                else -> view.tag = value.semanticValue()
             }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text(key)
             PropKey.SOURCE -> loadImage(view, state)
@@ -1453,9 +1454,10 @@ class PamRenderer(
             PropKey.MEDIA_RESIZE_HEIGHT,
             PropKey.MEDIA_PRIORITY,
             PropKey.MEDIA_CACHE_CHECKSUM,
-            -> when (view) {
-                is PamMediaView -> configureMediaCache(view, state)
-                is PamImageView -> loadImage(view, state)
+            -> if (view is PamMediaView) {
+                configureMediaCache(view, state)
+            } else if (pamImageView(view) != null) {
+                loadImage(view, state)
             }
             PropKey.ON_MEDIA_CACHE_HIT,
             PropKey.ON_MEDIA_CACHE_MISS,
@@ -1543,6 +1545,16 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setScrollTargetOffset(
                     value.decimal().toFloat(),
                 )
+            PropKey.DRAWING_COLOR ->
+                (view as? PamDrawingCanvas)?.setBrushColor(value.integer().toInt())
+            PropKey.DRAWING_WIDTH ->
+                (view as? PamDrawingCanvas)?.setBrushWidth(value.decimal().toFloat())
+            PropKey.DRAWING_MODE ->
+                (view as? PamDrawingCanvas)?.setDrawingMode(value.integer().toInt())
+            PropKey.DRAWING_CLEAR_REQUEST ->
+                (view as? PamDrawingCanvas)?.setClearRequest(value.integer().toInt())
+            PropKey.DRAWING_UNDO_REQUEST ->
+                (view as? PamDrawingCanvas)?.setUndoRequest(value.integer().toInt())
             PropKey.SCROLL_REQUEST ->
                 (view as? PamScrollContainer)?.requestScroll()
             PropKey.SCROLL_FILL_VIEWPORT ->
@@ -1887,10 +1899,10 @@ class PamRenderer(
         when (key) {
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
             PropKey.TEXT -> (view as? TextView)?.text = ""
-            PropKey.VALUE -> if (view is EditText) {
-                view.setText("")
-            } else {
-                view.tag = null
+            PropKey.VALUE -> when (view) {
+                is EditText -> view.setText("")
+                is PamDrawingCanvas -> view.setDrawing("")
+                else -> view.tag = null
             }
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = null
             PropKey.SOURCE -> pamImageView(view)?.let(imageLoader::cancel)
@@ -2076,6 +2088,16 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setScrollTargetTestId("")
             PropKey.SCROLL_TARGET_OFFSET ->
                 (view as? PamScrollContainer)?.setScrollTargetOffset(-1f)
+            PropKey.DRAWING_COLOR ->
+                (view as? PamDrawingCanvas)?.setBrushColor(Color.WHITE)
+            PropKey.DRAWING_WIDTH ->
+                (view as? PamDrawingCanvas)?.setBrushWidth(6f)
+            PropKey.DRAWING_MODE ->
+                (view as? PamDrawingCanvas)?.setDrawingMode(1)
+            PropKey.DRAWING_CLEAR_REQUEST ->
+                (view as? PamDrawingCanvas)?.setClearRequest(0)
+            PropKey.DRAWING_UNDO_REQUEST ->
+                (view as? PamDrawingCanvas)?.setUndoRequest(0)
             PropKey.SCROLL_REQUEST -> Unit
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)
@@ -2401,6 +2423,15 @@ class PamRenderer(
             }
         }
         if (view is PamScrollContainer) installScrollEvents(view, state)
+        if (view is PamDrawingCanvas) {
+            view.setOnDrawingChange(
+                if (state.properties[PropKey.ON_CHANGE] != null) {
+                    { drawing -> dispatch(state.id, EVENT_CHANGE, drawing) }
+                } else {
+                    null
+                },
+            )
+        }
         if (view is PamRecyclerList) installListEvents(view, state)
         if (view is PamRefreshContainer) {
             view.setOnRefresh(
@@ -3576,7 +3607,8 @@ class PamRenderer(
     private fun updateBackground(view: View, state: NodeState) {
         val defaultColor = if (
             state.kind == NodeKind.IMAGE ||
-            state.kind == NodeKind.IMAGE_BACKGROUND
+            state.kind == NodeKind.IMAGE_BACKGROUND ||
+            state.kind == NodeKind.DRAWING_CANVAS
         ) {
             state.integer(
                 PropKey.IMAGE_OVERLAY_COLOR,
@@ -3623,7 +3655,8 @@ class PamRenderer(
             )
         val borderColor = state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
         val imageHost = state.kind == NodeKind.IMAGE ||
-            state.kind == NodeKind.IMAGE_BACKGROUND
+            state.kind == NodeKind.IMAGE_BACKGROUND ||
+            state.kind == NodeKind.DRAWING_CANVAS
         val radii = floatArrayOf(
             topLeft,
             topLeft,
@@ -4693,6 +4726,7 @@ class PamRenderer(
         when (view) {
             is PamImageView -> view
             is PamImageBackground -> view.image
+            is PamDrawingCanvas -> view.image
             else -> null
         }
 
@@ -4700,6 +4734,7 @@ class PamRenderer(
         when (view) {
             is ImageView -> view
             is PamImageBackground -> view.image
+            is PamDrawingCanvas -> view.image
             else -> null
         }
 

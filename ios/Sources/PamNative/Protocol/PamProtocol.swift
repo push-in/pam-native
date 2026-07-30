@@ -40,6 +40,7 @@ public enum NodeKind: Int {
     case virtualList = 26
     case webView = 27
     case media = 28
+    case drawingCanvas = 29
 
     public init(_ rawValue: Int) throws {
         guard let kind = NodeKind(rawValue: rawValue) else {
@@ -344,6 +345,11 @@ public enum PamConstants {
     public static let scrollTargetTestId = 388
     public static let scrollRequest = 389
     public static let scrollTargetOffset = 390
+    public static let drawingColor = 391
+    public static let drawingWidth = 392
+    public static let drawingMode = 393
+    public static let drawingClearRequest = 394
+    public static let drawingUndoRequest = 395
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

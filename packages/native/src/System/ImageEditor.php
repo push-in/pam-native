@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\System;
 
 use Closure;
+use InvalidArgumentException;
 use Pam\Native\FileReference;
 use Pam\Native\ImageCropRatio;
 use Pam\Native\ImageFilterType;
@@ -32,6 +33,7 @@ final class ImageEditor
         int $maxWidth = 0,
         int $maxHeight = 0,
         int $outputQuality = 94,
+        string $drawing = '',
     ): int {
         return NativeModules::call(
             'image-editor',
@@ -40,6 +42,7 @@ final class ImageEditor
                 'brightness' => self::adjustment($brightness),
                 'contrast' => self::adjustment($contrast),
                 'cropRatio' => $cropRatio->value,
+                'drawing' => self::drawing($drawing),
                 'filter' => $filter->value,
                 'flipHorizontal' => $flipHorizontal ? 1 : 0,
                 'maxHeight' => max(0, $maxHeight),
@@ -80,5 +83,20 @@ final class ImageEditor
     private static function adjustment(int $value): int
     {
         return max(-100, min(100, $value));
+    }
+
+    private static function drawing(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        if (strlen($value) > 524_288 || !json_validate($value, 64)) {
+            throw new InvalidArgumentException(
+                'Image editor drawing must be valid JSON no larger than 512 KiB.',
+            );
+        }
+
+        return $value;
     }
 }

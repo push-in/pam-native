@@ -17,6 +17,7 @@ use Pam\Native\AsyncValue;
 use Pam\Native\Component;
 use Pam\Native\Contact;
 use Pam\Native\CaptureType;
+use Pam\Native\DrawingMode;
 use Pam\Native\EventKind;
 use Pam\Native\FileReference;
 use Pam\Native\FontStyle;
@@ -146,6 +147,7 @@ use Pam\Native\UI\ActivityIndicator;
 use Pam\Native\UI\Animated;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
+use Pam\Native\UI\DrawingCanvas;
 use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Input;
 use Pam\Native\UI\InteractionRegion;
@@ -1479,6 +1481,32 @@ $assert(
     'Image helpers must preserve native loading, cache, resize, lifecycle and background behavior.',
 );
 
+$drawingChanged = '';
+$drawingCanvas = DrawingCanvas::make(
+    'pam-file:///editor/source.jpg',
+    '{"version":1,"strokes":[]}',
+)
+    ->brush(0xFF2563EB, 8.0, DrawingMode::Eraser)
+    ->clearRequest(2)
+    ->undoRequest(3)
+    ->onChange(static function (string $value) use (&$drawingChanged): void {
+        $drawingChanged = $value;
+    });
+($drawingCanvas->events()[EventKind::Change->value])('{"version":1,"strokes":[1]}');
+$assert(
+    $drawingCanvas->kind() === NodeKind::DrawingCanvas
+        && $drawingCanvas->properties()[PropKey::Source->value]
+            === 'pam-file:///editor/source.jpg'
+        && $drawingCanvas->properties()[PropKey::DrawingColor->value] === 0xFF2563EB
+        && $drawingCanvas->properties()[PropKey::DrawingWidth->value] === 8.0
+        && $drawingCanvas->properties()[PropKey::DrawingMode->value]
+            === DrawingMode::Eraser->value
+        && $drawingCanvas->properties()[PropKey::DrawingClearRequest->value] === 2
+        && $drawingCanvas->properties()[PropKey::DrawingUndoRequest->value] === 3
+        && $drawingChanged === '{"version":1,"strokes":[1]}',
+    'DrawingCanvas must keep stroke rendering and completed-stroke events native.',
+);
+
 $nativeControlTemplate = TemplateRenderer::render(
     TemplateCompiler::compile(<<<'PAM'
 <Screen>
@@ -1510,6 +1538,15 @@ $nativeControlTemplate = TemplateRenderer::render(
         trackColorTrue="#2563eb"
         thumbColor="#ffffff"
     />
+    <DrawingCanvas
+        source="pam-file:///editor/source.jpg"
+        value="{&quot;version&quot;:1,&quot;strokes&quot;:[]}"
+        brushColor="#2563eb"
+        brushWidth="7"
+        drawingMode="eraser"
+        clearRequest="4"
+        undoRequest="5"
+    />
 </Screen>
 PAM),
     null,
@@ -1518,6 +1555,7 @@ PAM),
 $templateScroll = $nativeControlTemplate->children()[0];
 $templateIndicator = $nativeControlTemplate->children()[1];
 $templateSwitch = $nativeControlTemplate->children()[2];
+$templateDrawing = $nativeControlTemplate->children()[3];
 $assert(
     $templateScroll->properties()[PropKey::ScrollHorizontal->value] === true
         && $templateScroll
@@ -1542,8 +1580,15 @@ $assert(
             ->properties()[PropKey::SwitchTrackColorFalse->value] === 0xFF64748B
         && $templateSwitch
             ->properties()[PropKey::SwitchTrackColorTrue->value] === 0xFF2563EB
-        && $templateSwitch->properties()[PropKey::SwitchThumbColor->value] === 0xFFFFFFFF,
-    'Native control tags must map to the same typed scroll, indicator and switch protocol.',
+        && $templateSwitch->properties()[PropKey::SwitchThumbColor->value] === 0xFFFFFFFF
+        && $templateDrawing->kind() === NodeKind::DrawingCanvas
+        && $templateDrawing->properties()[PropKey::DrawingColor->value] === 0xFF2563EB
+        && (float) $templateDrawing->properties()[PropKey::DrawingWidth->value] === 7.0
+        && $templateDrawing->properties()[PropKey::DrawingMode->value]
+            === DrawingMode::Eraser->value
+        && $templateDrawing->properties()[PropKey::DrawingClearRequest->value] === 4
+        && $templateDrawing->properties()[PropKey::DrawingUndoRequest->value] === 5,
+    'Native control tags must map to typed scroll, indicator, switch and drawing protocols.',
 );
 
 $listElement = FlatList::make(['One', 'Two', 'Three'])
@@ -3783,8 +3828,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.60',
-    'The runtime SDK contract must match the 0.5.60 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.61',
+    'The runtime SDK contract must match the 0.5.61 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -3801,10 +3846,11 @@ $assert(
         ) === [1, 2, 3, 4, 5]
         && array_map(
             static fn (ReflectionParameter $parameter): string => $parameter->getName(),
-            array_slice($imageEditorParameters, -3),
-        ) === ['maxWidth', 'maxHeight', 'outputQuality']
-        && $imageEditorParameters[array_key_last($imageEditorParameters)]->getDefaultValue() === 94,
-    'The image editor contract must expose typed transforms and bounded output controls.',
+            array_slice($imageEditorParameters, -4),
+        ) === ['maxWidth', 'maxHeight', 'outputQuality', 'drawing']
+        && $imageEditorParameters[count($imageEditorParameters) - 2]->getDefaultValue() === 94
+        && $imageEditorParameters[array_key_last($imageEditorParameters)]->getDefaultValue() === '',
+    'The image editor contract must expose typed transforms, bounded output and drawing.',
 );
 
 $bottomSheet = BottomSheet::make(

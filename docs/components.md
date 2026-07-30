@@ -492,6 +492,36 @@ Tree components and `.pam.php` components can render each other because both
 use the same component lifecycle, element identities, Rust diff engine, binary
 protocol, and Android UI-thread commit queue.
 
+## Native drawing canvas
+
+`DrawingCanvas` layers a native freehand surface over an aspect-fit image:
+
+```xml
+<DrawingCanvas
+    class="editor-canvas"
+    :source="$previewSource"
+    :value="$drawing"
+    brushColor="#FF40C463"
+    brushWidth="6"
+    drawingMode="brush"
+    :undoRequest="$undoRequest"
+    :clearRequest="$clearRequest"
+    on:change="updateDrawing"
+/>
+```
+
+`drawingMode` accepts `brush` or `eraser`. `undoRequest` and `clearRequest`
+are monotonically increasing command tokens. The native surface coalesces
+touch samples and redraws locally during the gesture, then emits `change` once
+when the stroke finishes. Its versioned JSON document is bounded to 256
+strokes and 2,048 points per stroke; coordinates and widths are normalized to
+the displayed image content so preview and export remain aligned at different
+screen or image sizes.
+
+Pass the emitted string to `System\ImageEditor::render(drawing: $drawing)` to
+flatten it before crop, rotation, filters, resize, and JPEG encoding on the
+native worker.
+
 ## Generators
 
 ```bash

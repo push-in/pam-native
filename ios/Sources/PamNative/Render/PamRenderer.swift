@@ -279,9 +279,10 @@ public final class PamRenderer {
             state.properties.removeValue(forKey: key)
             resetProperty(view: view, nodeId: id, key: key, state: state)
             if key == PamConstants.source,
-               let imageView = view as? UIImageView {
+               let imageView = imageView(for: view) {
                 cancelImageLoad(for: state)
                 imageView.image = nil
+                (view as? PamDrawingCanvas)?.imageDidChange()
             }
         }
 
@@ -299,7 +300,7 @@ public final class PamRenderer {
         }
 
         if key == PamConstants.source, let source = value?.textOrNil() {
-            if let imageView = view as? UIImageView {
+            if let imageView = imageView(for: view) {
                 loadImage(source, into: imageView, nodeId: id)
             }
         }
@@ -582,6 +583,8 @@ public final class PamRenderer {
             return PamWebView()
         case .media:
             return PamMediaView()
+        case .drawingCanvas:
+            return PamDrawingCanvas()
         case .refreshControl:
             return PamRefreshContainer()
         case .customView:
@@ -869,6 +872,12 @@ public final class PamRenderer {
                 self?.dispatchEvent(nodeId, EventKind.webViewMessage.rawValue, payload)
             } : nil
         }
+        if let drawing = view as? PamDrawingCanvas {
+            drawing.onDrawingChange = eventProperties.contains(PamConstants.onChange) ? {
+                [weak self] value in
+                self?.dispatchEvent(nodeId, EventKind.change.rawValue, Data(value.utf8))
+            } : nil
+        }
         if let media = view as? PamMediaView {
             media.onReady = eventProperties.contains(PamConstants.onMediaReady) ? {
                 [weak self] in self?.dispatchEvent(nodeId, EventKind.mediaReady.rawValue, Data())
@@ -1154,7 +1163,9 @@ public final class PamRenderer {
                 }
             }
         case PamConstants.value:
-            if let textValue = value.textOrNil(), let field = view as? UITextField {
+            if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
+                drawing.setDrawing(textValue)
+            } else if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.text = textValue
             } else if let boolValue = value.boolOrNil(), let switchView = view as? PamVuetifySwitch {
                 switchView.isOn = boolValue
@@ -1167,12 +1178,12 @@ public final class PamRenderer {
                 field.placeholder = textValue
             }
         case PamConstants.source:
-            if let imageView = view as? UIImageView, let source = value.textOrNil() {
+            if let imageView = imageView(for: view), let source = value.textOrNil() {
                 loadImage(source, into: imageView, nodeId: nodeId)
             }
         case PamConstants.imageFit:
             let mode = Int(value.integerOrNil() ?? 1)
-            if let imageView = view as? UIImageView {
+            if let imageView = imageView(for: view) {
                 imageView.contentMode = switch mode {
                 case 2: .scaleAspectFit
                 case 3: .scaleToFill
@@ -1434,6 +1445,16 @@ public final class PamRenderer {
         case PamConstants.scrollTargetOffset:
             (view as? PamAnchoredScrollView)?.scrollTargetOffset =
                 CGFloat(value.decimalOrZero())
+        case PamConstants.drawingColor:
+            (view as? PamDrawingCanvas)?.setBrushColor(value.integerOrNil() ?? Int64(UInt32.max))
+        case PamConstants.drawingWidth:
+            (view as? PamDrawingCanvas)?.setBrushWidth(CGFloat(value.decimalOrZero()))
+        case PamConstants.drawingMode:
+            (view as? PamDrawingCanvas)?.setDrawingMode(Int(value.integerOrNil() ?? 1))
+        case PamConstants.drawingClearRequest:
+            (view as? PamDrawingCanvas)?.setClearRequest(Int(value.integerOrNil() ?? 0))
+        case PamConstants.drawingUndoRequest:
+            (view as? PamDrawingCanvas)?.setUndoRequest(Int(value.integerOrNil() ?? 0))
         case PamConstants.scrollRequest:
             (view as? PamAnchoredScrollView)?.requestScroll()
         case PamConstants.drawerOpen:
@@ -1487,7 +1508,7 @@ public final class PamRenderer {
         case PamConstants.backgroundColor:
             view.backgroundColor = .clear
         case PamConstants.imageFit:
-            (view as? UIImageView)?.contentMode = .scaleAspectFill
+            imageView(for: view)?.contentMode = .scaleAspectFill
             (view as? PamMediaView)?.setResizeMode(1)
         case PamConstants.borderColor,
              PamConstants.borderWidth,
@@ -1656,6 +1677,16 @@ public final class PamRenderer {
             (view as? PamAnchoredScrollView)?.scrollTargetTestId = ""
         case PamConstants.scrollTargetOffset:
             (view as? PamAnchoredScrollView)?.scrollTargetOffset = -1
+        case PamConstants.drawingColor:
+            (view as? PamDrawingCanvas)?.setBrushColor(Int64(UInt32.max))
+        case PamConstants.drawingWidth:
+            (view as? PamDrawingCanvas)?.setBrushWidth(6)
+        case PamConstants.drawingMode:
+            (view as? PamDrawingCanvas)?.setDrawingMode(1)
+        case PamConstants.drawingClearRequest:
+            (view as? PamDrawingCanvas)?.setClearRequest(0)
+        case PamConstants.drawingUndoRequest:
+            (view as? PamDrawingCanvas)?.setUndoRequest(0)
         case PamConstants.scrollRequest:
             break
         case PamConstants.drawerOpen:
@@ -2291,6 +2322,17 @@ public final class PamRenderer {
         return UIImage(named: source)
     }
 
+    private func imageView(for view: UIView) -> UIImageView? {
+        if let imageView = view as? UIImageView {
+            return imageView
+        }
+        return (view as? PamDrawingCanvas)?.imageView
+    }
+
+    private func notifyDrawingImageChanged(nodeId: Int64) {
+        (views[nodeId] as? PamDrawingCanvas)?.imageDidChange()
+    }
+
     private func sandboxFileURL(_ source: String) -> URL? {
         guard let uri = URLComponents(string: source),
               uri.scheme?.lowercased() == "pam-file",
@@ -2325,6 +2367,7 @@ public final class PamRenderer {
     ) {
         if let image = localImage(source) {
             imageView.image = image
+            notifyDrawingImageChanged(nodeId: nodeId)
             return
         }
         guard let url = URL(string: source),
@@ -2337,6 +2380,7 @@ public final class PamRenderer {
                       state.imageGeneration == generation,
                       state.imageLoading else { return }
                 imageView?.image = image
+                self.notifyDrawingImageChanged(nodeId: nodeId)
             }
         }.resume()
     }
@@ -2527,7 +2571,8 @@ public final class PamRenderer {
             guard let self else { return }
             guard let state = self.nodes[context.nodeId],
                   state.imageGeneration == context.generation,
-                  let imageView = self.views[context.nodeId] as? UIImageView else {
+                  let hostView = self.views[context.nodeId],
+                  let imageView = self.imageView(for: hostView) else {
                 return
             }
             let multiplier = state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
@@ -2587,6 +2632,7 @@ public final class PamRenderer {
                 } else {
                     imageView.image = image
                 }
+                self.notifyDrawingImageChanged(nodeId: context.nodeId)
                 state.imageLoading = false
                 guard state.properties[PamConstants.onImageLoad] != nil else { return }
                 let payload = (try? WireMap.encode(
@@ -2608,9 +2654,11 @@ public final class PamRenderer {
             guard let self,
                   let state = self.nodes[context.nodeId],
                   state.imageGeneration == context.generation,
-                  let imageView = self.views[context.nodeId] as? UIImageView,
+                  let hostView = self.views[context.nodeId],
+                  let imageView = self.imageView(for: hostView),
                   let image = UIImage(data: data) else { return }
             imageView.image = image
+            self.notifyDrawingImageChanged(nodeId: context.nodeId)
         }
 
         context.onError = { [weak self] context, error in
@@ -3820,7 +3868,8 @@ public final class PamRenderer {
 private extension NodeKind {
     var isContainer: Bool {
         switch self {
-        case .text, .input, .button, .activityIndicator, .toggle, .image, .spacer, .statusBar:
+        case .text, .input, .button, .activityIndicator, .toggle, .image,
+             .drawingCanvas, .spacer, .statusBar:
             return false
         default:
             return true

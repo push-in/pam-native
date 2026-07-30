@@ -20,6 +20,7 @@ use Pam\Native\AnimationKeyframe;
 use Pam\Native\AnimationPlayState;
 use Pam\Native\BottomSheetKeyboardBehavior;
 use Pam\Native\Component;
+use Pam\Native\DrawingMode;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\GestureComposition;
@@ -62,6 +63,7 @@ use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\DrawerLayoutAndroid;
+use Pam\Native\UI\DrawingCanvas;
 use Pam\Native\UI\FlatList;
 use Pam\Native\UI\Grid;
 use Pam\Native\UI\GestureDetector;
@@ -225,6 +227,13 @@ final class TemplateRenderer
         'scrollTargetTestId' => PropKey::ScrollTargetTestId,
         'scrollRequest' => PropKey::ScrollRequest,
         'scrollTargetOffset' => PropKey::ScrollTargetOffset,
+        'brushColor' => PropKey::DrawingColor,
+        'drawingColor' => PropKey::DrawingColor,
+        'brushWidth' => PropKey::DrawingWidth,
+        'drawingWidth' => PropKey::DrawingWidth,
+        'drawingMode' => PropKey::DrawingMode,
+        'clearRequest' => PropKey::DrawingClearRequest,
+        'undoRequest' => PropKey::DrawingUndoRequest,
         'fillViewport' => PropKey::ScrollFillViewport,
         'overScrollMode' => PropKey::ScrollOverScrollMode,
         'nestedScrollEnabled' => PropKey::ScrollNestedEnabled,
@@ -939,6 +948,10 @@ final class TemplateRenderer
                 'Input value',
             )),
             'Image' => Image::make(self::stringValue($values['source'] ?? '', 'Image source')),
+            'DrawingCanvas' => DrawingCanvas::make(
+                self::stringValue($values['source'] ?? '', 'DrawingCanvas source'),
+                self::stringValue($values['value'] ?? '', 'DrawingCanvas value'),
+            ),
             'ImageBackground' => ImageBackground::make(
                 self::stringValue($values['source'] ?? '', 'Image source'),
                 ...$children,
@@ -1360,7 +1373,7 @@ final class TemplateRenderer
             && isset($attributes['alt'])
             && in_array(
                 $element->kind(),
-                [NodeKind::Image, NodeKind::ImageBackground],
+                [NodeKind::Image, NodeKind::ImageBackground, NodeKind::DrawingCanvas],
                 true,
             )
         ) {
@@ -1580,7 +1593,7 @@ final class TemplateRenderer
             PropKey::ImageRequestHeaders,
             => in_array(
                 $kind,
-                [NodeKind::Image, NodeKind::ImageBackground],
+                [NodeKind::Image, NodeKind::ImageBackground, NodeKind::DrawingCanvas],
                 true,
             ),
             PropKey::InputEditable,
@@ -1628,6 +1641,7 @@ final class TemplateRenderer
             PropKey::InputUnderlineColor,
             PropKey::ModalBackdropColor,
             PropKey::DrawerOverlayColor,
+            PropKey::DrawingColor,
             => self::colorValue($value, "Template {$key->name}"),
             PropKey::AlignItems, PropKey::AlignSelf => self::named($value, [
                 'start' => 1, 'flex-start' => 1, 'center' => 2,
@@ -1639,6 +1653,10 @@ final class TemplateRenderer
                 'space-around' => 5, 'space-evenly' => 6,
             ]),
             PropKey::TextAlign => self::named($value, ['start' => 1, 'center' => 2, 'end' => 3]),
+            PropKey::DrawingMode => self::named($value, [
+                'brush' => DrawingMode::Brush->value,
+                'eraser' => DrawingMode::Eraser->value,
+            ]),
             PropKey::KeyboardType => self::named($value, [
                 'text' => KeyboardType::Text->value,
                 'email' => KeyboardType::Email->value,
@@ -1943,6 +1961,8 @@ final class TemplateRenderer
             PropKey::PressDelayInMs,
             PropKey::PressDelayOutMs,
             PropKey::ScrollRequest,
+            PropKey::DrawingClearRequest,
+            PropKey::DrawingUndoRequest,
             => min(
                 60_000,
                 max(0, (int) self::floatValue($value, "Pressable {$key->name}")),
@@ -1958,6 +1978,7 @@ final class TemplateRenderer
             PropKey::PressRetentionBottom,
             PropKey::RippleRadius,
             PropKey::ScrollAutoScrollToEndThreshold,
+            PropKey::DrawingWidth,
             => max(0.0, self::floatValue($value, "Pressable {$key->name}")),
             PropKey::RippleAlpha => min(
                 1.0,

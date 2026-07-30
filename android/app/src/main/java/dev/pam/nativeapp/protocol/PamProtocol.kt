@@ -37,7 +37,8 @@ enum class NodeKind(val value: Int) {
     NAVIGATION_HOST(25),
     VIRTUAL_LIST(26),
     WEB_VIEW(27),
-    MEDIA(28);
+    MEDIA(28),
+    DRAWING_CANVAS(29);
 
     companion object {
         fun from(value: Int): NodeKind =
@@ -503,7 +504,12 @@ enum class PropKey(val value: Int) {
     SCROLL_AUTO_SCROLL_TO_END_THRESHOLD(387),
     SCROLL_TARGET_TEST_ID(388),
     SCROLL_REQUEST(389),
-    SCROLL_TARGET_OFFSET(390);
+    SCROLL_TARGET_OFFSET(390),
+    DRAWING_COLOR(391),
+    DRAWING_WIDTH(392),
+    DRAWING_MODE(393),
+    DRAWING_CLEAR_REQUEST(394),
+    DRAWING_UNDO_REQUEST(395);
 
     companion object {
         fun from(value: Int): PropKey =

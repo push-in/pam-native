@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.61 - 2026-07-30
+
+- Add a native `DrawingCanvas` on Android and iOS with coalesced freehand
+  input, brush/eraser modes and tokenized undo/clear commands. Completed
+  strokes cross the PHP boundary only once and stay normalized to the displayed
+  image content.
+- Let the off-render-thread image editor flatten bounded drawing documents
+  before transforms and export.
+- Enforce `maxWidth`, `maxHeight` and `outputQuality` in the iOS image editor,
+  matching the Android contract introduced in 0.5.59.
+
 ## 0.5.60 - 2026-07-30
 
 - Add `scrollTargetOffset` to tokenized `scrollRequest` operations so an

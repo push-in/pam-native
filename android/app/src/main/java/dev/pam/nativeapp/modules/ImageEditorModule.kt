@@ -8,6 +8,10 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import dev.pam.nativeapp.render.PamDrawingCodec
+import dev.pam.nativeapp.render.PamDrawingStroke
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
@@ -49,8 +53,15 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
         val maxWidth = values.integer("maxWidth").coerceAtLeast(0)
         val maxHeight = values.integer("maxHeight").coerceAtLeast(0)
         val decoded = decode(source, maxWidth, maxHeight)
-        var current = orient(decoded, values.integer("quarterTurns"), values.integer("flipHorizontal") == 1)
+        var current = composeDrawing(decoded, values.text("drawing"))
         if (current !== decoded) decoded.recycle()
+        val oriented = orient(
+            current,
+            values.integer("quarterTurns"),
+            values.integer("flipHorizontal") == 1,
+        )
+        if (oriented !== current) current.recycle()
+        current = oriented
         val cropped = crop(current, values.integer("cropRatio"))
         if (cropped !== current) current.recycle()
         val filtered = filter(cropped, values.integer("filter"))
@@ -179,6 +190,59 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
         val baseline = source.height * (if (sticker) 0.48f else 0.72f) - (paint.ascent() + paint.descent()) / 2f
         Canvas(output).drawText(value, source.width / 2f, baseline, paint)
         return output
+    }
+
+    private fun composeDrawing(source: Bitmap, value: String): Bitmap {
+        val strokes = runCatching { PamDrawingCodec.decode(value) }
+            .getOrDefault(emptyList())
+        if (strokes.isEmpty()) return source
+        val overlay = Bitmap.createBitmap(
+            source.width,
+            source.height,
+            Bitmap.Config.ARGB_8888,
+        )
+        val overlayCanvas = Canvas(overlay)
+        strokes.forEach { stroke ->
+            drawStroke(overlayCanvas, stroke, source.width, source.height)
+        }
+        return source.copy(Bitmap.Config.ARGB_8888, true).also { output ->
+            Canvas(output).drawBitmap(overlay, 0f, 0f, null)
+            overlay.recycle()
+        }
+    }
+
+    private fun drawStroke(
+        canvas: Canvas,
+        stroke: PamDrawingStroke,
+        width: Int,
+        height: Int,
+    ) {
+        if (stroke.points.isEmpty()) return
+        val path = android.graphics.Path()
+        stroke.points.forEachIndexed { index, point ->
+            val x = point.x * width
+            val y = point.y * height
+            if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = stroke.color
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            strokeWidth = (stroke.width * width).coerceAtLeast(1f)
+            if (stroke.mode == 2) {
+                xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+            }
+        }
+        if (stroke.points.size == 1) {
+            canvas.drawPoint(
+                stroke.points[0].x * width,
+                stroke.points[0].y * height,
+                paint,
+            )
+        } else {
+            canvas.drawPath(path, paint)
+        }
     }
 
     private fun resolve(path: String): File = File(root, path).canonicalFile.also {

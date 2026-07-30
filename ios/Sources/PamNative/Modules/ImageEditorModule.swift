@@ -38,6 +38,10 @@ final class ImageEditorModule: NativeModule {
         guard var image = UIImage(contentsOfFile: source.path) else {
             throw ImageEditorError("Unable to decode the image.")
         }
+        image = composeDrawing(
+            image,
+            drawing: values["drawing"]?.imageEditorText ?? ""
+        )
         image = orient(
             image,
             turns: Int(values["quarterTurns"]?.imageEditorInteger ?? 0),
@@ -53,11 +57,20 @@ final class ImageEditorModule: NativeModule {
         )
         image = compose(image, text: String((values["overlayText"]?.imageEditorText ?? "").prefix(120)), sticker: false)
         image = compose(image, text: String((values["sticker"]?.imageEditorText ?? "").prefix(8)), sticker: true)
+        image = resize(
+            image,
+            maxWidth: Int(values["maxWidth"]?.imageEditorInteger ?? 0),
+            maxHeight: Int(values["maxHeight"]?.imageEditorInteger ?? 0)
+        )
 
         let directory = root.appendingPathComponent("editor", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let output = directory.appendingPathComponent("image-edit-\(UUID().uuidString).jpg")
-        guard let data = image.jpegData(compressionQuality: 0.94) else {
+        let quality = max(
+            1,
+            min(100, Int(values["outputQuality"]?.imageEditorInteger ?? 94))
+        )
+        guard let data = image.jpegData(compressionQuality: CGFloat(quality) / 100) else {
             throw ImageEditorError("Unable to encode the edited image.")
         }
         try data.write(to: output, options: Data.WritingOptions.atomic)
@@ -154,6 +167,80 @@ final class ImageEditorModule: NativeModule {
             ]
             let y = image.size.height * (sticker ? 0.48 : 0.72) - size / 2
             value.draw(in: CGRect(x: image.size.width * 0.07, y: y, width: image.size.width * 0.86, height: size * 2), withAttributes: attributes)
+        }
+    }
+
+    private func composeDrawing(_ image: UIImage, drawing: String) -> UIImage {
+        let strokes = PamDrawingCodec.decode(drawing)
+        guard !strokes.isEmpty else { return image }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let overlay = UIGraphicsImageRenderer(size: image.size, format: format).image {
+            renderer in
+            let context = renderer.cgContext
+            strokes.forEach { stroke in
+                drawStroke(
+                    stroke,
+                    in: context,
+                    width: image.size.width,
+                    height: image.size.height
+                )
+            }
+        }
+        return UIGraphicsImageRenderer(size: image.size, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: image.size))
+            overlay.draw(in: CGRect(origin: .zero, size: image.size))
+        }
+    }
+
+    private func drawStroke(
+        _ stroke: PamDrawingStroke,
+        in context: CGContext,
+        width: CGFloat,
+        height: CGFloat
+    ) {
+        guard let first = stroke.points.first else { return }
+        context.saveGState()
+        context.setBlendMode(stroke.mode == 2 ? .clear : .normal)
+        context.setStrokeColor(UIColor(argb: stroke.color).cgColor)
+        context.setLineWidth(max(1, stroke.width * width))
+        context.setLineCap(.round)
+        context.setLineJoin(.round)
+        context.beginPath()
+        context.move(to: CGPoint(x: first.x * width, y: first.y * height))
+        stroke.points.dropFirst().forEach { point in
+            context.addLine(to: CGPoint(x: point.x * width, y: point.y * height))
+        }
+        if stroke.points.count == 1 {
+            context.addLine(to: CGPoint(
+                x: first.x * width + 0.01,
+                y: first.y * height + 0.01
+            ))
+        }
+        context.strokePath()
+        context.restoreGState()
+    }
+
+    private func resize(_ image: UIImage, maxWidth: Int, maxHeight: Int) -> UIImage {
+        guard maxWidth > 0 || maxHeight > 0 else { return image }
+        let widthScale = maxWidth > 0
+            ? CGFloat(maxWidth) / max(image.size.width, 1)
+            : 1
+        let heightScale = maxHeight > 0
+            ? CGFloat(maxHeight) / max(image.size.height, 1)
+            : 1
+        let scale = min(1, min(widthScale, heightScale))
+        guard scale < 1 else { return image }
+        let target = CGSize(
+            width: max(1, floor(image.size.width * scale)),
+            height: max(1, floor(image.size.height * scale))
+        )
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
         }
     }
 

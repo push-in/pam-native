@@ -42,6 +42,7 @@ pub enum NodeKind {
     VirtualList = 26,
     WebView = 27,
     Media = 28,
+    DrawingCanvas = 29,
 }
 
 impl TryFrom<u8> for NodeKind {
@@ -77,6 +78,7 @@ impl TryFrom<u8> for NodeKind {
             26 => Ok(Self::VirtualList),
             27 => Ok(Self::WebView),
             28 => Ok(Self::Media),
+            29 => Ok(Self::DrawingCanvas),
             other => Err(ProtocolError::UnknownNodeKind(other)),
         }
     }
@@ -475,6 +477,11 @@ pub enum PropKey {
     ScrollTargetTestId = 388,
     ScrollRequest = 389,
     ScrollTargetOffset = 390,
+    DrawingColor = 391,
+    DrawingWidth = 392,
+    DrawingMode = 393,
+    DrawingClearRequest = 394,
+    DrawingUndoRequest = 395,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -872,6 +879,11 @@ impl TryFrom<u16> for PropKey {
             388 => Ok(Self::ScrollTargetTestId),
             389 => Ok(Self::ScrollRequest),
             390 => Ok(Self::ScrollTargetOffset),
+            391 => Ok(Self::DrawingColor),
+            392 => Ok(Self::DrawingWidth),
+            393 => Ok(Self::DrawingMode),
+            394 => Ok(Self::DrawingClearRequest),
+            395 => Ok(Self::DrawingUndoRequest),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1667,18 +1679,18 @@ mod tests {
 
     #[test]
     fn protocol_enums_are_sequential_and_append_only() {
-        for value in 1..=28 {
+        for value in 1..=29 {
             assert!(
                 NodeKind::try_from(value).is_ok(),
                 "missing node kind {value}"
             );
         }
-        assert!(NodeKind::try_from(29).is_err());
+        assert!(NodeKind::try_from(30).is_err());
 
-        for value in 1..=390 {
+        for value in 1..=395 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(391).is_err());
+        assert!(PropKey::try_from(396).is_err());
     }
 
     fn tree(text: &str) -> Tree {

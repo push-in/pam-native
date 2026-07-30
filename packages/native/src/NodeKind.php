@@ -34,4 +34,5 @@ enum NodeKind: int
     case VirtualList = 26;
     case WebView = 27;
     case Media = 28;
+    case DrawingCanvas = 29;
 }

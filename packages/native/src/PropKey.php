@@ -396,4 +396,9 @@ enum PropKey: int
     case ScrollTargetTestId = 388;
     case ScrollRequest = 389;
     case ScrollTargetOffset = 390;
+    case DrawingColor = 391;
+    case DrawingWidth = 392;
+    case DrawingMode = 393;
+    case DrawingClearRequest = 394;
+    case DrawingUndoRequest = 395;
 }
