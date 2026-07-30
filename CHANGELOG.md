@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.86 - 2026-07-30
+
+- Resolve safe-area padding against the system-bar space already consumed by
+  Android's decor-fitted content frame. `SafeAreaView` no longer applies the
+  status or navigation inset twice on Android versions and OEM windows that do
+  not run edge-to-edge.
+- Preserve full safe-area padding for edge-to-edge windows and preserve only
+  the unconsumed edge in mixed layouts such as a translucent status bar with a
+  decor-fitted navigation bar.
+- Add unit coverage for decor-fitted, edge-to-edge, and mixed window modes.
+
 ## 0.5.85 - 2026-07-30
 
 - Snap Android layout edges in the absolute physical-pixel grid, deriving each

@@ -153,6 +153,10 @@ On Android 0.5.85+, native frames round their absolute start and end edges
 before deriving pixel width or height. This keeps centered labels and icons on
 one physical center at fractional densities and gives adjacent siblings one
 shared edge instead of independently rounded geometry.
+On Android 0.5.86+, `SafeAreaView` subtracts status/navigation-bar space already
+consumed by the activity decor frame. It therefore uses zero duplicate padding
+in decor-fitted windows, full padding edge-to-edge, and only the remaining edge
+in mixed/translucent layouts.
 
 Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
 short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),

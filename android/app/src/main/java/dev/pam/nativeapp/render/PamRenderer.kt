@@ -139,6 +139,23 @@ internal data class SnappedPixelSpan(
     val extent: Int,
 )
 
+internal data class SafeAreaInsets(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+)
+
+internal fun unconsumedSafeAreaInsets(
+    raw: SafeAreaInsets,
+    consumed: SafeAreaInsets,
+): SafeAreaInsets = SafeAreaInsets(
+    left = (raw.left - consumed.left).coerceAtLeast(0),
+    top = (raw.top - consumed.top).coerceAtLeast(0),
+    right = (raw.right - consumed.right).coerceAtLeast(0),
+    bottom = (raw.bottom - consumed.bottom).coerceAtLeast(0),
+)
+
 internal fun snappedPixelSpan(
     start: Float,
     extent: Float,
@@ -4273,22 +4290,33 @@ class PamRenderer(
             safeArea.clipToPadding = true
         }
         view.setOnApplyWindowInsetsListener { target, insets ->
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                state.safeAreaLeftInset = bars.left
-                state.safeAreaTopInset = bars.top
-                state.safeAreaRightInset = bars.right
-                state.safeAreaBottomInset = bars.bottom
+                SafeAreaInsets(
+                    left = bars.left,
+                    top = bars.top,
+                    right = bars.right,
+                    bottom = bars.bottom,
+                )
             } else {
                 @Suppress("DEPRECATION")
-                state.safeAreaLeftInset = insets.systemWindowInsetLeft
+                val left = insets.systemWindowInsetLeft
                 @Suppress("DEPRECATION")
-                state.safeAreaTopInset = insets.systemWindowInsetTop
+                val top = insets.systemWindowInsetTop
                 @Suppress("DEPRECATION")
-                state.safeAreaRightInset = insets.systemWindowInsetRight
+                val right = insets.systemWindowInsetRight
                 @Suppress("DEPRECATION")
-                state.safeAreaBottomInset = insets.systemWindowInsetBottom
+                val bottom = insets.systemWindowInsetBottom
+                SafeAreaInsets(left, top, right, bottom)
             }
+            val resolved = unconsumedSafeAreaInsets(
+                raw = raw,
+                consumed = consumedSystemBarInsets(target),
+            )
+            state.safeAreaLeftInset = resolved.left
+            state.safeAreaTopInset = resolved.top
+            state.safeAreaRightInset = resolved.right
+            state.safeAreaBottomInset = resolved.bottom
             applySafeAreaLayout(target, state)
             insets
         }
@@ -4304,6 +4332,37 @@ class PamRenderer(
                 override fun onViewDetachedFromWindow(detached: View) = Unit
             })
         }
+    }
+
+    private fun consumedSystemBarInsets(target: View): SafeAreaInsets {
+        val decor = activity()?.window?.decorView ?: target.rootView
+        val content = decor.findViewById<View>(android.R.id.content) ?: target.rootView
+        if (
+            decor.width <= 0 ||
+            decor.height <= 0 ||
+            content.width <= 0 ||
+            content.height <= 0
+        ) {
+            return SafeAreaInsets(0, 0, 0, 0)
+        }
+
+        val decorLocation = IntArray(2)
+        val contentLocation = IntArray(2)
+        decor.getLocationOnScreen(decorLocation)
+        content.getLocationOnScreen(contentLocation)
+        val contentLeft = contentLocation[0] - decorLocation[0]
+        val contentTop = contentLocation[1] - decorLocation[1]
+
+        return SafeAreaInsets(
+            left = contentLeft.coerceAtLeast(0),
+            top = contentTop.coerceAtLeast(0),
+            right = (
+                decor.width - contentLeft - content.width
+                ).coerceAtLeast(0),
+            bottom = (
+                decor.height - contentTop - content.height
+                ).coerceAtLeast(0),
+        )
     }
 
     private fun applySafeAreaLayout(view: View, state: NodeState) {

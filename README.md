@@ -204,6 +204,10 @@ Since 0.5.85, Android snaps absolute start and end edges to the physical-pixel
 grid and derives the native extent from those shared edges. Centered icons and
 labels therefore keep the same physical center at fractional densities, while
 adjacent flex siblings meet without one-pixel rounding drift.
+Since 0.5.86, `SafeAreaView` subtracts system-bar space already consumed by the
+Android decor frame before applying CSS-like safe-area padding. This keeps
+centered screens centered on both classic decor-fitted devices and edge-to-edge
+devices without double status/navigation-bar offsets.
 Relative `@import` statements are expanded from the file that declares them at
 compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,
