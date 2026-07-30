@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.52 - 2026-07-30
 
 - Add compile-time relative `@import` support to scoped PAM styles so shared
   fonts, tokens, tag defaults, and semantic classes can live in ordinary CSS
