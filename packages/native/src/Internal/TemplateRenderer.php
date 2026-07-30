@@ -1786,6 +1786,8 @@ final class TemplateRenderer
                 'reload' => ImageCachePolicy::Reload->value,
                 'force-cache' => ImageCachePolicy::ForceCache->value,
                 'forceCache' => ImageCachePolicy::ForceCache->value,
+                'memory-disk' => ImageCachePolicy::ForceCache->value,
+                'memoryDisk' => ImageCachePolicy::ForceCache->value,
                 'only-if-cached' => ImageCachePolicy::OnlyIfCached->value,
                 'onlyIfCached' => ImageCachePolicy::OnlyIfCached->value,
             ]),

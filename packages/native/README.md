@@ -267,6 +267,11 @@ Image::make($url)
     ->onError($showFallback);
 ```
 
+PAM templates accept `cachePolicy="memory-disk"` (and `memoryDisk`) as familiar
+aliases for the same native memory-plus-disk behavior as `force-cache`. This
+keeps ports from Expo Image explicit without introducing a JavaScript image
+pipeline.
+
 `asset://` always starts at the PAM project root. For example,
 `asset://assets/logos/brand.png` loads
 `assets/logos/brand.png` on both Android and iOS. Keep the internal `pam/`

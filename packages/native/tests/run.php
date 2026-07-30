@@ -1246,6 +1246,17 @@ $assert(
     $secureAliasElement->properties()[PropKey::Secure->value] === true,
     'Input secureTextEntry must remain a compatible alias for secure.',
 );
+$memoryDiskImage = TemplateRenderer::render(
+    TemplateCompiler::compile('<Image source="https://example.test/image.webp" cachePolicy="memory-disk" />'),
+    new class {
+    },
+    [],
+);
+$assert(
+    $memoryDiskImage->properties()[PropKey::ImageCachePolicy->value]
+        === ImageCachePolicy::ForceCache->value,
+    'Image memory-disk must map the familiar Expo policy to the native memory/disk cache.',
+);
 $keyboardAliasElement = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<Column>'
@@ -4208,8 +4219,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.79',
-    'The runtime SDK contract must match the 0.5.79 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.80',
+    'The runtime SDK contract must match the 0.5.80 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

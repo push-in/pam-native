@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.80 - 2026-07-30
+
+- Accept Expo Image's familiar `cachePolicy="memory-disk"` and camel-case
+  `memoryDisk` spellings as aliases for PAM's native memory-plus-disk
+  `force-cache` policy on `Image` and `ImageBackground`.
+- Publish the aliases through the PAM template completion metadata and cover
+  the mapping with a renderer regression test.
+
 ## 0.5.79 - 2026-07-30
 
 - Accept `keyboardType="default"` and the familiar React Native keyboard names
