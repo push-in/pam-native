@@ -514,7 +514,9 @@ class PamRenderer(
                 installSafeArea(it, requireNotNull(state))
             }
             NodeKind.DRAWER_LAYOUT -> PamDrawerLayout(context)
-            NodeKind.NAVIGATION_HOST -> PamNavigationHost(context)
+            NodeKind.NAVIGATION_HOST -> PamNavigationHost(context).also {
+                it.onActiveRouteChanged = ::applyMergedStatusBar
+            }
             NodeKind.WEB_VIEW -> PamWebView(context)
             NodeKind.MEDIA -> PamMediaView(context, mediaCache)
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
@@ -4460,7 +4462,12 @@ class PamRenderer(
         val mounted = ArrayList<NodeState>()
         for (position in 0 until nodes.size()) {
             val state = nodes.valueAt(position)
-            if (state.kind == NodeKind.STATUS_BAR) mounted += state
+            if (
+                state.kind == NodeKind.STATUS_BAR &&
+                views[state.id]?.let(::isInActiveNavigationRoute) == true
+            ) {
+                mounted += state
+            }
         }
         mounted.sortBy(NodeState::mountOrder)
         mounted.forEach { state ->
@@ -4500,6 +4507,19 @@ class PamRenderer(
             }
         }
         applyStatusBarConfig(merged)
+    }
+
+    private fun isInActiveNavigationRoute(view: View): Boolean {
+        var routeChild = view
+        var ancestor = routeChild.parent
+        while (ancestor is View) {
+            if (ancestor is PamNavigationHost && !ancestor.isActiveRoute(routeChild)) {
+                return false
+            }
+            routeChild = ancestor
+            ancestor = routeChild.parent
+        }
+        return true
     }
 
     @Suppress("DEPRECATION")

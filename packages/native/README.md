@@ -161,6 +161,9 @@ Android and iOS render the typed shadow directly; inset and multiple shadows
 remain intentionally unsupported.
 Template `StatusBar` accepts `backgroundColor`/`barStyle` as aliases for
 `color`/`appearance`, plus `animated` and `translucent`.
+On Android, retained stack routes contribute status-bar configuration only
+while active, so a hidden or previously mounted screen cannot override the
+visible route.
 
 Direct PAM color attributes retain the original `#AARRGGBB` eight-digit format
 for source compatibility. Prefer stylesheet colors when authoring CSS-style

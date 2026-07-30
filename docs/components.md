@@ -263,6 +263,8 @@ Multiple comma-separated shadows and inset shadows are rejected explicitly.
 `StatusBar` templates accept both PAM's `color`/`appearance` names and the
 familiar `backgroundColor`/`barStyle` aliases, including `animated` and
 `translucent`.
+Android resolves those properties from the active retained stack route; hidden
+routes no longer override the system UI of the visible screen.
 
 CSS custom properties are declared in `:root`, may reference one another, and
 support nested fallbacks such as `var(--brand, var(--fallback, rebeccapurple))`.

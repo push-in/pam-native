@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.75 - 2026-07-30
+
+- Resolve Android `StatusBar` from the active retained navigation route instead
+  of letting a newer hidden route override the visible screen. Push, pop,
+  replace, restored routes, and cancelled back gestures now update system UI
+  from the actual route target.
+
 ## 0.5.74 - 2026-07-30
 
 - Align conservative intrinsic text frames from the relevant flex axis:

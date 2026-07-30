@@ -393,9 +393,11 @@ automatic font fitting, accessibility font scaling with an optional maximum,
 Android break/hyphenation strategies and local link/e-mail/phone detection.
 These behaviors never require a PHP callback.
 
-Mounted `StatusBar` nodes merge in mount order and restore the prior window
-configuration when removed. Icon appearance, visibility, translucency and
-optional color animation run on the UI thread. Android 15+ keeps its enforced
+Mounted `StatusBar` nodes in the active retained route merge in mount order and
+restore the prior window configuration when removed. Hidden stack routes cannot
+override the visible screen; push, pop, replace and interactive-back targets
+switch system UI on the UI thread. Icon appearance, visibility, translucency
+and optional color animation also remain native. Android 15+ keeps its enforced
 edge-to-edge behavior, where background color and translucency are system
 no-ops.
 

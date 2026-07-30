@@ -16,7 +16,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var operation: Int = OPERATION_IDLE
     var transition: Int = TRANSITION_PLATFORM_DEFAULT
     var durationMs: Long = 240L
+    var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
+    private var activeRoute: View? = null
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingObserver: ViewTreeObserver? = null
@@ -46,7 +48,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             index.coerceIn(0, childCount),
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
+        if (isInitialRoute) setActiveRoute(view)
     }
+
+    fun isActiveRoute(view: View): Boolean = view === activeRoute
 
     fun navigate(nextRevision: Long) {
         if (nextRevision == revision) return
@@ -124,6 +129,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun prepareGesture() {
         val incoming = getChildAt(childCount - 2)
         val outgoing = getChildAt(childCount - 1)
+        setActiveRoute(incoming)
         incoming.visibility = View.VISIBLE
         outgoing.visibility = View.VISIBLE
     }
@@ -154,10 +160,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                     if (complete) {
                         outgoing.visibility = View.INVISIBLE
                         incoming.visibility = View.VISIBLE
+                        setActiveRoute(incoming)
                         onGesturePop?.invoke()
                     } else {
                         incoming.visibility = View.INVISIBLE
                         outgoing.visibility = View.VISIBLE
+                        setActiveRoute(outgoing)
                     }
                 }
             })
@@ -228,6 +236,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 return
             }
         }
+        setActiveRoute(incoming)
 
         for (index in 0 until childCount) {
             getChildAt(index).apply {
@@ -341,6 +350,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     private fun finish(incoming: View, outgoing: View?) {
         running = null
+        setActiveRoute(incoming)
         reset(incoming)
         outgoing?.let {
             reset(it)
@@ -353,6 +363,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun showOnlyTop() {
+        val top = if (childCount == 0) null else getChildAt(childCount - 1)
+        top?.let(::setActiveRoute)
         for (index in 0 until childCount) {
             getChildAt(index).apply {
                 val active = index == childCount - 1
@@ -364,6 +376,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 }
             }
         }
+    }
+
+    private fun setActiveRoute(view: View) {
+        if (activeRoute === view) return
+        activeRoute = view
+        onActiveRouteChanged?.invoke()
     }
 
     private fun reset(view: View) {

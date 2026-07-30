@@ -34,6 +34,98 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Suppress("DEPRECATION")
+    @Test
+    fun statusBarConfigurationFollowsTheActiveRetainedRoute() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(
+                                node(
+                                    1,
+                                    0,
+                                    NodeKind.NAVIGATION_HOST,
+                                    mapOf(
+                                        PropKey.NAVIGATION_DURATION_MS to PropValue.Integer(0),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(node(2, 1, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    2,
+                                    NodeKind.STATUS_BAR,
+                                    mapOf(
+                                        PropKey.STATUS_BAR_COLOR to
+                                            PropValue.Integer(Color.RED.toLong()),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(node(4, 1, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    5,
+                                    4,
+                                    NodeKind.STATUS_BAR,
+                                    mapOf(
+                                        PropKey.STATUS_BAR_COLOR to
+                                            PropValue.Integer(Color.BLUE.toLong()),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(3, Frame(0f, 0f, 0f, 0f)),
+                            Mutation.Layout(4, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(5, Frame(0f, 0f, 0f, 0f)),
+                            Mutation.Update(
+                                1,
+                                PropKey.NAVIGATION_OPERATION,
+                                PropValue.Integer(2),
+                            ),
+                            Mutation.Update(
+                                1,
+                                PropKey.NAVIGATION_REVISION,
+                                PropValue.Integer(1),
+                            ),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                activity.host.viewTreeObserver.dispatchOnPreDraw()
+                assertEquals(Color.BLUE, activity.window.statusBarColor)
+
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Update(
+                                1,
+                                PropKey.NAVIGATION_OPERATION,
+                                PropValue.Integer(3),
+                            ),
+                            Mutation.Update(
+                                1,
+                                PropKey.NAVIGATION_REVISION,
+                                PropValue.Integer(2),
+                            ),
+                        ),
+                    ),
+                )
+                activity.host.viewTreeObserver.dispatchOnPreDraw()
+                assertEquals(Color.RED, activity.window.statusBarColor)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun intrinsicTextFollowsTheParentsRelevantCenteringAxis() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
