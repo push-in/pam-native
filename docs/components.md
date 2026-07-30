@@ -199,6 +199,31 @@ Unsupported web-only properties such as `box-shadow`, nested selectors, media
 queries, descendant selectors, and unknown variables fail the build instead of
 silently producing a different native layout.
 
+Rounded clipping uses the platform compositor rather than a browser mask:
+
+```xml
+<Pressable class="avatar">
+    <Image class="avatar-image" :source="$avatar" />
+</Pressable>
+
+<style scoped>
+    .avatar,
+    .avatar-image {
+        width: 38px;
+        height: 38px;
+    }
+
+    .avatar {
+        overflow: hidden;
+        border-radius: 19px;
+    }
+</style>
+```
+
+On Android, PAM retains and reuses a native rounded clip path until the bounds
+or radii change. On iOS, the same property maps to the view layer's bounds
+mask. Removing `overflow: hidden` restores visible overflow dynamically.
+
 Inline properties remain useful for dynamic values and isolated exceptions:
 
 ```xml

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.47 - 2026-07-29
+
+- Clip Android container descendants to the authored rounded border path when
+  `overflow: hidden` is active, including `View`, `Row`, `Column`,
+  `Pressable`, and `ImageBackground`.
+- Recompute the native clip path only when bounds or corner radii change and
+  restore visible overflow immediately when the property is removed.
+- Connect the same public overflow contract to UIKit `masksToBounds` on iOS.
+
 ## 0.5.46 - 2026-07-29
 
 - Give declarative `ScrollView` a native `Row` or `Column` content container,

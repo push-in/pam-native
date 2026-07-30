@@ -194,6 +194,11 @@ lifecycle contract. Scoped styles compile directly to typed native properties;
 they do not ship a browser CSS engine. PAM uses `p-if`, `p-else-if`, `p-else`,
 and `p-for` as its template directives.
 
+`overflow: hidden` follows the authored native border path. A rounded
+`Pressable`, `View`, `Row`, `Column`, or `ImageBackground` therefore clips its
+children to the same radius on Android and iOS without a mask component or an
+application-side workaround.
+
 The package also installs a deterministic formatter:
 
 ```bash

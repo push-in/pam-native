@@ -1232,6 +1232,8 @@ public final class PamRenderer {
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             view.layer.cornerRadius = CGFloat(value.decimalOrZero())
+        case PamConstants.overflow:
+            view.layer.masksToBounds = value.integerOrNil() == 2
         case PamConstants.enabled:
             if let enabled = value.boolOrNil() {
                 view.isUserInteractionEnabled = enabled
@@ -1493,6 +1495,8 @@ public final class PamRenderer {
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             view.layer.cornerRadius = 0
+        case PamConstants.overflow:
+            view.layer.masksToBounds = false
         case PamConstants.fontSize,
              PamConstants.fontWeight,
              PamConstants.fontStyle,

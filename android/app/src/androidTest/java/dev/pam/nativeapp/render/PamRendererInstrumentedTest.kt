@@ -2,10 +2,14 @@ package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.RippleDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
-import android.graphics.drawable.RippleDrawable
 import android.widget.Button
 import android.widget.FrameLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -27,6 +31,131 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun overflowHiddenClipsChildrenToRoundedContainerAndCanBeDisabled() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val container = PamContainer(activity)
+                val child = View(activity).apply {
+                    background = ColorDrawable(Color.RED)
+                }
+                container.addView(
+                    child,
+                    FrameLayout.LayoutParams(100, 100),
+                )
+                container.measure(
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                )
+                container.layout(0, 0, 100, 100)
+                container.setOverflowClip(true, FloatArray(8) { 30f })
+
+                val clipped = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+                container.draw(Canvas(clipped))
+                assertEquals(Color.TRANSPARENT, clipped.getPixel(0, 0))
+                assertEquals(Color.RED, clipped.getPixel(50, 50))
+
+                container.setOverflowClip(false, FloatArray(8))
+                val visible = Bitmap.createBitmap(100, 100, Bitmap.Config.ARGB_8888)
+                container.draw(Canvas(visible))
+                assertEquals(Color.RED, visible.getPixel(0, 0))
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun rendererKeepsRoundedOverflowClipInSyncWithPropertyUpdates() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.IMAGE_BACKGROUND,
+                                    mapOf(
+                                        PropKey.BORDER_RADIUS to PropValue.Decimal(30.0),
+                                        PropKey.OVERFLOW to PropValue.Integer(2),
+                                        PropKey.TEST_ID to PropValue.Text("rounded-overflow"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    2,
+                                    NodeKind.VIEW,
+                                    mapOf(
+                                        PropKey.BACKGROUND_COLOR to
+                                            PropValue.Integer(Color.RED.toLong()),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(20f, 20f, 100f, 100f)),
+                            Mutation.Layout(3, Frame(0f, 0f, 100f, 100f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                val container = requireNotNull(
+                    activity.host.findByTransitionName("rounded-overflow"),
+                ) as PamContainer
+                activity.host.measure(
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 360f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 720f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                )
+                activity.host.layout(
+                    0,
+                    0,
+                    dp(activity.host, 360f),
+                    dp(activity.host, 720f),
+                )
+                val clipped = Bitmap.createBitmap(
+                    container.width,
+                    container.height,
+                    Bitmap.Config.ARGB_8888,
+                )
+                container.draw(Canvas(clipped))
+                assertEquals(Color.TRANSPARENT, clipped.getPixel(0, 0))
+
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Update(2, PropKey.OVERFLOW, null),
+                        ),
+                    ),
+                )
+                val visible = Bitmap.createBitmap(
+                    container.width,
+                    container.height,
+                    Bitmap.Config.ARGB_8888,
+                )
+                container.draw(Canvas(visible))
+                assertEquals(Color.RED, visible.getPixel(0, 0))
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun imageUsesEngineFrameInsteadOfIntrinsicDrawableBounds() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

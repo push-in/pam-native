@@ -768,7 +768,6 @@ class PamRenderer(
         }
         when (val parent = views[parentId]) {
             is PamContainer -> parent.insert(view, index)
-            is PamImageBackground -> parent.insert(view, index)
             is PamRefreshContainer -> parent.insert(view, index)
             is PamDrawerLayout -> parent.insert(view, index)
             is PamNavigationHost -> parent.insert(view, index)
@@ -1702,7 +1701,7 @@ class PamRenderer(
                 applyInputConfiguration(it, state)
             }
             PropKey.Z_INDEX -> view.z = value.decimal().toFloat()
-            PropKey.OVERFLOW -> (view as? ViewGroup)?.clipChildren = value.integer() == 2L
+            PropKey.OVERFLOW -> applyOverflowClip(view, state)
             PropKey.HOST_PROPERTIES -> {
                 val properties = (value as? PropValue.Properties)?.value
                     ?: error("Expected native view property map")
@@ -2104,6 +2103,7 @@ class PamRenderer(
             PropKey.SCALE_X -> view.scaleX = 1f
             PropKey.SCALE_Y -> view.scaleY = 1f
             PropKey.ROTATION -> view.rotation = 0f
+            PropKey.OVERFLOW -> applyOverflowClip(view, state)
             PropKey.VISIBLE -> when (view) {
                 is PamModalHost -> view.setVisible(true)
                 is PamActivityIndicator -> view.setRequestedVisible(true)
@@ -3620,6 +3620,10 @@ class PamRenderer(
             bottomLeft,
             bottomLeft,
         )
+        (view as? PamContainer)?.setOverflowClip(
+            state.integer(PropKey.OVERFLOW, OVERFLOW_VISIBLE) == OVERFLOW_HIDDEN,
+            radii,
+        )
         val shape = GradientDrawable().apply {
             setColor(color)
             cornerRadii = radii
@@ -3771,6 +3775,15 @@ class PamRenderer(
                 }
             }
         }
+    }
+
+    private fun applyOverflowClip(view: View, state: NodeState) {
+        val enabled = state.integer(PropKey.OVERFLOW, OVERFLOW_VISIBLE) == OVERFLOW_HIDDEN
+        if (view is PamContainer) {
+            updateBackground(view, state)
+            return
+        }
+        (view as? ViewGroup)?.clipChildren = enabled
     }
 
     private fun textEllipsize(mode: Int): TextUtils.TruncateAt? =
@@ -5237,6 +5250,8 @@ class PamRenderer(
         const val KEYBOARD_PADDING = 3
         const val SAFE_AREA_PADDING = 1
         const val SAFE_AREA_MARGIN = 2
+        const val OVERFLOW_VISIBLE = 1L
+        const val OVERFLOW_HIDDEN = 2L
         const val REFRESH_SIZE_DEFAULT = 1
         const val STATUS_BAR_DARK = 1
         const val STATUS_BAR_LIGHT = 2

@@ -346,6 +346,7 @@ public enum PamConstants {
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38
+    public static let overflow = 98
     public static let backgroundColor = 10
     public static let textColor = 11
     public static let fontSize = 12
