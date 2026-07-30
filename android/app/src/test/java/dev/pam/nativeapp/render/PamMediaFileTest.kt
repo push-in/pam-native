@@ -52,7 +52,7 @@ class PamMediaFileTest {
     }
 
     @Test
-    fun containKeepsVideoViewAspectFitScale() {
+    fun containKeepsNativeVideoAspectFitScale() {
         val scale = resolveVideoScale(2, 1028, 1024, 576, 1024)
 
         assertEquals(1f, scale.first, 0f)

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.51 - 2026-07-30
+
+- Render Android video through a retained `TextureView` and native
+  `MediaPlayer`, keeping playback inside ordinary view clipping, transforms,
+  transitions, and z-order instead of a detached `SurfaceView` layer.
+- Preserve native transport controls, seeking, looping, playback rate,
+  lifecycle pause/resume, streaming cache, and media events on the new
+  texture-backed player.
+- Clip the complete Android virtual-list draw pass, including overlays and
+  foregrounds, at the authored viewport.
+
 ## 0.5.50 - 2026-07-30
 
 - Clip Android virtualized-list drawing directly at the native canvas

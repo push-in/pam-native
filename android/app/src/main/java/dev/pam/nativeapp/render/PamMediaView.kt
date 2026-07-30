@@ -2,13 +2,16 @@ package dev.pam.nativeapp.render
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
+import android.view.Surface
+import android.view.TextureView
 import android.widget.FrameLayout
 import android.widget.MediaController
-import android.widget.VideoView
 import java.io.File
 import java.net.URI
 
@@ -57,8 +60,10 @@ internal fun resolveVideoScale(
 internal class PamMediaView(
     context: Context,
     private val mediaCache: NativeMediaFileCache,
-) : FrameLayout(context) {
-    private val video = VideoView(context)
+) : FrameLayout(context),
+    MediaController.MediaPlayerControl,
+    TextureView.SurfaceTextureListener {
+    private val video = TextureView(context)
     private val main = Handler(Looper.getMainLooper())
     private var source = ""
     private var autoPlay = false
@@ -70,6 +75,10 @@ internal class PamMediaView(
     private var resizeMode = 1
     private var currentTime = 0.0
     private var preparedPlayer: MediaPlayer? = null
+    private var prepared = false
+    private var bufferedPercentage = 0
+    private var videoSurface: Surface? = null
+    private var mediaController: MediaController? = null
     private var resumeAfterPause = false
     var onReady: (() -> Unit)? = null
     var onProgress: ((Double, Double) -> Unit)? = null
@@ -84,8 +93,12 @@ internal class PamMediaView(
 
     private val progress = object : Runnable {
         override fun run() {
-            if (video.isPlaying) {
-                onProgress?.invoke(video.currentPosition / 1_000.0, video.duration.coerceAtLeast(0) / 1_000.0)
+            val player = preparedPlayer
+            if (prepared && player?.isPlaying == true) {
+                onProgress?.invoke(
+                    player.currentPosition / 1_000.0,
+                    player.duration.coerceAtLeast(0) / 1_000.0,
+                )
             }
             main.postDelayed(this, 250)
         }
@@ -98,24 +111,9 @@ internal class PamMediaView(
                 gravity = android.view.Gravity.CENTER
             },
         )
-        video.setOnPreparedListener { player ->
-            preparedPlayer = player
-            player.isLooping = looping
-            applyAudio(player)
-            player.playbackParams = player.playbackParams.setSpeed(rate)
-            if (currentTime > 0) video.seekTo((currentTime * 1_000).toInt())
-            if (autoPlay) video.start()
-            video.post(::applyVideoTransform)
-            onReady?.invoke()
-        }
-        video.setOnCompletionListener {
-            onEnd?.invoke()
-            if (looping) video.start()
-        }
-        video.setOnErrorListener { _, what, extra ->
-            onError?.invoke("Media playback failed ($what/$extra)")
-            true
-        }
+        video.surfaceTextureListener = this
+        clipChildren = true
+        clipToPadding = true
         main.post(progress)
     }
 
@@ -123,9 +121,8 @@ internal class PamMediaView(
         if (source == value) return
         source = value
         sourceGeneration++
-        preparedPlayer = null
         if (value.isEmpty()) {
-            video.stopPlayback()
+            releasePlayer()
         } else {
             val uri = Uri.parse(value)
             val resolved = runCatching {
@@ -159,7 +156,7 @@ internal class PamMediaView(
                 ),
             ) { cached ->
                 if (generation == sourceGeneration) {
-                    video.setVideoURI(
+                    prepareMedia(
                         if (shouldUseResolvedMediaUri(cached == Uri.EMPTY, cached.scheme)) {
                             resolved
                         } else {
@@ -181,12 +178,30 @@ internal class PamMediaView(
         }
     }
 
-    fun setAutoPlay(value: Boolean) { autoPlay = value; if (value && video.canPause()) video.start() }
+    fun setAutoPlay(value: Boolean) {
+        autoPlay = value
+        if (value && prepared) start()
+    }
+
     fun setControls(value: Boolean) {
         controls = value
-        video.setMediaController(if (value) MediaController(context).also { it.setAnchorView(video) } else null)
+        mediaController = if (value) {
+            (mediaController ?: MediaController(context)).also {
+                it.setAnchorView(this)
+                it.setMediaPlayer(this)
+                it.isEnabled = prepared
+            }
+        } else {
+            mediaController?.hide()
+            null
+        }
     }
-    fun setLoop(value: Boolean) { looping = value; preparedPlayer?.isLooping = value }
+
+    fun setLoop(value: Boolean) {
+        looping = value
+        preparedPlayer?.isLooping = value
+    }
+
     fun setMuted(value: Boolean) { muted = value; preparedPlayer?.let(::applyAudio) }
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
@@ -194,7 +209,7 @@ internal class PamMediaView(
     }
     fun seek(seconds: Double) {
         currentTime = seconds.coerceAtLeast(0.0)
-        video.seekTo((currentTime * 1_000).toInt())
+        if (prepared) seekTo((currentTime * 1_000).toInt())
     }
     fun setPlaybackRate(value: Float) {
         rate = value.coerceIn(0.25f, 4f)
@@ -207,15 +222,66 @@ internal class PamMediaView(
     }
 
     fun onHostPause() {
-        resumeAfterPause = video.isPlaying
-        video.pause()
+        resumeAfterPause = isPlaying
+        pause()
     }
 
     fun onHostResume() {
         if (resumeAfterPause) {
             resumeAfterPause = false
-            video.start()
+            start()
         }
+    }
+
+    private fun prepareMedia(uri: Uri) {
+        releasePlayer()
+        val player = MediaPlayer()
+        preparedPlayer = player
+        player.setSurface(videoSurface)
+        player.setOnPreparedListener {
+            if (preparedPlayer !== it) return@setOnPreparedListener
+            prepared = true
+            it.isLooping = looping
+            applyAudio(it)
+            it.playbackParams = it.playbackParams.setSpeed(rate)
+            if (currentTime > 0) it.seekTo((currentTime * 1_000).toInt())
+            mediaController?.isEnabled = true
+            applyVideoTransform()
+            if (autoPlay) it.start()
+            onReady?.invoke()
+        }
+        player.setOnCompletionListener {
+            onEnd?.invoke()
+            if (looping) it.start()
+        }
+        player.setOnBufferingUpdateListener { _, percentage ->
+            bufferedPercentage = percentage.coerceIn(0, 100)
+        }
+        player.setOnErrorListener { _, what, extra ->
+            prepared = false
+            mediaController?.isEnabled = false
+            onError?.invoke("Media playback failed ($what/$extra)")
+            true
+        }
+        runCatching {
+            player.setDataSource(context, uri)
+            player.prepareAsync()
+        }.onFailure {
+            releasePlayer()
+            onError?.invoke(it.message ?: "Media source could not be prepared.")
+        }
+    }
+
+    private fun releasePlayer() {
+        prepared = false
+        bufferedPercentage = 0
+        mediaController?.isEnabled = false
+        preparedPlayer?.let { player ->
+            runCatching { player.setSurface(null) }
+            runCatching { player.reset() }
+            player.release()
+        }
+        preparedPlayer = null
     }
 
     private fun applyAudio(player: MediaPlayer) {
@@ -233,8 +299,8 @@ internal class PamMediaView(
             resizeMode,
             width,
             height,
-            video.width,
-            video.height,
+            preparedPlayer?.videoWidth ?: 0,
+            preparedPlayer?.videoHeight ?: 0,
         )
         video.pivotX = video.width / 2f
         video.pivotY = video.height / 2f
@@ -242,10 +308,88 @@ internal class PamMediaView(
         video.scaleY = scaleY
     }
 
+    override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
+        videoSurface?.release()
+        videoSurface = Surface(texture)
+        preparedPlayer?.setSurface(videoSurface)
+    }
+
+    override fun onSurfaceTextureSizeChanged(
+        texture: SurfaceTexture,
+        width: Int,
+        height: Int,
+    ) {
+        applyVideoTransform()
+    }
+
+    override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
+        preparedPlayer?.setSurface(null)
+        videoSurface?.release()
+        videoSurface = null
+        return true
+    }
+
+    override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        if (controls) mediaController?.show()
+        return true
+    }
+
+    override fun start() {
+        if (prepared) preparedPlayer?.start()
+    }
+
+    override fun pause() {
+        if (prepared) preparedPlayer?.pause()
+    }
+
+    override fun getDuration(): Int =
+        if (prepared) preparedPlayer?.duration?.coerceAtLeast(0) ?: 0 else 0
+
+    override fun getCurrentPosition(): Int =
+        if (prepared) preparedPlayer?.currentPosition?.coerceAtLeast(0) ?: 0 else 0
+
+    override fun seekTo(position: Int) {
+        currentTime = position.coerceAtLeast(0) / 1_000.0
+        if (prepared) preparedPlayer?.seekTo(position.coerceAtLeast(0))
+    }
+
+    override fun isPlaying(): Boolean = prepared && preparedPlayer?.isPlaying == true
+
+    override fun getBufferPercentage(): Int = bufferedPercentage
+
+    override fun canPause(): Boolean = true
+
+    override fun canSeekBackward(): Boolean = true
+
+    override fun canSeekForward(): Boolean = true
+
+    override fun getAudioSessionId(): Int = preparedPlayer?.audioSessionId ?: 0
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        main.removeCallbacks(progress)
+        main.post(progress)
+        if (source.isNotEmpty() && preparedPlayer == null) {
+            val current = source
+            source = ""
+            setSource(current)
+        }
+    }
+
     override fun onDetachedFromWindow() {
         main.removeCallbacks(progress)
-        preparedPlayer = null
-        video.stopPlayback()
+        sourceGeneration++
+        releasePlayer()
+        videoSurface?.release()
+        videoSurface = null
         super.onDetachedFromWindow()
     }
 }

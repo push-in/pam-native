@@ -10,6 +10,7 @@ import android.graphics.drawable.RippleDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
+import android.view.TextureView
 import android.widget.Button
 import android.widget.FrameLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -31,6 +32,24 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun mediaPlayerUsesTextureBackedVideoThatParticipatesInAncestorClipping() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val cache = NativeMediaFileCache(activity)
+        try {
+            onMain(instrumentation) {
+                val media = PamMediaView(activity, cache)
+                activity.host.addView(media, FrameLayout.LayoutParams(200, 120))
+
+                assertTrue(media.getChildAt(0) is TextureView)
+            }
+        } finally {
+            cache.close()
+            activity.finish()
+        }
+    }
+
     @Test
     fun richVirtualListUsesPerItemExtentsInsteadOfForcingItsEstimate() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -168,6 +187,11 @@ class PamRendererInstrumentedTest {
                     },
                     unmount = { _, holder -> holder.removeAllViews() },
                 )
+                val overlayChild = View(activity).apply {
+                    background = ColorDrawable(Color.RED)
+                }
+                list.overlay.add(overlayChild)
+                overlayChild.layout(0, -40, 100, 60)
                 parent.measure(
                     View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(200, View.MeasureSpec.EXACTLY),

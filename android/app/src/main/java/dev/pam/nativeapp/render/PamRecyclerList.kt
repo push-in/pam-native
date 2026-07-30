@@ -221,10 +221,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     override fun performClick(): Boolean = super.performClick()
 
-    override fun dispatchDraw(canvas: Canvas) {
+    override fun draw(canvas: Canvas) {
         val checkpoint = canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
-        super.dispatchDraw(canvas)
+        super.draw(canvas)
         canvas.restoreToCount(checkpoint)
     }
 

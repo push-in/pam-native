@@ -30,7 +30,7 @@ table, see the [capability cookbook](examples.md).
 
 `WebView` accepts a URL or inline HTML, custom user agent, injected JavaScript,
 DOM storage and a safe `PamNative.postMessage(value)` bridge. `MediaPlayer`
-uses `VideoView`/`MediaPlayer` on Android and `AVPlayerViewController` on iOS,
+uses `TextureView`/`MediaPlayer` on Android and `AVPlayerViewController` on iOS,
 with controls, autoplay, looping, mute, volume, seek, rate and progress events.
 
 ## Files, camera and gallery
