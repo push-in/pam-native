@@ -3425,6 +3425,30 @@ final class Dashboard extends Component
 </template>
 PAM,
 );
+file_put_contents(
+    $pamPhpDirectory.'/ConditionalRoot.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class ConditionalRoot extends Component
+{
+    public bool $visible = false;
+}
+?>
+
+<template>
+    <View p-if="$visible">
+        <Text>Visible</Text>
+    </View>
+</template>
+PAM,
+);
 
 $invalidPamPhpDirectory = $pamPhpDirectory.'-invalid';
 if (
@@ -3530,6 +3554,12 @@ TemplateRegistry::reset();
 App::components($pamPhpDirectory, $pamPhpCache);
 $dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
 $counterClass = 'Pam\\Native\\Tests\\Sfc\\CounterCard';
+$conditionalRoot = App::make('Pam\\Native\\Tests\\Sfc\\ConditionalRoot')->toElement();
+$assert(
+    $conditionalRoot->properties()[PropKey::Visible->value] === false
+        && $conditionalRoot->children() === [],
+    'A false conditional root must render an inert zero-layout placeholder.',
+);
 $dashboard = App::make($dashboardClass);
 App::run($dashboard);
 $sfcElement = $dashboard->toElement();
@@ -3880,8 +3910,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.65',
-    'The runtime SDK contract must match the 0.5.65 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.66',
+    'The runtime SDK contract must match the 0.5.66 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

@@ -135,6 +135,10 @@ current one-based number. Zero and negative integers render nothing:
 migrating existing components. They are deprecated aliases; new code and
 editor metadata use the distinctive `p-*` PAM directives.
 
+A component still declares one root in source, but that root may use `p-if`.
+When its condition is false, PAM emits an inert invisible placeholder that
+consumes no flex space. Multiple rendered roots remain an error.
+
 ## Native scoped CSS
 
 A component may place one `<style scoped>` block after `</template>`. PAM

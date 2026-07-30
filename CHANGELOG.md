@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.66 - 2026-07-30
+
+- Allow a false conditional component root to render an inert invisible native
+  placeholder that consumes no parent flow space, while continuing to reject
+  ambiguous multiple-root templates.
+
 ## 0.5.65 - 2026-07-30
 
 - Add safe numeric `+`, `-`, `*`, `/`, and integer `%` operators to template

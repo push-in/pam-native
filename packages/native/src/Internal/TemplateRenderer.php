@@ -489,6 +489,9 @@ final class TemplateRenderer
         $rendered = self::nodes($tree->children, $scope, $data);
         $elements = array_values(array_filter($rendered, static fn (mixed $value): bool => $value instanceof Element));
 
+        if ($rendered === []) {
+            return NativeView::make()->visible(false);
+        }
         if (count($rendered) !== 1 || count($elements) !== 1) {
             throw new RuntimeException('A Pam Native view must render exactly one root element.');
         }

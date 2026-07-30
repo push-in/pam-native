@@ -145,6 +145,8 @@ native border color. Absolute position edges accept percentages and
 CSS fails compilation. Template bindings support safe numeric `+`, `-`, `*`,
 `/`, integer `%`, and parentheses with ordinary precedence; the restricted
 interpreter does not use `eval`.
+Conditional component roots may use `p-if`; a false root becomes an inert
+invisible placeholder with no layout footprint.
 
 For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
 image/video metadata and `System\MediaLibrary::albums()` reads album summaries
