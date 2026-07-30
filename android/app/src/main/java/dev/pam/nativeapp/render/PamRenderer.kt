@@ -3791,7 +3791,11 @@ class PamRenderer(
             updateBackground(view, state)
             return
         }
-        (view as? ViewGroup)?.clipChildren = enabled
+        (view as? ViewGroup)?.clipChildren = if (view is PamRecyclerList) {
+            true
+        } else {
+            enabled
+        }
     }
 
     private fun textEllipsize(mode: Int): TextUtils.TruncateAt? =

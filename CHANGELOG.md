@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.49 - 2026-07-30
+
+- Keep Android virtual-list viewports and recycled holders as hard native paint
+  boundaries so media cannot draw over headers, adjacent rows, or tab bars
+  while scrolling.
+- Preserve component-level `overflow` behavior inside each recycled cell.
+
 ## 0.5.48 - 2026-07-30
 
 - Let rich `VirtualizedList` and `VirtualGrid` cells keep their authored

@@ -90,6 +90,13 @@ class PamRendererInstrumentedTest {
                     requireNotNull(list.findViewHolderForAdapterPosition(1))
                         .itemView.layoutParams.height,
                 )
+                assertTrue(list.clipChildren)
+                assertTrue(
+                    (
+                        requireNotNull(list.findViewHolderForAdapterPosition(0))
+                            .itemView as FrameLayout
+                    ).clipChildren,
+                )
 
                 val retainedFirst = requireNotNull(
                     list.findViewHolderForAdapterPosition(0),

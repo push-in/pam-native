@@ -46,6 +46,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     init {
         itemAnimator = null
         isNestedScrollingEnabled = true
+        clipChildren = true
         clipToPadding = false
         setHasFixedSize(true)
         updateLayoutManager()
@@ -464,8 +465,8 @@ private class RichRecyclerAdapter(
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RichHolder =
         RichHolder(FrameLayout(context).apply {
-            clipChildren = false
-            clipToPadding = false
+            clipChildren = true
+            clipToPadding = true
             importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
         })
 

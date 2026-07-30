@@ -333,6 +333,10 @@ horizontal list) remains authoritative, so one recycled list can render
 different media aspect ratios without measuring them on the UI thread.
 `rowHeight` remains a compatibility alias.
 
+The native list viewport and every recycled holder are paint boundaries.
+Scrolling media cannot draw over screen headers, adjacent rows, or tab bars;
+`overflow` remains available to control clipping inside the cell itself.
+
 `FlatList` remains source-compatible for lightweight string arrays.
 
 The responsive values are mobile-first. A missing value inherits the closest
