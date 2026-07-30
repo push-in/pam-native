@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.70 - 2026-07-30
+
+- Make the Android renderer artifact self-contained for Firebase-enabled apps
+  by shipping the root Google Services plugin declaration, Firebase source
+  set, and ProGuard configuration with the app renderer.
+
 ## 0.5.69 - 2026-07-30
 
 - Retry transient Android image-load failures while their native view remains

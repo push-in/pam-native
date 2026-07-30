@@ -83,6 +83,9 @@ jobs:
           cp android/plugin-api/build/outputs/aar/plugin-api-release.aar \
             "dist/pam-native-android-plugin-api-${version}.aar"
           tar -czf "dist/pam-native-android-renderer-${version}.tar.gz" \
+            android/build.gradle.kts \
+            android/app/proguard-rules.pro \
+            android/app/src/firebase \
             android/app/src/main \
             android/app/build.gradle.kts \
             native/pam_native_engine.h \
