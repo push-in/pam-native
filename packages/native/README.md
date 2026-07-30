@@ -182,6 +182,26 @@ Scroll::make($content)
     ->onScroll($rememberOffset);
 ```
 
+Declarative components use `ScrollView` with direct children. PAM inserts the
+correct native content container, so compact horizontal items keep their
+authored widths and loops may render any number of children:
+
+```xml
+<ScrollView horizontal="true" showsHorizontalScrollIndicator="false">
+    <Pressable
+        p-for="$story in $stories"
+        :key="$story->id"
+        width="66"
+    >
+        <Image :source="$story->avatar" width="66" height="66" />
+    </Pressable>
+</ScrollView>
+```
+
+Horizontal `ScrollView` content is a native `Row`; vertical content is a native
+`Column`. The lower-level `Scroll::make($content)` API deliberately retains its
+single explicit content element contract.
+
 For chat timelines, use native end anchoring instead of a guessed content
 offset:
 

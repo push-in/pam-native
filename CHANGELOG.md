@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.46 - 2026-07-29
+
+- Give declarative `ScrollView` a native `Row` or `Column` content container,
+  allowing one or many direct children without stretching a compact item to
+  the viewport or failing when a conditional loop renders multiple items.
+- Keep low-level `Scroll` source-compatible with its explicit single-content
+  contract.
+
 ## 0.5.45 - 2026-07-29
 
 - Add compiled `<style scoped>` blocks to `.pam.php` components with native

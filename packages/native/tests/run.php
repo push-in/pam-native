@@ -805,6 +805,28 @@ $assert(
             ->properties()[PropKey::Text->value] === 'Two',
     'Native p-if, p-else-if and p-else directives must render one matching branch.',
 );
+$scrollViewElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<ScrollView horizontal="true">'
+        .'<Pressable width="66"><Text>New</Text></Pressable>'
+        .'<Pressable width="76"><Text>Saved</Text></Pressable>'
+        .'</ScrollView>',
+    ),
+    null,
+    [],
+);
+$scrollContent = $scrollViewElement->children()[0] ?? null;
+$assert(
+    $scrollViewElement->kind() === NodeKind::Scroll
+        && $scrollContent instanceof \Pam\Native\Element
+        && $scrollContent->kind() === NodeKind::Row
+        && count($scrollContent->children()) === 2
+        && (float) $scrollContent->children()[0]
+            ->properties()[PropKey::Width->value] === 66.0
+        && (float) $scrollContent->children()[1]
+            ->properties()[PropKey::Width->value] === 76.0,
+    'Declarative horizontal ScrollView must preserve direct child widths in a Row container.',
+);
 $pressInEvent = null;
 $pressOutEvent = null;
 $pressMoveEvent = null;
@@ -3329,8 +3351,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.45',
-    'The runtime SDK contract must match the 0.5.45 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.46',
+    'The runtime SDK contract must match the 0.5.46 package release.',
 );
 $assert(
     array_map(

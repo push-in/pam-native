@@ -941,7 +941,14 @@ final class TemplateRenderer
                 self::stringValue($values['source'] ?? '', 'Image source'),
                 ...$children,
             ),
-            'Scroll', 'ScrollView' => Scroll::make(self::singleChild($children, $tag)),
+            'Scroll' => Scroll::make(self::singleChild($children, $tag)),
+            'ScrollView' => Scroll::make(self::scrollViewContent(
+                $children,
+                self::boolValue(
+                    $values['horizontal'] ?? false,
+                    'ScrollView horizontal',
+                ),
+            )),
             'FlatList', 'NativeList' => FlatList::make(
                 self::stringItems($values['items'] ?? []),
             ),
@@ -2802,6 +2809,22 @@ final class TemplateRenderer
         }
 
         return $children[0];
+    }
+
+    /** @param list<Element> $children */
+    private static function scrollViewContent(
+        array $children,
+        bool $horizontal,
+    ): Element {
+        if ($children === []) {
+            throw new RuntimeException(
+                'ScrollView requires at least one child.',
+            );
+        }
+
+        return $horizontal
+            ? Row::make(...$children)
+            : Column::make(...$children);
     }
 
     /** @param list<Element> $children */

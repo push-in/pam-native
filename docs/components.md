@@ -207,6 +207,31 @@ Inline properties remain useful for dynamic values and isolated exceptions:
 </Text>
 ```
 
+## Declarative scroll views
+
+`ScrollView` accepts one or many direct children in `.pam.php` templates. PAM
+builds a native `Row` content container when `horizontal` is true and a native
+`Column` otherwise. This preserves the natural size of compact items instead
+of stretching a lone child to the viewport and lets `p-for` or conditional
+branches render any number of children safely:
+
+```xml
+<ScrollView horizontal="true" showsHorizontalScrollIndicator="false">
+    <Pressable
+        p-for="$story in $stories"
+        :key="$story->id"
+        width="66"
+    >
+        <Image :source="$story->avatar" width="66" height="66" />
+        <Text>{{ $story->name }}</Text>
+    </Pressable>
+</ScrollView>
+```
+
+The explicit PHP API remains intentionally lower-level:
+`Scroll::make($content)` receives exactly one content element. Use a `Row` or
+`Column` yourself when authoring an imperative element tree.
+
 ## Format PAM components
 
 The Composer package installs an official formatter:
