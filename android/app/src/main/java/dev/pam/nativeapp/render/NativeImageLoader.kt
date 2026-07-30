@@ -137,7 +137,14 @@ internal class NativeImageLoader(
 
         val signature = request.signature()
         val current = active[view]
-        if (current?.signature == signature) {
+        if (
+            shouldReuseImageRequest(
+                sameSignature = current?.signature == signature,
+                finished = current?.finished == true,
+                hasDrawable = view.drawable != null,
+            )
+        ) {
+            checkNotNull(current)
             current.callbacks = callbacks
             return
         }
@@ -402,6 +409,24 @@ internal class NativeImageLoader(
         message: String,
     ) {
         if (active[view] !== pending || pending.finished) return
+        if (
+            shouldRetryImageRequest(
+                attempts = pending.retryAttempts,
+                attached = view.isAttachedToWindow,
+            )
+        ) {
+            pending.retryAttempts++
+            pending.decodedKey = null
+            main.postDelayed(
+                {
+                    if (active[view] === pending && !pending.finished) {
+                        begin(view, pending.token, view.width, view.height)
+                    }
+                },
+                RETRY_BASE_DELAY_MS * pending.retryAttempts,
+            )
+            return
+        }
         pending.finished = true
         pending.callbacks.onError(message)
         pending.callbacks.onEnd()
@@ -1001,6 +1026,7 @@ internal class NativeImageLoader(
         var callbacks: NativeImageCallbacks,
         var decodedKey: String? = null,
         var finished: Boolean = false,
+        var retryAttempts: Int = 0,
     )
 
     private data class DecodedBitmap(
@@ -1031,11 +1057,23 @@ internal class NativeImageLoader(
         const val MAX_HEADERS = 32
         const val MAX_HEADER_BYTES = 4_096
         const val MAX_ERROR_BYTES = 512
+        const val RETRY_BASE_DELAY_MS = 32L
         val HEADER_NAME = Regex("^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$")
         val REDIRECT_STATUS = setOf(301, 302, 303, 307, 308)
         val JPEG_CONTENT_TYPES = setOf("image/jpeg", "image/jpg")
     }
 }
+
+internal fun shouldReuseImageRequest(
+    sameSignature: Boolean,
+    finished: Boolean,
+    hasDrawable: Boolean,
+): Boolean = sameSignature && (!finished || hasDrawable)
+
+internal fun shouldRetryImageRequest(
+    attempts: Int,
+    attached: Boolean,
+): Boolean = attached && attempts < 2
 
 internal const val IMAGE_RESIZE_AUTO = 1
 internal const val IMAGE_RESIZE_RESIZE = 2

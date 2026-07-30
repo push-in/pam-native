@@ -117,6 +117,9 @@ remove downloaded offline content as well.
 - Pinned files survive normal eviction and are intended for explicit offline content.
 - Recycled native views use source generations, so late work cannot render into a
   component that now represents another item.
+- Android retries bounded transient failures while an image view stays attached.
+  A completed request is reused only if it still owns a drawable, so an image
+  cannot remain blank until its virtualized cell is recycled.
 - Android validates redirect count, origin-sensitive headers, response type, decoded
   image bounds, byte limits, and checksums.
 - iOS stores cache files under the application cache sandbox and uses ImageIO

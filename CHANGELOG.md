@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.69 - 2026-07-30
+
+- Retry transient Android image-load failures while their native view remains
+  attached, preventing the first visible `VirtualizedList` cell from staying
+  blank until it is recycled.
+- Reuse a completed same-source image request only while it still owns visible
+  pixels; a completed request without a drawable now starts fresh immediately.
+
 ## 0.5.68 - 2026-07-30
 
 - Include the versioned native engine C header in the Android renderer archive,
