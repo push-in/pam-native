@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.56 - 2026-07-30
+
+- Synchronize Android `google-services.json` through an incremental Gradle
+  task with exact file inputs and outputs, keeping Firebase builds correct
+  after `mobile prepare` even when Gradle reuses its configuration cache.
+
 ## 0.5.55 - 2026-07-30
 
 - Compile `text-decoration` from PAM styles into the existing typed native

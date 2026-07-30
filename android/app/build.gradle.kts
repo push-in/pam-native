@@ -1,7 +1,25 @@
 import java.util.Properties
+import org.gradle.api.DefaultTask
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     id("com.android.application")
+}
+
+abstract class SyncGoogleServicesTask : DefaultTask() {
+    @get:InputFile
+    abstract val sourceFile: RegularFileProperty
+
+    @get:OutputFile
+    abstract val targetFile: RegularFileProperty
+
+    @TaskAction
+    fun sync() {
+        sourceFile.get().asFile.copyTo(targetFile.get().asFile, overwrite = true)
+    }
 }
 
 val pamProperties = Properties().apply {
@@ -43,8 +61,17 @@ val pamFirebaseMessagingEnabled = pamProjectRoot.isNotBlank()
     && pamGoogleServicesSource.isFile
 
 if (pamFirebaseMessagingEnabled) {
-    pamGoogleServicesSource.copyTo(file("google-services.json"), overwrite = true)
     apply(plugin = "com.google.gms.google-services")
+    val pamGoogleServicesTarget = file("google-services.json")
+    val syncPamGoogleServices = tasks.register<SyncGoogleServicesTask>("syncPamGoogleServices") {
+        sourceFile.fileValue(pamGoogleServicesSource)
+        targetFile.fileValue(pamGoogleServicesTarget)
+    }
+    tasks.matching {
+        it.name.startsWith("process") && it.name.endsWith("GoogleServices")
+    }.configureEach {
+        dependsOn(syncPamGoogleServices)
+    }
 }
 
 android {

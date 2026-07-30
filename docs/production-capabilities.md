@@ -57,11 +57,13 @@ $subscription = PushNotifications::listenAndRoute($navigator, $onMessage);
 
 Android projects only need their Firebase client file at
 `.pam/google-services.json` (preferred) or root `google-services.json`. PAM
-conditionally compiles the Firebase service and dependency, forwards
-notification and data payloads to `PushNotifications`, and persists up to 64
-unconsumed events across process startup. Pam notification-opening intents are
-forwarded automatically. Custom native integrations may still call
-`PamPushNotifications.reportReceived(...)` or `reportOpened(...)`.
+conditionally compiles the Firebase service and dependency, synchronizes the
+client file through a cache-safe incremental Gradle task after every generated
+host refresh, forwards notification and data payloads to `PushNotifications`,
+and persists up to 64 unconsumed events across process startup. Pam
+notification-opening intents are forwarded automatically. Custom native
+integrations may still call `PamPushNotifications.reportReceived(...)` or
+`reportOpened(...)`.
 
 iOS notification delegates forward foreground delivery with
 `PamPushNotifications.didReceive(notification:)` and opening with
