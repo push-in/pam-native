@@ -17,6 +17,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import dev.pam.nativeapp.protocol.PackedSectionList
 import dev.pam.nativeapp.protocol.PackedStringList
+import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.math.abs
 import kotlin.math.max
 
@@ -397,6 +399,9 @@ private class RichRecyclerAdapter(
     private var extents = extents.toMap()
     private var extent = dp(48f)
     private var horizontal = false
+    private val boundHolders: MutableSet<RichHolder> = Collections.newSetFromMap(
+        IdentityHashMap(),
+    )
 
     init {
         setHasStableIds(true)
@@ -408,6 +413,19 @@ private class RichRecyclerAdapter(
         val previousExtents = extents
         val replacement = next.toList()
         val replacementExtents = nextExtents.toMap()
+        if (previous == replacement) {
+            extents = replacementExtents
+            boundHolders.forEach { holder ->
+                val id = holder.boundId
+                if (
+                    id != RecyclerView.NO_ID &&
+                    previousExtents[id] != replacementExtents[id]
+                ) {
+                    applyLayout(holder.container, id)
+                }
+            }
+            return
+        }
         val diff = DiffUtil.calculateDiff(
             object : DiffUtil.Callback() {
                 override fun getOldListSize(): Int = previous.size
@@ -422,6 +440,9 @@ private class RichRecyclerAdapter(
                     val newId = replacement[newPosition]
                     return previousExtents[oldId] == replacementExtents[newId]
                 }
+
+                override fun getChangePayload(oldPosition: Int, newPosition: Int): Any =
+                    PAYLOAD_LAYOUT
             },
             true,
         )
@@ -465,6 +486,7 @@ private class RichRecyclerAdapter(
     }
 
     override fun onViewRecycled(holder: RichHolder) {
+        boundHolders.remove(holder)
         holder.boundId.takeIf { it != RecyclerView.NO_ID }?.let {
             unmount(it, holder.container)
         }
@@ -482,14 +504,22 @@ private class RichRecyclerAdapter(
         applyLayout(holder.container, id)
         mount(id, holder.container)
         holder.boundId = id
+        boundHolders += holder
     }
 
     private fun applyLayout(container: FrameLayout, id: Long) {
         val itemExtent = extents[id] ?: extent
-        container.layoutParams = RecyclerView.LayoutParams(
-            if (horizontal) itemExtent else ViewGroup.LayoutParams.MATCH_PARENT,
-            if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else itemExtent,
-        )
+        val width = if (horizontal) itemExtent else ViewGroup.LayoutParams.MATCH_PARENT
+        val height = if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else itemExtent
+        val params = container.layoutParams as? RecyclerView.LayoutParams
+        if (params == null) {
+            container.layoutParams = RecyclerView.LayoutParams(width, height)
+            return
+        }
+        if (params.width == width && params.height == height) return
+        params.width = width
+        params.height = height
+        container.requestLayout()
     }
 
     private fun dp(value: Float): Int =
@@ -571,10 +601,17 @@ private abstract class PackedRowAdapter(
     }
 
     private fun applyLayout(text: TextView) {
-        text.layoutParams = RecyclerView.LayoutParams(
-            if (horizontal) extent else ViewGroup.LayoutParams.MATCH_PARENT,
-            if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else extent,
-        )
+        val width = if (horizontal) extent else ViewGroup.LayoutParams.MATCH_PARENT
+        val height = if (horizontal) ViewGroup.LayoutParams.MATCH_PARENT else extent
+        val params = text.layoutParams as? RecyclerView.LayoutParams
+        if (params == null) {
+            text.layoutParams = RecyclerView.LayoutParams(width, height)
+            return
+        }
+        if (params.width == width && params.height == height) return
+        params.width = width
+        params.height = height
+        text.requestLayout()
     }
 
     protected abstract fun value(position: Int): String

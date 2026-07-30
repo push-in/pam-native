@@ -7,6 +7,9 @@
   fallback and prefetch estimate.
 - Size each Android `RecyclerView` holder from the Rust-computed cell frame and
   patch changed extents without remounting stable cells.
+- Apply extent-only updates synchronously on already-bound Android holders and
+  preserve their internal `RecyclerView.LayoutParams` ownership, avoiding a
+  stale frame on older API levels.
 - Add the clearer `estimatedRowHeight` PHP and template alias while preserving
   existing `rowHeight` call sites.
 
