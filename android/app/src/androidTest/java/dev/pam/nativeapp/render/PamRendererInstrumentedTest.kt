@@ -7,6 +7,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
+import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -99,7 +100,15 @@ class PamRendererInstrumentedTest {
                     ),
                 )
                 activity.host.viewTreeObserver.dispatchOnPreDraw()
-                assertEquals(Color.BLUE, activity.window.statusBarColor)
+                assertEquals(
+                    Color.BLUE,
+                    if (Build.VERSION.SDK_INT >= 35) {
+                        (activity.window.decorView.background as ColorDrawable).color
+                    } else {
+                        @Suppress("DEPRECATION")
+                        activity.window.statusBarColor
+                    },
+                )
 
                 renderer.commit(
                     listOf(
@@ -118,7 +127,15 @@ class PamRendererInstrumentedTest {
                     ),
                 )
                 activity.host.viewTreeObserver.dispatchOnPreDraw()
-                assertEquals(Color.RED, activity.window.statusBarColor)
+                assertEquals(
+                    Color.RED,
+                    if (Build.VERSION.SDK_INT >= 35) {
+                        (activity.window.decorView.background as ColorDrawable).color
+                    } else {
+                        @Suppress("DEPRECATION")
+                        activity.window.statusBarColor
+                    },
+                )
                 renderer.close()
             }
         } finally {
