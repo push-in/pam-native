@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.41 - 2026-07-29
+
+- Prune obsolete content-addressed Android application releases outside the
+  startup path while retaining the active bundle and one previous release for
+  rollback or diagnostics.
+- Preserve application state, Nitro databases, cached media, and the active
+  executable bundle during release cleanup.
+
 ## 0.5.38 - 2026-07-29
 
 - Keep the iOS image-editor wire decoding contract local to its module so the

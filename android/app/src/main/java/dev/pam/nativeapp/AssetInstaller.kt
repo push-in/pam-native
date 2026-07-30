@@ -13,6 +13,7 @@ internal class AssetInstaller(private val context: Context) {
         val release = File(context.filesDir, "pam/releases/$version")
         val entry = File(release, "index.php")
         if (entry.isFile) {
+            scheduleReleaseCleanup(release)
             return entry
         }
         val staging = File(context.cacheDir, "pam-install-$version")
@@ -28,7 +29,36 @@ internal class AssetInstaller(private val context: Context) {
         }
         check(staging.renameTo(release)) { "Cannot activate Pam Native application bundle" }
         require(entry.isFile) { "Pam Native bundle does not contain index.php" }
+        scheduleReleaseCleanup(release)
         return entry
+    }
+
+    /**
+     * Release extraction is content-addressed, so upgrades never need to
+     * overwrite a running bundle. Cleanup happens off the startup path and
+     * retains one previous valid release for diagnostics or rollback.
+     */
+    private fun scheduleReleaseCleanup(activeRelease: File) {
+        Thread(
+            {
+                runCatching { pruneReleases(activeRelease) }
+            },
+            "pam-release-cleanup",
+        ).apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    private fun pruneReleases(activeRelease: File) {
+        val releasesDirectory = activeRelease.parentFile ?: return
+        staleReleaseDirectories(
+            releasesDirectory = releasesDirectory,
+            activeRelease = activeRelease,
+            retainedInactiveReleases = RETAINED_INACTIVE_RELEASES,
+        ).forEach { obsolete ->
+            obsolete.deleteRecursively()
+        }
     }
 
     private fun copyDirectory(assetPath: String, destination: File) {
@@ -110,5 +140,27 @@ internal class AssetInstaller(private val context: Context) {
 
     private companion object {
         const val ASSET_ROOT = "pam"
+        const val RETAINED_INACTIVE_RELEASES = 1
     }
+}
+
+internal fun staleReleaseDirectories(
+    releasesDirectory: File,
+    activeRelease: File,
+    retainedInactiveReleases: Int,
+): List<File> {
+    require(retainedInactiveReleases >= 0)
+    val activeCanonical = activeRelease.canonicalFile
+
+    return releasesDirectory.listFiles()
+        .orEmpty()
+        .asSequence()
+        .filter { candidate ->
+            candidate.isDirectory &&
+                candidate.name.matches(Regex("[a-f0-9]{64}")) &&
+                candidate.canonicalFile != activeCanonical
+        }
+        .sortedByDescending(File::lastModified)
+        .drop(retainedInactiveReleases)
+        .toList()
 }
