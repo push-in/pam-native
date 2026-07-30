@@ -293,8 +293,9 @@ final class PamPhpCompiler
 
     /**
      * @param array{
-     *     classes: array<string, array<string, string|bool>>,
-     *     tags: array<string, array<string, string|bool>>,
+     *     classes: array<string, array<string, string|int|bool>>,
+     *     tags: array<string, array<string, string|int|bool>>,
+     *     classCascade: array<string, array<string, array{order: int, value: string|int|bool}>>,
      *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * } $styleSheet
      */

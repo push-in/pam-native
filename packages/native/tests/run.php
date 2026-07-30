@@ -56,6 +56,8 @@ use Pam\Native\InputTextAlignVertical;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\PamPhpCompiler;
+use Pam\Native\Internal\CssColor;
+use Pam\Native\Internal\CompiledTemplateNode;
 use Pam\Native\Internal\ScopedStyleCompiler;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\TemplateCompiler;
@@ -247,6 +249,17 @@ $assert = static function (bool $condition, string $message): void {
     }
 };
 
+$assert(
+    CssColor::parse('transparent') === 0x00000000
+        && CssColor::parse('#123') === 0xFF112233
+        && CssColor::parse('#1234') === 0x44112233
+        && CssColor::parse('#11223344') === 0x44112233
+        && CssColor::parse('rgb(255 0 128 / 50%)') === 0x80FF0080
+        && CssColor::parse('hsl(120deg 100% 25%)') === 0xFF008000
+        && CssColor::parse('rebeccapurple') === 0xFF663399,
+    'CSS colors must support transparent, modern hex, functions and named colors.',
+);
+
 $compiledCss = ScopedStyleCompiler::compile(
     <<<'CSS'
     :root {
@@ -293,7 +306,7 @@ $compiledCss = ScopedStyleCompiler::compile(
     'ScopedStyleCompilerTest.pam.php',
 );
 $assert(
-    $compiledCss['tags']['Text']['textColor'] === '#101410'
+    $compiledCss['tags']['Text']['textColor'] === 0xFF101410
         && $compiledCss['classes']['body-copy']['fontFamily']
             === 'asset://assets/fonts/SpaceGrotesk-Regular.ttf'
         && $compiledCss['classes']['body-copy']['textDecoration'] === 'underline',
@@ -321,10 +334,10 @@ $assert(
         'marginBottom' => '3',
         'marginLeft' => '4',
         'borderWidth' => '1.5',
-        'borderColor' => '#101410',
+        'borderColor' => 0xFF101410,
         'borderBottomWidth' => '2',
         'borderLeftWidth' => '3',
-        'borderColor' => '#D6ECDD',
+        'borderColor' => 0xFFD6ECDD,
         'borderTopLeftRadius' => '28',
         'borderTopRightRadius' => '28',
         'borderBottomRightRadius' => '0',
@@ -352,8 +365,156 @@ $forwardVariableCss = ScopedStyleCompiler::compile(
     'ForwardVariable.pam.php',
 );
 $assert(
-    $forwardVariableCss['classes']['label']['textColor'] === '#334455',
+    $forwardVariableCss['classes']['label']['textColor'] === 0xFF334455,
     'Scoped CSS variables must be independent from declaration order.',
+);
+$modernCss = ScopedStyleCompiler::compile(
+    <<<'CSS'
+    :root {
+        --fallback-ink: var(--missing-ink, rgb(12 34 56 / 75%));
+        --space: 0.5rem;
+    }
+
+    Text { color: red; }
+    .later { color: #1234; }
+    .earlier { color: hsl(120 100% 25%); }
+    .later {
+        color: var(--fallback-ink);
+        background: none;
+        aspect-ratio: 16 / 9;
+        padding-inline: var(--space) 1rem;
+        margin-block: 2px 3px;
+        inset-inline: 4px 5px;
+        border: none;
+        font-weight: bold;
+        font-family: "Space Grotesk", sans-serif;
+        opacity: 50%;
+        transform: translateX(3px) translateY(-2dp) scale(1.25) rotate(0.5turn);
+        object-fit: scale-down;
+        visibility: visible;
+        box-sizing: border-box;
+    }
+    CSS,
+    'ModernCss.pam.php',
+);
+$assert(
+    $modernCss['classes']['later'] === [
+        'textColor' => 0xBF0C2238,
+        'backgroundColor' => 0,
+        'aspectRatio' => (string) (16 / 9),
+        'paddingLeft' => '8',
+        'paddingRight' => '16',
+        'marginTop' => '2',
+        'marginBottom' => '3',
+        'left' => '4',
+        'right' => '5',
+        'borderWidth' => '0',
+        'borderColor' => 0,
+        'fontWeight' => '700',
+        'fontFamily' => 'Space Grotesk',
+        'opacity' => '0.5',
+        'translationX' => '3',
+        'translationY' => '-2',
+        'scaleX' => '1.25',
+        'scaleY' => '1.25',
+        'rotation' => '180',
+        'resizeMode' => 'contain',
+        'visible' => true,
+    ],
+    'Modern scoped CSS values and native-safe shorthands must compile exactly.',
+);
+$assert(
+    $modernCss['classCascade']['earlier']['textColor']['order'] === 2
+        && $modernCss['classCascade']['later']['textColor']['order'] === 3,
+    'Scoped CSS must index property source order for a deterministic constant-time cascade.',
+);
+$cyclicVariableRejected = false;
+try {
+    ScopedStyleCompiler::compile(
+        ':root { --a: var(--b); --b: var(--a); } Text { color: var(--a); }',
+        'CyclicVariables.pam.php',
+    );
+} catch (RuntimeException $error) {
+    $cyclicVariableRejected = str_contains($error->getMessage(), 'Circular CSS variable');
+}
+$assert(
+    $cyclicVariableRejected,
+    'Scoped CSS must reject custom-property cycles during compilation.',
+);
+
+$cascadeTemplate = TemplateCompiler::compile(
+    '<Column><Text class="later earlier">Styled</Text></Column>',
+);
+$cascadeStyled = new CompiledTemplateNode(
+    kind: $cascadeTemplate->kind,
+    name: $cascadeTemplate->name,
+    attributes: [
+        ...$cascadeTemplate->attributes,
+        '__pamStyles' => json_encode($modernCss, JSON_THROW_ON_ERROR),
+    ],
+    source: $cascadeTemplate->source,
+    line: $cascadeTemplate->line,
+    column: $cascadeTemplate->column,
+    value: $cascadeTemplate->value,
+);
+$cascadeStyled->children = $cascadeTemplate->children;
+$cascadeElement = TemplateRenderer::render($cascadeStyled, null, []);
+$cascadeText = $cascadeElement->children()[0];
+$assert(
+    $cascadeText->properties()[PropKey::TextColor->value] === 0xBF0C2238,
+    'CSS class order in markup must not override stylesheet source order.',
+);
+
+$inheritCss = ScopedStyleCompiler::compile(
+    <<<'CSS'
+    @font-face {
+        font-family: "Theme";
+        src: url("asset://assets/fonts/Theme-Regular.ttf");
+        font-weight: 400;
+    }
+    @font-face {
+        font-family: "Theme";
+        src: url("asset://assets/fonts/Theme-Bold.ttf");
+        font-weight: 700;
+    }
+    .theme {
+        color: #123;
+        font-family: "Theme";
+        font-size: 1rem;
+        font-weight: normal;
+        text-align: center;
+    }
+    .strong { font-weight: bold; }
+    CSS,
+    'InheritedCss.pam.php',
+);
+$inheritTemplate = TemplateCompiler::compile(
+    '<Column class="theme"><Row><Text class="strong">Inherited</Text></Row></Column>',
+);
+$inheritStyled = new CompiledTemplateNode(
+    kind: $inheritTemplate->kind,
+    name: $inheritTemplate->name,
+    attributes: [
+        ...$inheritTemplate->attributes,
+        '__pamStyles' => json_encode($inheritCss, JSON_THROW_ON_ERROR),
+    ],
+    source: $inheritTemplate->source,
+    line: $inheritTemplate->line,
+    column: $inheritTemplate->column,
+    value: $inheritTemplate->value,
+);
+$inheritStyled->children = $inheritTemplate->children;
+$inheritText = TemplateRenderer::render($inheritStyled, null, [])
+    ->children()[0]
+    ->children()[0];
+$assert(
+    $inheritText->properties()[PropKey::TextColor->value] === 0xFF112233
+        && $inheritText->properties()[PropKey::FontSize->value] === 16
+        && $inheritText->properties()[PropKey::FontFamily->value]
+            === 'asset://assets/fonts/Theme-Bold.ttf'
+        && !isset($inheritText->properties()[PropKey::FontWeight->value])
+        && $inheritText->properties()[PropKey::TextAlign->value] === 2,
+    'Text CSS properties and logical font families must inherit through native layout containers.',
 );
 $cssImportRoot = sys_get_temp_dir().'/pam-native-css-import-'.getmypid();
 mkdir($cssImportRoot.'/src/styles', 0o755, true);
@@ -387,7 +548,7 @@ $importedCss = ScopedStyleCompiler::compile(
     $cssImportComponent,
 );
 $assert(
-    $importedCss['tags']['Text']['textColor'] === '#163D2A'
+    $importedCss['tags']['Text']['textColor'] === 0xFF163D2A
         && $importedCss['tags']['Text']['fontFamily']
             === 'Brand'
         && $importedCss['tags']['Text']['fontSize'] === '15'
@@ -475,8 +636,8 @@ $secondImportedStyles = json_decode(
     JSON_THROW_ON_ERROR,
 );
 $assert(
-    $firstImportedStyles['tags']['Text']['textColor'] === '#163D2A'
-        && $secondImportedStyles['tags']['Text']['textColor'] === '#245E42',
+    $firstImportedStyles['tags']['Text']['textColor'] === 0xFF163D2A
+        && $secondImportedStyles['tags']['Text']['textColor'] === 0xFF245E42,
     'Changing an imported CSS dependency must invalidate the compiled component cache.',
 );
 file_put_contents(
@@ -540,7 +701,7 @@ $globalStyles = json_decode(
     JSON_THROW_ON_ERROR,
 );
 $assert(
-    $globalStyles['tags']['Text']['textColor'] === '#112A1C'
+    $globalStyles['tags']['Text']['textColor'] === 0xFF112A1C
         && $globalStyles['tags']['Text']['fontSize'] === '15'
         && $globalStyles['classes']['shared-card'] === [
             'paddingTop' => '8',
@@ -1063,6 +1224,27 @@ $dynamicColorElement = TemplateRenderer::render(
 $assert(
     $dynamicColorElement->properties()[PropKey::TextColor->value] === 0xFF1B7A4E,
     'Dynamically bound hexadecimal colors must cross the native bridge as integers.',
+);
+$transparentColorElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<View backgroundColor="transparent">'
+        .'<View backgroundColor="rgba(255 255 255 / 25%)" />'
+        .'<View backgroundColor="#1234" />'
+        .'<View backgroundColor="#80112233" />'
+        .'</View>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $transparentColorElement->properties()[PropKey::BackgroundColor->value] === 0x00000000
+        && $transparentColorElement->children()[0]
+            ->properties()[PropKey::BackgroundColor->value] === 0x40FFFFFF
+        && $transparentColorElement->children()[1]
+            ->properties()[PropKey::BackgroundColor->value] === 0x44112233
+        && $transparentColorElement->children()[2]
+            ->properties()[PropKey::BackgroundColor->value] === 0x80112233,
+    'Direct colors must add CSS forms while preserving legacy eight-digit ARGB.',
 );
 $quotedComparisonTemplate = TemplateCompiler::compile(
     '<Column><Text v-if="$count > 0">More</Text>'
@@ -3917,8 +4099,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.70',
-    'The runtime SDK contract must match the 0.5.70 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.71',
+    'The runtime SDK contract must match the 0.5.71 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

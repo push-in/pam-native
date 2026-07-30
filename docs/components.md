@@ -206,10 +206,17 @@ Here `--ink-muted`, the font faces, and the default `Text` family are declared
 once in `src/app.css`. The local component sheet stays focused on its semantic
 layout and overrides global rules when necessary.
 
-The cascade is deterministic: a tag rule is the base, classes are applied from
-left to right, and an inline PAM attribute wins last. Both `class` and
-`:class` participate. Component styles are isolated and cannot leak into a
+The cascade is deterministic and follows useful CSS specificity: tag rules are
+the base, matching class rules win over tags and follow stylesheet source
+order, and an authored PAM attribute wins last. Reordering `class="card
+selected"` to `class="selected card"` never changes the result. Both `class`
+and `:class` participate. Component styles are isolated and cannot leak into a
 child component's template.
+
+Text color, font family/size/weight/style, letter spacing, line height,
+alignment, and case inherit through `Column`, `Row`, and other native layout
+containers. A child that changes only `font-weight` keeps the inherited logical
+family and resolves the matching packaged `@font-face`.
 
 `pam-native-format` removes an empty `<style scoped>` block automatically, so
 components that rely only on `src/app.css` keep no placeholder markup.
@@ -223,14 +230,22 @@ Supported CSS covers PAM's common native layout and paint contracts:
 - dimensions, min/max dimensions, `aspect-ratio`, position edges and `z-index`;
 - `flex`, growth/shrink/direction, native `flex-wrap`, gap, alignment and
   justification;
-- padding and margin edges plus standard one-to-four-value shorthands;
-- `inset`, individual position edges, and compositor `translation-x/y`;
+- padding and margin edges, standard one-to-four-value shorthands, and
+  `padding-inline/block` plus `margin-inline/block`;
+- `inset`, `inset-inline/block`, individual position edges, `transform`
+  (`translateX/Y`, `scale/X/Y`, and `rotate`), and compositor
+  `translation-x/y`;
 - border width/color/radii plus `border` and directional
-  `border-top/right/bottom/left` `<width> solid <color>` shorthands;
-- background, text color, opacity, elevation, overflow and visibility;
-- font family/size/weight/style, letter/line spacing, text alignment and case.
+  `border-top/right/bottom/left` `<width> solid <color>` shorthands, including
+  `border: none`;
+- background colors (including `background: none`), text color, percentage or
+  numeric opacity, elevation, overflow and visibility;
+- font family stacks, size/weight/style, letter/line spacing, text alignment,
+  decoration and case;
+- `object-fit`, `box-sizing: border-box`, and `aspect-ratio: 16 / 9`.
 
-Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points.
+Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points. `rem`
+uses a stable native root of 16 logical points.
 Percentages are supported for width, height, max-width, and max-height.
 They are also supported for absolute `left`, `top`, `right`, and `bottom`
 offsets. `border-radius` accepts the standard one-to-four circular-radius
@@ -238,6 +253,29 @@ shorthand; elliptical slash syntax is intentionally rejected.
 Directional border colors are accepted for familiar CSS authoring; Android
 and iOS currently paint one shared native border color, so the last authored
 directional color applies to every edge.
+
+CSS custom properties are declared in `:root`, may reference one another, and
+support nested fallbacks such as `var(--brand, var(--fallback, rebeccapurple))`.
+Unknown variables without a fallback, cycles, and excessive expansion depth
+fail compilation instead of producing a device-only visual error.
+
+Stylesheet colors use web ordering and support the complete CSS named-color
+set, `transparent`, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, comma or
+space-separated `rgb()`/`rgba()`, and `hsl()`/`hsla()` with alpha. They compile
+directly to the protocol's ARGB integer:
+
+```css
+.glass {
+    color: rgb(255 255 255 / 92%);
+    background-color: #FFFFFF29;
+    border: 1px solid hsl(140deg 45% 35% / 35%);
+}
+```
+
+For backward compatibility, an eight-digit color written directly as a PAM
+attribute remains `#AARRGGBB`. Use a stylesheet for CSS `#RRGGBBAA`; direct
+attributes also accept named colors, `transparent`, `#RGB`, `#RGBA`, and CSS
+color functions.
 `:root` is reserved for component-local `--custom-properties`. Selectors are a
 native tag, `.class`, or a comma-separated combination of those forms.
 Packaged fonts use compile-time `@font-face` declarations with one safe

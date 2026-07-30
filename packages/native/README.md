@@ -121,9 +121,10 @@ Text {
 
 The path resolves below the packaged `pam/` asset root. Declare another
 `@font-face` for each weight or italic variant, then author ordinary
-`font-family`, `font-weight`, and `font-style` rules. PAM selects the closest
-face while compiling the component, so there is no font registry, CSS parser,
-or selector work in the application runtime. PAM accepts TTF and OTF files,
+`font-family`, `font-weight`, and `font-style` rules. PAM preserves the logical
+family through inherited text styles and selects the closest face for each
+element, so there is no font registry, CSS parser, or selector work in the
+native application runtime. PAM accepts TTF and OTF files,
 rejects traversal, caches decoded native typefaces, and keeps ordinary
 installed family names such as `sans-serif` working unchanged.
 The conventional `src/app.css` sheet is prepended automatically to every PAM
@@ -133,18 +134,32 @@ expanded recursively from the file that declares them at compile time and
 invalidate compiled component caches when a dependency changes. Imports cannot
 leave the Composer project or load network resources.
 Scoped styles are compiled into typed native properties and add no CSS runtime
-or selector pass. Tag rules, `.class` rules, component-local variables,
-percentages, common box shorthands, dynamic classes, and native text decoration
-(`none`, `underline`, `line-through`, or `underline-line-through`) are
-supported. `border` and the directional `border-top`, `border-right`,
-`border-bottom`, and `border-left` forms accept `<width> solid <color>`;
-`inset`, `translation-x/y`, directional border colors, and native retained
-`flex-wrap` are supported. Directional colors currently resolve to the shared
+or selector pass. Tag rules form the base, matching classes follow stylesheet
+source order regardless of class order in markup, and authored PAM attributes
+win last. Text color, typography, spacing, alignment, and case inherit through
+native layout containers.
+
+Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
+short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),
+`rgb()`/`rgba()`, and `hsl()`/`hsla()`. Custom properties support nested
+references and `var(--name, fallback)`. PAM also compiles percentages, `rem`
+(16 logical points), physical and logical box shorthands, `inset`,
+`transform`, `object-fit`, `visibility`, `box-sizing: border-box`,
+`aspect-ratio`, native `flex-wrap`, percentage opacity, `border: none`, and
+native text decoration. `border` and its directional forms accept
+`<width> solid <color>`; directional colors currently resolve to the shared
 native border color. Absolute position edges accept percentages and
 `border-radius` accepts one to four circular corner values. Unknown web-only
-CSS fails compilation. Template bindings support safe numeric `+`, `-`, `*`,
-`/`, integer `%`, and parentheses with ordinary precedence; the restricted
-interpreter does not use `eval`.
+CSS fails compilation with the component path.
+
+Direct PAM color attributes retain the original `#AARRGGBB` eight-digit format
+for source compatibility. Prefer stylesheet colors when authoring CSS-style
+`#RRGGBBAA`; direct attributes also accept named colors, `transparent`, short
+hex, and CSS color functions.
+
+Template bindings support safe numeric `+`, `-`, `*`, `/`, integer `%`, and
+parentheses with ordinary precedence; the restricted interpreter does not use
+`eval`.
 Conditional component roots may use `p-if`; a false root becomes an inert
 invisible placeholder with no layout footprint.
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.71 - 2026-07-30
+
+- Compile CSS colors with web semantics: `transparent`, the complete named
+  color set, `#RGB`, `#RGBA`, `#RRGGBB`, `#RRGGBBAA`, modern/legacy
+  `rgb()`/`rgba()`, and `hsl()`/`hsla()`.
+- Make scoped cascade independent from class order in markup: tag rules form
+  the base, matching classes use stylesheet source order, and authored PAM
+  attributes win last.
+- Inherit native text color, family, size, weight, style, spacing, line height,
+  alignment, and case through layout containers, while resolving each
+  descendant against the best packaged `@font-face`.
+- Add nested custom-property references and `var(--token, fallback)` with
+  circular-reference and expansion-depth protection.
+- Add `rem`, logical inline/block box shorthands, CSS `transform`,
+  `object-fit`, `visibility`, `box-sizing: border-box`, percentage opacity,
+  ratio syntax, font stacks, `border: none`, `background: none`, and common
+  text-decoration syntax to the zero-runtime scoped CSS compiler.
+
 ## 0.5.70 - 2026-07-30
 
 - Make the Android renderer artifact self-contained for Firebase-enabled apps

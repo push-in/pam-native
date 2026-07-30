@@ -102,6 +102,19 @@ use Traversable;
 
 final class TemplateRenderer
 {
+    /** @var list<string> */
+    private const INHERITED_STYLE_ATTRIBUTES = [
+        'textColor',
+        'fontFamily',
+        'fontSize',
+        'fontWeight',
+        'fontStyle',
+        'letterSpacing',
+        'lineHeight',
+        'textAlign',
+        'textTransform',
+    ];
+
     /** @var array<string, ReflectionMethod> */
     private static array $methods = [];
 
@@ -737,7 +750,7 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|bool> $attributes
+     * @param array<string, string|int|bool> $attributes
      * @param list<CompiledTemplateNode> $childNodes
      * @param array<string, mixed> $data
      */
@@ -753,10 +766,20 @@ final class TemplateRenderer
             $attributes = self::nativeEventAliases($attributes);
         }
         $resolvedClass = self::classValue($attributes, $scope, $data);
+        $inheritedStyles = $data['__pamInheritedStyles'] ?? [];
+        if (!is_array($inheritedStyles)) {
+            $inheritedStyles = [];
+        }
         $attributes = [
+            ...$inheritedStyles,
             ...self::scopedStyleAttributes($tag, $resolvedClass, $data),
             ...$attributes,
         ];
+        $unresolvedStyleAttributes = $attributes;
+        $attributes = self::resolveScopedFont(
+            $attributes,
+            self::styleSheetFonts($data),
+        );
         if (isset($attributes['bind:value'])) {
             $attributes[':value'] = $attributes['bind:value'];
             $attributes['model'] = ltrim(
@@ -885,6 +908,12 @@ final class TemplateRenderer
         }
         $childData = [
             ...$data,
+            '__pamInheritedStyles' => self::inheritedStyleAttributes(
+                $values,
+                $unresolvedStyleAttributes,
+                $scope,
+                $data,
+            ),
             '__pamParentVariants' => [
                 ...$inheritedVariants,
                 ...$ownVariants,
@@ -2009,15 +2038,14 @@ final class TemplateRenderer
         if (is_int($value)) {
             return $value;
         }
-        $raw = self::stringValue($value, $context);
-        if (preg_match('/^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/D', $raw, $color) !== 1) {
-            throw new InvalidArgumentException(
-                "{$context} must be an integer or #RRGGBB/#AARRGGBB color.",
-            );
-        }
-        $hex = strlen($color[1]) === 6 ? 'FF'.$color[1] : $color[1];
+        $raw = trim(self::stringValue($value, $context));
+        if (preg_match('/^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/D', $raw, $color) === 1) {
+            $hex = strlen($color[1]) === 6 ? 'FF'.$color[1] : $color[1];
 
-        return (int) hexdec($hex);
+            return (int) hexdec($hex);
+        }
+
+        return CssColor::parse($raw, $context);
     }
 
     private static function activityIndicatorSize(
@@ -2102,8 +2130,9 @@ final class TemplateRenderer
 
     /**
      * @return array{
-     *     classes: array<string, array<string, string|bool>>,
-     *     tags: array<string, array<string, string|bool>>,
+     *     classes: array<string, array<string, string|int|bool>>,
+     *     tags: array<string, array<string, string|int|bool>>,
+     *     classCascade: array<string, array<string, array{order: int, value: string|int|bool}>>,
      *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * }
      */
@@ -2111,7 +2140,12 @@ final class TemplateRenderer
     {
         $encoded = $tree->attributes['__pamStyles'] ?? null;
         if (!is_string($encoded) || $encoded === '') {
-            return ['classes' => [], 'tags' => [], 'fonts' => []];
+            return [
+                'classes' => [],
+                'tags' => [],
+                'classCascade' => [],
+                'fonts' => [],
+            ];
         }
         try {
             $decoded = json_decode($encoded, true, 64, JSON_THROW_ON_ERROR);
@@ -2126,9 +2160,18 @@ final class TemplateRenderer
         }
         $classes = self::validatedStyleRules($decoded['classes'] ?? null, $tree->source);
         $tags = self::validatedStyleRules($decoded['tags'] ?? null, $tree->source);
+        $classCascade = self::validatedClassCascade(
+            $decoded['classCascade'] ?? [],
+            $tree->source,
+        );
         $fonts = self::validatedFontFaces($decoded['fonts'] ?? [], $tree->source);
 
-        return ['classes' => $classes, 'tags' => $tags, 'fonts' => $fonts];
+        return [
+            'classes' => $classes,
+            'tags' => $tags,
+            'classCascade' => $classCascade,
+            'fonts' => $fonts,
+        ];
     }
 
     /**
@@ -2145,7 +2188,7 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $data
-     * @return array<string, string|bool>
+     * @return array<string, string|int|bool>
      */
     private static function scopedStyleAttributes(
         string $tag,
@@ -2156,24 +2199,70 @@ final class TemplateRenderer
         if (!is_array($sheet)) {
             return [];
         }
+        $classCascade = is_array($sheet['classCascade'] ?? null)
+            ? $sheet['classCascade']
+            : [];
+        $classNames = array_fill_keys(
+            array_filter(preg_split('/\s+/', trim($classes ?? '')) ?: []),
+            true,
+        );
         $tags = is_array($sheet['tags'] ?? null) ? $sheet['tags'] : [];
-        $classRules = is_array($sheet['classes'] ?? null) ? $sheet['classes'] : [];
         $attributes = is_array($tags[$tag] ?? null) ? $tags[$tag] : [];
-        foreach (preg_split('/\s+/', trim($classes ?? '')) ?: [] as $class) {
-            if ($class !== '' && is_array($classRules[$class] ?? null)) {
-                $attributes = [...$attributes, ...$classRules[$class]];
+        if ($classCascade !== []) {
+            $winners = [];
+            foreach (array_keys($classNames) as $class) {
+                $declarations = $classCascade[$class] ?? null;
+                if (!is_array($declarations)) {
+                    continue;
+                }
+                foreach ($declarations as $attribute => $entry) {
+                    if (
+                        !is_array($entry)
+                        || !is_int($entry['order'] ?? null)
+                        || !array_key_exists('value', $entry)
+                    ) {
+                        continue;
+                    }
+                    if (
+                        !isset($winners[$attribute])
+                        || $entry['order'] >= $winners[$attribute]['order']
+                    ) {
+                        $winners[$attribute] = $entry;
+                    }
+                }
+            }
+            foreach ($winners as $attribute => $entry) {
+                $attributes[$attribute] = $entry['value'];
+            }
+        } else {
+            // Backward compatibility for templates compiled before cascade indexes.
+            $classRules = is_array($sheet['classes'] ?? null) ? $sheet['classes'] : [];
+            foreach (array_keys($classNames) as $class) {
+                if (is_array($classRules[$class] ?? null)) {
+                    $attributes = [...$attributes, ...$classRules[$class]];
+                }
             }
         }
 
-        $fonts = is_array($sheet['fonts'] ?? null) ? $sheet['fonts'] : [];
-
-        return self::resolveScopedFont($attributes, $fonts);
+        return $attributes;
     }
 
     /**
-     * @param array<string, string|bool> $attributes
+     * @param array<string, mixed> $data
+     * @return array<string, list<array{source: string, weight: string, style: string}>>
+     */
+    private static function styleSheetFonts(array $data): array
+    {
+        $sheet = $data['__pamStyles'] ?? null;
+        $fonts = is_array($sheet) ? ($sheet['fonts'] ?? null) : null;
+
+        return is_array($fonts) ? $fonts : [];
+    }
+
+    /**
+     * @param array<string, string|int|bool> $attributes
      * @param array<string, list<array{source: string, weight: string, style: string}>> $fonts
-     * @return array<string, string|bool>
+     * @return array<string, string|int|bool>
      */
     private static function resolveScopedFont(array $attributes, array $fonts): array
     {
@@ -2211,7 +2300,7 @@ final class TemplateRenderer
     }
 
     /**
-     * @return array<string, array<string, string|bool>>
+     * @return array<string, array<string, string|int|bool>>
      */
     private static function validatedStyleRules(mixed $rules, string $source): array
     {
@@ -2226,16 +2315,102 @@ final class TemplateRenderer
             foreach ($attributes as $name => $value) {
                 if (
                     !is_string($name)
-                    || (!is_string($value) && !is_bool($value))
+                    || (!is_string($value) && !is_int($value) && !is_bool($value))
                 ) {
                     throw new RuntimeException("Invalid compiled style value in {$source}.");
                 }
             }
-            /** @var array<string, string|bool> $attributes */
+            /** @var array<string, string|int|bool> $attributes */
             $validated[$selector] = $attributes;
         }
 
         return $validated;
+    }
+
+    /**
+     * @return array<string, array<string, array{order: int, value: string|int|bool}>>
+     */
+    private static function validatedClassCascade(
+        mixed $cascade,
+        string $source,
+    ): array {
+        if (!is_array($cascade)) {
+            throw new RuntimeException("Invalid compiled class cascade in {$source}.");
+        }
+        $validated = [];
+        foreach ($cascade as $class => $declarations) {
+            if (!is_string($class) || !is_array($declarations)) {
+                throw new RuntimeException("Invalid compiled class cascade in {$source}.");
+            }
+            foreach ($declarations as $attribute => $entry) {
+                $value = is_array($entry) ? ($entry['value'] ?? null) : null;
+                if (
+                    !is_string($attribute)
+                    || !is_array($entry)
+                    || !is_int($entry['order'] ?? null)
+                    || (
+                        !is_string($value)
+                        && !is_int($value)
+                        && !is_bool($value)
+                    )
+                ) {
+                    throw new RuntimeException(
+                        "Invalid compiled class cascade entry in {$source}.",
+                    );
+                }
+                $validated[$class][$attribute] = [
+                    'order' => $entry['order'],
+                    'value' => $value,
+                ];
+            }
+        }
+
+        return $validated;
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $unresolved
+     * @param array<string, mixed> $data
+     * @return array<string, string|int|float|bool>
+     */
+    private static function inheritedStyleAttributes(
+        array $values,
+        array $unresolved,
+        ?object $scope,
+        array $data,
+    ): array {
+        $inherited = [];
+        foreach (self::INHERITED_STYLE_ATTRIBUTES as $attribute) {
+            $value = $values[$attribute] ?? null;
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inherited[$attribute] = $value;
+            }
+        }
+        foreach ($unresolved as $name => $raw) {
+            $attribute = ltrim($name, ':');
+            if (!in_array($attribute, self::INHERITED_STYLE_ATTRIBUTES, true)) {
+                continue;
+            }
+            $value = str_starts_with($name, ':')
+                ? self::dynamicValue($raw, $scope, $data)
+                : self::value($raw, $scope, $data);
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inherited[$attribute] = $value;
+            }
+        }
+
+        return $inherited;
     }
 
     /**
@@ -2788,6 +2963,9 @@ final class TemplateRenderer
 
         if (preg_match('/^\\$[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)*$/', $raw) === 1) {
             return self::path($raw, $scope, $data);
+        }
+        if (preg_match('/^(?:rgba?|hsla?)\(/Di', trim($raw)) === 1) {
+            return trim($raw);
         }
 
         return match ($raw) {

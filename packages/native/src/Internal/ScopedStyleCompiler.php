@@ -87,8 +87,9 @@ final class ScopedStyleCompiler
 
     /**
      * @return array{
-     *     classes: array<string, array<string, string|bool>>,
-     *     tags: array<string, array<string, string|bool>>,
+     *     classes: array<string, array<string, string|int|bool>>,
+     *     tags: array<string, array<string, string|int|bool>>,
+     *     classCascade: array<string, array<string, array{order: int, value: string|int|bool}>>,
      *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * }
      */
@@ -103,6 +104,7 @@ final class ScopedStyleCompiler
         $classes = [];
         $tags = [];
         $fonts = [];
+        $classCascade = [];
         $rules = [];
         $matchedBytes = 0;
         preg_match_all(
@@ -147,6 +149,7 @@ final class ScopedStyleCompiler
                 'style' => $face['style'],
             ];
         }
+        $sourceOrder = 0;
         foreach ($rules as [$selectorSource, $body]) {
             if ($selectorSource === ':root') {
                 continue;
@@ -161,6 +164,12 @@ final class ScopedStyleCompiler
                         ...($classes[$match[1]] ?? []),
                         ...$declarations,
                     ];
+                    foreach ($declarations as $attribute => $value) {
+                        $classCascade[$match[1]][$attribute] = [
+                            'order' => $sourceOrder,
+                            'value' => $value,
+                        ];
+                    }
                     continue;
                 }
                 if (preg_match('/^[A-Za-z][A-Za-z0-9_.-]*$/D', $selector) === 1) {
@@ -174,9 +183,15 @@ final class ScopedStyleCompiler
                     "Unsupported scoped selector {$selector} in {$name}; use a tag or .class.",
                 );
             }
+            $sourceOrder++;
         }
 
-        return ['classes' => $classes, 'tags' => $tags, 'fonts' => $fonts];
+        return [
+            'classes' => $classes,
+            'tags' => $tags,
+            'classCascade' => $classCascade,
+            'fonts' => $fonts,
+        ];
     }
 
     public static function resolveImports(string $source, string $name): string
@@ -377,7 +392,19 @@ final class ScopedStyleCompiler
             );
         }
         $weight = self::scalar(
-            self::resolveVariables($declarations['font-weight'] ?? '400', $variables, $name),
+            match (strtolower(self::resolveVariables(
+                $declarations['font-weight'] ?? '400',
+                $variables,
+                $name,
+            ))) {
+                'normal' => '400',
+                'bold' => '700',
+                default => self::resolveVariables(
+                    $declarations['font-weight'] ?? '400',
+                    $variables,
+                    $name,
+                ),
+            },
             $name,
         );
         $numericWeight = (int) $weight;
@@ -410,7 +437,7 @@ final class ScopedStyleCompiler
 
     /**
      * @param array<string, string> $variables
-     * @return array<string, string|bool>
+     * @return array<string, string|int|bool>
      */
     private static function declarations(
         string $source,
@@ -427,6 +454,17 @@ final class ScopedStyleCompiler
             $value = self::resolveVariables($rawValue, $variables, $name);
             if (in_array($property, ['padding', 'margin'], true)) {
                 self::expandBox($output, $property, $value, $name);
+                continue;
+            }
+            if (in_array($property, [
+                'padding-inline',
+                'padding-block',
+                'margin-inline',
+                'margin-block',
+                'inset-inline',
+                'inset-block',
+            ], true)) {
+                self::expandLogicalBox($output, $property, $value, $name);
                 continue;
             }
             if ($property === 'inset') {
@@ -448,6 +486,43 @@ final class ScopedStyleCompiler
             if ($property === 'flex') {
                 $output['flexGrow'] = self::scalar($value, $name);
                 $output['flexShrink'] = '1';
+                continue;
+            }
+            if ($property === 'transform') {
+                self::expandTransform($output, $value, $name);
+                continue;
+            }
+            if ($property === 'object-fit') {
+                $output['resizeMode'] = match (strtolower(trim($value))) {
+                    'contain', 'cover', 'fill' => strtolower(trim($value)),
+                    'none' => 'center',
+                    'scale-down' => 'contain',
+                    default => throw new RuntimeException(
+                        "Unsupported object-fit value {$value} in {$name}.",
+                    ),
+                };
+                continue;
+            }
+            if ($property === 'visibility') {
+                $output['visible'] = match (strtolower(trim($value))) {
+                    'visible' => true,
+                    'hidden', 'collapse' => false,
+                    default => throw new RuntimeException(
+                        "Unsupported visibility value {$value} in {$name}.",
+                    ),
+                };
+                continue;
+            }
+            if ($property === 'box-sizing') {
+                if (strtolower(trim($value)) !== 'border-box') {
+                    throw new RuntimeException(
+                        "Pam Native uses border-box layout; content-box is unsupported in {$name}.",
+                    );
+                }
+                continue;
+            }
+            if (in_array($property, ['row-gap', 'column-gap'], true)) {
+                $output['gap'] = self::scalar($value, $name);
                 continue;
             }
             $attribute = self::PROPERTIES[$property] ?? null;
@@ -488,29 +563,90 @@ final class ScopedStyleCompiler
         return $output;
     }
 
-    /** @param array<string, string> $variables */
+    /**
+     * @param array<string, string> $variables
+     * @param list<string> $stack
+     */
     private static function resolveVariables(
         string $value,
         array $variables,
         string $name,
+        array $stack = [],
     ): string {
-        $resolved = preg_replace_callback(
-            '/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/',
-            static function (array $match) use ($variables, $name): string {
-                if (!array_key_exists($match[1], $variables)) {
-                    throw new RuntimeException(
-                        "Unknown CSS variable {$match[1]} in {$name}.",
-                    );
-                }
-                return $variables[$match[1]];
-            },
-            trim($value),
-        );
-        if (!is_string($resolved)) {
-            throw new RuntimeException("Cannot resolve CSS value in {$name}.");
+        if (count($stack) > 32) {
+            throw new RuntimeException("CSS variable expansion is too deep in {$name}.");
+        }
+        $resolved = trim($value);
+        while (($start = strpos($resolved, 'var(')) !== false) {
+            $end = self::matchingParenthesis($resolved, $start + 3, $name);
+            $body = substr($resolved, $start + 4, $end - $start - 4);
+            [$variable, $fallback] = self::variableParts($body);
+            if (preg_match('/^--[A-Za-z0-9_-]+$/D', $variable) !== 1) {
+                throw new RuntimeException("Invalid CSS variable {$variable} in {$name}.");
+            }
+            if (in_array($variable, $stack, true)) {
+                throw new RuntimeException("Circular CSS variable {$variable} in {$name}.");
+            }
+            if (array_key_exists($variable, $variables)) {
+                $replacement = self::resolveVariables(
+                    $variables[$variable],
+                    $variables,
+                    $name,
+                    [...$stack, $variable],
+                );
+            } elseif ($fallback !== null) {
+                $replacement = self::resolveVariables($fallback, $variables, $name, $stack);
+            } else {
+                throw new RuntimeException("Unknown CSS variable {$variable} in {$name}.");
+            }
+            $resolved = substr($resolved, 0, $start)
+                .$replacement
+                .substr($resolved, $end + 1);
         }
 
         return $resolved;
+    }
+
+    private static function matchingParenthesis(
+        string $value,
+        int $open,
+        string $name,
+    ): int {
+        $depth = 0;
+        $length = strlen($value);
+        for ($index = $open; $index < $length; $index++) {
+            if ($value[$index] === '(') {
+                $depth++;
+            } elseif ($value[$index] === ')') {
+                $depth--;
+                if ($depth === 0) {
+                    return $index;
+                }
+            }
+        }
+
+        throw new RuntimeException("Unclosed CSS var() in {$name}.");
+    }
+
+    /** @return array{string, ?string} */
+    private static function variableParts(string $body): array
+    {
+        $depth = 0;
+        $length = strlen($body);
+        for ($index = 0; $index < $length; $index++) {
+            if ($body[$index] === '(') {
+                $depth++;
+            } elseif ($body[$index] === ')') {
+                $depth--;
+            } elseif ($body[$index] === ',' && $depth === 0) {
+                return [
+                    trim(substr($body, 0, $index)),
+                    trim(substr($body, $index + 1)),
+                ];
+            }
+        }
+
+        return [trim($body), null];
     }
 
     /** @return array<string, string> */
@@ -537,7 +673,7 @@ final class ScopedStyleCompiler
         return $output;
     }
 
-    /** @param array<string, string|bool> $output */
+    /** @param array<string, string|int|bool> $output */
     private static function expandBox(
         array &$output,
         string $property,
@@ -590,7 +726,32 @@ final class ScopedStyleCompiler
         }
     }
 
-    /** @param array<string, string|bool> $output */
+    /** @param array<string, string|int|bool> $output */
+    private static function expandLogicalBox(
+        array &$output,
+        string $property,
+        string $value,
+        string $name,
+    ): void {
+        $parts = preg_split('/\s+/', trim($value)) ?: [];
+        if ($parts === [] || count($parts) > 2) {
+            throw new RuntimeException("Invalid {$property} shorthand in {$name}.");
+        }
+        $start = self::scalar($parts[0], $name);
+        $end = self::scalar($parts[1] ?? $parts[0], $name);
+        [$first, $second] = match ($property) {
+            'padding-inline' => ['paddingLeft', 'paddingRight'],
+            'padding-block' => ['paddingTop', 'paddingBottom'],
+            'margin-inline' => ['marginLeft', 'marginRight'],
+            'margin-block' => ['marginTop', 'marginBottom'],
+            'inset-inline' => ['left', 'right'],
+            'inset-block' => ['top', 'bottom'],
+        };
+        $output[$first] = $start;
+        $output[$second] = $end;
+    }
+
+    /** @param array<string, string|int|bool> $output */
     private static function expandBorder(
         array &$output,
         string $value,
@@ -598,6 +759,15 @@ final class ScopedStyleCompiler
         string $edge = '',
     ): void {
         $parts = preg_split('/\s+/', trim($value)) ?: [];
+        if (
+            in_array(strtolower(trim($value)), ['none', '0', '0px', '0dp', '0pt'], true)
+        ) {
+            $output[$edge === '' ? 'borderWidth' : 'border'.$edge.'Width'] = '0';
+            if ($edge === '') {
+                $output['borderColor'] = 0;
+            }
+            return;
+        }
         if (count($parts) !== 3 || strtolower($parts[1]) !== 'solid') {
             throw new RuntimeException(
                 "Native border shorthand in {$name} must be '<width> solid <color>'.",
@@ -605,10 +775,10 @@ final class ScopedStyleCompiler
         }
         $output[$edge === '' ? 'borderWidth' : 'border'.$edge.'Width'] =
             self::scalar($parts[0], $name);
-        $output['borderColor'] = $parts[2];
+        $output['borderColor'] = CssColor::parse($parts[2], "Border color in {$name}");
     }
 
-    /** @param array<string, string|bool> $output */
+    /** @param array<string, string|int|bool> $output */
     private static function expandBorderRadius(
         array &$output,
         string $value,
@@ -646,7 +816,7 @@ final class ScopedStyleCompiler
         string $property,
         string $value,
         string $name,
-    ): string|bool {
+    ): string|int|bool {
         if ($property === 'display') {
             return match (strtolower($value)) {
                 'none' => false,
@@ -657,7 +827,7 @@ final class ScopedStyleCompiler
             };
         }
         if ($property === 'font-family') {
-            return self::unquote($value);
+            return self::fontFamily($value, $name);
         }
         if ($property === 'font-style') {
             return match (strtolower($value)) {
@@ -665,6 +835,18 @@ final class ScopedStyleCompiler
                 'italic' => 'italic',
                 default => throw new RuntimeException("Invalid font-style in {$name}."),
             };
+        }
+        if ($property === 'font-weight') {
+            $weight = match (strtolower(trim($value))) {
+                'normal' => '400',
+                'bold' => '700',
+                default => self::scalar($value, $name),
+            };
+            if ((float) $weight < 1 || (float) $weight > 1000) {
+                throw new RuntimeException("Invalid font-weight in {$name}.");
+            }
+
+            return $weight;
         }
         if (in_array($property, [
             'background',
@@ -675,6 +857,65 @@ final class ScopedStyleCompiler
             'border-bottom-color',
             'border-left-color',
             'color',
+        ], true)) {
+            if (
+                $property === 'background'
+                && strtolower(trim($value)) === 'none'
+            ) {
+                return 0;
+            }
+            return CssColor::parse($value, "{$property} in {$name}");
+        }
+        if ($property === 'opacity' && str_ends_with(trim($value), '%')) {
+            return (string) (self::percentage($value, $name) / 100);
+        }
+        if ($property === 'aspect-ratio' && str_contains($value, '/')) {
+            $parts = array_map('trim', explode('/', $value));
+            if (
+                count($parts) !== 2
+                || (float) self::scalar($parts[1], $name) === 0.0
+            ) {
+                throw new RuntimeException("Invalid aspect-ratio in {$name}.");
+            }
+
+            return (string) (
+                (float) self::scalar($parts[0], $name)
+                / (float) self::scalar($parts[1], $name)
+            );
+        }
+        if ($property === 'overflow') {
+            return match (strtolower(trim($value))) {
+                'visible', 'hidden' => strtolower(trim($value)),
+                'clip' => 'hidden',
+                default => throw new RuntimeException(
+                    "Native overflow in {$name} supports visible, hidden, or clip.",
+                ),
+            };
+        }
+        if ($property === 'position') {
+            return match (strtolower(trim($value))) {
+                'relative', 'absolute' => strtolower(trim($value)),
+                default => throw new RuntimeException(
+                    "Native position in {$name} supports relative or absolute.",
+                ),
+            };
+        }
+        if ($property === 'text-decoration') {
+            $normalized = preg_replace('/\s+/', '-', strtolower(trim($value)))
+                ?? strtolower(trim($value));
+
+            return match ($normalized) {
+                'none', 'underline', 'line-through',
+                'underline-line-through', 'line-through-underline' =>
+                    $normalized === 'line-through-underline'
+                        ? 'underline-line-through'
+                        : $normalized,
+                default => throw new RuntimeException(
+                    "Unsupported text-decoration in {$name}.",
+                ),
+            };
+        }
+        if (in_array($property, [
             'align-items',
             'align-self',
             'justify-content',
@@ -695,11 +936,74 @@ final class ScopedStyleCompiler
     private static function scalar(string $value, string $name): string
     {
         $trimmed = trim($value);
-        if (preg_match('/^-?(?:\d+|\d*\.\d+)(?:px|dp|pt)?$/D', $trimmed) !== 1) {
+        if (preg_match('/^-?(?:\d+|\d*\.\d+)(?:px|dp|pt|rem)?$/D', $trimmed) !== 1) {
             throw new RuntimeException("Expected a native numeric CSS value in {$name}, got {$value}.");
+        }
+        if (str_ends_with($trimmed, 'rem')) {
+            return (string) ((float) substr($trimmed, 0, -3) * 16);
         }
 
         return preg_replace('/(?:px|dp|pt)$/', '', $trimmed) ?? $trimmed;
+    }
+
+    /** @param array<string, string|int|bool> $output */
+    private static function expandTransform(
+        array &$output,
+        string $value,
+        string $name,
+    ): void {
+        $remaining = trim($value);
+        if ($remaining === 'none') {
+            return;
+        }
+        while ($remaining !== '') {
+            if (preg_match('/^([A-Za-z]+)\(([^()]*)\)\s*/D', $remaining, $match) !== 1) {
+                throw new RuntimeException("Invalid transform in {$name}: {$value}.");
+            }
+            $function = strtolower($match[1]);
+            $argument = trim($match[2]);
+            match ($function) {
+                'translatex' => $output['translationX'] = self::scalar($argument, $name),
+                'translatey' => $output['translationY'] = self::scalar($argument, $name),
+                'scale' => self::setScale($output, $argument, $argument, $name),
+                'scalex' => $output['scaleX'] = self::scalar($argument, $name),
+                'scaley' => $output['scaleY'] = self::scalar($argument, $name),
+                'rotate' => $output['rotation'] = self::angle($argument, $name),
+                default => throw new RuntimeException(
+                    "Unsupported transform function {$match[1]} in {$name}.",
+                ),
+            };
+            $remaining = ltrim(substr($remaining, strlen($match[0])));
+        }
+    }
+
+    /** @param array<string, string|int|bool> $output */
+    private static function setScale(
+        array &$output,
+        string $x,
+        string $y,
+        string $name,
+    ): void {
+        $output['scaleX'] = self::scalar($x, $name);
+        $output['scaleY'] = self::scalar($y, $name);
+    }
+
+    private static function angle(string $value, string $name): string
+    {
+        $trimmed = strtolower(trim($value));
+        foreach (['turn' => 360.0, 'grad' => 0.9, 'rad' => 180 / M_PI, 'deg' => 1.0] as $unit => $factor) {
+            if (str_ends_with($trimmed, $unit)) {
+                $numeric = self::scalar(substr($trimmed, 0, -strlen($unit)), $name);
+
+                return (string) ((float) $numeric * $factor);
+            }
+        }
+
+        if ((float) self::scalar($trimmed, $name) === 0.0) {
+            return '0';
+        }
+
+        throw new RuntimeException("Non-zero rotate() requires an angle unit in {$name}.");
     }
 
     private static function percentage(string $value, string $name): string
@@ -724,5 +1028,15 @@ final class ScopedStyleCompiler
         }
 
         return $trimmed;
+    }
+
+    private static function fontFamily(string $value, string $name): string
+    {
+        $families = str_getcsv($value, ',', '"', '\\');
+        if ($families === [] || trim((string) $families[0]) === '') {
+            throw new RuntimeException("font-family requires at least one family in {$name}.");
+        }
+
+        return self::unquote(trim((string) $families[0]));
     }
 }
