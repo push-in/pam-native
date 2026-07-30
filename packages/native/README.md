@@ -136,7 +136,9 @@ Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules, `.class` rules, component-local variables,
 percentages, common box shorthands, dynamic classes, and native text decoration
 (`none`, `underline`, `line-through`, or `underline-line-through`) are
-supported; unknown web-only CSS fails compilation.
+supported. `border` and the directional `border-top`, `border-right`,
+`border-bottom`, and `border-left` forms accept `<width> solid <color>`;
+unknown web-only CSS fails compilation.
 
 For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
 image/video metadata and `System\MediaLibrary::albums()` reads album summaries

@@ -426,6 +426,10 @@ final class ScopedStyleCompiler
                 self::expandBorder($output, $value, $name);
                 continue;
             }
+            if (preg_match('/^border-(top|right|bottom|left)$/D', $property, $match) === 1) {
+                self::expandBorder($output, $value, $name, ucfirst($match[1]));
+                continue;
+            }
             if ($property === 'flex') {
                 $output['flexGrow'] = self::scalar($value, $name);
                 $output['flexShrink'] = '1';
@@ -537,6 +541,7 @@ final class ScopedStyleCompiler
         array &$output,
         string $value,
         string $name,
+        string $edge = '',
     ): void {
         $parts = preg_split('/\s+/', trim($value)) ?: [];
         if (count($parts) !== 3 || strtolower($parts[1]) !== 'solid') {
@@ -544,7 +549,8 @@ final class ScopedStyleCompiler
                 "Native border shorthand in {$name} must be '<width> solid <color>'.",
             );
         }
-        $output['borderWidth'] = self::scalar($parts[0], $name);
+        $output[$edge === '' ? 'borderWidth' : 'border'.$edge.'Width'] =
+            self::scalar($parts[0], $name);
         $output['borderColor'] = $parts[2];
     }
 

@@ -215,7 +215,8 @@ Supported CSS covers PAM's common native layout and paint contracts:
 - dimensions, min/max dimensions, `aspect-ratio`, position edges and `z-index`;
 - `flex`, growth/shrink/direction, gap, alignment and justification;
 - padding and margin edges plus standard one-to-four-value shorthands;
-- border width/color/radii and `<width> solid <color>` shorthand;
+- border width/color/radii plus `border` and directional
+  `border-top/right/bottom/left` `<width> solid <color>` shorthands;
 - background, text color, opacity, elevation, overflow and visibility;
 - font family/size/weight/style, letter/line spacing, text alignment and case.
 

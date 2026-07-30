@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.62 - 2026-07-30
+
+- Compile native-safe `border-top`, `border-right`, `border-bottom`, and
+  `border-left` CSS shorthands into directional widths and the shared native
+  border color, matching the existing `border` shorthand.
+
 ## 0.5.61 - 2026-07-30
 
 - Add a native `DrawingCanvas` on Android and iOS with coalesced freehand
