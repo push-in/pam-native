@@ -21,7 +21,7 @@ final class PamAssetPathTests: XCTestCase {
         XCTAssertNil(try normalizedPamAssetPath("https://cdn.example.com/avatar.png"))
     }
 
-    func testRejectsEmptyTraversalAndUriSuffixes() {
+    func testRejectsEmptyTraversalAndUriSuffixes() throws {
         [
             "asset://",
             "asset://assets/../secrets.png",
