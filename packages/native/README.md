@@ -145,6 +145,29 @@ user selects one, `System\Files::importUri()` materializes only that asset as a
 sandboxed `FileReference`. Request `PermissionKind::Photos` first and accept
 both granted and limited access; use `Files::pick()` as the portable fallback.
 
+`System\ImageEditor::render()` crops, rotates, flips, filters, adjusts, and
+composes imported images on a dedicated native worker. Set `maxWidth` and
+`maxHeight` to bound the encoded dimensions and `outputQuality` from 1 to 100.
+Android reads image bounds first and chooses a decode sample before allocating
+the bitmap, then performs one final high-quality resize. This keeps profile
+photos and message attachments off the UI thread without decoding their full
+camera resolution unnecessarily:
+
+```php
+ImageEditor::render(
+    source: $selected,
+    cropRatio: ImageCropRatio::Square,
+    filter: ImageFilterType::Original,
+    quarterTurns: 0,
+    flipHorizontal: false,
+    overlayText: '',
+    callback: fn (?FileReference $image, string $error) => $this->upload($image),
+    maxWidth: 1080,
+    maxHeight: 1080,
+    outputQuality: 92,
+);
+```
+
 Format and migrate a component tree with the package binary:
 
 ```bash

@@ -13,6 +13,8 @@ import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import kotlin.math.floor
+import kotlin.math.min
 
 internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable {
     private val executor = Executors.newSingleThreadExecutor()
@@ -44,7 +46,9 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
 
     private fun render(values: Map<String, WireValue>): File {
         val source = resolve(values.requiredText("path"))
-        val decoded = BitmapFactory.decodeFile(source.path) ?: error("Unable to decode the image.")
+        val maxWidth = values.integer("maxWidth").coerceAtLeast(0)
+        val maxHeight = values.integer("maxHeight").coerceAtLeast(0)
+        val decoded = decode(source, maxWidth, maxHeight)
         var current = orient(decoded, values.integer("quarterTurns"), values.integer("flipHorizontal") == 1)
         if (current !== decoded) decoded.recycle()
         val cropped = crop(current, values.integer("cropRatio"))
@@ -57,15 +61,59 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
         if (withText !== adjusted) adjusted.recycle()
         val composed = compose(withText, values.text("sticker").trim().take(8), true)
         if (composed !== withText) withText.recycle()
+        val resized = resize(composed, maxWidth, maxHeight)
+        if (resized !== composed) composed.recycle()
 
         val directory = File(root, "editor").apply { mkdirs() }.canonicalFile
         require(directory.path.startsWith(root.path + File.separator))
         val output = File(directory, "image-edit-${System.nanoTime()}.jpg")
         FileOutputStream(output).buffered().use {
-            check(composed.compress(Bitmap.CompressFormat.JPEG, 94, it))
+            check(
+                resized.compress(
+                    Bitmap.CompressFormat.JPEG,
+                    values.integerOr("outputQuality", 94).coerceIn(1, 100),
+                    it,
+                ),
+            )
         }
-        composed.recycle()
+        resized.recycle()
         return output
+    }
+
+    private fun decode(source: File, maxWidth: Int, maxHeight: Int): Bitmap {
+        if (maxWidth == 0 && maxHeight == 0) {
+            return BitmapFactory.decodeFile(source.path) ?: error("Unable to decode the image.")
+        }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(source.path, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "Unable to decode the image." }
+        val requestedWidth = if (maxWidth > 0) maxWidth else bounds.outWidth
+        val requestedHeight = if (maxHeight > 0) maxHeight else bounds.outHeight
+        var sampleSize = 1
+        while (
+            bounds.outWidth / (sampleSize * 2) >= requestedWidth
+            && bounds.outHeight / (sampleSize * 2) >= requestedHeight
+        ) {
+            sampleSize *= 2
+        }
+        return BitmapFactory.decodeFile(
+            source.path,
+            BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inSampleSize = sampleSize
+            },
+        ) ?: error("Unable to decode the image.")
+    }
+
+    private fun resize(source: Bitmap, maxWidth: Int, maxHeight: Int): Bitmap {
+        if (maxWidth == 0 && maxHeight == 0) return source
+        val widthScale = if (maxWidth > 0) maxWidth.toFloat() / source.width else 1f
+        val heightScale = if (maxHeight > 0) maxHeight.toFloat() / source.height else 1f
+        val scale = min(1f, min(widthScale, heightScale))
+        if (scale >= 1f) return source
+        val width = floor(source.width * scale).toInt().coerceAtLeast(1)
+        val height = floor(source.height * scale).toInt().coerceAtLeast(1)
+        return Bitmap.createScaledBitmap(source, width, height, true)
     }
 
     private fun orient(source: Bitmap, turns: Int, flip: Boolean): Bitmap {
@@ -140,6 +188,8 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
     private fun Map<String, WireValue>.requiredText(key: String) = (this[key] as? WireValue.Text)?.value ?: error("Missing field $key")
     private fun Map<String, WireValue>.text(key: String) = (this[key] as? WireValue.Text)?.value ?: ""
     private fun Map<String, WireValue>.integer(key: String) = ((this[key] as? WireValue.Integer)?.value ?: 0L).toInt()
+    private fun Map<String, WireValue>.integerOr(key: String, fallback: Int) =
+        ((this[key] as? WireValue.Integer)?.value ?: fallback.toLong()).toInt()
     private fun ModuleCompletion.failure(message: String) = complete(ModuleResultStatus.FAILURE, message.toByteArray())
     override fun close() {
         executor.shutdownNow()

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.59 - 2026-07-30
+
+- Add bounded `maxWidth`, `maxHeight`, and `outputQuality` controls to the
+  native image editor without breaking existing calls.
+- Decode large Android images with a source-size-aware sample before crop,
+  effects, and composition, then perform one final filtered resize off the UI
+  thread.
+- Document the optimized avatar and attachment pipeline in the package and
+  public PAM Native media guides.
+
 ## 0.5.58 - 2026-07-30
 
 - Use the context-aware `MediaRecorder` constructor on Android 12 and newer

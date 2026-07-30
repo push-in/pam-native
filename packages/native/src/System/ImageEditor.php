@@ -29,6 +29,9 @@ final class ImageEditor
         int $contrast = 0,
         int $saturation = 0,
         string $sticker = '',
+        int $maxWidth = 0,
+        int $maxHeight = 0,
+        int $outputQuality = 94,
     ): int {
         return NativeModules::call(
             'image-editor',
@@ -39,7 +42,10 @@ final class ImageEditor
                 'cropRatio' => $cropRatio->value,
                 'filter' => $filter->value,
                 'flipHorizontal' => $flipHorizontal ? 1 : 0,
+                'maxHeight' => max(0, $maxHeight),
+                'maxWidth' => max(0, $maxWidth),
                 'overlayText' => mb_substr(trim($overlayText), 0, 120),
+                'outputQuality' => max(1, min(100, $outputQuality)),
                 'path' => $source->path,
                 'quarterTurns' => (($quarterTurns % 4) + 4) % 4,
                 'saturation' => self::adjustment($saturation),
