@@ -315,12 +315,13 @@ $unformattedPam = <<<'PAM'
 
 declare(strict_types=1);
 ?>
-<template><Column><Text v-if="$ready" fontSize="15">Ready</Text><Text v-else>Wait</Text></Column></template><style scoped>.ready { color: #112233; font-size: 15px; }</style>
+<template><Column><!-- Keep this explanation. --><Text v-if="$ready" fontSize="15">Ready</Text><Text v-else>Wait</Text></Column></template><style scoped>.ready { color: #112233; font-size: 15px; }</style>
 PAM;
 $formattedPam = PamFormatter::format($unformattedPam, 'FormatterTest.pam.php');
 $assert(
     str_contains($formattedPam, 'p-if="$ready"')
         && str_contains($formattedPam, '<Text p-else>Wait</Text>')
+        && str_contains($formattedPam, '<!-- Keep this explanation. -->')
         && str_contains(
             $formattedPam,
             "    .ready {\n        color: #112233;\n        font-size: 15px;\n    }",

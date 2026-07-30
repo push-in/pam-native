@@ -18,6 +18,7 @@ use RuntimeException;
 final class PamFormatter
 {
     private const MAX_INLINE_COLUMNS = 100;
+    private const COMMENT_TAG = 'Pam.__FormatterComment';
 
     private function __construct()
     {
@@ -25,14 +26,26 @@ final class PamFormatter
 
     public static function format(string $source, string $name = '<memory>'): string
     {
-        if (str_contains($source, '<!--')) {
+        if (str_contains($source, '<'.self::COMMENT_TAG)) {
             throw new RuntimeException(
-                "PAM formatter does not rewrite template comments in {$name}.",
+                "PAM component {$name} uses the formatter's reserved internal tag.",
             );
         }
 
         [$php, $template, $style, $hasStyle] = self::split($source, $name);
-        $tree = TemplateCompiler::compile($template, $name);
+        $protectedTemplate = preg_replace_callback(
+            '/<!--[\s\S]*?-->/',
+            static fn (array $match): string =>
+                '<'.self::COMMENT_TAG.' value="'
+                    .base64_encode($match[0]).'" />',
+            $template,
+        );
+        if (!is_string($protectedTemplate)) {
+            throw new RuntimeException(
+                "Cannot preserve template comments in {$name}.",
+            );
+        }
+        $tree = TemplateCompiler::compile($protectedTemplate, $name);
         $lines = ['<template>'];
         foreach ($tree->children as $child) {
             array_push($lines, ...self::node($child, 1));
@@ -118,6 +131,19 @@ final class PamFormatter
         $indent = str_repeat('    ', $depth);
         if ($node->kind === 2) {
             return [$indent.trim($node->value)];
+        }
+        if ($node->name === self::COMMENT_TAG) {
+            $encoded = $node->attributes['value'] ?? null;
+            $comment = is_string($encoded)
+                ? base64_decode($encoded, true)
+                : false;
+            if (!is_string($comment) || !str_starts_with($comment, '<!--')) {
+                throw new RuntimeException(
+                    'PAM formatter could not restore a template comment.',
+                );
+            }
+
+            return [$indent.trim($comment)];
         }
 
         $attributes = self::attributes($node->attributes);
