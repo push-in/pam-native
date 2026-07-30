@@ -558,6 +558,13 @@ Node IDs are stable 64-bit hashes of keyed PHP element identities. Reused
 immutable subtrees are cached with `WeakMap`; returning the exact same tree
 produces no native commit.
 
+Commits are recoverable without remounting PHP components. If a native engine
+rejects an incremental `PNP1` patch, PHP preserves stable element identities,
+forces the next encoding to one complete `PNT1` tree and retries immediately.
+Android and iOS suppress the recoverable patch overlay and log the exact engine
+diagnostic through `pam_native_engine_last_error`. A rejected complete tree
+still surfaces as a runtime error because it cannot be repaired safely.
+
 Paint-only property changes emit a mutation without recalculating layout.
 Dimensions, flex, spacing, min/max constraints, margins, and alignment
 invalidate layout. The renderer maintains incremental child indexes and applies

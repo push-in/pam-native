@@ -63,12 +63,14 @@ impl From<EngineStats> for PamNativeStats {
 #[repr(C)]
 pub struct PamNativeEngineHandle {
     engine: Engine,
+    last_error: Option<String>,
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn pam_native_engine_new() -> *mut PamNativeEngineHandle {
     Box::into_raw(Box::new(PamNativeEngineHandle {
         engine: Engine::new(),
+        last_error: None,
     }))
 }
 
@@ -229,18 +231,46 @@ pub unsafe extern "C" fn pam_native_engine_commit(
     let input = unsafe { std::slice::from_raw_parts(input, input_length) };
     match catch_unwind(AssertUnwindSafe(|| handle.engine.commit(input))) {
         Ok(Ok(batch)) => {
+            handle.last_error = None;
             *output = leak_buffer(batch);
             PamStatus::Success
         }
         Ok(Err(error)) => {
-            eprintln!("Pam Native rejected render frame: {error:?}");
+            let detail = format!("{error:?}");
+            eprintln!("Pam Native rejected render frame: {detail}");
+            handle.last_error = Some(detail);
             PamStatus::InvalidFrame
         }
         Err(payload) => {
             eprintln!("Pam Native panicked while committing render frame: {payload:?}");
+            handle.last_error = Some(format!("Panic({payload:?})"));
             PamStatus::Panic
         }
     }
+}
+
+#[unsafe(no_mangle)]
+/// Copies the most recent commit error into an owned UTF-8 buffer.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine and `output` must point to writable
+/// storage for one [`PamNativeBuffer`].
+pub unsafe extern "C" fn pam_native_engine_last_error(
+    handle: *const PamNativeEngineHandle,
+    output: *mut PamNativeBuffer,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_ref() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    *output = PamNativeBuffer::default();
+    if let Some(error) = &handle.last_error {
+        *output = leak_buffer(error.as_bytes().to_vec());
+    }
+    PamStatus::Success
 }
 
 #[unsafe(no_mangle)]
@@ -265,19 +295,19 @@ pub unsafe extern "C" fn pam_native_engine_stats(
 }
 
 #[unsafe(no_mangle)]
-/// Releases a mutation buffer returned by [`pam_native_engine_commit`].
+/// Releases an owned buffer returned by the engine C ABI.
 ///
 /// # Safety
 ///
 /// A non-empty `buffer` must be the exact, unmodified value returned by a
-/// successful commit and may be released exactly once.
+/// successful output call and may be released exactly once.
 pub unsafe extern "C" fn pam_native_buffer_free(buffer: PamNativeBuffer) {
     if buffer.data.is_null() || buffer.length == 0 {
         return;
     }
     let slice = ptr::slice_from_raw_parts_mut(buffer.data, buffer.length);
-    // SAFETY: pam_native_engine_commit returns this exact boxed slice and
-    // transfers unique ownership to the caller.
+    // SAFETY: Engine output functions return this exact boxed slice and
+    // transfer unique ownership to the caller.
     drop(unsafe { Box::from_raw(slice) });
 }
 
@@ -339,5 +369,33 @@ mod tests {
         assert_eq!(stats.nodes, 1);
         // SAFETY: Handle is released exactly once.
         unsafe { pam_native_engine_free(handle) };
+    }
+
+    #[test]
+    fn ffi_exposes_the_last_commit_error() {
+        let handle = pam_native_engine_new();
+        let invalid = b"NOPE";
+        let mut mutations = PamNativeBuffer::default();
+        // SAFETY: All pointers are live for the duration of the call.
+        assert_eq!(
+            unsafe {
+                pam_native_engine_commit(handle, invalid.as_ptr(), invalid.len(), &mut mutations)
+            },
+            PamStatus::InvalidFrame,
+        );
+        let mut detail = PamNativeBuffer::default();
+        // SAFETY: Handle and output are valid.
+        assert_eq!(
+            unsafe { pam_native_engine_last_error(handle, &mut detail) },
+            PamStatus::Success,
+        );
+        // SAFETY: The function returned a live buffer with `length` bytes.
+        let message = unsafe { std::slice::from_raw_parts(detail.data, detail.length) };
+        assert!(String::from_utf8_lossy(message).contains("InvalidMagic"));
+        // SAFETY: The buffers and handle are released exactly once.
+        unsafe {
+            pam_native_buffer_free(detail);
+            pam_native_engine_free(handle);
+        }
     }
 }

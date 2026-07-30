@@ -261,6 +261,7 @@ PHP_FUNCTION(pam_native_commit) {
 
     PamNativeBuffer batch{nullptr, 0};
     PamStatus status;
+    std::string detail;
     {
         std::lock_guard<std::mutex> lock(state->engine_mutex);
         status = pam_native_engine_commit(
@@ -269,9 +270,36 @@ PHP_FUNCTION(pam_native_commit) {
             frame_length,
             &batch
         );
+        if (status != PAM_STATUS_SUCCESS) {
+            PamNativeBuffer error_buffer{nullptr, 0};
+            if (
+                pam_native_engine_last_error(state->engine, &error_buffer)
+                    == PAM_STATUS_SUCCESS
+                && error_buffer.data != nullptr
+                && error_buffer.length > 0
+            ) {
+                detail.assign(
+                    reinterpret_cast<const char*>(error_buffer.data),
+                    error_buffer.length
+                );
+            }
+            pam_native_buffer_free(error_buffer);
+        }
     }
     if (status != PAM_STATUS_SUCCESS) {
-        report_error(state, "Pam Native rejected an invalid render frame.");
+        const bool is_patch =
+            frame_length >= 4 && std::memcmp(frame, "PNP1", 4) == 0;
+        if (is_patch) {
+            log_error(
+                "Pam Native rejected an incremental render frame; "
+                "requesting a full-tree recovery. " + detail
+            );
+        } else {
+            report_error(
+                state,
+                "Pam Native rejected an invalid render frame. " + detail
+            );
+        }
         RETURN_FALSE;
     }
     publish_batch(state, batch);

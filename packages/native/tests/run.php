@@ -2168,15 +2168,22 @@ $assert($unchanged['frame'] === null, 'An unchanged tree must not cross the nati
 $assert(str_starts_with($patchFrame, 'PNP1'), 'Property update must use a patch frame.');
 $assert(strlen($patchFrame) < strlen($initialFrame), 'Property patch must be smaller than the full tree.');
 
-$structural = $incremental->encode(
-    Column::make(
-        Text::make('B')->key('value'),
-        Text::make('New')->key('new'),
-    )->key('content'),
-);
+$structuralTree = Column::make(
+    Text::make('B')->key('value'),
+    Text::make('New')->key('new'),
+)->key('content');
+$structural = $incremental->encode($structuralTree);
 $assert(
     $structural['frame'] !== null && str_starts_with($structural['frame'], 'PNP1'),
     'Structural changes after boot must use a patch frame.',
+);
+$incremental->forceFullFrame();
+$recovery = $incremental->encode($structuralTree);
+$assert(
+    $recovery['full']
+        && $recovery['frame'] !== null
+        && str_starts_with($recovery['frame'], 'PNT1'),
+    'A rejected patch must be recoverable with a complete frame.',
 );
 
 $wire = Wire::map([
@@ -3910,8 +3917,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.66',
-    'The runtime SDK contract must match the 0.5.66 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.67',
+    'The runtime SDK contract must match the 0.5.67 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

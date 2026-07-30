@@ -67,6 +67,10 @@ PamStatus pam_native_engine_commit(
     size_t input_length,
     PamNativeBuffer *output
 );
+PamStatus pam_native_engine_last_error(
+    const PamNativeEngineHandle *handle,
+    PamNativeBuffer *output
+);
 PamStatus pam_native_engine_stats(
     const PamNativeEngineHandle *handle,
     PamNativeStats *output

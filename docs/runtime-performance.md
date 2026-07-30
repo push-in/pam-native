@@ -73,6 +73,14 @@ last known-good native hierarchy. Failures receive stable fingerprints and a
 consecutive-failure counter; three consecutive failures enter safe mode and
 prevent restart-loop policy from being mistaken for a healthy runtime.
 
+An invalid incremental patch is handled before it becomes a visible failure:
+the encoder keeps PHP component identity and cached subtrees, discards only its
+previous wire snapshot and immediately emits one complete tree. Android and iOS
+do not open an error overlay for this recoverable path. The C ABI exposes the
+precise last commit error, and both native bridges include it in development
+logs. A complete-tree rejection remains visible and never advances the
+checkpoint.
+
 Stores, navigation and component-restorable state keep their existing atomic
 checkpoints. The checkpoint intentionally stores only frame identity, not the
 binary tree, because the native renderer already owns the last committed tree.

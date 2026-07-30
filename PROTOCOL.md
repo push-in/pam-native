@@ -19,7 +19,7 @@ New optional properties, node kinds, event kinds and native operations may only
 be appended. A change to an existing field's representation or meaning requires
 a new protocol version and an explicit compatibility adapter.
 
-Protocol v1 currently appends properties through ID `284` and events through
+Protocol v1 currently appends properties through ID `400` and events through
 ID `34`.
 
 ## Frames
@@ -37,6 +37,11 @@ payload counts. Strings and opaque values use a `u32` byte length. Node IDs are
 non-zero `u64` values. The implementation rejects duplicate IDs/properties,
 cycles, disconnected trees, invalid enum values, trailing bytes and payloads
 over their published limits.
+
+Patch application is transactional. A rejected `PNP1` frame leaves the
+retained tree untouched; the PHP encoder then resynchronizes with a complete
+`PNT1` frame while keeping component and element identities stable. Native
+bridges expose the exact failure through `pam_native_engine_last_error`.
 
 The canonical enum tables live in:
 

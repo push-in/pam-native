@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.67 - 2026-07-30
+
+- Recover automatically from a rejected incremental render patch by preserving
+  PHP component identity and immediately resynchronizing the native renderer
+  with one complete tree.
+- Make the property-only Rust fast path transactional with a proportional
+  rollback journal, preserving its no-tree-clone performance on success.
+- Expose the retained engine's last commit error through its stable C ABI and
+  include the precise diagnostic in Android and iOS logs.
+- Prevent recoverable patch desynchronization from opening a native runtime
+  error overlay.
+- Force release jobs to rebuild Android engine archives from source so cached
+  cross-target artifacts cannot leak into a newer protocol release.
+
 ## 0.5.66 - 2026-07-30
 
 - Allow a false conditional component root to render an inert invisible native

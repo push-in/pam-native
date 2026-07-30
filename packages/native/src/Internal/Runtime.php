@@ -109,6 +109,13 @@ final class Runtime
                     $committed = true;
                     if (function_exists('pam_native_commit')) {
                         $committed = pam_native_commit($frame);
+                        if (!$committed && !$encoded['full']) {
+                            $encoder->forceFullFrame();
+                            $recovery = $encoder->encode($element);
+                            self::$eventCallbacks = $recovery['callbacks'];
+                            $frame = $recovery['frame'];
+                            $committed = $frame !== null && pam_native_commit($frame);
+                        }
                         if (!$committed) {
                             @file_put_contents(
                                 sys_get_temp_dir() . '/pam-native-invalid-frame.bin',

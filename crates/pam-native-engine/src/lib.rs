@@ -10,8 +10,8 @@ use pam_native_protocol::{
 
 pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
-    pam_native_engine_commit, pam_native_engine_free, pam_native_engine_new,
-    pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
+    pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
+    pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
     pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 
@@ -196,6 +196,7 @@ impl Engine {
         }
 
         let mut mutations = Vec::with_capacity(updates.len());
+        let mut rollback = Vec::with_capacity(updates.len());
         let mut layout_dirty = false;
         let current = self.current.as_mut().expect("validated current tree");
         for PropertyPatch { id, key, value } in updates {
@@ -208,19 +209,35 @@ impl Engine {
                 continue;
             }
             layout_dirty |= affects_layout(key);
+            rollback.push(PropertyPatch {
+                id,
+                key,
+                value: previous,
+            });
             mutations.push(Mutation::Update { id, key, value });
-            self.updated = self.updated.saturating_add(1);
         }
 
-        if layout_dirty {
-            let next_layouts = layout::calculate_with_text_scale(
+        let next_layouts = if layout_dirty {
+            let calculated = layout::calculate_with_text_scale(
                 self.current
                     .as_ref()
                     .expect("current tree remains available"),
                 self.viewport,
                 self.text_scale,
-            )?;
-            for (id, next) in &next_layouts {
+            );
+            let calculated = match calculated {
+                Ok(layouts) => layouts,
+                Err(error) => {
+                    rollback_property_updates(
+                        self.current
+                            .as_mut()
+                            .expect("current tree remains available"),
+                        rollback,
+                    );
+                    return Err(error.into());
+                }
+            };
+            for (id, next) in &calculated {
                 if self.layouts.get(id) != Some(next) {
                     mutations.push(Mutation::Layout {
                         id: *id,
@@ -228,12 +245,32 @@ impl Engine {
                     });
                 }
             }
+            Some(calculated)
+        } else {
+            None
+        };
+
+        let output = match encode_batch(&mutations) {
+            Ok(output) => output,
+            Err(error) => {
+                rollback_property_updates(
+                    self.current
+                        .as_mut()
+                        .expect("current tree remains available"),
+                    rollback,
+                );
+                return Err(EngineError::Protocol(error));
+            }
+        };
+        if let Some(next_layouts) = next_layouts {
             self.layouts = next_layouts;
         }
-
+        self.updated = self
+            .updated
+            .saturating_add(u64::try_from(rollback.len()).unwrap_or(u64::MAX));
         self.commits = self.commits.saturating_add(1);
         self.patch_commits = self.patch_commits.saturating_add(1);
-        encode_batch(&mutations).map_err(EngineError::Protocol)
+        Ok(output)
     }
 
     fn commit_structural_patch(&mut self, patch: Patch) -> Result<Vec<u8>, EngineError> {
@@ -375,6 +412,22 @@ impl From<layout::LayoutError> for EngineError {
 }
 
 type ChildIndex<'a> = BTreeMap<u64, Vec<&'a pam_native_protocol::Node>>;
+
+fn rollback_property_updates(tree: &mut Tree, updates: Vec<PropertyPatch>) {
+    for PropertyPatch { id, key, value } in updates.into_iter().rev() {
+        let Some(node) = tree.nodes.get_mut(&id) else {
+            continue;
+        };
+        match value {
+            Some(value) => {
+                node.properties.insert(key, value);
+            }
+            None => {
+                node.properties.remove(&key);
+            }
+        }
+    }
+}
 
 fn child_index(tree: &Tree) -> ChildIndex<'_> {
     let mut children = ChildIndex::new();
@@ -768,6 +821,59 @@ mod tests {
                 .iter()
                 .any(|mutation| matches!(mutation, Mutation::Layout { .. }))
         );
+    }
+
+    #[test]
+    fn rejected_property_patch_rolls_back_the_retained_tree() {
+        let mut engine = Engine::new();
+        engine.commit(&frame("A", true)).expect("initial");
+        let invalid = Patch {
+            operations: vec![PatchOperation::Update(PropertyPatch {
+                id: 2,
+                key: PropKey::Padding,
+                value: Some(PropValue::Float(-1.0)),
+            })],
+        }
+        .encode()
+        .expect("invalid patch");
+
+        assert!(matches!(
+            engine.commit(&invalid),
+            Err(EngineError::Layout(layout::LayoutError::InvalidDimension)),
+        ));
+        assert_eq!(
+            engine
+                .current
+                .as_ref()
+                .expect("retained tree")
+                .nodes
+                .get(&2)
+                .expect("column")
+                .properties
+                .get(&PropKey::Padding),
+            Some(&PropValue::Float(16.0)),
+        );
+        assert_eq!(engine.stats().patch_commits, 0);
+        assert_eq!(engine.stats().updated, 0);
+
+        let valid = Patch {
+            operations: vec![PatchOperation::Update(PropertyPatch {
+                id: 2,
+                key: PropKey::Padding,
+                value: Some(PropValue::Float(24.0)),
+            })],
+        }
+        .encode()
+        .expect("valid patch");
+        let mutations = decode_batch(&engine.commit(&valid).expect("retry")).expect("batch");
+        assert!(mutations.iter().any(|mutation| matches!(
+            mutation,
+            Mutation::Update {
+                id: 2,
+                key: PropKey::Padding,
+                ..
+            }
+        )));
     }
 
     #[test]

@@ -49,6 +49,19 @@ final class TreeEncoder
     }
 
     /**
+     * Forces the next encoded tree to be a complete frame.
+     *
+     * This is used to recover synchronization when a native renderer rejects
+     * an incremental patch. Stable element identities and subtree caches are
+     * preserved, so recovery does not remount PHP components.
+     */
+    public function forceFullFrame(): void
+    {
+        $this->previousNodes = null;
+        $this->previousRoot = null;
+    }
+
+    /**
      * @return array{frame: ?string, callbacks: array<string, Closure>, full: bool}
      */
     public function encode(Element $root): array

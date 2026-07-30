@@ -70,6 +70,7 @@ jobs:
       - name: Build renderer, engines, and plugin API
         run: |
           sdkmanager "platforms;android-36"
+          cargo clean --package pam-native-engine --package pam-native-protocol
           scripts/prepare-android-runtime.sh
           ./android/gradlew -p android \
             -PpamNativeRoot="$GITHUB_WORKSPACE" \
