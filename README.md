@@ -207,8 +207,8 @@ vendor/bin/pam-native-format src
 vendor/bin/pam-native-format --check src
 ```
 
-It indents `*.pam.php`, normalizes scoped styles, and migrates deprecated
-`v-*` directive aliases to the canonical `p-*` form.
+It indents `*.pam.php`, normalizes scoped styles, removes empty style blocks,
+and migrates deprecated `v-*` directive aliases to the canonical `p-*` form.
 
 Typed PHP:
 

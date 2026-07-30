@@ -53,7 +53,7 @@ final class PamFormatter
         $lines[] = '</template>';
 
         $formatted = rtrim($php)."\n?>\n\n".implode("\n", $lines);
-        if ($hasStyle) {
+        if ($hasStyle && trim($style) !== '') {
             $formatted .= "\n\n<style scoped>\n"
                 .self::style($style)
                 ."\n</style>";

@@ -557,6 +557,23 @@ $assert(
             === $formattedPam,
     'PAM formatter must migrate directives and produce idempotent output.',
 );
+$emptyStylePam = PamFormatter::format(
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+?>
+<template><Text>Ready</Text></template><style scoped>
+
+</style>
+PAM,
+    'EmptyStyleFormatterTest.pam.php',
+);
+$assert(
+    !str_contains($emptyStylePam, '<style scoped>')
+        && str_contains($emptyStylePam, '<Text>Ready</Text>'),
+    'PAM formatter must remove empty scoped style blocks.',
+);
 
 foreach (NodeKind::cases() as $index => $kind) {
     $assert($kind->value === $index + 1, 'Node kinds must remain sequential protocol integers.');

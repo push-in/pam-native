@@ -144,8 +144,9 @@ vendor/bin/pam-native-format src
 vendor/bin/pam-native-format --check src
 ```
 
-The formatter makes `p-if`, `p-else-if`, `p-else`, and `p-for` canonical.
-Legacy `v-*` directives remain deprecated compatibility aliases.
+The formatter removes empty scoped-style blocks and makes `p-if`,
+`p-else-if`, `p-else`, and `p-for` canonical. Legacy `v-*` directives remain
+deprecated compatibility aliases.
 
 `Input` and its `TextInput` alias keep composition, selection and the editable
 buffer inside a dedicated Android `EditText`. They support React
