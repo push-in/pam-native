@@ -85,6 +85,7 @@ jobs:
           tar -czf "dist/pam-native-android-renderer-${version}.tar.gz" \
             android/app/src/main \
             android/app/build.gradle.kts \
+            native/pam_native_engine.h \
             target/aarch64-linux-android/release/libpam_native_engine.a \
             target/x86_64-linux-android/release/libpam_native_engine.a
           (

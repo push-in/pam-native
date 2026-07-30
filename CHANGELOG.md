@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.68 - 2026-07-30
+
+- Include the versioned native engine C header in the Android renderer archive,
+  keeping bridge sources, static engines and their ABI contract self-contained.
+
 ## 0.5.67 - 2026-07-30
 
 - Recover automatically from a rejected incremental render patch by preserving
