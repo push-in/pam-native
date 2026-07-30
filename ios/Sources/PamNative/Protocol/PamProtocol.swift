@@ -363,6 +363,9 @@ public enum PamConstants {
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38
+    public static let alignItems = 39
+    public static let alignSelf = 40
+    public static let textAlign = 42
     public static let overflow = 98
     public static let backgroundColor = 10
     public static let textColor = 11
@@ -427,6 +430,7 @@ public enum PamConstants {
     public static let navigationRevision = 284
     public static let hostName = 99
     public static let onNativeEvent = 101
+    public static let flexDirection = 102
     public static let imageDefaultSource = 195
     public static let imageLoadingIndicatorSource = 196
     public static let imageFadeDurationMs = 197
