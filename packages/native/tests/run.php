@@ -26,6 +26,9 @@ use Pam\Native\GestureEvent;
 use Pam\Native\GestureState;
 use Pam\Native\GestureType;
 use Pam\Native\MediaType;
+use Pam\Native\MediaAlbum;
+use Pam\Native\MediaAsset;
+use Pam\Native\MediaAssetPage;
 use Pam\Native\MediaPickerType;
 use Pam\Native\MediaCachePolicy;
 use Pam\Native\MediaPriority;
@@ -118,6 +121,7 @@ use Pam\Native\System\DeviceInfo;
 use Pam\Native\System\Sensors;
 use Pam\Native\System\Location;
 use Pam\Native\System\Files;
+use Pam\Native\System\MediaLibrary;
 use Pam\Native\LocationPosition;
 use Pam\Native\System\AudioRecorder;
 use Pam\Native\Storage\Storage;
@@ -2301,6 +2305,42 @@ $assert(
     'Files pickMany must decode every native file reference in selection order.',
 );
 
+$importedFile = null;
+$importUriRequest = Files::importUri(
+    'content://media/external/images/media/42',
+    static function (FileReference $file) use (&$importedFile): void {
+        $importedFile = $file;
+    },
+);
+$importUriCall = TestDiagnostics::$moduleCall;
+$assert(
+    $importUriCall !== null
+        && $importUriCall['requestId'] === $importUriRequest
+        && $importUriCall['module'] === 'files'
+        && $importUriCall['method'] === 'importUri'
+        && Wire::decodeMap($importUriCall['payload']) === [
+            'uri' => 'content://media/external/images/media/42',
+        ],
+    'Files importUri must emit a typed content URI import.',
+);
+Runtime::dispatchModuleResult(
+    $importUriRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'path' => 'imports/photo-42.jpg',
+        'name' => 'photo-42.jpg',
+        'mimeType' => 'image/jpeg',
+        'size' => 4_096,
+    ]),
+);
+$assert(
+    $importedFile instanceof FileReference
+        && $importedFile->path === 'imports/photo-42.jpg'
+        && $importedFile->mimeType === 'image/jpeg'
+        && $importedFile->size === 4_096,
+    'Files importUri must decode the sandboxed file reference.',
+);
+
 $missingStoredValue = 'not-dispatched';
 $storageRequest = Storage::get(
     'chat.draft.missing',
@@ -2419,6 +2459,104 @@ Runtime::dispatchModuleResult(
         ]], JSON_THROW_ON_ERROR),
         'hasMore' => false,
     ]),
+);
+
+$mediaPage = null;
+$mediaRequestId = MediaLibrary::assets(
+    MediaPickerType::Media,
+    static function (MediaAssetPage $page) use (&$mediaPage): void {
+        $mediaPage = $page;
+    },
+    limit: 80,
+    offset: 160,
+    albumId: 'camera',
+);
+$mediaCall = TestDiagnostics::$moduleCall;
+$assert(
+    $mediaCall !== null
+        && $mediaCall['requestId'] === $mediaRequestId
+        && $mediaCall['module'] === 'media-library'
+        && $mediaCall['method'] === 'assets'
+        && Wire::decodeMap($mediaCall['payload']) === [
+            'albumId' => 'camera',
+            'limit' => 80,
+            'offset' => 160,
+            'type' => MediaPickerType::Media->value,
+        ],
+    'MediaLibrary assets must emit a bounded paginated native query.',
+);
+Runtime::dispatchModuleResult(
+    $mediaRequestId,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'items' => json_encode([[
+            'id' => '42',
+            'uri' => 'content://media/external/images/media/42',
+            'name' => 'photo-42.jpg',
+            'mimeType' => 'image/jpeg',
+            'width' => 1_080,
+            'height' => 1_350,
+            'durationMs' => 0,
+            'size' => 4_096,
+            'createdAt' => 1_785_000_000_000,
+            'modifiedAt' => 1_785_000_100_000,
+            'albumId' => 'camera',
+            'albumTitle' => 'Câmera',
+            'favorite' => true,
+        ]], JSON_THROW_ON_ERROR),
+        'hasMore' => true,
+    ]),
+);
+$assert(
+    $mediaPage instanceof MediaAssetPage
+        && $mediaPage->hasMore
+        && $mediaPage->nextOffset === 161
+        && count($mediaPage->items) === 1
+        && $mediaPage->items[0] instanceof MediaAsset
+        && $mediaPage->items[0]->id === '42'
+        && $mediaPage->items[0]->width === 1_080
+        && $mediaPage->items[0]->favorite
+        && !$mediaPage->items[0]->video(),
+    'MediaLibrary assets must decode typed media metadata and pagination.',
+);
+
+$mediaAlbums = null;
+$albumRequestId = MediaLibrary::albums(
+    MediaPickerType::Image,
+    static function (array $items) use (&$mediaAlbums): void {
+        $mediaAlbums = $items;
+    },
+);
+$albumCall = TestDiagnostics::$moduleCall;
+$assert(
+    $albumCall !== null
+        && $albumCall['requestId'] === $albumRequestId
+        && $albumCall['module'] === 'media-library'
+        && $albumCall['method'] === 'albums'
+        && Wire::decodeMap($albumCall['payload']) === [
+            'type' => MediaPickerType::Image->value,
+        ],
+    'MediaLibrary albums must emit its typed media filter.',
+);
+Runtime::dispatchModuleResult(
+    $albumRequestId,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'items' => json_encode([[
+            'id' => 'camera',
+            'title' => 'Câmera',
+            'count' => 42,
+            'coverUri' => 'content://media/external/images/media/42',
+        ]], JSON_THROW_ON_ERROR),
+    ]),
+);
+$assert(
+    is_array($mediaAlbums)
+        && count($mediaAlbums) === 1
+        && $mediaAlbums[0] instanceof MediaAlbum
+        && $mediaAlbums[0]->id === 'camera'
+        && $mediaAlbums[0]->count === 42,
+    'MediaLibrary albums must decode typed album metadata.',
 );
 
 $incomingShare = null;
@@ -3641,8 +3779,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.56',
-    'The runtime SDK contract must match the 0.5.56 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.57',
+    'The runtime SDK contract must match the 0.5.57 package release.',
 );
 $assert(
     array_map(

@@ -32,6 +32,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "delete" -> executor.execute { delete(payload, completion) }
                 "pick" -> pick(payload, completion)
                 "pickMany" -> pickMany(payload, completion)
+                "importUri" -> executor.execute { importContentUri(payload, completion) }
                 "capture" -> capture(payload, completion)
                 else -> error("Unknown files method $method")
             }
@@ -176,6 +177,16 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             }
             executor.execute { importUris(uris, completion) }
         }
+    }
+
+    private fun importContentUri(payload: ByteArray, completion: ModuleCompletion) {
+        runCatching {
+            val raw = WireMap.decode(payload).requiredText("uri")
+            val uri = Uri.parse(raw)
+            require(uri.scheme == "content") { "Only content URIs can be imported" }
+            val imported = importUri(uri)
+            completion.success(imported.file, imported.mime, imported.name)
+        }.onFailure { completion.failure(it) }
     }
 
     private fun capture(payload: ByteArray, completion: ModuleCompletion) {

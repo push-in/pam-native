@@ -10,7 +10,7 @@ table, see the [capability cookbook](examples.md).
 | --- | --- |
 | Gestures | `UI\GestureDetector` |
 | Video and audio | `UI\MediaPlayer` |
-| Camera and gallery | `System\MediaCapture`, `System\Files::pick()`, `System\Files::pickMany()` |
+| Camera and gallery | `System\MediaCapture`, `System\MediaLibrary`, `System\Files` |
 | Gesture navigation | `Navigation\Navigator`, `NavigationHost` |
 | Bottom Sheet | `UI\BottomSheet` |
 | Declarative animations | `UI\Animated` |
@@ -45,6 +45,17 @@ through PHP or exposing an absolute device path. Image reads and decoding stay
 off the UI thread, and both renderers reject authority and path traversal.
 If any import fails, files already copied by that selection are removed.
 Each file is bounded to 64 MiB and a multi-selection is bounded to 256 MiB.
+
+On Android, `MediaLibrary::assets()` queries the device gallery directly with
+bounded offset pagination, an optional album filter and an image/video type
+filter. It returns `MediaAssetPage` metadata and stable `content://` thumbnail
+sources without copying the files or moving image bytes through PHP.
+`MediaLibrary::albums()` returns typed album counts and cover sources. Both
+queries run on a dedicated native worker and respect full or user-selected
+photo access. Call `Files::importUri()` only after selection to copy that
+single asset into the PAM sandbox for editing, upload or durable app-owned
+storage.
+
 `MediaCapture::capture()`
 captures a full-resolution photo or video. `Files::read()` and `Files::write()`
 only accept sandbox-relative paths and bridge at most one MiB per call; imports
@@ -53,9 +64,13 @@ are bounded to 64 MiB. `Files::stat()` returns typed metadata,
 `Files::delete()` removes a single sandbox file. Directory deletion and paths
 escaping the application sandbox are rejected.
 
-Android declares no broad storage permission and uses the system document
-provider. iOS hosts must provide the standard camera/photo usage descriptions
-in the application `Info.plist`.
+The system document picker does not require broad storage permission.
+Applications that call `MediaLibrary` request `PermissionKind::Photos`;
+Android 13+ reports image/video access and Android 14+ selected-photo access
+as a typed `PermissionStatus::Limited` decision when appropriate. iOS hosts
+must provide the standard camera/photo usage descriptions in the application
+`Info.plist`. The direct `MediaLibrary` query is currently Android-only; the
+document picker remains the portable fallback.
 
 ## Incoming shares
 

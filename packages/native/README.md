@@ -138,6 +138,13 @@ percentages, common box shorthands, dynamic classes, and native text decoration
 (`none`, `underline`, `line-through`, or `underline-line-through`) are
 supported; unknown web-only CSS fails compilation.
 
+For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
+image/video metadata and `System\MediaLibrary::albums()` reads album summaries
+on a native worker. Thumbnail `content://` sources are not copied. After the
+user selects one, `System\Files::importUri()` materializes only that asset as a
+sandboxed `FileReference`. Request `PermissionKind::Photos` first and accept
+both granted and limited access; use `Files::pick()` as the portable fallback.
+
 Format and migrate a component tree with the package binary:
 
 ```bash

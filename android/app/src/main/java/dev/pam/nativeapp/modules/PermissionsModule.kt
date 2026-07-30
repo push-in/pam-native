@@ -33,6 +33,13 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
     }
 
     private fun request(kind: Int, completion: ModuleCompletion) {
+        if (kind == KIND_PHOTOS) {
+            history.edit().putBoolean("photos", true).apply()
+            activity.requestPamPermissions(photoPermissions()) {
+                result(kind, completion)
+            }
+            return
+        }
         if (kind == KIND_LOCATION) {
             history.edit().putBoolean("location", true).apply()
             activity.requestPamPermissions(
@@ -53,6 +60,10 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
     }
 
     private fun result(kind: Int, completion: ModuleCompletion) {
+        if (kind == KIND_PHOTOS) {
+            photosResult(completion)
+            return
+        }
         if (kind == KIND_LOCATION) {
             val fine = activity.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
@@ -85,10 +96,48 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
         completion.decision(status, canAskAgain)
     }
 
+    private fun photosResult(completion: ModuleCompletion) {
+        val permissions = photoPermissions()
+        val granted = permissions.count {
+            activity.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+        }
+        val full = when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> {
+                activity.checkSelfPermission(Manifest.permission.READ_MEDIA_IMAGES) ==
+                    PackageManager.PERMISSION_GRANTED &&
+                    activity.checkSelfPermission(Manifest.permission.READ_MEDIA_VIDEO) ==
+                    PackageManager.PERMISSION_GRANTED
+            }
+            else -> granted == permissions.size
+        }
+        val asked = history.getBoolean("photos", false)
+        val canAskAgain = !asked || permissions.any(activity::shouldShowRequestPermissionRationale)
+        val status = when {
+            full -> STATUS_GRANTED
+            granted > 0 -> STATUS_LIMITED
+            canAskAgain -> STATUS_DENIED
+            else -> STATUS_BLOCKED
+        }
+        completion.decision(status, canAskAgain)
+    }
+
+    private fun photoPermissions(): Array<String> = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED,
+        )
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU -> arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+        )
+        else -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+
     private fun permission(kind: Int): String? = when (kind) {
         KIND_CAMERA -> Manifest.permission.CAMERA
         KIND_MICROPHONE -> Manifest.permission.RECORD_AUDIO
-        KIND_PHOTOS -> null // The system photo picker grants scoped access without broad storage.
+        KIND_PHOTOS -> error("Photos use a versioned grouped permission request")
         KIND_NOTIFICATIONS ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 Manifest.permission.POST_NOTIFICATIONS

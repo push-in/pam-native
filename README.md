@@ -445,6 +445,14 @@ AudioRecorder::stop(function ($recording): void {
 });
 ```
 
+Android applications can also build a fully custom, virtualized gallery with
+`MediaLibrary::assets()` and `MediaLibrary::albums()`. Queries are paginated on
+a dedicated native worker and return `content://` thumbnail sources plus typed
+metadata without copying media or sending pixels through PHP. After selection,
+`Files::importUri()` copies only the chosen asset into the private PAM sandbox.
+The system `Files::pick()` APIs remain the portable fallback. See the
+[native capability guide](docs/native-capabilities.md#files-camera-and-gallery).
+
 ## Thread ownership
 
 The UI thread is reserved for work that must manipulate Android host views.

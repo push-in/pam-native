@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.57 - 2026-07-30
+
+- Add a direct Android `MediaLibrary` API for paginated image/video metadata,
+  album summaries and Android 14 selected-photo access, with all MediaStore
+  work isolated from the UI thread.
+- Add `Files::importUri()` so custom galleries copy only the asset the user
+  actually selects into PAM's bounded private sandbox.
+- Return typed `MediaAsset`, `MediaAssetPage` and `MediaAlbum` values without
+  moving thumbnail bytes through the PHP bridge.
+- Upgrade `PermissionKind::Photos` on Android to report granted, limited,
+  denied and blocked access across the platform's versioned media permission
+  model.
+
 ## 0.5.56 - 2026-07-30
 
 - Synchronize Android `google-services.json` through an incremental Gradle

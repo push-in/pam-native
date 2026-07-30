@@ -129,6 +129,25 @@ final class Files
         );
     }
 
+    /**
+     * Copies a content URI granted to the application into the PAM file
+     * sandbox so it can be uploaded, edited and retained safely.
+     *
+     * @param Closure(FileReference): void $callback
+     */
+    public static function importUri(string $uri, Closure $callback): int
+    {
+        if (!str_starts_with($uri, 'content://')) {
+            throw new RuntimeException('Only content URIs can be imported.');
+        }
+
+        return self::invoke(
+            'importUri',
+            ['uri' => $uri],
+            static fn (array $values): mixed => $callback(self::reference($values)),
+        );
+    }
+
     private static function reference(array $values): FileReference
     {
         return new FileReference(

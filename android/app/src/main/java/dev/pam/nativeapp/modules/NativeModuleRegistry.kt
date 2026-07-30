@@ -21,6 +21,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         (context as? dev.pam.nativeapp.PamActivity)?.let(::PermissionsModule)
     private val sensors = SensorsModule(context)
     private val contacts = ContactsModule(context)
+    private val mediaLibrary = MediaLibraryModule(context)
     private val location = LocationModule(context)
     private val audioRecorder = AudioRecorderModule(context)
     private val imageEditor = ImageEditorModule(context)
@@ -39,6 +40,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         permissions?.let { put("permissions", it) }
         put("sensors", sensors)
         put("contacts", contacts)
+        put("media-library", mediaLibrary)
         put("location", location)
         put("audio-recorder", audioRecorder)
         put("image-editor", imageEditor)

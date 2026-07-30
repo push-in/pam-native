@@ -11,7 +11,7 @@ short end-to-end recipes.
 | Product-quality Android gallery and source tour | [Visual showcase](showcase.md) |
 | Components, props, state, lifecycle, effects, slots, context and refs | [Component runtime](component-runtime.md) |
 | Global store, transactions, persistence, sync, undo and optimistic state | [Pam Store](store.md) |
-| Files, camera, notifications, SQLite, WebView, media, animation and device APIs | [Capability cookbook](examples.md) |
+| Files, direct gallery, camera, notifications, SQLite, WebView, media, animation and device APIs | [Capability cookbook](examples.md) |
 | Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
 | Gestures and composition | [Gestures](gestures.md) |
 | Bottom sheets | [Bottom Sheet](bottom-sheet.md) |

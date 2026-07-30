@@ -36,8 +36,12 @@ pinning and cache events.
 ```php
 use Pam\Native\CaptureType;
 use Pam\Native\MediaPickerType;
+use Pam\Native\PermissionKind;
+use Pam\Native\PermissionStatus;
 use Pam\Native\System\Files;
 use Pam\Native\System\MediaCapture;
+use Pam\Native\System\MediaLibrary;
+use Pam\Native\System\Permissions;
 
 Files::write('drafts/message.txt', 'Hello', function (): void {
     Files::read('drafts/message.txt', fn (string $text) => $this->show($text));
@@ -58,6 +62,40 @@ Files::pickMany(
     limit: 10,
 );
 
+// Android custom gallery: query metadata first, import only the chosen asset.
+Permissions::requestKind(PermissionKind::Photos, function ($decision): void {
+    if (!in_array(
+        $decision->status,
+        [PermissionStatus::Granted, PermissionStatus::Limited],
+        true,
+    )) {
+        return;
+    }
+
+    MediaLibrary::assets(
+        MediaPickerType::Media,
+        function ($page): void {
+            $this->gallery = $page->items;
+            $this->hasMore = $page->hasMore;
+        },
+        limit: 80,
+        offset: 0,
+    );
+});
+
+MediaLibrary::albums(
+    MediaPickerType::Media,
+    fn (array $albums) => $this->albums = $albums,
+);
+
+Files::importUri(
+    'content://media/external/images/media/42',
+    function ($file): void {
+        // $file->path is now app-owned and ready for edit/upload.
+        $this->selectedImageSource = $file->uri();
+    },
+);
+
 MediaCapture::capture(CaptureType::Photo, function ($photo): void {
     $this->photoPath = $photo->path;
 });
@@ -69,6 +107,8 @@ Files::delete('drafts/message.txt');
 
 Returned paths are sandbox-relative `FileReference` values. Keep larger media
 on the native file path instead of reading it through the PHP bridge.
+`MediaLibrary` is Android-only in this release; keep `Files::pick()` or
+`Files::pickMany()` as the portable and permission-free picker fallback.
 
 ## SQLite with bound parameters
 
