@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.55 - 2026-07-30
+
+- Compile `text-decoration` from PAM styles into the existing typed native
+  text-decoration contract, including underline and line-through variants.
+- Remove empty scoped-style blocks during formatting.
+
 ## 0.5.54 - 2026-07-30
 
 - Apply the conventional `src/app.css` stylesheet to every PAM component at

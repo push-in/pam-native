@@ -67,6 +67,7 @@ final class ScopedStyleCompiler
         'position' => 'position',
         'right' => 'right',
         'text-align' => 'textAlign',
+        'text-decoration' => 'textDecoration',
         'text-transform' => 'textTransform',
         'top' => 'top',
         'width' => 'width',
@@ -583,6 +584,7 @@ final class ScopedStyleCompiler
             'position',
             'flex-direction',
             'text-align',
+            'text-decoration',
             'text-transform',
         ], true)) {
             return self::unquote($value);

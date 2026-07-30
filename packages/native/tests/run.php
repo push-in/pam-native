@@ -258,6 +258,7 @@ $compiledCss = ScopedStyleCompiler::compile(
     Text, .body-copy {
         color: var(--ink);
         font-family: var(--font-ui);
+        text-decoration: underline;
     }
 
     .card {
@@ -274,7 +275,8 @@ $compiledCss = ScopedStyleCompiler::compile(
 $assert(
     $compiledCss['tags']['Text']['textColor'] === '#101410'
         && $compiledCss['classes']['body-copy']['fontFamily']
-            === 'asset://assets/fonts/SpaceGrotesk-Regular.ttf',
+            === 'asset://assets/fonts/SpaceGrotesk-Regular.ttf'
+        && $compiledCss['classes']['body-copy']['textDecoration'] === 'underline',
     'Scoped CSS must resolve variables in tag and class rules.',
 );
 $assert(
@@ -3639,8 +3641,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.54',
-    'The runtime SDK contract must match the 0.5.54 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.55',
+    'The runtime SDK contract must match the 0.5.55 package release.',
 );
 $assert(
     array_map(

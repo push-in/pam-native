@@ -193,7 +193,8 @@ every component automatically; component `<style scoped>` rules override it.
 Relative `@import` statements are expanded from the file that declares them at
 compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,
-and `p-for` as its template directives.
+and `p-for` as its template directives. Native text decoration uses familiar
+CSS such as `text-decoration: underline` or `text-decoration: line-through`.
 
 `overflow: hidden` follows the authored native border path. A rounded
 `Pressable`, `View`, `Row`, `Column`, or `ImageBackground` therefore clips its

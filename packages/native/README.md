@@ -134,8 +134,9 @@ invalidate compiled component caches when a dependency changes. Imports cannot
 leave the Composer project or load network resources.
 Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules, `.class` rules, component-local variables,
-percentages, common box shorthands, and dynamic classes are supported; unknown
-web-only CSS fails compilation.
+percentages, common box shorthands, dynamic classes, and native text decoration
+(`none`, `underline`, `line-through`, or `underline-line-through`) are
+supported; unknown web-only CSS fails compilation.
 
 Format and migrate a component tree with the package binary:
 
