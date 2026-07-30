@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.43 - 2026-07-29
+
+- Convert logical-point text letter spacing to Android `em` units using the
+  authored font size, matching the shared PAM and React Native-style contract.
+- Reapply letter spacing when font size changes so retained text stays
+  metrically stable.
+
 ## 0.5.42 - 2026-07-29
 
 - Load project-packaged TTF and OTF families through `fontFamily="asset://…"`

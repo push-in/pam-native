@@ -118,6 +118,11 @@ internal fun safeAreaFlexViewportExtent(
         }
     }
 
+internal fun resolvedAndroidLetterSpacing(
+    logicalSpacing: Float,
+    logicalFontSize: Float,
+): Float = logicalSpacing / logicalFontSize.coerceAtLeast(1f)
+
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -1194,7 +1199,10 @@ class PamRenderer(
                 }
                 is PamRecyclerList -> view.setTextColor(value.integer().toInt())
             }
-            PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
+            PropKey.FONT_SIZE -> (view as? TextView)?.let {
+                applyTextSizing(it, state)
+                applyLetterSpacing(it, state)
+            }
             PropKey.ENABLED -> {
                 view.isEnabled = value.flag()
                 configurePressable(view, state)
@@ -1627,7 +1635,9 @@ class PamRenderer(
                 } else {
                     View.LAYOUT_DIRECTION_LTR
                 }
-            PropKey.LETTER_SPACING -> (view as? TextView)?.letterSpacing = value.decimal().toFloat()
+            PropKey.LETTER_SPACING -> (view as? TextView)?.let {
+                applyLetterSpacing(it, state)
+            }
             PropKey.LINE_HEIGHT -> (view as? TextView)?.setLineSpacing(
                 0f,
                 max(0.1f, value.decimal().toFloat() / max(1f, view.textSize / resourcesDensity())),
@@ -1873,7 +1883,10 @@ class PamRenderer(
                 is TextView -> view.setTextColor(Color.BLACK)
                 is PamRecyclerList -> view.setTextColor(Color.BLACK)
             }
-            PropKey.FONT_SIZE -> (view as? TextView)?.let { applyTextSizing(it, state) }
+            PropKey.FONT_SIZE -> (view as? TextView)?.let {
+                applyTextSizing(it, state)
+                applyLetterSpacing(it, state)
+            }
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
             PropKey.FONT_FAMILY,
@@ -3766,6 +3779,13 @@ class PamRenderer(
             maximumPxInt,
             1,
             TypedValue.COMPLEX_UNIT_PX,
+        )
+    }
+
+    private fun applyLetterSpacing(view: TextView, state: NodeState) {
+        view.letterSpacing = resolvedAndroidLetterSpacing(
+            state.number(PropKey.LETTER_SPACING, 0.0).toFloat(),
+            state.number(PropKey.FONT_SIZE, 14.0).toFloat(),
         )
     }
 
