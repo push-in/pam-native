@@ -155,6 +155,8 @@ CSS fails compilation with the component path.
 `x-offset y-offset [blur-radius] [spread-radius] [color]` and `none`.
 Android and iOS render the typed shadow directly; inset and multiple shadows
 remain intentionally unsupported.
+Template `StatusBar` accepts `backgroundColor`/`barStyle` as aliases for
+`color`/`appearance`, plus `animated` and `translucent`.
 
 Direct PAM color attributes retain the original `#AARRGGBB` eight-digit format
 for source compatibility. Prefer stylesheet colors when authoring CSS-style

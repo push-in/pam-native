@@ -1142,11 +1142,7 @@ final class TemplateRenderer
                 self::singleChild($children, $tag),
                 self::boolValue($values['refreshing'] ?? false, 'RefreshControl refreshing'),
             ),
-            'StatusBar' => StatusBar::make(
-                isset($values['color']) ? self::intValue($values['color'], 'StatusBar color') : null,
-                self::statusBarAppearance($values['appearance'] ?? 'dark'),
-                self::boolValue($values['hidden'] ?? false, 'StatusBar hidden'),
-            ),
+            'StatusBar' => self::statusBar($values),
             'SafeAreaView' => SafeAreaView::make(...$children),
             'DrawerLayoutAndroid' => DrawerLayoutAndroid::make(
                 self::childAt($children, 0, $tag),
@@ -3307,9 +3303,31 @@ final class TemplateRenderer
     private static function statusBarAppearance(mixed $value): StatusBarAppearance
     {
         return match ($value) {
-            2, 'light' => StatusBarAppearance::Light,
+            2, 'light', 'light-content' => StatusBarAppearance::Light,
             default => StatusBarAppearance::Dark,
         };
+    }
+
+    /** @param array<string, mixed> $values */
+    private static function statusBar(array $values): StatusBar
+    {
+        $authoredColor = $values['color'] ?? $values['backgroundColor'] ?? null;
+        $bar = StatusBar::make(
+            $authoredColor === null
+                ? null
+                : self::colorValue($authoredColor, 'StatusBar color'),
+            self::statusBarAppearance(
+                $values['appearance'] ?? $values['barStyle'] ?? 'dark',
+            ),
+            self::boolValue($values['hidden'] ?? false, 'StatusBar hidden'),
+        );
+
+        return $bar
+            ->animated(self::boolValue($values['animated'] ?? false, 'StatusBar animated'))
+            ->translucent(self::boolValue(
+                $values['translucent'] ?? false,
+                'StatusBar translucent',
+            ));
     }
 
     private static function stringValue(mixed $value, string $label): string

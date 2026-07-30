@@ -1477,6 +1477,22 @@ $assert(
         && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true,
     'Status bar helpers must preserve color, style, visibility and edge-to-edge properties.',
 );
+$statusBarAliases = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<StatusBar barStyle="light-content" backgroundColor="#F7F6F2" '
+        .'animated="true" translucent="true" />',
+    ),
+    null,
+    [],
+);
+$assert(
+    $statusBarAliases->properties()[PropKey::StatusBarColor->value] === 0xFFF7F6F2
+        && $statusBarAliases->properties()[PropKey::StatusBarStyle->value]
+            === StatusBarAppearance::Light->value
+        && $statusBarAliases->properties()[PropKey::StatusBarAnimated->value] === true
+        && $statusBarAliases->properties()[PropKey::StatusBarTranslucent->value] === true,
+    'StatusBar must accept the familiar backgroundColor and barStyle aliases.',
+);
 $modalShown = false;
 $modalDismissed = false;
 $modalRequestedClose = false;

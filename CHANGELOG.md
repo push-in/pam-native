@@ -9,6 +9,9 @@
   eliminating visible drift without sacrificing glyph-clipping protection.
 - Apply CSS `text-align` on iOS with the same start/center/end behavior as
   Android.
+- Accept `backgroundColor`, `barStyle`, `animated`, and `translucent` on
+  template `StatusBar`, matching familiar mobile authoring without silently
+  leaving the platform defaults active.
 
 ## 0.5.72 - 2026-07-30
 
