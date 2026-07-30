@@ -21,6 +21,10 @@ final readonly class DeviceInfo
         public float $density,
         public UserInterfaceAppearance $appearance,
         public AppState $appState,
+        public float $safeAreaTop = 0.0,
+        public float $safeAreaRight = 0.0,
+        public float $safeAreaBottom = 0.0,
+        public float $safeAreaLeft = 0.0,
     ) {
     }
 
@@ -42,6 +46,10 @@ final readonly class DeviceInfo
                     density: (float) ($values['density'] ?? 1.0),
                     appearance: UserInterfaceAppearance::from((int) ($values['appearance'] ?? 1)),
                     appState: AppState::from((int) ($values['appState'] ?? 1)),
+                    safeAreaTop: (float) ($values['safeAreaTop'] ?? 0.0),
+                    safeAreaRight: (float) ($values['safeAreaRight'] ?? 0.0),
+                    safeAreaBottom: (float) ($values['safeAreaBottom'] ?? 0.0),
+                    safeAreaLeft: (float) ($values['safeAreaLeft'] ?? 0.0),
                 ));
             },
         );

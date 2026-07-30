@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.53 - 2026-07-30
+
+- Expose top, right, bottom, and left safe-area insets through `DeviceInfo` in
+  logical points on Android and iOS so custom native chrome can match each
+  device without fixed status-bar or navigation-bar guesses.
+
 ## 0.5.52 - 2026-07-30
 
 - Add compile-time relative `@import` support to scoped PAM styles so shared

@@ -22,6 +22,8 @@ import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
@@ -176,31 +178,58 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     }
 
     private fun deviceInfo(completion: ModuleCompletion) {
-        val metrics = context.resources.displayMetrics
-        val density = metrics.density
-        val appearance = when (
-            context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        ) {
-            Configuration.UI_MODE_NIGHT_YES -> APPEARANCE_DARK
-            else -> APPEARANCE_LIGHT
+        main.post {
+            runCatching {
+                val metrics = context.resources.displayMetrics
+                val density = metrics.density
+                val appearance = when (
+                    context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+                ) {
+                    Configuration.UI_MODE_NIGHT_YES -> APPEARANCE_DARK
+                    else -> APPEARANCE_LIGHT
+                }
+                val activity = context as? PamActivity
+                val appState = if (activity?.hasWindowFocus() == true) {
+                    APP_STATE_ACTIVE
+                } else {
+                    APP_STATE_BACKGROUND
+                }
+                val insets = activity?.window?.decorView
+                    ?.let(ViewCompat::getRootWindowInsets)
+                    ?.getInsets(
+                        WindowInsetsCompat.Type.systemBars() or
+                            WindowInsetsCompat.Type.displayCutout(),
+                    )
+                WireMap.encode(
+                    mapOf(
+                        "width" to WireValue.Decimal(metrics.widthPixels / density.toDouble()),
+                        "height" to WireValue.Decimal(metrics.heightPixels / density.toDouble()),
+                        "density" to WireValue.Decimal(density.toDouble()),
+                        "appearance" to WireValue.Integer(appearance.toLong()),
+                        "appState" to WireValue.Integer(appState.toLong()),
+                        "safeAreaTop" to WireValue.Decimal(
+                            (insets?.top ?: 0) / density.toDouble(),
+                        ),
+                        "safeAreaRight" to WireValue.Decimal(
+                            (insets?.right ?: 0) / density.toDouble(),
+                        ),
+                        "safeAreaBottom" to WireValue.Decimal(
+                            (insets?.bottom ?: 0) / density.toDouble(),
+                        ),
+                        "safeAreaLeft" to WireValue.Decimal(
+                            (insets?.left ?: 0) / density.toDouble(),
+                        ),
+                    ),
+                )
+            }.onSuccess { payload ->
+                completion.complete(ModuleResultStatus.SUCCESS, payload)
+            }.onFailure { error ->
+                completion.complete(
+                    ModuleResultStatus.FAILURE,
+                    (error.message ?: "Device info failed").toByteArray(),
+                )
+            }
         }
-        val appState = if ((context as? PamActivity)?.hasWindowFocus() == true) {
-            APP_STATE_ACTIVE
-        } else {
-            APP_STATE_BACKGROUND
-        }
-        completion.complete(
-            ModuleResultStatus.SUCCESS,
-            WireMap.encode(
-                mapOf(
-                    "width" to WireValue.Decimal(metrics.widthPixels / density.toDouble()),
-                    "height" to WireValue.Decimal(metrics.heightPixels / density.toDouble()),
-                    "density" to WireValue.Decimal(density.toDouble()),
-                    "appearance" to WireValue.Integer(appearance.toLong()),
-                    "appState" to WireValue.Integer(appState.toLong()),
-                ),
-            ),
-        )
     }
 
     private fun dismissKeyboard(completion: ModuleCompletion) {

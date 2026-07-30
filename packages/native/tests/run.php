@@ -114,6 +114,7 @@ use Pam\Native\System\IncomingShares;
 use Pam\Native\System\Caches;
 use Pam\Native\System\Clipboard;
 use Pam\Native\System\Contacts;
+use Pam\Native\System\DeviceInfo;
 use Pam\Native\System\Sensors;
 use Pam\Native\System\Location;
 use Pam\Native\System\Files;
@@ -2579,6 +2580,37 @@ $assert(
 );
 Runtime::shutdown();
 
+$deviceInfo = new DeviceInfo(
+    width: 412.0,
+    height: 915.0,
+    density: 3.0,
+    appearance: UserInterfaceAppearance::Dark,
+    appState: AppState::Active,
+    safeAreaTop: 32.0,
+    safeAreaRight: 0.0,
+    safeAreaBottom: 24.0,
+    safeAreaLeft: 0.0,
+);
+$assert(
+    $deviceInfo->safeAreaTop === 32.0
+        && $deviceInfo->safeAreaBottom === 24.0,
+    'Device info must expose platform safe-area insets in logical points.',
+);
+$legacyDeviceInfo = new DeviceInfo(
+    width: 360.0,
+    height: 800.0,
+    density: 2.0,
+    appearance: UserInterfaceAppearance::Light,
+    appState: AppState::Active,
+);
+$assert(
+    $legacyDeviceInfo->safeAreaTop === 0.0
+        && $legacyDeviceInfo->safeAreaRight === 0.0
+        && $legacyDeviceInfo->safeAreaBottom === 0.0
+        && $legacyDeviceInfo->safeAreaLeft === 0.0,
+    'Device info safe-area additions must preserve constructor compatibility.',
+);
+
 State::set('test.value', ['count' => 7]);
 State::resetCache();
 $assert(State::get('test.value') === ['count' => 7], 'Atomic state persistence failed.');
@@ -3518,8 +3550,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.52',
-    'The runtime SDK contract must match the 0.5.52 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.53',
+    'The runtime SDK contract must match the 0.5.53 package release.',
 );
 $assert(
     array_map(

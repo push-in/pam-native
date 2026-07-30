@@ -358,6 +358,17 @@ padding behavior, a vertical offset and an enabled switch. Android window
 insets, IME overlap and the resulting frame or padding updates are calculated
 and applied on the UI thread without a PHP round trip.
 
+Custom chrome that needs its own geometry can read the same logical insets:
+
+```php
+DeviceInfo::get(function (DeviceInfo $device): void {
+    $this->bottomInset = $device->safeAreaBottom;
+});
+```
+
+`safeAreaTop`, `safeAreaRight`, `safeAreaBottom`, and `safeAreaLeft` are
+reported in logical points on both Android and iOS.
+
 `RefreshControl` detects a vertical pull only while its native child is at the
 top. Indicator visibility, drag feedback, multi-color animation, background,
 size and progress offset stay on the UI thread; PHP receives only the semantic

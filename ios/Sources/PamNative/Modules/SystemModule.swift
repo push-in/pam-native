@@ -93,23 +93,37 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
         case "sensorRead":
             sensorRead(payload: payload, completion: completion)
         case "deviceInfo":
-            do {
-                let screen = UIScreen.main
-                let width = screen.bounds.size.width
-                let height = screen.bounds.size.height
-                let density = screen.scale
-                let appearance = UIScreen.main.traitCollection.userInterfaceStyle == .dark ? 2 : 1
-                let appState = UIApplication.shared.applicationState == .active ? 1 : 3
-                let payload = try WireMap.encode([
-                    "width": .decimal(Double(width)),
-                    "height": .decimal(Double(height)),
-                    "density": .decimal(Double(density)),
-                    "appearance": .integer(Int64(appearance)),
-                    "appState": .integer(Int64(appState)),
-                ])
-                completion(.success, payload)
-            } catch {
-                completion(.failure, (error.localizedDescription).data(using: .utf8) ?? Data())
+            DispatchQueue.main.async {
+                do {
+                    let screen = UIScreen.main
+                    let width = screen.bounds.size.width
+                    let height = screen.bounds.size.height
+                    let density = screen.scale
+                    let appearance = screen.traitCollection.userInterfaceStyle == .dark ? 2 : 1
+                    let appState = UIApplication.shared.applicationState == .active ? 1 : 3
+                    let window = UIApplication.shared.connectedScenes
+                        .compactMap { $0 as? UIWindowScene }
+                        .flatMap(\.windows)
+                        .first(where: \.isKeyWindow)
+                    let insets = window?.safeAreaInsets ?? .zero
+                    let payload = try WireMap.encode([
+                        "width": .decimal(Double(width)),
+                        "height": .decimal(Double(height)),
+                        "density": .decimal(Double(density)),
+                        "appearance": .integer(Int64(appearance)),
+                        "appState": .integer(Int64(appState)),
+                        "safeAreaTop": .decimal(Double(insets.top)),
+                        "safeAreaRight": .decimal(Double(insets.right)),
+                        "safeAreaBottom": .decimal(Double(insets.bottom)),
+                        "safeAreaLeft": .decimal(Double(insets.left)),
+                    ])
+                    completion(.success, payload)
+                } catch {
+                    completion(
+                        .failure,
+                        (error.localizedDescription).data(using: .utf8) ?? Data()
+                    )
+                }
             }
         case "keyboardDismiss":
             DispatchQueue.main.async {

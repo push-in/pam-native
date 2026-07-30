@@ -76,6 +76,9 @@ Safe-area and keyboard avoidance remain native:
 Android applies system-bar and IME insets directly on the UI thread. The same
 options are available through `SafeAreaView::edges()->mode()` and
 `KeyboardAvoidingView::verticalOffset()->avoidingEnabled()`.
+When custom chrome must size itself around those regions,
+`DeviceInfo::get()` exposes `safeAreaTop`, `safeAreaRight`, `safeAreaBottom`,
+and `safeAreaLeft` in logical points on Android and iOS.
 
 Pull-to-refresh is configured with `RefreshControl::colors()`,
 `progressBackgroundColor()`, `progressViewOffset()`, `enabled()` and `size()`.
