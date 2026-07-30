@@ -206,17 +206,23 @@ final class PamPhpRegistry
         );
         $slots = $values['__pamSlots'] ?? ['slot' => $children];
         $listeners = $values['__pamComponentEvents'] ?? [];
+        $inheritedStyles = $values['__pamInheritedStyles'] ?? [];
         unset(
             $values['__pamNodePath'],
             $values['__pamSlots'],
             $values['__pamComponentEvents'],
+            $values['__pamInheritedStyles'],
             $values['__parentVariants'],
             $values['__pamEventContexts'],
             $values['className'],
             $values['key'],
         );
 
-        if (!is_array($slots) || !is_array($listeners)) {
+        if (
+            !is_array($slots)
+            || !is_array($listeners)
+            || !is_array($inheritedStyles)
+        ) {
             throw new RuntimeException('Compiled component context is invalid.');
         }
 
@@ -245,6 +251,7 @@ final class PamPhpRegistry
             $safeSlots,
             $safeListeners,
             $scope instanceof Component ? $scope : null,
+            $inheritedStyles,
         );
         $bucket[$cacheKey] = $instance;
         $instances[$owner] = $bucket;

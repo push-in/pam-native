@@ -216,8 +216,11 @@ child component's template.
 
 Text color, font family/size/weight/style, letter spacing, line height,
 alignment, and case inherit through `Column`, `Row`, and other native layout
-containers. A child that changes only `font-weight` keeps the inherited logical
-family and resolves the matching packaged `@font-face`.
+containers, including across nested `.pam.php` component templates. Inherited
+CSS travels as private render context and never becomes a constructor prop or
+component variant; typed components therefore receive only attributes authored
+on their tag. A child that changes only `font-weight` keeps the inherited
+logical family and resolves the matching packaged `@font-face`.
 Conservative auto-width text frames follow the relevant flex alignment axis:
 `align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
 sized or growing text keeps normal start alignment unless `text-align` is

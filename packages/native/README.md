@@ -137,7 +137,9 @@ Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules form the base, matching classes follow stylesheet
 source order regardless of class order in markup, and authored PAM attributes
 win last. Text color, typography, spacing, alignment, and case inherit through
-native layout containers.
+native layout containers and nested `.pam.php` components. PAM carries that
+inheritance as private render context instead of public component props, so
+strict constructors receive only attributes authored on their component tag.
 Auto-width text uses the parent's relevant flex axis to align visible glyphs
 inside PAM's conservative clipping-safe frame: cross-axis alignment in columns
 and main-axis justification in rows. Explicit widths and growing text preserve

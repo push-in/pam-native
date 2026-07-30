@@ -191,6 +191,10 @@ Register them with `App::components(__DIR__.'/src')`. See
 lifecycle contract. Scoped styles compile directly to typed native properties;
 they do not ship a browser CSS engine. A conventional `src/app.css` applies to
 every component automatically; component `<style scoped>` rules override it.
+Inherited typography crosses nested `.pam.php` component boundaries as CSS
+context, not as public constructor props, so prop-strict icons and controls can
+live under a colored or typographic container without declaring unrelated
+style arguments.
 Relative `@import` statements are expanded from the file that declares them at
 compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,

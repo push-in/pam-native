@@ -27,6 +27,7 @@ final readonly class CompiledComponentView implements Renderable
             [
                 ...$slots,
                 'props' => $props,
+                '__pamInheritedStyles' => $this->component->__pamInheritedStyles(),
             ],
         );
     }

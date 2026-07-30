@@ -771,6 +771,7 @@ final class TemplateRenderer
         if ($factory === null) {
             $attributes = self::nativeEventAliases($attributes);
         }
+        $declaredAttributes = $attributes;
         $resolvedClass = self::classValue($attributes, $scope, $data);
         $inheritedStyles = $data['__pamInheritedStyles'] ?? [];
         if (!is_array($inheritedStyles)) {
@@ -855,13 +856,27 @@ final class TemplateRenderer
         if ($factory !== null) {
             $values['__pamNodePath'] = $data['__pamNodePath'] ?? $tag;
         }
+        $componentValues = $values;
+        if ($factory !== null) {
+            $declaredNames = [];
+            foreach (array_keys($declaredAttributes) as $name) {
+                $declaredNames[ltrim($name, ':')] = true;
+            }
+            $componentValues = array_filter(
+                $values,
+                static fn (string $name): bool =>
+                    isset($declaredNames[$name])
+                    || in_array($name, ['className', '__pamNodePath'], true),
+                ARRAY_FILTER_USE_KEY,
+            );
+        }
 
         $inheritedVariants = $data['__pamParentVariants'] ?? [];
         if (!is_array($inheritedVariants)) {
             $inheritedVariants = [];
         }
         $ownVariants = array_filter(
-            $values,
+            $factory !== null ? $componentValues : $values,
             static fn (mixed $value, string $name): bool =>
                 !str_starts_with($name, '__pam')
                 && self::isDeclarativeContextValue($value),
@@ -964,18 +979,20 @@ final class TemplateRenderer
             $values['text'] ??= $text;
         }
         if ($factory !== null && $inheritedVariants !== []) {
-            $values['__parentVariants'] = $inheritedVariants;
+            $componentValues['__parentVariants'] = $inheritedVariants;
         }
         if ($factory !== null && $inheritedEventContexts !== []) {
-            $values['__pamEventContexts'] = $inheritedEventContexts;
+            $componentValues['__pamEventContexts'] = $inheritedEventContexts;
         }
         if ($factory !== null) {
-            $values['__pamSlots'] = $slots;
-            $values['__pamComponentEvents'] = $componentEvents;
+            $componentValues['__pamSlots'] = $slots;
+            $componentValues['__pamComponentEvents'] = $componentEvents;
+            $componentValues['__pamInheritedStyles'] =
+                $childData['__pamInheritedStyles'];
         }
 
         $element = $factory !== null
-            ? $factory($values, $children, $scope)->toElement()
+            ? $factory($componentValues, $children, $scope)->toElement()
             : match ($tag) {
             'Screen' => Screen::make(...$children),
             'Column' => Column::make(...$children),

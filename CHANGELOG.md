@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.82 - 2026-07-30
+
+- Preserve inherited CSS typography across compiled component boundaries
+  through an internal style context, while keeping those values out of typed
+  constructor props and declarative component variants.
+- Fix nested icons and other prop-strict components failing when an ancestor
+  authors `color`, font, line-height, alignment, letter spacing, or text case.
+- Cover both the public prop boundary and inheritance into a nested
+  `.pam.php` component with regression tests.
+
 ## 0.5.81 - 2026-07-30
 
 - Add PHP-compatible, right-associative `??` null coalescing to restricted PAM

@@ -2086,6 +2086,30 @@ $assert(
             === 12.0,
     'Registered template components must receive className before visual utilities are applied.',
 );
+$capturedStyleBoundaryProps = null;
+TemplateRegistry::component(
+    'StyleBoundary',
+    static function (
+        array $props,
+    ) use (&$capturedStyleBoundaryProps): \Pam\Native\Renderable {
+        $capturedStyleBoundaryProps = $props;
+
+        return Text::make('Inherited');
+    },
+);
+TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column textColor="#123456"><StyleBoundary /></Column>',
+    ),
+    null,
+    [],
+);
+$assert(
+    !array_key_exists('textColor', $capturedStyleBoundaryProps ?? [])
+        && ($capturedStyleBoundaryProps['__pamInheritedStyles']['textColor'] ?? null)
+            === 0xFF123456,
+    'Inherited CSS must cross a component boundary as internal style context, not constructor props.',
+);
 $coreRoleElement = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<Text accessibilityRole="header">Accessible heading</Text>',
@@ -3725,6 +3749,50 @@ final class ConditionalRoot extends Component
 </template>
 PAM,
 );
+file_put_contents(
+    $pamPhpDirectory.'/InheritedText.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class InheritedText extends Component
+{
+}
+?>
+
+<template>
+    <Text>Inherited component text</Text>
+</template>
+PAM,
+);
+file_put_contents(
+    $pamPhpDirectory.'/InheritedStyleHost.pam.php',
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\Sfc;
+
+use Pam\Native\Component;
+
+final class InheritedStyleHost extends Component
+{
+}
+?>
+
+<template>
+    <Column textColor="#123456" fontSize="17">
+        <InheritedText />
+    </Column>
+</template>
+PAM,
+);
 
 $invalidPamPhpDirectory = $pamPhpDirectory.'-invalid';
 if (
@@ -3905,6 +3973,16 @@ App::components($pamPhpDirectory, $pamPhpCache);
 $dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
 $counterClass = 'Pam\\Native\\Tests\\Sfc\\CounterCard';
 $conditionalRoot = App::make('Pam\\Native\\Tests\\Sfc\\ConditionalRoot')->toElement();
+$inheritedStyleHost = App::make(
+    'Pam\\Native\\Tests\\Sfc\\InheritedStyleHost',
+)->toElement();
+$inheritedText = $inheritedStyleHost->children()[0] ?? null;
+$assert(
+    $inheritedText instanceof \Pam\Native\Element
+        && $inheritedText->properties()[PropKey::TextColor->value] === 0xFF123456
+        && (float) $inheritedText->properties()[PropKey::FontSize->value] === 17.0,
+    'Inherited CSS must remain active inside a compiled child component.',
+);
 $assert(
     $conditionalRoot->properties()[PropKey::Visible->value] === false
         && $conditionalRoot->children() === [],
@@ -4260,8 +4338,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.81',
-    'The runtime SDK contract must match the 0.5.81 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.82',
+    'The runtime SDK contract must match the 0.5.82 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

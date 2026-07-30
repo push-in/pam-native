@@ -27,6 +27,9 @@ abstract class Component implements Renderable
     /** @var array<string, list<Renderable>> */
     private array $pamSlots = [];
 
+    /** @var array<string, mixed> */
+    private array $pamInheritedStyles = [];
+
     private ?ComponentState $pamState = null;
     private ?Component $pamParent = null;
     /** @var array<class-string, mixed> */
@@ -288,15 +291,18 @@ abstract class Component implements Renderable
     /**
      * @param array<string, list<Renderable>> $slots
      * @param array<string, Closure> $listeners
+     * @param array<string, mixed> $inheritedStyles
      */
     final public function __pamConfigure(
         array $slots,
         array $listeners,
         ?Component $parent = null,
+        array $inheritedStyles = [],
     ): void {
         $this->pamSlots = $slots;
         $this->pamEventListeners = $listeners;
         $this->pamParent = $parent;
+        $this->pamInheritedStyles = $inheritedStyles;
         $this->pamProvided = $this->provide();
         foreach ($this->slots() as $name => $definition) {
             if (!$definition instanceof Slot) {
@@ -313,6 +319,12 @@ abstract class Component implements Renderable
     final public function __pamSlots(): array
     {
         return $this->pamSlots;
+    }
+
+    /** @return array<string, mixed> */
+    final public function __pamInheritedStyles(): array
+    {
+        return $this->pamInheritedStyles;
     }
 
     final public function __pamNotifyUpdating(string $property, mixed $next, mixed $previous): void
