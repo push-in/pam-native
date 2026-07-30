@@ -4944,7 +4944,7 @@ class PamRenderer(
                     PropKey.ACCESSIBILITY_CHECKED_STATE,
                     if (state.flag(PropKey.CHECKED, false)) 2L else 1L,
                 ).toInt()
-                info.isChecked = checkedState == 2
+                setAccessibilityChecked(info, checkedState)
             }
             10 -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 info.isHeading = true
@@ -5002,14 +5002,53 @@ class PamRenderer(
             minimum <= current &&
             current <= maximum
         ) {
-            info.rangeInfo = AccessibilityNodeInfo.RangeInfo.obtain(
-                AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT,
+            info.rangeInfo = accessibilityRangeInfo(
                 minimum.toFloat(),
                 maximum.toFloat(),
                 current.toFloat(),
             )
         }
     }
+
+    @Suppress("DEPRECATION")
+    private fun setAccessibilityChecked(
+        info: AccessibilityNodeInfo,
+        checkedState: Int,
+    ) {
+        if (Build.VERSION.SDK_INT >= 36) {
+            info.setChecked(
+                when (checkedState) {
+                    2 -> AccessibilityNodeInfo.CHECKED_STATE_TRUE
+                    3 -> AccessibilityNodeInfo.CHECKED_STATE_PARTIAL
+                    else -> AccessibilityNodeInfo.CHECKED_STATE_FALSE
+                },
+            )
+        } else {
+            info.isChecked = checkedState == 2
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun accessibilityRangeInfo(
+        minimum: Float,
+        maximum: Float,
+        current: Float,
+    ): AccessibilityNodeInfo.RangeInfo =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            AccessibilityNodeInfo.RangeInfo(
+                AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT,
+                minimum,
+                maximum,
+                current,
+            )
+        } else {
+            AccessibilityNodeInfo.RangeInfo.obtain(
+                AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT,
+                minimum,
+                maximum,
+                current,
+            )
+        }
 
     private fun setStateDescription(
         info: AccessibilityNodeInfo,

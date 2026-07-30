@@ -10,7 +10,7 @@ class PamMediaFileTest {
     fun resolvesEncodedFileInsideSandbox() {
         val root = Files.createTempDirectory("pam-media-root").toFile()
         val media = root.resolve("imports/video one.mp4").apply {
-            parentFile.mkdirs()
+            requireNotNull(parentFile).mkdirs()
             writeBytes(byteArrayOf(1))
         }
 

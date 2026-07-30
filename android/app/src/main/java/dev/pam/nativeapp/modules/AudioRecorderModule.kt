@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaRecorder
+import android.os.Build
 import android.os.SystemClock
 import android.os.Handler
 import android.os.Looper
@@ -55,7 +56,7 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
 
         val recordings = File(context.filesDir, "pam-files/recordings").apply { mkdirs() }
         val file = File.createTempFile("pam-voice-", ".m4a", recordings)
-        val next = MediaRecorder().apply {
+        val next = createMediaRecorder().apply {
             setAudioSource(MediaRecorder.AudioSource.MIC)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -70,6 +71,14 @@ internal class AudioRecorderModule(private val context: Context) : NativeModule,
         startedAt = SystemClock.elapsedRealtime()
         completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
     }
+
+    @Suppress("DEPRECATION")
+    private fun createMediaRecorder(): MediaRecorder =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            MediaRecorder(context)
+        } else {
+            MediaRecorder()
+        }
 
     private fun stop(completion: ModuleCompletion) {
         val active = recorder ?: error("No audio recording is active")

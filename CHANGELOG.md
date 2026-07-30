@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.58 - 2026-07-30
+
+- Use the context-aware `MediaRecorder` constructor on Android 12 and newer
+  while retaining the API 26–30 fallback.
+- Publish native tri-state accessibility check semantics on Android 16 and
+  preserve boolean compatibility on earlier platform versions.
+- Replace pooled accessibility range metadata on Android 11 and newer while
+  retaining the legacy API 26–29 path.
+- Keep Android media-path tests null-safe under the current Kotlin compiler.
+
 ## 0.5.57 - 2026-07-30
 
 - Add a direct Android `MediaLibrary` API for paginated image/video metadata,
