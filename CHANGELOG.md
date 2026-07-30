@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.77 - 2026-07-30
+
+- Position absolute flex children with automatic insets from their CSS static
+  position. `align-items`/`align-self` and `justify-content` now center or
+  trail badges, tab indicators, logo layers, and other absolute adornments
+  without app-specific offsets.
+
 ## 0.5.76 - 2026-07-30
 
 - Add safe PHP `.` string concatenation to template expressions with PHP 8

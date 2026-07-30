@@ -256,6 +256,11 @@ Percentages are supported for width, height, max-width, and max-height.
 They are also supported for absolute `left`, `top`, `right`, and `bottom`
 offsets. `border-radius` accepts the standard one-to-four circular-radius
 shorthand; elliptical slash syntax is intentionally rejected.
+An absolutely positioned child with both insets on an axis left as `auto`
+keeps its CSS flex static position: the parent's `justify-content` controls
+the main axis and `align-items` or the child's `align-self` controls the cross
+axis. This centers tab indicators and layered logos without calculating
+device-specific offsets.
 Directional border colors are accepted for familiar CSS authoring; Android
 and iOS currently paint one shared native border color, so the last authored
 directional color applies to every edge.

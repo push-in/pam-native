@@ -597,14 +597,18 @@ fn layout_node(
                 inner.height,
             ),
         )?;
+        let static_x =
+            absolute_static_offset(child, node, axis, Axis::Horizontal, inner.width, width);
+        let static_y =
+            absolute_static_offset(child, node, axis, Axis::Vertical, inner.height, height);
         let child_frame = Layout {
             x: inner.x
                 + left.unwrap_or_else(|| {
-                    right.map_or(0.0, |right| (inner.width - right - width).max(0.0))
+                    right.map_or(static_x, |right| (inner.width - right - width).max(0.0))
                 }),
             y: inner.y
                 + top.unwrap_or_else(|| {
-                    bottom.map_or(0.0, |bottom| (inner.height - bottom - height).max(0.0))
+                    bottom.map_or(static_y, |bottom| (inner.height - bottom - height).max(0.0))
                 }),
             width,
             height,
@@ -1894,6 +1898,35 @@ fn cross_alignment(value: i64) -> CrossAlignment {
     }
 }
 
+fn absolute_static_offset(
+    child: &Node,
+    parent: &Node,
+    parent_axis: Axis,
+    target_axis: Axis,
+    available: f32,
+    child_size: f32,
+) -> f32 {
+    let free = (available - child_size).max(0.0);
+    if parent_axis == target_axis {
+        return justify_offsets(
+            integer(parent, PropKey::JustifyContent).unwrap_or(1),
+            free,
+            1,
+            0.0,
+        )
+        .0;
+    }
+
+    let alignment = integer(child, PropKey::AlignSelf)
+        .map(cross_alignment)
+        .unwrap_or_else(|| cross_alignment(integer(parent, PropKey::AlignItems).unwrap_or(4)));
+    match alignment {
+        CrossAlignment::Center => free / 2.0,
+        CrossAlignment::End => free,
+        CrossAlignment::Start | CrossAlignment::Stretch => 0.0,
+    }
+}
+
 fn justify_offsets(value: i64, free: f32, count: usize, gap: f32) -> (f32, f32) {
     match value {
         2 => (free / 2.0, gap),
@@ -2120,6 +2153,53 @@ mod tests {
 
         assert_eq!(child.x, 38.0);
         assert_eq!(child.y, 86.0);
+    }
+
+    #[test]
+    fn absolute_child_without_horizontal_insets_uses_flex_static_alignment() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::AlignItems, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::PositionType, PropValue::Integer(2)),
+                            (PropKey::Bottom, PropValue::Float(0.0)),
+                            (PropKey::Width, PropValue::Float(26.0)),
+                            (PropKey::Height, PropValue::Float(3.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 48.0,
+            },
+        )
+        .expect("absolute static alignment");
+        let child = layouts[&2];
+
+        assert_eq!(child.x, 167.0);
+        assert_eq!(child.y, 45.0);
     }
 
     #[test]
