@@ -22,7 +22,7 @@ final class PamAssetPathTests: XCTestCase {
     }
 
     func testRejectsEmptyTraversalAndUriSuffixes() throws {
-        [
+        try [
             "asset://",
             "asset://assets/../secrets.png",
             "asset://assets//brand.png",
