@@ -195,6 +195,10 @@ Inherited typography crosses nested `.pam.php` component boundaries as CSS
 context, not as public constructor props, so prop-strict icons and controls can
 live under a colored or typographic container without declaring unrelated
 style arguments.
+Since 0.5.83, Rust calibrates intrinsic text widths against native sans-serif
+glyph advances and retains only a sub-pixel wrapping tolerance. Centered
+text-and-icon rows therefore align by their visible content instead of an
+inflated safety frame, including under Android font scaling.
 Relative `@import` statements are expanded from the file that declares them at
 compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,

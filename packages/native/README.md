@@ -140,10 +140,12 @@ win last. Text color, typography, spacing, alignment, and case inherit through
 native layout containers and nested `.pam.php` components. PAM carries that
 inheritance as private render context instead of public component props, so
 strict constructors receive only attributes authored on their component tag.
-Auto-width text uses the parent's relevant flex axis to align visible glyphs
-inside PAM's conservative clipping-safe frame: cross-axis alignment in columns
-and main-axis justification in rows. Explicit widths and growing text preserve
-normal start alignment unless `text-align` is authored.
+Auto-width text uses the parent's relevant flex axis to align visible glyphs:
+cross-axis alignment in columns and main-axis justification in rows. Since
+0.5.83, intrinsic widths follow native sans-serif glyph advances with only a
+sub-pixel wrapping tolerance, so text-and-icon controls stay optically centered
+under platform font scaling. Explicit widths and growing text preserve normal
+start alignment unless `text-align` is authored.
 
 Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
 short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),

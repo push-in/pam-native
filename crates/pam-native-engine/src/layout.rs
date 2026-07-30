@@ -1594,15 +1594,29 @@ fn estimated_text_width(text: &str, font_size: f32, letter_spacing: f32) -> f32 
             width += letter_spacing;
         }
     }
-    if width > 0.0 { width * 1.06 + 1.0 } else { 0.0 }
+    // Bounding-box based em classes need a small conversion to platform glyph
+    // advances. The old broad classes plus a 6% safety margin substantially
+    // over-allocated short labels, so centered icon/label rows looked shifted
+    // even though their frames were centered. These classes track Android's
+    // modern sans metrics closely; keep only a sub-pixel wrapping tolerance.
+    if width > 0.0 { width * 1.09 + 0.5 } else { 0.0 }
 }
 
 fn estimated_character_width(character: char, font_size: f32) -> f32 {
     let em = match character {
-        ' ' | '\t' => 0.33,
-        'i' | 'l' | 'I' | '!' | '|' | '.' | ',' | ':' | ';' | '\'' => 0.30,
-        'm' | 'w' | 'M' | 'W' | '@' | '%' | '&' => 0.88,
-        character if character.is_ascii_uppercase() => 0.68,
+        ' ' | '\t' => 0.25,
+        'i' | '!' | '.' | ',' | ':' | ';' | '\'' => 0.23,
+        'l' | 'I' | '|' => 0.21,
+        'r' => 0.32,
+        'f' | 't' => 0.42,
+        'm' => 0.78,
+        'w' => 0.74,
+        'M' => 0.82,
+        'W' => 0.87,
+        '@' => 0.95,
+        '%' => 0.74,
+        '&' => 0.56,
+        character if character.is_ascii_uppercase() => 0.59,
         character if character.is_ascii_digit() => 0.56,
         character if character.is_ascii() => 0.54,
         _ => 1.0,
@@ -3219,7 +3233,7 @@ mod tests {
     }
 
     #[test]
-    fn intrinsic_text_width_keeps_safety_space_for_platform_font_metrics() {
+    fn intrinsic_text_width_tracks_platform_advances_with_subpixel_tolerance() {
         let font_size = 14.0;
         let raw_glyph_width = "Paid"
             .chars()
@@ -3227,6 +3241,10 @@ mod tests {
             .sum::<f32>();
 
         assert!(estimated_text_width("Paid", font_size, 0.0) > raw_glyph_width);
+        assert_eq!(
+            estimated_text_width("Paid", font_size, 0.0) - raw_glyph_width * 1.09,
+            0.5,
+        );
     }
 
     #[test]
@@ -3245,7 +3263,7 @@ mod tests {
         let without_spacing = estimated_text_width("ABC", 20.0, 0.0);
         let with_spacing = text_extent(&compact, Axis::Horizontal, 320.0, 1.0);
 
-        assert!((with_spacing - without_spacing - 1.272).abs() < 0.01);
+        assert!((with_spacing - without_spacing - 1.308).abs() < 0.01);
     }
 
     #[test]

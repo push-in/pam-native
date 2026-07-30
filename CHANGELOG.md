@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.83 - 2026-07-30
+
+- Calibrate intrinsic text widths against Android sans-serif glyph advances
+  instead of reserving broad per-run safety space.
+- Keep centered text-and-icon rows optically aligned with their container while
+  preserving the sub-pixel tolerance that prevents phantom wrapping.
+- Refine narrow, punctuation, lowercase, uppercase, digit, and wide-glyph
+  classes with regression coverage for text scale and letter spacing.
+
 ## 0.5.82 - 2026-07-30
 
 - Preserve inherited CSS typography across compiled component boundaries
