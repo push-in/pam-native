@@ -14,6 +14,8 @@ final class TemplateExpression
     /** @var list<array{type: int|string, text: string}> */
     private array $tokens;
     private int $position = 0;
+    private int $coalescingDepth = 0;
+    private readonly object $missing;
 
     /**
      * @param array<string, mixed> $data
@@ -24,6 +26,7 @@ final class TemplateExpression
         private readonly array $data,
     ) {
         $this->tokens = self::tokenize($expression);
+        $this->missing = new \stdClass();
     }
 
     /** @param array<string, mixed> $data */
@@ -75,7 +78,7 @@ final class TemplateExpression
 
     private function ternary(): mixed
     {
-        $condition = $this->logicalOr();
+        $condition = $this->coalescing();
 
         if (!$this->take('?')) {
             return $condition;
@@ -89,6 +92,27 @@ final class TemplateExpression
         $falsy = $this->ternary();
 
         return (bool) $condition ? $truthy : $falsy;
+    }
+
+    private function coalescing(): mixed
+    {
+        $this->coalescingDepth++;
+        try {
+            $value = $this->logicalOr();
+        } finally {
+            $this->coalescingDepth--;
+        }
+
+        if ($this->take(T_COALESCE)) {
+            $right = $this->coalescing();
+
+            return $value === $this->missing || $value === null ? $right : $value;
+        }
+        if ($value === $this->missing && $this->coalescingDepth === 0) {
+            throw new RuntimeException('Cannot resolve template value.');
+        }
+
+        return $value;
     }
 
     private function logicalOr(): mixed
@@ -356,6 +380,8 @@ final class TemplateExpression
                 throw new RuntimeException("Template property \${$name} is not initialized.");
             }
             $value = $property->getValue($this->scope);
+        } elseif ($this->coalescingDepth > 0) {
+            $value = $this->missing;
         } else {
             throw new RuntimeException("Template expression \${$name} is undefined.");
         }
@@ -368,10 +394,12 @@ final class TemplateExpression
                 }
                 $this->position++;
                 $value = match (true) {
+                    $value === $this->missing => $this->missing,
                     is_array($value) && array_key_exists($segment['text'], $value) =>
                         $value[$segment['text']],
                     is_object($value) && property_exists($value, $segment['text']) =>
                         (new ReflectionProperty($value, $segment['text']))->getValue($value),
+                    $this->coalescingDepth > 0 => $this->missing,
                     default => throw new RuntimeException(
                         "Cannot resolve template property {$segment['text']}.",
                     ),
@@ -381,11 +409,22 @@ final class TemplateExpression
             if ($this->take('[')) {
                 $index = $this->ternary();
                 $this->expect(']');
+                if ($value === $this->missing) {
+                    continue;
+                }
                 if (
                     (!is_string($index) && !is_int($index))
                     || !is_array($value)
                     || !array_key_exists($index, $value)
                 ) {
+                    if (
+                        $this->coalescingDepth > 0
+                        && (is_string($index) || is_int($index))
+                    ) {
+                        $value = $this->missing;
+
+                        continue;
+                    }
                     throw new RuntimeException('Cannot resolve template array index.');
                 }
                 $value = $value[$index];
@@ -517,6 +556,7 @@ final class TemplateExpression
                         T_IS_SMALLER_OR_EQUAL,
                         T_OBJECT_OPERATOR,
                         T_DOUBLE_ARROW,
+                        T_COALESCE,
                     ], true)
                 ) {
                     throw new RuntimeException(

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.81 - 2026-07-30
+
+- Add PHP-compatible, right-associative `??` null coalescing to restricted PAM
+  template expressions, including safe missing and nested array/property paths.
+- Keep missing values strict outside a coalescing expression and cover null,
+  present, chained and nested fallback behavior without introducing `eval`.
+
 ## 0.5.80 - 2026-07-30
 
 - Accept Expo Image's familiar `cachePolicy="memory-disk"` and camel-case

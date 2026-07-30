@@ -118,8 +118,9 @@ The template syntax includes:
 - `key` for stable identity in repeated or reordered children.
 
 Expressions support component properties, local loop values, public component
-methods, arrays, comparisons, boolean operators, and ternaries. Business logic
-stays in PHP methods rather than in markup.
+methods, arrays, comparisons, boolean operators, ternaries, and
+right-associative null coalescing with `??`. Business logic stays in PHP
+methods rather than in markup.
 
 An integer `p-for` source repeats the element that many times and exposes the
 current one-based number. Zero and negative integers render nothing:
@@ -237,7 +238,9 @@ Template expressions support safe numeric arithmetic with conventional
 precedence: `+`, `-`, `*`, `/`, integer `%`, and parentheses. For example,
 `:height="72 + $bottomSpacing"` stays typed and is evaluated without `eval`.
 PHP `.` concatenation accepts scalar, null, and `Stringable` operands, so
-`'@'.$username` is valid without allowing array-to-string warnings.
+`'@'.$username` is valid without allowing array-to-string warnings. PHP `??`
+returns the first present non-null value and safely handles missing nested
+array or property paths.
 
 Supported CSS covers PAM's common native layout and paint contracts:
 

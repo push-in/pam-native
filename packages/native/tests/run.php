@@ -3841,6 +3841,47 @@ $assert(
     ) === 'Profile',
     'Template dot-property paths must remain distinct from string concatenation.',
 );
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$profile["bio"] ?? $fallback ?? "Sem bio"',
+        null,
+        ['profile' => [], 'fallback' => null],
+    ) === 'Sem bio',
+    'Template null coalescing must be right associative and tolerate a missing array key.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$profile["details"]["website"] ?? "Sem site"',
+        null,
+        ['profile' => []],
+    ) === 'Sem site',
+    'Template null coalescing must safely traverse a missing nested path.',
+);
+$assert(
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$profile["bio"] ?? "Sem bio"',
+        null,
+        ['profile' => ['bio' => 'PAM']],
+    ) === 'PAM',
+    'Template null coalescing must preserve a present non-null value.',
+);
+$missingWithoutCoalescingRejected = false;
+try {
+    \Pam\Native\Internal\TemplateExpression::evaluate(
+        '$profile["bio"]',
+        null,
+        ['profile' => []],
+    );
+} catch (RuntimeException $error) {
+    $missingWithoutCoalescingRejected = str_contains(
+        $error->getMessage(),
+        'Cannot resolve template value',
+    );
+}
+$assert(
+    $missingWithoutCoalescingRejected,
+    'Missing template values must remain strict outside null coalescing.',
+);
 $concatenationRejected = false;
 try {
     \Pam\Native\Internal\TemplateExpression::evaluate(
@@ -4219,8 +4260,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.80',
-    'The runtime SDK contract must match the 0.5.80 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.81',
+    'The runtime SDK contract must match the 0.5.81 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
