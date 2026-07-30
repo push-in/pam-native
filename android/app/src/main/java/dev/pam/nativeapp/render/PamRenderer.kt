@@ -134,6 +134,27 @@ internal fun resolvedLineSpacingExtra(
     return targetLineHeightPx - fontMetricsHeightPx
 }
 
+internal data class SnappedPixelSpan(
+    val offset: Int,
+    val extent: Int,
+)
+
+internal fun snappedPixelSpan(
+    start: Float,
+    extent: Float,
+    parentStart: Float,
+    density: Float,
+): SnappedPixelSpan {
+    val safeDensity = density.coerceAtLeast(0.01f)
+    val absoluteStart = (start * safeDensity).roundToInt()
+    val absoluteEnd = ((start + extent.coerceAtLeast(0f)) * safeDensity).roundToInt()
+    val absoluteParentStart = (parentStart * safeDensity).roundToInt()
+    return SnappedPixelSpan(
+        offset = absoluteStart - absoluteParentStart,
+        extent = (absoluteEnd - absoluteStart).coerceAtLeast(0),
+    )
+}
+
 internal fun resolvedImageScaleType(imageFit: Int): ImageView.ScaleType =
     when (imageFit) {
         2 -> ImageView.ScaleType.FIT_CENTER
@@ -747,13 +768,12 @@ class PamRenderer(
         } else {
             frames[hostedParent] ?: rootFrame
         }
-        val width = dp(frame.width).coerceAtLeast(0)
-        val height = dp(frame.height).coerceAtLeast(0)
-        val left = if (id == rootId) 0 else dp(frame.x - parentFrame.x)
-        val top = if (id == rootId) 0 else dp(frame.y - parentFrame.y)
-        view.layoutParams = FrameLayout.LayoutParams(width, height).apply {
-            leftMargin = left
-            topMargin = top
+        val density = resourcesDensity()
+        val horizontal = snappedPixelSpan(frame.x, frame.width, parentFrame.x, density)
+        val vertical = snappedPixelSpan(frame.y, frame.height, parentFrame.y, density)
+        view.layoutParams = FrameLayout.LayoutParams(horizontal.extent, vertical.extent).apply {
+            leftMargin = if (id == rootId) 0 else horizontal.offset
+            topMargin = if (id == rootId) 0 else vertical.offset
         }
     }
 
@@ -908,8 +928,19 @@ class PamRenderer(
         val state = nodes[id] ?: return
         val parentState = nodes[state.parent]
         val parentFrame = frames[effectiveParent(state.parent)]
-        val left = frame.x - (parentFrame?.x ?: 0f)
-        val top = frame.y - (parentFrame?.y ?: 0f)
+        val density = resourcesDensity()
+        val horizontal = snappedPixelSpan(
+            frame.x,
+            frame.width,
+            parentFrame?.x ?: 0f,
+            density,
+        )
+        val vertical = snappedPixelSpan(
+            frame.y,
+            frame.height,
+            parentFrame?.y ?: 0f,
+            density,
+        )
         val parentSafePadding = parentState?.kind == NodeKind.SAFE_AREA_VIEW &&
             parentState.integer(
                 PropKey.SAFE_AREA_MODE,
@@ -986,13 +1017,13 @@ class PamRenderer(
             0
         }
         var width = (
-            dp(frame.width) - safeLeft - safeRight - parentSafeWidthReduction
+            horizontal.extent - safeLeft - safeRight - parentSafeWidthReduction
             ).coerceAtLeast(0)
         var height = (
-            dp(frame.height) - safeTop - safeBottom - parentSafeHeightReduction
+            vertical.extent - safeTop - safeBottom - parentSafeHeightReduction
             ).coerceAtLeast(0)
-        var leftPx = dp(left) + safeLeft
-        var topPx = dp(top) + safeTop
+        var leftPx = horizontal.offset + safeLeft
+        var topPx = vertical.offset + safeTop
         compensateFlexParentViewportReduction(
             state = state,
             parentState = parentState,

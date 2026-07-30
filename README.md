@@ -200,6 +200,10 @@ Since 0.5.84, Rust reads and caches the real glyph advances of packaged
 centered text-and-icon rows therefore use the font Android and iOS actually
 render, including under platform font scaling, without a UI-thread measurement
 or a corrective second render.
+Since 0.5.85, Android snaps absolute start and end edges to the physical-pixel
+grid and derives the native extent from those shared edges. Centered icons and
+labels therefore keep the same physical center at fractional densities, while
+adjacent flex siblings meet without one-pixel rounding drift.
 Relative `@import` statements are expanded from the file that declares them at
 compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,

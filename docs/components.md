@@ -228,6 +228,11 @@ scaling, and flex centering therefore use the metrics of the font Android and
 iOS actually render. A missing or unsupported face falls back to PAM's
 allocation-free generic estimator; layout never waits for a native measurement
 round trip and does not visibly correct itself after mount.
+Android converts retained logical frames to physical pixels by rounding their
+absolute start and end edges, then deriving width and height from those edges.
+This preserves a shared physical center for icon-and-text controls at
+fractional densities and guarantees that adjacent flex siblings meet on the
+same rounded boundary.
 Conservative auto-width text frames follow the relevant flex alignment axis:
 `align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
 sized or growing text keeps normal start alignment unless `text-align` is

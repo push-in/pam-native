@@ -149,6 +149,10 @@ cross-axis alignment in columns and main-axis justification in rows. Since
 sans-serif estimator, so labels neither clip nor shift a centered text-and-icon
 control under platform font scaling. Explicit widths and growing text preserve
 normal start alignment unless `text-align` is authored.
+On Android 0.5.85+, native frames round their absolute start and end edges
+before deriving pixel width or height. This keeps centered labels and icons on
+one physical center at fractional densities and gives adjacent siblings one
+shared edge instead of independently rounded geometry.
 
 Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
 short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),

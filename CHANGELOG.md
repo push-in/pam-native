@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.85 - 2026-07-30
+
+- Snap Android layout edges in the absolute physical-pixel grid, deriving each
+  rendered extent from its rounded start and end edges instead of rounding
+  position and size independently.
+- Preserve the exact shared center of text-and-icon controls at fractional
+  display densities, removing the remaining one-pixel vertical or horizontal
+  drift in buttons, headers, tabs, badges, and nested flex layouts.
+- Make adjacent siblings share the same rounded edge and round negative
+  offsets symmetrically, with unit coverage for all three contracts.
+
 ## 0.5.84 - 2026-07-30
 
 - Measure intrinsic text with the actual packaged TTF/OTF face selected by
