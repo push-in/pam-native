@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.74 - 2026-07-30
+
+- Align conservative intrinsic text frames from the relevant flex axis:
+  `align-items`/`align-self` in columns and `justify-content` in rows. Centered
+  text-and-icon controls now stay optically centered without changing the
+  authored alignment of explicitly sized or growing text.
+
 ## 0.5.73 - 2026-07-30
 
 - Add typed, zero-selector-runtime CSS `box-shadow` with color, x/y offset,

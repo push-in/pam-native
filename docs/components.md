@@ -217,6 +217,10 @@ Text color, font family/size/weight/style, letter spacing, line height,
 alignment, and case inherit through `Column`, `Row`, and other native layout
 containers. A child that changes only `font-weight` keeps the inherited logical
 family and resolves the matching packaged `@font-face`.
+Conservative auto-width text frames follow the relevant flex alignment axis:
+`align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
+sized or growing text keeps normal start alignment unless `text-align` is
+authored.
 
 `pam-native-format` removes an empty `<style scoped>` block automatically, so
 components that rely only on `src/app.css` keep no placeholder markup.

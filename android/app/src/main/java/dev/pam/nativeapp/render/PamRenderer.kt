@@ -3948,23 +3948,36 @@ class PamRenderer(
             1 -> Gravity.START
             else -> {
                 val parent = nodes[state.parent]
-                val parentDirection = parent?.integer(
-                    PropKey.FLEX_DIRECTION,
-                    if (parent.kind == NodeKind.ROW) 2L else 1L,
-                )?.toInt() ?: 1
-                val parentIsColumn = parentDirection == 1 || parentDirection == 3
-                val alignment = state.properties[PropKey.ALIGN_SELF]
-                    ?.integer()
-                    ?.toInt()
-                    ?.takeUnless { it == 4 }
-                    ?: parent?.integer(PropKey.ALIGN_ITEMS, 4L)?.toInt()
-                    ?: 4
-                if (parentIsColumn && alignment == 2) {
-                    Gravity.CENTER_HORIZONTAL
-                } else if (parentIsColumn && alignment == 3) {
-                    Gravity.END
-                } else {
+                val hasAllocatedWidth = state.properties.containsKey(PropKey.WIDTH) ||
+                    state.properties.containsKey(PropKey.MIN_WIDTH) ||
+                    state.number(PropKey.FLEX_GROW, 0.0) > 0.0
+                if (hasAllocatedWidth) {
                     Gravity.START
+                } else {
+                    val parentDirection = parent?.integer(
+                        PropKey.FLEX_DIRECTION,
+                        if (parent.kind == NodeKind.ROW) 2L else 1L,
+                    )?.toInt() ?: 1
+                    val parentIsColumn = parentDirection == 1 || parentDirection == 3
+                    if (parentIsColumn) {
+                        val alignment = state.properties[PropKey.ALIGN_SELF]
+                            ?.integer()
+                            ?.toInt()
+                            ?.takeUnless { it == 4 }
+                            ?: parent?.integer(PropKey.ALIGN_ITEMS, 4L)?.toInt()
+                            ?: 4
+                        when (alignment) {
+                            2 -> Gravity.CENTER_HORIZONTAL
+                            3 -> Gravity.END
+                            else -> Gravity.START
+                        }
+                    } else {
+                        when (parent?.integer(PropKey.JUSTIFY_CONTENT, 1L)?.toInt()) {
+                            2 -> Gravity.CENTER_HORIZONTAL
+                            3 -> Gravity.END
+                            else -> Gravity.START
+                        }
+                    }
                 }
             }
         }

@@ -7,12 +7,14 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.TextureView
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
@@ -32,6 +34,78 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun intrinsicTextFollowsTheParentsRelevantCenteringAxis() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.ROW,
+                                    mapOf(PropKey.JUSTIFY_CONTENT to PropValue.Integer(2)),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    2,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Centered"),
+                                        PropKey.TEST_ID to PropValue.Text("intrinsic-centered"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    4,
+                                    2,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Allocated"),
+                                        PropKey.WIDTH to PropValue.Decimal(120.0),
+                                        PropKey.TEST_ID to PropValue.Text("allocated-start"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(0f, 0f, 360f, 80f)),
+                            Mutation.Layout(3, Frame(70f, 0f, 100f, 40f)),
+                            Mutation.Layout(4, Frame(170f, 0f, 120f, 40f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+
+                val intrinsic = requireNotNull(
+                    activity.host.findByTransitionName("intrinsic-centered"),
+                ) as TextView
+                val allocated = requireNotNull(
+                    activity.host.findByTransitionName("allocated-start"),
+                ) as TextView
+                assertEquals(
+                    Gravity.CENTER_HORIZONTAL,
+                    intrinsic.gravity and Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK,
+                )
+                assertEquals(
+                    Gravity.START,
+                    allocated.gravity and Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK,
+                )
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun mediaPlayerUsesTextureBackedVideoThatParticipatesInAncestorClipping() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

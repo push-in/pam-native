@@ -1817,20 +1817,36 @@ public final class PamRenderer {
             label.textAlignment = .left
             return
         }
+        let hasAllocatedWidth =
+            state.properties[PamConstants.width] != nil
+            || state.properties[PamConstants.minWidth] != nil
+            || (state.properties[PamConstants.flexGrow]?.decimalOrNil() ?? 0) > 0
+        if hasAllocatedWidth {
+            label.textAlignment = .left
+            return
+        }
         let defaultDirection: Int64 = parent.kind == .row ? 2 : 1
         let direction = parent.properties[PamConstants.flexDirection]?.integerOrNil()
             ?? defaultDirection
         let parentIsColumn = direction == 1 || direction == 3
-        let authoredSelf = state.properties[PamConstants.alignSelf]?.integerOrNil()
-        let alignment = authoredSelf == 4 || authoredSelf == nil
-            ? parent.properties[PamConstants.alignItems]?.integerOrNil() ?? 4
-            : authoredSelf!
-        if parentIsColumn && alignment == 2 {
-            label.textAlignment = .center
-        } else if parentIsColumn && alignment == 3 {
-            label.textAlignment = .right
+        if parentIsColumn {
+            let authoredSelf = state.properties[PamConstants.alignSelf]?.integerOrNil()
+            let alignment = authoredSelf == 4 || authoredSelf == nil
+                ? parent.properties[PamConstants.alignItems]?.integerOrNil() ?? 4
+                : authoredSelf!
+            label.textAlignment = switch alignment {
+            case 2: .center
+            case 3: .right
+            default: .left
+            }
         } else {
-            label.textAlignment = .left
+            let justification =
+                parent.properties[PamConstants.justifyContent]?.integerOrNil() ?? 1
+            label.textAlignment = switch justification {
+            case 2: .center
+            case 3: .right
+            default: .left
+            }
         }
     }
 

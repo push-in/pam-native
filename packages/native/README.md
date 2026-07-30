@@ -138,6 +138,10 @@ or selector pass. Tag rules form the base, matching classes follow stylesheet
 source order regardless of class order in markup, and authored PAM attributes
 win last. Text color, typography, spacing, alignment, and case inherit through
 native layout containers.
+Auto-width text uses the parent's relevant flex axis to align visible glyphs
+inside PAM's conservative clipping-safe frame: cross-axis alignment in columns
+and main-axis justification in rows. Explicit widths and growing text preserve
+normal start alignment unless `text-align` is authored.
 
 Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
 short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),

@@ -309,6 +309,7 @@ public enum PamConstants {
     public static let source = 4
     public static let width = 5
     public static let height = 6
+    public static let minWidth = 31
     public static let items = 16
     public static let onPress = 14
     public static let onChange = 15
@@ -365,6 +366,7 @@ public enum PamConstants {
     public static let opacity = 38
     public static let alignItems = 39
     public static let alignSelf = 40
+    public static let justifyContent = 41
     public static let textAlign = 42
     public static let overflow = 98
     public static let backgroundColor = 10
