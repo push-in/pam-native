@@ -2,6 +2,7 @@ package dev.pam.nativeapp.render
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Typeface
 import android.util.TypedValue
@@ -219,6 +220,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     override fun performClick(): Boolean = super.performClick()
+
+    override fun dispatchDraw(canvas: Canvas) {
+        val checkpoint = canvas.save()
+        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+        super.dispatchDraw(canvas)
+        canvas.restoreToCount(checkpoint)
+    }
 
     private fun updateLayoutManager() {
         val previous = layoutManager as? LinearLayoutManager

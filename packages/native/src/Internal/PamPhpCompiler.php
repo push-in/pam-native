@@ -240,7 +240,8 @@ final class PamPhpCompiler
     /**
      * @param array{
      *     classes: array<string, array<string, string|bool>>,
-     *     tags: array<string, array<string, string|bool>>
+     *     tags: array<string, array<string, string|bool>>,
+     *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * } $styleSheet
      */
     private static function withStyleSheet(

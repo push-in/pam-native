@@ -171,8 +171,10 @@ final class Card extends Component
 </template>
 
 <style scoped>
-    :root {
-        --brand-bold: asset://assets/fonts/Brand-Bold.ttf;
+    @font-face {
+        font-family: "Brand";
+        src: url("asset://assets/fonts/Brand-Bold.ttf");
+        font-weight: 700;
     }
 
     .card {
@@ -182,7 +184,8 @@ final class Card extends Component
     }
 
     .card-title {
-        font-family: var(--brand-bold);
+        font-family: "Brand";
+        font-weight: 700;
         font-size: 18px;
     }
 </style>

@@ -96,20 +96,27 @@ through an asset family:
 </template>
 
 <style scoped>
-    :root {
-        --brand-bold: asset://assets/fonts/Brand-Bold.ttf;
+    @font-face {
+        font-family: "Brand";
+        src: url("asset://assets/fonts/Brand-Bold.ttf");
+        font-weight: 700;
     }
 
     .brand-title {
-        font-family: var(--brand-bold);
+        font-family: "Brand";
+        font-weight: 700;
         font-size: 20px;
     }
 </style>
 ```
 
-The path resolves below the packaged `pam/` asset root. PAM accepts TTF and OTF
-files, rejects traversal, caches decoded `Typeface` instances, and keeps
-ordinary installed family names such as `sans-serif` working unchanged.
+The path resolves below the packaged `pam/` asset root. Declare another
+`@font-face` for each weight or italic variant, then author ordinary
+`font-family`, `font-weight`, and `font-style` rules. PAM selects the closest
+face while compiling the component, so there is no font registry, CSS parser,
+or selector work in the application runtime. PAM accepts TTF and OTF files,
+rejects traversal, caches decoded native typefaces, and keeps ordinary
+installed family names such as `sans-serif` working unchanged.
 Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules, `.class` rules, component-local variables,
 percentages, common box shorthands, and dynamic classes are supported; unknown

@@ -77,7 +77,8 @@ final class ScopedStyleCompiler
     /**
      * @return array{
      *     classes: array<string, array<string, string|bool>>,
-     *     tags: array<string, array<string, string|bool>>
+     *     tags: array<string, array<string, string|bool>>,
+     *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * }
      */
     public static function compile(string $source, string $name): array
@@ -89,6 +90,7 @@ final class ScopedStyleCompiler
         $variables = [];
         $classes = [];
         $tags = [];
+        $fonts = [];
         $rules = [];
         $matchedBytes = 0;
         preg_match_all(
@@ -123,7 +125,21 @@ final class ScopedStyleCompiler
             }
         }
         foreach ($rules as [$selectorSource, $body]) {
+            if ($selectorSource !== '@font-face') {
+                continue;
+            }
+            $face = self::fontFace($body, $variables, $name);
+            $fonts[$face['family']][] = [
+                'source' => $face['source'],
+                'weight' => $face['weight'],
+                'style' => $face['style'],
+            ];
+        }
+        foreach ($rules as [$selectorSource, $body]) {
             if ($selectorSource === ':root') {
+                continue;
+            }
+            if ($selectorSource === '@font-face') {
                 continue;
             }
             $declarations = self::declarations($body, $variables, $name);
@@ -148,7 +164,88 @@ final class ScopedStyleCompiler
             }
         }
 
-        return ['classes' => $classes, 'tags' => $tags];
+        return ['classes' => $classes, 'tags' => $tags, 'fonts' => $fonts];
+    }
+
+    /**
+     * @param array<string, string> $variables
+     * @return array{family: string, source: string, weight: string, style: string}
+     */
+    private static function fontFace(
+        string $source,
+        array $variables,
+        string $name,
+    ): array {
+        $declarations = self::rawDeclarations($source, $name);
+        foreach (array_keys($declarations) as $property) {
+            if (!in_array($property, ['font-family', 'src', 'font-weight', 'font-style'], true)) {
+                throw new RuntimeException(
+                    "Unsupported @font-face property {$property} in {$name}.",
+                );
+            }
+        }
+        $family = self::unquote(
+            self::resolveVariables($declarations['font-family'] ?? '', $variables, $name),
+        );
+        if ($family === '') {
+            throw new RuntimeException("@font-face in {$name} requires font-family.");
+        }
+        $rawSource = self::resolveVariables($declarations['src'] ?? '', $variables, $name);
+        if (
+            preg_match(
+                '/^url\(\s*(?:"([^"]+)"|\'([^\']+)\'|([^\'")\s]+))\s*\)$/D',
+                trim($rawSource),
+                $match,
+            ) !== 1
+        ) {
+            throw new RuntimeException(
+                "@font-face src in {$name} must be one url(asset://…ttf|otf).",
+            );
+        }
+        $fontSource = (string) ($match[1] !== ''
+            ? $match[1]
+            : ($match[2] !== '' ? $match[2] : $match[3]));
+        if (
+            preg_match(
+                '/^asset:\/\/[A-Za-z0-9_.\/-]+\.(?:ttf|otf)$/Di',
+                $fontSource,
+            ) !== 1
+            || str_contains($fontSource, '..')
+        ) {
+            throw new RuntimeException(
+                "@font-face src in {$name} must reference a safe packaged TTF or OTF asset.",
+            );
+        }
+        $weight = self::scalar(
+            self::resolveVariables($declarations['font-weight'] ?? '400', $variables, $name),
+            $name,
+        );
+        $numericWeight = (int) $weight;
+        if (
+            (string) $numericWeight !== $weight
+            || $numericWeight < 100
+            || $numericWeight > 900
+            || $numericWeight % 100 !== 0
+        ) {
+            throw new RuntimeException(
+                "@font-face font-weight in {$name} must be 100, 200, …, or 900.",
+            );
+        }
+        $style = strtolower(self::unquote(
+            self::resolveVariables($declarations['font-style'] ?? 'normal', $variables, $name),
+        ));
+        if (!in_array($style, ['normal', 'italic'], true)) {
+            throw new RuntimeException(
+                "@font-face font-style in {$name} supports only normal or italic.",
+            );
+        }
+
+        return [
+            'family' => $family,
+            'source' => $fontSource,
+            'weight' => $weight,
+            'style' => $style,
+        ];
     }
 
     /**
@@ -167,21 +264,7 @@ final class ScopedStyleCompiler
                     "Custom properties in {$name} must be declared in :root.",
                 );
             }
-            $value = preg_replace_callback(
-                '/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/',
-                static function (array $match) use ($variables, $name): string {
-                    if (!array_key_exists($match[1], $variables)) {
-                        throw new RuntimeException(
-                            "Unknown CSS variable {$match[1]} in {$name}.",
-                        );
-                    }
-                    return $variables[$match[1]];
-                },
-                trim($rawValue),
-            );
-            if (!is_string($value)) {
-                throw new RuntimeException("Cannot resolve CSS value in {$name}.");
-            }
+            $value = self::resolveVariables($rawValue, $variables, $name);
             if (in_array($property, ['padding', 'margin'], true)) {
                 self::expandBox($output, $property, $value, $name);
                 continue;
@@ -218,6 +301,31 @@ final class ScopedStyleCompiler
         }
 
         return $output;
+    }
+
+    /** @param array<string, string> $variables */
+    private static function resolveVariables(
+        string $value,
+        array $variables,
+        string $name,
+    ): string {
+        $resolved = preg_replace_callback(
+            '/var\(\s*(--[A-Za-z0-9_-]+)\s*\)/',
+            static function (array $match) use ($variables, $name): string {
+                if (!array_key_exists($match[1], $variables)) {
+                    throw new RuntimeException(
+                        "Unknown CSS variable {$match[1]} in {$name}.",
+                    );
+                }
+                return $variables[$match[1]];
+            },
+            trim($value),
+        );
+        if (!is_string($resolved)) {
+            throw new RuntimeException("Cannot resolve CSS value in {$name}.");
+        }
+
+        return $resolved;
     }
 
     /** @return array<string, string> */

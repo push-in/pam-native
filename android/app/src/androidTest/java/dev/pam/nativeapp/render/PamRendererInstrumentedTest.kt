@@ -138,6 +138,54 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun richVirtualListClipsTranslatedDescendantsAtItsViewport() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val parent = FrameLayout(activity).apply {
+                    setBackgroundColor(Color.TRANSPARENT)
+                }
+                val list = PamRecyclerList(activity)
+                parent.addView(
+                    list,
+                    FrameLayout.LayoutParams(100, 100).apply {
+                        topMargin = 50
+                    },
+                )
+                list.setRowHeight(100f)
+                list.setRichItems(
+                    ids = listOf(101L),
+                    extents = mapOf(101L to 100f),
+                    mount = { _, holder ->
+                        holder.addView(
+                            View(activity).apply {
+                                background = ColorDrawable(Color.RED)
+                                translationY = -40f
+                            },
+                            FrameLayout.LayoutParams(100, 100),
+                        )
+                    },
+                    unmount = { _, holder -> holder.removeAllViews() },
+                )
+                parent.measure(
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(200, View.MeasureSpec.EXACTLY),
+                )
+                parent.layout(0, 0, 100, 200)
+
+                val bitmap = Bitmap.createBitmap(100, 200, Bitmap.Config.ARGB_8888)
+                parent.draw(Canvas(bitmap))
+
+                assertEquals(Color.TRANSPARENT, bitmap.getPixel(50, 30))
+                assertEquals(Color.RED, bitmap.getPixel(50, 60))
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun overflowHiddenClipsChildrenToRoundedContainerAndCanBeDisabled() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

@@ -152,9 +152,19 @@ recalculation exists in the application runtime.
 
 <style scoped>
     :root {
-        --font-bold: asset://assets/fonts/SpaceGrotesk-Bold.ttf;
-        --font-regular: asset://assets/fonts/SpaceGrotesk-Regular.ttf;
         --ink-muted: #5C5C55;
+    }
+
+    @font-face {
+        font-family: "Space Grotesk";
+        src: url("asset://assets/fonts/SpaceGrotesk-Regular.ttf");
+        font-weight: 400;
+    }
+
+    @font-face {
+        font-family: "Space Grotesk";
+        src: url("asset://assets/fonts/SpaceGrotesk-Bold.ttf");
+        font-weight: 700;
     }
 
     .profile {
@@ -163,14 +173,16 @@ recalculation exists in the application runtime.
     }
 
     .profile-name {
-        font-family: var(--font-bold);
+        font-family: "Space Grotesk";
+        font-weight: 700;
         font-size: 15px;
     }
 
     .profile-bio {
         margin-top: 1px;
         color: var(--ink-muted);
-        font-family: var(--font-regular);
+        font-family: "Space Grotesk";
+        font-weight: 400;
         font-size: 13.5px;
         line-height: 18px;
     }
@@ -195,6 +207,10 @@ Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points.
 Percentages are supported for width, height, max-width, and max-height.
 `:root` is reserved for component-local `--custom-properties`. Selectors are a
 native tag, `.class`, or a comma-separated combination of those forms.
+Packaged fonts use compile-time `@font-face` declarations with one safe
+`url(asset://…ttf|otf)` source plus numeric `font-weight` and optional
+`font-style`; the selected asset becomes the native `fontFamily` property
+before rendering.
 Unsupported web-only properties such as `box-shadow`, nested selectors, media
 queries, descendant selectors, and unknown variables fail the build instead of
 silently producing a different native layout.

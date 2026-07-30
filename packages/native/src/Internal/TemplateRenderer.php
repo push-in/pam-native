@@ -2067,14 +2067,15 @@ final class TemplateRenderer
     /**
      * @return array{
      *     classes: array<string, array<string, string|bool>>,
-     *     tags: array<string, array<string, string|bool>>
+     *     tags: array<string, array<string, string|bool>>,
+     *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * }
      */
     private static function styleSheet(CompiledTemplateNode $tree): array
     {
         $encoded = $tree->attributes['__pamStyles'] ?? null;
         if (!is_string($encoded) || $encoded === '') {
-            return ['classes' => [], 'tags' => []];
+            return ['classes' => [], 'tags' => [], 'fonts' => []];
         }
         try {
             $decoded = json_decode($encoded, true, 64, JSON_THROW_ON_ERROR);
@@ -2089,8 +2090,9 @@ final class TemplateRenderer
         }
         $classes = self::validatedStyleRules($decoded['classes'] ?? null, $tree->source);
         $tags = self::validatedStyleRules($decoded['tags'] ?? null, $tree->source);
+        $fonts = self::validatedFontFaces($decoded['fonts'] ?? [], $tree->source);
 
-        return ['classes' => $classes, 'tags' => $tags];
+        return ['classes' => $classes, 'tags' => $tags, 'fonts' => $fonts];
     }
 
     /**
@@ -2127,6 +2129,48 @@ final class TemplateRenderer
             }
         }
 
+        $fonts = is_array($sheet['fonts'] ?? null) ? $sheet['fonts'] : [];
+
+        return self::resolveScopedFont($attributes, $fonts);
+    }
+
+    /**
+     * @param array<string, string|bool> $attributes
+     * @param array<string, list<array{source: string, weight: string, style: string}>> $fonts
+     * @return array<string, string|bool>
+     */
+    private static function resolveScopedFont(array $attributes, array $fonts): array
+    {
+        $family = $attributes['fontFamily'] ?? null;
+        if (!is_string($family) || !isset($fonts[$family])) {
+            return $attributes;
+        }
+        $wantedWeight = (int) ($attributes['fontWeight'] ?? '400');
+        $wantedStyle = (string) ($attributes['fontStyle'] ?? 'normal');
+        $best = null;
+        $bestScore = PHP_INT_MAX;
+        $exact = false;
+        foreach ($fonts[$family] as $face) {
+            $weight = (int) $face['weight'];
+            $stylePenalty = $face['style'] === $wantedStyle ? 0 : 10_000;
+            $score = $stylePenalty + abs($weight - $wantedWeight);
+            if ($score < $bestScore) {
+                $best = $face;
+                $bestScore = $score;
+            }
+            if ($score === 0) {
+                $exact = true;
+                break;
+            }
+        }
+        if ($best === null) {
+            return $attributes;
+        }
+        $attributes['fontFamily'] = $best['source'];
+        if ($exact) {
+            unset($attributes['fontWeight'], $attributes['fontStyle']);
+        }
+
         return $attributes;
     }
 
@@ -2153,6 +2197,39 @@ final class TemplateRenderer
             }
             /** @var array<string, string|bool> $attributes */
             $validated[$selector] = $attributes;
+        }
+
+        return $validated;
+    }
+
+    /**
+     * @return array<string, list<array{source: string, weight: string, style: string}>>
+     */
+    private static function validatedFontFaces(mixed $fonts, string $source): array
+    {
+        if (!is_array($fonts)) {
+            throw new RuntimeException("Invalid compiled fonts in {$source}.");
+        }
+        $validated = [];
+        foreach ($fonts as $family => $faces) {
+            if (!is_string($family) || $family === '' || !is_array($faces)) {
+                throw new RuntimeException("Invalid compiled font family in {$source}.");
+            }
+            foreach ($faces as $face) {
+                if (
+                    !is_array($face)
+                    || !is_string($face['source'] ?? null)
+                    || !is_string($face['weight'] ?? null)
+                    || !is_string($face['style'] ?? null)
+                ) {
+                    throw new RuntimeException("Invalid compiled font face in {$source}.");
+                }
+                $validated[$family][] = [
+                    'source' => $face['source'],
+                    'weight' => $face['weight'],
+                    'style' => $face['style'],
+                ];
+            }
         }
 
         return $validated;

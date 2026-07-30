@@ -246,6 +246,13 @@ $compiledCss = ScopedStyleCompiler::compile(
         --ink: #101410;
     }
 
+    @font-face {
+        font-family: "Space Grotesk";
+        src: url(var(--font-ui));
+        font-weight: 400;
+        font-style: normal;
+    }
+
     Text, .body-copy {
         color: var(--ink);
         font-family: var(--font-ui);
@@ -267,6 +274,14 @@ $assert(
         && $compiledCss['classes']['body-copy']['fontFamily']
             === 'asset://assets/fonts/SpaceGrotesk-Regular.ttf',
     'Scoped CSS must resolve variables in tag and class rules.',
+);
+$assert(
+    $compiledCss['fonts']['Space Grotesk'][0] === [
+        'source' => 'asset://assets/fonts/SpaceGrotesk-Regular.ttf',
+        'weight' => '400',
+        'style' => 'normal',
+    ],
+    'Scoped CSS must compile packaged @font-face aliases without a runtime registry.',
 );
 $assert(
     $compiledCss['classes']['card'] === [
@@ -2864,8 +2879,10 @@ final class CounterCard extends Component
 </template>
 
 <style scoped>
-    :root {
-        --brand-bold: asset://assets/fonts/Brand-Bold.ttf;
+    @font-face {
+        font-family: "Brand";
+        src: url("asset://assets/fonts/Brand-Bold.ttf");
+        font-weight: 700;
     }
 
     Text {
@@ -2875,7 +2892,7 @@ final class CounterCard extends Component
 
     .profile-title {
         color: #1B7A4E;
-        font-family: var(--brand-bold);
+        font-family: "Brand";
         font-size: 15px;
         font-weight: 700;
         line-height: 18px;
@@ -3363,8 +3380,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.49',
-    'The runtime SDK contract must match the 0.5.49 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.50',
+    'The runtime SDK contract must match the 0.5.50 package release.',
 );
 $assert(
     array_map(

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.50 - 2026-07-30
+
+- Clip Android virtualized-list drawing directly at the native canvas
+  viewport, including translated or animated rich descendants that platform
+  child clipping alone cannot contain.
+- Add compile-time scoped `@font-face` aliases for packaged TTF and OTF assets,
+  with numeric weight and italic variant selection through familiar CSS
+  `font-family`, `font-weight`, and `font-style` declarations.
+- Resolve font aliases to cached native asset families before the component is
+  rendered, preserving PAM's zero-CSS-runtime contract.
+
 ## 0.5.49 - 2026-07-30
 
 - Keep Android virtual-list viewports and recycled holders as hard native paint
