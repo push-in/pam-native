@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.44 - 2026-07-29
+
+- Cancel stale native long-poll waiters before a hot reload and let the new PHP
+  runtime immediately re-arm deep-link, incoming-share, and push listeners.
+- Drop asynchronous native completions from older runtime generations so a
+  reload cannot deliver obsolete callbacks into the new application instance.
+
 ## 0.5.43 - 2026-07-29
 
 - Convert logical-point text letter spacing to Android `em` units using the

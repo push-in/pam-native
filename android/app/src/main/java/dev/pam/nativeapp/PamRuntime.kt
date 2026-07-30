@@ -141,6 +141,7 @@ class PamRuntime(
             val active = handle
             if (active != 0L) {
                 readyForEvents = false
+                modules.prepareReload()
                 nativeReload(active, entryPath)
             }
         }

@@ -54,6 +54,12 @@ public object PamPushNotifications {
         pending?.complete(ModuleResultStatus.FAILURE, message.toByteArray())
     }
 
+    internal fun prepareReload() {
+        synchronized(lock) {
+            waiter = null
+        }
+    }
+
     private fun report(
         event: Int,
         id: String,

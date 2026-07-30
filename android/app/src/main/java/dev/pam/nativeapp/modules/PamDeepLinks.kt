@@ -67,6 +67,12 @@ internal object PamDeepLinks {
         pending?.complete(ModuleResultStatus.FAILURE, message.toByteArray())
     }
 
+    fun prepareReload() {
+        synchronized(lock) {
+            waiter = null
+        }
+    }
+
     private fun payload(url: String): ByteArray =
         WireMap.encode(mapOf("url" to WireValue.Text(url)))
 

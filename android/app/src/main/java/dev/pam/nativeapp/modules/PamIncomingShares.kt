@@ -72,6 +72,12 @@ internal object PamIncomingShares {
         pending?.complete(ModuleResultStatus.FAILURE, message.toByteArray())
     }
 
+    fun prepareReload() {
+        synchronized(lock) {
+            waiter = null
+        }
+    }
+
     private fun capture(context: Context, intent: Intent?): ByteArray? {
         if (intent == null || intent.action !in setOf(Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE)) {
             return null

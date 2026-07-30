@@ -1,8 +1,10 @@
 package dev.pam.nativeapp.modules
 
 import android.content.Context
+import java.util.concurrent.atomic.AtomicLong
 
 class NativeModuleRegistry(context: Context) : AutoCloseable {
+    private val generation = AtomicLong(1)
     private val http = HttpModule()
     private val storage = StorageModule(context)
     private val system = SystemModule(context)
@@ -49,10 +51,11 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         payload: ByteArray,
         completion: ModuleCompletion,
     ) {
+        val reloadSafeCompletion = completion.forGeneration(generation.get())
         when (val operation = NativeOperation.from(operationValue)) {
-            NativeOperation.HTTP_GET -> http.invoke("get", payload, completion)
-            NativeOperation.STORAGE_GET -> storage.invoke("get", payload, completion)
-            NativeOperation.STORAGE_SET -> storage.invoke("set", payload, completion)
+            NativeOperation.HTTP_GET -> http.invoke("get", payload, reloadSafeCompletion)
+            NativeOperation.STORAGE_GET -> storage.invoke("get", payload, reloadSafeCompletion)
+            NativeOperation.STORAGE_SET -> storage.invoke("set", payload, reloadSafeCompletion)
             NativeOperation.ALERT,
             NativeOperation.TOAST,
             NativeOperation.SHARE,
@@ -69,8 +72,8 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
             NativeOperation.CLIPBOARD_GET_TEXT,
             NativeOperation.CLIPBOARD_HAS_TEXT,
             NativeOperation.SENSOR_READ,
-            -> system.invoke(operation, payload, completion)
-            null -> completion.complete(
+            -> system.invoke(operation, payload, reloadSafeCompletion)
+            null -> reloadSafeCompletion.complete(
                 ModuleResultStatus.FAILURE,
                 "Unknown native operation $operationValue".toByteArray(),
             )
@@ -83,23 +86,39 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         payload: ByteArray,
         completion: ModuleCompletion,
     ) {
+        val reloadSafeCompletion = completion.forGeneration(generation.get())
         val implementation = modules[module]
         if (implementation == null) {
-            completion.complete(
+            reloadSafeCompletion.complete(
                 ModuleResultStatus.FAILURE,
                 "Unknown native module $module".toByteArray(),
             )
             return
         }
-        implementation.invoke(method, payload, completion)
+        implementation.invoke(method, payload, reloadSafeCompletion)
+    }
+
+    fun prepareReload() {
+        generation.incrementAndGet()
+        PamDeepLinks.prepareReload()
+        PamIncomingShares.prepareReload()
+        PamPushNotifications.prepareReload()
     }
 
     override fun close() {
+        generation.incrementAndGet()
         modules.values.filterIsInstance<AutoCloseable>().forEach {
             runCatching { it.close() }
         }
         runCatching { system.close() }
     }
+
+    private fun ModuleCompletion.forGeneration(expected: Long): ModuleCompletion =
+        ModuleCompletion { status, payload ->
+            if (generation.get() == expected) {
+                complete(status, payload)
+            }
+        }
 }
 
 enum class NativeOperation(val value: Int) {
