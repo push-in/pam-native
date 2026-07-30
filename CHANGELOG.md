@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.79 - 2026-07-30
+
+- Accept `keyboardType="default"` and the familiar React Native keyboard names
+  (`email-address`, `number-pad`, `numeric`, `phone-pad`, `decimal-pad`, and
+  text-keyboard variants) as aliases for PAM's typed native keyboard modes.
+
 ## 0.5.78 - 2026-07-30
 
 - Accept the standard CSS `text-align: left` and `text-align: right` values as

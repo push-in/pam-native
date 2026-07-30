@@ -223,6 +223,13 @@ sized or growing text keeps normal start alignment unless `text-align` is
 authored. `text-align` accepts the familiar CSS values `left`, `center`, and
 `right`, plus the logical aliases `start` and `end`.
 
+`Input keyboardType` accepts the concise PAM values `text`, `email`, `number`,
+`phone`, `decimal`, and `url`. React Native-compatible aliases are also valid:
+`default`, `email-address`, `number-pad`, `numeric`, `phone-pad`,
+`decimal-pad`, `ascii-capable`, `ascii-capable-number-pad`,
+`numbers-and-punctuation`, `name-phone-pad`, `twitter`, `web-search`, and
+`visible-password`.
+
 `pam-native-format` removes an empty `<style scoped>` block automatically, so
 components that rely only on `src/app.css` keep no placeholder markup.
 

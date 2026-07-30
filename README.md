@@ -393,6 +393,11 @@ automatic font fitting, accessibility font scaling with an optional maximum,
 Android break/hyphenation strategies and local link/e-mail/phone detection.
 These behaviors never require a PHP callback.
 
+`Input keyboardType` accepts PAM's concise `text`, `email`, `number`, `phone`,
+`decimal`, and `url` names plus familiar React Native values such as
+`default`, `email-address`, `number-pad`, `numeric`, `phone-pad`, and
+`decimal-pad`.
+
 Mounted `StatusBar` nodes in the active retained route merge in mount order and
 restore the prior window configuration when removed. Hidden stack routes cannot
 override the visible screen; push, pop, replace and interactive-back targets

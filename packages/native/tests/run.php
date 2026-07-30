@@ -53,6 +53,7 @@ use Pam\Native\InputMode;
 use Pam\Native\InputSelectionEvent;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
+use Pam\Native\KeyboardType;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\PamPhpCompiler;
@@ -1244,6 +1245,34 @@ $secureAliasElement = TemplateRenderer::render(
 $assert(
     $secureAliasElement->properties()[PropKey::Secure->value] === true,
     'Input secureTextEntry must remain a compatible alias for secure.',
+);
+$keyboardAliasElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column>'
+        .'<Input keyboardType="default" />'
+        .'<Input keyboardType="email-address" />'
+        .'<Input keyboardType="number-pad" />'
+        .'<Input keyboardType="phone-pad" />'
+        .'<Input keyboardType="decimal-pad" />'
+        .'</Column>',
+    ),
+    new class {
+    },
+    [],
+);
+$assert(
+    array_map(
+        static fn (\Pam\Native\Element $input): int => $input
+            ->properties()[PropKey::KeyboardType->value],
+        $keyboardAliasElement->children(),
+    ) === [
+        KeyboardType::Text->value,
+        KeyboardType::Email->value,
+        KeyboardType::Number->value,
+        KeyboardType::Phone->value,
+        KeyboardType::Decimal->value,
+    ],
+    'Input keyboardType must accept familiar React Native aliases.',
 );
 $dynamicColorElement = TemplateRenderer::render(
     TemplateCompiler::compile(
@@ -4179,8 +4208,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.78',
-    'The runtime SDK contract must match the 0.5.78 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.79',
+    'The runtime SDK contract must match the 0.5.79 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
