@@ -49,6 +49,14 @@
         <receiver
             android:name="dev.pam.nativeapp.modules.NotificationReceiver"
             android:exported="false" />
+        <service
+            android:name="${pamFirebaseMessagingService}"
+            android:enabled="${pamFirebaseMessagingEnabled}"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
         <profileable
             android:shell="true"
             tools:targetApi="q" />

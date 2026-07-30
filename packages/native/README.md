@@ -94,7 +94,7 @@ Android project fonts can be bundled in the application source and loaded
 through an asset family:
 
 ```css
-/* src/styles/brand.css */
+/* src/app.css */
 @font-face {
     font-family: "Brand";
     src: url("asset://assets/fonts/Brand-Bold.ttf");
@@ -112,10 +112,7 @@ Text {
 </template>
 
 <style scoped>
-    @import "./styles/brand.css";
-
     .brand-title {
-        font-family: "Brand";
         font-weight: 700;
         font-size: 20px;
     }
@@ -129,10 +126,12 @@ face while compiling the component, so there is no font registry, CSS parser,
 or selector work in the application runtime. PAM accepts TTF and OTF files,
 rejects traversal, caches decoded native typefaces, and keeps ordinary
 installed family names such as `sans-serif` working unchanged.
-Relative `.css` imports are expanded recursively at compile time, remain
-scoped to the importing component, and invalidate that component's compiled
-cache when a dependency changes. Imports cannot leave the Composer project or
-load network resources.
+The conventional `src/app.css` sheet is prepended automatically to every PAM
+component. Use it for fonts, design tokens, tag defaults, and reusable classes;
+local `<style scoped>` rules win the cascade. Relative `.css` imports are
+expanded recursively from the file that declares them at compile time and
+invalidate compiled component caches when a dependency changes. Imports cannot
+leave the Composer project or load network resources.
 Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules, `.class` rules, component-local variables,
 percentages, common box shorthands, and dynamic classes are supported; unknown

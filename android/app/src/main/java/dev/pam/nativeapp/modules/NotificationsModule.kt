@@ -17,6 +17,11 @@ import dev.pam.nativeapp.protocol.WireValue
 
 internal class NotificationsModule(private val activity: PamActivity) : NativeModule, AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
+
+    init {
+        PamPushNotifications.attach(activity.applicationContext)
+    }
+
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
         runCatching {
             when (method) {

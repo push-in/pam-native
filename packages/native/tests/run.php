@@ -435,12 +435,84 @@ $assert(
         && $secondImportedStyles['tags']['Text']['textColor'] === '#245E42',
     'Changing an imported CSS dependency must invalidate the compiled component cache.',
 );
+file_put_contents(
+    $cssImportRoot.'/src/app.css',
+    <<<'CSS'
+:root {
+    --app-ink: #112A1C;
+}
+
+Text {
+    color: var(--app-ink);
+    font-size: 13px;
+}
+
+.shared-card {
+    padding: 8px;
+}
+CSS,
+);
+file_put_contents(
+    $cssImportComponent,
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\CssImport;
+
+use Pam\Native\Component;
+
+final class Profile extends Component
+{
+}
+?>
+
+<template>
+    <Column class="shared-card">
+        <Text>Profile</Text>
+    </Column>
+</template>
+
+<style scoped>
+    .shared-card {
+        padding-left: 16px;
+    }
+
+    Text {
+        font-size: 15px;
+    }
+</style>
+PAM,
+);
+$globalStyleComponent = PamPhpCompiler::compileFile(
+    $cssImportComponent,
+    $cssImportCache,
+);
+$globalStyles = json_decode(
+    (string) ($globalStyleComponent->template->attributes['__pamStyles'] ?? ''),
+    true,
+    32,
+    JSON_THROW_ON_ERROR,
+);
+$assert(
+    $globalStyles['tags']['Text']['textColor'] === '#112A1C'
+        && $globalStyles['tags']['Text']['fontSize'] === '15'
+        && $globalStyles['classes']['shared-card'] === [
+            'paddingTop' => '8',
+            'paddingRight' => '8',
+            'paddingBottom' => '8',
+            'paddingLeft' => '16',
+        ],
+    'src/app.css must apply globally while local component CSS wins the cascade.',
+);
 unlink($outsideCss);
 unlink($cssImportComponent);
 foreach (glob($cssImportCache.'/*') ?: [] as $cacheFile) {
     unlink($cacheFile);
 }
 rmdir($cssImportCache);
+unlink($cssImportRoot.'/src/app.css');
 unlink($cssImportRoot.'/src/styles/brand.css');
 unlink($cssImportRoot.'/src/styles/tokens.css');
 unlink($cssImportRoot.'/composer.json');
@@ -3550,8 +3622,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.53',
-    'The runtime SDK contract must match the 0.5.53 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.54',
+    'The runtime SDK contract must match the 0.5.54 package release.',
 );
 $assert(
     array_map(

@@ -105,9 +105,7 @@ final class PamPhpCompiler
         }
 
         [$php, $template, $templateLine, $style] = self::split($contents, $source);
-        if ($style !== '') {
-            $style = ScopedStyleCompiler::resolveImports($style, $source);
-        }
+        $style = self::resolvedStyleSheet($style, $source);
         self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
         $cacheKey = hash('sha256', $source);
@@ -167,6 +165,59 @@ final class PamPhpCompiler
             classFile: $classFile,
             template: $tree,
         );
+    }
+
+    /**
+     * Prepends the conventional project-wide `src/app.css` sheet to a
+     * component's local scoped CSS. Both sources are expanded independently so
+     * relative imports keep resolving from the file that declared them.
+     */
+    private static function resolvedStyleSheet(
+        string $localStyle,
+        string $component,
+    ): string {
+        $sources = [];
+        $appStyle = self::appStylePath($component);
+        if ($appStyle !== null) {
+            $contents = file_get_contents($appStyle);
+            if ($contents === false) {
+                throw new RuntimeException("Cannot read PAM application stylesheet {$appStyle}.");
+            }
+            $sources[] = ScopedStyleCompiler::resolveImports($contents, $appStyle);
+        }
+        if ($localStyle !== '') {
+            $sources[] = ScopedStyleCompiler::resolveImports($localStyle, $component);
+        }
+
+        return implode("\n", $sources);
+    }
+
+    private static function appStylePath(string $component): ?string
+    {
+        $directory = dirname($component);
+        while (true) {
+            $manifest = $directory.DIRECTORY_SEPARATOR.'composer.json';
+            if (is_file($manifest)) {
+                $candidate = $directory.DIRECTORY_SEPARATOR.'src'
+                    .DIRECTORY_SEPARATOR.'app.css';
+                if (!is_file($candidate)) {
+                    return null;
+                }
+                $resolved = realpath($candidate);
+                if (!is_string($resolved)) {
+                    throw new RuntimeException(
+                        "Cannot resolve PAM application stylesheet {$candidate}.",
+                    );
+                }
+
+                return $resolved;
+            }
+            $parent = dirname($directory);
+            if ($parent === $directory) {
+                return null;
+            }
+            $directory = $parent;
+        }
     }
 
     private static function validateHotPath(string $php, string $source): void

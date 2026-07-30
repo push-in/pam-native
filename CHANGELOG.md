@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.54 - 2026-07-30
+
+- Apply the conventional `src/app.css` stylesheet to every PAM component at
+  compile time, with local scoped rules winning the cascade and no runtime CSS
+  parser or selector pass.
+- Resolve imports relative to the global or local stylesheet that declares
+  them and include the complete global graph in component cache invalidation.
+- Add optional zero-glue Android Firebase Cloud Messaging reception when
+  `.pam/google-services.json` or `google-services.json` is present, without
+  adding Firebase bytecode to applications that do not configure it.
+- Persist received native push payloads across process/runtime startup so PHP
+  listeners can reconcile background events reliably.
+
 ## 0.5.53 - 2026-07-30
 
 - Expose top, right, bottom, and left safe-area insets through `DeviceInfo` in

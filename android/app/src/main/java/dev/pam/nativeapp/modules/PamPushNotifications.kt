@@ -1,14 +1,42 @@
 package dev.pam.nativeapp.modules
 
+import android.content.Context
+import android.content.SharedPreferences
+import android.util.Base64
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.util.ArrayDeque
+import org.json.JSONArray
 import org.json.JSONObject
 
 public object PamPushNotifications {
     private val lock = Any()
     private val events = ArrayDeque<ByteArray>()
     private var waiter: ModuleCompletion? = null
+    private var preferences: SharedPreferences? = null
+
+    @JvmStatic
+    public fun attach(context: Context) {
+        synchronized(lock) {
+            if (preferences != null) return
+            preferences = context.applicationContext.getSharedPreferences(
+                PREFERENCES_NAME,
+                Context.MODE_PRIVATE,
+            )
+            val stored = runCatching {
+                JSONArray(preferences?.getString(PREFERENCES_EVENTS, "[]") ?: "[]")
+            }.getOrDefault(JSONArray())
+            for (index in 0 until stored.length()) {
+                val encoded = stored.optString(index)
+                val payload = runCatching {
+                    Base64.decode(encoded, Base64.NO_WRAP)
+                }.getOrNull() ?: continue
+                if (payload.isNotEmpty()) events.addLast(payload)
+            }
+            while (events.size > MAX_QUEUED_EVENTS) events.removeFirst()
+            persistLocked()
+        }
+    }
 
     @JvmStatic
     public fun reportReceived(
@@ -39,7 +67,7 @@ public object PamPushNotifications {
                 waiter = completion
                 null
             } else {
-                events.removeFirst()
+                events.removeFirst().also { persistLocked() }
             }
         }
         if (event != null) completion.complete(ModuleResultStatus.SUCCESS, event)
@@ -86,6 +114,7 @@ public object PamPushNotifications {
             if (value == null) {
                 if (events.size >= MAX_QUEUED_EVENTS) events.removeFirst()
                 events.addLast(payload)
+                persistLocked()
             } else {
                 waiter = null
             }
@@ -94,6 +123,17 @@ public object PamPushNotifications {
         pending?.complete(ModuleResultStatus.SUCCESS, payload)
     }
 
+    private fun persistLocked() {
+        val storage = preferences ?: return
+        val encoded = JSONArray()
+        events.forEach { payload ->
+            encoded.put(Base64.encodeToString(payload, Base64.NO_WRAP))
+        }
+        storage.edit().putString(PREFERENCES_EVENTS, encoded.toString()).apply()
+    }
+
     private const val MAX_QUEUED_EVENTS = 64
     private const val MAX_DATA_BYTES = 256 * 1024
+    private const val PREFERENCES_EVENTS = "events"
+    private const val PREFERENCES_NAME = "pam-native-push"
 }

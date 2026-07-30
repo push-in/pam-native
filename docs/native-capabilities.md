@@ -100,8 +100,13 @@ IncomingShares::listen($openComposer);
 `BackgroundTasks::end()`.
 
 `Notifications` requests permission and schedules/cancels local notifications.
-`PushNotifications::register()` returns an FCM token when the Android host
-includes Firebase Messaging. iOS hosts forward their app-delegate callbacks:
+On Android, place the Firebase client file at
+`.pam/google-services.json` (preferred) or `google-services.json` in the PAM
+project root. The generated host then enables Firebase Messaging,
+`PushNotifications::register()` returns its token, and received messages enter
+the persistent PAM event stream automatically. Projects without that file do
+not compile or package Firebase. iOS hosts forward their app-delegate
+callbacks:
 
 ```swift
 func application(
@@ -119,10 +124,11 @@ func application(
 }
 ```
 
-The framework owns token acquisition and the bounded receive/open event stream;
-provider transport and server-side delivery remain host configuration. See the
-[production capability guide](production-capabilities.md) for FCM/APNs delegate
-forwarding and automatic deep-link routing.
+The framework owns token acquisition and the bounded receive/open event stream.
+Queued Android receives survive Activity and PHP-runtime startup. Provider
+transport and server-side delivery remain application configuration. See the
+[production capability guide](production-capabilities.md) for FCM/APNs setup
+and automatic deep-link routing.
 
 ## SQLite
 

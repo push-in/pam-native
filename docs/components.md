@@ -142,11 +142,16 @@ compiles this native-safe CSS subset into typed element properties when it
 compiles the component. No CSS parser, WebView, selector engine, or style
 recalculation exists in the application runtime.
 
-Shared tokens and typography may live in an ordinary CSS file and be imported
-by each component that uses them:
+Shared tokens, typography, tag defaults, and reusable classes belong in the
+conventional application stylesheet `src/app.css`. PAM prepends it to every
+component automatically:
 
 ```css
-/* src/styles/brand.css */
+/* src/app.css */
+:root {
+    --ink-muted: #5C5C55;
+}
+
 @font-face {
     font-family: "Space Grotesk";
     src: url("asset://assets/fonts/SpaceGrotesk-Regular.ttf");
@@ -158,16 +163,11 @@ Text {
 }
 ```
 
-```php
-<style scoped>
-    @import "../../styles/brand.css";
-</style>
-```
-
-Imports are expanded when the component is compiled. They may be nested, must
-use a relative `.css` path inside the nearest Composer project, and participate
-in cache invalidation. Imported selectors remain scoped to the importing
-component, and local rules that follow the import override them normally.
+`src/app.css` may itself use relative `@import` statements to split tokens,
+fonts, and components into smaller files. Imports are expanded from the CSS
+file that declares them when the component is compiled. They may be nested,
+must stay inside the nearest Composer project, and participate in cache
+invalidation. No stylesheet or selector engine is shipped in the app.
 
 ```php
 <template>
@@ -178,29 +178,12 @@ component, and local rules that follow the import override them normally.
 </template>
 
 <style scoped>
-    :root {
-        --ink-muted: #5C5C55;
-    }
-
-    @font-face {
-        font-family: "Space Grotesk";
-        src: url("asset://assets/fonts/SpaceGrotesk-Regular.ttf");
-        font-weight: 400;
-    }
-
-    @font-face {
-        font-family: "Space Grotesk";
-        src: url("asset://assets/fonts/SpaceGrotesk-Bold.ttf");
-        font-weight: 700;
-    }
-
     .profile {
         padding: 0 16px;
         margin-top: 9px;
     }
 
     .profile-name {
-        font-family: "Space Grotesk";
         font-weight: 700;
         font-size: 15px;
     }
@@ -208,13 +191,16 @@ component, and local rules that follow the import override them normally.
     .profile-bio {
         margin-top: 1px;
         color: var(--ink-muted);
-        font-family: "Space Grotesk";
         font-weight: 400;
         font-size: 13.5px;
         line-height: 18px;
     }
 </style>
 ```
+
+Here `--ink-muted`, the font faces, and the default `Text` family are declared
+once in `src/app.css`. The local component sheet stays focused on its semantic
+layout and overrides global rules when necessary.
 
 The cascade is deterministic: a tag rule is the base, classes are applied from
 left to right, and an inline PAM attribute wins last. Both `class` and

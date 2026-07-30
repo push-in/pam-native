@@ -34,6 +34,18 @@ val pamVersionName = pamProperties.getProperty("versionName", "0.2.1")
 val pamAbis = pamProperties.getProperty("abis", "arm64-v8a,x86_64")
     .split(',')
     .filter(String::isNotBlank)
+val pamProjectRoot = pamProperties.getProperty("projectRoot", "")
+val pamGoogleServicesSource = listOf(
+    file("$pamProjectRoot/.pam/google-services.json"),
+    file("$pamProjectRoot/google-services.json"),
+).firstOrNull(File::isFile) ?: file("$pamProjectRoot/.pam/google-services.json")
+val pamFirebaseMessagingEnabled = pamProjectRoot.isNotBlank()
+    && pamGoogleServicesSource.isFile
+
+if (pamFirebaseMessagingEnabled) {
+    pamGoogleServicesSource.copyTo(file("google-services.json"), overwrite = true)
+    apply(plugin = "com.google.gms.google-services")
+}
 
 android {
     namespace = "dev.pam.nativeapp"
@@ -48,6 +60,14 @@ android {
         versionName = pamVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["pamApplicationName"] = pamApplicationName
+        manifestPlaceholders["pamFirebaseMessagingEnabled"] =
+            pamFirebaseMessagingEnabled.toString()
+        manifestPlaceholders["pamFirebaseMessagingService"] =
+            if (pamFirebaseMessagingEnabled) {
+                "dev.pam.nativeapp.modules.PamFirebaseMessagingService"
+            } else {
+                "dev.pam.nativeapp.modules.PamDisabledFirebaseMessagingService"
+            }
 
         externalNativeBuild {
             cmake {
@@ -69,7 +89,9 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            if (!pamFirebaseMessagingEnabled) {
+                applicationIdSuffix = ".debug"
+            }
             isJniDebuggable = true
         }
         release {
@@ -103,6 +125,9 @@ android {
         getByName("main").kotlin.directories.add(
             pamProperties.getProperty("projectRoot") + "/android/src/main/kotlin",
         )
+        if (pamFirebaseMessagingEnabled) {
+            getByName("main").kotlin.directories.add("src/firebase/kotlin")
+        }
     }
 
     buildFeatures {
@@ -140,6 +165,9 @@ dependencies {
     implementation(project(":plugin-api"))
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    if (pamFirebaseMessagingEnabled) {
+        implementation("com.google.firebase:firebase-messaging:25.1.1")
+    }
     add("benchmarkImplementation", "androidx.tracing:tracing:1.1.0")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")

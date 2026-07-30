@@ -5,7 +5,10 @@ remain available; new code should use `PermissionKind`.
 
 ## Host changes
 
-- Android FCM data services call `PamPushNotifications.reportReceived()`.
+- Android FCM projects place their client configuration at
+  `.pam/google-services.json` or `google-services.json`; PAM supplies the
+  messaging service automatically. Existing custom services may continue to
+  call `PamPushNotifications.reportReceived()`.
 - iOS adds relevant usage descriptions and forwards notification delegate
   callbacks described in `production-capabilities.md`.
 - iOS runtime hosts may pass the optional `onDiagnostic` callback.

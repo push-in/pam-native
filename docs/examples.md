@@ -142,7 +142,8 @@ $pushSubscription = PushNotifications::listenAndRoute(
 PushNotifications::unsubscribe($pushSubscription);
 ```
 
-Provider/APNs/FCM host setup and delegate forwarding are documented in
+Android FCM is enabled by adding `.pam/google-services.json`; APNs delegate
+forwarding and the full provider setup are documented in
 [production capabilities](production-capabilities.md).
 
 ## Finite background work

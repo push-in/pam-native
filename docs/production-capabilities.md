@@ -55,9 +55,13 @@ does not exceed the native bridge payload limit.
 $subscription = PushNotifications::listenAndRoute($navigator, $onMessage);
 ```
 
-Android Firebase services forward data messages through
-`PamPushNotifications.reportReceived(...)`; Pam notification-opening intents
-are forwarded automatically. Custom intents can call `reportOpened(...)`.
+Android projects only need their Firebase client file at
+`.pam/google-services.json` (preferred) or root `google-services.json`. PAM
+conditionally compiles the Firebase service and dependency, forwards
+notification and data payloads to `PushNotifications`, and persists up to 64
+unconsumed events across process startup. Pam notification-opening intents are
+forwarded automatically. Custom native integrations may still call
+`PamPushNotifications.reportReceived(...)` or `reportOpened(...)`.
 
 iOS notification delegates forward foreground delivery with
 `PamPushNotifications.didReceive(notification:)` and opening with
