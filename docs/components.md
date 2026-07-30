@@ -282,6 +282,11 @@ Packaged fonts use compile-time `@font-face` declarations with one safe
 `url(asset://…ttf|otf)` source plus numeric `font-weight` and optional
 `font-style`; the selected asset becomes the native `fontFamily` property
 before rendering.
+All `asset://` URLs are relative to the PAM project root. For example,
+`asset://assets/brand.png` and
+`url(asset://assets/fonts/Brand-Regular.ttf)` address files under the
+project's `assets/` directory; never add the runtime's internal `pam/` bundle
+prefix yourself.
 Unsupported web-only properties such as `box-shadow`, nested selectors, media
 queries, descendant selectors, and unknown variables fail the build instead of
 silently producing a different native layout.

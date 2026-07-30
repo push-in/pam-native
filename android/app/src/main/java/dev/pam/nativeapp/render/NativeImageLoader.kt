@@ -515,7 +515,9 @@ internal class NativeImageLoader(
                     source,
                 ).inputStream().use(::readBounded)
             "asset" -> context.assets.open(
-                uri.schemeSpecificPart.removePrefix("//").removePrefix("/"),
+                requireNotNull(normalizedPamAssetPath(source)) {
+                    "Image asset path is invalid."
+                },
             ).use(::readBounded)
             null -> context.assets.open(source.removePrefix("/"))
                 .use(::readBounded)

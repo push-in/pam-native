@@ -32,21 +32,9 @@ internal class NativeTypefaceLoader(context: Context) {
 }
 
 internal fun normalizedFontAssetPath(family: String): String? {
-    if (!family.startsWith(ASSET_SCHEME)) {
-        return null
-    }
-    val relative = family.removePrefix(ASSET_SCHEME).trimStart('/')
-    require(relative.isNotBlank()) { "Font asset path cannot be empty" }
-    require('\\' !in relative && '\u0000' !in relative) {
-        "Font asset path contains invalid characters"
-    }
-    require(relative.split('/').none { it.isBlank() || it == "." || it == ".." }) {
-        "Font asset path cannot contain empty or traversal segments"
-    }
-    require(relative.endsWith(".ttf", true) || relative.endsWith(".otf", true)) {
+    val assetPath = normalizedPamAssetPath(family) ?: return null
+    require(assetPath.endsWith(".ttf", true) || assetPath.endsWith(".otf", true)) {
         "Font asset must be a TTF or OTF file"
     }
-    return if (relative.startsWith("pam/")) relative else "pam/$relative"
+    return assetPath
 }
-
-private const val ASSET_SCHEME = "asset://"

@@ -2310,8 +2310,27 @@ public final class PamRenderer {
     }
 
     private func localImage(_ source: String) -> UIImage? {
-        if source.hasPrefix("asset://") {
-            return UIImage(named: String(source.dropFirst("asset://".count)))
+        if source.lowercased().hasPrefix("asset://") {
+            guard let path = try? normalizedPamAssetPath(source) else {
+                return nil
+            }
+            let resourcePath = path as NSString
+            let directory = resourcePath.deletingLastPathComponent
+            let fileName = resourcePath.lastPathComponent
+            if let url = Bundle.main.url(
+                forResource: fileName,
+                withExtension: nil,
+                subdirectory: directory
+            ) {
+                return UIImage(contentsOfFile: url.path)
+            }
+            if let resourceRoot = Bundle.main.resourceURL {
+                let url = resourceRoot.appendingPathComponent(path, isDirectory: false)
+                if FileManager.default.fileExists(atPath: url.path) {
+                    return UIImage(contentsOfFile: url.path)
+                }
+            }
+            return UIImage(named: path)
         }
         if let url = sandboxFileURL(source) {
             return UIImage(contentsOfFile: url.path)

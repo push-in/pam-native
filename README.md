@@ -360,6 +360,11 @@ cover/contain/stretch/center/repeat, `srcSet`, safe request headers and opt-in
 typed lifecycle events. Images with no registered lifecycle callbacks produce
 zero PHP bridge traffic.
 
+Packaged image paths are project-relative: `asset://assets/logo.png` resolves
+the checked-in `assets/logo.png` identically on Android and iOS. The runtime
+owns the platform-specific `pam/` bundle prefix, including for placeholders
+and `ImageBackground`.
+
 `SafeAreaView` accepts independent top/right/bottom/left edges and padding or
 margin mode. `KeyboardAvoidingView` supports resize/height, pan/position and
 padding behavior, a vertical offset and an enabled switch. Android window

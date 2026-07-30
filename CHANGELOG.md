@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.72 - 2026-07-30
+
+- Resolve every `asset://…` image and packaged font relative to the PAM
+  project bundle on Android and iOS, without exposing the internal `pam/`
+  namespace to application code.
+- Reject empty, traversal, query, fragment, and malformed packaged-asset paths
+  before they reach platform file APIs.
+
 ## 0.5.71 - 2026-07-30
 
 - Compile CSS colors with web semantics: `transparent`, the complete named

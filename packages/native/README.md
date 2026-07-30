@@ -253,6 +253,12 @@ Image::make($url)
     ->onError($showFallback);
 ```
 
+`asset://` always starts at the PAM project root. For example,
+`asset://assets/logos/brand.png` loads
+`assets/logos/brand.png` on both Android and iOS. Keep the internal `pam/`
+bundle directory out of application code; the runtime adds it consistently
+for images, image backgrounds, placeholders, and packaged fonts.
+
 HTTPS, debug HTTP, `asset:`, `file:`, `content:`, `android.resource:` and
 bounded image `data:` URIs are supported. Redirects cannot downgrade HTTPS;
 responses, headers, redirects, input bytes and decoded pixels are bounded.
