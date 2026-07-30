@@ -6,6 +6,7 @@ namespace Pam\Native\Internal;
 
 use Closure;
 use InvalidArgumentException;
+use JsonException;
 use Pam\Native\Align;
 use Pam\Native\AccessibilityRole;
 use Pam\Native\AccessibilityCheckedState;
@@ -467,6 +468,7 @@ final class TemplateRenderer
         array $data,
     ): Element
     {
+        $data['__pamStyles'] = self::styleSheet($tree);
         $rendered = self::nodes($tree->children, $scope, $data);
         $elements = array_values(array_filter($rendered, static fn (mixed $value): bool => $value instanceof Element));
 
@@ -500,11 +502,12 @@ final class TemplateRenderer
             }
 
             $tag = $node->name;
-            $attributes = $node->attributes;
+            $attributes = self::directiveAliases($node->attributes);
+            $node = self::withAttributes($node, $attributes);
             $children = $node->children;
 
-            if (isset($attributes['v-for'])) {
-                $directive = $attributes['v-for'];
+            if (isset($attributes['p-for'])) {
+                $directive = $attributes['p-for'];
                 if (
                     !is_string($directive)
                     || preg_match(
@@ -514,7 +517,7 @@ final class TemplateRenderer
                     ) !== 1
                 ) {
                     throw new RuntimeException(
-                        'v-for must use "$item in $items" syntax.',
+                        'p-for must use "$item in $items" syntax.',
                     );
                 }
                 $items = TemplateExpression::evaluate($match[2], $scope, $nodeData);
@@ -525,10 +528,10 @@ final class TemplateRenderer
                 }
                 if (!is_array($items)) {
                     throw new RuntimeException(
-                        'v-for source must resolve to an integer, array, or Traversable.',
+                        'p-for source must resolve to an integer, array, or Traversable.',
                     );
                 }
-                $loopNode = self::withoutAttributes($node, ['v-for']);
+                $loopNode = self::withoutAttributes($node, ['p-for']);
                 foreach ($items as $itemIndex => $item) {
                     array_push(
                         $output,
@@ -547,9 +550,9 @@ final class TemplateRenderer
                 continue;
             }
 
-            if (isset($attributes['v-if'])) {
+            if (isset($attributes['p-if'])) {
                 $condition = self::dynamicValue(
-                    $attributes['v-if'],
+                    $attributes['p-if'],
                     $scope,
                     $nodeData,
                 );
@@ -557,19 +560,19 @@ final class TemplateRenderer
                 if (!$branchMatched) {
                     continue;
                 }
-            } elseif (isset($attributes['v-else-if'])) {
+            } elseif (isset($attributes['p-else-if'])) {
                 if ($branchMatched) {
                     continue;
                 }
                 $branchMatched = (bool) self::dynamicValue(
-                    $attributes['v-else-if'],
+                    $attributes['p-else-if'],
                     $scope,
                     $nodeData,
                 );
                 if (!$branchMatched) {
                     continue;
                 }
-            } elseif (isset($attributes['v-else'])) {
+            } elseif (isset($attributes['p-else'])) {
                 if ($branchMatched) {
                     $branchMatched = false;
                     continue;
@@ -581,7 +584,7 @@ final class TemplateRenderer
 
             $node = self::withoutAttributes(
                 $node,
-                ['v-if', 'v-else-if', 'v-else'],
+                ['p-if', 'p-else-if', 'p-else'],
             );
             $attributes = $node->attributes;
 
@@ -729,6 +732,11 @@ final class TemplateRenderer
         if ($factory === null) {
             $attributes = self::nativeEventAliases($attributes);
         }
+        $resolvedClass = self::classValue($attributes, $scope, $data);
+        $attributes = [
+            ...self::scopedStyleAttributes($tag, $resolvedClass, $data),
+            ...$attributes,
+        ];
         if (isset($attributes['bind:value'])) {
             $attributes[':value'] = $attributes['bind:value'];
             $attributes['model'] = ltrim(
@@ -792,7 +800,6 @@ final class TemplateRenderer
                 $values['rippleRadius'] = $ripple['radius'];
             }
         }
-        $resolvedClass = self::classValue($attributes, $scope, $data);
         if ($factory !== null && $resolvedClass !== null) {
             $values['className'] = $resolvedClass;
         }
@@ -1094,7 +1101,7 @@ final class TemplateRenderer
         }
 
         if ($resolvedClass !== null) {
-            $element = self::classes($element, $resolvedClass);
+            $element = self::classes($element, $resolvedClass, $data);
         }
 
         $element = self::attributes($element, $values);
@@ -2010,10 +2017,19 @@ final class TemplateRenderer
         ]));
     }
 
-    private static function classes(Element $element, string $classes): Element
+    /** @param array<string, mixed> $data */
+    private static function classes(
+        Element $element,
+        string $classes,
+        array $data,
+    ): Element
     {
+        $localClasses = self::styleSheetClasses($data);
         foreach (preg_split('/\\s+/', trim($classes)) ?: [] as $class) {
             if ($class === '') {
+                continue;
+            }
+            if (isset($localClasses[$class])) {
                 continue;
             }
 
@@ -2040,12 +2056,107 @@ final class TemplateRenderer
         return $element;
     }
 
+    /**
+     * @return array{
+     *     classes: array<string, array<string, string|bool>>,
+     *     tags: array<string, array<string, string|bool>>
+     * }
+     */
+    private static function styleSheet(CompiledTemplateNode $tree): array
+    {
+        $encoded = $tree->attributes['__pamStyles'] ?? null;
+        if (!is_string($encoded) || $encoded === '') {
+            return ['classes' => [], 'tags' => []];
+        }
+        try {
+            $decoded = json_decode($encoded, true, 64, JSON_THROW_ON_ERROR);
+        } catch (JsonException $error) {
+            throw new RuntimeException(
+                "Invalid compiled styles in {$tree->source}.",
+                previous: $error,
+            );
+        }
+        if (!is_array($decoded)) {
+            throw new RuntimeException("Invalid compiled styles in {$tree->source}.");
+        }
+        $classes = self::validatedStyleRules($decoded['classes'] ?? null, $tree->source);
+        $tags = self::validatedStyleRules($decoded['tags'] ?? null, $tree->source);
+
+        return ['classes' => $classes, 'tags' => $tags];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, array<string, string|bool>>
+     */
+    private static function styleSheetClasses(array $data): array
+    {
+        $sheet = $data['__pamStyles'] ?? null;
+        $classes = is_array($sheet) ? ($sheet['classes'] ?? null) : null;
+
+        return is_array($classes) ? $classes : [];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array<string, string|bool>
+     */
+    private static function scopedStyleAttributes(
+        string $tag,
+        ?string $classes,
+        array $data,
+    ): array {
+        $sheet = $data['__pamStyles'] ?? null;
+        if (!is_array($sheet)) {
+            return [];
+        }
+        $tags = is_array($sheet['tags'] ?? null) ? $sheet['tags'] : [];
+        $classRules = is_array($sheet['classes'] ?? null) ? $sheet['classes'] : [];
+        $attributes = is_array($tags[$tag] ?? null) ? $tags[$tag] : [];
+        foreach (preg_split('/\s+/', trim($classes ?? '')) ?: [] as $class) {
+            if ($class !== '' && is_array($classRules[$class] ?? null)) {
+                $attributes = [...$attributes, ...$classRules[$class]];
+            }
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * @return array<string, array<string, string|bool>>
+     */
+    private static function validatedStyleRules(mixed $rules, string $source): array
+    {
+        if (!is_array($rules)) {
+            throw new RuntimeException("Invalid compiled styles in {$source}.");
+        }
+        $validated = [];
+        foreach ($rules as $selector => $attributes) {
+            if (!is_string($selector) || !is_array($attributes)) {
+                throw new RuntimeException("Invalid compiled style rule in {$source}.");
+            }
+            foreach ($attributes as $name => $value) {
+                if (
+                    !is_string($name)
+                    || (!is_string($value) && !is_bool($value))
+                ) {
+                    throw new RuntimeException("Invalid compiled style value in {$source}.");
+                }
+            }
+            /** @var array<string, string|bool> $attributes */
+            $validated[$selector] = $attributes;
+        }
+
+        return $validated;
+    }
+
     /** @return array{PropKey, int|float}|null */
     private static function utility(string $class): ?array
     {
         $fixed = [
             'flex-1' => [PropKey::FlexGrow, 1.0],
-            'w-full' => [PropKey::Width, 10_000.0],
+            'w-full' => [PropKey::WidthPercent, 100.0],
+            'h-full' => [PropKey::HeightPercent, 100.0],
             'bg-white' => [PropKey::BackgroundColor, 0xFFFFFFFF],
             'bg-black' => [PropKey::BackgroundColor, 0xFF000000],
             'text-white' => [PropKey::TextColor, 0xFFFFFFFF],
@@ -2492,6 +2603,57 @@ final class TemplateRenderer
             self::path('$'.$property, $scope, []),
             'Input model value',
         );
+    }
+
+    /**
+     * @param array<string, string|bool> $attributes
+     * @return array<string, string|bool>
+     */
+    private static function directiveAliases(array $attributes): array
+    {
+        foreach ([
+            'v-if' => 'p-if',
+            'v-else-if' => 'p-else-if',
+            'v-else' => 'p-else',
+            'v-for' => 'p-for',
+        ] as $legacy => $native) {
+            if (!array_key_exists($legacy, $attributes)) {
+                continue;
+            }
+            if (
+                array_key_exists($native, $attributes)
+                && $attributes[$native] !== $attributes[$legacy]
+            ) {
+                throw new RuntimeException(
+                    "Template directives {$native} and {$legacy} cannot disagree.",
+                );
+            }
+            $attributes[$native] ??= $attributes[$legacy];
+            unset($attributes[$legacy]);
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * @param array<string, string|bool> $attributes
+     */
+    private static function withAttributes(
+        CompiledTemplateNode $node,
+        array $attributes,
+    ): CompiledTemplateNode {
+        $copy = new CompiledTemplateNode(
+            kind: $node->kind,
+            name: $node->name,
+            attributes: $attributes,
+            source: $node->source,
+            line: $node->line,
+            column: $node->column,
+            value: $node->value,
+        );
+        $copy->children = $node->children;
+
+        return $copy;
     }
 
     /**

@@ -64,7 +64,7 @@ final class ProfileCard extends Component
         <Row class="items-center justify-between">
             <Column>
                 <Text>{{ $name }}</Text>
-                <Text v-if="$subtitle" class="text-muted">
+                <Text p-if="$subtitle" class="text-muted">
                     {{ $subtitle }}
                 </Text>
             </Column>
@@ -111,9 +111,9 @@ The template syntax includes:
 - `:prop="expression"` and `:class="expression"` bindings;
 - `@press="method"` native events and `@event="method"` component events;
 - `bind:value="$property"` and `bind:checked="$property"` two-way bindings;
-- `v-if`, `v-else-if`, and `v-else`;
-- `v-for="$item in $items"` for arrays and `Traversable` values;
-- `v-for="$number in $count"` for one-based repetition from `1` to `$count`;
+- `p-if`, `p-else-if`, and `p-else`;
+- `p-for="$item in $items"` for arrays and `Traversable` values;
+- `p-for="$number in $count"` for one-based repetition from `1` to `$count`;
 - `<Slot />`, `<Slot name="..."/>`, and `<template #name>`;
 - `key` for stable identity in repeated or reordered children.
 
@@ -121,15 +121,105 @@ Expressions support component properties, local loop values, public component
 methods, arrays, comparisons, boolean operators, and ternaries. Business logic
 stays in PHP methods rather than in markup.
 
-An integer `v-for` source repeats the element that many times and exposes the
+An integer `p-for` source repeats the element that many times and exposes the
 current one-based number. Zero and negative integers render nothing:
 
 ```xml
-<Column v-for="$number in $count" :key="$number">
+<Column p-for="$number in $count" :key="$number">
     <Text>Item {{ $number }}</Text>
     <Text>Any subtree can be repeated.</Text>
 </Column>
 ```
+
+`v-if`, `v-else-if`, `v-else`, and `v-for` remain accepted temporarily when
+migrating existing components. They are deprecated aliases; new code and
+editor metadata use the distinctive `p-*` PAM directives.
+
+## Native scoped CSS
+
+A component may place one `<style scoped>` block after `</template>`. PAM
+compiles this native-safe CSS subset into typed element properties when it
+compiles the component. No CSS parser, WebView, selector engine, or style
+recalculation exists in the application runtime.
+
+```php
+<template>
+    <Column class="profile">
+        <Text class="profile-name">{{ $name }}</Text>
+        <Text p-if="$bio !== ''" class="profile-bio">{{ $bio }}</Text>
+    </Column>
+</template>
+
+<style scoped>
+    :root {
+        --font-bold: asset://assets/fonts/SpaceGrotesk-Bold.ttf;
+        --font-regular: asset://assets/fonts/SpaceGrotesk-Regular.ttf;
+        --ink-muted: #5C5C55;
+    }
+
+    .profile {
+        padding: 0 16px;
+        margin-top: 9px;
+    }
+
+    .profile-name {
+        font-family: var(--font-bold);
+        font-size: 15px;
+    }
+
+    .profile-bio {
+        margin-top: 1px;
+        color: var(--ink-muted);
+        font-family: var(--font-regular);
+        font-size: 13.5px;
+        line-height: 18px;
+    }
+</style>
+```
+
+The cascade is deterministic: a tag rule is the base, classes are applied from
+left to right, and an inline PAM attribute wins last. Both `class` and
+`:class` participate. Component styles are isolated and cannot leak into a
+child component's template.
+
+Supported CSS covers PAM's common native layout and paint contracts:
+
+- dimensions, min/max dimensions, `aspect-ratio`, position edges and `z-index`;
+- `flex`, growth/shrink/direction, gap, alignment and justification;
+- padding and margin edges plus standard one-to-four-value shorthands;
+- border width/color/radii and `<width> solid <color>` shorthand;
+- background, text color, opacity, elevation, overflow and visibility;
+- font family/size/weight/style, letter/line spacing, text alignment and case.
+
+Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points.
+Percentages are supported for width, height, max-width, and max-height.
+`:root` is reserved for component-local `--custom-properties`. Selectors are a
+native tag, `.class`, or a comma-separated combination of those forms.
+Unsupported web-only properties such as `box-shadow`, nested selectors, media
+queries, descendant selectors, and unknown variables fail the build instead of
+silently producing a different native layout.
+
+Inline properties remain useful for dynamic values and isolated exceptions:
+
+```xml
+<Text class="title" :textColor="$selected ? '#1B7A4E' : '#5C5C55'">
+    {{ $label }}
+</Text>
+```
+
+## Format PAM components
+
+The Composer package installs an official formatter:
+
+```bash
+vendor/bin/pam-native-format src
+vendor/bin/pam-native-format --check src
+```
+
+It accepts any number of files or directories, recursively discovers
+`*.pam.php`, preserves the PHP block for Pint/PHP-CS-Fixer, formats templates
+and scoped styles deterministically, and migrates legacy `v-*` directives to
+`p-*`. `--check` makes CI fail when a component needs formatting.
 
 ## Responsive grid and flex
 
@@ -148,7 +238,7 @@ orientation, split-screen width, or foldable posture changes.
     </Column>
 
     <ProfileCard
-        v-for="$profile in $profiles"
+        p-for="$profile in $profiles"
         :key="$profile->id"
         span="12"
         spanSm="6"

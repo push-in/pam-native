@@ -48,7 +48,7 @@ final class Home extends \Pam\Native\Component
 ```
 
 Call `App::components(__DIR__.'/src')` before `App::run(...)`. Constructor
-properties become typed props; named/default slots, `v-if`, `v-for`, dynamic
+properties become typed props; named/default slots, `p-if`, `p-for`, dynamic
 bindings, component events, two-way bindings, and lifecycle hooks all compile
 to the existing `Element` tree and binary protocol. The fluent tree API remains
 the default and can be mixed with single-file components freely.
@@ -90,18 +90,40 @@ selection, fitting, line breaking and link detection inside `TextView`.
 Android project fonts can be bundled in the application source and loaded
 through an asset family:
 
-```xml
-<Text
-    fontFamily="asset://assets/fonts/Brand-Bold.ttf"
-    fontSize="20"
->
-    Brand title
-</Text>
+```php
+<template>
+    <Text class="brand-title">Brand title</Text>
+</template>
+
+<style scoped>
+    :root {
+        --brand-bold: asset://assets/fonts/Brand-Bold.ttf;
+    }
+
+    .brand-title {
+        font-family: var(--brand-bold);
+        font-size: 20px;
+    }
+</style>
 ```
 
 The path resolves below the packaged `pam/` asset root. PAM accepts TTF and OTF
 files, rejects traversal, caches decoded `Typeface` instances, and keeps
 ordinary installed family names such as `sans-serif` working unchanged.
+Scoped styles are compiled into typed native properties and add no CSS runtime
+or selector pass. Tag rules, `.class` rules, component-local variables,
+percentages, common box shorthands, and dynamic classes are supported; unknown
+web-only CSS fails compilation.
+
+Format and migrate a component tree with the package binary:
+
+```bash
+vendor/bin/pam-native-format src
+vendor/bin/pam-native-format --check src
+```
+
+The formatter makes `p-if`, `p-else-if`, `p-else`, and `p-for` canonical.
+Legacy `v-*` directives remain deprecated compatibility aliases.
 
 `Input` and its `TextInput` alias keep composition, selection and the editable
 buffer inside a dedicated Android `EditText`. They support React

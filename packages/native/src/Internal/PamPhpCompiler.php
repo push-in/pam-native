@@ -104,7 +104,7 @@ final class PamPhpCompiler
             );
         }
 
-        [$php, $template, $templateLine] = self::split($contents, $source);
+        [$php, $template, $templateLine, $style] = self::split($contents, $source);
         self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
         $cacheKey = hash('sha256', $source);
@@ -128,6 +128,12 @@ final class PamPhpCompiler
                 str_repeat("\n", max(0, $templateLine - 1)).$template,
                 $source,
             );
+            if ($style !== '') {
+                $tree = self::withStyleSheet(
+                    $tree,
+                    ScopedStyleCompiler::compile($style, $source),
+                );
+            }
             self::writeAtomic($classFile, rtrim($php)."\n");
             try {
                 $encodedTree = json_encode(
@@ -135,7 +141,7 @@ final class PamPhpCompiler
                     JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
                 );
                 $encodedMetadata = json_encode([
-                    'version' => 2,
+                    'version' => 3,
                     'hash' => $hash,
                     'class' => $className,
                     'tag' => $tag,
@@ -177,7 +183,7 @@ final class PamPhpCompiler
         }
     }
 
-    /** @return array{string, string, int} */
+    /** @return array{string, string, int, string} */
     private static function split(string $source, string $name): array
     {
         $tokens = token_get_all($source);
@@ -210,7 +216,8 @@ final class PamPhpCompiler
         $match = [];
 
         if (preg_match(
-            '/\A\s*<template(?:\s[^>]*)?>([\s\S]*)<\/template>\s*\z/D',
+            '/\A\s*<template(?:\s[^>]*)?>([\s\S]*?)<\/template>'
+            .'\s*(?:<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
             $markup,
             $match,
             PREG_OFFSET_CAPTURE,
@@ -220,11 +227,49 @@ final class PamPhpCompiler
             );
         }
         $capture = $match[1];
+        $style = is_array($match[2] ?? null)
+            ? (string) ($match[2][0] ?? '')
+            : '';
 
         $templateOffset = $closeOffset + $closeLength + $capture[1];
         $templateLine = substr_count(substr($source, 0, $templateOffset), "\n") + 1;
 
-        return [$php, $capture[0], $templateLine];
+        return [$php, $capture[0], $templateLine, $style];
+    }
+
+    /**
+     * @param array{
+     *     classes: array<string, array<string, string|bool>>,
+     *     tags: array<string, array<string, string|bool>>
+     * } $styleSheet
+     */
+    private static function withStyleSheet(
+        CompiledTemplateNode $tree,
+        array $styleSheet,
+    ): CompiledTemplateNode {
+        try {
+            $encoded = json_encode(
+                $styleSheet,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            );
+        } catch (JsonException $error) {
+            throw new RuntimeException(
+                "Cannot encode scoped PAM styles for {$tree->source}.",
+                previous: $error,
+            );
+        }
+        $copy = new CompiledTemplateNode(
+            kind: $tree->kind,
+            name: $tree->name,
+            attributes: [...$tree->attributes, '__pamStyles' => $encoded],
+            source: $tree->source,
+            line: $tree->line,
+            column: $tree->column,
+            value: $tree->value,
+        );
+        $copy->children = $tree->children;
+
+        return $copy;
     }
 
     /** @return array{string, string} */
@@ -354,7 +399,7 @@ final class PamPhpCompiler
 
         if (
             !is_array($metadata)
-            || ($metadata['version'] ?? null) !== 2
+            || ($metadata['version'] ?? null) !== 3
             || ($metadata['hash'] ?? null) !== $hash
             || ($metadata['class'] ?? null) !== $className
         ) {

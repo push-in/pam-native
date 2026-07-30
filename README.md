@@ -165,15 +165,44 @@ final class Card extends Component
 
 <template>
     <Column :class="['card', 'elevation-2' => $elevated]">
-        <Text>{{ $title }}</Text>
+        <Text class="card-title">{{ $title }}</Text>
         <Slot />
     </Column>
 </template>
+
+<style scoped>
+    :root {
+        --brand-bold: asset://assets/fonts/Brand-Bold.ttf;
+    }
+
+    .card {
+        padding: 16px;
+        border: 1px solid #D8D7CF;
+        border-radius: 12px;
+    }
+
+    .card-title {
+        font-family: var(--brand-bold);
+        font-size: 18px;
+    }
+</style>
 ```
 
 Register them with `App::components(__DIR__.'/src')`. See
 [`docs/components.md`](docs/components.md) for the complete syntax and
-lifecycle contract.
+lifecycle contract. Scoped styles compile directly to typed native properties;
+they do not ship a browser CSS engine. PAM uses `p-if`, `p-else-if`, `p-else`,
+and `p-for` as its template directives.
+
+The package also installs a deterministic formatter:
+
+```bash
+vendor/bin/pam-native-format src
+vendor/bin/pam-native-format --check src
+```
+
+It indents `*.pam.php`, normalizes scoped styles, and migrates deprecated
+`v-*` directive aliases to the canonical `p-*` form.
 
 Typed PHP:
 

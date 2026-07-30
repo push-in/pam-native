@@ -123,6 +123,25 @@ internal fun resolvedAndroidLetterSpacing(
     logicalFontSize: Float,
 ): Float = logicalSpacing / logicalFontSize.coerceAtLeast(1f)
 
+internal fun resolvedLineSpacingExtra(
+    logicalLineHeight: Float,
+    renderedTextSizePx: Float,
+    logicalFontSize: Float,
+    fontMetricsHeightPx: Float,
+): Float {
+    val effectiveScale = renderedTextSizePx / logicalFontSize.coerceAtLeast(1f)
+    val targetLineHeightPx = logicalLineHeight.coerceAtLeast(0f) * effectiveScale
+    return targetLineHeightPx - fontMetricsHeightPx
+}
+
+internal fun resolvedImageScaleType(imageFit: Int): ImageView.ScaleType =
+    when (imageFit) {
+        2 -> ImageView.ScaleType.FIT_CENTER
+        3 -> ImageView.ScaleType.FIT_XY
+        4, 5 -> ImageView.ScaleType.CENTER
+        else -> ImageView.ScaleType.CENTER_CROP
+    }
+
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -1202,6 +1221,7 @@ class PamRenderer(
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
                 applyLetterSpacing(it, state)
+                applyLineHeight(it, state)
             }
             PropKey.ENABLED -> {
                 view.isEnabled = value.flag()
@@ -1245,7 +1265,10 @@ class PamRenderer(
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
             PropKey.FONT_FAMILY,
-            -> (view as? TextView)?.let { applyTypeface(it, state) }
+            -> (view as? TextView)?.let {
+                applyTypeface(it, state)
+                applyLineHeight(it, state)
+            }
             PropKey.TEXT_DECORATION -> (view as? TextView)?.let { text ->
                 text.paintFlags = text.paintFlags and
                     (Paint.UNDERLINE_TEXT_FLAG or Paint.STRIKE_THRU_TEXT_FLAG).inv()
@@ -1318,12 +1341,8 @@ class PamRenderer(
                 }
             }
             PropKey.IMAGE_FIT -> {
-                imageView(view)?.scaleType = when (value.integer().toInt()) {
-                    2 -> ImageView.ScaleType.CENTER_INSIDE
-                    3 -> ImageView.ScaleType.FIT_XY
-                    4, 5 -> ImageView.ScaleType.CENTER
-                    else -> ImageView.ScaleType.CENTER_CROP
-                }
+                imageView(view)?.scaleType =
+                    resolvedImageScaleType(value.integer().toInt())
                 (view as? PamMediaView)?.setResizeMode(value.integer().toInt())
                 loadImage(view, state)
             }
@@ -1638,10 +1657,9 @@ class PamRenderer(
             PropKey.LETTER_SPACING -> (view as? TextView)?.let {
                 applyLetterSpacing(it, state)
             }
-            PropKey.LINE_HEIGHT -> (view as? TextView)?.setLineSpacing(
-                0f,
-                max(0.1f, value.decimal().toFloat() / max(1f, view.textSize / resourcesDensity())),
-            )
+            PropKey.LINE_HEIGHT -> (view as? TextView)?.let {
+                applyLineHeight(it, state)
+            }
             PropKey.PLACEHOLDER_COLOR -> (view as? EditText)?.setHintTextColor(value.integer().toInt())
             PropKey.SELECTION_COLOR -> (view as? TextView)?.highlightColor =
                 value.integer().toInt()
@@ -1655,7 +1673,11 @@ class PamRenderer(
             PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER,
             PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT,
             PropKey.TEXT_MINIMUM_FONT_SCALE,
-            -> (view as? TextView)?.let { applyTextSizing(it, state) }
+            -> (view as? TextView)?.let {
+                applyTextSizing(it, state)
+                applyLetterSpacing(it, state)
+                applyLineHeight(it, state)
+            }
             PropKey.TEXT_BREAK_STRATEGY -> (view as? TextView)?.let {
                 applyTextBreakStrategy(it, value.integer().toInt())
             }
@@ -1886,11 +1908,18 @@ class PamRenderer(
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
                 applyLetterSpacing(it, state)
+                applyLineHeight(it, state)
             }
             PropKey.FONT_WEIGHT,
             PropKey.FONT_STYLE,
             PropKey.FONT_FAMILY,
-            -> (view as? TextView)?.let { applyTypeface(it, state) }
+            -> (view as? TextView)?.let {
+                applyTypeface(it, state)
+                applyLineHeight(it, state)
+            }
+            PropKey.LINE_HEIGHT -> (view as? TextView)?.let {
+                applyLineHeight(it, state)
+            }
             PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines = Int.MAX_VALUE
             PropKey.SELECTION_COLOR -> (view as? TextView)?.highlightColor =
                 state.defaultHighlightColor
@@ -1904,7 +1933,11 @@ class PamRenderer(
             PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER,
             PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT,
             PropKey.TEXT_MINIMUM_FONT_SCALE,
-            -> (view as? TextView)?.let { applyTextSizing(it, state) }
+            -> (view as? TextView)?.let {
+                applyTextSizing(it, state)
+                applyLetterSpacing(it, state)
+                applyLineHeight(it, state)
+            }
             PropKey.TEXT_BREAK_STRATEGY -> (view as? TextView)?.let {
                 applyTextBreakStrategy(it, TEXT_BREAK_HIGH_QUALITY)
             }
@@ -3789,6 +3822,24 @@ class PamRenderer(
         )
     }
 
+    private fun applyLineHeight(view: TextView, state: NodeState) {
+        val logicalLineHeight = state.properties[PropKey.LINE_HEIGHT]?.decimal()?.toFloat()
+        if (logicalLineHeight == null) {
+            view.setLineSpacing(0f, 1f)
+            return
+        }
+        val metrics = view.paint.fontMetricsInt
+        view.setLineSpacing(
+            resolvedLineSpacingExtra(
+                logicalLineHeight = logicalLineHeight,
+                renderedTextSizePx = view.textSize,
+                logicalFontSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat(),
+                fontMetricsHeightPx = (metrics.descent - metrics.ascent).toFloat(),
+            ),
+            1f,
+        )
+    }
+
     private fun applyTextDataDetector(view: TextView, state: NodeState) {
         (view.text as? Spannable)?.let { text ->
             text.getSpans(0, text.length, URLSpan::class.java)
@@ -3881,8 +3932,10 @@ class PamRenderer(
         view.animate().cancel()
         if (!ValueAnimator.areAnimatorsEnabled() || kind == 1) {
             view.alpha = state.targetAlpha()
-            view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat()
-            view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()
+            view.translationX =
+                dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
+            view.translationY =
+                dp(state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()).toFloat()
             view.scaleX = state.number(PropKey.SCALE_X, 1.0).toFloat()
             view.scaleY = state.number(PropKey.SCALE_Y, 1.0).toFloat()
             return

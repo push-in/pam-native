@@ -51,11 +51,13 @@ use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\ScopedStyleCompiler;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
+use Pam\Native\Tooling\PamFormatter;
 use Pam\Native\KeyboardAvoidingBehavior;
 use Pam\Native\MemoryPressure;
 use Pam\Native\MotionPreset;
@@ -236,6 +238,98 @@ $assert = static function (bool $condition, string $message): void {
         throw new RuntimeException($message);
     }
 };
+
+$compiledCss = ScopedStyleCompiler::compile(
+    <<<'CSS'
+    :root {
+        --font-ui: "asset://assets/fonts/SpaceGrotesk-Regular.ttf";
+        --ink: #101410;
+    }
+
+    Text, .body-copy {
+        color: var(--ink);
+        font-family: var(--font-ui);
+    }
+
+    .card {
+        width: 100%;
+        height: 50%;
+        max-width: 92%;
+        padding: 8px 16px 12px;
+        margin: 1px 2px 3px 4px;
+        border: 1.5px solid #101410;
+    }
+    CSS,
+    'ScopedStyleCompilerTest.pam.php',
+);
+$assert(
+    $compiledCss['tags']['Text']['textColor'] === '#101410'
+        && $compiledCss['classes']['body-copy']['fontFamily']
+            === 'asset://assets/fonts/SpaceGrotesk-Regular.ttf',
+    'Scoped CSS must resolve variables in tag and class rules.',
+);
+$assert(
+    $compiledCss['classes']['card'] === [
+        'widthPercent' => '100',
+        'heightPercent' => '50',
+        'maxWidthPercent' => '92',
+        'paddingTop' => '8',
+        'paddingRight' => '16',
+        'paddingBottom' => '12',
+        'paddingLeft' => '16',
+        'marginTop' => '1',
+        'marginRight' => '2',
+        'marginBottom' => '3',
+        'marginLeft' => '4',
+        'borderWidth' => '1.5',
+        'borderColor' => '#101410',
+    ],
+    'Scoped CSS must compile percentages and native box shorthands exactly.',
+);
+$forwardVariableCss = ScopedStyleCompiler::compile(
+    '.label { color: var(--label); } :root { --label: #334455; }',
+    'ForwardVariable.pam.php',
+);
+$assert(
+    $forwardVariableCss['classes']['label']['textColor'] === '#334455',
+    'Scoped CSS variables must be independent from declaration order.',
+);
+$invalidCssRejected = false;
+try {
+    ScopedStyleCompiler::compile(
+        '.card { box-shadow: 0 1px 2px #000; }',
+        'InvalidStyle.pam.php',
+    );
+} catch (RuntimeException $error) {
+    $invalidCssRejected = str_contains(
+        $error->getMessage(),
+        'Unsupported native CSS property box-shadow',
+    );
+}
+$assert(
+    $invalidCssRejected,
+    'Scoped CSS must fail fast when a property has no native contract.',
+);
+$unformattedPam = <<<'PAM'
+<?php
+
+declare(strict_types=1);
+?>
+<template><Column><Text v-if="$ready" fontSize="15">Ready</Text><Text v-else>Wait</Text></Column></template><style scoped>.ready { color: #112233; font-size: 15px; }</style>
+PAM;
+$formattedPam = PamFormatter::format($unformattedPam, 'FormatterTest.pam.php');
+$assert(
+    str_contains($formattedPam, 'p-if="$ready"')
+        && str_contains($formattedPam, '<Text p-else>Wait</Text>')
+        && str_contains(
+            $formattedPam,
+            "    .ready {\n        color: #112233;\n        font-size: 15px;\n    }",
+        )
+        && !str_contains($formattedPam, 'v-if')
+        && PamFormatter::format($formattedPam, 'FormatterTest.pam.php')
+            === $formattedPam,
+    'PAM formatter must migrate directives and produce idempotent output.',
+);
 
 foreach (NodeKind::cases() as $index => $kind) {
     $assert($kind->value === $index + 1, 'Node kinds must remain sequential protocol integers.');
@@ -692,6 +786,23 @@ $assert(
         && $quotedComparisonTemplate->children[0]->children[1]->attributes['v-if']
             === '$count < 1',
     'Template tags must keep angle-bracket operators inside quoted attributes.',
+);
+$pamDirectiveBranches = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column>'
+        .'<Text p-if="$kind === 1">One</Text>'
+        .'<Text p-else-if="$kind === 2">Two</Text>'
+        .'<Text p-else>Other</Text>'
+        .'</Column>',
+    ),
+    null,
+    ['kind' => 2],
+);
+$assert(
+    count($pamDirectiveBranches->children()) === 1
+        && $pamDirectiveBranches->children()[0]
+            ->properties()[PropKey::Text->value] === 'Two',
+    'Native p-if, p-else-if and p-else directives must render one matching branch.',
 );
 $pressInEvent = null;
 $pressOutEvent = null;
@@ -2697,11 +2808,14 @@ final class CounterCard extends Component
 
 <template>
     <Column :class="cardClasses()">
-        <Text>{{ $title }}</Text>
-        <Text v-if="$subtitle">{{ $subtitle }}</Text>
-        <Text v-for="$item in $items">{{ $item }}</Text>
-        <Text v-for="$number in $repeatCount">Repeat {{ $number }}</Text>
-        <Text v-for="$_ in 0">Never rendered</Text>
+        <Text
+            :class="$elevated ? 'profile-title' : ''"
+            fontSize="16"
+        >{{ $title }}</Text>
+        <Text p-if="$subtitle">{{ $subtitle }}</Text>
+        <Text p-for="$item in $items">{{ $item }}</Text>
+        <Text p-for="$number in $repeatCount">Repeat {{ $number }}</Text>
+        <Text p-for="$_ in 0">Never rendered</Text>
         <Button @press="increment">
             {{ $count === 0 ? 'Ready' : $count }}
         </Button>
@@ -2713,6 +2827,25 @@ final class CounterCard extends Component
         <Slot />
     </Column>
 </template>
+
+<style scoped>
+    :root {
+        --brand-bold: asset://assets/fonts/Brand-Bold.ttf;
+    }
+
+    Text {
+        color: #222222;
+        font-size: 13px;
+    }
+
+    .profile-title {
+        color: #1B7A4E;
+        font-family: var(--brand-bold);
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 18px;
+    }
+</style>
 PAM,
 );
 file_put_contents(
@@ -2869,7 +3002,18 @@ $assert($toggleKey !== null, '.pam.php bind:checked event was not compiled.');
 $assert($inputKey !== null, '.pam.php bind:value event was not compiled.');
 $assert(
     count($sfcElement->children()) === 12,
-    '.pam.php v-if, iterable/integer v-for and slots did not compose correctly.',
+    '.pam.php p-if, iterable/integer p-for and slots did not compose correctly.',
+);
+$assert(
+    $sfcElement->children()[0]->properties()[PropKey::FontFamily->value]
+        === 'asset://assets/fonts/Brand-Bold.ttf'
+        && (float) $sfcElement->children()[0]
+            ->properties()[PropKey::FontSize->value] === 16.0
+        && (float) $sfcElement->children()[0]
+            ->properties()[PropKey::LineHeight->value] === 18.0
+        && $sfcElement->children()[0]->properties()[PropKey::TextColor->value]
+            === 0xFF1B7A4E,
+    '.pam.php scoped CSS must cascade tag, dynamic class and inline properties.',
 );
 $assert(
     array_map(
@@ -2877,7 +3021,7 @@ $assert(
             $element->properties()[PropKey::Text->value] ?? null,
         array_slice($sfcElement->children(), 4, 3),
     ) === ['Repeat 1', 'Repeat 2', 'Repeat 3'],
-    '.pam.php integer v-for must expose a one-based loop value.',
+    '.pam.php integer p-for must expose a one-based loop value.',
 );
 $assert(
     $counterClass::$lifecycle === ['boot', 'mount', 'attached', 'resumed'],
@@ -3184,8 +3328,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.44',
-    'The runtime SDK contract must match the 0.5.44 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.45',
+    'The runtime SDK contract must match the 0.5.45 package release.',
 );
 $assert(
     array_map(

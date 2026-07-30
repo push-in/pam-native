@@ -414,8 +414,9 @@ fn layout_node(
         })
         .sum::<f32>();
     let remaining = (available_main - resolved_fixed - flex_margins - total_gap).max(0.0);
-    let consumed =
-        resolved_fixed + flex_margins + total_gap + if total_flex > 0.0 { remaining } else { 0.0 };
+    let flex_allocations = allocate_flex_main(&flow_children, axis, available_main, remaining)?;
+    let flex_consumed = flex_allocations.values().sum::<f32>();
+    let consumed = resolved_fixed + flex_margins + total_gap + flex_consumed;
     let free = (available_main - consumed).max(0.0);
     let auto_margin_count = if axis == Axis::Horizontal {
         flow_children
@@ -442,7 +443,7 @@ fn layout_node(
     for child in ordered_children {
         let flex = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
         let main = if flex > 0.0 && total_flex > 0.0 {
-            remaining * flex / total_flex
+            flex_allocations.get(&child.id).copied().unwrap_or(0.0)
         } else {
             resolved_main[&child.id]
         };
@@ -1206,7 +1207,10 @@ fn text_extent(node: &Node, axis: Axis, available_width: f32, device_text_scale:
     let line_height = number(node, PropKey::LineHeight)
         .unwrap_or((base_font_size * 1.4).max(DEFAULT_TEXT_HEIGHT / 2.0))
         * text_scale;
-    let letter_spacing = number(node, PropKey::LetterSpacing).unwrap_or(0.0) * font_size;
+    // PAM authors letter spacing in logical points. Android receives the
+    // equivalent `em` value, so the rendered glyph gap scales once with the
+    // configured accessibility text scale, not again with the font size.
+    let letter_spacing = number(node, PropKey::LetterSpacing).unwrap_or(0.0) * text_scale;
     let source_text = match node.properties.get(&PropKey::Text) {
         Some(pam_native_protocol::PropValue::String(value)) => value.as_str(),
         _ => "",
@@ -1355,6 +1359,106 @@ fn intrinsic_cross(
         text_scale,
         depth,
     )
+}
+
+fn allocate_flex_main(
+    children: &[&Node],
+    axis: Axis,
+    available_main: f32,
+    remaining: f32,
+) -> Result<BTreeMap<u64, f32>, LayoutError> {
+    let mut unresolved = children
+        .iter()
+        .copied()
+        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) > 0.0)
+        .collect::<Vec<_>>();
+    let bounds = unresolved
+        .iter()
+        .map(|child| Ok((child.id, flex_main_bounds(child, axis, available_main)?)))
+        .collect::<Result<BTreeMap<_, _>, LayoutError>>()?;
+    let mut allocations = BTreeMap::new();
+    let mut pool = remaining.max(0.0);
+
+    while !unresolved.is_empty() {
+        let minimum_total = unresolved
+            .iter()
+            .map(|child| bounds[&child.id].0)
+            .sum::<f32>();
+        if minimum_total > pool {
+            for child in unresolved.drain(..) {
+                allocations.insert(child.id, bounds[&child.id].0);
+            }
+            break;
+        }
+        let total_weight = unresolved
+            .iter()
+            .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
+            .sum::<f32>();
+        if total_weight <= 0.0 {
+            break;
+        }
+        let mut frozen = Vec::new();
+        for child in &unresolved {
+            let weight = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
+            let candidate = pool * weight / total_weight;
+            let (minimum, maximum) = bounds[&child.id];
+            let constrained = candidate.max(minimum).min(maximum);
+            if (constrained - candidate).abs() > f32::EPSILON {
+                frozen.push((child.id, constrained));
+            }
+        }
+        if frozen.is_empty() {
+            for child in unresolved.drain(..) {
+                let weight = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
+                allocations.insert(child.id, pool * weight / total_weight);
+            }
+            break;
+        }
+        for (id, value) in frozen {
+            allocations.insert(id, value);
+            pool = (pool - value).max(0.0);
+            unresolved.retain(|child| child.id != id);
+        }
+    }
+
+    Ok(allocations)
+}
+
+fn flex_main_bounds(
+    node: &Node,
+    axis: Axis,
+    available_main: f32,
+) -> Result<(f32, f32), LayoutError> {
+    let (raw_minimum, raw_maximum) = match axis {
+        Axis::Vertical => (
+            number(node, PropKey::MinHeight),
+            dimension(
+                node,
+                PropKey::MaxHeight,
+                PropKey::MaxHeightPercent,
+                available_main,
+            ),
+        ),
+        Axis::Horizontal => (
+            number(node, PropKey::MinWidth),
+            dimension(
+                node,
+                PropKey::MaxWidth,
+                PropKey::MaxWidthPercent,
+                available_main,
+            ),
+        ),
+    };
+    let minimum = raw_minimum
+        .map(finite_non_negative)
+        .transpose()?
+        .unwrap_or(0.0);
+    let maximum = raw_maximum
+        .map(finite_non_negative)
+        .transpose()?
+        .unwrap_or(f32::INFINITY);
+
+    Ok((minimum, maximum.max(minimum)))
 }
 
 fn child_main(
@@ -1757,6 +1861,119 @@ mod tests {
         assert_eq!(layouts[&2].width, 50.0);
         assert_eq!(layouts[&3].width, 50.0);
         assert_eq!(layouts[&3].x, 50.0);
+    }
+
+    #[test]
+    fn flex_growth_redistributes_space_after_minimum_and_maximum_constraints() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Row,
+                        [(PropKey::FlexDirection, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                            (PropKey::MinWidth, PropValue::Float(80.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::FlexGrow, PropValue::Float(1.0))],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        1,
+                        2,
+                        NodeKind::View,
+                        [
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                            (PropKey::MaxWidth, PropValue::Float(40.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 180.0,
+                height: 40.0,
+            },
+        )
+        .expect("layout");
+
+        assert_eq!(layouts[&2].width, 80.0);
+        assert_eq!(layouts[&3].width, 60.0);
+        assert_eq!(layouts[&4].width, 40.0);
+        assert_eq!(layouts[&3].x, 80.0);
+        assert_eq!(layouts[&4].x, 140.0);
+    }
+
+    #[test]
+    fn flex_constraints_reject_non_finite_dimensions() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Row,
+                        [(PropKey::FlexDirection, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                            (PropKey::MinWidth, PropValue::Float(f64::NAN)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        assert!(matches!(
+            calculate(
+                &tree,
+                Size {
+                    width: 180.0,
+                    height: 40.0,
+                },
+            ),
+            Err(LayoutError::InvalidDimension),
+        ));
     }
 
     #[test]
@@ -2527,6 +2744,25 @@ mod tests {
             .sum::<f32>();
 
         assert!(estimated_text_width("Paid", font_size, 0.0) > raw_glyph_width);
+    }
+
+    #[test]
+    fn logical_letter_spacing_is_not_multiplied_by_font_size() {
+        let compact = node(
+            1,
+            0,
+            0,
+            NodeKind::Text,
+            [
+                (PropKey::Text, PropValue::String("ABC".into())),
+                (PropKey::FontSize, PropValue::Float(20.0)),
+                (PropKey::LetterSpacing, PropValue::Float(0.6)),
+            ],
+        );
+        let without_spacing = estimated_text_width("ABC", 20.0, 0.0);
+        let with_spacing = text_extent(&compact, Axis::Horizontal, 320.0, 1.0);
+
+        assert!((with_spacing - without_spacing - 1.272).abs() < 0.01);
     }
 
     #[test]

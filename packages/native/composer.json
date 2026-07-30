@@ -23,6 +23,9 @@
             "Pam\\Native\\": "src/"
         }
     },
+    "bin": [
+        "bin/pam-native-format"
+    ],
     "extra": {
         "pam-native": {
             "manifest-schema": "resources/pam-native.schema.json",

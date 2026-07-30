@@ -1,0 +1,84 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    dirname(__DIR__, 3).'/autoload.php',
+    dirname(__DIR__).'/vendor/autoload.php',
+];
+$loaded = false;
+foreach ($autoloadCandidates as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        $loaded = true;
+        break;
+    }
+}
+if (!$loaded) {
+    spl_autoload_register(static function (string $class): void {
+        $prefix = 'Pam\\Native\\';
+        if (!str_starts_with($class, $prefix)) {
+            return;
+        }
+        $path = dirname(__DIR__).'/src/'
+            .str_replace('\\', '/', substr($class, strlen($prefix))).'.php';
+        if (is_file($path)) {
+            require $path;
+        }
+    });
+}
+
+use Pam\Native\Tooling\PamFormatter;
+
+$check = false;
+$paths = [];
+foreach (array_slice($argv, 1) as $argument) {
+    if ($argument === '--check') {
+        $check = true;
+        continue;
+    }
+    $paths[] = $argument;
+}
+if ($paths === []) {
+    fwrite(STDERR, "Usage: pam-native-format [--check] <file-or-directory> [...]\n");
+    exit(2);
+}
+
+$files = [];
+foreach ($paths as $path) {
+    if (is_file($path)) {
+        $files[] = $path;
+        continue;
+    }
+    if (!is_dir($path)) {
+        fwrite(STDERR, "Path does not exist: {$path}\n");
+        exit(2);
+    }
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS),
+    );
+    foreach ($iterator as $file) {
+        if ($file->isFile() && str_ends_with($file->getFilename(), '.pam.php')) {
+            $files[] = $file->getPathname();
+        }
+    }
+}
+$files = array_values(array_unique($files));
+sort($files, SORT_STRING);
+$changed = 0;
+try {
+    foreach ($files as $file) {
+        if (PamFormatter::formatFile($file, $check)) {
+            $changed++;
+            fwrite(STDOUT, ($check ? 'Needs formatting: ' : 'Formatted: ').$file."\n");
+        }
+    }
+} catch (Throwable $error) {
+    fwrite(STDERR, $error->getMessage()."\n");
+    exit(1);
+}
+if ($check && $changed > 0) {
+    exit(1);
+}
+fwrite(STDOUT, "PAM components checked: ".count($files)."; changed: {$changed}.\n");

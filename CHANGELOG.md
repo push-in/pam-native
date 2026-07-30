@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.45 - 2026-07-29
+
+- Add compiled `<style scoped>` blocks to `.pam.php` components with native
+  tag/class selectors, component-local custom properties, deterministic
+  cascade, dynamic classes, percentages, and box/border shorthands.
+- Reject unsupported selectors, nested rules, unresolved variables, and CSS
+  properties without a native protocol contract during component compilation.
+- Make `p-if`, `p-else-if`, `p-else`, and `p-for` the canonical PAM template
+  directives while retaining deprecated `v-*` aliases for migration.
+- Ship the idempotent `pam-native-format` Composer binary to indent templates,
+  normalize scoped styles, and migrate legacy directives across files or
+  directories.
+- Redistribute flex growth after min/max constraints instead of leaving unused
+  space, and reject non-finite flex bounds before they reach native frames.
+- Match Rust text measurement to the logical-point letter-spacing contract and
+  apply authored `lineHeight` exactly on retained Android text views.
+- Convert non-animated translation values from logical points to Android pixels
+  consistently with animated transforms.
+- Fix `w-full` to resolve to 100% of the containing block and add `h-full`.
+- Map `contain` images to Android `FIT_CENTER`, matching PAM's authored-frame
+  contract by scaling small and large bitmaps proportionally to fit.
+- Remove the need for layout-breaking scale transforms when rendering compact
+  packaged icons and other low-resolution assets.
+
 ## 0.5.44 - 2026-07-29
 
 - Cancel stale native long-poll waiters before a hot reload and let the new PHP
