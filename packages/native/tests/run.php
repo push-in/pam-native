@@ -277,9 +277,17 @@ $compiledCss = ScopedStyleCompiler::compile(
         border-bottom: 2px solid #101410;
         border-left: 3px solid #101410;
         border-left-color: #D6ECDD;
+        border-radius: 28px 28px 0 0;
         inset: 5px 6px 7px 8px;
         flex-wrap: wrap;
         translation-y: 28px;
+    }
+
+    .percent-position {
+        left: 4%;
+        top: 10%;
+        right: 5%;
+        bottom: 2%;
     }
     CSS,
     'ScopedStyleCompilerTest.pam.php',
@@ -317,6 +325,10 @@ $assert(
         'borderBottomWidth' => '2',
         'borderLeftWidth' => '3',
         'borderColor' => '#D6ECDD',
+        'borderTopLeftRadius' => '28',
+        'borderTopRightRadius' => '28',
+        'borderBottomRightRadius' => '0',
+        'borderBottomLeftRadius' => '0',
         'top' => '5',
         'right' => '6',
         'bottom' => '7',
@@ -325,6 +337,15 @@ $assert(
         'translationY' => '28',
     ],
     'Scoped CSS must compile percentages and native box shorthands exactly.',
+);
+$assert(
+    $compiledCss['classes']['percent-position'] === [
+        'leftPercent' => '4',
+        'topPercent' => '10',
+        'rightPercent' => '5',
+        'bottomPercent' => '2',
+    ],
+    'Scoped CSS must compile percentage position offsets exactly.',
 );
 $forwardVariableCss = ScopedStyleCompiler::compile(
     '.label { color: var(--label); } :root { --label: #334455; }',
@@ -3843,8 +3864,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.63',
-    'The runtime SDK contract must match the 0.5.63 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.64',
+    'The runtime SDK contract must match the 0.5.64 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

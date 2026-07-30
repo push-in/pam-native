@@ -351,6 +351,10 @@ public enum PamConstants {
     public static let drawingClearRequest = 394
     public static let drawingUndoRequest = 395
     public static let flexWrap = 396
+    public static let leftPercent = 397
+    public static let topPercent = 398
+    public static let rightPercent = 399
+    public static let bottomPercent = 400
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

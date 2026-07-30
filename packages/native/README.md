@@ -140,7 +140,9 @@ supported. `border` and the directional `border-top`, `border-right`,
 `border-bottom`, and `border-left` forms accept `<width> solid <color>`;
 `inset`, `translation-x/y`, directional border colors, and native retained
 `flex-wrap` are supported. Directional colors currently resolve to the shared
-native border color. Unknown web-only CSS fails compilation.
+native border color. Absolute position edges accept percentages and
+`border-radius` accepts one to four circular corner values. Unknown web-only
+CSS fails compilation.
 
 For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
 image/video metadata and `System\MediaLibrary::albums()` reads album summaries

@@ -224,6 +224,9 @@ Supported CSS covers PAM's common native layout and paint contracts:
 
 Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points.
 Percentages are supported for width, height, max-width, and max-height.
+They are also supported for absolute `left`, `top`, `right`, and `bottom`
+offsets. `border-radius` accepts the standard one-to-four circular-radius
+shorthand; elliptical slash syntax is intentionally rejected.
 Directional border colors are accepted for familiar CSS authoring; Android
 and iOS currently paint one shared native border color, so the last authored
 directional color applies to every edge.

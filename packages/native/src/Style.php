@@ -108,6 +108,10 @@ final readonly class Style
         public ?float $gridRowGap = null,
         public ?LayoutDirection $layoutDirection = null,
         public ?FlexWrap $flexWrap = null,
+        public ?float $leftPercent = null,
+        public ?float $topPercent = null,
+        public ?float $rightPercent = null,
+        public ?float $bottomPercent = null,
     ) {
     }
 
@@ -218,6 +222,10 @@ final readonly class Style
             PropKey::GridRowGap->value => $this->gridRowGap,
             PropKey::LayoutDirection->value => $this->layoutDirection?->value,
             PropKey::FlexWrap->value => $this->flexWrap?->value,
+            PropKey::LeftPercent->value => $this->leftPercent,
+            PropKey::TopPercent->value => $this->topPercent,
+            PropKey::RightPercent->value => $this->rightPercent,
+            PropKey::BottomPercent->value => $this->bottomPercent,
         ] as $key => $value) {
             if ($value !== null) {
                 $properties[$key] = $value;

@@ -1863,6 +1863,10 @@ class PamRenderer(
             PropKey.TOP,
             PropKey.RIGHT,
             PropKey.BOTTOM,
+            PropKey.LEFT_PERCENT,
+            PropKey.TOP_PERCENT,
+            PropKey.RIGHT_PERCENT,
+            PropKey.BOTTOM_PERCENT,
             PropKey.ASPECT_RATIO,
             PropKey.WIDTH_PERCENT,
             PropKey.HEIGHT_PERCENT,
@@ -2100,6 +2104,11 @@ class PamRenderer(
             PropKey.DRAWING_UNDO_REQUEST ->
                 (view as? PamDrawingCanvas)?.setUndoRequest(0)
             PropKey.FLEX_WRAP -> Unit
+            PropKey.LEFT_PERCENT,
+            PropKey.TOP_PERCENT,
+            PropKey.RIGHT_PERCENT,
+            PropKey.BOTTOM_PERCENT,
+            -> Unit
             PropKey.SCROLL_REQUEST -> Unit
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)

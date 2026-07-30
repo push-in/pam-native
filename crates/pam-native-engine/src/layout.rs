@@ -531,10 +531,10 @@ fn layout_node(
     }
 
     for child in absolute_children {
-        let left = number(child, PropKey::Left);
-        let top = number(child, PropKey::Top);
-        let right = number(child, PropKey::Right);
-        let bottom = number(child, PropKey::Bottom);
+        let left = dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width);
+        let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height);
+        let right = dimension(child, PropKey::Right, PropKey::RightPercent, inner.width);
+        let bottom = dimension(child, PropKey::Bottom, PropKey::BottomPercent, inner.height);
         let explicit_width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width);
         let explicit_height =
             dimension(child, PropKey::Height, PropKey::HeightPercent, inner.height);
@@ -861,8 +861,9 @@ fn layout_grid(
             && child.kind != NodeKind::Modal
             && integer(child, PropKey::PositionType).unwrap_or(1) == 2
     }) {
-        let left = number(child, PropKey::Left).unwrap_or(0.0);
-        let top = number(child, PropKey::Top).unwrap_or(0.0);
+        let left =
+            dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width).unwrap_or(0.0);
+        let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height).unwrap_or(0.0);
         let width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width)
             .unwrap_or(inner.width);
         let height = child_main(
@@ -2071,6 +2072,54 @@ mod tests {
         assert_eq!(child.height, 156.0);
         assert_eq!(child.x, 114.0);
         assert_eq!(child.y, 200.0);
+    }
+
+    #[test]
+    fn resolves_percentage_position_offsets_against_the_inner_containing_block() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Screen,
+                        [(PropKey::Padding, PropValue::Float(10.0))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::PositionType, PropValue::Integer(2)),
+                            (PropKey::LeftPercent, PropValue::Float(10.0)),
+                            (PropKey::TopPercent, PropValue::Float(20.0)),
+                            (PropKey::Width, PropValue::Float(20.0)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 300.0,
+                height: 400.0,
+            },
+        )
+        .expect("percentage offsets");
+        let child = layouts[&2];
+
+        assert_eq!(child.x, 38.0);
+        assert_eq!(child.y, 86.0);
     }
 
     #[test]

@@ -402,4 +402,8 @@ enum PropKey: int
     case DrawingClearRequest = 394;
     case DrawingUndoRequest = 395;
     case FlexWrap = 396;
+    case LeftPercent = 397;
+    case TopPercent = 398;
+    case RightPercent = 399;
+    case BottomPercent = 400;
 }

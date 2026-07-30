@@ -197,6 +197,8 @@ and `p-for` as its template directives. Native text decoration uses familiar
 CSS such as `text-decoration: underline` or `text-decoration: line-through`.
 Native retained layout also supports `flex-wrap`; `inset` and
 `translation-x/y` compile directly to typed native properties.
+Absolute position edges accept percentages, and the familiar one-to-four-value
+`border-radius` shorthand compiles to native per-corner radii.
 
 `overflow: hidden` follows the authored native border path. A rounded
 `Pressable`, `View`, `Row`, `Column`, or `ImageBackground` therefore clips its

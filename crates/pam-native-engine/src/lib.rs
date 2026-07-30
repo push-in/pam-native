@@ -547,6 +547,10 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::Top
             | PropKey::Right
             | PropKey::Bottom
+            | PropKey::LeftPercent
+            | PropKey::TopPercent
+            | PropKey::RightPercent
+            | PropKey::BottomPercent
             | PropKey::AspectRatio
             | PropKey::WidthPercent
             | PropKey::HeightPercent

@@ -437,6 +437,10 @@ final class ScopedStyleCompiler
                 self::expandBorder($output, $value, $name);
                 continue;
             }
+            if ($property === 'border-radius') {
+                self::expandBorderRadius($output, $value, $name);
+                continue;
+            }
             if (preg_match('/^border-(top|right|bottom|left)$/D', $property, $match) === 1) {
                 self::expandBorder($output, $value, $name, ucfirst($match[1]));
                 continue;
@@ -454,13 +458,26 @@ final class ScopedStyleCompiler
             }
             if (
                 str_ends_with(trim($value), '%')
-                && in_array($property, ['width', 'height', 'max-width', 'max-height'], true)
+                && in_array($property, [
+                    'width',
+                    'height',
+                    'max-width',
+                    'max-height',
+                    'left',
+                    'top',
+                    'right',
+                    'bottom',
+                ], true)
             ) {
                 $attribute = match ($property) {
                     'width' => 'widthPercent',
                     'height' => 'heightPercent',
                     'max-width' => 'maxWidthPercent',
                     'max-height' => 'maxHeightPercent',
+                    'left' => 'leftPercent',
+                    'top' => 'topPercent',
+                    'right' => 'rightPercent',
+                    'bottom' => 'bottomPercent',
                 };
                 $output[$attribute] = self::percentage($value, $name);
                 continue;
@@ -589,6 +606,40 @@ final class ScopedStyleCompiler
         $output[$edge === '' ? 'borderWidth' : 'border'.$edge.'Width'] =
             self::scalar($parts[0], $name);
         $output['borderColor'] = $parts[2];
+    }
+
+    /** @param array<string, string|bool> $output */
+    private static function expandBorderRadius(
+        array &$output,
+        string $value,
+        string $name,
+    ): void {
+        if (str_contains($value, '/')) {
+            throw new RuntimeException(
+                "Elliptical border-radius is not supported in {$name}.",
+            );
+        }
+        $parts = preg_split('/\s+/', trim($value)) ?: [];
+        if ($parts === [] || count($parts) > 4) {
+            throw new RuntimeException("Invalid border-radius shorthand in {$name}.");
+        }
+        if (count($parts) === 1) {
+            $output['borderRadius'] = self::scalar($parts[0], $name);
+            return;
+        }
+        [$topLeft, $topRight, $bottomRight, $bottomLeft] = match (count($parts)) {
+            2 => [$parts[0], $parts[1], $parts[0], $parts[1]],
+            3 => [$parts[0], $parts[1], $parts[2], $parts[1]],
+            4 => $parts,
+        };
+        foreach ([
+            'borderTopLeftRadius' => $topLeft,
+            'borderTopRightRadius' => $topRight,
+            'borderBottomRightRadius' => $bottomRight,
+            'borderBottomLeftRadius' => $bottomLeft,
+        ] as $attribute => $cornerValue) {
+            $output[$attribute] = self::scalar($cornerValue, $name);
+        }
     }
 
     private static function propertyValue(

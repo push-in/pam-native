@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.64 - 2026-07-30
+
+- Compile the complete one-to-four-value CSS `border-radius` shorthand into
+  native per-corner radii while preserving the compact uniform-radius path.
+- Add percentage `left`, `top`, `right`, and `bottom` offsets to the protocol
+  and resolve them against the retained inner containing block in Rust.
+
 ## 0.5.63 - 2026-07-30
 
 - Add native `flex-wrap` row and column layout to the retained Rust engine,

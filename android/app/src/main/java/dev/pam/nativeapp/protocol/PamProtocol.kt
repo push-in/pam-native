@@ -510,7 +510,11 @@ enum class PropKey(val value: Int) {
     DRAWING_MODE(393),
     DRAWING_CLEAR_REQUEST(394),
     DRAWING_UNDO_REQUEST(395),
-    FLEX_WRAP(396);
+    FLEX_WRAP(396),
+    LEFT_PERCENT(397),
+    TOP_PERCENT(398),
+    RIGHT_PERCENT(399),
+    BOTTOM_PERCENT(400);
 
     companion object {
         fun from(value: Int): PropKey =
