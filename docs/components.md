@@ -289,6 +289,24 @@ The explicit PHP API remains intentionally lower-level:
 `Scroll::make($content)` receives exactly one content element. Use a `Row` or
 `Column` yourself when authoring an imperative element tree.
 
+Observed logical offsets can be restored without controlling the scroll on
+every render:
+
+```xml
+<ScrollView
+    anchorToEnd="true"
+    :scrollTargetOffset="$savedOffset"
+    :scrollRequest="$restoreGeneration"
+>
+    <!-- timeline -->
+</ScrollView>
+```
+
+`scrollRequest` is tokenized and runs only when its value changes. A non-empty
+`scrollTargetTestId` has priority, a non-negative `scrollTargetOffset` restores
+that logical offset, and omitting both targets preserves the scroll-to-end
+behavior.
+
 ## Format PAM components
 
 The Composer package installs an official formatter:

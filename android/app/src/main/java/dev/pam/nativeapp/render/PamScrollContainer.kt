@@ -40,6 +40,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var maintainVisibleContentPosition = false
     private var autoScrollToEndThresholdPx = 24
     private var scrollTargetTestId = ""
+    private var scrollTargetOffsetPx = -1
     private var keyboardAvoidanceInsetPx = 0
     private var keyboardBaseContentExtentPx = 0
     private val applyOffsetRunnable = Runnable {
@@ -194,18 +195,26 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         scrollTargetTestId = value
     }
 
+    fun setScrollTargetOffset(value: Float) {
+        scrollTargetOffsetPx = if (value < 0f) -1 else dp(value)
+    }
+
     fun requestScroll() {
         activeScroll.post {
             if (!isAttachedToWindow) return@post
-            if (scrollTargetTestId.isEmpty()) {
-                scrollToPrimary(primaryMaxOffset())
+            if (scrollTargetTestId.isNotEmpty()) {
+                val target = findDescendantByTestId(content, scrollTargetTestId)
+                    ?: return@post
+                val rect = Rect(0, 0, target.width, target.height)
+                content.offsetDescendantRectToMyCoords(target, rect)
+                scrollToPrimary(if (horizontal) rect.left else rect.top)
                 return@post
             }
-            val target = findDescendantByTestId(content, scrollTargetTestId)
-                ?: return@post
-            val rect = Rect(0, 0, target.width, target.height)
-            content.offsetDescendantRectToMyCoords(target, rect)
-            scrollToPrimary(if (horizontal) rect.left else rect.top)
+            if (scrollTargetOffsetPx >= 0) {
+                scrollToPrimary(scrollTargetOffsetPx)
+            } else {
+                scrollToPrimary(primaryMaxOffset())
+            }
         }
     }
 

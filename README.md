@@ -392,7 +392,8 @@ scrollbars, paging/snap, deceleration and keyboard dismissal remain in Android.
 Chat-style timelines can use `anchorToEnd`, `maintainVisibleContentPosition`
 and `autoScrollToEndThreshold` to open at the newest content, follow additions
 only while the reader remains near the end and preserve their position when
-older content is prepended;
+older content is prepended. A tokenized `scrollRequest` can target either a
+descendant `testId`, a persisted logical `scrollTargetOffset`, or the end;
 an observed offset crosses the boundary at most once per VSYNC. Native
 `ActivityIndicator` controls animation, stopped visibility, tint and numeric or
 small/large size, while `Switch` owns checked state and disabled-aware

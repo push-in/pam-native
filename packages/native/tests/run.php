@@ -1328,7 +1328,7 @@ $scrollElement = Scroll::make(Text::make('Scrollable'))
     ->snapToInterval(80.0)
     ->decelerationRate(0.9)
     ->keyboardDismissMode(ScrollKeyboardDismissMode::OnDrag)
-    ->scrollRequest(7, 'first-unread')
+    ->scrollRequest(7, 'first-unread', 143.5)
     ->scrollEnabled(false)
     ->showsIndicator()
     ->onScroll(static function (): void {
@@ -1351,6 +1351,7 @@ $assert(
             === ScrollKeyboardDismissMode::OnDrag->value
         && $scrollElement->properties()[PropKey::ScrollTargetTestId->value]
             === 'first-unread'
+        && $scrollElement->properties()[PropKey::ScrollTargetOffset->value] === 143.5
         && $scrollElement->properties()[PropKey::ScrollRequest->value] === 7
         && isset($scrollElement->events()[EventKind::Scroll->value]),
     'Scroll helpers must preserve Android-owned orientation, momentum and viewport behavior.',
@@ -1488,6 +1489,7 @@ $nativeControlTemplate = TemplateRenderer::render(
         maintainVisibleContentPosition="true"
         autoScrollToEndThreshold="32"
         scrollTargetTestId="first-unread"
+        scrollTargetOffset="143.5"
         scrollRequest="9"
         pagingEnabled="true"
         snapToInterval="80"
@@ -1527,6 +1529,8 @@ $assert(
             ->properties()[PropKey::ScrollAutoScrollToEndThreshold->value] === 32.0
         && $templateScroll
             ->properties()[PropKey::ScrollTargetTestId->value] === 'first-unread'
+        && $templateScroll
+            ->properties()[PropKey::ScrollTargetOffset->value] === 143.5
         && $templateScroll->properties()[PropKey::ScrollRequest->value] === 9
         && $templateScroll->properties()[PropKey::ScrollPagingEnabled->value] === true
         && $templateScroll->properties()[PropKey::ScrollSnapInterval->value] === 80
@@ -3779,8 +3783,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.59',
-    'The runtime SDK contract must match the 0.5.59 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.60',
+    'The runtime SDK contract must match the 0.5.60 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

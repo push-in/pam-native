@@ -474,6 +474,7 @@ pub enum PropKey {
     ScrollAutoScrollToEndThreshold = 387,
     ScrollTargetTestId = 388,
     ScrollRequest = 389,
+    ScrollTargetOffset = 390,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -870,6 +871,7 @@ impl TryFrom<u16> for PropKey {
             387 => Ok(Self::ScrollAutoScrollToEndThreshold),
             388 => Ok(Self::ScrollTargetTestId),
             389 => Ok(Self::ScrollRequest),
+            390 => Ok(Self::ScrollTargetOffset),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1673,10 +1675,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(29).is_err());
 
-        for value in 1..=389 {
+        for value in 1..=390 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(390).is_err());
+        assert!(PropKey::try_from(391).is_err());
     }
 
     fn tree(text: &str) -> Tree {

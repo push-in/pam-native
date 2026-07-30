@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.60 - 2026-07-30
+
+- Add `scrollTargetOffset` to tokenized `scrollRequest` operations so an
+  application can restore an observed logical scroll offset without binding a
+  continuously controlled `contentOffset`.
+- Preserve existing descendant `scrollTargetTestId` priority and end-scroll
+  behavior while applying explicit offset requests on Android and iOS.
+
 ## 0.5.59 - 2026-07-30
 
 - Add bounded `maxWidth`, `maxHeight`, and `outputQuality` controls to the

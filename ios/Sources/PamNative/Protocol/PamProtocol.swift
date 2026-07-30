@@ -343,6 +343,7 @@ public enum PamConstants {
     public static let scrollAutoScrollToEndThreshold = 387
     public static let scrollTargetTestId = 388
     public static let scrollRequest = 389
+    public static let scrollTargetOffset = 390
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

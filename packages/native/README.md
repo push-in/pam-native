@@ -266,6 +266,23 @@ Scroll::make($messages)
     ->autoScrollToEndThreshold(32);
 ```
 
+Persisted readers can restore a previously observed logical offset through the
+same tokenized request path. The request runs once when its token changes and
+does not turn the scroll into a continuously controlled component:
+
+```php
+Scroll::make($messages)
+    ->anchorToEnd()
+    ->scrollRequest(
+        request: $restoreGeneration,
+        targetOffset: $savedOffset,
+    );
+```
+
+In a `.pam.php` template use `scrollTargetOffset` beside `scrollRequest`.
+`scrollTargetTestId` wins when both targets are present; a negative offset with
+an empty target keeps the original scroll-to-end behavior.
+
 Android owns drag, fling, snapping, fading edges, scrollbars and IME dismissal.
 When `onScroll` is present PAM sends only the active-axis offset, coalesced once
 per display frame. `ActivityIndicator` exposes `animating()`,

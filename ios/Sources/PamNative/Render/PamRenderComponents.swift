@@ -14,6 +14,7 @@ final class PamAnchoredScrollView: UIScrollView {
     var autoScrollToEndThreshold: CGFloat = 24
     var horizontal = false
     var scrollTargetTestId = ""
+    var scrollTargetOffset: CGFloat = -1
 
     private var initialEndAnchorApplied = false
     private var previousMaxOffset: CGFloat = 0
@@ -60,18 +61,22 @@ final class PamAnchoredScrollView: UIScrollView {
     func requestScroll() {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window != nil else { return }
-            guard !self.scrollTargetTestId.isEmpty else {
+            if !self.scrollTargetTestId.isEmpty {
+                guard let target = self.findDescendant(testId: self.scrollTargetTestId) else {
+                    return
+                }
+                let frame = target.convert(target.bounds, to: self)
+                let offset = self.horizontal
+                    ? frame.minX + self.contentOffset.x
+                    : frame.minY + self.contentOffset.y
+                self.setPrimaryOffset(offset)
+                return
+            }
+            if self.scrollTargetOffset >= 0 {
+                self.setPrimaryOffset(self.scrollTargetOffset)
+            } else {
                 self.setPrimaryOffset(self.primaryMaxOffset)
-                return
             }
-            guard let target = self.findDescendant(testId: self.scrollTargetTestId) else {
-                return
-            }
-            let frame = target.convert(target.bounds, to: self)
-            let offset = self.horizontal
-                ? frame.minX + self.contentOffset.x
-                : frame.minY + self.contentOffset.y
-            self.setPrimaryOffset(offset)
         }
     }
 

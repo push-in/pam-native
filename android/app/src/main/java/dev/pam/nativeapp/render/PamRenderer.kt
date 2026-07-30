@@ -1539,6 +1539,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setScrollTargetTestId(
                     value.text(key),
                 )
+            PropKey.SCROLL_TARGET_OFFSET ->
+                (view as? PamScrollContainer)?.setScrollTargetOffset(
+                    value.decimal().toFloat(),
+                )
             PropKey.SCROLL_REQUEST ->
                 (view as? PamScrollContainer)?.requestScroll()
             PropKey.SCROLL_FILL_VIEWPORT ->
@@ -2070,6 +2074,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setAutoScrollToEndThreshold(24f)
             PropKey.SCROLL_TARGET_TEST_ID ->
                 (view as? PamScrollContainer)?.setScrollTargetTestId("")
+            PropKey.SCROLL_TARGET_OFFSET ->
+                (view as? PamScrollContainer)?.setScrollTargetOffset(-1f)
             PropKey.SCROLL_REQUEST -> Unit
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)

@@ -224,6 +224,7 @@ final class TemplateRenderer
         'autoScrollToEndThreshold' => PropKey::ScrollAutoScrollToEndThreshold,
         'scrollTargetTestId' => PropKey::ScrollTargetTestId,
         'scrollRequest' => PropKey::ScrollRequest,
+        'scrollTargetOffset' => PropKey::ScrollTargetOffset,
         'fillViewport' => PropKey::ScrollFillViewport,
         'overScrollMode' => PropKey::ScrollOverScrollMode,
         'nestedScrollEnabled' => PropKey::ScrollNestedEnabled,

@@ -1431,6 +1431,9 @@ public final class PamRenderer {
         case PamConstants.scrollTargetTestId:
             (view as? PamAnchoredScrollView)?.scrollTargetTestId =
                 value.textOrNil() ?? ""
+        case PamConstants.scrollTargetOffset:
+            (view as? PamAnchoredScrollView)?.scrollTargetOffset =
+                CGFloat(value.decimalOrZero())
         case PamConstants.scrollRequest:
             (view as? PamAnchoredScrollView)?.requestScroll()
         case PamConstants.drawerOpen:
@@ -1651,6 +1654,8 @@ public final class PamRenderer {
             (view as? PamAnchoredScrollView)?.autoScrollToEndThreshold = 24
         case PamConstants.scrollTargetTestId:
             (view as? PamAnchoredScrollView)?.scrollTargetTestId = ""
+        case PamConstants.scrollTargetOffset:
+            (view as? PamAnchoredScrollView)?.scrollTargetOffset = -1
         case PamConstants.scrollRequest:
             break
         case PamConstants.drawerOpen:

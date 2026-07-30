@@ -502,7 +502,8 @@ enum class PropKey(val value: Int) {
     SCROLL_MAINTAIN_VISIBLE_CONTENT_POSITION(386),
     SCROLL_AUTO_SCROLL_TO_END_THRESHOLD(387),
     SCROLL_TARGET_TEST_ID(388),
-    SCROLL_REQUEST(389);
+    SCROLL_REQUEST(389),
+    SCROLL_TARGET_OFFSET(390);
 
     companion object {
         fun from(value: Int): PropKey =
