@@ -213,8 +213,10 @@ components that rely only on `src/app.css` keep no placeholder markup.
 Supported CSS covers PAM's common native layout and paint contracts:
 
 - dimensions, min/max dimensions, `aspect-ratio`, position edges and `z-index`;
-- `flex`, growth/shrink/direction, gap, alignment and justification;
+- `flex`, growth/shrink/direction, native `flex-wrap`, gap, alignment and
+  justification;
 - padding and margin edges plus standard one-to-four-value shorthands;
+- `inset`, individual position edges, and compositor `translation-x/y`;
 - border width/color/radii plus `border` and directional
   `border-top/right/bottom/left` `<width> solid <color>` shorthands;
 - background, text color, opacity, elevation, overflow and visibility;
@@ -222,6 +224,9 @@ Supported CSS covers PAM's common native layout and paint contracts:
 
 Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points.
 Percentages are supported for width, height, max-width, and max-height.
+Directional border colors are accepted for familiar CSS authoring; Android
+and iOS currently paint one shared native border color, so the last authored
+directional color applies to every edge.
 `:root` is reserved for component-local `--custom-properties`. Selectors are a
 native tag, `.class`, or a comma-separated combination of those forms.
 Packaged fonts use compile-time `@font-face` declarations with one safe

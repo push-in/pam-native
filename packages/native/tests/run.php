@@ -276,6 +276,10 @@ $compiledCss = ScopedStyleCompiler::compile(
         border: 1.5px solid #101410;
         border-bottom: 2px solid #101410;
         border-left: 3px solid #101410;
+        border-left-color: #D6ECDD;
+        inset: 5px 6px 7px 8px;
+        flex-wrap: wrap;
+        translation-y: 28px;
     }
     CSS,
     'ScopedStyleCompilerTest.pam.php',
@@ -312,6 +316,13 @@ $assert(
         'borderColor' => '#101410',
         'borderBottomWidth' => '2',
         'borderLeftWidth' => '3',
+        'borderColor' => '#D6ECDD',
+        'top' => '5',
+        'right' => '6',
+        'bottom' => '7',
+        'left' => '8',
+        'flexWrap' => 'wrap',
+        'translationY' => '28',
     ],
     'Scoped CSS must compile percentages and native box shorthands exactly.',
 );
@@ -3832,8 +3843,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.62',
-    'The runtime SDK contract must match the 0.5.62 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.63',
+    'The runtime SDK contract must match the 0.5.63 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

@@ -195,6 +195,8 @@ compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,
 and `p-for` as its template directives. Native text decoration uses familiar
 CSS such as `text-decoration: underline` or `text-decoration: line-through`.
+Native retained layout also supports `flex-wrap`; `inset` and
+`translation-x/y` compile directly to typed native properties.
 
 `overflow: hidden` follows the authored native border path. A rounded
 `Pressable`, `View`, `Row`, `Column`, or `ImageBackground` therefore clips its

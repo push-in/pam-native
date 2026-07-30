@@ -1857,6 +1857,7 @@ class PamRenderer(
             PropKey.ON_NAVIGATION_GESTURE_POP,
             PropKey.ON_ANIMATION_COMPLETE,
             PropKey.FLEX_DIRECTION,
+            PropKey.FLEX_WRAP,
             PropKey.POSITION_TYPE,
             PropKey.LEFT,
             PropKey.TOP,
@@ -2098,6 +2099,7 @@ class PamRenderer(
                 (view as? PamDrawingCanvas)?.setClearRequest(0)
             PropKey.DRAWING_UNDO_REQUEST ->
                 (view as? PamDrawingCanvas)?.setUndoRequest(0)
+            PropKey.FLEX_WRAP -> Unit
             PropKey.SCROLL_REQUEST -> Unit
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(true)

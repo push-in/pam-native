@@ -107,6 +107,7 @@ final readonly class Style
         public ?float $gridColumnGap = null,
         public ?float $gridRowGap = null,
         public ?LayoutDirection $layoutDirection = null,
+        public ?FlexWrap $flexWrap = null,
     ) {
     }
 
@@ -216,6 +217,7 @@ final readonly class Style
             PropKey::GridColumnGap->value => $this->gridColumnGap,
             PropKey::GridRowGap->value => $this->gridRowGap,
             PropKey::LayoutDirection->value => $this->layoutDirection?->value,
+            PropKey::FlexWrap->value => $this->flexWrap?->value,
         ] as $key => $value) {
             if ($value !== null) {
                 $properties[$key] = $value;

@@ -25,13 +25,17 @@ final class ScopedStyleCompiler
         'border-bottom-left-radius' => 'borderBottomLeftRadius',
         'border-bottom-right-radius' => 'borderBottomRightRadius',
         'border-bottom-width' => 'borderBottomWidth',
+        'border-bottom-color' => 'borderColor',
         'border-color' => 'borderColor',
         'border-radius' => 'borderRadius',
         'border-top-left-radius' => 'borderTopLeftRadius',
         'border-top-right-radius' => 'borderTopRightRadius',
         'border-top-width' => 'borderTopWidth',
         'border-left-width' => 'borderLeftWidth',
+        'border-left-color' => 'borderColor',
         'border-right-width' => 'borderRightWidth',
+        'border-right-color' => 'borderColor',
+        'border-top-color' => 'borderColor',
         'border-width' => 'borderWidth',
         'bottom' => 'bottom',
         'color' => 'textColor',
@@ -40,6 +44,7 @@ final class ScopedStyleCompiler
         'flex-grow' => 'flexGrow',
         'flex-shrink' => 'flexShrink',
         'flex-direction' => 'flexDirection',
+        'flex-wrap' => 'flexWrap',
         'font-family' => 'fontFamily',
         'font-size' => 'fontSize',
         'font-style' => 'fontStyle',
@@ -70,6 +75,8 @@ final class ScopedStyleCompiler
         'text-decoration' => 'textDecoration',
         'text-transform' => 'textTransform',
         'top' => 'top',
+        'translation-x' => 'translationX',
+        'translation-y' => 'translationY',
         'width' => 'width',
         'z-index' => 'zIndex',
     ];
@@ -422,6 +429,10 @@ final class ScopedStyleCompiler
                 self::expandBox($output, $property, $value, $name);
                 continue;
             }
+            if ($property === 'inset') {
+                self::expandInset($output, $value, $name);
+                continue;
+            }
             if ($property === 'border') {
                 self::expandBorder($output, $value, $name);
                 continue;
@@ -537,6 +548,32 @@ final class ScopedStyleCompiler
     }
 
     /** @param array<string, string|bool> $output */
+    private static function expandInset(
+        array &$output,
+        string $value,
+        string $name,
+    ): void {
+        $parts = preg_split('/\s+/', trim($value)) ?: [];
+        if ($parts === [] || count($parts) > 4) {
+            throw new RuntimeException("Invalid inset shorthand in {$name}.");
+        }
+        [$top, $right, $bottom, $left] = match (count($parts)) {
+            1 => [$parts[0], $parts[0], $parts[0], $parts[0]],
+            2 => [$parts[0], $parts[1], $parts[0], $parts[1]],
+            3 => [$parts[0], $parts[1], $parts[2], $parts[1]],
+            4 => $parts,
+        };
+        foreach ([
+            'top' => $top,
+            'right' => $right,
+            'bottom' => $bottom,
+            'left' => $left,
+        ] as $edge => $edgeValue) {
+            $output[$edge] = self::scalar($edgeValue, $name);
+        }
+    }
+
+    /** @param array<string, string|bool> $output */
     private static function expandBorder(
         array &$output,
         string $value,
@@ -582,6 +619,10 @@ final class ScopedStyleCompiler
             'background',
             'background-color',
             'border-color',
+            'border-top-color',
+            'border-right-color',
+            'border-bottom-color',
+            'border-left-color',
             'color',
             'align-items',
             'align-self',
@@ -589,6 +630,7 @@ final class ScopedStyleCompiler
             'overflow',
             'position',
             'flex-direction',
+            'flex-wrap',
             'text-align',
             'text-decoration',
             'text-transform',

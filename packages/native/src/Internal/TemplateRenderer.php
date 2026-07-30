@@ -23,6 +23,7 @@ use Pam\Native\Component;
 use Pam\Native\DrawingMode;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
+use Pam\Native\FlexWrap;
 use Pam\Native\GestureComposition;
 use Pam\Native\GestureDirection;
 use Pam\Native\GestureEvent;
@@ -319,6 +320,7 @@ final class TemplateRenderer
         'zIndex' => PropKey::ZIndex,
         'overflow' => PropKey::Overflow,
         'flexDirection' => PropKey::FlexDirection,
+        'flexWrap' => PropKey::FlexWrap,
         'layoutDirection' => PropKey::LayoutDirection,
         'gestureType' => PropKey::GestureType,
         'gestureEnabled' => PropKey::GestureEnabled,
@@ -1748,6 +1750,11 @@ final class TemplateRenderer
                 'row' => 2,
                 'column-reverse' => 3,
                 'row-reverse' => 4,
+            ]),
+            PropKey::FlexWrap => self::named($value, [
+                'nowrap' => FlexWrap::NoWrap->value,
+                'no-wrap' => FlexWrap::NoWrap->value,
+                'wrap' => FlexWrap::Wrap->value,
             ]),
             PropKey::LayoutDirection => self::named($value, [
                 'ltr' => LayoutDirection::LeftToRight->value,

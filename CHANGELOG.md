@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.63 - 2026-07-30
+
+- Add native `flex-wrap` row and column layout to the retained Rust engine,
+  including intrinsic cross-axis measurement for content-sized containers.
+- Compile CSS `inset`, `translation-x`, and `translation-y` into native layout
+  and compositor properties.
+- Accept directional border color declarations while documenting that the
+  current native border renderer uses one shared color for all four edges.
+
 ## 0.5.62 - 2026-07-30
 
 - Compile native-safe `border-top`, `border-right`, `border-bottom`, and

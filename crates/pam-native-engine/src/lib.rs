@@ -532,6 +532,7 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::LetterSpacing
             | PropKey::LineHeight
             | PropKey::FlexDirection
+            | PropKey::FlexWrap
             | PropKey::FlexShrink
             | PropKey::PaddingLeft
             | PropKey::PaddingTop

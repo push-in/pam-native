@@ -401,4 +401,5 @@ enum PropKey: int
     case DrawingMode = 393;
     case DrawingClearRequest = 394;
     case DrawingUndoRequest = 395;
+    case FlexWrap = 396;
 }

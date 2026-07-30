@@ -138,7 +138,9 @@ percentages, common box shorthands, dynamic classes, and native text decoration
 (`none`, `underline`, `line-through`, or `underline-line-through`) are
 supported. `border` and the directional `border-top`, `border-right`,
 `border-bottom`, and `border-left` forms accept `<width> solid <color>`;
-unknown web-only CSS fails compilation.
+`inset`, `translation-x/y`, directional border colors, and native retained
+`flex-wrap` are supported. Directional colors currently resolve to the shared
+native border color. Unknown web-only CSS fails compilation.
 
 For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
 image/video metadata and `System\MediaLibrary::albums()` reads album summaries

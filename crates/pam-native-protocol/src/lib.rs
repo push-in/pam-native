@@ -482,6 +482,7 @@ pub enum PropKey {
     DrawingMode = 393,
     DrawingClearRequest = 394,
     DrawingUndoRequest = 395,
+    FlexWrap = 396,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -884,6 +885,7 @@ impl TryFrom<u16> for PropKey {
             393 => Ok(Self::DrawingMode),
             394 => Ok(Self::DrawingClearRequest),
             395 => Ok(Self::DrawingUndoRequest),
+            396 => Ok(Self::FlexWrap),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1687,10 +1689,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(30).is_err());
 
-        for value in 1..=395 {
+        for value in 1..=396 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(396).is_err());
+        assert!(PropKey::try_from(397).is_err());
     }
 
     fn tree(text: &str) -> Tree {

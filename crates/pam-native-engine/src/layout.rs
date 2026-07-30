@@ -333,7 +333,7 @@ fn layout_node(
     } else {
         Axis::Vertical
     };
-    let flow_children = node_children
+    let mut flow_children = node_children
         .iter()
         .copied()
         .filter(|child| {
@@ -351,7 +351,7 @@ fn layout_node(
                 && integer(child, PropKey::PositionType).unwrap_or(1) == 2
         })
         .collect::<Vec<_>>();
-    let ordered_children = if matches!(direction, 3 | 4) {
+    let mut ordered_children = if matches!(direction, 3 | 4) {
         flow_children.iter().rev().copied().collect::<Vec<_>>()
     } else {
         flow_children.clone()
@@ -364,6 +364,22 @@ fn layout_node(
         Axis::Vertical => inner.width,
         Axis::Horizontal => inner.height,
     };
+    if integer(node, PropKey::FlexWrap).unwrap_or(1) == 2 {
+        layout_wrapped_children(
+            context,
+            node,
+            &ordered_children,
+            inner,
+            axis,
+            available_main,
+            available_cross,
+            gap,
+            depth,
+            output,
+        )?;
+        flow_children.clear();
+        ordered_children.clear();
+    }
     let total_gap = gap * flow_children.len().saturating_sub(1) as f32;
     let total_flex = flow_children
         .iter()
@@ -595,6 +611,152 @@ fn layout_node(
         };
         layout_node(context, child.id, child_frame, false, depth + 1, output)?;
     }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn layout_wrapped_children(
+    context: &LayoutContext<'_>,
+    node: &Node,
+    children: &[&Node],
+    inner: Layout,
+    axis: Axis,
+    available_main: f32,
+    available_cross: f32,
+    gap: f32,
+    depth: usize,
+    output: &mut BTreeMap<u64, Layout>,
+) -> Result<(), LayoutError> {
+    if children.is_empty() {
+        return Ok(());
+    }
+
+    let mut base_main = BTreeMap::new();
+    let mut lines = Vec::<Vec<&Node>>::new();
+    let mut line = Vec::<&Node>::new();
+    let mut consumed = 0.0_f32;
+    for child in children {
+        let main = child_main(
+            context.children,
+            child,
+            axis,
+            available_main,
+            available_cross,
+            context.text_scale,
+            depth + 1,
+        )?;
+        base_main.insert(child.id, main);
+        let (before, after) = margin_main(child, axis);
+        let outer = main + before + after;
+        let candidate = if line.is_empty() {
+            outer
+        } else {
+            consumed + gap + outer
+        };
+        if !line.is_empty() && candidate > available_main {
+            lines.push(std::mem::take(&mut line));
+            consumed = outer;
+        } else {
+            consumed = candidate;
+        }
+        line.push(child);
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+
+    let parent_alignment = cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4));
+    let justify = integer(node, PropKey::JustifyContent).unwrap_or(1);
+    let mut cross_cursor = 0.0_f32;
+
+    for line in lines {
+        let fixed_with_margins = line
+            .iter()
+            .map(|child| {
+                let (before, after) = margin_main(child, axis);
+                base_main[&child.id] + before + after
+            })
+            .sum::<f32>();
+        let line_gaps = gap * line.len().saturating_sub(1) as f32;
+        let grow = line
+            .iter()
+            .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
+            .sum::<f32>();
+        let grow_space = (available_main - fixed_with_margins - line_gaps).max(0.0);
+
+        let mut resolved_cross = BTreeMap::new();
+        let mut line_cross = 0.0_f32;
+        for child in &line {
+            let child_grow = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
+            let main = base_main[&child.id]
+                + if grow > 0.0 {
+                    grow_space * child_grow / grow
+                } else {
+                    0.0
+                };
+            let explicit = child_cross(child, axis, available_cross, main)?;
+            let intrinsic = intrinsic_cross(
+                context.children,
+                child,
+                axis,
+                available_main,
+                available_cross,
+                context.text_scale,
+                depth + 1,
+            )?;
+            let cross = explicit.unwrap_or(intrinsic);
+            let (before, after) = margin_cross(child, axis);
+            line_cross = line_cross.max(cross + before + after);
+            resolved_cross.insert(child.id, (main, explicit, intrinsic));
+        }
+        line_cross = line_cross.min((available_cross - cross_cursor).max(0.0));
+
+        let consumed_main =
+            fixed_with_margins + line_gaps + if grow > 0.0 { grow_space } else { 0.0 };
+        let free = (available_main - consumed_main).max(0.0);
+        let (mut main_cursor, distributed_gap) = justify_offsets(justify, free, line.len(), gap);
+
+        for child in line {
+            let (main, explicit_cross, intrinsic_cross) = resolved_cross[&child.id];
+            let (main_before, main_after) = margin_main(child, axis);
+            let (cross_before, cross_after) = margin_cross(child, axis);
+            let alignment = integer(child, PropKey::AlignSelf)
+                .map(cross_alignment)
+                .unwrap_or(parent_alignment);
+            let cross = explicit_cross.unwrap_or_else(|| {
+                if alignment == CrossAlignment::Stretch {
+                    (line_cross - cross_before - cross_after).max(0.0)
+                } else {
+                    intrinsic_cross.min((line_cross - cross_before - cross_after).max(0.0))
+                }
+            });
+            let cross_offset = match alignment {
+                CrossAlignment::Start | CrossAlignment::Stretch => cross_before,
+                CrossAlignment::Center => (line_cross - cross + cross_before - cross_after) / 2.0,
+                CrossAlignment::End => line_cross - cross - cross_after,
+            }
+            .max(0.0);
+            main_cursor += main_before;
+            let child_frame = match axis {
+                Axis::Vertical => Layout {
+                    x: inner.x + cross_cursor + cross_offset,
+                    y: inner.y + main_cursor,
+                    width: cross,
+                    height: main,
+                },
+                Axis::Horizontal => Layout {
+                    x: inner.x + main_cursor,
+                    y: inner.y + cross_cursor + cross_offset,
+                    width: main,
+                    height: cross,
+                },
+            };
+            layout_node(context, child.id, child_frame, false, depth + 1, output)?;
+            main_cursor += main + main_after + distributed_gap;
+        }
+        cross_cursor += line_cross + gap;
+    }
+
     Ok(())
 }
 
@@ -1013,6 +1175,28 @@ fn intrinsic_extent(
         Axis::Vertical
     };
     let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
+    if integer(node, PropKey::FlexWrap).unwrap_or(1) == 2 && requested_axis != flow_axis {
+        let available_main = match flow_axis {
+            Axis::Horizontal => inner_width,
+            Axis::Vertical => inner_height,
+        };
+        let content = wrapped_intrinsic_cross(
+            children,
+            &node_children,
+            flow_axis,
+            available_main,
+            inner_width,
+            inner_height,
+            gap,
+            text_scale,
+            depth + 1,
+        )?;
+        let padding_extent = match requested_axis {
+            Axis::Vertical => padding_top + padding_bottom,
+            Axis::Horizontal => padding_left + padding_right,
+        };
+        return finite_non_negative(content + padding_extent);
+    }
     let mut child_extents = Vec::with_capacity(node_children.len());
     for child in node_children {
         let child_extent = constrained_intrinsic_extent(
@@ -1042,6 +1226,74 @@ fn intrinsic_extent(
     };
 
     finite_non_negative(content + padding_extent)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn wrapped_intrinsic_cross(
+    children_index: &BTreeMap<u64, Vec<&Node>>,
+    children: &[&Node],
+    flow_axis: Axis,
+    available_main: f32,
+    available_width: f32,
+    available_height: f32,
+    gap: f32,
+    text_scale: f32,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    let cross_axis = match flow_axis {
+        Axis::Horizontal => Axis::Vertical,
+        Axis::Vertical => Axis::Horizontal,
+    };
+    let mut total_cross = 0.0_f32;
+    let mut line_main = 0.0_f32;
+    let mut line_cross = 0.0_f32;
+    let mut line_count = 0_usize;
+    let mut line_total = 0_usize;
+
+    for child in children {
+        let main = constrained_intrinsic_extent(
+            children_index,
+            child,
+            flow_axis,
+            available_width,
+            available_height,
+            text_scale,
+            depth + 1,
+        )?;
+        let cross = constrained_intrinsic_extent(
+            children_index,
+            child,
+            cross_axis,
+            available_width,
+            available_height,
+            text_scale,
+            depth + 1,
+        )?;
+        let (main_before, main_after) = margin_main(child, flow_axis);
+        let (cross_before, cross_after) = margin_cross(child, flow_axis);
+        let outer_main = main + main_before + main_after;
+        let candidate = if line_count == 0 {
+            outer_main
+        } else {
+            line_main + gap + outer_main
+        };
+        if line_count > 0 && candidate > available_main {
+            total_cross += if line_total == 0 { 0.0 } else { gap } + line_cross;
+            line_total += 1;
+            line_main = outer_main;
+            line_cross = cross + cross_before + cross_after;
+            line_count = 1;
+        } else {
+            line_main = candidate;
+            line_cross = line_cross.max(cross + cross_before + cross_after);
+            line_count += 1;
+        }
+    }
+    if line_count > 0 {
+        total_cross += if line_total == 0 { 0.0 } else { gap } + line_cross;
+    }
+
+    finite_non_negative(total_cross)
 }
 
 fn grid_intrinsic_height(
@@ -1877,6 +2129,92 @@ mod tests {
         assert_eq!(layouts[&2].width, 50.0);
         assert_eq!(layouts[&3].width, 50.0);
         assert_eq!(layouts[&3].x, 50.0);
+    }
+
+    #[test]
+    fn flex_wrap_breaks_rows_and_reports_intrinsic_cross_extent() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::AlignItems, PropValue::Integer(1))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Row,
+                        [
+                            (PropKey::Width, PropValue::Float(100.0)),
+                            (PropKey::FlexWrap, PropValue::Integer(2)),
+                            (PropKey::Gap, PropValue::Float(4.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(44.0)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(44.0)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        2,
+                        2,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(44.0)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 100.0,
+                height: 100.0,
+            },
+        )
+        .expect("wrapped layout");
+
+        assert_eq!(layouts[&2].height, 44.0);
+        assert_eq!((layouts[&3].x, layouts[&3].y), (0.0, 0.0));
+        assert_eq!((layouts[&4].x, layouts[&4].y), (48.0, 0.0));
+        assert_eq!((layouts[&5].x, layouts[&5].y), (0.0, 24.0));
     }
 
     #[test]
