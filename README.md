@@ -171,11 +171,7 @@ final class Card extends Component
 </template>
 
 <style scoped>
-    @font-face {
-        font-family: "Brand";
-        src: url("asset://assets/fonts/Brand-Bold.ttf");
-        font-weight: 700;
-    }
+    @import "./styles/brand.css";
 
     .card {
         padding: 16px;
@@ -194,8 +190,10 @@ final class Card extends Component
 Register them with `App::components(__DIR__.'/src')`. See
 [`docs/components.md`](docs/components.md) for the complete syntax and
 lifecycle contract. Scoped styles compile directly to typed native properties;
-they do not ship a browser CSS engine. PAM uses `p-if`, `p-else-if`, `p-else`,
-and `p-for` as its template directives.
+they do not ship a browser CSS engine. Relative `@import` statements are
+expanded at compile time, so fonts, tokens, tag defaults, and semantic classes
+can be shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`,
+`p-else`, and `p-for` as its template directives.
 
 `overflow: hidden` follows the authored native border path. A rounded
 `Pressable`, `View`, `Row`, `Column`, or `ImageBackground` therefore clips its

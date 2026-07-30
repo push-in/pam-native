@@ -142,6 +142,33 @@ compiles this native-safe CSS subset into typed element properties when it
 compiles the component. No CSS parser, WebView, selector engine, or style
 recalculation exists in the application runtime.
 
+Shared tokens and typography may live in an ordinary CSS file and be imported
+by each component that uses them:
+
+```css
+/* src/styles/brand.css */
+@font-face {
+    font-family: "Space Grotesk";
+    src: url("asset://assets/fonts/SpaceGrotesk-Regular.ttf");
+    font-weight: 400;
+}
+
+Text {
+    font-family: "Space Grotesk";
+}
+```
+
+```php
+<style scoped>
+    @import "../../styles/brand.css";
+</style>
+```
+
+Imports are expanded when the component is compiled. They may be nested, must
+use a relative `.css` path inside the nearest Composer project, and participate
+in cache invalidation. Imported selectors remain scoped to the importing
+component, and local rules that follow the import override them normally.
+
 ```php
 <template>
     <Column class="profile">

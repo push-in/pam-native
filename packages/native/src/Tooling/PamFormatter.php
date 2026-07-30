@@ -256,6 +256,22 @@ final class PamFormatter
         if (!is_string($clean)) {
             throw new RuntimeException('Cannot format scoped PAM styles.');
         }
+        $imports = [];
+        $clean = preg_replace_callback(
+            '/@import\s+(?:url\(\s*)?(["\'])([^"\']+)\1\s*\)?\s*;/i',
+            static function (array $match) use (&$imports): string {
+                $imports[] = '@import "'.trim((string) $match[2]).'";';
+
+                return '';
+            },
+            $clean,
+        );
+        if (!is_string($clean)) {
+            throw new RuntimeException('Cannot format scoped PAM style imports.');
+        }
+        foreach ($imports as $import) {
+            $lines[] = '    '.$import;
+        }
         preg_match_all(
             '/([^{}]+)\{([^{}]*)\}/',
             $clean,

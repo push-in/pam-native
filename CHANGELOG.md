@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Add compile-time relative `@import` support to scoped PAM styles so shared
+  fonts, tokens, tag defaults, and semantic classes can live in ordinary CSS
+  files without adding a runtime CSS engine.
+- Resolve nested imports inside the nearest Composer project, reject traversal,
+  remote sources, cycles, oversized graphs, and invalid syntax, and include
+  imported contents in component cache invalidation.
+- Preserve and normalize `@import` statements in `pam-native-format`.
+
 ## 0.5.51 - 2026-07-30
 
 - Render Android video through a retained `TextureView` and native

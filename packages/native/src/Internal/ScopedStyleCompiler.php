@@ -12,6 +12,9 @@ use RuntimeException;
  */
 final class ScopedStyleCompiler
 {
+    private const MAX_IMPORTED_BYTES = 1_048_576;
+    private const MAX_IMPORT_DEPTH = 16;
+
     /** @var array<string, string> */
     private const PROPERTIES = [
         'align-items' => 'alignItems',
@@ -83,6 +86,7 @@ final class ScopedStyleCompiler
      */
     public static function compile(string $source, string $name): array
     {
+        $source = self::resolveImports($source, $name);
         $clean = preg_replace('/\/\*[\s\S]*?\*\//', '', $source);
         if (!is_string($clean)) {
             throw new RuntimeException("Cannot parse styles in {$name}.");
@@ -165,6 +169,154 @@ final class ScopedStyleCompiler
         }
 
         return ['classes' => $classes, 'tags' => $tags, 'fonts' => $fonts];
+    }
+
+    public static function resolveImports(string $source, string $name): string
+    {
+        if (!str_contains($source, '@import')) {
+            return $source;
+        }
+        if (!is_file($name)) {
+            throw new RuntimeException(
+                "CSS imports in {$name} require a component file path.",
+            );
+        }
+        $component = realpath($name);
+        if (!is_string($component)) {
+            throw new RuntimeException("Cannot resolve component path {$name}.");
+        }
+        $root = self::projectRoot(dirname($component));
+        $bytes = strlen($source);
+        $stack = [];
+
+        return self::expandImports(
+            $source,
+            dirname($component),
+            $root,
+            $stack,
+            $bytes,
+            0,
+            $name,
+        );
+    }
+
+    /**
+     * @param array<string, bool> $stack
+     */
+    private static function expandImports(
+        string $source,
+        string $directory,
+        string $root,
+        array &$stack,
+        int &$bytes,
+        int $depth,
+        string $name,
+    ): string {
+        if ($depth >= self::MAX_IMPORT_DEPTH) {
+            throw new RuntimeException(
+                "Scoped CSS imports exceed ".self::MAX_IMPORT_DEPTH." levels in {$name}.",
+            );
+        }
+        $source = preg_replace('/\/\*[\s\S]*?\*\//', '', $source);
+        if (!is_string($source)) {
+            throw new RuntimeException("Cannot parse CSS comments in {$name}.");
+        }
+        $expanded = preg_replace_callback(
+            '/@import\s+(?:url\(\s*)?(["\'])([^"\']+)\1\s*\)?\s*;/i',
+            static function (array $match) use (
+                $directory,
+                $root,
+                &$stack,
+                &$bytes,
+                $depth,
+                $name,
+            ): string {
+                $import = trim((string) $match[2]);
+                if (
+                    $import === ''
+                    || str_contains($import, "\0")
+                    || str_contains($import, '://')
+                    || str_starts_with($import, '/')
+                    || strtolower(pathinfo($import, PATHINFO_EXTENSION)) !== 'css'
+                ) {
+                    throw new RuntimeException(
+                        "CSS import {$import} in {$name} must be a relative .css file.",
+                    );
+                }
+                $path = realpath($directory.DIRECTORY_SEPARATOR.$import);
+                if (
+                    !is_string($path)
+                    || !is_file($path)
+                    || !self::inside($path, $root)
+                ) {
+                    throw new RuntimeException(
+                        "CSS import {$import} in {$name} is missing or outside the project.",
+                    );
+                }
+                if (isset($stack[$path])) {
+                    throw new RuntimeException(
+                        "Circular CSS import {$import} in {$name}.",
+                    );
+                }
+                $contents = file_get_contents($path);
+                if ($contents === false) {
+                    throw new RuntimeException("Cannot read CSS import {$path}.");
+                }
+                $bytes += strlen($contents);
+                if ($bytes > self::MAX_IMPORTED_BYTES) {
+                    throw new RuntimeException(
+                        "Scoped CSS imports exceed one megabyte in {$name}.",
+                    );
+                }
+                $stack[$path] = true;
+                try {
+                    return self::expandImports(
+                        $contents,
+                        dirname($path),
+                        $root,
+                        $stack,
+                        $bytes,
+                        $depth + 1,
+                        $path,
+                    );
+                } finally {
+                    unset($stack[$path]);
+                }
+            },
+            $source,
+        );
+        if (!is_string($expanded)) {
+            throw new RuntimeException("Cannot expand CSS imports in {$name}.");
+        }
+        if (str_contains($expanded, '@import')) {
+            throw new RuntimeException(
+                "Invalid CSS import syntax in {$name}; use @import \"relative.css\".",
+            );
+        }
+
+        return $expanded;
+    }
+
+    private static function projectRoot(string $directory): string
+    {
+        $current = $directory;
+        while (true) {
+            if (is_file($current.DIRECTORY_SEPARATOR.'composer.json')) {
+                return $current;
+            }
+            $parent = dirname($current);
+            if ($parent === $current) {
+                return $directory;
+            }
+            $current = $parent;
+        }
+    }
+
+    private static function inside(string $path, string $root): bool
+    {
+        $root = rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+
+        return str_starts_with($path, $root);
     }
 
     /**

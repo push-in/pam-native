@@ -105,6 +105,9 @@ final class PamPhpCompiler
         }
 
         [$php, $template, $templateLine, $style] = self::split($contents, $source);
+        if ($style !== '') {
+            $style = ScopedStyleCompiler::resolveImports($style, $source);
+        }
         self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
         $cacheKey = hash('sha256', $source);
@@ -114,7 +117,7 @@ final class PamPhpCompiler
             .DIRECTORY_SEPARATOR.$cacheKey.'.template.json';
         $metadataFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
             .DIRECTORY_SEPARATOR.$cacheKey.'.json';
-        $hash = hash('sha256', $contents);
+        $hash = hash('sha256', $contents."\0".$style);
         $tree = self::cachedTree(
             $metadataFile,
             $templateFile,

@@ -51,6 +51,7 @@ use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\PamPhpCompiler;
 use Pam\Native\Internal\ScopedStyleCompiler;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\TemplateCompiler;
@@ -309,6 +310,143 @@ $assert(
     $forwardVariableCss['classes']['label']['textColor'] === '#334455',
     'Scoped CSS variables must be independent from declaration order.',
 );
+$cssImportRoot = sys_get_temp_dir().'/pam-native-css-import-'.getmypid();
+mkdir($cssImportRoot.'/src/styles', 0o755, true);
+mkdir($cssImportRoot.'/src/screens', 0o755, true);
+file_put_contents($cssImportRoot.'/composer.json', "{}\n");
+file_put_contents(
+    $cssImportRoot.'/src/styles/tokens.css',
+    ":root { --brand-ink: #163D2A; }\n",
+);
+file_put_contents(
+    $cssImportRoot.'/src/styles/brand.css',
+    <<<'CSS'
+@import "./tokens.css";
+
+@font-face {
+    font-family: "Brand";
+    src: url("asset://assets/fonts/Brand-Regular.ttf");
+    font-weight: 400;
+}
+
+Text {
+    color: var(--brand-ink);
+    font-family: "Brand";
+}
+CSS,
+);
+$cssImportComponent = $cssImportRoot.'/src/screens/Profile.pam.php';
+file_put_contents($cssImportComponent, "<?php\n");
+$importedCss = ScopedStyleCompiler::compile(
+    '@import "../styles/brand.css"; Text { font-size: 15px; }',
+    $cssImportComponent,
+);
+$assert(
+    $importedCss['tags']['Text']['textColor'] === '#163D2A'
+        && $importedCss['tags']['Text']['fontFamily']
+            === 'Brand'
+        && $importedCss['tags']['Text']['fontSize'] === '15'
+        && $importedCss['fonts']['Brand'][0]['source']
+            === 'asset://assets/fonts/Brand-Regular.ttf',
+    'Scoped CSS imports must inline nested project styles and preserve local cascade order.',
+);
+$formattedImportPam = PamFormatter::format(
+    <<<'PAM'
+<?php
+?>
+<template><Text>Brand</Text></template><style scoped>@import url('../styles/brand.css'); Text { font-size: 15px; }</style>
+PAM,
+    $cssImportComponent,
+);
+$assert(
+    str_contains($formattedImportPam, '    @import "../styles/brand.css";')
+        && PamFormatter::format($formattedImportPam, $cssImportComponent)
+            === $formattedImportPam,
+    'PAM formatter must normalize and preserve compile-time CSS imports.',
+);
+$outsideCss = sys_get_temp_dir().'/pam-native-css-outside-'.getmypid().'.css';
+file_put_contents($outsideCss, "Text { color: #FF0000; }\n");
+$outsideImportRejected = false;
+try {
+    ScopedStyleCompiler::compile(
+        '@import "../../../'.basename($outsideCss).'";',
+        $cssImportComponent,
+    );
+} catch (RuntimeException $error) {
+    $outsideImportRejected = str_contains($error->getMessage(), 'outside the project');
+}
+$assert(
+    $outsideImportRejected,
+    'Scoped CSS imports must not escape the Composer project root.',
+);
+file_put_contents(
+    $cssImportComponent,
+    <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\CssImport;
+
+use Pam\Native\Component;
+
+final class Profile extends Component
+{
+}
+?>
+
+<template>
+    <Text>Profile</Text>
+</template>
+
+<style scoped>
+    @import "../styles/brand.css";
+</style>
+PAM,
+);
+$cssImportCache = $cssImportRoot.'/.cache';
+$firstImportedComponent = PamPhpCompiler::compileFile(
+    $cssImportComponent,
+    $cssImportCache,
+);
+$firstImportedStyles = json_decode(
+    (string) ($firstImportedComponent->template->attributes['__pamStyles'] ?? ''),
+    true,
+    32,
+    JSON_THROW_ON_ERROR,
+);
+file_put_contents(
+    $cssImportRoot.'/src/styles/tokens.css',
+    ":root { --brand-ink: #245E42; }\n",
+);
+$secondImportedComponent = PamPhpCompiler::compileFile(
+    $cssImportComponent,
+    $cssImportCache,
+);
+$secondImportedStyles = json_decode(
+    (string) ($secondImportedComponent->template->attributes['__pamStyles'] ?? ''),
+    true,
+    32,
+    JSON_THROW_ON_ERROR,
+);
+$assert(
+    $firstImportedStyles['tags']['Text']['textColor'] === '#163D2A'
+        && $secondImportedStyles['tags']['Text']['textColor'] === '#245E42',
+    'Changing an imported CSS dependency must invalidate the compiled component cache.',
+);
+unlink($outsideCss);
+unlink($cssImportComponent);
+foreach (glob($cssImportCache.'/*') ?: [] as $cacheFile) {
+    unlink($cacheFile);
+}
+rmdir($cssImportCache);
+unlink($cssImportRoot.'/src/styles/brand.css');
+unlink($cssImportRoot.'/src/styles/tokens.css');
+unlink($cssImportRoot.'/composer.json');
+rmdir($cssImportRoot.'/src/screens');
+rmdir($cssImportRoot.'/src/styles');
+rmdir($cssImportRoot.'/src');
+rmdir($cssImportRoot);
 $invalidCssRejected = false;
 try {
     ScopedStyleCompiler::compile(
