@@ -93,6 +93,7 @@ use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\NavigationPresentation;
+use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
 use Pam\Native\Navigation\InteractsWithNavigationLifecycle;
 use Pam\Native\Navigation\TabNavigator;
@@ -4448,6 +4449,25 @@ $assert(
         && $containerStateChanges === 1,
     'NavigationContainer must dispatch actions and build canonical paths from state.',
 );
+$navigationRef = new NavigationRef();
+$refNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->build();
+$assert(
+    $navigationRef->navigate('profile') && !$navigationRef->isReady(),
+    'Navigation refs must safely queue actions before the root container mounts.',
+);
+$refContainer = NavigationContainer::make($refNavigator, $navigationRef);
+$refContainer->mount();
+$assert(
+    $navigationRef->isReady()
+        && $navigationRef->currentRoute()?->name === 'profile'
+        && ($navigationRef->rootState()['index'] ?? null) === 1,
+    'Navigation refs must replay queued actions in order and expose the mounted root state.',
+);
+$refContainer->unmount();
+$assert(!$navigationRef->isReady(), 'Unmounting must detach navigation refs without retaining the container.');
 $preloadFactories = 0;
 $preloadNavigator = Router::stack('home')
     ->route('home', static fn () => Screen::make(Text::make('Home')))

@@ -28,7 +28,10 @@ final class NavigationContainer extends Component
     /** @var (Closure(NavigationAction): void)|null */
     private ?Closure $onUnhandledAction = null;
 
-    public function __construct(private readonly Navigator $root)
+    public function __construct(
+        private readonly Navigator $root,
+        private readonly ?NavigationRef $ref = null,
+    )
     {
         $root->claimSystemBackRoot();
         $this->stateSubscription = $root->addListener(
@@ -57,11 +60,12 @@ final class NavigationContainer extends Component
                 ));
             },
         );
+        $ref?->attach($this);
     }
 
-    public static function make(Navigator $root): self
+    public static function make(Navigator $root, ?NavigationRef $ref = null): self
     {
-        return new self($root);
+        return new self($root, $ref);
     }
 
     public function onReady(Closure $callback): self
@@ -99,6 +103,12 @@ final class NavigationContainer extends Component
     public function isReady(): bool
     {
         return $this->ready;
+    }
+
+    public function unmount(): void
+    {
+        $this->ready = false;
+        $this->ref?->detach($this);
     }
 
     public function dispatch(NavigationAction $action): bool
