@@ -445,4 +445,5 @@ enum PropKey: int
     case TabIndicatorColor = 437;
     case TabSwipeEnabled = 438;
     case TabScrollEnabled = 439;
+    case CanvasCommands = 440;
 }

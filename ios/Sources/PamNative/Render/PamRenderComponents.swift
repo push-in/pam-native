@@ -13,11 +13,48 @@ final class PamAnchoredScrollView: UIScrollView {
     var maintainVisibleContentPosition = false
     var autoScrollToEndThreshold: CGFloat = 24
     var horizontal = false
+    var pamPagingEnabled = false
+    var pamSnapInterval: CGFloat = 0
     var scrollTargetTestId = ""
     var scrollTargetOffset: CGFloat = -1
 
     private var initialEndAnchorApplied = false
     private var previousMaxOffset: CGFloat = 0
+
+    var primaryPageExtent: CGFloat {
+        if pamSnapInterval > 0 {
+            return pamSnapInterval
+        }
+        guard pamPagingEnabled else { return 0 }
+        return horizontal
+            ? max(0, bounds.width - adjustedContentInset.left - adjustedContentInset.right)
+            : max(0, bounds.height - adjustedContentInset.top - adjustedContentInset.bottom)
+    }
+
+    static func onePageTarget(
+        start: CGFloat,
+        position: CGFloat,
+        velocity: CGFloat,
+        extent: CGFloat,
+        maximum: CGFloat
+    ) -> CGFloat {
+        guard extent > 0 else { return min(max(0, position), maximum) }
+        let startPage = (start / extent).rounded()
+        let displacement = position - startPage * extent
+        let direction: CGFloat
+        if velocity > 350 {
+            direction = 1
+        } else if velocity < -350 {
+            direction = -1
+        } else if displacement > extent * 0.18 {
+            direction = 1
+        } else if displacement < -extent * 0.18 {
+            direction = -1
+        } else {
+            direction = 0
+        }
+        return min(max(0, (startPage + direction) * extent), maximum)
+    }
 
     override func layoutSubviews() {
         let oldMax = previousMaxOffset

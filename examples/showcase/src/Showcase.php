@@ -6,7 +6,7 @@ namespace App;
 
 use Pam\Native\Element;
 use Pam\Native\Http\Http;
-use Pam\Native\Navigation\Navigator;
+use Pam\Native\Routing\Navigation;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\Storage\Storage;
 use Pam\Native\Style;
@@ -23,7 +23,6 @@ use Pam\Native\UI\Text;
 
 final class Showcase
 {
-    public Navigator $navigator;
     private int $count = 0;
     private string $name = 'PHP';
     private string $networkStatus = 'HTTP has not run yet.';
@@ -132,7 +131,7 @@ final class Showcase
                                 fontWeight: 700,
                             ))
                             ->onPress(function (): void {
-                                $this->navigator->push('details');
+                                Navigation::push('details');
                             }),
                     )->key('actions')->style(new Style(height: 52, gap: 10)),
                     Button::make('Tags, classes, props and slots')
@@ -146,7 +145,7 @@ final class Showcase
                             borderColor: 0xFF475569,
                         ))
                         ->onPress(function (): void {
-                            $this->navigator->push('tags');
+                            Navigation::push('tags');
                         }),
                     Text::make("Hello, {$this->name}.")
                         ->key('greeting')
@@ -201,7 +200,7 @@ final class Showcase
                         ->accessibilityLabel('benchmark-back')
                         ->style(new Style(width: 96))
                         ->onPress(function (): void {
-                            $this->navigator->pop();
+                            Navigation::back();
                         }),
                     Text::make('10,000 native rows')
                         ->key('details-title')

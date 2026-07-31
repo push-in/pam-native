@@ -5,13 +5,10 @@ declare(strict_types=1);
 namespace App;
 
 use Pam\Native\Component;
-use Pam\Native\Navigation\Navigator;
 use Pam\Native\View;
 
 final class Gallery extends Component
 {
-    public Navigator $navigator;
-
     public function render(): View
     {
         return View::make('screens.gallery');
@@ -19,26 +16,26 @@ final class Gallery extends Component
 
     public function openCommerce(): void
     {
-        $this->navigator->push('commerce');
+        $this->pushRoute('commerce');
     }
 
     public function openFinance(): void
     {
-        $this->navigator->push('finance');
+        $this->pushRoute('finance');
     }
 
     public function openChat(): void
     {
-        $this->navigator->push('chat');
+        $this->pushRoute('chat');
     }
 
     public function openField(): void
     {
-        $this->navigator->push('field');
+        $this->pushRoute('field');
     }
 
     public function openLab(): void
     {
-        $this->navigator->push('home');
+        $this->pushRoute('home');
     }
 }

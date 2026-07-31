@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace App;
 
 use Pam\Native\Component;
-use Pam\Native\Navigation\Navigator;
 use Pam\Native\View;
 
 final class ChatDemo extends Component
 {
-    public Navigator $navigator;
     private string $message = '';
     private float $scrollOffset = 100000.0;
 
@@ -104,6 +102,6 @@ final class ChatDemo extends Component
 
     public function back(): void
     {
-        $this->navigator->pop();
+        $this->popRoute();
     }
 }

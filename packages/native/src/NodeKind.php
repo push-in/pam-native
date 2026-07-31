@@ -36,4 +36,5 @@ enum NodeKind: int
     case Media = 28;
     case DrawingCanvas = 29;
     case TabHost = 30;
+    case Canvas = 31;
 }

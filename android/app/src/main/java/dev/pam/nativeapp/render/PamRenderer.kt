@@ -596,6 +596,7 @@ class PamRenderer(
             NodeKind.MEDIA -> PamMediaView(context, mediaCache)
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
             NodeKind.TAB_HOST -> PamTabHost(context)
+            NodeKind.CANVAS -> PamVectorCanvas(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
@@ -1385,6 +1386,8 @@ class PamRenderer(
             PropKey.TAB_SWIPE_ENABLED,
             PropKey.TAB_SCROLL_ENABLED,
             -> configureTabHost(view, state)
+            PropKey.CANVAS_COMMANDS ->
+                (view as? PamVectorCanvas)?.setCommands(value.text(PropKey.CANVAS_COMMANDS))
             PropKey.NAVIGATION_GESTURE_ENABLED,
             PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
             PropKey.NAVIGATION_GESTURE_THRESHOLD,

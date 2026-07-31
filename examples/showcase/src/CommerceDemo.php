@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace App;
 
 use Pam\Native\Component;
-use Pam\Native\Navigation\Navigator;
 use Pam\Native\View;
 
 final class CommerceDemo extends Component
 {
-    public Navigator $navigator;
     private int $cartCount = 0;
     private string $cartLabel = 'Add to order';
 
@@ -27,6 +25,6 @@ final class CommerceDemo extends Component
 
     public function back(): void
     {
-        $this->navigator->pop();
+        $this->popRoute();
     }
 }

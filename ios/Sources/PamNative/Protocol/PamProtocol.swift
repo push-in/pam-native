@@ -42,6 +42,7 @@ public enum NodeKind: Int {
     case media = 28
     case drawingCanvas = 29
     case tabHost = 30
+    case canvas = 31
 
     public init(_ rawValue: Int) throws {
         guard let kind = NodeKind(rawValue: rawValue) else {
@@ -341,6 +342,9 @@ public enum PamConstants {
     public static let switchTrackColorTrue = 193
     public static let switchThumbColor = 194
     public static let scrollHorizontal = 177
+    public static let scrollPagingEnabled = 185
+    public static let scrollSnapInterval = 186
+    public static let scrollDecelerationRate = 187
     public static let scrollAnchorToEnd = 385
     public static let scrollMaintainVisibleContentPosition = 386
     public static let scrollAutoScrollToEndThreshold = 387
@@ -396,6 +400,7 @@ public enum PamConstants {
     public static let tabIndicatorColor = 437
     public static let tabSwipeEnabled = 438
     public static let tabScrollEnabled = 439
+    public static let canvasCommands = 440
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

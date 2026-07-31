@@ -10,8 +10,8 @@ use App\FinanceDemo;
 use App\ChatDemo;
 use App\FieldDemo;
 use Pam\Native\App;
-use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\NavigationTransition;
+use Pam\Native\Routing\Route;
 
 require __DIR__.'/vendor/autoload.php';
 
@@ -27,29 +27,22 @@ $commerce = new CommerceDemo();
 $finance = new FinanceDemo();
 $chat = new ChatDemo();
 $field = new FieldDemo();
-$navigator = new Navigator(
-    initialRoute: 'gallery',
-    routes: [
-        'gallery' => static fn () => $gallery,
-        'commerce' => static fn () => $commerce,
-        'finance' => static fn () => $finance,
-        'chat' => static fn () => $chat,
-        'field' => static fn () => $field,
-        'home' => $showcase->home(...),
-        'details' => $showcase->details(...),
-        'tags' => static fn () => $template,
-    ],
-    persistenceKey: 'showcase',
+$navigator = Route::stack(
+    name: 'showcase',
+    initial: 'gallery',
+    routes: static function () use ($gallery, $commerce, $finance, $chat, $field, $showcase, $template): void {
+        Route::screen('gallery', $gallery);
+        Route::screen('commerce', $commerce);
+        Route::screen('finance', $finance);
+        Route::screen('chat', $chat);
+        Route::screen('field', $field);
+        Route::screen('home', $showcase->home(...));
+        Route::screen('details', $showcase->details(...));
+        Route::screen('tags', $template);
+    },
     transition: NavigationTransition::PlatformDefault,
-    transitionDurationMs: 240,
+    durationMs: 240,
 );
-$showcase->navigator = $navigator;
-$template->navigator = $navigator;
-$gallery->navigator = $navigator;
-$commerce->navigator = $navigator;
-$finance->navigator = $navigator;
-$chat->navigator = $navigator;
-$field->navigator = $navigator;
 
 App::onBack(static function () use ($navigator): void {
     $navigator->pop();

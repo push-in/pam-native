@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0 - 2026-07-31
+
+- Add Laravel-inspired named route stacks, tabs, screens and modals. Components
+  navigate through their nearest application scope without receiving a
+  `Navigator`, and class-based screens hydrate typed constructor parameters.
+- Add a bounded typed bridge IDL compiler with sequential module/method/field
+  IDs, SHA-256 fingerprints and generated PHP, Kotlin, Swift and Rust
+  contracts.
+- Promote the priority scheduler into cancellable `AsyncResource` and
+  `Suspense` APIs; add deterministic bounded numeric `PNW1` worklet bytecode.
+- Formalize advanced retained list/grid/section virtualization and introduce
+  recoverable background jobs plus an idempotent offline mutation queue with
+  typed lifecycle states, persistence, conflict handling and capped backoff.
+- Add append-only Canvas node/property contracts and hardware-accelerated
+  Android/UIKit renderers for bounded retained vector commands.
+- Add bounded server-driven UI documents with integer node kinds, allowlisted
+  components/styles and locally resolved actions; remote documents cannot name
+  or execute PHP functions or classes.
+- Make Android paging move at most one page per gesture, protect programmatic
+  flings from stale gesture origins, and add matching paging, snap interval and
+  deceleration behavior plus tests on iOS.
+- Replace the repository landing page with an adoption-focused English README,
+  publish the platform-runtime guide and migrate the showcase to named routes.
+
 ## 0.5.94 - 2026-07-31
 
 - Clear process-local linking, incoming-share, and push subscriptions during runtime shutdown so hot reload can rebuild an app without duplicate-listener exceptions.

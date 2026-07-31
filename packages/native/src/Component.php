@@ -15,6 +15,7 @@ use ReflectionMethod;
 use Throwable;
 use WeakMap;
 use Pam\Native\Diagnostics\Profiler;
+use Pam\Native\Routing\Navigation;
 
 abstract class Component implements Renderable
 {
@@ -163,6 +164,29 @@ abstract class Component implements Renderable
     public function fallback(): ?Renderable
     {
         return null;
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    final protected function pushRoute(string $route, mixed ...$params): void
+    {
+        Navigation::push($route, $params);
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    final protected function navigateRoute(string $route, mixed ...$params): bool
+    {
+        return Navigation::navigate($route, $params);
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    final protected function replaceRoute(string $route, mixed ...$params): void
+    {
+        Navigation::replace($route, $params);
+    }
+
+    final protected function popRoute(): bool
+    {
+        return Navigation::back();
     }
 
     final public function __get(string $name): mixed

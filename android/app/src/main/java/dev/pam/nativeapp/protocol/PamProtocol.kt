@@ -39,7 +39,8 @@ enum class NodeKind(val value: Int) {
     WEB_VIEW(27),
     MEDIA(28),
     DRAWING_CANVAS(29),
-    TAB_HOST(30);
+    TAB_HOST(30),
+    CANVAS(31);
 
     companion object {
         fun from(value: Int): NodeKind =
@@ -554,7 +555,8 @@ enum class PropKey(val value: Int) {
     TAB_BACKGROUND_COLOR(436),
     TAB_INDICATOR_COLOR(437),
     TAB_SWIPE_ENABLED(438),
-    TAB_SCROLL_ENABLED(439);
+    TAB_SCROLL_ENABLED(439),
+    CANVAS_COMMANDS(440);
 
     companion object {
         fun from(value: Int): PropKey =

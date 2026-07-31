@@ -12,8 +12,10 @@ use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
 use Pam\Native\AnimationKeyframe;
 use Pam\Native\BottomSheetKeyboardBehavior;
+use Pam\Native\Bridge\IdlCompiler;
 use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
+use Pam\Native\AsyncResource;
 use Pam\Native\Component;
 use Pam\Native\Contact;
 use Pam\Native\CaptureType;
@@ -54,6 +56,7 @@ use Pam\Native\InputSelectionEvent;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardType;
+use Pam\Native\Jobs\BackgroundJobs;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\PamPhpCompiler;
@@ -99,6 +102,8 @@ use Pam\Native\Navigation\NavigationPresentation;
 use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
 use Pam\Native\Navigation\InteractsWithNavigationLifecycle;
+use Pam\Native\Routing\Route;
+use Pam\Native\Routing\Navigation as NamedNavigation;
 use Pam\Native\Navigation\TabNavigator;
 use Pam\Native\Navigation\TabPresentation;
 use Pam\Native\ModalAnimationType;
@@ -112,9 +117,11 @@ use Pam\Native\PointerEvents;
 use Pam\Native\PressEvent;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\RefreshIndicatorSize;
+use Pam\Native\Renderable;
 use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\ServerDriven\ServerDrivenUi;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
@@ -128,6 +135,8 @@ use Pam\Native\Store\Store;
 use Pam\Native\Store\StoreChangeKind;
 use Pam\Native\Store\StoreMiddleware;
 use Pam\Native\Store\Stores;
+use Pam\Native\Sync\MutationStatus;
+use Pam\Native\Sync\OfflineMutationQueue;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
 use Pam\Native\System\IncomingShares;
@@ -157,6 +166,7 @@ use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
+use Pam\Native\UI\Canvas;
 use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\GestureDetector;
 use Pam\Native\UI\ActivityIndicator;
@@ -179,11 +189,13 @@ use Pam\Native\UI\Screen;
 use Pam\Native\UI\Scroll;
 use Pam\Native\UI\SectionList;
 use Pam\Native\UI\StatusBar;
+use Pam\Native\UI\Suspense;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\Toggle;
 use Pam\Native\UI\VirtualGrid;
 use Pam\Native\UI\VirtualizedList;
 use Pam\Native\UI\WebView;
+use Pam\Native\Worklets\Worklet;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
@@ -212,6 +224,22 @@ final class TestDiagnostics
 
     /** @var array{requestId: int, operation: int, payload: string}|null */
     public static ?array $typedCall = null;
+}
+
+final class TypedRouteTestScreen extends Component
+{
+    public function __construct(
+        private readonly int $productId,
+        private readonly bool $preview = false,
+    ) {
+    }
+
+    public function render(): Renderable
+    {
+        return Screen::make(Text::make(
+            "Product {$this->productId}".($this->preview ? ' preview' : ''),
+        ));
+    }
 }
 
 if (!function_exists('pam_native_error')) {
@@ -4227,6 +4255,37 @@ $fluentNavigator = Router::stack('home')
     ->transitions(NavigationTransition::Scale, 180)
     ->build();
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
+$namedRouteNavigator = Route::stack(
+    name: 'named-routes-test',
+    initial: 'home',
+    routes: static function (): void {
+        Route::screen('home', static fn () => Screen::make(Text::make('Home')));
+        Route::screen('product', TypedRouteTestScreen::class);
+        Route::modal('filters', static fn () => Screen::make(Text::make('Filters')))
+            ->sheet();
+    },
+);
+$namedRouteNavigator->push('product', ['productId' => 42, 'preview' => true]);
+$namedProduct = $namedRouteNavigator->render()->toElement()->children()[1];
+$assert(
+    $namedRouteNavigator->currentRoute() === 'product'
+        && $namedProduct->children()[0]->properties()[PropKey::Text->value] === 'Product 42 preview',
+    'Laravel-style named routes must register screens and pass bounded parameters.',
+);
+$namedRouteNavigator->push('filters');
+$assert(
+    $namedRouteNavigator->currentOptions()->presentation === NavigationPresentation::FormSheet,
+    'Named modal routes must preserve native presentation options.',
+);
+$namedTabs = Route::tabs('named-tabs-test', 'home', static function (): void {
+    Route::tab('home', Screen::make(Text::make('Home')), label: 'Home');
+    Route::tab('settings', Screen::make(Text::make('Settings')), label: 'Settings', badge: '2');
+});
+$assert(
+    NamedNavigation::navigate('settings')
+        && $namedTabs->selectedTab() === 'settings',
+    'Laravel-style named tabs must select destinations through the shared navigation scope.',
+);
 $headerNavigator = Router::stack('home')
     ->route(
         'home',
@@ -5369,6 +5428,122 @@ $assert(
     $obsolete->token->cancelled()
         && $schedulerOrder === ['input', 'latest', 'background'],
     'Scheduler must prioritize user work and coalesce obsolete tasks.',
+);
+$resource = new AsyncResource(
+    static fn (\Pam\Native\Scheduling\CancellationToken $token): array => ['ready'],
+    'dashboard',
+);
+$resource->load(\Pam\Native\Scheduling\TaskPriority::UserBlocking);
+\Pam\Native\Scheduling\Scheduler::drain(100);
+$suspended = Suspense::make(
+    $resource->value(),
+    static fn (array $data): Text => Text::make($data[0]),
+    Text::make('Loading'),
+);
+$assert(
+    $resource->value()->status === AsyncStatus::Content
+        && $suspended->toElement()->properties()[PropKey::Text->value] === 'ready',
+    'Async resources must run through the priority scheduler and reveal Suspense content.',
+);
+
+$idl = IdlCompiler::compile(json_encode([
+    'version' => 1,
+    'namespace' => 'Dev.Pam.Generated',
+    'modules' => [[
+        'id' => 1,
+        'name' => 'camera',
+        'methods' => [[
+            'id' => 1,
+            'name' => 'capture',
+            'parameters' => [[
+                'id' => 1,
+                'name' => 'quality',
+                'type' => 3,
+                'required' => false,
+            ]],
+        ]],
+    ]],
+], JSON_THROW_ON_ERROR));
+$assert(
+    str_contains($idl->php, 'final class CameraBridge')
+        && str_contains($idl->kotlin, 'const val CAPTURE: Int = 1')
+        && str_contains($idl->swift, 'static let capture: Int = 1')
+        && str_contains($idl->rust, 'CAMERA_CAPTURE: u16 = 1')
+        && strlen($idl->fingerprint) === 64,
+    'Typed IDL must generate fingerprinted PHP, Kotlin, Swift, and Rust contracts.',
+);
+$worklet = Worklet::input()
+    ->interpolate(0, 200, 1, 0)
+    ->clamp(0, 1);
+$assert(
+    abs($worklet->evaluate(50) - 0.75) < 0.000001
+        && str_starts_with($worklet->bytecode(), 'PNW1')
+        && strlen($worklet->bytecode()) < 256,
+    'Worklets must compile bounded data-only numeric programs deterministically.',
+);
+$offline = new OfflineMutationQueue();
+$queued = $offline->enqueue('message:local-1', 'messages.send', ['body' => 'Hello']);
+$assert(
+    $offline->enqueue('message:local-1', 'messages.send', ['body' => 'Duplicate'])->id === $queued->id,
+    'Offline sync must deduplicate active mutations by idempotency key.',
+);
+$canvas = Canvas::make()
+    ->roundedRectangle(8, 8, 120, 48, 12, 0xFF6750A4)
+    ->circle(180, 32, 24, 0xFFFFD23F)
+    ->line(8, 80, 220, 80, 4, 0xFF111111);
+$assert(
+    $canvas->kind() === NodeKind::Canvas
+        && str_contains($canvas->properties()[PropKey::CanvasCommands->value], '"kind":2'),
+    'Canvas must encode bounded vector commands for hardware-accelerated native renderers.',
+);
+$serverAction = false;
+$serverTree = ServerDrivenUi::render(
+    json_encode([
+        'version' => 1,
+        'root' => [
+            'kind' => 2,
+            'props' => ['style' => ['padding' => 16, 'gap' => 8]],
+            'children' => [
+                ['kind' => 4, 'props' => ['text' => 'Remote offer']],
+                ['kind' => 5, 'props' => ['label' => 'Open', 'action' => 'offer.open']],
+            ],
+        ],
+    ], JSON_THROW_ON_ERROR),
+    static function (string $action) use (&$serverAction): ?Closure {
+        return $action === 'offer.open'
+            ? static function () use (&$serverAction): void { $serverAction = true; }
+            : null;
+    },
+);
+$serverElement = $serverTree->toElement();
+$assert(
+    $serverElement->kind() === NodeKind::Column
+        && count($serverElement->children()) === 2,
+    'Server-driven UI must render only allowlisted bounded native nodes and actions.',
+);
+$jobRan = false;
+$jobs = new BackgroundJobs();
+$jobs->register(
+    'sync.messages',
+    static function (array $payload, \Pam\Native\Scheduling\CancellationToken $token) use (&$jobRan): void {
+        $token->throwIfCancelled();
+        $jobRan = ($payload['conversationId'] ?? null) === 42;
+    },
+);
+$jobs->dispatch('sync.messages', 'conversation:42', ['conversationId' => 42]);
+$assert($jobs->runReady(1_000) === 1, 'Background jobs must schedule ready persisted work.');
+\Pam\Native\Scheduling\Scheduler::drain(100);
+$assert(
+    $jobRan && str_contains($jobs->snapshot(), '"status":3'),
+    'Background jobs must execute with cancellation and persist applied state.',
+);
+$offline->sending($queued->id);
+$retry = $offline->retry($queued->id, 1_000, 'network');
+$restoredOffline = OfflineMutationQueue::restore($offline->export());
+$assert(
+    $retry->status === MutationStatus::Retry
+        && $restoredOffline->ready($retry->availableAtMs)[0]->key === 'message:local-1',
+    'Offline sync must persist typed retry state and deterministic backoff.',
 );
 
 $firstLinkingSubscription = \Pam\Native\System\Linking::listen(static function (string $url): void {});
