@@ -82,4 +82,38 @@ final class NavigationHost extends Element
             ->withProperty(PropKey::NavigationOrientation, $orientation->value)
             ->withProperty(PropKey::NavigationAutoHideHomeIndicator, $autoHideHomeIndicator);
     }
+
+    /** Sends the already-resolved active route options to native controllers. */
+    public function screenOptions(ScreenOptions $options): self
+    {
+        $host = $this
+            ->withProperty(PropKey::NavigationTitle, $options->title ?? '')
+            ->withProperty(PropKey::NavigationHeaderShown, $options->headerShown)
+            ->withProperty(PropKey::NavigationHeaderTransparent, $options->headerTransparent)
+            ->withProperty(PropKey::NavigationHeaderShadowVisible, $options->headerShadowVisible)
+            ->withProperty(PropKey::NavigationHeaderLargeTitleEnabled, $options->headerLargeTitleEnabled)
+            ->withProperty(PropKey::NavigationHeaderSearchEnabled, $options->headerSearchEnabled)
+            ->withProperty(PropKey::NavigationHeaderSearchPlaceholder, $options->headerSearchPlaceholder)
+            ->withProperty(PropKey::NavigationPresentation, $options->presentation->value)
+            ->withProperty(PropKey::NavigationGestureDirection, $options->gestureDirection->value)
+            ->withProperty(PropKey::NavigationFullScreenGestureEnabled, $options->fullScreenGestureEnabled)
+            ->withProperty(PropKey::NavigationFreezeOnBlur, $options->freezeOnBlur)
+            ->withProperty(PropKey::NavigationSheetDetents, implode(',', $options->sheetAllowedDetents ?? [1.0]))
+            ->withProperty(PropKey::NavigationSheetInitialDetentIndex, $options->sheetInitialDetentIndex)
+            ->withProperty(PropKey::NavigationSheetGrabberVisible, $options->sheetGrabberVisible)
+            ->withProperty(PropKey::NavigationSheetCornerRadius, $options->sheetCornerRadius ?? 0.0)
+            ->withProperty(PropKey::NavigationSheetExpandsWhenScrolledToEdge, $options->sheetExpandsWhenScrolledToEdge);
+
+        if ($options->headerBackgroundColor !== null) {
+            $host = $host->withProperty(PropKey::NavigationHeaderBackgroundColor, $options->headerBackgroundColor);
+        }
+        if ($options->headerTintColor !== null) {
+            $host = $host->withProperty(PropKey::NavigationHeaderTintColor, $options->headerTintColor);
+        }
+        if ($options->onHeaderSearchChange !== null) {
+            $host = $host->withEvent(EventKind::Change, $options->onHeaderSearchChange);
+        }
+
+        return $host;
+    }
 }

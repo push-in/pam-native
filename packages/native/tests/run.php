@@ -4234,10 +4234,13 @@ $headerNavigator = Router::stack('home')
         new ScreenOptions(title: 'Native header', headerShown: true),
     )
     ->build();
+$headerElement = $headerNavigator->render()->toElement();
 $assert(
-    $headerNavigator->render()->toElement()->children()[0]->kind() === NodeKind::Column
+    $headerElement->children()[0]->kind() === NodeKind::Screen
+        && $headerElement->properties()[PropKey::NavigationTitle->value] === 'Native header'
+        && $headerElement->properties()[PropKey::NavigationHeaderShown->value] === true
         && $headerNavigator->currentOptions()->title === 'Native header',
-    'Screen options must render a retained native header with typed options.',
+    'Screen options must configure controller-owned native chrome with typed options.',
 );
 $sheetNavigator = Router::stack('home')
     ->route('home', static fn () => Screen::make(Text::make('Home')))

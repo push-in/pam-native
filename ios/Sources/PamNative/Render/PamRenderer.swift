@@ -1335,6 +1335,23 @@ public final class PamRenderer {
             (view as? PamNavigationHost)?.navigationOrientation = Int(value.integerOrNil() ?? 1)
         case PamConstants.navigationAutoHideHomeIndicator:
             (view as? PamNavigationHost)?.autoHideHomeIndicator = value.boolOrNil() ?? false
+        case PamConstants.navigationTitle:
+            (view as? PamNavigationHost)?.screenTitle = value.textOrNil() ?? ""
+        case PamConstants.navigationHeaderShown:
+            (view as? PamNavigationHost)?.headerShown = value.boolOrNil() ?? false
+        case PamConstants.navigationHeaderTransparent:
+            (view as? PamNavigationHost)?.headerTransparent = value.boolOrNil() ?? false
+        case PamConstants.navigationHeaderBackgroundColor:
+            (view as? PamNavigationHost)?.headerBackgroundColor = value.integerOrNil().map(UIColor.init(argb:))
+        case PamConstants.navigationHeaderTintColor:
+            (view as? PamNavigationHost)?.headerTintColor = value.integerOrNil().map(UIColor.init(argb:))
+        case PamConstants.navigationHeaderShadowVisible:
+            (view as? PamNavigationHost)?.headerShadowVisible = value.boolOrNil() ?? true
+        case PamConstants.navigationHeaderLargeTitleEnabled:
+            (view as? PamNavigationHost)?.headerLargeTitleEnabled = value.boolOrNil() ?? false
+        case PamConstants.navigationHeaderSearchEnabled,
+             PamConstants.navigationHeaderSearchPlaceholder:
+            configureNavigationChrome(nodeId: nodeId, view: view)
         case PamConstants.navigationRevision:
             (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
         case PamConstants.navigationGestureEnabled,
@@ -2177,6 +2194,16 @@ public final class PamRenderer {
                 self?.dispatchEvent(nodeId, EventKind.gestureCancel.rawValue, Data())
             } : nil
         )
+    }
+
+    private func configureNavigationChrome(nodeId: Int64, view: UIView) {
+        guard let navigation = view as? PamNavigationHost,
+              let state = nodes[nodeId] else { return }
+        navigation.headerSearchEnabled = state.properties[PamConstants.navigationHeaderSearchEnabled]?.boolOrNil() ?? false
+        navigation.headerSearchPlaceholder = state.properties[PamConstants.navigationHeaderSearchPlaceholder]?.textOrNil() ?? "Search"
+        navigation.onSearchChange = state.properties[PamConstants.onChange] != nil ? { [weak self] text in
+            self?.dispatchEvent(nodeId, EventKind.change.rawValue, Data(text.utf8))
+        } : nil
     }
 
     private func configureKeyframeAnimation(nodeId: Int64, view: UIView) {

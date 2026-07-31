@@ -387,6 +387,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             ...$screens,
         )->gestureNavigation($activeOptions->gestureEnabled)
         ->screenBehavior($activeOptions->orientation, $activeOptions->autoHideHomeIndicator)
+        ->screenOptions($activeOptions)
         ->onTransitionEnd(function (): void {
             $this->finalizeOutgoingRoute();
             $this->emitNavigation(NavigationEventType::TransitionEnd, ['route' => $this->current()]);

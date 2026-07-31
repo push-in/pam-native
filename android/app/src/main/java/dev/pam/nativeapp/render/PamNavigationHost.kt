@@ -18,6 +18,9 @@ import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.SearchView
+import android.widget.Toolbar
+import android.graphics.Color
 import dev.pam.nativeapp.R
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentManager
@@ -33,6 +36,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             field = value.coerceIn(1, 8)
             applyOrientation()
         }
+    var screenTitle: String = ""; set(value) { field = value; applyControllerChrome() }
+    var headerShown: Boolean = false; set(value) { field = value; applyControllerChrome() }
+    var headerTransparent: Boolean = false; set(value) { field = value; applyControllerChrome() }
+    var headerBackgroundColor: Int? = null; set(value) { field = value; applyControllerChrome() }
+    var headerTintColor: Int? = null; set(value) { field = value; applyControllerChrome() }
+    var headerShadowVisible: Boolean = true; set(value) { field = value; applyControllerChrome() }
+    var headerSearchEnabled: Boolean = false; set(value) { field = value; applyControllerChrome() }
+    var headerSearchPlaceholder: String = "Search"; set(value) { field = value; applyControllerChrome() }
+    var onSearchChange: ((String) -> Unit)? = null
     var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
     private var activeRoute: View? = null
@@ -67,6 +79,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private val routeControllers = IdentityHashMap<View, PamRouteFragment>()
     private var suppressControllerRemoval = false
     private var nextControllerId = 1L
+    private val nativeToolbar = Toolbar(context).apply {
+        visibility = View.GONE
+        minimumHeight = dp(56f).toInt()
+        setTitleTextAppearance(context, android.R.style.TextAppearance_Material_Widget_ActionBar_Title)
+    }
+    private var nativeSearch: SearchView? = null
 
     init {
         id = View.generateViewId()
@@ -95,6 +113,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         super.onAttachedToWindow()
         childrenSnapshot().forEach(::ensureRouteController)
         updateControllerLifecycles()
+        overlay.add(nativeToolbar)
+        applyControllerChrome()
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        nativeToolbar.layout(0, 0, width, dp(56f).toInt())
     }
 
     override fun onViewRemoved(child: View) {
@@ -293,6 +318,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     override fun onDetachedFromWindow() {
+        overlay.remove(nativeToolbar)
         clearSharedElements()
         clearPendingTransition()
         running?.cancel()
@@ -667,6 +693,34 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
         if (activity.requestedOrientation != requested) activity.requestedOrientation = requested
+    }
+
+    private fun applyControllerChrome() {
+        nativeToolbar.visibility = if (headerShown) View.VISIBLE else View.GONE
+        nativeToolbar.title = screenTitle
+        nativeToolbar.setTitleTextColor(headerTintColor ?: Color.BLACK)
+        nativeToolbar.setBackgroundColor(
+            if (headerTransparent) Color.TRANSPARENT else headerBackgroundColor ?: Color.WHITE,
+        )
+        nativeToolbar.elevation = if (headerShadowVisible) dp(4f) else 0f
+        if (headerSearchEnabled) {
+            val search = nativeSearch ?: SearchView(context).also { view ->
+                view.setIconifiedByDefault(false)
+                view.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+                    override fun onQueryTextSubmit(query: String?): Boolean = false
+                    override fun onQueryTextChange(newText: String?): Boolean {
+                        onSearchChange?.invoke(newText.orEmpty())
+                        return true
+                    }
+                })
+                nativeToolbar.addView(view, Toolbar.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+                nativeSearch = view
+            }
+            search.queryHint = headerSearchPlaceholder
+            search.visibility = View.VISIBLE
+        } else {
+            nativeSearch?.visibility = View.GONE
+        }
     }
 
     private companion object {

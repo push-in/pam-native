@@ -34,7 +34,12 @@ final readonly class NavigationScreen implements Renderable
 
     public function toElement(): \Pam\Native\Element
     {
-        $body = $this->options->headerShown
+        // Standard chrome is owned by UINavigationController/Fragment. PAM
+        // content remains the fallback for custom renderable header slots.
+        $hasCustomHeader = $this->options->headerTitle !== null
+            || $this->options->headerLeft !== null
+            || $this->options->headerRight !== null;
+        $body = $this->options->headerShown && $hasCustomHeader
             ? $this->withHeader()
             : $this->content;
 

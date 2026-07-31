@@ -1,7 +1,8 @@
 import UIKit
 
-private final class PamRouteViewController: UIViewController {
+private final class PamRouteViewController: UIViewController, UISearchResultsUpdating {
     private let routeView: UIView
+    var onSearchChange: ((String) -> Void)?
 
     init(routeView: UIView) {
         self.routeView = routeView
@@ -15,6 +16,10 @@ private final class PamRouteViewController: UIViewController {
     override func loadView() {
         view = routeView
     }
+
+    func updateSearchResults(for searchController: UISearchController) {
+        onSearchChange?(searchController.searchBar.text ?? "")
+    }
 }
 
 final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
@@ -27,6 +32,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     var autoHideHomeIndicator = false {
         didSet { applyPlatformScreenBehavior() }
     }
+    var screenTitle = "" { didSet { applyControllerChrome() } }
+    var headerShown = false { didSet { applyControllerChrome() } }
+    var headerTransparent = false { didSet { applyControllerChrome() } }
+    var headerBackgroundColor: UIColor? { didSet { applyControllerChrome() } }
+    var headerTintColor: UIColor? { didSet { applyControllerChrome() } }
+    var headerShadowVisible = true { didSet { applyControllerChrome() } }
+    var headerLargeTitleEnabled = false { didSet { applyControllerChrome() } }
+    var headerSearchEnabled = false { didSet { applyControllerChrome() } }
+    var headerSearchPlaceholder = "Search" { didSet { applyControllerChrome() } }
+    var onSearchChange: ((String) -> Void)? { didSet { applyControllerChrome() } }
     private var revision: Int64 = 0
     private var gestureEnabled = true
     private var gestureEdgeWidth: CGFloat = 24
@@ -425,6 +440,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         navigationController = navigation
         let controllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
         navigation.setViewControllers(controllers, animated: false)
+        applyControllerChrome()
     }
 
     private func nearestViewController() -> UIViewController? {
@@ -480,6 +496,35 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
 
     internal var routeControllerCount: Int { routeControllers.count }
     internal var usesNativeNavigationController: Bool { navigationController != nil }
+
+    private func applyControllerChrome() {
+        guard let navigation = navigationController else { return }
+        navigation.setNavigationBarHidden(!headerShown, animated: false)
+        navigation.navigationBar.prefersLargeTitles = headerLargeTitleEnabled
+        navigation.navigationBar.tintColor = headerTintColor
+        let appearance = UINavigationBarAppearance()
+        if headerTransparent { appearance.configureWithTransparentBackground() }
+        else { appearance.configureWithOpaqueBackground() }
+        appearance.backgroundColor = headerBackgroundColor
+        if !headerShadowVisible { appearance.shadowColor = .clear }
+        navigation.navigationBar.standardAppearance = appearance
+        navigation.navigationBar.scrollEdgeAppearance = appearance
+
+        guard let controller = navigation.topViewController as? PamRouteViewController else { return }
+        controller.title = screenTitle
+        controller.navigationItem.largeTitleDisplayMode = headerLargeTitleEnabled ? .always : .never
+        controller.onSearchChange = onSearchChange
+        if headerSearchEnabled {
+            let search = controller.navigationItem.searchController ?? UISearchController(searchResultsController: nil)
+            search.searchResultsUpdater = controller
+            search.obscuresBackgroundDuringPresentation = false
+            search.searchBar.placeholder = headerSearchPlaceholder
+            controller.navigationItem.searchController = search
+            controller.navigationItem.hidesSearchBarWhenScrolling = headerLargeTitleEnabled
+        } else {
+            controller.navigationItem.searchController = nil
+        }
+    }
 
     private func applyPlatformScreenBehavior() {
         if #available(iOS 16.0, *), navigationOrientation != 1,

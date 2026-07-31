@@ -418,4 +418,22 @@ enum PropKey: int
     case NavigationOrientation = 410;
     case NavigationAutoHideHomeIndicator = 411;
     case SharedTransitionTag = 412;
+    case NavigationTitle = 413;
+    case NavigationHeaderShown = 414;
+    case NavigationHeaderTransparent = 415;
+    case NavigationHeaderBackgroundColor = 416;
+    case NavigationHeaderTintColor = 417;
+    case NavigationHeaderShadowVisible = 418;
+    case NavigationHeaderLargeTitleEnabled = 419;
+    case NavigationHeaderSearchEnabled = 420;
+    case NavigationHeaderSearchPlaceholder = 421;
+    case NavigationPresentation = 422;
+    case NavigationGestureDirection = 423;
+    case NavigationFullScreenGestureEnabled = 424;
+    case NavigationFreezeOnBlur = 425;
+    case NavigationSheetDetents = 426;
+    case NavigationSheetInitialDetentIndex = 427;
+    case NavigationSheetGrabberVisible = 428;
+    case NavigationSheetCornerRadius = 429;
+    case NavigationSheetExpandsWhenScrolledToEdge = 430;
 }
