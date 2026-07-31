@@ -208,6 +208,8 @@ Since 0.5.89, `SafeAreaView` intersects stable system-bar and display-cutout
 insets with each view's real window bounds. This preserves the full protection
 edge-to-edge, avoids duplicates in decor-fitted and nested layouts, and keeps
 bottom controls clear of transient gesture or button navigation bars.
+The complete Android API/navigation/OEM contract and release matrix live in
+[`docs/android-safe-area.md`](docs/android-safe-area.md).
 Relative `@import` statements are expanded from the file that declares them at
 compile time, so fonts, tokens, tag defaults, and semantic classes can be
 shared without a runtime stylesheet. PAM uses `p-if`, `p-else-if`, `p-else`,

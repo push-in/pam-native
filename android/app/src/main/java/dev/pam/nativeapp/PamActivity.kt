@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
+import android.util.DisplayMetrics
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
@@ -16,6 +17,7 @@ import android.util.Log
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.window.BackEvent
@@ -50,13 +52,25 @@ class PamActivity : FragmentActivity() {
     private var recoveryRunnable: Runnable? = null
     private lateinit var devTools: PamDevToolsOverlay
     private var devToolsReceiver: BroadcastReceiver? = null
+    private var viewportWidth = 0
+    private var viewportHeight = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Keep one deterministic edge-to-edge contract on every supported
         // Android version. Insets are consumed by PAM views, never implicitly
         // by the decor view or an OEM-specific compatibility path.
-        WindowCompat.setDecorFitsSystemWindows(window, false)
+        WindowCompat.enableEdgeToEdge(window)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    } else {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+            }
+        }
         val host = PamRootHost(this).also { rootHost = it }
         errors = ErrorOverlay(this)
         devTools = PamDevToolsOverlay(this)
@@ -97,6 +111,9 @@ class PamActivity : FragmentActivity() {
         )
         root.addView(errors)
         setContentView(root)
+        val (windowWidth, windowHeight) = resolvedViewportSize()
+        viewportWidth = windowWidth
+        viewportHeight = windowHeight
         applyDefaultSystemBars()
         registerBackCallback()
         registerDevTools()
@@ -108,8 +125,8 @@ class PamActivity : FragmentActivity() {
             val entry = AssetInstaller(this).install()
             runtimeEntryPath = entry.absolutePath
             val density = resources.displayMetrics.density
-            val widthDp = resources.displayMetrics.widthPixels / density
-            val heightDp = resources.displayMetrics.heightPixels / density
+            val widthDp = windowWidth / density
+            val heightDp = windowHeight / density
             runtime.start(
                 entry,
                 widthDp,
@@ -118,6 +135,10 @@ class PamActivity : FragmentActivity() {
                 isDarkAppearance(),
             )
             runtimeStarted = true
+            rootHost.onStableInsetsChanged = { updateViewportFromWindow() }
+            window.decorView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                updateViewportFromWindow()
+            }
             if (BuildConfig.DEBUG) {
                 hotReload = HotReloadClient(
                     context = this,
@@ -168,26 +189,7 @@ class PamActivity : FragmentActivity() {
         super.onConfigurationChanged(newConfig)
         if (!runtimeStarted) return
         applyDefaultSystemBars()
-        val density = resources.displayMetrics.density
-        val widthDp = resources.displayMetrics.widthPixels / density
-        val heightDp = resources.displayMetrics.heightPixels / density
-        runtime.updateViewport(
-            widthDp,
-            heightDp,
-            resources.configuration.fontScale,
-            isDarkAppearance(),
-        )
-        runtime.dispatchLifecycle(
-            EVENT_DIMENSIONS,
-            WireMap.encode(
-                mapOf(
-                    "width" to WireValue.Decimal(widthDp.toDouble()),
-                    "height" to WireValue.Decimal(heightDp.toDouble()),
-                    "density" to WireValue.Decimal(density.toDouble()),
-                    "appearance" to WireValue.Integer(appearanceValue()),
-                ),
-            ),
-        )
+        updateViewportFromWindow(force = true)
     }
 
     @Suppress("DEPRECATION")
@@ -404,15 +406,62 @@ class PamActivity : FragmentActivity() {
         resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
             Configuration.UI_MODE_NIGHT_YES
 
+    @Suppress("DEPRECATION")
+    private fun fullWindowSize(): Pair<Int, Int> {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val bounds = window.windowManager.currentWindowMetrics.bounds
+            return bounds.width() to bounds.height()
+        }
+        val metrics = DisplayMetrics()
+        windowManager.defaultDisplay.getRealMetrics(metrics)
+        return metrics.widthPixels to metrics.heightPixels
+    }
+
+    private fun resolvedViewportSize(): Pair<Int, Int> {
+        val (width, height) = fullWindowSize()
+        return width to height
+    }
+
+    private fun updateViewportFromWindow(force: Boolean = false) {
+        if (!runtimeStarted) return
+        val (width, height) = resolvedViewportSize()
+        if (!force && width == viewportWidth && height == viewportHeight) return
+        viewportWidth = width
+        viewportHeight = height
+        val density = resources.displayMetrics.density
+        val widthDp = width / density
+        val heightDp = height / density
+        runtime.updateViewport(
+            widthDp,
+            heightDp,
+            resources.configuration.fontScale,
+            isDarkAppearance(),
+        )
+        runtime.dispatchLifecycle(
+            EVENT_DIMENSIONS,
+            WireMap.encode(
+                mapOf(
+                    "width" to WireValue.Decimal(widthDp.toDouble()),
+                    "height" to WireValue.Decimal(heightDp.toDouble()),
+                    "density" to WireValue.Decimal(density.toDouble()),
+                    "appearance" to WireValue.Integer(appearanceValue()),
+                ),
+            ),
+        )
+    }
+
     private fun appearanceValue(): Long =
         if (isDarkAppearance()) APPEARANCE_DARK else APPEARANCE_LIGHT
 
     @Suppress("DEPRECATION")
     private fun applyDefaultSystemBars() {
         val dark = isDarkAppearance()
-        val color = if (dark) Color.rgb(15, 23, 42) else Color.WHITE
-        window.statusBarColor = color
-        window.navigationBarColor = color
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or

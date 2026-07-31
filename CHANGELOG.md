@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.93 - 2026-07-31
+
+- Make Android activity and transparent full-screen modal windows share one
+  explicit edge-to-edge contract, including stable system-bar/display-cutout
+  insets on Samsung and other OEM window implementations.
+- Correct geometric IME overlap in full-screen windows and keep translated
+  composer inputs and actions touch-aligned throughout keyboard animations.
+- Restrict the closed-IME touch fallback to text inputs so modal taps cannot
+  leak through to retained activity buttons, tabs or routes underneath.
+- Add an Android API 26–36, navigation-mode, cutout, orientation, multi-window
+  and OEM safe-area compatibility contract with a repeatable release matrix.
+- Update AndroidX Core to 1.17.0 and cover translated touch registration with
+  regression tests.
+
 ## 0.5.92 - 2026-07-31
 
 - Complete the 17-block native navigation parity program: route identity,

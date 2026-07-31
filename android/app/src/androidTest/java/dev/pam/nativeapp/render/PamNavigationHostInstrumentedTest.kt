@@ -211,7 +211,10 @@ class PamNavigationHostInstrumentedTest {
                 navigation = PamNavigationHost(activity).apply {
                     layout(0, 0, 1_080, 1_920)
                     operation = OPERATION_PUSH
-                    transition = TRANSITION_SLIDE_FROM_RIGHT
+                    // This test exercises predictive-back state, not the preceding push.
+                    // Keep setup deterministic on physical devices where animator scale and
+                    // refresh cadence may leave the push animator active after waitForIdleSync.
+                    transition = TRANSITION_NONE
                 }
                 activity.host.addView(navigation)
                 first = View(activity)

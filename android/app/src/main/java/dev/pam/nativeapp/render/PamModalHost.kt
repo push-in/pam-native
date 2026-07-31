@@ -9,6 +9,7 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Outline
+import android.os.Build
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -24,6 +25,8 @@ import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.widget.EditText
 import android.widget.FrameLayout
+import androidx.core.view.WindowCompat
+import dev.pam.nativeapp.R
 import dev.pam.nativeapp.PamActivity
 import java.lang.ref.WeakReference
 
@@ -288,7 +291,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
         previousFocus = WeakReference(rootView.findFocus())
         val generation = ++dialogGeneration
-        dialog = Dialog(context).also { modal ->
+        dialog = Dialog(context, R.style.Theme_PamNative_Modal).also { modal ->
             modal.requestWindowFeature(Window.FEATURE_NO_TITLE)
             (content.parent as? ViewGroup)?.removeView(content)
             modal.setContentView(content)
@@ -437,17 +440,28 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             } else {
                 clearFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
             }
-            if (statusBarTranslucent) {
-                addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
+            val edgeToEdge = statusBarTranslucent || navigationBarTranslucent
+            if (edgeToEdge) {
+                WindowCompat.enableEdgeToEdge(this)
+                WindowCompat.setDecorFitsSystemWindows(this, false)
                 statusBarColor = Color.TRANSPARENT
-            } else {
-                clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS)
-            }
-            if (navigationBarTranslucent && statusBarTranslucent) {
-                addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
                 navigationBarColor = Color.TRANSPARENT
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    isStatusBarContrastEnforced = false
+                    isNavigationBarContrastEnforced = false
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    attributes = attributes.apply {
+                        layoutInDisplayCutoutMode =
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                            } else {
+                                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                            }
+                    }
+                }
             } else {
-                clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION)
+                WindowCompat.setDecorFitsSystemWindows(this, true)
             }
         }
         applyBackdrop()
