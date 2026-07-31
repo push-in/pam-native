@@ -4280,6 +4280,34 @@ $assert(
             ->children()[0]->properties()[PropKey::Text->value] === 'Profile 42',
     'Route contexts must expose bounded typed parameters to screen factories.',
 );
+$identifiedNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route(
+        'profile',
+        static fn (RouteContext $route) => Screen::make(Text::make('Profile '.$route->integer('id'))),
+        static fn (RouteContext $route) => new ScreenOptions(title: 'Profile '.$route->integer('id')),
+        static fn (RouteContext $route): int => $route->integer('id') ?? 0,
+    )
+    ->build();
+$identifiedNavigator->push('profile', ['id' => 1]);
+$firstProfileKey = $identifiedNavigator->current()->key;
+$identifiedNavigator->push('profile', ['id' => 2]);
+$secondProfileKey = $identifiedNavigator->current()->key;
+$identifiedNavigator->navigate('profile', ['id' => 1]);
+$assert(
+    $identifiedNavigator->current()->integer('id') === 1
+        && $identifiedNavigator->current()->key === $firstProfileKey
+        && $firstProfileKey !== $secondProfileKey
+        && $identifiedNavigator->currentOptions()->title === 'Profile 1'
+        && ($identifiedNavigator->getState()['routes'][1]['id'] ?? null) === '1',
+    'getId route identity must distinguish same-name entities, reuse the matching entry, and resolve options from route context.',
+);
+$identifiedState = $identifiedNavigator->saveState();
+$assert(
+    $identifiedState['version'] === 4
+        && ($identifiedState['stack'][1]['id'] ?? null) === '1',
+    'Versioned navigation state must persist semantic route identities.',
+);
 $advancedNavigator->push('article', ['slug' => 'temporary']);
 $assert(
     $advancedNavigator->popTo('profile')

@@ -18,8 +18,10 @@ final class Router
     private bool $restoreState = true;
     /** @var list<DeepLink> */
     private array $deepLinks = [];
-    /** @var array<string, ScreenOptions> */
+    /** @var array<string, ScreenOptions|Closure> */
     private array $options = [];
+    /** @var array<string, Closure> */
+    private array $routeIds = [];
     /** @var list<string> */
     private array $linkingPrefixes = [];
     private ?Closure $linkFilter = null;
@@ -51,7 +53,12 @@ final class Router
         return new DrawerRouter($initialRoute);
     }
 
-    public function route(string $name, Closure $screen, ?ScreenOptions $options = null): self
+    public function route(
+        string $name,
+        Closure $screen,
+        ScreenOptions|Closure|null $options = null,
+        ?Closure $getId = null,
+    ): self
     {
         if ($name === '') {
             throw new InvalidArgumentException('Route names cannot be empty.');
@@ -59,6 +66,7 @@ final class Router
         $copy = clone $this;
         $copy->routes[$name] = $screen;
         if ($options !== null) $copy->options[$name] = $options;
+        if ($getId !== null) $copy->routeIds[$name] = $getId;
 
         return $copy;
     }
@@ -133,6 +141,7 @@ final class Router
             screenOptions: $this->options,
             linkingPrefixes: $this->linkingPrefixes,
             linkFilter: $this->linkFilter,
+            routeIds: $this->routeIds,
         );
     }
 }
