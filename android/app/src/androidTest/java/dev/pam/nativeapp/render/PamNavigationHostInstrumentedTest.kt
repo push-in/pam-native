@@ -167,8 +167,8 @@ class PamNavigationHostInstrumentedTest {
             onMain(instrumentation) {
                 assertEquals(View.VISIBLE, first.visibility)
                 assertEquals(View.INVISIBLE, second.visibility)
-                assertEquals(0f, first.translationX)
-                assertEquals(0f, second.translationX)
+                assertEquals(0f, first.translationX, 0.001f)
+                assertEquals(0f, second.translationX, 0.001f)
             }
         } finally {
             activity.finish()
