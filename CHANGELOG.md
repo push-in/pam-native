@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.92 - 2026-07-31
+
+- Complete the 17-block native navigation parity program: route identity,
+  layered options, typed actions and bubbling, recursive state, auth guards,
+  linking ownership, native controllers, headers/search, sheets, retained
+  bottom/top tabs, drawer coverage, gestures, transitions and shared elements.
+- Run shared-element geometry, tab selection, controller transitions and
+  interactive Back entirely on Kotlin/UIKit UI threads without per-frame PHP
+  work; add full-screen and vertical gestures, flip and simple-push variants.
+- Bound speculative routes and navigation traces, release subscriptions and
+  option layers deterministically, and forward complete Android/iOS lifecycle
+  and critical-memory events.
+- Add recursive navigation inspection, transition average/p95 metrics,
+  versioned JSON exports, deterministic performance gates and a public parity
+  matrix covering all delivered behavior.
+
 ## 0.5.91 - 2026-07-31
 
 - Introduce Navigation Core 2 with typed actions, interceptable lifecycle
