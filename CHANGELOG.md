@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.89 - 2026-07-30
+
+- Resolve Android safe areas from stable system-bar and display-cutout insets,
+  including transient gesture/button navigation bars and early runtime device
+  queries.
+- Replace the decor-size heuristic with per-view geometric intersection
+  against the window safe rectangle, preventing both missing and duplicated
+  insets in edge-to-edge, decor-fitted, nested and bottom-bar layouts.
+- Include display cutouts on Android API 28–29 and keep the same stable
+  behavior through API 36, with regression coverage for portrait, landscape,
+  fullscreen, fitted and bottom-overlap cases.
+- Resolve iOS device information from the active window instead of the main
+  screen, preserving correct dimensions and safe-area values for notches,
+  home indicators, rotation and iPad multiwindow layouts.
+
 ## 0.5.88 - 2026-07-30
 
 - Added a public, package-restricted Android background-push broadcast contract

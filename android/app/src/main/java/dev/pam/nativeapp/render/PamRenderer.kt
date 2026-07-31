@@ -64,6 +64,7 @@ import android.widget.PopupMenu
 import android.widget.Space
 import android.widget.Switch
 import android.widget.TextView
+import androidx.annotation.RequiresApi
 import dev.pam.nativeapp.protocol.Frame
 import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
@@ -146,6 +147,13 @@ internal data class SafeAreaInsets(
     val bottom: Int,
 )
 
+internal data class SafeAreaBounds(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+)
+
 internal fun unconsumedSafeAreaInsets(
     raw: SafeAreaInsets,
     consumed: SafeAreaInsets,
@@ -155,6 +163,32 @@ internal fun unconsumedSafeAreaInsets(
     right = (raw.right - consumed.right).coerceAtLeast(0),
     bottom = (raw.bottom - consumed.bottom).coerceAtLeast(0),
 )
+
+internal fun safeAreaInsetsForBounds(
+    raw: SafeAreaInsets,
+    window: SafeAreaBounds,
+    target: SafeAreaBounds,
+): SafeAreaInsets {
+    if (
+        window.right <= window.left ||
+        window.bottom <= window.top ||
+        target.right <= target.left ||
+        target.bottom <= target.top
+    ) {
+        return raw
+    }
+    val safeLeft = window.left + raw.left
+    val safeTop = window.top + raw.top
+    val safeRight = window.right - raw.right
+    val safeBottom = window.bottom - raw.bottom
+
+    return SafeAreaInsets(
+        left = (safeLeft - target.left).coerceIn(0, raw.left),
+        top = (safeTop - target.top).coerceIn(0, raw.top),
+        right = (target.right - safeRight).coerceIn(0, raw.right),
+        bottom = (target.bottom - safeBottom).coerceIn(0, raw.bottom),
+    )
+}
 
 internal fun snappedPixelSpan(
     start: Float,
@@ -4107,12 +4141,7 @@ class PamRenderer(
             return
         }
         view.setOnApplyWindowInsetsListener { _, insets ->
-            state.safeBottomInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                insets.getInsets(WindowInsets.Type.systemBars()).bottom
-            } else {
-                @Suppress("DEPRECATION")
-                insets.systemWindowInsetBottom
-            }
+            state.safeBottomInset = windowSafeAreaInsets(insets).bottom
             applyLeafPadding(view, state)
             insets
         }
@@ -4290,29 +4319,8 @@ class PamRenderer(
             safeArea.clipToPadding = true
         }
         view.setOnApplyWindowInsetsListener { target, insets ->
-            val raw = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val bars = insets.getInsets(WindowInsets.Type.systemBars())
-                SafeAreaInsets(
-                    left = bars.left,
-                    top = bars.top,
-                    right = bars.right,
-                    bottom = bars.bottom,
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                val left = insets.systemWindowInsetLeft
-                @Suppress("DEPRECATION")
-                val top = insets.systemWindowInsetTop
-                @Suppress("DEPRECATION")
-                val right = insets.systemWindowInsetRight
-                @Suppress("DEPRECATION")
-                val bottom = insets.systemWindowInsetBottom
-                SafeAreaInsets(left, top, right, bottom)
-            }
-            val resolved = unconsumedSafeAreaInsets(
-                raw = raw,
-                consumed = consumedSystemBarInsets(target),
-            )
+            val raw = windowSafeAreaInsets(insets)
+            val resolved = safeAreaInsetsForView(raw, target)
             state.safeAreaLeftInset = resolved.left
             state.safeAreaTopInset = resolved.top
             state.safeAreaRightInset = resolved.right
@@ -4334,34 +4342,76 @@ class PamRenderer(
         }
     }
 
-    private fun consumedSystemBarInsets(target: View): SafeAreaInsets {
+    private fun windowSafeAreaInsets(insets: WindowInsets): SafeAreaInsets {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val safe = insets.getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+            )
+            return SafeAreaInsets(safe.left, safe.top, safe.right, safe.bottom)
+        }
+
+        @Suppress("DEPRECATION")
+        val systemLeft = insets.systemWindowInsetLeft
+        @Suppress("DEPRECATION")
+        val systemTop = insets.systemWindowInsetTop
+        @Suppress("DEPRECATION")
+        val systemRight = insets.systemWindowInsetRight
+        @Suppress("DEPRECATION")
+        val systemBottom = insets.systemWindowInsetBottom
+        val cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            displayCutoutSafeArea(insets)
+        } else {
+            SafeAreaInsets(0, 0, 0, 0)
+        }
+        return SafeAreaInsets(
+            left = max(systemLeft, cutout.left),
+            top = max(systemTop, cutout.top),
+            right = max(systemRight, cutout.right),
+            bottom = max(systemBottom, cutout.bottom),
+        )
+    }
+
+    @RequiresApi(Build.VERSION_CODES.P)
+    private fun displayCutoutSafeArea(insets: WindowInsets): SafeAreaInsets {
+        val cutout = insets.displayCutout ?: return SafeAreaInsets(0, 0, 0, 0)
+        return SafeAreaInsets(
+            left = cutout.safeInsetLeft,
+            top = cutout.safeInsetTop,
+            right = cutout.safeInsetRight,
+            bottom = cutout.safeInsetBottom,
+        )
+    }
+
+    private fun safeAreaInsetsForView(raw: SafeAreaInsets, target: View): SafeAreaInsets {
         val decor = activity()?.window?.decorView ?: target.rootView
-        val content = decor.findViewById<View>(android.R.id.content) ?: target.rootView
         if (
             decor.width <= 0 ||
             decor.height <= 0 ||
-            content.width <= 0 ||
-            content.height <= 0
+            target.width <= 0 ||
+            target.height <= 0
         ) {
-            return SafeAreaInsets(0, 0, 0, 0)
+            return raw
         }
 
         val decorLocation = IntArray(2)
-        val contentLocation = IntArray(2)
+        val targetLocation = IntArray(2)
         decor.getLocationOnScreen(decorLocation)
-        content.getLocationOnScreen(contentLocation)
-        val contentLeft = contentLocation[0] - decorLocation[0]
-        val contentTop = contentLocation[1] - decorLocation[1]
+        target.getLocationOnScreen(targetLocation)
 
-        return SafeAreaInsets(
-            left = contentLeft.coerceAtLeast(0),
-            top = contentTop.coerceAtLeast(0),
-            right = (
-                decor.width - contentLeft - content.width
-                ).coerceAtLeast(0),
-            bottom = (
-                decor.height - contentTop - content.height
-                ).coerceAtLeast(0),
+        return safeAreaInsetsForBounds(
+            raw = raw,
+            window = SafeAreaBounds(
+                left = decorLocation[0],
+                top = decorLocation[1],
+                right = decorLocation[0] + decor.width,
+                bottom = decorLocation[1] + decor.height,
+            ),
+            target = SafeAreaBounds(
+                left = targetLocation[0],
+                top = targetLocation[1],
+                right = targetLocation[0] + target.width,
+                bottom = targetLocation[1] + target.height,
+            ),
         )
     }
 

@@ -96,16 +96,33 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
             DispatchQueue.main.async {
                 do {
                     let screen = UIScreen.main
-                    let width = screen.bounds.size.width
-                    let height = screen.bounds.size.height
-                    let density = screen.scale
-                    let appearance = screen.traitCollection.userInterfaceStyle == .dark ? 2 : 1
-                    let appState = UIApplication.shared.applicationState == .active ? 1 : 3
-                    let window = UIApplication.shared.connectedScenes
+                    let activeScenes = UIApplication.shared.connectedScenes
                         .compactMap { $0 as? UIWindowScene }
+                        .filter {
+                            $0.activationState == .foregroundActive
+                                || $0.activationState == .foregroundInactive
+                        }
+                    let window = activeScenes
                         .flatMap(\.windows)
                         .first(where: \.isKeyWindow)
-                    let insets = window?.safeAreaInsets ?? .zero
+                        ?? activeScenes.flatMap(\.windows).first(where: { !$0.isHidden })
+                    window?.layoutIfNeeded()
+                    window?.rootViewController?.view.layoutIfNeeded()
+                    let bounds = window?.bounds ?? screen.bounds
+                    let width = bounds.size.width
+                    let height = bounds.size.height
+                    let density = window?.screen.scale ?? screen.scale
+                    let traits = window?.traitCollection ?? screen.traitCollection
+                    let appearance = traits.userInterfaceStyle == .dark ? 2 : 1
+                    let appState = UIApplication.shared.applicationState == .active ? 1 : 3
+                    let windowInsets = window?.safeAreaInsets ?? .zero
+                    let rootInsets = window?.rootViewController?.view.safeAreaInsets ?? .zero
+                    let insets = UIEdgeInsets(
+                        top: max(windowInsets.top, rootInsets.top),
+                        left: max(windowInsets.left, rootInsets.left),
+                        bottom: max(windowInsets.bottom, rootInsets.bottom),
+                        right: max(windowInsets.right, rootInsets.right)
+                    )
                     let payload = try WireMap.encode([
                         "width": .decimal(Double(width)),
                         "height": .decimal(Double(height)),

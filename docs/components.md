@@ -233,10 +233,12 @@ absolute start and end edges, then deriving width and height from those edges.
 This preserves a shared physical center for icon-and-text controls at
 fractional densities and guarantees that adjacent flex siblings meet on the
 same rounded boundary.
-`SafeAreaView` also resolves each Android system-bar inset against the space
-the window decor has already consumed. A classic decor-fitted activity receives
-no duplicate padding, an edge-to-edge activity receives the full inset, and a
-mixed/translucent activity receives only the unconsumed edges.
+`SafeAreaView` resolves stable Android system-bar and display-cutout insets
+against the actual screen-space bounds of each safe-area view. A classic
+decor-fitted view receives no duplicate padding, an edge-to-edge view receives
+the full overlapping inset, and nested, mixed or bottom-bar layouts receive
+only the edges they physically overlap. Transient gesture/button bars and
+rotation therefore do not move interactive content underneath system chrome.
 Conservative auto-width text frames follow the relevant flex alignment axis:
 `align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
 sized or growing text keeps normal start alignment unless `text-align` is

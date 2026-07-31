@@ -20,8 +20,10 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.view.HapticFeedbackConstants
+import android.view.WindowInsets
 import android.view.inputmethod.InputMethodManager
 import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.pam.nativeapp.PamActivity
@@ -194,12 +196,24 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 } else {
                     APP_STATE_BACKGROUND
                 }
-                val insets = activity?.window?.decorView
+                val visibleInsets = activity?.window?.decorView
                     ?.let(ViewCompat::getRootWindowInsets)
                     ?.getInsets(
                         WindowInsetsCompat.Type.systemBars() or
                             WindowInsetsCompat.Type.displayCutout(),
                     )
+                val stableInsets = if (
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                    activity !== null
+                ) {
+                    stableWindowSafeArea(activity)
+                } else {
+                    intArrayOf(0, 0, 0, 0)
+                }
+                val safeLeft = maxOf(visibleInsets?.left ?: 0, stableInsets[0])
+                val safeTop = maxOf(visibleInsets?.top ?: 0, stableInsets[1])
+                val safeRight = maxOf(visibleInsets?.right ?: 0, stableInsets[2])
+                val safeBottom = maxOf(visibleInsets?.bottom ?: 0, stableInsets[3])
                 WireMap.encode(
                     mapOf(
                         "width" to WireValue.Decimal(metrics.widthPixels / density.toDouble()),
@@ -208,16 +222,16 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                         "appearance" to WireValue.Integer(appearance.toLong()),
                         "appState" to WireValue.Integer(appState.toLong()),
                         "safeAreaTop" to WireValue.Decimal(
-                            (insets?.top ?: 0) / density.toDouble(),
+                            safeTop / density.toDouble(),
                         ),
                         "safeAreaRight" to WireValue.Decimal(
-                            (insets?.right ?: 0) / density.toDouble(),
+                            safeRight / density.toDouble(),
                         ),
                         "safeAreaBottom" to WireValue.Decimal(
-                            (insets?.bottom ?: 0) / density.toDouble(),
+                            safeBottom / density.toDouble(),
                         ),
                         "safeAreaLeft" to WireValue.Decimal(
-                            (insets?.left ?: 0) / density.toDouble(),
+                            safeLeft / density.toDouble(),
                         ),
                     ),
                 )
@@ -230,6 +244,15 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 )
             }
         }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun stableWindowSafeArea(activity: Activity): IntArray {
+        val insets = activity.windowManager.currentWindowMetrics.windowInsets
+            .getInsetsIgnoringVisibility(
+                WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
+            )
+        return intArrayOf(insets.left, insets.top, insets.right, insets.bottom)
     }
 
     private fun dismissKeyboard(completion: ModuleCompletion) {
