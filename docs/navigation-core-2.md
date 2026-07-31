@@ -80,7 +80,13 @@ $url = $stack->currentPath();                 // /profiles/84
 
 Preloaded and mounted routes are retained by route key. A normal reconciliation
 does not invoke the route factory again. A parameter change invalidates only
-the affected route instance.
+the affected route instance. Speculative preloads use a 16-entry LRU bound;
+`trimMemory()` releases them immediately without changing mounted history.
+
+Android and iOS both forward active, inactive/background, and critical-memory
+events into the PHP lifecycle. Native image work and memory caches are trimmed
+on the platform UI thread. Removed route trees release child subscriptions and
+dynamic option layers when their exit transition completes.
 
 ## Typed screen options
 

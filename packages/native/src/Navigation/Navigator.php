@@ -576,8 +576,19 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             'routeId' => $this->resolveRouteId($route, $validatedParams),
             'params' => $validatedParams,
         ];
-        $this->preloaded[$this->preloadKey($route, $entry['params'])] = $this->createRoute($entry);
+        $key = $this->preloadKey($route, $entry['params']);
+        unset($this->preloaded[$key]);
+        $this->preloaded[$key] = $this->createRoute($entry);
+        while (count($this->preloaded) > 16) {
+            array_shift($this->preloaded);
+        }
         return true;
+    }
+
+    /** Releases speculative route trees without touching mounted navigation state. */
+    public function trimMemory(): void
+    {
+        $this->preloaded = [];
     }
 
     public function popTo(string $route): bool
@@ -988,6 +999,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                     $this->routeInstances[$key],
                     $this->childSubscriptions[$key],
                     $this->pendingChildState[$key],
+                    $this->dynamicOptions[$key],
                 );
             }
         }
@@ -1053,6 +1065,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                 $this->routeInstances[$key],
                 $this->childSubscriptions[$key],
                 $this->pendingChildState[$key],
+                $this->dynamicOptions[$key],
             );
         }
         $this->outgoing = null;

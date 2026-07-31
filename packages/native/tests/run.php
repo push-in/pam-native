@@ -4602,6 +4602,25 @@ $assert(
     $preloadFactories === 1,
     'An exact preloaded route must be consumed and retained without rerunning its factory.',
 );
+$boundedPreloadFactories = 0;
+$boundedPreloads = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('detail', static function () use (&$boundedPreloadFactories): Screen {
+        $boundedPreloadFactories++;
+        return Screen::make(Text::make('Detail'));
+    })
+    ->build();
+for ($id = 1; $id <= 17; $id++) $boundedPreloads->preload('detail', ['id' => $id]);
+$boundedPreloads->push('detail', ['id' => 1]);
+$boundedPreloads->render();
+$boundedPreloads->preload('detail', ['id' => 99]);
+$boundedPreloads->trimMemory();
+$boundedPreloads->push('detail', ['id' => 99]);
+$boundedPreloads->render();
+$assert(
+    $boundedPreloadFactories === 20,
+    'Speculative routes must use a 16-entry LRU bound and be releasable under memory pressure.',
+);
 $lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
     use InteractsWithNavigationLifecycle;
 
