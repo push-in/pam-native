@@ -24,6 +24,27 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertTrue(first.isHidden)
     }
 
+    func testFormSheetUsesNativeControllerAndConfiguredDetents() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let host = PamNavigationHost(frame: root.view.bounds)
+        root.view.addSubview(host)
+        host.insert(UIView(), index: 0)
+        host.insert(UIView(), index: 1)
+        host.operation = 2
+        host.transition = 8
+        host.screenPresentation = 7
+        host.sheetDetents = [0.5, 1]
+        host.sheetInitialDetentIndex = 1
+        host.sheetGrabberVisible = true
+        host.navigate(1)
+
+        XCTAssertTrue(host.usesNativeModalController)
+        XCTAssertEqual(host.activeSheetDetentCount, 2)
+    }
+
     func testEveryPublicTransitionCompletesWithOnlyDestinationVisible() {
         for transition in 2...11 where transition != 8 {
             let completed = expectation(description: "transition \(transition)")

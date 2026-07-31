@@ -19,6 +19,42 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
     @Test
+    fun formSheetSizesNativeRouteControllerAtConfiguredDetent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var previous: View
+            lateinit var sheet: View
+            onMain(instrumentation) {
+                val navigation = PamNavigationHost(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(390, 800)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                    screenPresentation = 7
+                    sheetDetents = listOf(0.5f, 1f)
+                    sheetInitialDetentIndex = 1
+                    sheetCornerRadius = 24f
+                }
+                activity.host.addView(navigation)
+                navigation.layout(0, 0, 390, 800)
+                previous = View(activity)
+                sheet = View(activity)
+                navigation.insert(previous, 0)
+                navigation.insert(sheet, 1)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(400, sheet.layoutParams.height)
+                assertTrue(sheet.clipToOutline)
+                assertEquals(View.VISIBLE, previous.visibility)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun drawerAdaptsStatusBarIconsAndRestoresThemWhenClosed() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

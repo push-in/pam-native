@@ -10,8 +10,11 @@ import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
+import android.graphics.Outline
 import android.provider.Settings
 import android.view.View
+import android.view.ViewOutlineProvider
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.VelocityTracker
 import android.view.ViewTreeObserver
@@ -45,6 +48,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var headerSearchEnabled: Boolean = false; set(value) { field = value; applyControllerChrome() }
     var headerSearchPlaceholder: String = "Search"; set(value) { field = value; applyControllerChrome() }
     var onSearchChange: ((String) -> Unit)? = null
+    var screenPresentation: Int = PRESENTATION_CARD
+    var sheetDetents: List<Float> = listOf(1f)
+    var sheetInitialDetentIndex: Int = 1
+    var sheetCornerRadius: Float = 0f
     var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
     private var activeRoute: View? = null
@@ -269,6 +276,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val incoming = getChildAt(childCount - 2)
         val outgoing = getChildAt(childCount - 1)
         setActiveRoute(incoming)
+        applyRoutePresentation(incoming)
         incoming.visibility = View.VISIBLE
         outgoing.visibility = View.VISIBLE
         onGestureStart?.invoke()
@@ -589,7 +597,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         reset(incoming)
         outgoing?.let {
             reset(it)
-            it.visibility = View.INVISIBLE
+            it.visibility = if (keepsPreviousRouteVisible()) View.VISIBLE else View.INVISIBLE
         }
         incoming.visibility = View.VISIBLE
         incoming.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
@@ -723,6 +731,39 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         }
     }
 
+    private fun applyRoutePresentation(route: View) {
+        val params = (route.layoutParams as? LayoutParams)
+            ?: LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        if (screenPresentation == PRESENTATION_FORM_SHEET) {
+            val detents = sheetDetents.ifEmpty { listOf(1f) }.take(3)
+            val detent = detents[(sheetInitialDetentIndex - 1).coerceIn(0, detents.lastIndex)]
+            params.width = LayoutParams.MATCH_PARENT
+            params.height = (height.coerceAtLeast(measuredHeight) * detent.coerceIn(0.05f, 1f))
+                .toInt()
+                .coerceAtLeast(dp(48f).toInt())
+            params.gravity = Gravity.BOTTOM
+            route.elevation = dp(12f)
+            val radius = dp(if (sheetCornerRadius > 0f) sheetCornerRadius else 20f)
+            route.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, view.height + radius.toInt(), radius)
+                }
+            }
+            route.clipToOutline = true
+        } else {
+            params.width = LayoutParams.MATCH_PARENT
+            params.height = LayoutParams.MATCH_PARENT
+            params.gravity = Gravity.FILL
+            route.elevation = 0f
+            route.clipToOutline = false
+            route.outlineProvider = ViewOutlineProvider.BACKGROUND
+        }
+        route.layoutParams = params
+    }
+
+    private fun keepsPreviousRouteVisible(): Boolean = operation != OPERATION_POP &&
+        screenPresentation in PRESENTATION_CONTAINED_MODAL..PRESENTATION_FORM_SHEET
+
     private companion object {
         const val OPERATION_IDLE = 1
         const val OPERATION_PUSH = 2
@@ -740,5 +781,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val TRANSITION_SLIDE_FROM_TOP = 9
         const val TRANSITION_SHARED_AXIS_X = 10
         const val TRANSITION_SHARED_AXIS_Y = 11
+
+        const val PRESENTATION_CARD = 1
+        const val PRESENTATION_CONTAINED_MODAL = 3
+        const val PRESENTATION_FORM_SHEET = 7
     }
 }

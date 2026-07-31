@@ -4258,9 +4258,13 @@ $sheetNavigator = Router::stack('home')
     )
     ->build();
 $sheetNavigator->push('filters');
+$sheetElement = $sheetNavigator->render()->toElement();
 $assert(
-    $sheetNavigator->render()->toElement()->children()[1]->kind() === NodeKind::Modal,
-    'Form-sheet routes must use the native modal sheet host and typed detents.',
+    $sheetElement->children()[1]->kind() === NodeKind::Column
+        && $sheetElement->properties()[PropKey::NavigationPresentation->value]
+            === NavigationPresentation::FormSheet->value
+        && $sheetElement->properties()[PropKey::NavigationSheetDetents->value] === '0.5,1',
+    'Form-sheet routes must be owned by native controllers with typed detents.',
 );
 
 $advancedNavigator = Router::stack('home')

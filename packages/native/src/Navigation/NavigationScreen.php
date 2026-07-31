@@ -8,16 +8,12 @@ use Pam\Native\AccessibilityRole;
 use Pam\Native\Align;
 use Pam\Native\Renderable;
 use Pam\Native\Style;
-use Pam\Native\ModalPresentation;
-use Pam\Native\ModalAnimationType;
-use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\Pressable;
 use Pam\Native\UI\Row;
 use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
-use Pam\Native\UI\Modal;
 use Pam\Native\UI\Input;
 use Pam\Native\ReturnKeyType;
 
@@ -43,44 +39,10 @@ final readonly class NavigationScreen implements Renderable
             ? $this->withHeader()
             : $this->content;
 
-        return match ($this->options->presentation) {
-            NavigationPresentation::Card => $body->toElement(),
-            NavigationPresentation::FormSheet => BottomSheet::make(
-                $body,
-                $this->options->sheetAllowedDetents ?? [1.0],
-                $this->options->sheetInitialDetentIndex - 1,
-            )
-                ->handleVisible($this->options->sheetGrabberVisible)
-                ->cornerRadius($this->options->sheetCornerRadius ?? 20.0)
-                ->onDismiss($this->goBack)
-                ->toElement(),
-            NavigationPresentation::Modal,
-            NavigationPresentation::ContainedModal => Modal::make(
-                $body,
-                presentation: ModalPresentation::Dialog,
-            )
-                ->animationType(ModalAnimationType::Slide)
-                ->allowSwipeDismissal($this->options->gestureEnabled)
-                ->onRequestClose($this->goBack)
-                ->toElement(),
-            NavigationPresentation::FullScreenModal => Modal::make(
-                $body,
-                presentation: ModalPresentation::FullScreen,
-            )
-                ->animationType(ModalAnimationType::Slide)
-                ->onRequestClose($this->goBack)
-                ->toElement(),
-            NavigationPresentation::TransparentModal,
-            NavigationPresentation::ContainedTransparentModal => Modal::make(
-                $body,
-                presentation: ModalPresentation::FullScreen,
-            )
-                ->transparent()
-                ->animationType(ModalAnimationType::Fade)
-                ->allowSwipeDismissal($this->options->gestureEnabled)
-                ->onRequestClose($this->goBack)
-                ->toElement(),
-        };
+        // Presentation belongs to the retained native route controller. This
+        // keeps modal/sheet lifecycle, gestures and accessibility inside the
+        // platform rather than nesting a second PAM modal host in the route.
+        return $body->toElement();
     }
 
     private function withHeader(): Renderable

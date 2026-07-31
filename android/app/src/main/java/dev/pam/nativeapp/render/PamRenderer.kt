@@ -1358,16 +1358,17 @@ class PamRenderer(
             PropKey.NAVIGATION_HEADER_SEARCH_PLACEHOLDER,
             -> configureNavigationChrome(view, state)
             PropKey.NAVIGATION_HEADER_LARGE_TITLE_ENABLED,
-            PropKey.NAVIGATION_PRESENTATION,
             PropKey.NAVIGATION_GESTURE_DIRECTION,
             PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED,
             PropKey.NAVIGATION_FREEZE_ON_BLUR,
-            PropKey.NAVIGATION_SHEET_DETENTS,
-            PropKey.NAVIGATION_SHEET_INITIAL_DETENT_INDEX,
             PropKey.NAVIGATION_SHEET_GRABBER_VISIBLE,
-            PropKey.NAVIGATION_SHEET_CORNER_RADIUS,
             PropKey.NAVIGATION_SHEET_EXPANDS_WHEN_SCROLLED_TO_EDGE,
             -> Unit
+            PropKey.NAVIGATION_PRESENTATION,
+            PropKey.NAVIGATION_SHEET_DETENTS,
+            PropKey.NAVIGATION_SHEET_INITIAL_DETENT_INDEX,
+            PropKey.NAVIGATION_SHEET_CORNER_RADIUS,
+            -> configureNavigationPresentation(view, state)
             PropKey.NAVIGATION_REVISION ->
                 (view as? PamNavigationHost)?.navigate(value.integer())
             PropKey.NAVIGATION_GESTURE_ENABLED,
@@ -2926,6 +2927,21 @@ class PamRenderer(
         navigation.onSearchChange = if (state.properties[PropKey.ON_CHANGE] != null) {
             { text -> dispatch(state.id, EventKind.CHANGE.value, text) }
         } else null
+    }
+
+    private fun configureNavigationPresentation(view: View, state: NodeState) {
+        val navigation = view as? PamNavigationHost ?: return
+        navigation.screenPresentation = state.integer(PropKey.NAVIGATION_PRESENTATION, 1).toInt()
+        navigation.sheetDetents = state.textOrNull(PropKey.NAVIGATION_SHEET_DETENTS)
+            ?.split(',')
+            ?.mapNotNull(String::toFloatOrNull)
+            ?.take(3)
+            .orEmpty()
+        navigation.sheetInitialDetentIndex = state.integer(
+            PropKey.NAVIGATION_SHEET_INITIAL_DETENT_INDEX,
+            1,
+        ).toInt()
+        navigation.sheetCornerRadius = state.number(PropKey.NAVIGATION_SHEET_CORNER_RADIUS, 0.0).toFloat()
     }
 
     private fun configureKeyframeAnimation(view: View, state: NodeState) {

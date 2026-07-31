@@ -22,7 +22,7 @@ private final class PamRouteViewController: UIViewController, UISearchResultsUpd
     }
 }
 
-final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
+final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePresentationControllerDelegate {
     var operation = 1
     var transition = 1
     var duration: TimeInterval = 0.24
@@ -42,6 +42,12 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     var headerSearchEnabled = false { didSet { applyControllerChrome() } }
     var headerSearchPlaceholder = "Search" { didSet { applyControllerChrome() } }
     var onSearchChange: ((String) -> Void)? { didSet { applyControllerChrome() } }
+    var screenPresentation = 1
+    var sheetDetents: [CGFloat] = [1]
+    var sheetInitialDetentIndex = 1
+    var sheetGrabberVisible = false
+    var sheetCornerRadius: CGFloat = 0
+    var sheetExpandsWhenScrolledToEdge = true
     private var revision: Int64 = 0
     private var gestureEnabled = true
     private var gestureEdgeWidth: CGFloat = 24
@@ -56,6 +62,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     private var routeControllers: [ObjectIdentifier: PamRouteViewController] = [:]
     private weak var containerController: UIViewController?
     private var navigationController: UINavigationController?
+    private var presentedNavigationController: UINavigationController?
     private struct SharedElementAnimation {
         let snapshot: UIView
         let source: UIView
@@ -457,6 +464,27 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
               let incoming = incomingView() else { return }
         let outgoing = outgoingView()
         let allControllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
+        if operation == 3, let presented = presentedNavigationController {
+            presented.dismiss(animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+                self?.presentedNavigationController = nil
+                self?.finish(incoming: incoming, outgoing: outgoing)
+                self?.applyControllerChrome()
+            }
+            return
+        }
+        if operation != 3, screenPresentation != 1,
+           let controller = allControllers.last {
+            let baseControllers = Array(allControllers.dropLast())
+            navigation.setViewControllers(baseControllers, animated: false)
+            let modal = UINavigationController(rootViewController: controller)
+            configurePresentation(modal)
+            presentedNavigationController = modal
+            applyControllerChrome()
+            navigation.present(modal, animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+                self?.finish(incoming: incoming, outgoing: outgoing)
+            }
+            return
+        }
         let finalControllers = operation == 3 && allControllers.count > 1
             ? Array(allControllers.dropLast())
             : allControllers
@@ -496,9 +524,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
 
     internal var routeControllerCount: Int { routeControllers.count }
     internal var usesNativeNavigationController: Bool { navigationController != nil }
+    internal var usesNativeModalController: Bool { presentedNavigationController != nil }
+    internal var activeSheetDetentCount: Int {
+        presentedNavigationController?.sheetPresentationController?.detents.count ?? 0
+    }
 
     private func applyControllerChrome() {
-        guard let navigation = navigationController else { return }
+        guard let navigation = presentedNavigationController ?? navigationController else { return }
         navigation.setNavigationBarHidden(!headerShown, animated: false)
         navigation.navigationBar.prefersLargeTitles = headerLargeTitleEnabled
         navigation.navigationBar.tintColor = headerTintColor
@@ -524,6 +556,46 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         } else {
             controller.navigationItem.searchController = nil
         }
+    }
+
+    private func configurePresentation(_ modal: UINavigationController) {
+        switch screenPresentation {
+        case 3: modal.modalPresentationStyle = .currentContext
+        case 4: modal.modalPresentationStyle = .fullScreen
+        case 5:
+            modal.modalPresentationStyle = .overFullScreen
+            modal.view.backgroundColor = .clear
+        case 6:
+            modal.modalPresentationStyle = .overCurrentContext
+            modal.view.backgroundColor = .clear
+        default: modal.modalPresentationStyle = .pageSheet
+        }
+        modal.presentationController?.delegate = self
+        guard screenPresentation == 7, let sheet = modal.sheetPresentationController else { return }
+        if #available(iOS 16.0, *) {
+            sheet.detents = sheetDetents.prefix(3).enumerated().map { index, fraction in
+                .custom(identifier: .init("pam.detent.\(index + 1)")) { context in
+                    context.maximumDetentValue * min(max(fraction, 0.05), 1)
+                }
+            }
+        } else {
+            sheet.detents = sheetDetents.prefix(2).map { $0 <= 0.5 ? .medium() : .large() }
+        }
+        let detents = sheet.detents
+        if !detents.isEmpty {
+            let index = min(max(sheetInitialDetentIndex - 1, 0), detents.count - 1)
+            sheet.selectedDetentIdentifier = detents[index].identifier
+        }
+        sheet.prefersGrabberVisible = sheetGrabberVisible
+        sheet.preferredCornerRadius = sheetCornerRadius > 0 ? sheetCornerRadius : nil
+        sheet.prefersScrollingExpandsWhenScrolledToEdge = sheetExpandsWhenScrolledToEdge
+    }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        guard presentedNavigationController != nil else { return }
+        presentedNavigationController = nil
+        onGestureEnd?()
+        onGesturePop?()
     }
 
     private func applyPlatformScreenBehavior() {

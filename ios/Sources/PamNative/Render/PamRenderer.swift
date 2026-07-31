@@ -1352,6 +1352,13 @@ public final class PamRenderer {
         case PamConstants.navigationHeaderSearchEnabled,
              PamConstants.navigationHeaderSearchPlaceholder:
             configureNavigationChrome(nodeId: nodeId, view: view)
+        case PamConstants.navigationPresentation,
+             PamConstants.navigationSheetDetents,
+             PamConstants.navigationSheetInitialDetentIndex,
+             PamConstants.navigationSheetGrabberVisible,
+             PamConstants.navigationSheetCornerRadius,
+             PamConstants.navigationSheetExpandsWhenScrolledToEdge:
+            configureNavigationPresentation(nodeId: nodeId, view: view)
         case PamConstants.navigationRevision:
             (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
         case PamConstants.navigationGestureEnabled,
@@ -2204,6 +2211,20 @@ public final class PamRenderer {
         navigation.onSearchChange = state.properties[PamConstants.onChange] != nil ? { [weak self] text in
             self?.dispatchEvent(nodeId, EventKind.change.rawValue, Data(text.utf8))
         } : nil
+    }
+
+    private func configureNavigationPresentation(nodeId: Int64, view: UIView) {
+        guard let navigation = view as? PamNavigationHost,
+              let state = nodes[nodeId] else { return }
+        navigation.screenPresentation = Int(state.properties[PamConstants.navigationPresentation]?.integerOrNil() ?? 1)
+        navigation.sheetDetents = (state.properties[PamConstants.navigationSheetDetents]?.textOrNil() ?? "1")
+            .split(separator: ",")
+            .compactMap { Double($0) }
+            .map { CGFloat($0) }
+        navigation.sheetInitialDetentIndex = Int(state.properties[PamConstants.navigationSheetInitialDetentIndex]?.integerOrNil() ?? 1)
+        navigation.sheetGrabberVisible = state.properties[PamConstants.navigationSheetGrabberVisible]?.boolOrNil() ?? false
+        navigation.sheetCornerRadius = CGFloat(state.properties[PamConstants.navigationSheetCornerRadius]?.decimalOrNil() ?? 0)
+        navigation.sheetExpandsWhenScrolledToEdge = state.properties[PamConstants.navigationSheetExpandsWhenScrolledToEdge]?.boolOrNil() ?? true
     }
 
     private func configureKeyframeAnimation(nodeId: Int64, view: UIView) {
