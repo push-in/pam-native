@@ -116,6 +116,13 @@ final class NavigationContainer extends Component
         return $this->root->dispatch($action);
     }
 
+    public function addListener(
+        NavigationEventType $type,
+        Closure $listener,
+    ): NavigationSubscription {
+        return $this->root->addListener($type, $listener);
+    }
+
     /** @return array<string, mixed> */
     public function getRootState(): array
     {
