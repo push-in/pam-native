@@ -15,6 +15,7 @@ final class Router
     private NavigationTransition $transition = NavigationTransition::PlatformDefault;
     private int $durationMs = 240;
     private bool $handleSystemBack = true;
+    private bool $restoreState = true;
     /** @var list<DeepLink> */
     private array $deepLinks = [];
 
@@ -59,6 +60,18 @@ final class Router
         return $copy;
     }
 
+    /**
+     * Controls whether a cold runtime restores the previously persisted stack.
+     * Disable this for apps that must always boot from their initial route.
+     */
+    public function restoreState(bool $enabled = true): self
+    {
+        $copy = clone $this;
+        $copy->restoreState = $enabled;
+
+        return $copy;
+    }
+
     public function transitions(
         NavigationTransition $transition,
         int $durationMs = 240,
@@ -96,6 +109,7 @@ final class Router
             transitionDurationMs: $this->durationMs,
             handleSystemBack: $this->handleSystemBack,
             deepLinks: $this->deepLinks,
+            restorePersistedState: $this->restoreState,
         );
     }
 }

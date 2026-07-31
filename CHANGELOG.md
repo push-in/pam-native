@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.90 - 2026-07-31
+
+- Establish one explicit Android edge-to-edge window contract before mounting
+  the PAM host, avoiding OEM-dependent decor fitting on Samsung devices.
+- Capture stable system-bar and display-cutout insets at the root host and use
+  them as the lower bound for both `SafeAreaView` and early `DeviceInfo`
+  queries, preventing transient zero bottom insets during cold start.
+- Stop using Android's legacy visible display frame to compensate edge-to-edge
+  flex layouts, which could subtract status/navigation bars a second time from
+  fixed bottom siblings.
+- Add `Router::restoreState(false)` for applications that require a
+  deterministic initial route without deleting persisted domain state or
+  briefly mounting a historical navigation stack.
+
 ## 0.5.89 - 2026-07-30
 
 - Resolve Android safe areas from stable system-bar and display-cutout insets,

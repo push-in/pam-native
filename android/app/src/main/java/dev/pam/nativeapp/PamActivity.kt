@@ -19,6 +19,7 @@ import android.view.WindowInsetsController
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
 import android.widget.FrameLayout
+import androidx.core.view.WindowCompat
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
@@ -28,6 +29,8 @@ import dev.pam.nativeapp.modules.PamIncomingShares
 import dev.pam.nativeapp.modules.PamDeepLinks
 
 class PamActivity : Activity() {
+    internal lateinit var rootHost: PamRootHost
+        private set
     private lateinit var runtime: PamRuntime
     private var hotReload: HotReloadClient? = null
     private var backCallback: OnBackInvokedCallback? = null
@@ -47,7 +50,11 @@ class PamActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val host = PamRootHost(this)
+        // Keep one deterministic edge-to-edge contract on every supported
+        // Android version. Insets are consumed by PAM views, never implicitly
+        // by the decor view or an OEM-specific compatibility path.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val host = PamRootHost(this).also { rootHost = it }
         errors = ErrorOverlay(this)
         devTools = PamDevToolsOverlay(this)
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->

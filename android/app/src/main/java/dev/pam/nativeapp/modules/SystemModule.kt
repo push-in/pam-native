@@ -210,10 +210,27 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                 } else {
                     intArrayOf(0, 0, 0, 0)
                 }
-                val safeLeft = maxOf(visibleInsets?.left ?: 0, stableInsets[0])
-                val safeTop = maxOf(visibleInsets?.top ?: 0, stableInsets[1])
-                val safeRight = maxOf(visibleInsets?.right ?: 0, stableInsets[2])
-                val safeBottom = maxOf(visibleInsets?.bottom ?: 0, stableInsets[3])
+                val rootInsets = activity?.rootHost?.stableSafeAreaInsets
+                val safeLeft = maxOf(
+                    visibleInsets?.left ?: 0,
+                    stableInsets[0],
+                    rootInsets?.left ?: 0,
+                )
+                val safeTop = maxOf(
+                    visibleInsets?.top ?: 0,
+                    stableInsets[1],
+                    rootInsets?.top ?: 0,
+                )
+                val safeRight = maxOf(
+                    visibleInsets?.right ?: 0,
+                    stableInsets[2],
+                    rootInsets?.right ?: 0,
+                )
+                val safeBottom = maxOf(
+                    visibleInsets?.bottom ?: 0,
+                    stableInsets[3],
+                    rootInsets?.bottom ?: 0,
+                )
                 WireMap.encode(
                     mapOf(
                         "width" to WireValue.Decimal(metrics.widthPixels / density.toDouble()),

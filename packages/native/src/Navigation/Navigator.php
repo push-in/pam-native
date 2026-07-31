@@ -42,6 +42,7 @@ final class Navigator extends Component implements Restorable
         private int $transitionDurationMs = 240,
         bool $handleSystemBack = true,
         array $deepLinks = [],
+        private readonly bool $restorePersistedState = true,
     )
     {
         $validated = [];
@@ -331,6 +332,10 @@ final class Navigator extends Component implements Restorable
 
     public function restoreState(array $state): void
     {
+        if (!$this->restorePersistedState) {
+            return;
+        }
+
         $stack = $state['stack'] ?? null;
 
         if (!is_array($stack) || $stack === []) {

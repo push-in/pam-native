@@ -4257,6 +4257,16 @@ $assert(
     $restoredNavigator->current()->integer('id') === 42,
     'Navigator persistence must preserve route parameters.',
 );
+$ephemeralNavigator = Router::stack('home')
+    ->restoreState(false)
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->build();
+$ephemeralNavigator->restoreState($savedNavigation);
+$assert(
+    $ephemeralNavigator->currentRoute() === 'home',
+    'Navigator state restoration must be explicitly disableable for deterministic cold starts.',
+);
 $assert(
     $advancedNavigator->open('pam://docs/articles/native%20grid?source=notification')
         && $advancedNavigator->currentRoute() === 'article'
@@ -4391,8 +4401,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.89',
-    'The runtime SDK contract must match the 0.5.89 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.90',
+    'The runtime SDK contract must match the 0.5.90 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

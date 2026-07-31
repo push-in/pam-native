@@ -65,6 +65,7 @@ import android.widget.Space
 import android.widget.Switch
 import android.widget.TextView
 import androidx.annotation.RequiresApi
+import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.Frame
 import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
@@ -1161,13 +1162,6 @@ class PamRenderer(
         } else {
             measuredExtent
         }
-        val windowVisibleFrame = Rect().also(
-            parentView::getWindowVisibleDisplayFrame,
-        )
-        val windowVisibleExtent = when (axis) {
-            Axis.HORIZONTAL -> windowVisibleFrame.width()
-            Axis.VERTICAL -> windowVisibleFrame.height()
-        }
         val parentUsesSafeAreaPadding =
             parentState.kind == NodeKind.SAFE_AREA_VIEW &&
                 parentState.integer(
@@ -1205,7 +1199,10 @@ class PamRenderer(
         val renderedExtent = safeAreaFlexViewportExtent(
             layoutExtent = visibleExtent,
             safeAreaInsets = safeAreaInsets,
-            windowVisibleExtent = windowVisibleExtent,
+            // PAM owns an explicit edge-to-edge window. The legacy visible
+            // display frame excludes status/navigation bars on Samsung and
+            // would subtract them a second time from fixed flex siblings.
+            windowVisibleExtent = visibleExtent,
         )
         if (renderedExtent <= 0) return
         val viewportReduction = engineExtent - renderedExtent
@@ -4355,7 +4352,9 @@ class PamRenderer(
             val safe = insets.getInsetsIgnoringVisibility(
                 WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
             )
-            return SafeAreaInsets(safe.left, safe.top, safe.right, safe.bottom)
+            return withStableRootInsets(
+                SafeAreaInsets(safe.left, safe.top, safe.right, safe.bottom),
+            )
         }
 
         @Suppress("DEPRECATION")
@@ -4371,11 +4370,24 @@ class PamRenderer(
         } else {
             SafeAreaInsets(0, 0, 0, 0)
         }
+        return withStableRootInsets(
+            SafeAreaInsets(
+                left = max(systemLeft, cutout.left),
+                top = max(systemTop, cutout.top),
+                right = max(systemRight, cutout.right),
+                bottom = max(systemBottom, cutout.bottom),
+            ),
+        )
+    }
+
+    private fun withStableRootInsets(current: SafeAreaInsets): SafeAreaInsets {
+        val stable = (activity() as? PamActivity)?.rootHost?.stableSafeAreaInsets
+            ?: return current
         return SafeAreaInsets(
-            left = max(systemLeft, cutout.left),
-            top = max(systemTop, cutout.top),
-            right = max(systemRight, cutout.right),
-            bottom = max(systemBottom, cutout.bottom),
+            left = max(current.left, stable.left),
+            top = max(current.top, stable.top),
+            right = max(current.right, stable.right),
+            bottom = max(current.bottom, stable.bottom),
         )
     }
 
