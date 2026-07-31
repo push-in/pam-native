@@ -82,23 +82,21 @@ strings so untrusted deep links cannot inflate the retained tree.
 
 ### Incoming application links
 
-Connect Android intents and iOS application links to the same router once:
+Let the root container own Android intents and iOS application links for its
+entire mounted lifetime:
 
 ```php
-use Pam\Native\System\Linking;
-
-$linkSubscription = Linking::listenAndRoute(
-    $navigator,
+$navigation = NavigationContainer::make($navigator)->linking(
     static function (string $url, bool $handled): void {
         // Optional analytics or fallback handling.
     },
 );
 ```
 
-`listenAndRoute()` consumes the Android cold-start URL, then keeps one bounded
-listener armed for warm-start URLs delivered through `singleTask`
-`onNewIntent()`. Call `Linking::unsubscribe($linkSubscription)` when a
-short-lived owner no longer needs it.
+The container consumes the cold-start URL, keeps one bounded listener armed for
+warm-start URLs delivered through `singleTask` `onNewIntent()`, and releases it
+automatically on unmount. `Linking::listenAndRoute()` remains available when a
+non-container owner needs explicit subscription control.
 
 On iOS, forward the initial and subsequent URLs from the application or scene
 delegate:

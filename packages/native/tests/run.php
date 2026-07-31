@@ -4432,9 +4432,20 @@ $assert(
         && $optionalLinkNavigator->current()->string('path') === 'guides/native/start'
         && $optionalLinkNavigator->currentPath() === '/documents/guides/native/start'
         && $optionalLinkNavigator->currentUrl() === 'pam://app/documents/guides/native/start'
+        && !$optionalLinkNavigator->open('pam://application/documents/private')
         && !$optionalLinkNavigator->open('other://documents/private')
         && !$optionalLinkNavigator->open('pam://app/blocked'),
-    'Deep links must support optional and terminal wildcard path parameters bidirectionally.',
+    'Deep links must support optional/wildcard parameters and enforce URI prefix boundaries.',
+);
+$pathPriorityNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->deepLink('/profile/{id}', 'profile')
+    ->build();
+$assert(
+    $pathPriorityNavigator->open('pam://app/profile/42?id=99')
+        && $pathPriorityNavigator->current()->string('id') === '42',
+    'A query string must not override an identity captured from the path.',
 );
 $authenticated = false;
 $authNavigator = Router::stack('login')
@@ -4530,6 +4541,15 @@ $assert(
         && $container->currentPath() === '/articles/native%20core'
         && $containerStateChanges === 1,
     'NavigationContainer must dispatch actions and build canonical paths from state.',
+);
+$container->unmount();
+$advancedNavigator->navigate('profile', ['id' => 91]);
+$detachedStateChanges = $containerStateChanges;
+$container->mount();
+$advancedNavigator->navigate('article', ['slug' => 'remounted']);
+$assert(
+    $detachedStateChanges === 1 && $containerStateChanges === 2,
+    'NavigationContainer must release root listeners on unmount and restore exactly one subscription on remount.',
 );
 $navigationRef = new NavigationRef();
 $refNavigator = Router::stack('home')

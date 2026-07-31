@@ -35,6 +35,7 @@ $stack = Router::stack('home')
     ->build();
 
 $navigation = NavigationContainer::make($stack)
+    ->linking(fn (string $url, bool $handled) => $analytics->link($url, $handled))
     ->onReady(fn () => $analytics->ready())
     ->onStateChange(fn (array $state) => $analytics->screen($state))
     ->onUnhandledAction(fn ($action) => $logger->warning($action->toArray()));

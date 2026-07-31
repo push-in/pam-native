@@ -612,7 +612,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($this->linkFilter !== null && !($this->linkFilter)($uri)) return false;
         if (
             $this->linkingPrefixes !== []
-            && !array_any($this->linkingPrefixes, static fn (string $prefix): bool => str_starts_with($uri, $prefix))
+            && !array_any($this->linkingPrefixes, static function (string $prefix) use ($uri): bool {
+                if (!str_starts_with($uri, $prefix)) return false;
+                $boundary = $uri[strlen($prefix)] ?? '';
+                return $boundary === '' || str_ends_with($prefix, '/') || in_array($boundary, ['/', '?', '#'], true);
+            })
         ) return false;
         $parts = parse_url($uri);
         if ($parts === false) return false;
@@ -632,7 +636,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                 if (isset($parts['query'])) {
                     parse_str($parts['query'], $query);
                     foreach ($query as $key => $value) {
-                        if (is_string($key) && is_scalar($value)) {
+                        if (is_string($key) && !array_key_exists($key, $params) && is_scalar($value)) {
                             $params[$key] = (string) $value;
                         }
                     }
