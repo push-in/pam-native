@@ -44,6 +44,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private array $screenOptions;
     /** @var array<string, Closure> */
     private array $routeIds;
+    /** @var array<string, Closure> */
+    private array $routeGuards;
     /** @var array<string, ScreenOptions> */
     private array $dynamicOptions = [];
     /** @var list<string> */
@@ -68,6 +70,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         array $linkingPrefixes = [],
         ?Closure $linkFilter = null,
         array $routeIds = [],
+        array $routeGuards = [],
+        private readonly ?string $guardFallback = null,
     )
     {
         $validated = [];
@@ -107,6 +111,15 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             }
         }
         $this->routeIds = $routeIds;
+        foreach ($routeGuards as $route => $guard) {
+            if (!is_string($route) || !isset($validated[$route]) || !$guard instanceof Closure) {
+                throw new InvalidArgumentException('Route guards must target a registered route.');
+            }
+        }
+        if ($guardFallback !== null && !isset($validated[$guardFallback])) {
+            throw new InvalidArgumentException('The route guard fallback must be registered.');
+        }
+        $this->routeGuards = $routeGuards;
         foreach ($linkingPrefixes as $prefix) {
             if (!is_string($prefix) || strlen($prefix) > 512 || preg_match('#^[A-Za-z][A-Za-z0-9+.-]*://#', $prefix) !== 1) {
                 throw new InvalidArgumentException('Linking prefixes require bounded absolute URI prefixes.');
@@ -115,10 +128,16 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->linkingPrefixes = array_values(array_unique($linkingPrefixes));
         $this->linkFilter = $linkFilter;
         $this->theme = NavigationTheme::light();
+        $bootRoute = $this->routeAvailable($initialRoute)
+            ? $initialRoute
+            : $guardFallback;
+        if ($bootRoute === null || !$this->routeAvailable($bootRoute)) {
+            throw new InvalidArgumentException('The initial route is guarded and no available fallback exists.');
+        }
         $this->stack = [[
-            'name' => $initialRoute,
+            'name' => $bootRoute,
             'id' => 1,
-            'routeId' => $this->resolveRouteId($initialRoute, []),
+            'routeId' => $this->resolveRouteId($bootRoute, []),
             'params' => [],
         ]];
         $this->persistenceKey = $persistenceKey;
@@ -166,6 +185,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
 
         $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) {
+            throw new InvalidArgumentException("Route {$route} is not currently available.");
+        }
         $previous = $this->currentEntry();
         $this->outgoing = null;
         $this->stack[] = [
@@ -374,6 +396,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
         $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) {
+            throw new InvalidArgumentException("Route {$route} is not currently available.");
+        }
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Replace, $route, $params))) return;
         $this->outgoing = array_pop($this->stack);
@@ -395,6 +420,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
         $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) {
+            throw new InvalidArgumentException("Route {$route} is not currently available.");
+        }
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Reset, $route, $params))) return;
         $this->outgoing = null;
@@ -416,6 +444,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
         $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) return;
         $routeId = $this->resolveRouteId($route, $validatedParams);
         $previous = $this->currentEntry();
         $target = null;
@@ -574,8 +603,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                         }
                     }
                 }
+                if (!$this->routeAvailable($link->route, $params)) return false;
                 $this->navigate($link->route, $params);
-
                 return true;
             }
         }
@@ -610,6 +639,44 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($durationMs !== null) {
             $this->transitionDurationMs = max(0, min(2_000, $durationMs));
         }
+    }
+
+    /** @param array<string, string|int|float|bool|null> $params */
+    public function routeAvailable(string $route, array $params = []): bool
+    {
+        if (!isset($this->routes[$route])) return false;
+        $guard = $this->routeGuards[$route] ?? null;
+        return $guard === null || $guard(new RouteContext($route, self::validatedParams($params))) === true;
+    }
+
+    /**
+     * Re-evaluates auth/feature conditions and removes inaccessible history in
+     * one state revision. Call after the session or entitlement state changes.
+     */
+    public function refreshConditions(): bool
+    {
+        $previous = $this->currentEntry();
+        $available = array_values(array_filter(
+            $this->stack,
+            fn (array $entry): bool => $this->routeAvailable($entry['name'], $entry['params']),
+        ));
+        if ($available === []) {
+            $fallback = $this->guardFallback;
+            if ($fallback === null || !$this->routeAvailable($fallback)) return false;
+            $available[] = [
+                'name' => $fallback,
+                'id' => $this->nextId++,
+                'routeId' => $this->resolveRouteId($fallback, []),
+                'params' => [],
+            ];
+        }
+        if ($available === $this->stack) return false;
+        $this->stack = $available;
+        $this->outgoing = null;
+        $this->operation = NavigationOperation::Reset;
+        $this->revision++;
+        $this->didNavigate($previous, NavigationAction::reset($this->currentRoute(), $this->current()->all()));
+        return true;
     }
 
     public function stateKey(): string
@@ -649,6 +716,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             } catch (InvalidArgumentException) {
                 return;
             }
+            if (!$this->routeAvailable($route, $validatedParams)) continue;
             $entry = [
                 'name' => $route,
                 'id' => $this->nextId++,
@@ -659,6 +727,16 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             if (is_array($saved) && is_array($saved['state'] ?? null)) {
                 $this->pendingChildState[$this->entryKey($entry)] = $saved['state'];
             }
+        }
+        if ($restored === []) {
+            $fallback = $this->guardFallback;
+            if ($fallback === null || !$this->routeAvailable($fallback)) return;
+            $restored[] = [
+                'name' => $fallback,
+                'id' => $this->nextId++,
+                'routeId' => $this->resolveRouteId($fallback, []),
+                'params' => [],
+            ];
         }
         $this->stack = $restored;
         $this->operation = NavigationOperation::Reset;
@@ -873,6 +951,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($action->route === null || !isset($this->routes[$action->route])) {
             return false;
         }
+        if (!$this->routeAvailable($action->route, $action->params)) return false;
         $operation();
         return true;
     }

@@ -22,6 +22,9 @@ final class Router
     private array $options = [];
     /** @var array<string, Closure> */
     private array $routeIds = [];
+    /** @var array<string, Closure> */
+    private array $routeGuards = [];
+    private ?string $guardFallback = null;
     /** @var list<string> */
     private array $linkingPrefixes = [];
     private ?Closure $linkFilter = null;
@@ -76,6 +79,21 @@ final class Router
         $copy = clone $this;
         $copy->persistenceKey = $key;
 
+        return $copy;
+    }
+
+    /** @param Closure(RouteContext): bool $guard */
+    public function guard(string $route, Closure $guard): self
+    {
+        $copy = clone $this;
+        $copy->routeGuards[$route] = $guard;
+        return $copy;
+    }
+
+    public function guardFallback(string $route): self
+    {
+        $copy = clone $this;
+        $copy->guardFallback = $route;
         return $copy;
     }
 
@@ -142,6 +160,8 @@ final class Router
             linkingPrefixes: $this->linkingPrefixes,
             linkFilter: $this->linkFilter,
             routeIds: $this->routeIds,
+            routeGuards: $this->routeGuards,
+            guardFallback: $this->guardFallback,
         );
     }
 }

@@ -4391,6 +4391,41 @@ $assert(
         && !$optionalLinkNavigator->open('pam://app/blocked'),
     'Deep links must support optional and terminal wildcard path parameters bidirectionally.',
 );
+$authenticated = false;
+$authNavigator = Router::stack('login')
+    ->route('login', static fn () => Screen::make(Text::make('Login')))
+    ->route('account', static fn () => Screen::make(Text::make('Account')))
+    ->guard('account', static function () use (&$authenticated): bool {
+        return $authenticated;
+    })
+    ->guardFallback('login')
+    ->deepLink('/account', 'account')
+    ->build();
+$assert(
+    !$authNavigator->dispatch(NavigationAction::navigate('account'))
+        && !$authNavigator->open('pam://app/account')
+        && $authNavigator->currentRoute() === 'login',
+    'Guards must reject actions and deep links before protected route content is instantiated.',
+);
+$authenticated = true;
+$assert(
+    $authNavigator->dispatch(NavigationAction::navigate('account'))
+        && $authNavigator->currentRoute() === 'account',
+    'Conditional routes must become reachable immediately after their guard state changes.',
+);
+$authenticatedState = $authNavigator->saveState();
+$authenticated = false;
+$assert(
+    $authNavigator->refreshConditions()
+        && $authNavigator->currentRoute() === 'login'
+        && !$authNavigator->canGoBack(),
+    'Logout must atomically remove protected history and retain the registered public fallback.',
+);
+$authNavigator->restoreState($authenticatedState);
+$assert(
+    $authNavigator->currentRoute() === 'login' && !$authNavigator->canGoBack(),
+    'Cold restoration must never reopen a route whose auth guard is no longer satisfied.',
+);
 $assert(
     $advancedNavigator->popToTop()
         && $advancedNavigator->currentRoute() === 'home',
