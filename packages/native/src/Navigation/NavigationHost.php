@@ -53,4 +53,33 @@ final class NavigationHost extends Element
     {
         return $this->withEvent(EventKind::NavigationGesturePop, $handler);
     }
+
+    public function onTransitionEnd(Closure $handler): self
+    {
+        return $this->withEvent(EventKind::AnimationComplete, $handler);
+    }
+
+    public function onGestureStart(Closure $handler): self
+    {
+        return $this->withEvent(EventKind::GestureBegin, $handler);
+    }
+
+    public function onGestureEnd(Closure $handler): self
+    {
+        return $this->withEvent(EventKind::GestureEnd, $handler);
+    }
+
+    public function onGestureCancel(Closure $handler): self
+    {
+        return $this->withEvent(EventKind::GestureCancel, $handler);
+    }
+
+    public function screenBehavior(
+        NavigationOrientation $orientation,
+        bool $autoHideHomeIndicator = false,
+    ): self {
+        return $this
+            ->withProperty(PropKey::NavigationOrientation, $orientation->value)
+            ->withProperty(PropKey::NavigationAutoHideHomeIndicator, $autoHideHomeIndicator);
+    }
 }

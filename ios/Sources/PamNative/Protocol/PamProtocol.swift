@@ -365,6 +365,8 @@ public enum PamConstants {
     public static let gestureNativeMinScale = 407
     public static let gestureNativeMaxScale = 408
     public static let gestureNativeResetKey = 409
+    public static let navigationOrientation = 410
+    public static let navigationAutoHideHomeIndicator = 411
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

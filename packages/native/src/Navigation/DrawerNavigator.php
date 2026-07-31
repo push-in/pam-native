@@ -21,7 +21,7 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 use Pam\Native\WindowMetrics;
 
-final class DrawerNavigator implements Renderable, Restorable
+final class DrawerNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable
 {
     /** @var list<NavigationDrawerItem> */
     private array $routes;
@@ -32,6 +32,13 @@ final class DrawerNavigator implements Renderable, Restorable
     private float $windowWidth = 0.0;
     /** @var array<string, bool> */
     private array $expandedGroups = [];
+    /** @var array<string, Renderable> */
+    private array $instances = [];
+    /** @var array<int, array<int, Closure>> */
+    private array $listeners = [];
+    /** @var array<string, NavigationSubscription> */
+    private array $childSubscriptions = [];
+    private int $nextListenerId = 1;
 
     /**
      * @param list<NavigationDrawerItem> $routes
@@ -97,6 +104,13 @@ final class DrawerNavigator implements Renderable, Restorable
             if ($route->name !== $name) {
                 continue;
             }
+            $event = $this->emitNavigation(
+                NavigationEventType::DrawerItemPress,
+                ['route' => $name],
+                true,
+                $name,
+            );
+            if ($event->isDefaultPrevented()) return false;
             $changed = $this->selected !== $index + 1;
             $this->selected = $index + 1;
             $this->open = false;
@@ -110,6 +124,7 @@ final class DrawerNavigator implements Renderable, Restorable
                 $this->history[] = $name;
             }
             State::set($this->stateKey(), $this->saveState());
+            $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
 
             return $changed;
         }
@@ -148,21 +163,74 @@ final class DrawerNavigator implements Renderable, Restorable
     public function openDrawer(): void
     {
         $this->open = true;
+        State::set($this->stateKey(), $this->saveState());
+        $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
     }
 
     public function closeDrawer(): void
     {
         $this->open = false;
+        State::set($this->stateKey(), $this->saveState());
+        $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
     }
 
     public function toggleDrawer(): void
     {
         $this->open = !$this->open;
+        State::set($this->stateKey(), $this->saveState());
+        $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
+    }
+
+    public function addListener(NavigationEventType $type, Closure $listener): NavigationSubscription
+    {
+        $id = $this->nextListenerId++;
+        $this->listeners[$type->value][$id] = $listener;
+        return new NavigationSubscription(function () use ($type, $id): void {
+            unset($this->listeners[$type->value][$id]);
+        });
     }
 
     public function selectedRoute(): string
     {
         return $this->routes[$this->selected - 1]->name;
+    }
+
+    public function canGoBack(): bool
+    {
+        if ($this->open && $this->resolvedType() !== DrawerType::Permanent) return true;
+        $child = $this->instances[$this->selectedRoute()] ?? null;
+        if ($child instanceof NavigationBackHandler && $child->canGoBack()) return true;
+        return match ($this->backBehavior) {
+            DrawerBackBehavior::None => false,
+            DrawerBackBehavior::FirstRoute, DrawerBackBehavior::InitialRoute, DrawerBackBehavior::Order => $this->selected > 1,
+            DrawerBackBehavior::History, DrawerBackBehavior::FullHistory => count($this->history) > 1,
+        };
+    }
+
+    public function goBack(): bool
+    {
+        if ($this->open && $this->resolvedType() !== DrawerType::Permanent) {
+            $this->closeDrawer();
+            return true;
+        }
+        $child = $this->instances[$this->selectedRoute()] ?? null;
+        if ($child instanceof NavigationBackHandler && $child->canGoBack()) return $child->goBack();
+        if (!$this->canGoBack()) return false;
+        $target = match ($this->backBehavior) {
+            DrawerBackBehavior::FirstRoute, DrawerBackBehavior::InitialRoute => $this->routes[0]->name,
+            DrawerBackBehavior::Order => $this->routes[$this->selected - 2]->name,
+            DrawerBackBehavior::History, DrawerBackBehavior::FullHistory => $this->history[count($this->history) - 2],
+            DrawerBackBehavior::None => $this->selectedRoute(),
+        };
+        if (in_array($this->backBehavior, [DrawerBackBehavior::History, DrawerBackBehavior::FullHistory], true)) {
+            array_pop($this->history);
+        }
+        $changed = $this->navigate($target);
+        if ($changed && $this->backBehavior === DrawerBackBehavior::FullHistory) {
+            array_pop($this->history);
+            State::set($this->stateKey(), $this->saveState());
+        }
+        return $changed;
     }
 
     public function dimensions(WindowMetrics $metrics): void
@@ -185,7 +253,7 @@ final class DrawerNavigator implements Renderable, Restorable
     public function toElement(): \Pam\Native\Element
     {
         $selectedRoute = $this->routes[$this->selected - 1];
-        $screen = View::make($selectedRoute->render())->style(new Style(
+        $screen = View::make($this->instance($selectedRoute))->style(new Style(
             widthPercent: 100.0,
             heightPercent: 100.0,
             flexGrow: 1.0,
@@ -204,11 +272,24 @@ final class DrawerNavigator implements Renderable, Restorable
                 lineHeight: 20.0,
                 fontWeight: $selected ? 600 : 400,
             ));
-            $row = $route->icon === null
+            $rowChildren = $route->icon === null
                 ? Row::make($label)
                 : Row::make($route->icon, $label);
+            if ($route->badge !== null) {
+                $rowChildren = Row::make(
+                    $rowChildren,
+                    Text::make($route->badge)->style(new Style(
+                        minWidth: 20.0,
+                        minHeight: 20.0,
+                        paddingHorizontal: 5.0,
+                        borderRadius: 10.0,
+                        textAlign: \Pam\Native\TextAlignment::Center,
+                        textColor: $this->activeColor,
+                    )),
+                )->style(new Style(alignItems: \Pam\Native\Align::Center));
+            }
 
-            return Pressable::make($row->style(new Style(
+            return Pressable::make($rowChildren->style(new Style(
                 gap: 16.0,
                 alignItems: \Pam\Native\Align::Center,
             )))
@@ -318,16 +399,40 @@ final class DrawerNavigator implements Renderable, Restorable
             )
             ->permanentBreakpoint($this->permanentBreakpoint)
             ->onOpen(function (): void {
-                $this->open = true;
+                $this->openDrawer();
             })
             ->onClose(function (): void {
-                $this->open = false;
+                $this->closeDrawer();
             });
     }
 
     public function stateKey(): string
     {
         return 'drawer-navigator.'.$this->persistenceKey;
+    }
+
+    public function key(): string
+    {
+        return 'drawer.'.$this->persistenceKey;
+    }
+
+    /** @return array<string, mixed> */
+    public function getState(): array
+    {
+        return [
+            'version' => 2,
+            'type' => 4,
+            'key' => $this->key(),
+            'index' => $this->selected - 1,
+            'history' => $this->history,
+            'open' => $this->open,
+            'routes' => array_map(function (NavigationDrawerItem $item): array {
+                $route = ['key' => $this->key().'.'.$item->name, 'name' => $item->name];
+                $instance = $this->instances[$item->name] ?? null;
+                if ($instance instanceof NavigationStateProvider) $route['state'] = $instance->getState();
+                return $route;
+            }, $this->routes),
+        ];
     }
 
     public function restoreState(array $state): void
@@ -378,5 +483,33 @@ final class DrawerNavigator implements Renderable, Restorable
             'history' => $this->history,
             'expandedGroups' => array_keys(array_filter($this->expandedGroups)),
         ];
+    }
+
+    private function instance(NavigationDrawerItem $item): Renderable
+    {
+        if (isset($this->instances[$item->name])) return $this->instances[$item->name];
+        $instance = $item->render();
+        $this->instances[$item->name] = $instance;
+        if ($instance instanceof NavigationObservable) {
+            $this->childSubscriptions[$item->name] = $instance->addListener(
+                NavigationEventType::State,
+                fn (): NavigationEvent => $this->emitNavigation(
+                    NavigationEventType::State,
+                    ['state' => $this->getState()],
+                ),
+            );
+        }
+        return $instance;
+    }
+
+    private function emitNavigation(
+        NavigationEventType $type,
+        array $data = [],
+        bool $canPreventDefault = false,
+        ?string $target = null,
+    ): NavigationEvent {
+        $event = new NavigationEvent($type, $target ?? $this->selectedRoute(), $data, $canPreventDefault);
+        foreach ($this->listeners[$type->value] ?? [] as $listener) $listener($event);
+        return $event;
     }
 }

@@ -1,5 +1,9 @@
 # Navigation
 
+For the new root container, typed action/event API, screen options, canonical
+paths, preload, retained route instances, predictive Back and top tabs, see
+[Navigation Core 2](navigation-core-2.md).
+
 `Navigator` is Pam Native's typed stack navigator. It keeps the incoming and
 outgoing screens mounted while Android animates them on the UI thread.
 
@@ -70,8 +74,9 @@ Router::stack('home')
 
 `open('pam://app/profiles/42?preview=1')` resolves percent-encoded path
 parameters and bounded scalar query values. `navigate()` returns to an existing
-stack entry when possible instead of duplicating it. Persistence format v2
-stores both route names and parameters; legacy name-only stacks still restore.
+stack entry when possible instead of duplicating it. Persistence format v3
+stores route names and parameters with an integrity checksum; legacy v1/v2
+stacks still restore.
 Route parameters are limited to 64 safe keys, scalar values, and 16 KiB
 strings so untrusted deep links cannot inflate the retained tree.
 

@@ -4,11 +4,22 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     var operation = 1
     var transition = 1
     var duration: TimeInterval = 0.24
+    var navigationOrientation = 1 {
+        didSet { applyPlatformScreenBehavior() }
+    }
+    var autoHideHomeIndicator = false {
+        didSet { applyPlatformScreenBehavior() }
+    }
     private var revision: Int64 = 0
     private var gestureEnabled = true
     private var gestureEdgeWidth: CGFloat = 24
     private var gestureThreshold: CGFloat = 0.35
     private var onGesturePop: (() -> Void)?
+    private var onTransitionEnd: (() -> Void)?
+    private var onGestureStart: (() -> Void)?
+    private var onGestureEnd: (() -> Void)?
+    private var onGestureCancel: (() -> Void)?
+    private var interactivePopCommitted = false
     private lazy var edgeGesture = UIPanGestureRecognizer(
         target: self,
         action: #selector(handleEdgePan(_:))
@@ -24,6 +35,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        applyPlatformScreenBehavior()
     }
 
     func insert(_ view: UIView, index: Int) {
@@ -45,12 +61,20 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         enabled: Bool,
         edgeWidth: CGFloat,
         threshold: CGFloat,
-        onPop: (() -> Void)?
+        onPop: (() -> Void)?,
+        onTransitionEnd: (() -> Void)?,
+        onGestureStart: (() -> Void)?,
+        onGestureEnd: (() -> Void)?,
+        onGestureCancel: (() -> Void)?
     ) {
         gestureEnabled = enabled
         gestureEdgeWidth = min(max(edgeWidth, 8), 160)
         gestureThreshold = min(max(threshold, 0.1), 0.9)
         onGesturePop = onPop
+        self.onTransitionEnd = onTransitionEnd
+        self.onGestureStart = onGestureStart
+        self.onGestureEnd = onGestureEnd
+        self.onGestureCancel = onGestureCancel
         edgeGesture.isEnabled = enabled
     }
 
@@ -72,39 +96,111 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     private func runTransition() {
         guard let incoming = incomingView() else { return }
         let outgoing = outgoingView()
-        subviews.forEach { $0.isHidden = $0 !== incoming && $0 !== outgoing }
-        let sign: CGFloat = effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1
-        let popping = operation == 3
-        incoming.isHidden = false
-        outgoing?.isHidden = false
-        if UIAccessibility.isReduceMotionEnabled || duration == 0 || transition == 8 {
+        if interactivePopCommitted && operation == 3 {
+            interactivePopCommitted = false
             finish(incoming: incoming, outgoing: outgoing)
             return
         }
-        if transition == 5 {
-            incoming.alpha = 0
-        } else if popping {
-            incoming.transform = CGAffineTransform(translationX: -sign * bounds.width * 0.28, y: 0)
-        } else {
-            incoming.transform = CGAffineTransform(translationX: sign * bounds.width, y: 0)
+        subviews.forEach { $0.isHidden = $0 !== incoming && $0 !== outgoing }
+        incoming.isHidden = false
+        outgoing?.isHidden = false
+        let kind = transition == 1 ? 2 : transition
+        if UIAccessibility.isReduceMotionEnabled || duration == 0 || kind == 8 {
+            finish(incoming: incoming, outgoing: outgoing)
+            return
         }
+        applyProgress(0, incoming: incoming, outgoing: outgoing, kind: kind)
         UIView.animate(
             withDuration: min(max(duration, 0), 2),
             delay: 0,
             options: [.curveEaseOut, .beginFromCurrentState]
         ) {
-            incoming.alpha = 1
-            incoming.transform = .identity
-            if self.transition == 5 {
-                outgoing?.alpha = 0
-            } else {
-                outgoing?.transform = CGAffineTransform(
-                    translationX: popping ? sign * self.bounds.width : -sign * self.bounds.width * 0.28,
-                    y: 0
-                )
-            }
+            self.applyProgress(1, incoming: incoming, outgoing: outgoing, kind: kind)
         } completion: { _ in
             self.finish(incoming: incoming, outgoing: outgoing)
+        }
+    }
+
+    private func applyProgress(
+        _ progress: CGFloat,
+        incoming: UIView,
+        outgoing: UIView?,
+        kind: Int
+    ) {
+        let width = max(bounds.width, 1)
+        let height = max(bounds.height, 1)
+        let semanticSign: CGFloat = effectiveUserInterfaceLayoutDirection == .rightToLeft ? -1 : 1
+        let popping = operation == 3
+        let direction: CGFloat = kind == 3 ? -1 : semanticSign
+        incoming.alpha = 1
+        incoming.transform = .identity
+        outgoing?.alpha = 1
+        outgoing?.transform = .identity
+
+        switch kind {
+        case 2, 3:
+            if popping {
+                incoming.transform = CGAffineTransform(
+                    translationX: -direction * width * 0.28 * (1 - progress), y: 0
+                )
+                outgoing?.transform = CGAffineTransform(
+                    translationX: direction * width * progress, y: 0
+                )
+            } else {
+                incoming.transform = CGAffineTransform(
+                    translationX: direction * width * (1 - progress), y: 0
+                )
+                outgoing?.transform = CGAffineTransform(
+                    translationX: -direction * width * 0.28 * progress, y: 0
+                )
+            }
+            outgoing?.alpha = 1 - progress * 0.18
+        case 4:
+            if popping {
+                outgoing?.transform = CGAffineTransform(translationX: 0, y: height * progress)
+            } else {
+                incoming.transform = CGAffineTransform(translationX: 0, y: height * (1 - progress))
+            }
+            outgoing?.alpha = 1 - progress * 0.12
+        case 5:
+            incoming.alpha = progress
+            outgoing?.alpha = 1 - progress
+        case 6:
+            incoming.alpha = progress
+            incoming.transform = CGAffineTransform(translationX: 0, y: height * 0.08 * (1 - progress))
+        case 7:
+            incoming.alpha = progress
+            let scale = 0.94 + 0.06 * progress
+            incoming.transform = CGAffineTransform(scaleX: scale, y: scale)
+        case 9:
+            if popping {
+                outgoing?.transform = CGAffineTransform(translationX: 0, y: -height * progress)
+            } else {
+                incoming.transform = CGAffineTransform(translationX: 0, y: -height * (1 - progress))
+            }
+            outgoing?.alpha = 1 - progress * 0.12
+        case 10:
+            let sign = popping ? -semanticSign : semanticSign
+            incoming.alpha = progress
+            incoming.transform = CGAffineTransform(
+                translationX: sign * width * 0.12 * (1 - progress), y: 0
+            )
+            outgoing?.alpha = 1 - progress
+            outgoing?.transform = CGAffineTransform(
+                translationX: -sign * width * 0.08 * progress, y: 0
+            )
+        case 11:
+            let sign: CGFloat = popping ? -1 : 1
+            incoming.alpha = progress
+            incoming.transform = CGAffineTransform(
+                translationX: 0, y: sign * height * 0.08 * (1 - progress)
+            )
+            outgoing?.alpha = 1 - progress
+            outgoing?.transform = CGAffineTransform(
+                translationX: 0, y: -sign * height * 0.05 * progress
+            )
+        default:
+            break
         }
     }
 
@@ -118,7 +214,12 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         let progress = min(distance / max(bounds.width, 1), 1)
         let sign: CGFloat = rtl ? -1 : 1
         switch gesture.state {
-        case .began, .changed:
+        case .began:
+            onGestureStart?()
+            incoming.isHidden = false
+            outgoing.isHidden = false
+            fallthrough
+        case .changed:
             incoming.isHidden = false
             outgoing.isHidden = false
             outgoing.transform = CGAffineTransform(translationX: sign * bounds.width * progress, y: 0)
@@ -149,9 +250,12 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
                 incoming.alpha = 1
                 if complete {
                     outgoing.isHidden = true
+                    self.interactivePopCommitted = true
+                    self.onGestureEnd?()
                     self.onGesturePop?()
                 } else {
                     incoming.isHidden = true
+                    self.onGestureCancel?()
                 }
             }
         default:
@@ -179,11 +283,42 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         outgoing?.alpha = 1
         outgoing?.transform = .identity
         outgoing?.isHidden = true
+        onTransitionEnd?()
     }
 
     private func showOnlyTop() {
         for (index, view) in subviews.enumerated() {
             view.isHidden = index != subviews.count - 1
         }
+    }
+
+    private func applyPlatformScreenBehavior() {
+        if #available(iOS 16.0, *), navigationOrientation != 1,
+           let scene = window?.windowScene {
+            let mask: UIInterfaceOrientationMask = switch navigationOrientation {
+            case 2: .all
+            case 3: [.portrait, .portraitUpsideDown]
+            case 4: .portrait
+            case 5: .portraitUpsideDown
+            case 6: .landscape
+            case 7: .landscapeLeft
+            case 8: .landscapeRight
+            default: .all
+            }
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+        }
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController {
+                controller.setNeedsUpdateOfHomeIndicatorAutoHidden()
+                break
+            }
+            responder = current.next
+        }
+        NotificationCenter.default.post(
+            name: Notification.Name("PamNativeHomeIndicatorAutoHide"),
+            object: self,
+            userInfo: ["hidden": autoHideHomeIndicator]
+        )
     }
 }

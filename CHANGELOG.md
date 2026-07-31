@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.91 - 2026-07-31
+
+- Introduce Navigation Core 2 with typed actions, interceptable lifecycle
+  events, recursive navigation state, exact-route preloading, dynamic options,
+  canonical deep links and checksummed state restoration.
+- Retain stack, bottom-tab, top-tab and drawer scenes by route key, bubble
+  nested state without polling, and recurse Back through the focused child
+  before changing its parent.
+- Add native top tabs, tab/drawer history policies, reselect-to-pop behavior,
+  badges, drawer groups, native headers, search, modal and form-sheet screen
+  presentations, orientation policies and light/dark navigation themes.
+- Run all stack transitions and interactive gestures on UIKit/Android's UI
+  thread; implement every public transition on iOS and Android 14 predictive
+  Back without sending progress frames to PHP or replaying the committed pop.
+- Extend the append-only protocol with navigation orientation and home-indicator
+  intent, including matching PHP, Rust, Kotlin and Swift definitions.
+- Add PHP, Rust, Android and iOS regression coverage plus a complete Navigation
+  Core 2 guide and compatibility notes.
+
 ## 0.5.90 - 2026-07-31
 
 - Establish one explicit Android edge-to-edge window contract before mounting

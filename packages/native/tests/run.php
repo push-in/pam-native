@@ -82,10 +82,19 @@ use Pam\Native\Forms\Attributes\MaxLength;
 use Pam\Native\Forms\Attributes\MinLength;
 use Pam\Native\Forms\Attributes\Required;
 use Pam\Native\Navigation\NavigationOperation;
+use Pam\Native\Navigation\NavigationAction;
+use Pam\Native\Navigation\NavigationActionType;
+use Pam\Native\Navigation\NavigationContainer;
+use Pam\Native\Navigation\NavigationEvent;
+use Pam\Native\Navigation\NavigationEventType;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
+use Pam\Native\Navigation\ScreenOptions;
+use Pam\Native\Navigation\NavigationPresentation;
+use Pam\Native\Navigation\NavigationLifecycleAware;
+use Pam\Native\Navigation\InteractsWithNavigationLifecycle;
 use Pam\Native\Navigation\TabNavigator;
 use Pam\Native\Navigation\TabPresentation;
 use Pam\Native\ModalAnimationType;
@@ -4214,6 +4223,38 @@ $fluentNavigator = Router::stack('home')
     ->transitions(NavigationTransition::Scale, 180)
     ->build();
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
+$headerNavigator = Router::stack('home')
+    ->route(
+        'home',
+        static fn () => Screen::make(Text::make('Header content')),
+        new ScreenOptions(title: 'Native header', headerShown: true),
+    )
+    ->build();
+$assert(
+    $headerNavigator->render()->toElement()->children()[0]->kind() === NodeKind::Column
+        && $headerNavigator->currentOptions()->title === 'Native header',
+    'Screen options must render a retained native header with typed options.',
+);
+$sheetNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route(
+        'filters',
+        static fn () => Column::make(Text::make('Filters')),
+        new ScreenOptions(
+            title: 'Filters',
+            headerShown: true,
+            presentation: NavigationPresentation::FormSheet,
+            sheetAllowedDetents: [0.5, 1.0],
+            sheetInitialDetentIndex: 1,
+            sheetGrabberVisible: true,
+        ),
+    )
+    ->build();
+$sheetNavigator->push('filters');
+$assert(
+    $sheetNavigator->render()->toElement()->children()[1]->kind() === NodeKind::Modal,
+    'Form-sheet routes must use the native modal sheet host and typed detents.',
+);
 
 $advancedNavigator = Router::stack('home')
     ->route('home', static fn () => Screen::make(Text::make('Home')))
@@ -4257,6 +4298,17 @@ $assert(
     $restoredNavigator->current()->integer('id') === 42,
     'Navigator persistence must preserve route parameters.',
 );
+$tamperedNavigation = $savedNavigation;
+$tamperedNavigation['stack'][1]['params']['id'] = 999;
+$checksumProtectedNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->build();
+$checksumProtectedNavigator->restoreState($tamperedNavigation);
+$assert(
+    $checksumProtectedNavigator->currentRoute() === 'home',
+    'Navigation persistence must reject a modified state checksum atomically.',
+);
 $ephemeralNavigator = Router::stack('home')
     ->restoreState(false)
     ->route('home', static fn () => Screen::make(Text::make('Home')))
@@ -4286,11 +4338,154 @@ $assert(
         && $hostNavigator->current()->string('source') === 'share',
     'Custom-scheme deep links must also match host-plus-path route patterns.',
 );
+$optionalLinkNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('catalog', static fn () => Screen::make(Text::make('Catalog')))
+    ->route('document', static fn () => Screen::make(Text::make('Document')))
+    ->deepLink('/catalog/{category?}', 'catalog')
+    ->deepLink('/documents/{path*}', 'document')
+    ->linking(
+        ['pam://app', 'https://native.example'],
+        static fn (string $uri): bool => !str_contains($uri, '/blocked'),
+    )
+    ->build();
+$assert(
+    $optionalLinkNavigator->open('pam://app/catalog')
+        && $optionalLinkNavigator->currentPath() === '/catalog'
+        && $optionalLinkNavigator->open('pam://app/documents/guides/native/start')
+        && $optionalLinkNavigator->current()->string('path') === 'guides/native/start'
+        && $optionalLinkNavigator->currentPath() === '/documents/guides/native/start'
+        && $optionalLinkNavigator->currentUrl() === 'pam://app/documents/guides/native/start'
+        && !$optionalLinkNavigator->open('other://documents/private')
+        && !$optionalLinkNavigator->open('pam://app/blocked'),
+    'Deep links must support optional and terminal wildcard path parameters bidirectionally.',
+);
 $assert(
     $advancedNavigator->popToTop()
         && $advancedNavigator->currentRoute() === 'home',
     'popToTop must restore the first stack entry.',
 );
+$navigationEvents = [];
+$eventSubscription = $advancedNavigator->addListener(
+    NavigationEventType::State,
+    static function (NavigationEvent $event) use (&$navigationEvents): void {
+        $navigationEvents[] = $event->data['state'];
+    },
+);
+$assert(
+    $advancedNavigator->dispatch(NavigationAction::push('profile', ['id' => 7]))
+        && $advancedNavigator->current()->key !== null
+        && $advancedNavigator->getState()['type'] === 1
+        && $navigationEvents !== [],
+    'Navigation actions must update observable, keyed stack state.',
+);
+$advancedNavigator->setParams(['preview' => true]);
+$assert(
+    $advancedNavigator->current()->integer('id') === 7
+        && $advancedNavigator->current()->boolean('preview') === true,
+    'setParams must merge validated parameters into the focused route.',
+);
+$advancedNavigator->replaceParams(['id' => 8]);
+$assert(
+    $advancedNavigator->current()->integer('id') === 8
+        && !$advancedNavigator->current()->has('preview'),
+    'replaceParams must replace the focused route parameter set.',
+);
+$blocked = $advancedNavigator->addListener(
+    NavigationEventType::BeforeRemove,
+    static function (NavigationEvent $event): void {
+        $event->preventDefault();
+    },
+);
+$assert(!$advancedNavigator->pop(), 'beforeRemove must cancel every stack removal path.');
+$blocked->unsubscribe();
+$assert($advancedNavigator->pop(), 'Removing a beforeRemove listener must release navigation.');
+$containerStateChanges = 0;
+$unhandledActions = 0;
+$container = NavigationContainer::make($advancedNavigator)
+    ->onStateChange(static function () use (&$containerStateChanges): void {
+        $containerStateChanges++;
+    })
+    ->onUnhandledAction(static function (NavigationAction $action) use (&$unhandledActions): void {
+        if ($action->type === NavigationActionType::Navigate) $unhandledActions++;
+    });
+$assert(
+    !$container->dispatch(NavigationAction::navigate('missing'))
+        && $unhandledActions === 1,
+    'NavigationContainer must report unhandled actions without mutating state.',
+);
+$assert(
+    $container->dispatch(NavigationAction::navigate('article', ['slug' => 'native core']))
+        && $container->currentPath() === '/articles/native%20core'
+        && $containerStateChanges === 1,
+    'NavigationContainer must dispatch actions and build canonical paths from state.',
+);
+$preloadFactories = 0;
+$preloadNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('detail', static function (RouteContext $route) use (&$preloadFactories): Screen {
+        $preloadFactories++;
+        return Screen::make(Text::make((string) $route->integer('id')));
+    })
+    ->build();
+$assert(
+    $preloadNavigator->preload('detail', ['id' => 42])
+        && $preloadFactories === 1,
+    'preload must instantiate a bounded route exactly once ahead of navigation.',
+);
+$preloadNavigator->push('detail', ['id' => 42]);
+$preloadNavigator->render();
+$preloadNavigator->render();
+$assert(
+    $preloadFactories === 1,
+    'An exact preloaded route must be consumed and retained without rerunning its factory.',
+);
+$lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
+    use InteractsWithNavigationLifecycle;
+
+    public int $focused = 0;
+    public int $blurred = 0;
+    public int $removed = 0;
+
+    public function render(): \Pam\Native\Renderable
+    {
+        return Screen::make(Text::make('Lifecycle'));
+    }
+
+    public function navigationFocused(RouteContext $route): void
+    {
+        $this->focused++;
+    }
+
+    public function navigationBlurred(RouteContext $route): void
+    {
+        $this->blurred++;
+    }
+
+    public function navigationRemoved(RouteContext $route): void
+    {
+        $this->removed++;
+    }
+};
+$lifecycleNavigator = Router::stack('lifecycle')
+    ->route('lifecycle', static fn () => $lifecycleScreen)
+    ->route('next', static fn () => Screen::make(Text::make('Next')))
+    ->build();
+$lifecycleNavigator->render();
+$lifecycleNavigator->push('next');
+$transitionHost = $lifecycleNavigator->render()->toElement();
+$assert(
+    $lifecycleScreen->focused === 1 && $lifecycleScreen->blurred === 1,
+    'Navigation-aware components must receive focus and blur independently of mount state.',
+);
+($transitionHost->events()[EventKind::AnimationComplete->value])('');
+$lifecycleNavigator->pop();
+$lifecycleNavigator->render();
+$assert(
+    $lifecycleScreen->focused === 2,
+    'Returning to a retained route must deliver focus without recreating the component.',
+);
+$eventSubscription->unsubscribe();
 
 $tabNavigator = Router::tabs('home')
     ->tab('home', 'Home', Screen::make(Text::make('Home tab')))
@@ -4328,6 +4523,18 @@ $assert(
     $restoredTabs->selectedTab() === 'orders',
     'Tab navigator must restore the selected destination.',
 );
+$topTabs = Router::topTabs('feed')
+    ->tab('feed', 'Feed', Screen::make(Text::make('Feed')))
+    ->tab('following', 'Following', Screen::make(Text::make('Following')))
+    ->behavior(swipeEnabled: true, scrollEnabled: true, lazy: true)
+    ->persistence('test-top-tabs')
+    ->build();
+$assert(
+    $topTabs->selectedTab() === 'feed'
+        && $topTabs->jumpTo('following')
+        && $topTabs->toElement()->kind() === NodeKind::Pressable,
+    'Top tabs must support lazy native scenes, jumpTo and native swipe recognition.',
+);
 
 $homeTabRenders = 0;
 $ordersTabRenders = 0;
@@ -4354,6 +4561,52 @@ $assert(
     $homeTabRenders === 1 && $ordersTabRenders === 1,
     'Selecting a tab must lazily mount only the next destination.',
 );
+$lazyTabs->select('home');
+$lazyTabs->toElement();
+$assert(
+    $homeTabRenders === 1 && $ordersTabRenders === 1,
+    'Previously visited tab scenes must be retained instead of invoking route factories again.',
+);
+$nestedStack = Router::stack('nested.index')
+    ->route('nested.index', static fn () => Screen::make(Text::make('Nested')))
+    ->build();
+$nestedTabs = Router::tabs('nested')
+    ->tab('nested', 'Nested', $nestedStack)
+    ->tab('other', 'Other', Screen::make(Text::make('Other')))
+    ->persistence('test-recursive-tabs')
+    ->build();
+$nestedTabs->toElement();
+$assert(
+    $nestedTabs->getState()['routes'][0]['state']['type'] === 1,
+    'Navigation state must recursively expose mounted child navigators.',
+);
+$nestedStack->push('nested.index');
+$outerNavigator = Router::stack('app')
+    ->route('app', static fn () => $nestedTabs)
+    ->build();
+$outerNavigator->render();
+$nestedStateEvents = 0;
+$nestedStateSubscription = $outerNavigator->addListener(
+    NavigationEventType::State,
+    static function () use (&$nestedStateEvents): void {
+        $nestedStateEvents++;
+    },
+);
+$nestedStack->push('nested.index');
+$assert(
+    $nestedStateEvents === 1
+        && $outerNavigator->getState()['routes'][0]['state']['routes'][0]['state']['index'] === 2,
+    'Nested state changes must bubble to the root without polling or remounting scenes.',
+);
+$assert(
+    $outerNavigator->canGoBack()
+        && $outerNavigator->goBack()
+        && $nestedStack->canGoBack()
+        && $outerNavigator->goBack()
+        && !$nestedStack->canGoBack(),
+    'Back must recurse into the focused child navigator before changing the parent stack.',
+);
+$nestedStateSubscription->unsubscribe();
 $groupedDrawer = Router::drawer('overview')
     ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
     ->route(
@@ -4401,8 +4654,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.90',
-    'The runtime SDK contract must match the 0.5.90 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.91',
+    'The runtime SDK contract must match the 0.5.91 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

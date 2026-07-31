@@ -1335,6 +1335,9 @@ class PamRenderer(
                 (view as? PamNavigationHost)?.transition = value.integer().toInt()
             PropKey.NAVIGATION_DURATION_MS ->
                 (view as? PamNavigationHost)?.durationMs = value.integer()
+            PropKey.NAVIGATION_ORIENTATION ->
+                (view as? PamNavigationHost)?.navigationOrientation = value.integer().toInt()
+            PropKey.NAVIGATION_AUTO_HIDE_HOME_INDICATOR -> Unit
             PropKey.NAVIGATION_REVISION ->
                 (view as? PamNavigationHost)?.navigate(value.integer())
             PropKey.NAVIGATION_GESTURE_ENABLED,
@@ -2868,6 +2871,18 @@ class PamRenderer(
             threshold = state.number(PropKey.NAVIGATION_GESTURE_THRESHOLD, 0.35).toFloat(),
             onPop = state.callback(PropKey.ON_NAVIGATION_GESTURE_POP) {
                 dispatch(state.id, EventKind.NAVIGATION_GESTURE_POP.value)
+            },
+            onTransitionEnd = state.callback(PropKey.ON_ANIMATION_COMPLETE) {
+                dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
+            },
+            onGestureStart = state.callback(PropKey.ON_GESTURE_BEGIN) {
+                dispatch(state.id, EventKind.GESTURE_BEGIN.value)
+            },
+            onGestureEnd = state.callback(PropKey.ON_GESTURE_END) {
+                dispatch(state.id, EventKind.GESTURE_END.value)
+            },
+            onGestureCancel = state.callback(PropKey.ON_GESTURE_CANCEL) {
+                dispatch(state.id, EventKind.GESTURE_CANCEL.value)
             },
         )
     }

@@ -18,6 +18,7 @@ short end-to-end recipes.
 | Image, video and audio cache | [Native media cache](media-cache.md) |
 | Scheduler, compiler fast paths, profiling and recovery | [Runtime performance](runtime-performance.md) |
 | Native navigation | [Navigation](navigation.md) |
+| Navigation Core 2 architecture, actions, lifecycle and top tabs | [Navigation Core 2](navigation-core-2.md) |
 | Components and tags reference | [Components](components.md) |
 | Debug overlay and diagnostics | [DevTools](devtools.md) |
 | Native/community plugins | [Plugins](plugins.md) |

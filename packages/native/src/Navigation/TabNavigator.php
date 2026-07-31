@@ -21,14 +21,25 @@ use Pam\Native\UI\SafeAreaView;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 use Pam\Native\WindowMetrics;
+use Closure;
 
-final class TabNavigator implements Renderable, Restorable
+final class TabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable
 {
     /** @var list<NavigationTab> */
     private array $tabs;
     private int $selected;
     private float $windowWidth = 0.0;
     private float $windowHeight = 0.0;
+    /** @var array<string, Renderable> */
+    private array $instances = [];
+    /** @var list<string> */
+    private array $history = [];
+    /** @var array<int, array<int, Closure>> */
+    private array $listeners = [];
+    private int $nextListenerId = 1;
+    private readonly string $initialTab;
+    /** @var array<string, NavigationSubscription> */
+    private array $childSubscriptions = [];
 
     /**
      * @param list<NavigationTab> $tabs
@@ -42,6 +53,8 @@ final class TabNavigator implements Renderable, Restorable
         private readonly int $activeColor = 0xFF0F172A,
         private readonly int $inactiveColor = 0xFF64748B,
         private readonly int $dividerColor = 0xFFE2E8F0,
+        private readonly TabBackBehavior $backBehavior = TabBackBehavior::FirstRoute,
+        private readonly bool $popToTopOnBlur = false,
     ) {
         if ($tabs === [] || count($tabs) > 5) {
             throw new InvalidArgumentException('Tab navigation requires between one and five destinations.');
@@ -58,7 +71,9 @@ final class TabNavigator implements Renderable, Restorable
             throw new InvalidArgumentException("Unknown initial tab {$initialTab}.");
         }
         $this->tabs = array_values($tabs);
+        $this->initialTab = $initialTab;
         $this->selected = $selected + 1;
+        $this->history = [$initialTab];
         $persisted = State::get($this->stateKey(), []);
         if (is_array($persisted)) {
             $this->restoreState($persisted);
@@ -73,11 +88,27 @@ final class TabNavigator implements Renderable, Restorable
             }
             $next = $index + 1;
             if ($next === $this->selected) {
+                $instance = $this->instances[$name] ?? null;
+                if ($instance instanceof Navigator) $instance->popToTop();
                 return false;
             }
+            $event = $this->emitNavigation(NavigationEventType::TabPress, ['route' => $name], true, $name);
+            if ($event->isDefaultPrevented()) return false;
+            $previous = $this->instances[$this->selectedTab()] ?? null;
+            if ($this->popToTopOnBlur && $previous instanceof Navigator) $previous->popToTop();
             $this->selected = $next;
+            if ($this->backBehavior === TabBackBehavior::FullHistory) {
+                $this->history[] = $name;
+            } else {
+                $this->history = array_values(array_filter(
+                    $this->history,
+                    static fn (string $entry): bool => $entry !== $name,
+                ));
+                $this->history[] = $name;
+            }
             State::set($this->stateKey(), $this->saveState());
             Haptics::trigger(HapticFeedback::Selection);
+            $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
 
             return true;
         }
@@ -88,6 +119,61 @@ final class TabNavigator implements Renderable, Restorable
     public function selectedTab(): string
     {
         return $this->tabs[$this->selected - 1]->name;
+    }
+
+    public function jumpTo(string $name): bool
+    {
+        return $this->select($name);
+    }
+
+    public function canGoBack(): bool
+    {
+        $child = $this->instances[$this->selectedTab()] ?? null;
+        if ($child instanceof NavigationBackHandler && $child->canGoBack()) return true;
+        return $this->canGoBackWithinTabs();
+    }
+
+    private function canGoBackWithinTabs(): bool
+    {
+        return match ($this->backBehavior) {
+            TabBackBehavior::None => false,
+            TabBackBehavior::FirstRoute => $this->selected !== 1,
+            TabBackBehavior::InitialRoute => $this->selectedTab() !== $this->initialTab,
+            TabBackBehavior::Order => $this->selected > 1,
+            TabBackBehavior::History, TabBackBehavior::FullHistory => count($this->history) > 1,
+        };
+    }
+
+    public function goBack(): bool
+    {
+        $child = $this->instances[$this->selectedTab()] ?? null;
+        if ($child instanceof NavigationBackHandler && $child->canGoBack()) return $child->goBack();
+        if (!$this->canGoBackWithinTabs()) return false;
+        $target = match ($this->backBehavior) {
+            TabBackBehavior::FirstRoute => $this->tabs[0]->name,
+            TabBackBehavior::InitialRoute => $this->initialTab,
+            TabBackBehavior::Order => $this->tabs[$this->selected - 2]->name,
+            TabBackBehavior::History, TabBackBehavior::FullHistory => $this->history[count($this->history) - 2],
+            TabBackBehavior::None => $this->selectedTab(),
+        };
+        if (in_array($this->backBehavior, [TabBackBehavior::History, TabBackBehavior::FullHistory], true)) {
+            array_pop($this->history);
+        }
+        $changed = $this->select($target);
+        if ($changed && $this->backBehavior === TabBackBehavior::FullHistory) {
+            array_pop($this->history);
+            State::set($this->stateKey(), $this->saveState());
+        }
+        return $changed;
+    }
+
+    public function addListener(NavigationEventType $type, Closure $listener): NavigationSubscription
+    {
+        $id = $this->nextListenerId++;
+        $this->listeners[$type->value][$id] = $listener;
+        return new NavigationSubscription(function () use ($type, $id): void {
+            unset($this->listeners[$type->value][$id]);
+        });
     }
 
     public function dimensions(WindowMetrics $metrics): void
@@ -138,6 +224,13 @@ final class TabNavigator implements Renderable, Restorable
                 )),
             )
                 ->onPress(fn (): bool => $this->select($tab->name))
+                ->onLongPress(function () use ($tab): void {
+                    $this->emitNavigation(
+                        NavigationEventType::TabLongPress,
+                        ['route' => $tab->name],
+                        target: $tab->name,
+                    );
+                })
                 ->hitSlop(4.0)
                 ->style(new Style(
                     flexGrow: 1.0,
@@ -152,7 +245,7 @@ final class TabNavigator implements Renderable, Restorable
                 ->accessibilityRole(AccessibilityRole::Tab)
                 ->accessibilityLabel($tab->label);
             if ($selected) {
-                $screens[] = View::make($tab->render())
+                $screens[] = View::make($this->instance($tab))
                     ->style(new Style(
                         positionType: \Pam\Native\PositionType::Absolute,
                         top: 0.0,
@@ -230,6 +323,29 @@ final class TabNavigator implements Renderable, Restorable
         return 'tab-navigator.'.$this->persistenceKey;
     }
 
+    public function key(): string
+    {
+        return 'tabs.'.$this->persistenceKey;
+    }
+
+    /** @return array<string, mixed> */
+    public function getState(): array
+    {
+        return [
+            'version' => 2,
+            'type' => 2,
+            'key' => $this->key(),
+            'index' => $this->selected - 1,
+            'history' => $this->history,
+            'routes' => array_map(function (NavigationTab $tab): array {
+                $route = ['key' => $this->key().'.'.$tab->name, 'name' => $tab->name];
+                $instance = $this->instances[$tab->name] ?? null;
+                if ($instance instanceof NavigationStateProvider) $route['state'] = $instance->getState();
+                return $route;
+            }, $this->tabs),
+        ];
+    }
+
     public function restoreState(array $state): void
     {
         $selected = $state['selected'] ?? null;
@@ -237,14 +353,47 @@ final class TabNavigator implements Renderable, Restorable
             foreach ($this->tabs as $index => $tab) {
                 if ($tab->name === $selected) {
                     $this->selected = $index + 1;
-                    return;
+                    break;
                 }
             }
+        }
+        if (is_array($state['history'] ?? null)) {
+            $valid = array_map(static fn (NavigationTab $tab): string => $tab->name, $this->tabs);
+            $history = array_values(array_filter(
+                $state['history'],
+                static fn (mixed $entry): bool => is_string($entry) && in_array($entry, $valid, true),
+            ));
+            if ($history !== []) $this->history = $history;
         }
     }
 
     public function saveState(): array
     {
-        return ['version' => 1, 'selected' => $this->selectedTab()];
+        return ['version' => 2, 'selected' => $this->selectedTab(), 'history' => $this->history];
+    }
+
+    private function instance(NavigationTab $tab): Renderable
+    {
+        if (!isset($this->instances[$tab->name])) {
+            $instance = $this->instances[$tab->name] = $tab->render();
+            if ($instance instanceof NavigationObservable) {
+                $this->childSubscriptions[$tab->name] = $instance->addListener(
+                    NavigationEventType::State,
+                    fn () => $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]),
+                );
+            }
+        }
+        return $this->instances[$tab->name];
+    }
+
+    private function emitNavigation(
+        NavigationEventType $type,
+        array $data = [],
+        bool $canPreventDefault = false,
+        ?string $target = null,
+    ): NavigationEvent {
+        $event = new NavigationEvent($type, $target ?? $this->selectedTab(), $data, $canPreventDefault);
+        foreach ($this->listeners[$type->value] ?? [] as $listener) $listener($event);
+        return $event;
     }
 }

@@ -4,6 +4,8 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.app.Activity
+import android.content.pm.ActivityInfo
 import android.provider.Settings
 import android.view.View
 import android.view.MotionEvent
@@ -16,6 +18,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var operation: Int = OPERATION_IDLE
     var transition: Int = TRANSITION_PLATFORM_DEFAULT
     var durationMs: Long = 240L
+    var navigationOrientation: Int = 1
+        set(value) {
+            field = value.coerceIn(1, 8)
+            applyOrientation()
+        }
     var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
     private var activeRoute: View? = null
@@ -26,9 +33,16 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var gestureEdgeWidth = 24f
     private var gestureThreshold = 0.35f
     private var onGesturePop: (() -> Unit)? = null
+    private var onTransitionEnd: (() -> Unit)? = null
+    private var onGestureStart: (() -> Unit)? = null
+    private var onGestureEnd: (() -> Unit)? = null
+    private var onGestureCancel: (() -> Unit)? = null
     private var gestureTracking = false
     private var gestureStartX = 0f
     private var velocityTracker: VelocityTracker? = null
+    private var predictiveBackActive = false
+    private var predictiveBackCommitted = false
+    private var predictiveBackProgress = 0f
 
     init {
         clipChildren = true
@@ -64,11 +78,58 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         edgeWidth: Float,
         threshold: Float,
         onPop: (() -> Unit)?,
+        onTransitionEnd: (() -> Unit)?,
+        onGestureStart: (() -> Unit)?,
+        onGestureEnd: (() -> Unit)?,
+        onGestureCancel: (() -> Unit)?,
     ) {
         gestureEnabled = enabled
         gestureEdgeWidth = edgeWidth.coerceIn(8f, 96f)
         gestureThreshold = threshold.coerceIn(0.1f, 0.9f)
         onGesturePop = onPop
+        this.onTransitionEnd = onTransitionEnd
+        this.onGestureStart = onGestureStart
+        this.onGestureEnd = onGestureEnd
+        this.onGestureCancel = onGestureCancel
+    }
+
+    fun startPredictiveBack(): Boolean {
+        if (!gestureEnabled || childCount < 2 || running != null) return false
+        predictiveBackActive = true
+        predictiveBackCommitted = false
+        predictiveBackProgress = 0f
+        prepareGesture()
+        applyGestureProgress(0f, layoutDirection == View.LAYOUT_DIRECTION_RTL)
+        return true
+    }
+
+    fun updatePredictiveBack(progress: Float) {
+        if (!predictiveBackActive) return
+        predictiveBackProgress = progress.coerceIn(0f, 1f)
+        applyGestureProgress(
+            predictiveBackProgress,
+            layoutDirection == View.LAYOUT_DIRECTION_RTL,
+        )
+    }
+
+    fun cancelPredictiveBack() {
+        if (!predictiveBackActive) return
+        predictiveBackActive = false
+        settleGesture(
+            predictiveBackProgress,
+            complete = false,
+            layoutDirection == View.LAYOUT_DIRECTION_RTL,
+        )
+        predictiveBackProgress = 0f
+    }
+
+    fun commitPredictiveBack() {
+        if (!predictiveBackActive) return
+        predictiveBackActive = false
+        predictiveBackCommitted = true
+        predictiveBackProgress = 1f
+        applyGestureProgress(1f, layoutDirection == View.LAYOUT_DIRECTION_RTL)
+        onGestureEnd?.invoke()
     }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -132,6 +193,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         setActiveRoute(incoming)
         incoming.visibility = View.VISIBLE
         outgoing.visibility = View.VISIBLE
+        onGestureStart?.invoke()
     }
 
     private fun applyGestureProgress(progress: Float, rtl: Boolean) {
@@ -161,11 +223,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                         outgoing.visibility = View.INVISIBLE
                         incoming.visibility = View.VISIBLE
                         setActiveRoute(incoming)
+                        onGestureEnd?.invoke()
                         onGesturePop?.invoke()
                     } else {
                         incoming.visibility = View.INVISIBLE
                         outgoing.visibility = View.VISIBLE
                         setActiveRoute(outgoing)
+                        onGestureCancel?.invoke()
                     }
                 }
             })
@@ -237,6 +301,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
         }
         setActiveRoute(incoming)
+
+        if (predictiveBackCommitted && operation == OPERATION_POP) {
+            predictiveBackCommitted = false
+            predictiveBackProgress = 0f
+            finish(incoming, outgoing)
+            return
+        }
 
         for (index in 0 until childCount) {
             getChildAt(index).apply {
@@ -360,6 +431,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         incoming.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         outgoing?.importantForAccessibility =
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+        onTransitionEnd?.invoke()
     }
 
     private fun showOnlyTop() {
@@ -396,6 +468,21 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         runCatching {
             Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
         }.getOrDefault(false)
+
+    private fun applyOrientation() {
+        val activity = context as? Activity ?: return
+        val requested = when (navigationOrientation) {
+            2 -> ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
+            3 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+            4 -> ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            5 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_PORTRAIT
+            6 -> ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            7 -> ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            8 -> ActivityInfo.SCREEN_ORIENTATION_REVERSE_LANDSCAPE
+            else -> ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
+        if (activity.requestedOrientation != requested) activity.requestedOrientation = requested
+    }
 
     private companion object {
         const val OPERATION_IDLE = 1

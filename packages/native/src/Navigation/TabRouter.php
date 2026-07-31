@@ -18,6 +18,8 @@ final class TabRouter
     private int $activeColor = 0xFF0F172A;
     private int $inactiveColor = 0xFF64748B;
     private int $dividerColor = 0xFFE2E8F0;
+    private TabBackBehavior $backBehavior = TabBackBehavior::FirstRoute;
+    private bool $popToTopOnBlur = false;
 
     public function __construct(private readonly string $initialTab)
     {
@@ -55,6 +57,16 @@ final class TabRouter
         return $copy;
     }
 
+    public function behavior(
+        TabBackBehavior $backBehavior = TabBackBehavior::FirstRoute,
+        bool $popToTopOnBlur = false,
+    ): self {
+        $copy = clone $this;
+        $copy->backBehavior = $backBehavior;
+        $copy->popToTopOnBlur = $popToTopOnBlur;
+        return $copy;
+    }
+
     public function appearance(
         int $barBackground,
         int $activeColor,
@@ -81,6 +93,8 @@ final class TabRouter
             activeColor: $this->activeColor,
             inactiveColor: $this->inactiveColor,
             dividerColor: $this->dividerColor,
+            backBehavior: $this->backBehavior,
+            popToTopOnBlur: $this->popToTopOnBlur,
         );
     }
 }

@@ -18,6 +18,8 @@ import android.view.View
 import android.view.WindowInsetsController
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import android.window.BackEvent
+import android.window.OnBackAnimationCallback
 import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
 import dev.pam.nativeapp.protocol.WireMap
@@ -335,9 +337,38 @@ class PamActivity : Activity() {
     private fun registerBackCallback() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
 
-        backCallback = OnBackInvokedCallback {
-            if (consumeSuppressedBack()) return@OnBackInvokedCallback
-            runtime.dispatchBack()
+        backCallback = if (Build.VERSION.SDK_INT >= 34) {
+            object : OnBackAnimationCallback {
+                private var interactive = false
+
+                override fun onBackStarted(backEvent: BackEvent) {
+                    interactive = rootHost.startPredictiveBack()
+                }
+
+                override fun onBackProgressed(backEvent: BackEvent) {
+                    if (interactive) rootHost.updatePredictiveBack(backEvent.progress)
+                }
+
+                override fun onBackCancelled() {
+                    if (interactive) rootHost.cancelPredictiveBack()
+                    interactive = false
+                }
+
+                override fun onBackInvoked() {
+                    if (consumeSuppressedBack()) {
+                        if (interactive) rootHost.cancelPredictiveBack()
+                        interactive = false
+                        return
+                    }
+                    if (interactive) rootHost.commitPredictiveBack()
+                    interactive = false
+                    runtime.dispatchBack()
+                }
+            }
+        } else {
+            OnBackInvokedCallback {
+                if (!consumeSuppressedBack()) runtime.dispatchBack()
+            }
         }.also { callback ->
             onBackInvokedDispatcher.registerOnBackInvokedCallback(
                 OnBackInvokedDispatcher.PRIORITY_DEFAULT,

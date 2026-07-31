@@ -415,4 +415,6 @@ enum PropKey: int
     case GestureNativeMinScale = 407;
     case GestureNativeMaxScale = 408;
     case GestureNativeResetKey = 409;
+    case NavigationOrientation = 410;
+    case NavigationAutoHideHomeIndicator = 411;
 }

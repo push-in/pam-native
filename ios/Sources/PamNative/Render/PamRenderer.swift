@@ -1325,6 +1325,10 @@ public final class PamRenderer {
         case PamConstants.navigationDurationMs:
             (view as? PamNavigationHost)?.duration =
                 TimeInterval(value.integerOrNil() ?? 240) / 1_000
+        case PamConstants.navigationOrientation:
+            (view as? PamNavigationHost)?.navigationOrientation = Int(value.integerOrNil() ?? 1)
+        case PamConstants.navigationAutoHideHomeIndicator:
+            (view as? PamNavigationHost)?.autoHideHomeIndicator = value.boolOrNil() ?? false
         case PamConstants.navigationRevision:
             (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
         case PamConstants.navigationGestureEnabled,
@@ -1601,6 +1605,10 @@ public final class PamRenderer {
             (view as? PamNavigationHost)?.transition = 1
         case PamConstants.navigationDurationMs:
             (view as? PamNavigationHost)?.duration = 0.24
+        case PamConstants.navigationOrientation:
+            (view as? PamNavigationHost)?.navigationOrientation = 1
+        case PamConstants.navigationAutoHideHomeIndicator:
+            (view as? PamNavigationHost)?.autoHideHomeIndicator = false
         case PamConstants.navigationRevision:
             break
         case PamConstants.navigationGestureEnabled,
@@ -2143,6 +2151,22 @@ public final class PamRenderer {
                     EventKind.navigationGesturePop.rawValue,
                     Data()
                 )
+            } : nil,
+            onTransitionEnd: state.properties[PamConstants.onAnimationComplete] != nil ? {
+                [weak self] in
+                self?.dispatchEvent(nodeId, EventKind.animationComplete.rawValue, Data())
+            } : nil,
+            onGestureStart: state.properties[PamConstants.onGestureBegin] != nil ? {
+                [weak self] in
+                self?.dispatchEvent(nodeId, EventKind.gestureBegin.rawValue, Data())
+            } : nil,
+            onGestureEnd: state.properties[PamConstants.onGestureEnd] != nil ? {
+                [weak self] in
+                self?.dispatchEvent(nodeId, EventKind.gestureEnd.rawValue, Data())
+            } : nil,
+            onGestureCancel: state.properties[PamConstants.onGestureCancel] != nil ? {
+                [weak self] in
+                self?.dispatchEvent(nodeId, EventKind.gestureCancel.rawValue, Data())
             } : nil
         )
     }

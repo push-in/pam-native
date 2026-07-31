@@ -18,6 +18,11 @@ final class Router
     private bool $restoreState = true;
     /** @var list<DeepLink> */
     private array $deepLinks = [];
+    /** @var array<string, ScreenOptions> */
+    private array $options = [];
+    /** @var list<string> */
+    private array $linkingPrefixes = [];
+    private ?Closure $linkFilter = null;
 
     private function __construct(private readonly string $initialRoute)
     {
@@ -36,18 +41,24 @@ final class Router
         return new TabRouter($initialTab);
     }
 
+    public static function topTabs(string $initialTab): TopTabRouter
+    {
+        return new TopTabRouter($initialTab);
+    }
+
     public static function drawer(string $initialRoute): DrawerRouter
     {
         return new DrawerRouter($initialRoute);
     }
 
-    public function route(string $name, Closure $screen): self
+    public function route(string $name, Closure $screen, ?ScreenOptions $options = null): self
     {
         if ($name === '') {
             throw new InvalidArgumentException('Route names cannot be empty.');
         }
         $copy = clone $this;
         $copy->routes[$name] = $screen;
+        if ($options !== null) $copy->options[$name] = $options;
 
         return $copy;
     }
@@ -99,6 +110,15 @@ final class Router
         return $copy;
     }
 
+    /** @param list<string> $prefixes @param (Closure(string): bool)|null $filter */
+    public function linking(array $prefixes, ?Closure $filter = null): self
+    {
+        $copy = clone $this;
+        $copy->linkingPrefixes = array_values($prefixes);
+        $copy->linkFilter = $filter;
+        return $copy;
+    }
+
     public function build(): Navigator
     {
         return new Navigator(
@@ -110,6 +130,9 @@ final class Router
             handleSystemBack: $this->handleSystemBack,
             deepLinks: $this->deepLinks,
             restorePersistedState: $this->restoreState,
+            screenOptions: $this->options,
+            linkingPrefixes: $this->linkingPrefixes,
+            linkFilter: $this->linkFilter,
         );
     }
 }

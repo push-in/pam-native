@@ -12,6 +12,8 @@ final readonly class RouteContext
     public function __construct(
         public string $name,
         private array $params = [],
+        public ?string $key = null,
+        public ?string $path = null,
     ) {
     }
 

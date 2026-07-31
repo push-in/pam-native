@@ -133,6 +133,49 @@ class PamNavigationHostInstrumentedTest {
     }
 
     @Test
+    fun predictiveBackProgressStaysNativeAndCommitsWithoutSecondAnimation() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var first: View
+            lateinit var second: View
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    layout(0, 0, 1_080, 1_920)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_SLIDE_FROM_RIGHT
+                }
+                activity.host.addView(navigation)
+                first = View(activity)
+                second = View(activity)
+                navigation.insert(first, 0)
+                navigation.insert(second, 1)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.startPredictiveBack())
+                navigation.updatePredictiveBack(0.5f)
+                assertTrue(second.translationX > 0f)
+                assertTrue(first.translationX < 0f)
+                navigation.commitPredictiveBack()
+                navigation.operation = OPERATION_POP
+                navigation.navigate(2)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(View.VISIBLE, first.visibility)
+                assertEquals(View.INVISIBLE, second.visibility)
+                assertEquals(0f, first.translationX)
+                assertEquals(0f, second.translationX)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun transitionsReuseHardwareAcceleratedDisplayListsWithoutBitmapLayers() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

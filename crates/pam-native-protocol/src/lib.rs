@@ -496,6 +496,8 @@ pub enum PropKey {
     GestureNativeMinScale = 407,
     GestureNativeMaxScale = 408,
     GestureNativeResetKey = 409,
+    NavigationOrientation = 410,
+    NavigationAutoHideHomeIndicator = 411,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -912,6 +914,8 @@ impl TryFrom<u16> for PropKey {
             407 => Ok(Self::GestureNativeMinScale),
             408 => Ok(Self::GestureNativeMaxScale),
             409 => Ok(Self::GestureNativeResetKey),
+            410 => Ok(Self::NavigationOrientation),
+            411 => Ok(Self::NavigationAutoHideHomeIndicator),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1715,10 +1719,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(30).is_err());
 
-        for value in 1..=409 {
+        for value in 1..=411 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(410).is_err());
+        assert!(PropKey::try_from(412).is_err());
     }
 
     fn tree(text: &str) -> Tree {
