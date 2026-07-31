@@ -17,4 +17,6 @@ enum NavigationTransition: int
     case SlideFromTop = 9;
     case SharedAxisX = 10;
     case SharedAxisY = 11;
+    case Flip = 12;
+    case SimplePush = 13;
 }

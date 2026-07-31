@@ -52,6 +52,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private var gestureEnabled = true
     private var gestureEdgeWidth: CGFloat = 24
     private var gestureThreshold: CGFloat = 0.35
+    private var gestureDirection = 1
+    private var fullScreenGestureEnabled = false
     private var onGesturePop: (() -> Void)?
     private var onTransitionEnd: (() -> Void)?
     private var onGestureStart: (() -> Void)?
@@ -129,6 +131,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         enabled: Bool,
         edgeWidth: CGFloat,
         threshold: CGFloat,
+        direction: Int = 1,
+        fullScreen: Bool = false,
         onPop: (() -> Void)?,
         onTransitionEnd: (() -> Void)?,
         onGestureStart: (() -> Void)?,
@@ -138,6 +142,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         gestureEnabled = enabled
         gestureEdgeWidth = min(max(edgeWidth, 8), 160)
         gestureThreshold = min(max(threshold, 0.1), 0.9)
+        gestureDirection = min(max(direction, 1), 2)
+        fullScreenGestureEnabled = fullScreen
         onGesturePop = onPop
         self.onTransitionEnd = onTransitionEnd
         self.onGestureStart = onGestureStart
@@ -153,12 +159,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
-        let atLeadingEdge = rtl
+        let atLeadingEdge = fullScreenGestureEnabled || gestureDirection == 2 || (rtl
             ? point.x >= bounds.width - gestureEdgeWidth
-            : point.x <= gestureEdgeWidth
+            : point.x <= gestureEdgeWidth)
         let velocity = pan.velocity(in: self)
-        let towardBack = rtl ? velocity.x < 0 : velocity.x > 0
-        return atLeadingEdge && towardBack && abs(velocity.x) > abs(velocity.y)
+        let towardBack = gestureDirection == 2 ? velocity.y > 0 : (rtl ? velocity.x < 0 : velocity.x > 0)
+        let dominant = gestureDirection == 2 ? abs(velocity.y) > abs(velocity.x) : abs(velocity.x) > abs(velocity.y)
+        return atLeadingEdge && towardBack && dominant
     }
 
     private func runTransition() {
@@ -208,8 +215,10 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         let direction: CGFloat = kind == 3 ? -1 : semanticSign
         incoming.alpha = 1
         incoming.transform = .identity
+        incoming.layer.transform = CATransform3DIdentity
         outgoing?.alpha = 1
         outgoing?.transform = .identity
+        outgoing?.layer.transform = CATransform3DIdentity
 
         switch kind {
         case 2, 3:
@@ -273,6 +282,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             outgoing?.transform = CGAffineTransform(
                 translationX: 0, y: -sign * height * 0.05 * progress
             )
+        case 12:
+            incoming.alpha = progress
+            incoming.layer.transform = CATransform3DMakeRotation(-.pi / 2 * (1 - progress), 0, 1, 0)
+            outgoing?.layer.transform = CATransform3DMakeRotation(.pi / 2 * progress, 0, 1, 0)
+        case 13:
+            if popping {
+                outgoing?.transform = CGAffineTransform(translationX: direction * width * progress, y: 0)
+            } else {
+                incoming.transform = CGAffineTransform(translationX: direction * width * (1 - progress), y: 0)
+            }
         default:
             break
         }
@@ -349,9 +368,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         let incoming = routeViews[routeViews.count - 2]
         let outgoing = routeViews[routeViews.count - 1]
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
-        let raw = gesture.translation(in: self).x
-        let distance = max(0, rtl ? -raw : raw)
-        let progress = min(distance / max(bounds.width, 1), 1)
+        let translation = gesture.translation(in: self)
+        let raw = gestureDirection == 2 ? translation.y : translation.x
+        let distance = max(0, gestureDirection == 2 ? raw : (rtl ? -raw : raw))
+        let extent = gestureDirection == 2 ? bounds.height : bounds.width
+        let progress = min(distance / max(extent, 1), 1)
         let sign: CGFloat = rtl ? -1 : 1
         switch gesture.state {
         case .began:
@@ -362,14 +383,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         case .changed:
             incoming.isHidden = false
             outgoing.isHidden = false
-            outgoing.transform = CGAffineTransform(translationX: sign * bounds.width * progress, y: 0)
-            incoming.transform = CGAffineTransform(
-                translationX: -sign * bounds.width * 0.28 * (1 - progress),
-                y: 0
-            )
+            outgoing.transform = gestureDirection == 2
+                ? CGAffineTransform(translationX: 0, y: bounds.height * progress)
+                : CGAffineTransform(translationX: sign * bounds.width * progress, y: 0)
+            incoming.transform = gestureDirection == 2
+                ? CGAffineTransform(translationX: 0, y: -bounds.height * 0.12 * (1 - progress))
+                : CGAffineTransform(translationX: -sign * bounds.width * 0.28 * (1 - progress), y: 0)
             incoming.alpha = 0.82 + 0.18 * progress
         case .ended, .cancelled:
-            let velocity = gesture.velocity(in: self).x * (rtl ? -1 : 1)
+            let rawVelocity = gestureDirection == 2 ? gesture.velocity(in: self).y : gesture.velocity(in: self).x
+            let velocity = gestureDirection == 2 ? rawVelocity : rawVelocity * (rtl ? -1 : 1)
             let complete = gesture.state == .ended &&
                 (progress >= gestureThreshold || velocity >= 700)
             UIView.animate(
@@ -378,7 +401,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                 options: [.curveEaseOut, .beginFromCurrentState]
             ) {
                 outgoing.transform = complete
-                    ? CGAffineTransform(translationX: sign * self.bounds.width, y: 0)
+                    ? (self.gestureDirection == 2
+                        ? CGAffineTransform(translationX: 0, y: self.bounds.height)
+                        : CGAffineTransform(translationX: sign * self.bounds.width, y: 0))
                     : .identity
                 incoming.transform = complete
                     ? .identity
@@ -503,6 +528,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             case 9:
                 animation.type = .push
                 animation.subtype = operation == 3 ? .fromBottom : .fromTop
+            case 12:
+                animation.type = .init(rawValue: "oglFlip")
+                animation.subtype = operation == 3 ? .fromLeft : .fromRight
             default:
                 animation.type = .push
                 let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft

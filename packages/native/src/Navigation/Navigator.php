@@ -385,7 +385,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $activeOptions->animationDurationMs ?? $this->transitionDurationMs,
             $this->revision,
             ...$screens,
-        )->gestureNavigation($activeOptions->gestureEnabled)
+        )->gestureNavigation(
+            $activeOptions->gestureEnabled,
+            direction: $activeOptions->gestureDirection,
+            fullScreen: $activeOptions->fullScreenGestureEnabled,
+        )
         ->screenBehavior($activeOptions->orientation, $activeOptions->autoHideHomeIndicator)
         ->screenOptions($activeOptions)
         ->onTransitionEnd(function (): void {

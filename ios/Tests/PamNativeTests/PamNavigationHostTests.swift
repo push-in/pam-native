@@ -69,7 +69,7 @@ final class PamNavigationHostTests: XCTestCase {
     }
 
     func testEveryPublicTransitionCompletesWithOnlyDestinationVisible() {
-        for transition in 2...11 where transition != 8 {
+        for transition in 2...13 where transition != 8 {
             let completed = expectation(description: "transition \(transition)")
             let host = PamNavigationHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
             host.operation = 2

@@ -68,6 +68,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var onGestureCancel: (() -> Unit)? = null
     private var gestureTracking = false
     private var gestureStartX = 0f
+    private var gestureStartY = 0f
+    private var gestureDirection = 1
+    private var fullScreenGestureEnabled = false
     private var velocityTracker: VelocityTracker? = null
     private var predictiveBackActive = false
     private var predictiveBackCommitted = false
@@ -162,6 +165,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         enabled: Boolean,
         edgeWidth: Float,
         threshold: Float,
+        direction: Int = 1,
+        fullScreen: Boolean = false,
         onPop: (() -> Unit)?,
         onTransitionEnd: (() -> Unit)?,
         onGestureStart: (() -> Unit)?,
@@ -171,6 +176,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         gestureEnabled = enabled
         gestureEdgeWidth = edgeWidth.coerceIn(8f, 96f)
         gestureThreshold = threshold.coerceIn(0.1f, 0.9f)
+        gestureDirection = direction.coerceIn(1, 2)
+        fullScreenGestureEnabled = fullScreen
         onGesturePop = onPop
         this.onTransitionEnd = onTransitionEnd
         this.onGestureStart = onGestureStart
@@ -223,9 +230,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 val edge = dp(gestureEdgeWidth)
-                val withinEdge = if (rtl) event.x >= width - edge else event.x <= edge
+                val withinEdge = fullScreenGestureEnabled || gestureDirection == 2 ||
+                    if (rtl) event.x >= width - edge else event.x <= edge
                 if (!withinEdge) return false
                 gestureStartX = event.x
+                gestureStartY = event.y
                 gestureTracking = true
                 velocityTracker?.recycle()
                 velocityTracker = VelocityTracker.obtain().also { it.addMovement(event) }
@@ -233,7 +242,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!gestureTracking) return false
-                val distance = if (rtl) gestureStartX - event.x else event.x - gestureStartX
+                val distance = if (gestureDirection == 2) event.y - gestureStartY
+                    else if (rtl) gestureStartX - event.x else event.x - gestureStartX
                 if (distance > dp(6f)) return true
             }
         }
@@ -244,15 +254,18 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (!gestureTracking) return false
         velocityTracker?.addMovement(event)
         val rtl = layoutDirection == View.LAYOUT_DIRECTION_RTL
-        val distance = (if (rtl) gestureStartX - event.x else event.x - gestureStartX)
+        val distance = (if (gestureDirection == 2) event.y - gestureStartY
+            else if (rtl) gestureStartX - event.x else event.x - gestureStartX)
             .coerceAtLeast(0f)
-        val progress = (distance / width.coerceAtLeast(1)).coerceIn(0f, 1f)
+        val extent = if (gestureDirection == 2) height else width
+        val progress = (distance / extent.coerceAtLeast(1)).coerceIn(0f, 1f)
         when (event.actionMasked) {
             MotionEvent.ACTION_MOVE -> applyGestureProgress(progress, rtl)
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 velocityTracker?.computeCurrentVelocity(1_000)
-                val rawVelocity = velocityTracker?.xVelocity ?: 0f
-                val velocity = if (rtl) -rawVelocity else rawVelocity
+                val rawVelocity = if (gestureDirection == 2) velocityTracker?.yVelocity ?: 0f
+                    else velocityTracker?.xVelocity ?: 0f
+                val velocity = if (gestureDirection == 2 || !rtl) rawVelocity else -rawVelocity
                 val complete = event.actionMasked == MotionEvent.ACTION_UP &&
                     (progress >= gestureThreshold || velocity >= dp(700f))
                 settleGesture(progress, complete, rtl)
@@ -286,8 +299,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val incoming = getChildAt(childCount - 2)
         val outgoing = getChildAt(childCount - 1)
         val sign = if (rtl) -1f else 1f
-        outgoing.translationX = sign * width * progress
-        incoming.translationX = -sign * width * 0.28f * (1f - progress)
+        if (gestureDirection == 2) {
+            outgoing.translationY = height * progress
+            incoming.translationY = -height * 0.12f * (1f - progress)
+        } else {
+            outgoing.translationX = sign * width * progress
+            incoming.translationX = -sign * width * 0.28f * (1f - progress)
+        }
         incoming.alpha = 0.82f + 0.18f * progress
     }
 
@@ -506,6 +524,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 outgoing?.alpha = 1f - progress
                 outgoing?.translationY = -sign * height * 0.05f * progress
             }
+            TRANSITION_FLIP -> {
+                incoming.alpha = progress
+                incoming.rotationY = -90f * (1f - progress)
+                outgoing?.rotationY = 90f * progress
+            }
+            TRANSITION_SIMPLE_PUSH -> {
+                if (popping) outgoing?.translationX = direction * width * progress
+                else incoming.translationX = direction * width * (1f - progress)
+            }
         }
         applySharedElementProgress(progress)
     }
@@ -681,6 +708,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         view.translationY = 0f
         view.scaleX = 1f
         view.scaleY = 1f
+        view.rotationY = 0f
     }
 
     private fun animationsDisabled(): Boolean =
@@ -781,6 +809,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         const val TRANSITION_SLIDE_FROM_TOP = 9
         const val TRANSITION_SHARED_AXIS_X = 10
         const val TRANSITION_SHARED_AXIS_Y = 11
+        const val TRANSITION_FLIP = 12
+        const val TRANSITION_SIMPLE_PUSH = 13
 
         const val PRESENTATION_CARD = 1
         const val PRESENTATION_CONTAINED_MODAL = 3

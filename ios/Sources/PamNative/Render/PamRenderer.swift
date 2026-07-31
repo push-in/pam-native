@@ -2192,6 +2192,8 @@ public final class PamRenderer {
             threshold: CGFloat(
                 state.properties[PamConstants.navigationGestureThreshold]?.decimalOrNil() ?? 0.35
             ),
+            direction: Int(state.properties[PamConstants.navigationGestureDirection]?.integerOrNil() ?? 1),
+            fullScreen: state.properties[PamConstants.navigationFullScreenGestureEnabled]?.boolOrNil() ?? false,
             onPop: state.properties[PamConstants.onNavigationGesturePop] != nil ? {
                 [weak self] in
                 self?.dispatchEvent(

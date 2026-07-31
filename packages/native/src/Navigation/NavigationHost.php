@@ -36,6 +36,8 @@ final class NavigationHost extends Element
         bool $enabled = true,
         float $edgeWidth = 24.0,
         float $threshold = 0.35,
+        NavigationGestureDirection $direction = NavigationGestureDirection::Horizontal,
+        bool $fullScreen = false,
     ): self {
         return $this
             ->withProperty(PropKey::NavigationGestureEnabled, $enabled)
@@ -46,7 +48,9 @@ final class NavigationHost extends Element
             ->withProperty(
                 PropKey::NavigationGestureThreshold,
                 max(0.1, min(0.9, $threshold)),
-            );
+            )
+            ->withProperty(PropKey::NavigationGestureDirection, $direction->value)
+            ->withProperty(PropKey::NavigationFullScreenGestureEnabled, $fullScreen);
     }
 
     public function onGesturePop(Closure $handler): self

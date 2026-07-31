@@ -2914,6 +2914,8 @@ class PamRenderer(
             enabled = state.flag(PropKey.NAVIGATION_GESTURE_ENABLED, true),
             edgeWidth = state.number(PropKey.NAVIGATION_GESTURE_EDGE_WIDTH, 24.0).toFloat(),
             threshold = state.number(PropKey.NAVIGATION_GESTURE_THRESHOLD, 0.35).toFloat(),
+            direction = state.integer(PropKey.NAVIGATION_GESTURE_DIRECTION, 1).toInt(),
+            fullScreen = state.flag(PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED, false),
             onPop = state.callback(PropKey.ON_NAVIGATION_GESTURE_POP) {
                 dispatch(state.id, EventKind.NAVIGATION_GESTURE_POP.value)
             },
