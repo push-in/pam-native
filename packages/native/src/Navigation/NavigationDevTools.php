@@ -13,6 +13,7 @@ final class NavigationDevTools
     /** @var list<NavigationSubscription> */
     private array $subscriptions = [];
     private int $nextId = 1;
+    private int $dropped = 0;
 
     public function __construct(
         private readonly NavigationContainer $container,
@@ -52,20 +53,62 @@ final class NavigationDevTools
     public function exportJson(): string
     {
         return json_encode(
-            ['version' => 1, 'state' => $this->tree(), 'timeline' => $this->timeline],
+            ['version' => 2, 'state' => $this->tree(), 'metrics' => $this->metrics(), 'timeline' => $this->timeline],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
         );
+    }
+
+    /** @return array<string, int|float|string|null> */
+    public function metrics(): array
+    {
+        $transitionStartedAt = null;
+        $transitionDurations = [];
+        $unhandled = 0;
+        $gestures = 0;
+        foreach ($this->timeline as $trace) {
+            if ($trace['kind'] === NavigationTraceKind::TransitionStart->value) {
+                $transitionStartedAt = $trace['timestampNs'];
+            } elseif ($trace['kind'] === NavigationTraceKind::TransitionEnd->value && $transitionStartedAt !== null) {
+                $transitionDurations[] = ($trace['timestampNs'] - $transitionStartedAt) / 1_000_000;
+                $transitionStartedAt = null;
+            } elseif ($trace['kind'] === NavigationTraceKind::UnhandledAction->value) {
+                $unhandled++;
+            } elseif ($trace['kind'] === NavigationTraceKind::Gesture->value) {
+                $gestures++;
+            }
+        }
+        sort($transitionDurations, SORT_NUMERIC);
+        $count = count($transitionDurations);
+        $average = $count === 0 ? 0.0 : array_sum($transitionDurations) / $count;
+        $p95 = $count === 0 ? 0.0 : $transitionDurations[(int) ceil($count * 0.95) - 1];
+
+        return [
+            'events' => count($this->timeline),
+            'droppedEvents' => $this->dropped,
+            'unhandledActions' => $unhandled,
+            'gestureEvents' => $gestures,
+            'completedTransitions' => $count,
+            'averageTransitionMs' => round($average, 3),
+            'p95TransitionMs' => round($p95, 3),
+            'currentRoute' => $this->container->getCurrentRoute()->name,
+        ];
     }
 
     public function clear(): void
     {
         $this->timeline = [];
+        $this->dropped = 0;
     }
 
     public function detach(): void
     {
         foreach ($this->subscriptions as $subscription) $subscription->unsubscribe();
         $this->subscriptions = [];
+    }
+
+    public function __destruct()
+    {
+        $this->detach();
     }
 
     private function record(NavigationTraceKind $kind, NavigationEvent $event): void
@@ -79,7 +122,10 @@ final class NavigationDevTools
             'state' => $this->container->getRootState(),
         ];
         $capacity = max(16, min(4_096, $this->capacity));
-        if (count($this->timeline) > $capacity) array_shift($this->timeline);
+        if (count($this->timeline) > $capacity) {
+            array_shift($this->timeline);
+            $this->dropped++;
+        }
     }
 
     /** @return array<string, mixed> */

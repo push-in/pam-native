@@ -4574,12 +4574,15 @@ $navigationDevTools = new NavigationDevTools($container, capacity: 16);
 $container->dispatch(NavigationAction::navigate('article', ['slug' => 'observed']));
 $navigationTimeline = $navigationDevTools->timeline();
 $navigationExport = json_decode($navigationDevTools->exportJson(), true, flags: JSON_THROW_ON_ERROR);
+$navigationMetrics = $navigationDevTools->metrics();
 $assert(
     $navigationTimeline !== []
         && $navigationTimeline[0]['kind'] === NavigationTraceKind::Action->value
         && ($navigationDevTools->tree()['routes'][0]['name'] ?? null) === 'home'
-        && ($navigationExport['version'] ?? null) === 1,
-    'Navigation DevTools must expose integer-typed action/state traces and recursive tree snapshots.',
+        && ($navigationExport['version'] ?? null) === 2
+        && ($navigationExport['metrics']['events'] ?? 0) === count($navigationTimeline)
+        && ($navigationMetrics['currentRoute'] ?? null) === 'article',
+    'Navigation DevTools must expose bounded traces, metrics and recursive tree snapshots.',
 );
 $navigationDevTools->detach();
 $preloadFactories = 0;
