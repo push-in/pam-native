@@ -407,6 +407,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             }
         }
         setActiveRoute(incoming)
+        applyRoutePresentation(incoming)
 
         if (predictiveBackCommitted && operation == OPERATION_POP) {
             predictiveBackCommitted = false
