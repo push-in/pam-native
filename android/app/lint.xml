@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- The renderer deliberately uses framework APIs in its compatibility
+         layer. Pulling fragment-ktx must not mechanically require KTX
+         rewrites across unrelated modules. -->
+    <issue id="UseKtx" severity="ignore" />
+</lint>

@@ -436,4 +436,13 @@ enum PropKey: int
     case NavigationSheetGrabberVisible = 428;
     case NavigationSheetCornerRadius = 429;
     case NavigationSheetExpandsWhenScrolledToEdge = 430;
+    case TabItems = 431;
+    case TabSelectedIndex = 432;
+    case TabPosition = 433;
+    case TabActiveColor = 434;
+    case TabInactiveColor = 435;
+    case TabBackgroundColor = 436;
+    case TabIndicatorColor = 437;
+    case TabSwipeEnabled = 438;
+    case TabScrollEnabled = 439;
 }

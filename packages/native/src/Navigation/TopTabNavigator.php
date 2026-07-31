@@ -127,6 +127,35 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
 
     public function toElement(): \Pam\Native\Element
     {
+        $nativeItems = [];
+        $nativeScreens = [];
+        foreach ($this->tabs as $index => $tab) {
+            $nativeItems[] = ['name' => $tab->name, 'label' => $tab->label, 'badge' => $tab->badge];
+            $scene = !$this->lazy || isset($this->instances[$tab->name]) || $index + 1 === $this->selected
+                ? $this->instance($tab)
+                : View::make();
+            $nativeScreens[] = View::make($scene)
+                ->style(new Style(flexGrow: 1.0))
+                ->key('top-tab-screen-'.$tab->name);
+        }
+        return NativeTabHost::make(
+            $nativeItems,
+            $this->selected,
+            2,
+            $this->activeColor,
+            $this->inactiveColor,
+            $this->barBackground,
+            $this->indicatorColor,
+            $this->swipeEnabled,
+            $this->scrollEnabled,
+            $nativeScreens,
+            function (string $index): bool {
+                $target = (int) $index;
+                return isset($this->tabs[$target - 1]) && $this->jumpTo($this->tabs[$target - 1]->name);
+            },
+        );
+
+        /* @deprecated PAM-rendered fallback retained temporarily for wire compatibility. */
         $items = [];
         foreach ($this->tabs as $index => $tab) {
             $selected = $this->selected === $index + 1;

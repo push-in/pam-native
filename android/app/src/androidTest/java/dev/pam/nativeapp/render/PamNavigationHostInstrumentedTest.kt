@@ -19,6 +19,32 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
     @Test
+    fun nativeTabHostRetainsAllScenesWhenSelectionChanges() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val tabs = PamTabHost(activity)
+                val first = View(activity)
+                val second = View(activity)
+                tabs.insertScene(first, 0)
+                tabs.insertScene(second, 1)
+                tabs.configure(
+                    """[{"name":"home","label":"Home","badge":null},{"name":"orders","label":"Orders","badge":"2"}]""",
+                    1, 1, Color.BLACK, Color.GRAY, Color.WHITE, Color.BLACK, false,
+                )
+                tabs.selectTab(2)
+
+                assertEquals(2, tabs.activeSceneIndex)
+                assertEquals(View.GONE, first.visibility)
+                assertEquals(View.VISIBLE, second.visibility)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun formSheetSizesNativeRouteControllerAtConfiguredDetent() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

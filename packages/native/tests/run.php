@@ -4653,8 +4653,8 @@ $assert(
 $assert(
     $tabNavigator->select('orders')
         && $tabNavigator->selectedTab() === 'orders'
-        && $tabNavigator->toElement()->kind() === NodeKind::SafeAreaView,
-    'Tab navigator must retain independent tab content and expose safe native navigation.',
+        && $tabNavigator->toElement()->kind() === NodeKind::TabHost,
+    'Tab navigator must retain independent content in a platform-native tab host.',
 );
 $restoredTabs = Router::tabs('home')
     ->tab('home', 'Home', Screen::make(Text::make('Home tab')))
@@ -4674,8 +4674,8 @@ $topTabs = Router::topTabs('feed')
 $assert(
     $topTabs->selectedTab() === 'feed'
         && $topTabs->jumpTo('following')
-        && $topTabs->toElement()->kind() === NodeKind::Pressable,
-    'Top tabs must support lazy native scenes, jumpTo and native swipe recognition.',
+        && $topTabs->toElement()->kind() === NodeKind::TabHost,
+    'Top tabs must support lazy retained scenes, jumpTo and native swipe recognition.',
 );
 
 $homeTabRenders = 0;

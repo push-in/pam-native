@@ -38,7 +38,8 @@ enum class NodeKind(val value: Int) {
     VIRTUAL_LIST(26),
     WEB_VIEW(27),
     MEDIA(28),
-    DRAWING_CANVAS(29);
+    DRAWING_CANVAS(29),
+    TAB_HOST(30);
 
     companion object {
         fun from(value: Int): NodeKind =
@@ -544,7 +545,16 @@ enum class PropKey(val value: Int) {
     NAVIGATION_SHEET_INITIAL_DETENT_INDEX(427),
     NAVIGATION_SHEET_GRABBER_VISIBLE(428),
     NAVIGATION_SHEET_CORNER_RADIUS(429),
-    NAVIGATION_SHEET_EXPANDS_WHEN_SCROLLED_TO_EDGE(430);
+    NAVIGATION_SHEET_EXPANDS_WHEN_SCROLLED_TO_EDGE(430),
+    TAB_ITEMS(431),
+    TAB_SELECTED_INDEX(432),
+    TAB_POSITION(433),
+    TAB_ACTIVE_COLOR(434),
+    TAB_INACTIVE_COLOR(435),
+    TAB_BACKGROUND_COLOR(436),
+    TAB_INDICATOR_COLOR(437),
+    TAB_SWIPE_ENABLED(438),
+    TAB_SCROLL_ENABLED(439);
 
     companion object {
         fun from(value: Int): PropKey =

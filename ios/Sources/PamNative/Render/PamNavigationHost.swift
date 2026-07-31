@@ -581,10 +581,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         } else {
             sheet.detents = sheetDetents.prefix(2).map { $0 <= 0.5 ? .medium() : .large() }
         }
-        let detents = sheet.detents
-        if !detents.isEmpty {
-            let index = min(max(sheetInitialDetentIndex - 1, 0), detents.count - 1)
-            sheet.selectedDetentIdentifier = detents[index].identifier
+        if #available(iOS 16.0, *), !sheet.detents.isEmpty {
+            let index = min(max(sheetInitialDetentIndex - 1, 0), sheet.detents.count - 1)
+            sheet.selectedDetentIdentifier = sheet.detents[index].identifier
+        } else if let fraction = sheetDetents.dropFirst(max(sheetInitialDetentIndex - 1, 0)).first {
+            sheet.selectedDetentIdentifier = fraction <= 0.5 ? .medium : .large
         }
         sheet.prefersGrabberVisible = sheetGrabberVisible
         sheet.preferredCornerRadius = sheetCornerRadius > 0 ? sheetCornerRadius : nil

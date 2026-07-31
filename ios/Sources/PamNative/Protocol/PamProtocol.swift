@@ -41,6 +41,7 @@ public enum NodeKind: Int {
     case webView = 27
     case media = 28
     case drawingCanvas = 29
+    case tabHost = 30
 
     public init(_ rawValue: Int) throws {
         guard let kind = NodeKind(rawValue: rawValue) else {
@@ -386,6 +387,15 @@ public enum PamConstants {
     public static let navigationSheetGrabberVisible = 428
     public static let navigationSheetCornerRadius = 429
     public static let navigationSheetExpandsWhenScrolledToEdge = 430
+    public static let tabItems = 431
+    public static let tabSelectedIndex = 432
+    public static let tabPosition = 433
+    public static let tabActiveColor = 434
+    public static let tabInactiveColor = 435
+    public static let tabBackgroundColor = 436
+    public static let tabIndicatorColor = 437
+    public static let tabSwipeEnabled = 438
+    public static let tabScrollEnabled = 439
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

@@ -214,6 +214,36 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
 
     public function toElement(): \Pam\Native\Element
     {
+        $items = [];
+        $screens = [];
+        foreach ($this->tabs as $index => $tab) {
+            $items[] = ['name' => $tab->name, 'label' => $tab->label, 'badge' => $tab->badge];
+            $scene = isset($this->instances[$tab->name]) || $index + 1 === $this->selected
+                ? $this->instance($tab)
+                : View::make();
+            $screens[] = View::make($scene)
+                ->style(new Style(flexGrow: 1.0))
+                ->key('tab-screen-'.$tab->name);
+        }
+        $position = $this->resolvedPresentation() === TabPresentation::Rail ? 3 : 1;
+        return NativeTabHost::make(
+            $items,
+            $this->selected,
+            $position,
+            $this->activeColor,
+            $this->inactiveColor,
+            $this->barBackground,
+            $this->activeColor,
+            false,
+            false,
+            $screens,
+            function (string $index): bool {
+                $target = (int) $index;
+                return isset($this->tabs[$target - 1]) && $this->select($this->tabs[$target - 1]->name);
+            },
+        );
+
+        /* @deprecated PAM-rendered fallback retained temporarily for wire compatibility. */
         $destinations = [];
         $screens = [];
         foreach ($this->tabs as $index => $tab) {

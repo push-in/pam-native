@@ -593,6 +593,7 @@ class PamRenderer(
             NodeKind.WEB_VIEW -> PamWebView(context)
             NodeKind.MEDIA -> PamMediaView(context, mediaCache)
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
+            NodeKind.TAB_HOST -> PamTabHost(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
@@ -857,6 +858,7 @@ class PamRenderer(
             is PamRefreshContainer -> parent.insert(view, index)
             is PamDrawerLayout -> parent.insert(view, index)
             is PamNavigationHost -> parent.insert(view, index)
+            is PamTabHost -> parent.insertScene(view, index)
             is PamModalHost -> parent.insert(view, index)
             is PamScrollContainer -> parent.insert(view)
             else -> {
@@ -1371,6 +1373,16 @@ class PamRenderer(
             -> configureNavigationPresentation(view, state)
             PropKey.NAVIGATION_REVISION ->
                 (view as? PamNavigationHost)?.navigate(value.integer())
+            PropKey.TAB_ITEMS,
+            PropKey.TAB_SELECTED_INDEX,
+            PropKey.TAB_POSITION,
+            PropKey.TAB_ACTIVE_COLOR,
+            PropKey.TAB_INACTIVE_COLOR,
+            PropKey.TAB_BACKGROUND_COLOR,
+            PropKey.TAB_INDICATOR_COLOR,
+            PropKey.TAB_SWIPE_ENABLED,
+            PropKey.TAB_SCROLL_ENABLED,
+            -> configureTabHost(view, state)
             PropKey.NAVIGATION_GESTURE_ENABLED,
             PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
             PropKey.NAVIGATION_GESTURE_THRESHOLD,
@@ -2942,6 +2954,23 @@ class PamRenderer(
             1,
         ).toInt()
         navigation.sheetCornerRadius = state.number(PropKey.NAVIGATION_SHEET_CORNER_RADIUS, 0.0).toFloat()
+    }
+
+    private fun configureTabHost(view: View, state: NodeState) {
+        val tabs = view as? PamTabHost ?: return
+        tabs.configure(
+            encodedItems = state.textOrNull(PropKey.TAB_ITEMS) ?: "[]",
+            selectedIndex = state.integer(PropKey.TAB_SELECTED_INDEX, 1).toInt(),
+            position = state.integer(PropKey.TAB_POSITION, 1).toInt(),
+            activeColor = state.integer(PropKey.TAB_ACTIVE_COLOR, 0xFF000000).toInt(),
+            inactiveColor = state.integer(PropKey.TAB_INACTIVE_COLOR, 0xFF777777).toInt(),
+            barColor = state.integer(PropKey.TAB_BACKGROUND_COLOR, 0xFFFFFFFF).toInt(),
+            indicatorColor = state.integer(PropKey.TAB_INDICATOR_COLOR, 0xFF000000).toInt(),
+            swipeEnabled = state.flag(PropKey.TAB_SWIPE_ENABLED, false),
+        )
+        tabs.onSelect = if (state.properties[PropKey.ON_CHANGE] != null) {
+            { index -> dispatch(state.id, EventKind.CHANGE.value, index.toString()) }
+        } else null
     }
 
     private fun configureKeyframeAnimation(view: View, state: NodeState) {

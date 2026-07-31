@@ -43,6 +43,7 @@ pub enum NodeKind {
     WebView = 27,
     Media = 28,
     DrawingCanvas = 29,
+    TabHost = 30,
 }
 
 impl TryFrom<u8> for NodeKind {
@@ -79,6 +80,7 @@ impl TryFrom<u8> for NodeKind {
             27 => Ok(Self::WebView),
             28 => Ok(Self::Media),
             29 => Ok(Self::DrawingCanvas),
+            30 => Ok(Self::TabHost),
             other => Err(ProtocolError::UnknownNodeKind(other)),
         }
     }
@@ -517,6 +519,15 @@ pub enum PropKey {
     NavigationSheetGrabberVisible = 428,
     NavigationSheetCornerRadius = 429,
     NavigationSheetExpandsWhenScrolledToEdge = 430,
+    TabItems = 431,
+    TabSelectedIndex = 432,
+    TabPosition = 433,
+    TabActiveColor = 434,
+    TabInactiveColor = 435,
+    TabBackgroundColor = 436,
+    TabIndicatorColor = 437,
+    TabSwipeEnabled = 438,
+    TabScrollEnabled = 439,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -954,6 +965,15 @@ impl TryFrom<u16> for PropKey {
             428 => Ok(Self::NavigationSheetGrabberVisible),
             429 => Ok(Self::NavigationSheetCornerRadius),
             430 => Ok(Self::NavigationSheetExpandsWhenScrolledToEdge),
+            431 => Ok(Self::TabItems),
+            432 => Ok(Self::TabSelectedIndex),
+            433 => Ok(Self::TabPosition),
+            434 => Ok(Self::TabActiveColor),
+            435 => Ok(Self::TabInactiveColor),
+            436 => Ok(Self::TabBackgroundColor),
+            437 => Ok(Self::TabIndicatorColor),
+            438 => Ok(Self::TabSwipeEnabled),
+            439 => Ok(Self::TabScrollEnabled),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1749,18 +1769,18 @@ mod tests {
 
     #[test]
     fn protocol_enums_are_sequential_and_append_only() {
-        for value in 1..=29 {
+        for value in 1..=30 {
             assert!(
                 NodeKind::try_from(value).is_ok(),
                 "missing node kind {value}"
             );
         }
-        assert!(NodeKind::try_from(30).is_err());
+        assert!(NodeKind::try_from(31).is_err());
 
-        for value in 1..=430 {
+        for value in 1..=439 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(431).is_err());
+        assert!(PropKey::try_from(440).is_err());
     }
 
     fn tree(text: &str) -> Tree {

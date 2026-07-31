@@ -502,6 +502,10 @@ public final class PamRenderer {
             navigation.insert(view, index: index)
             return
         }
+        if let tabs = parent as? PamTabHost {
+            tabs.insertScene(view, index: index)
+            return
+        }
         if let modal = parent as? PamModalHost {
             modal.insert(view, index: index)
             return
@@ -591,6 +595,8 @@ public final class PamRenderer {
             return PamMediaView()
         case .drawingCanvas:
             return PamDrawingCanvas()
+        case .tabHost:
+            return PamTabHost()
         case .refreshControl:
             return PamRefreshContainer()
         case .customView:
@@ -1361,6 +1367,16 @@ public final class PamRenderer {
             configureNavigationPresentation(nodeId: nodeId, view: view)
         case PamConstants.navigationRevision:
             (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
+        case PamConstants.tabItems,
+             PamConstants.tabSelectedIndex,
+             PamConstants.tabPosition,
+             PamConstants.tabActiveColor,
+             PamConstants.tabInactiveColor,
+             PamConstants.tabBackgroundColor,
+             PamConstants.tabIndicatorColor,
+             PamConstants.tabSwipeEnabled,
+             PamConstants.tabScrollEnabled:
+            configureTabHost(nodeId: nodeId, view: view)
         case PamConstants.navigationGestureEnabled,
              PamConstants.navigationGestureEdgeWidth,
              PamConstants.navigationGestureThreshold:
@@ -2225,6 +2241,23 @@ public final class PamRenderer {
         navigation.sheetGrabberVisible = state.properties[PamConstants.navigationSheetGrabberVisible]?.boolOrNil() ?? false
         navigation.sheetCornerRadius = CGFloat(state.properties[PamConstants.navigationSheetCornerRadius]?.decimalOrNil() ?? 0)
         navigation.sheetExpandsWhenScrolledToEdge = state.properties[PamConstants.navigationSheetExpandsWhenScrolledToEdge]?.boolOrNil() ?? true
+    }
+
+    private func configureTabHost(nodeId: Int64, view: UIView) {
+        guard let tabs = view as? PamTabHost, let state = nodes[nodeId] else { return }
+        tabs.configure(
+            encodedItems: state.properties[PamConstants.tabItems]?.textOrNil() ?? "[]",
+            selectedIndex: Int(state.properties[PamConstants.tabSelectedIndex]?.integerOrNil() ?? 1),
+            position: Int(state.properties[PamConstants.tabPosition]?.integerOrNil() ?? 1),
+            activeColor: UIColor(argb: state.properties[PamConstants.tabActiveColor]?.integerOrNil() ?? 0xFF000000),
+            inactiveColor: UIColor(argb: state.properties[PamConstants.tabInactiveColor]?.integerOrNil() ?? 0xFF777777),
+            barColor: UIColor(argb: state.properties[PamConstants.tabBackgroundColor]?.integerOrNil() ?? 0xFFFFFFFF),
+            indicatorColor: UIColor(argb: state.properties[PamConstants.tabIndicatorColor]?.integerOrNil() ?? 0xFF000000),
+            swipeEnabled: state.properties[PamConstants.tabSwipeEnabled]?.boolOrNil() ?? false
+        )
+        tabs.onSelect = state.properties[PamConstants.onChange] != nil ? { [weak self] index in
+            self?.dispatchEvent(nodeId, EventKind.change.rawValue, Data(String(index).utf8))
+        } : nil
     }
 
     private func configureKeyframeAnimation(nodeId: Int64, view: UIView) {

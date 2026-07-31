@@ -3,6 +3,29 @@ import UIKit
 @testable import PamNative
 
 final class PamNavigationHostTests: XCTestCase {
+    func testNativeTabHostRetainsScenesAndSelectsWithoutRemounting() {
+        let host = PamTabHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let first = UIView()
+        let second = UIView()
+        host.insertScene(first, index: 0)
+        host.insertScene(second, index: 1)
+        host.configure(
+            encodedItems: #"[{"name":"home","label":"Home","badge":null},{"name":"orders","label":"Orders","badge":"2"}]"#,
+            selectedIndex: 1,
+            position: 1,
+            activeColor: .label,
+            inactiveColor: .secondaryLabel,
+            barColor: .systemBackground,
+            indicatorColor: .label,
+            swipeEnabled: false
+        )
+        host.selectForTesting(2)
+
+        XCTAssertEqual(host.activeSceneIndex, 2)
+        XCTAssertTrue(first.isHidden)
+        XCTAssertFalse(second.isHidden)
+    }
+
     func testAttachedRoutesReceiveNativeViewControllers() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let root = UIViewController()
