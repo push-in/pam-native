@@ -45,6 +45,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var lastPointer = PamPressPointer(0f, 0f, 0f, 0f, 0L, 0)
     private var pendingMove: PamPressPointer? = null
     private var moveScheduled = false
+    private var nativeTransformEnabled = false
+    private var nativeMinScale = 1f
+    private var nativeMaxScale = 4f
+    private var nativeResetKey = 0L
+    private var nativeBaseTranslationX = 0f
+    private var nativeBaseTranslationY = 0f
+    private var nativeBaseScaleX = 1f
+    private var nativeBaseScaleY = 1f
+    private var nativeBaseRotation = 0f
 
     private val pressInRunnable = Runnable {
         if (gestureActive && eligibleForPress) {
@@ -129,9 +138,60 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     fun configureGesture(
         config: PamGestureConfig?,
         callback: ((PamGesturePayload) -> Unit)?,
+        nativeTransform: Boolean = false,
+        nativeMinScale: Float = 1f,
+        nativeMaxScale: Float = 4f,
+        nativeResetKey: Long = 0L,
     ) {
-        gestureRecognizer.configure(config, callback)
+        this.nativeTransformEnabled = nativeTransform
+        this.nativeMinScale = nativeMinScale.coerceAtLeast(0.01f)
+        this.nativeMaxScale = nativeMaxScale.coerceAtLeast(this.nativeMinScale)
+        if (this.nativeResetKey != nativeResetKey) {
+            this.nativeResetKey = nativeResetKey
+            resetNativeTransform()
+        }
+        gestureRecognizer.configure(config) { payload ->
+            applyNativeTransform(payload)
+            callback?.invoke(payload)
+        }
         updateClickable()
+    }
+
+    private fun applyNativeTransform(payload: PamGesturePayload) {
+        if (!nativeTransformEnabled) return
+        val child = getChildAt(0) ?: return
+        if (payload.state == 1) {
+            nativeBaseTranslationX = child.translationX
+            nativeBaseTranslationY = child.translationY
+            nativeBaseScaleX = child.scaleX
+            nativeBaseScaleY = child.scaleY
+            nativeBaseRotation = child.rotation
+        }
+        when (payload.type) {
+            2, 5 -> {
+                child.translationX = nativeBaseTranslationX + payload.translationX
+                child.translationY = nativeBaseTranslationY + payload.translationY
+            }
+            3 -> {
+                val scale = (nativeBaseScaleX * payload.scale)
+                    .coerceIn(nativeMinScale, nativeMaxScale)
+                child.scaleX = scale
+                child.scaleY = scale
+            }
+            4 -> child.rotation = nativeBaseRotation + Math.toDegrees(
+                payload.rotation.toDouble(),
+            ).toFloat()
+        }
+    }
+
+    private fun resetNativeTransform() {
+        val child = getChildAt(0) ?: return
+        child.animate().cancel()
+        child.translationX = 0f
+        child.translationY = 0f
+        child.scaleX = 1f
+        child.scaleY = 1f
+        child.rotation = 0f
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {

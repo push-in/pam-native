@@ -3568,6 +3568,9 @@ final class CounterCard extends Component
     /** @var list<string> */
     public static array $lifecycle = [];
 
+    /** @var list<string> */
+    public static array $changedDrafts = [];
+
     #[State]
     public int $count = 0;
 
@@ -3628,6 +3631,11 @@ final class CounterCard extends Component
         $this->emit('changed', $this->count);
     }
 
+    public function draftChanged(string $value): void
+    {
+        self::$changedDrafts[] = $this->draft.'|'.$value;
+    }
+
     /** @return array<array-key, string|bool> */
     public function cardClasses(): array
     {
@@ -3654,7 +3662,7 @@ final class CounterCard extends Component
             {{ $count === 0 ? 'Ready' : $count }}
         </Button>
         <Switch bind:checked="$enabled" />
-        <Input bind:value="$draft" />
+        <Input bind:value="$draft" on:change="draftChanged" />
         <Slot name="action">
             <Text>Fallback action</Text>
         </Slot>
@@ -4132,6 +4140,10 @@ $assert(
 $assert(
     in_array('updated:draft', $counterClass::$lifecycle, true),
     'bind:value must invoke the component updated lifecycle hook.',
+);
+$assert(
+    $counterClass::$changedDrafts === ['Offline draft|Offline draft'],
+    'bind:value must update state before composing the explicit change handler.',
 );
 
 Runtime::shutdown();

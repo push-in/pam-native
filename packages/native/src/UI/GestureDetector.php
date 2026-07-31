@@ -95,6 +95,25 @@ final class GestureDetector extends Element
         return $this->withProperty(PropKey::GestureEnabled, $enabled);
     }
 
+    public function nativeTransform(
+        bool $enabled = true,
+        float $minimumScale = 1.0,
+        float $maximumScale = 4.0,
+        int $resetKey = 0,
+    ): self {
+        return $this
+            ->withProperty(PropKey::GestureNativeTransform, $enabled)
+            ->withProperty(
+                PropKey::GestureNativeMinScale,
+                max(0.01, min(100.0, $minimumScale)),
+            )
+            ->withProperty(
+                PropKey::GestureNativeMaxScale,
+                max($minimumScale, min(100.0, $maximumScale)),
+            )
+            ->withProperty(PropKey::GestureNativeResetKey, max(0, $resetKey));
+    }
+
     /** @param Closure(GestureEvent): void $handler */
     public function onBegin(Closure $handler): self
     {

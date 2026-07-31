@@ -492,6 +492,10 @@ pub enum PropKey {
     ShadowBlurRadius = 403,
     ShadowSpreadRadius = 404,
     ShadowColor = 405,
+    GestureNativeTransform = 406,
+    GestureNativeMinScale = 407,
+    GestureNativeMaxScale = 408,
+    GestureNativeResetKey = 409,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -904,6 +908,10 @@ impl TryFrom<u16> for PropKey {
             403 => Ok(Self::ShadowBlurRadius),
             404 => Ok(Self::ShadowSpreadRadius),
             405 => Ok(Self::ShadowColor),
+            406 => Ok(Self::GestureNativeTransform),
+            407 => Ok(Self::GestureNativeMinScale),
+            408 => Ok(Self::GestureNativeMaxScale),
+            409 => Ok(Self::GestureNativeResetKey),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1707,10 +1715,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(30).is_err());
 
-        for value in 1..=405 {
+        for value in 1..=409 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(406).is_err());
+        assert!(PropKey::try_from(410).is_err());
     }
 
     fn tree(text: &str) -> Tree {

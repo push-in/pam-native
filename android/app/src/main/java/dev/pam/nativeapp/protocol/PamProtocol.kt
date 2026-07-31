@@ -519,7 +519,11 @@ enum class PropKey(val value: Int) {
     SHADOW_OFFSET_Y(402),
     SHADOW_BLUR_RADIUS(403),
     SHADOW_SPREAD_RADIUS(404),
-    SHADOW_COLOR(405);
+    SHADOW_COLOR(405),
+    GESTURE_NATIVE_TRANSFORM(406),
+    GESTURE_NATIVE_MIN_SCALE(407),
+    GESTURE_NATIVE_MAX_SCALE(408),
+    GESTURE_NATIVE_RESET_KEY(409);
 
     companion object {
         fun from(value: Int): PropKey =

@@ -344,6 +344,10 @@ final class TemplateRenderer
         'gestureComposition' => PropKey::GestureComposition,
         'gestureMinDistance' => PropKey::GestureMinDistance,
         'gestureMinDuration' => PropKey::GestureMinDurationMs,
+        'gestureNativeTransform' => PropKey::GestureNativeTransform,
+        'gestureNativeMinScale' => PropKey::GestureNativeMinScale,
+        'gestureNativeMaxScale' => PropKey::GestureNativeMaxScale,
+        'gestureNativeResetKey' => PropKey::GestureNativeResetKey,
         'flexShrink' => PropKey::FlexShrink,
         'paddingLeft' => PropKey::PaddingLeft,
         'paddingTop' => PropKey::PaddingTop,
@@ -1245,10 +1249,22 @@ final class TemplateRenderer
                 throw new RuntimeException('The model attribute is only valid on Input.');
             }
 
-            $element = $element->onChange(self::modelHandler(
+            $modelHandler = self::modelHandler(
                 self::stringValue($values['model'], 'Input model'),
                 $scope,
-            ));
+            );
+            $explicitHandler = $ownHandlers[EventKind::Change->value] ?? null;
+            $element = $element->onChange(
+                $explicitHandler === null
+                    ? $modelHandler
+                    : static function (string $value) use (
+                        $modelHandler,
+                        $explicitHandler,
+                    ): void {
+                        $modelHandler($value);
+                        $explicitHandler($value);
+                    },
+            );
         }
         if ($checkedBinding !== null) {
             if ($element->kind() !== NodeKind::Switch) {

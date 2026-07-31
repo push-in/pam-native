@@ -681,7 +681,13 @@ public final class PamRenderer {
                 emitsBegin: eventProperties.contains(PamConstants.onGestureBegin),
                 emitsUpdate: eventProperties.contains(PamConstants.onGestureUpdate),
                 emitsEnd: eventProperties.contains(PamConstants.onGestureEnd),
-                emitsCancel: eventProperties.contains(PamConstants.onGestureCancel)
+                emitsCancel: eventProperties.contains(PamConstants.onGestureCancel),
+                nativeTransform:
+                    state.properties[PamConstants.gestureNativeTransform]?.boolOrNil() ?? false,
+                nativeMinimumScale:
+                    state.properties[PamConstants.gestureNativeMinScale]?.decimalOrNil() ?? 1,
+                nativeMaximumScale:
+                    state.properties[PamConstants.gestureNativeMaxScale]?.decimalOrNil() ?? 4
             )
             eventBridges[nodeId]?[EventKind.gestureUpdate.rawValue] = bridge
         }
@@ -1505,7 +1511,16 @@ public final class PamRenderer {
              PamConstants.gestureDirection,
              PamConstants.gestureComposition,
              PamConstants.gestureMinDistance,
-             PamConstants.gestureMinDurationMs:
+             PamConstants.gestureMinDurationMs,
+             PamConstants.gestureNativeTransform,
+             PamConstants.gestureNativeMinScale,
+             PamConstants.gestureNativeMaxScale:
+            installEvents(for: nodeId)
+        case PamConstants.gestureNativeResetKey:
+            if let child = view.subviews.first {
+                child.layer.removeAllAnimations()
+                child.transform = .identity
+            }
             installEvents(for: nodeId)
         case PamConstants.hostProperties:
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
@@ -2960,6 +2975,10 @@ public final class PamRenderer {
         private var emitsGestureCancel = false
         private var pendingGesturePayload: Data?
         private var gestureUpdateScheduled = false
+        private var nativeGestureTransform = false
+        private var nativeGestureMinimumScale: CGFloat = 1
+        private var nativeGestureMaximumScale: CGFloat = 4
+        private var nativeGestureBaseTransform = CGAffineTransform.identity
 
         init(nodeId: Int64, kind: Int, dispatchEvent: @escaping (Int64, Int, Data) -> Void) {
             self.nodeId = nodeId
@@ -3113,7 +3132,10 @@ public final class PamRenderer {
             emitsBegin: Bool,
             emitsUpdate: Bool,
             emitsEnd: Bool,
-            emitsCancel: Bool
+            emitsCancel: Bool,
+            nativeTransform: Bool,
+            nativeMinimumScale: Double,
+            nativeMaximumScale: Double
         ) {
             semanticGestureType = type
             semanticGestureDirection = direction
@@ -3123,6 +3145,12 @@ public final class PamRenderer {
             emitsGestureUpdate = emitsUpdate
             emitsGestureEnd = emitsEnd
             emitsGestureCancel = emitsCancel
+            nativeGestureTransform = nativeTransform
+            nativeGestureMinimumScale = CGFloat(max(0.01, nativeMinimumScale))
+            nativeGestureMaximumScale = max(
+                nativeGestureMinimumScale,
+                CGFloat(nativeMaximumScale)
+            )
 
             let minimum = min(max(minimumPointers, 1), 10)
             let maximum = min(max(maximumPointers, minimum), 10)
@@ -3482,6 +3510,12 @@ public final class PamRenderer {
                 rotation = rotationGesture.rotation
                 velocity = CGPoint(x: rotationGesture.velocity, y: 0)
             }
+            applyNativeGestureTransform(
+                sender,
+                translation: translation,
+                scale: scale,
+                rotation: rotation
+            )
 
             if semanticGestureType == 2 || semanticGestureType == 5 {
                 guard matchesSemanticDirection(translation) else {
@@ -3578,6 +3612,47 @@ public final class PamRenderer {
                 scheduleSemanticGestureUpdate()
             } else {
                 dispatchEvent(nodeId, eventKind, payload)
+            }
+        }
+
+        private func applyNativeGestureTransform(
+            _ sender: UIGestureRecognizer,
+            translation: CGPoint,
+            scale: CGFloat,
+            rotation: CGFloat
+        ) {
+            guard nativeGestureTransform, let child = sender.view?.subviews.first else {
+                return
+            }
+            if sender.state == .began {
+                nativeGestureBaseTransform = child.transform
+            }
+            switch semanticGestureType {
+            case 2, 5:
+                child.transform = nativeGestureBaseTransform.concatenating(
+                    CGAffineTransform(
+                        translationX: translation.x,
+                        y: translation.y
+                    )
+                )
+            case 3:
+                let baseScale = hypot(
+                    nativeGestureBaseTransform.a,
+                    nativeGestureBaseTransform.c
+                )
+                let target = min(
+                    nativeGestureMaximumScale,
+                    max(nativeGestureMinimumScale, baseScale * scale)
+                )
+                let relative = target / max(baseScale, 0.0001)
+                child.transform = nativeGestureBaseTransform.scaledBy(
+                    x: relative,
+                    y: relative
+                )
+            case 4:
+                child.transform = nativeGestureBaseTransform.rotated(by: rotation)
+            default:
+                break
             }
         }
 

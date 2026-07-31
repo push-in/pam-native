@@ -411,4 +411,8 @@ enum PropKey: int
     case ShadowBlurRadius = 403;
     case ShadowSpreadRadius = 404;
     case ShadowColor = 405;
+    case GestureNativeTransform = 406;
+    case GestureNativeMinScale = 407;
+    case GestureNativeMaxScale = 408;
+    case GestureNativeResetKey = 409;
 }

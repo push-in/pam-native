@@ -361,6 +361,10 @@ public enum PamConstants {
     public static let shadowBlurRadius = 403
     public static let shadowSpreadRadius = 404
     public static let shadowColor = 405
+    public static let gestureNativeTransform = 406
+    public static let gestureNativeMinScale = 407
+    public static let gestureNativeMaxScale = 408
+    public static let gestureNativeResetKey = 409
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

@@ -14,6 +14,14 @@
 - Resolve iOS device information from the active window instead of the main
   screen, preserving correct dimensions and safe-area values for notches,
   home indicators, rotation and iPad multiwindow layouts.
+- Add UI-thread-native transforms to `GestureDetector` for pan, pinch and
+  rotation. High-refresh-rate media viewers can now follow the display cadence
+  without dispatching a PHP event or committing a render tree on every frame.
+- Add bounded native scale and revision-based transform reset properties with
+  matching Android, iOS, PHP and Rust protocol contracts.
+- Compose explicit `on:change` handlers with `bind:value` updates so input
+  masks and validators observe the freshly bound value instead of being
+  silently replaced by the model callback.
 
 ## 0.5.88 - 2026-07-30
 

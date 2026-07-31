@@ -1860,6 +1860,10 @@ class PamRenderer(
             PropKey.GESTURE_COMPOSITION,
             PropKey.GESTURE_MIN_DISTANCE,
             PropKey.GESTURE_MIN_DURATION_MS,
+            PropKey.GESTURE_NATIVE_TRANSFORM,
+            PropKey.GESTURE_NATIVE_MIN_SCALE,
+            PropKey.GESTURE_NATIVE_MAX_SCALE,
+            PropKey.GESTURE_NATIVE_RESET_KEY,
             -> configurePressable(view, state)
             PropKey.WIDTH,
             PropKey.HEIGHT,
@@ -3248,6 +3252,10 @@ class PamRenderer(
             } else {
                 null
             },
+            nativeTransform = state.flag(PropKey.GESTURE_NATIVE_TRANSFORM, false),
+            nativeMinScale = state.number(PropKey.GESTURE_NATIVE_MIN_SCALE, 1.0).toFloat(),
+            nativeMaxScale = state.number(PropKey.GESTURE_NATIVE_MAX_SCALE, 4.0).toFloat(),
+            nativeResetKey = state.integer(PropKey.GESTURE_NATIVE_RESET_KEY, 0L),
         )
     }
 
