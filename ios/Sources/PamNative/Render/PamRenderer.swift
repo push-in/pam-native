@@ -250,7 +250,11 @@ public final class PamRenderer {
 
         if let view = views[id] {
             nativeViews.release(view: view)
-            view.removeFromSuperview()
+            if let navigation = views[state.parent] as? PamNavigationHost {
+                navigation.removeRoute(view)
+            } else {
+                view.removeFromSuperview()
+            }
         }
 
         removeChild(from: state.parent, child: id)

@@ -22,6 +22,7 @@ import android.window.BackEvent
 import android.window.OnBackAnimationCallback
 import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
+import androidx.fragment.app.FragmentActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
@@ -30,7 +31,7 @@ import dev.pam.nativeapp.modules.PamPushNotifications
 import dev.pam.nativeapp.modules.PamIncomingShares
 import dev.pam.nativeapp.modules.PamDeepLinks
 
-class PamActivity : Activity() {
+class PamActivity : FragmentActivity() {
     internal lateinit var rootHost: PamRootHost
         private set
     private lateinit var runtime: PamRuntime

@@ -1,5 +1,22 @@
 import UIKit
 
+private final class PamRouteViewController: UIViewController {
+    private let routeView: UIView
+
+    init(routeView: UIView) {
+        self.routeView = routeView
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        view = routeView
+    }
+}
+
 final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     var operation = 1
     var transition = 1
@@ -20,6 +37,10 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     private var onGestureEnd: (() -> Void)?
     private var onGestureCancel: (() -> Void)?
     private var interactivePopCommitted = false
+    private var routeViews: [UIView] = []
+    private var routeControllers: [ObjectIdentifier: PamRouteViewController] = [:]
+    private weak var containerController: UIViewController?
+    private var navigationController: UINavigationController?
     private struct SharedElementAnimation {
         let snapshot: UIView
         let source: UIView
@@ -49,16 +70,31 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        ensureControllerHierarchy()
         applyPlatformScreenBehavior()
     }
 
     func insert(_ view: UIView, index: Int) {
-        if view.superview !== self {
+        if !routeViews.contains(where: { $0 === view }) {
+            routeViews.insert(view, at: min(max(index, 0), routeViews.count))
+            routeControllers[ObjectIdentifier(view)] = PamRouteViewController(routeView: view)
+        }
+        if navigationController == nil, view.superview !== self {
             insertSubview(view, at: min(max(index, 0), subviews.count))
         }
         view.frame = bounds
         view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         showOnlyTop()
+    }
+
+    func removeRoute(_ view: UIView) {
+        routeViews.removeAll { $0 === view }
+        routeControllers.removeValue(forKey: ObjectIdentifier(view))
+        view.removeFromSuperview()
+        if let navigationController {
+            let controllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
+            navigationController.setViewControllers(controllers, animated: false)
+        }
     }
 
     func navigate(_ value: Int64) {
@@ -91,7 +127,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     override func gestureRecognizerShouldBegin(
         _ gestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        guard gestureEnabled, subviews.count >= 2,
+        guard navigationController == nil, gestureEnabled, routeViews.count >= 2,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
@@ -104,6 +140,10 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func runTransition() {
+        if navigationController != nil {
+            runControllerTransition()
+            return
+        }
         guard let incoming = incomingView() else { return }
         let outgoing = outgoingView()
         if interactivePopCommitted && operation == 3 {
@@ -111,7 +151,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
             finish(incoming: incoming, outgoing: outgoing)
             return
         }
-        subviews.forEach { $0.isHidden = $0 !== incoming && $0 !== outgoing }
+        routeViews.forEach { $0.isHidden = $0 !== incoming && $0 !== outgoing }
         incoming.isHidden = false
         outgoing?.isHidden = false
         layoutIfNeeded()
@@ -283,9 +323,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     }
 
     @objc private func handleEdgePan(_ gesture: UIPanGestureRecognizer) {
-        guard gestureEnabled, subviews.count >= 2 else { return }
-        let incoming = subviews[subviews.count - 2]
-        let outgoing = subviews[subviews.count - 1]
+        guard gestureEnabled, routeViews.count >= 2 else { return }
+        let incoming = routeViews[routeViews.count - 2]
+        let outgoing = routeViews[routeViews.count - 1]
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
         let raw = gesture.translation(in: self).x
         let distance = max(0, rtl ? -raw : raw)
@@ -343,15 +383,15 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
 
     private func incomingView() -> UIView? {
         switch operation {
-        case 2, 4: return subviews.last
-        case 3: return subviews.count > 1 ? subviews[subviews.count - 2] : subviews.last
-        default: return subviews.last
+        case 2, 4: return routeViews.last
+        case 3: return routeViews.count > 1 ? routeViews[routeViews.count - 2] : routeViews.last
+        default: return routeViews.last
         }
     }
 
     private func outgoingView() -> UIView? {
-        guard subviews.count > 1 else { return nil }
-        return operation == 3 ? subviews.last : subviews[subviews.count - 2]
+        guard routeViews.count > 1 else { return nil }
+        return operation == 3 ? routeViews.last : routeViews[routeViews.count - 2]
     }
 
     private func finish(incoming: UIView, outgoing: UIView?) {
@@ -366,10 +406,80 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func showOnlyTop() {
-        for (index, view) in subviews.enumerated() {
-            view.isHidden = index != subviews.count - 1
+        for (index, view) in routeViews.enumerated() {
+            view.isHidden = index != routeViews.count - 1
         }
     }
+
+    private func ensureControllerHierarchy() {
+        guard window != nil, navigationController == nil,
+              let parent = nearestViewController() else { return }
+        let navigation = UINavigationController()
+        navigation.setNavigationBarHidden(true, animated: false)
+        parent.addChild(navigation)
+        navigation.view.frame = bounds
+        navigation.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        addSubview(navigation.view)
+        navigation.didMove(toParent: parent)
+        containerController = parent
+        navigationController = navigation
+        let controllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
+        navigation.setViewControllers(controllers, animated: false)
+    }
+
+    private func nearestViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController { return controller }
+            responder = current.next
+        }
+        return nil
+    }
+
+    private func runControllerTransition() {
+        guard let navigation = navigationController,
+              let incoming = incomingView() else { return }
+        let outgoing = outgoingView()
+        let allControllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
+        let finalControllers = operation == 3 && allControllers.count > 1
+            ? Array(allControllers.dropLast())
+            : allControllers
+        let kind = transition == 1 ? 2 : transition
+        let animated = !UIAccessibility.isReduceMotionEnabled && duration > 0 && kind != 8
+        if animated {
+            let animation = CATransition()
+            animation.duration = min(max(duration, 0), 2)
+            animation.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            switch kind {
+            case 5, 6, 7, 10, 11:
+                animation.type = .fade
+            case 4:
+                animation.type = .push
+                animation.subtype = operation == 3 ? .fromTop : .fromBottom
+            case 9:
+                animation.type = .push
+                animation.subtype = operation == 3 ? .fromBottom : .fromTop
+            default:
+                animation.type = .push
+                let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
+                animation.subtype = operation == 3
+                    ? (rtl ? .fromLeft : .fromRight)
+                    : (rtl ? .fromRight : .fromLeft)
+            }
+            navigation.view.layer.add(animation, forKey: "pam.navigation.controller")
+        }
+        navigation.setViewControllers(finalControllers, animated: false)
+        if animated {
+            DispatchQueue.main.asyncAfter(deadline: .now() + min(max(duration, 0), 2)) { [weak self] in
+                self?.finish(incoming: incoming, outgoing: outgoing)
+            }
+        } else {
+            finish(incoming: incoming, outgoing: outgoing)
+        }
+    }
+
+    internal var routeControllerCount: Int { routeControllers.count }
+    internal var usesNativeNavigationController: Bool { navigationController != nil }
 
     private func applyPlatformScreenBehavior() {
         if #available(iOS 16.0, *), navigationOrientation != 1,

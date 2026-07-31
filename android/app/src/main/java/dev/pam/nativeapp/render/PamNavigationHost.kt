@@ -4,6 +4,7 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.ContextWrapper
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
@@ -18,6 +19,10 @@ import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import dev.pam.nativeapp.R
+import androidx.fragment.app.FragmentActivity
+import androidx.fragment.app.FragmentManager
+import androidx.lifecycle.Lifecycle
+import java.util.IdentityHashMap
 
 internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var operation: Int = OPERATION_IDLE
@@ -59,8 +64,12 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val scaleY: Float,
     )
     private val sharedElements = ArrayList<SharedElementAnimation>(4)
+    private val routeControllers = IdentityHashMap<View, PamRouteFragment>()
+    private var suppressControllerRemoval = false
+    private var nextControllerId = 1L
 
     init {
+        id = View.generateViewId()
         clipChildren = true
         clipToPadding = true
     }
@@ -78,10 +87,38 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             index.coerceIn(0, childCount),
             LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
         )
+        if (isAttachedToWindow) ensureRouteController(view)
         if (isInitialRoute) setActiveRoute(view)
     }
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        childrenSnapshot().forEach(::ensureRouteController)
+        updateControllerLifecycles()
+    }
+
+    override fun onViewRemoved(child: View) {
+        super.onViewRemoved(child)
+        if (suppressControllerRemoval) return
+        val fragment = routeControllers.remove(child) ?: return
+        fragmentManager()?.takeUnless(FragmentManager::isStateSaved)?.let { manager ->
+            manager.beginTransaction().remove(fragment).commitNowAllowingStateLoss()
+        }
+    }
+
     fun isActiveRoute(view: View): Boolean = view === activeRoute
+
+    internal fun routeControllerCount(): Int = routeControllers.size
+
+    internal fun activeControllerLifecycle(): Lifecycle.State? =
+        routeControllers[activeRoute]?.lifecycle?.currentState
+
+    fun removeRoute(view: View) {
+        if (view.parent === this) removeView(view)
+        else routeControllers.remove(view)?.let { fragment ->
+            fragmentManager()?.beginTransaction()?.remove(fragment)?.commitNowAllowingStateLoss()
+        }
+    }
 
     fun navigate(nextRevision: Long) {
         if (nextRevision == revision) return
@@ -554,8 +591,55 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun setActiveRoute(view: View) {
         if (activeRoute === view) return
         activeRoute = view
+        updateControllerLifecycles()
         onActiveRouteChanged?.invoke()
     }
+
+    private fun ensureRouteController(view: View) {
+        if (routeControllers.containsKey(view)) return
+        val manager = fragmentManager() ?: return
+        if (manager.isStateSaved) return
+        val fragment = PamRouteFragment().also { it.bind(view) }
+        routeControllers[view] = fragment
+        suppressControllerRemoval = true
+        if (view.parent === this) removeView(view)
+        suppressControllerRemoval = false
+        manager.beginTransaction()
+            .setReorderingAllowed(true)
+            .add(id, fragment, "pam-route-${id}-${nextControllerId++}")
+            .setMaxLifecycle(
+                fragment,
+                if (view === activeRoute) Lifecycle.State.RESUMED else Lifecycle.State.STARTED,
+            )
+            .commitNow()
+    }
+
+    private fun updateControllerLifecycles() {
+        val manager = fragmentManager() ?: return
+        if (manager.isStateSaved || routeControllers.isEmpty()) return
+        val transaction = manager.beginTransaction().setReorderingAllowed(true)
+        routeControllers.forEach { (view, fragment) ->
+            if (fragment.isAdded) {
+                transaction.setMaxLifecycle(
+                    fragment,
+                    if (view === activeRoute) Lifecycle.State.RESUMED else Lifecycle.State.STARTED,
+                )
+            }
+        }
+        transaction.commitNowAllowingStateLoss()
+    }
+
+    private fun fragmentManager(): FragmentManager? {
+        var current: Context? = context
+        while (current is ContextWrapper) {
+            if (current is FragmentActivity) return current.supportFragmentManager
+            current = current.baseContext
+        }
+        return (current as? FragmentActivity)?.supportFragmentManager
+    }
+
+    private fun childrenSnapshot(): List<View> =
+        (0 until childCount).map(::getChildAt)
 
     private fun reset(view: View) {
         view.alpha = 1f

@@ -190,6 +190,7 @@ android {
 
 dependencies {
     implementation(project(":plugin-api"))
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     if (pamFirebaseMessagingEnabled) {

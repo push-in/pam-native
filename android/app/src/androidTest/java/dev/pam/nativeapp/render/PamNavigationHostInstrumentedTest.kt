@@ -116,6 +116,11 @@ class PamNavigationHostInstrumentedTest {
                     View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
                     second.importantForAccessibility,
                 )
+                assertEquals(2, navigation.routeControllerCount())
+                assertEquals(
+                    androidx.lifecycle.Lifecycle.State.RESUMED,
+                    navigation.activeControllerLifecycle(),
+                )
 
                 navigation.operation = OPERATION_POP
                 navigation.navigate(2)

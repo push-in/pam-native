@@ -841,7 +841,9 @@ class PamRenderer(
         (view as? PamWebView)?.destroy()
         view.let(nativeViews::release)
         clearHitSlop(view)
-        (view.parent as? ViewGroup)?.removeView(view)
+        val navigationParent = views[state.parent] as? PamNavigationHost
+        if (navigationParent != null) navigationParent.removeRoute(view)
+        else (view.parent as? ViewGroup)?.removeView(view)
         views.remove(id)
     }
 
