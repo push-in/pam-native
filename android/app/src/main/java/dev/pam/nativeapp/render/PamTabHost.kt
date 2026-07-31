@@ -83,6 +83,7 @@ internal class PamTabHost(context: Context) : FrameLayout(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!swipeEnabled) return false
         if (event.actionMasked == MotionEvent.ACTION_UP) {
+            performClick()
             val delta = event.x - touchStartX
             val next = when {
                 delta < -dp(48f) -> selectedIndex + 1
@@ -91,6 +92,11 @@ internal class PamTabHost(context: Context) : FrameLayout(context) {
             }.coerceIn(1, items.size.coerceAtLeast(1))
             selectTab(next)
         }
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
         return true
     }
 
