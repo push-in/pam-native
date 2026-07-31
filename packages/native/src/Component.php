@@ -68,6 +68,16 @@ abstract class Component implements Renderable
     {
     }
 
+    /**
+     * Marks an explicit restoration as authoritative so the first render does
+     * not overwrite it with a second lookup from the component state store.
+     */
+    final protected function stateWasRestored(): void
+    {
+        $persisted = self::$persisted ??= new WeakMap();
+        $persisted[$this] = '';
+    }
+
     public function rendering(): void
     {
     }

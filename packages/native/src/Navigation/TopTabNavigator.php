@@ -25,7 +25,7 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 use Pam\Native\PropKey;
 
-final class TopTabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable
+final class TopTabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler
 {
     /** @var list<NavigationTab> */
     private array $tabs;
@@ -36,6 +36,8 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
     private array $listeners = [];
     /** @var array<string, NavigationSubscription> */
     private array $childSubscriptions = [];
+    /** @var array<string, array<string, mixed>> */
+    private array $pendingChildState = [];
     private int $nextListenerId = 1;
 
     /** @param list<NavigationTab> $tabs */
@@ -80,6 +82,23 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
     public function selectedTab(): string
     {
         return $this->tabs[$this->selected - 1]->name;
+    }
+
+    public function dispatch(NavigationAction $action): bool
+    {
+        $this->emitNavigation(NavigationEventType::Action, ['action' => $action->toArray()]);
+        if ($action->target === null || $action->target === $this->key()) {
+            if (
+                $action->type === NavigationActionType::Navigate
+                && $action->route !== null
+                && array_any($this->tabs, static fn (NavigationTab $tab): bool => $tab->name === $action->route)
+            ) return $this->jumpTo($action->route) || $this->selectedTab() === $action->route;
+            if (in_array($action->type, [NavigationActionType::GoBack, NavigationActionType::Pop], true)) {
+                return $this->goBack();
+            }
+        }
+        $child = $this->instance($this->tabs[$this->selected - 1]);
+        return $child instanceof NavigationActionHandler && $child->dispatch($action);
     }
 
     public function addListener(NavigationEventType $type, Closure $listener): NavigationSubscription
@@ -197,17 +216,33 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
     {
         $selected = $state['selected'] ?? null;
         if (is_string($selected)) $this->jumpTo($selected);
+        if (is_array($state['children'] ?? null)) {
+            foreach ($state['children'] as $name => $childState) {
+                if (is_string($name) && is_array($childState)) {
+                    $this->pendingChildState[$name] = $childState;
+                }
+            }
+        }
     }
 
     public function saveState(): array
     {
-        return ['version' => 1, 'selected' => $this->selectedTab()];
+        $children = [];
+        foreach ($this->instances as $name => $instance) {
+            if ($instance instanceof Restorable) $children[$name] = $instance->saveState();
+        }
+        return ['version' => 2, 'selected' => $this->selectedTab(), 'children' => $children];
     }
 
     private function instance(NavigationTab $tab): Renderable
     {
         if (isset($this->instances[$tab->name])) return $this->instances[$tab->name];
         $instance = $tab->render();
+        $pendingState = $this->pendingChildState[$tab->name] ?? null;
+        if ($pendingState !== null && $instance instanceof Restorable) {
+            $instance->restoreState($pendingState);
+            unset($this->pendingChildState[$tab->name]);
+        }
         $this->instances[$tab->name] = $instance;
         if ($instance instanceof NavigationObservable) {
             $this->childSubscriptions[$tab->name] = $instance->addListener(

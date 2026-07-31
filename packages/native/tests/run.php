@@ -4654,6 +4654,36 @@ $assert(
         && !$nestedStack->canGoBack(),
     'Back must recurse into the focused child navigator before changing the parent stack.',
 );
+$assert(
+    $outerNavigator->dispatch(
+        NavigationAction::push('nested.index')->target($nestedStack->key()),
+    )
+        && $nestedStack->getState()['index'] === 1
+        && $outerNavigator->dispatch(NavigationAction::goBack()->target($nestedStack->key()))
+        && $nestedStack->getState()['index'] === 0,
+    'Targeted actions must traverse stack, tabs and the focused nested stack without being consumed by an ancestor.',
+);
+$nestedStack->push('nested.index', ['generation' => 2]);
+$savedNestedTree = $outerNavigator->saveState();
+$freshNestedStack = Router::stack('nested.index')
+    ->route('nested.index', static fn () => Screen::make(Text::make('Restored nested')))
+    ->build();
+$freshNestedTabs = Router::tabs('nested')
+    ->tab('nested', 'Nested', $freshNestedStack)
+    ->tab('other', 'Other', Screen::make(Text::make('Other')))
+    ->persistence('test-restored-recursive-tabs')
+    ->build();
+$freshOuter = Router::stack('app')
+    ->route('app', static fn () => $freshNestedTabs)
+    ->build();
+$freshOuter->restoreState($savedNestedTree);
+$freshOuter->render();
+$freshNestedTabs->toElement();
+$assert(
+    $freshNestedStack->getState()['index'] === 1
+        && $freshNestedStack->current()->integer('generation') === 2,
+    'Cold restoration must recursively rehydrate focused child stacks without eagerly mounting inactive tabs.',
+);
 $nestedStateSubscription->unsubscribe();
 $groupedDrawer = Router::drawer('overview')
     ->route('overview', 'Overview', Screen::make(Text::make('Overview')))

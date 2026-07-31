@@ -21,7 +21,7 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 use Pam\Native\WindowMetrics;
 
-final class DrawerNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable
+final class DrawerNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler
 {
     /** @var list<NavigationDrawerItem> */
     private array $routes;
@@ -38,6 +38,8 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
     private array $listeners = [];
     /** @var array<string, NavigationSubscription> */
     private array $childSubscriptions = [];
+    /** @var array<string, array<string, mixed>> */
+    private array $pendingChildState = [];
     private int $nextListenerId = 1;
 
     /**
@@ -193,6 +195,23 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
     public function selectedRoute(): string
     {
         return $this->routes[$this->selected - 1]->name;
+    }
+
+    public function dispatch(NavigationAction $action): bool
+    {
+        $this->emitNavigation(NavigationEventType::Action, ['action' => $action->toArray()]);
+        if ($action->target === null || $action->target === $this->key()) {
+            if (
+                $action->type === NavigationActionType::Navigate
+                && $action->route !== null
+                && array_any($this->routes, static fn (NavigationDrawerItem $item): bool => $item->name === $action->route)
+            ) return $this->navigate($action->route) || $this->selectedRoute() === $action->route;
+            if (in_array($action->type, [NavigationActionType::GoBack, NavigationActionType::Pop], true)) {
+                return $this->goBack();
+            }
+        }
+        $child = $this->instance($this->routes[$this->selected - 1]);
+        return $child instanceof NavigationActionHandler && $child->dispatch($action);
     }
 
     public function canGoBack(): bool
@@ -472,16 +491,28 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
                 }
             }
         }
+        if (is_array($state['children'] ?? null)) {
+            foreach ($state['children'] as $name => $childState) {
+                if (is_string($name) && is_array($childState)) {
+                    $this->pendingChildState[$name] = $childState;
+                }
+            }
+        }
     }
 
     public function saveState(): array
     {
+        $children = [];
+        foreach ($this->instances as $name => $instance) {
+            if ($instance instanceof Restorable) $children[$name] = $instance->saveState();
+        }
         return [
-            'version' => 1,
+            'version' => 2,
             'selected' => $this->selectedRoute(),
             'open' => $this->open,
             'history' => $this->history,
             'expandedGroups' => array_keys(array_filter($this->expandedGroups)),
+            'children' => $children,
         ];
     }
 
@@ -489,6 +520,11 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
     {
         if (isset($this->instances[$item->name])) return $this->instances[$item->name];
         $instance = $item->render();
+        $pendingState = $this->pendingChildState[$item->name] ?? null;
+        if ($pendingState !== null && $instance instanceof Restorable) {
+            $instance->restoreState($pendingState);
+            unset($this->pendingChildState[$item->name]);
+        }
         $this->instances[$item->name] = $instance;
         if ($instance instanceof NavigationObservable) {
             $this->childSubscriptions[$item->name] = $instance->addListener(
