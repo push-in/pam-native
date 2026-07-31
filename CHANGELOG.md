@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.88 - 2026-07-30
+
+- Added a public, package-restricted Android background-push broadcast contract
+  to the plugin API. Plugins can now handle FCM data-only messages while the
+  PHP runtime is suspended by declaring a non-exported receiver for
+  `dev.pam.nativeapp.action.PUSH_RECEIVED`.
+- Firebase delivery continues to persist the normal PAM push event before
+  dispatching the native plugin broadcast, preserving foreground, opened and
+  cold-start PHP routing.
+
 ## 0.5.87 - 2026-07-30
 
 - Add an explicit pure-function allowlist to restricted template expressions

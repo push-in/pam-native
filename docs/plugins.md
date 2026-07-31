@@ -271,6 +271,43 @@ Network, disk, large decoding, and other blocking work must leave that thread.
 Native gesture recognition, focus, scrolling, pressed state, and view-local
 animations should remain on it.
 
+## Background data-only push
+
+Android plugins can react to FCM data-only delivery while PHP is suspended.
+Declare a package-private receiver in the plugin manifest:
+
+```xml
+<receiver
+    android:name=".CallPushReceiver"
+    android:enabled="true"
+    android:exported="false">
+    <intent-filter>
+        <action android:name="dev.pam.nativeapp.action.PUSH_RECEIVED" />
+    </intent-filter>
+</receiver>
+```
+
+Read its bounded extras through the stable `BackgroundPush` constants from the
+plugin API:
+
+```kotlin
+class CallPushReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != BackgroundPush.ACTION_RECEIVED) return
+        val data = JSONObject(
+            intent.getStringExtra(BackgroundPush.EXTRA_DATA_JSON) ?: "{}",
+        )
+        // Schedule the call notification or other bounded native work.
+    }
+}
+```
+
+The broadcast is explicitly restricted to the current application package.
+Receivers must remain `exported="false"` and should finish synchronously or
+delegate longer work to WorkManager. PAM persists the same event for normal
+PHP `PushNotifications` delivery, so the native hook complements rather than
+replaces application routing.
+
 ## Compatibility policy
 
 - Descriptor version, wire protocol, statuses, and operation kinds are

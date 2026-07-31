@@ -2,6 +2,7 @@ package dev.pam.nativeapp.modules
 
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
+import dev.pam.nativeapp.push.BackgroundPush
 import org.json.JSONObject
 
 /**
@@ -22,12 +23,25 @@ public class PamFirebaseMessagingService : FirebaseMessagingService() {
             ?: message.data["deepLink"]
             ?: message.data["url"]
             ?: ""
+        val title = notification?.title ?: message.data["title"].orEmpty()
+        val body = notification?.body ?: message.data["body"].orEmpty()
+        val dataJson = data.toString()
         PamPushNotifications.reportReceived(
             id = id,
-            title = notification?.title ?: message.data["title"].orEmpty(),
-            body = notification?.body ?: message.data["body"].orEmpty(),
-            dataJson = data.toString(),
+            title = title,
+            body = body,
+            dataJson = dataJson,
             deepLink = deepLink,
+        )
+        sendBroadcast(
+            BackgroundPush.receivedIntent(
+                context = applicationContext,
+                id = id,
+                title = title,
+                body = body,
+                dataJson = dataJson,
+                deepLink = deepLink,
+            ),
         )
     }
 }
