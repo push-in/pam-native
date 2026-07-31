@@ -275,12 +275,33 @@ public final class PamRuntime {
                 forName: UIApplication.didBecomeActiveNotification,
                 object: nil,
                 queue: .main
-            ) { [weak self] _ in self?.renderer.setApplicationActive(true) },
+            ) { [weak self] _ in
+                self?.renderer.setApplicationActive(true)
+                self?.dispatchLifecycle(kind: NativeViewEventKind.appState.rawValue, payload: Data("1".utf8))
+            },
             NotificationCenter.default.addObserver(
                 forName: UIApplication.willResignActiveNotification,
                 object: nil,
                 queue: .main
-            ) { [weak self] _ in self?.renderer.setApplicationActive(false) },
+            ) { [weak self] _ in
+                self?.renderer.setApplicationActive(false)
+                self?.dispatchLifecycle(kind: NativeViewEventKind.appState.rawValue, payload: Data("2".utf8))
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didEnterBackgroundNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.dispatchLifecycle(kind: NativeViewEventKind.appState.rawValue, payload: Data("3".utf8))
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didReceiveMemoryWarningNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                self?.trimMemory(critical: true)
+                self?.dispatchLifecycle(kind: NativeViewEventKind.memoryPressure.rawValue, payload: Data("2".utf8))
+            },
         ]
     }
 

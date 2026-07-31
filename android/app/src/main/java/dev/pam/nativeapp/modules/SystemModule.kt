@@ -226,15 +226,22 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                     stableInsets[2],
                     rootInsets?.right ?: 0,
                 )
-                val safeBottom = maxOf(
+                val rawSafeBottom = maxOf(
                     visibleInsets?.bottom ?: 0,
                     stableInsets[3],
                     rootInsets?.bottom ?: 0,
                 )
+                val safeBottom = rawSafeBottom
+                val viewportWidth = activity?.rootHost?.width
+                    ?.takeIf { it > 0 }
+                    ?: metrics.widthPixels
+                val viewportHeight = activity?.rootHost?.height
+                    ?.takeIf { it > 0 }
+                    ?: metrics.heightPixels
                 WireMap.encode(
                     mapOf(
-                        "width" to WireValue.Decimal(metrics.widthPixels / density.toDouble()),
-                        "height" to WireValue.Decimal(metrics.heightPixels / density.toDouble()),
+                        "width" to WireValue.Decimal(viewportWidth / density.toDouble()),
+                        "height" to WireValue.Decimal(viewportHeight / density.toDouble()),
                         "density" to WireValue.Decimal(density.toDouble()),
                         "appearance" to WireValue.Integer(appearance.toLong()),
                         "appState" to WireValue.Integer(appState.toLong()),

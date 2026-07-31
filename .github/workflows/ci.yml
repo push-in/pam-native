@@ -54,6 +54,7 @@ jobs:
           composer install --working-dir=examples/showcase --no-interaction
           php packages/native/tests/run.php
           php packages/native/tests/performance.php
+          php packages/native/tests/navigation_performance.php
           php packages/native/tests/fuzz.php
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null

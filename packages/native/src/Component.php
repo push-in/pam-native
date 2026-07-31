@@ -15,6 +15,7 @@ use ReflectionMethod;
 use Throwable;
 use WeakMap;
 use Pam\Native\Diagnostics\Profiler;
+use Pam\Native\Routing\Navigation;
 
 abstract class Component implements Renderable
 {
@@ -66,6 +67,16 @@ abstract class Component implements Renderable
 
     public function rendered(): void
     {
+    }
+
+    /**
+     * Marks an explicit restoration as authoritative so the first render does
+     * not overwrite it with a second lookup from the component state store.
+     */
+    final protected function stateWasRestored(): void
+    {
+        $persisted = self::$persisted ??= new WeakMap();
+        $persisted[$this] = '';
     }
 
     public function rendering(): void
@@ -153,6 +164,29 @@ abstract class Component implements Renderable
     public function fallback(): ?Renderable
     {
         return null;
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    final protected function pushRoute(string $route, mixed ...$params): void
+    {
+        Navigation::push($route, $params);
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    final protected function navigateRoute(string $route, mixed ...$params): bool
+    {
+        return Navigation::navigate($route, $params);
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    final protected function replaceRoute(string $route, mixed ...$params): void
+    {
+        Navigation::replace($route, $params);
+    }
+
+    final protected function popRoute(): bool
+    {
+        return Navigation::back();
     }
 
     final public function __get(string $name): mixed

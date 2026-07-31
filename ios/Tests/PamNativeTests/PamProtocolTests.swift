@@ -79,6 +79,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.onBottomSheetDismiss, 324)
         XCTAssertEqual(NodeKind.media.rawValue, 28)
         XCTAssertEqual(NodeKind.drawingCanvas.rawValue, 29)
+        XCTAssertEqual(NodeKind.canvas.rawValue, 31)
         XCTAssertEqual(PamConstants.drawingUndoRequest, 395)
         XCTAssertEqual(PamConstants.flexWrap, 396)
         XCTAssertEqual(PamConstants.bottomPercent, 400)
@@ -89,6 +90,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.onAnimationComplete, 365)
         XCTAssertEqual(PamConstants.webViewAllowedHosts, 366)
         XCTAssertEqual(PamConstants.mediaCacheChecksum, 384)
+        XCTAssertEqual(PamConstants.canvasCommands, 440)
         XCTAssertEqual(
             [
                 NativeOperation.httpGet,

@@ -18,8 +18,16 @@ final class Router
     private bool $restoreState = true;
     /** @var list<DeepLink> */
     private array $deepLinks = [];
-    /** @var array<string, ScreenOptions> */
+    /** @var array<string, ScreenOptions|ScreenOptionsPatch|Closure> */
     private array $options = [];
+    private ScreenOptions|Closure|null $defaultOptions = null;
+    /** @var list<array{routes: list<string>, options: ScreenOptionsPatch|Closure}> */
+    private array $optionGroups = [];
+    /** @var array<string, Closure> */
+    private array $routeIds = [];
+    /** @var array<string, Closure> */
+    private array $routeGuards = [];
+    private ?string $guardFallback = null;
     /** @var list<string> */
     private array $linkingPrefixes = [];
     private ?Closure $linkFilter = null;
@@ -51,7 +59,12 @@ final class Router
         return new DrawerRouter($initialRoute);
     }
 
-    public function route(string $name, Closure $screen, ?ScreenOptions $options = null): self
+    public function route(
+        string $name,
+        Closure $screen,
+        ScreenOptions|ScreenOptionsPatch|Closure|null $options = null,
+        ?Closure $getId = null,
+    ): self
     {
         if ($name === '') {
             throw new InvalidArgumentException('Route names cannot be empty.');
@@ -59,7 +72,23 @@ final class Router
         $copy = clone $this;
         $copy->routes[$name] = $screen;
         if ($options !== null) $copy->options[$name] = $options;
+        if ($getId !== null) $copy->routeIds[$name] = $getId;
 
+        return $copy;
+    }
+
+    public function screenOptions(ScreenOptions|Closure $options): self
+    {
+        $copy = clone $this;
+        $copy->defaultOptions = $options;
+        return $copy;
+    }
+
+    /** @param list<string> $routes */
+    public function group(array $routes, ScreenOptionsPatch|Closure $options): self
+    {
+        $copy = clone $this;
+        $copy->optionGroups[] = ['routes' => array_values($routes), 'options' => $options];
         return $copy;
     }
 
@@ -68,6 +97,21 @@ final class Router
         $copy = clone $this;
         $copy->persistenceKey = $key;
 
+        return $copy;
+    }
+
+    /** @param Closure(RouteContext): bool $guard */
+    public function guard(string $route, Closure $guard): self
+    {
+        $copy = clone $this;
+        $copy->routeGuards[$route] = $guard;
+        return $copy;
+    }
+
+    public function guardFallback(string $route): self
+    {
+        $copy = clone $this;
+        $copy->guardFallback = $route;
         return $copy;
     }
 
@@ -133,6 +177,11 @@ final class Router
             screenOptions: $this->options,
             linkingPrefixes: $this->linkingPrefixes,
             linkFilter: $this->linkFilter,
+            routeIds: $this->routeIds,
+            routeGuards: $this->routeGuards,
+            guardFallback: $this->guardFallback,
+            defaultOptions: $this->defaultOptions,
+            optionGroups: $this->optionGroups,
         );
     }
 }

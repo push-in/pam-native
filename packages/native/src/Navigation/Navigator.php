@@ -11,12 +11,12 @@ use Pam\Native\Renderable;
 use Pam\Native\Restorable;
 use ReflectionFunction;
 
-final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable
+final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler
 {
     /** @var array<string, Closure(): Renderable> */
     private array $routes;
 
-    /** @var list<array{name: string, id: int, params: array<string, string|int|float|bool|null>}> */
+    /** @var list<array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>}> */
     private array $stack;
     private string $persistenceKey;
     private int $nextId = 2;
@@ -34,14 +34,23 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private ?string $focusedEntryKey = null;
     /** @var array<string, NavigationSubscription> */
     private array $childSubscriptions = [];
+    /** @var array<string, array<string, mixed>> */
+    private array $pendingChildState = [];
     /** @var (Closure(): bool)|null */
     private ?Closure $systemBackInterceptor = null;
     /** @var list<DeepLink> */
     private array $deepLinks;
-    /** @var array<string, ScreenOptions> */
+    /** @var array<string, ScreenOptions|ScreenOptionsPatch|Closure> */
     private array $screenOptions;
-    /** @var array<string, ScreenOptions> */
+    /** @var array<string, Closure> */
+    private array $routeIds;
+    /** @var array<string, Closure> */
+    private array $routeGuards;
+    /** @var array<string, ScreenOptions|ScreenOptionsPatch> */
     private array $dynamicOptions = [];
+    private ScreenOptions|Closure|null $defaultOptions;
+    /** @var list<array{routes: list<string>, options: ScreenOptionsPatch|Closure}> */
+    private array $optionGroups;
     /** @var list<string> */
     private array $linkingPrefixes;
     /** @var (Closure(string): bool)|null */
@@ -63,6 +72,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         array $screenOptions = [],
         array $linkingPrefixes = [],
         ?Closure $linkFilter = null,
+        array $routeIds = [],
+        array $routeGuards = [],
+        private readonly ?string $guardFallback = null,
+        ScreenOptions|Closure|null $defaultOptions = null,
+        array $optionGroups = [],
     )
     {
         $validated = [];
@@ -91,11 +105,41 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $this->deepLinks = array_values($deepLinks);
         foreach ($screenOptions as $route => $options) {
-            if (!is_string($route) || !isset($validated[$route]) || !$options instanceof ScreenOptions) {
-                throw new InvalidArgumentException('Screen options must target a registered route.');
+            if (!is_string($route) || !isset($validated[$route]) || (!$options instanceof ScreenOptions && !$options instanceof ScreenOptionsPatch && !$options instanceof Closure)) {
+                throw new InvalidArgumentException('Screen options must target a registered route and be options or a resolver.');
             }
         }
         $this->screenOptions = $screenOptions;
+        foreach ($optionGroups as $group) {
+            if (!is_array($group) || !is_array($group['routes'] ?? null) || !isset($group['options'])) {
+                throw new InvalidArgumentException('Option groups require routes and an option layer.');
+            }
+            foreach ($group['routes'] as $route) {
+                if (!is_string($route) || !isset($validated[$route])) {
+                    throw new InvalidArgumentException('Option groups must target registered routes.');
+                }
+            }
+            if (!$group['options'] instanceof ScreenOptionsPatch && !$group['options'] instanceof Closure) {
+                throw new InvalidArgumentException('Option groups require sparse options or a resolver.');
+            }
+        }
+        $this->defaultOptions = $defaultOptions;
+        $this->optionGroups = array_values($optionGroups);
+        foreach ($routeIds as $route => $getId) {
+            if (!is_string($route) || !isset($validated[$route]) || !$getId instanceof Closure) {
+                throw new InvalidArgumentException('Route identity resolvers must target a registered route.');
+            }
+        }
+        $this->routeIds = $routeIds;
+        foreach ($routeGuards as $route => $guard) {
+            if (!is_string($route) || !isset($validated[$route]) || !$guard instanceof Closure) {
+                throw new InvalidArgumentException('Route guards must target a registered route.');
+            }
+        }
+        if ($guardFallback !== null && !isset($validated[$guardFallback])) {
+            throw new InvalidArgumentException('The route guard fallback must be registered.');
+        }
+        $this->routeGuards = $routeGuards;
         foreach ($linkingPrefixes as $prefix) {
             if (!is_string($prefix) || strlen($prefix) > 512 || preg_match('#^[A-Za-z][A-Za-z0-9+.-]*://#', $prefix) !== 1) {
                 throw new InvalidArgumentException('Linking prefixes require bounded absolute URI prefixes.');
@@ -104,7 +148,18 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->linkingPrefixes = array_values(array_unique($linkingPrefixes));
         $this->linkFilter = $linkFilter;
         $this->theme = NavigationTheme::light();
-        $this->stack = [['name' => $initialRoute, 'id' => 1, 'params' => []]];
+        $bootRoute = $this->routeAvailable($initialRoute)
+            ? $initialRoute
+            : $guardFallback;
+        if ($bootRoute === null || !$this->routeAvailable($bootRoute)) {
+            throw new InvalidArgumentException('The initial route is guarded and no available fallback exists.');
+        }
+        $this->stack = [[
+            'name' => $bootRoute,
+            'id' => 1,
+            'routeId' => $this->resolveRouteId($bootRoute, []),
+            'params' => [],
+        ]];
         $this->persistenceKey = $persistenceKey;
         $this->transitionDurationMs = max(0, min(2_000, $transitionDurationMs));
         if ($handleSystemBack) NavigationBackCoordinator::register($this);
@@ -149,12 +204,17 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
 
+        $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) {
+            throw new InvalidArgumentException("Route {$route} is not currently available.");
+        }
         $previous = $this->currentEntry();
         $this->outgoing = null;
         $this->stack[] = [
             'name' => $route,
             'id' => $this->nextId++,
-            'params' => self::validatedParams($params),
+            'routeId' => $this->resolveRouteId($route, $validatedParams),
+            'params' => $validatedParams,
         ];
         $this->operation = NavigationOperation::Push;
         $this->revision++;
@@ -197,17 +257,24 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function currentOptions(): ScreenOptions
     {
         $entry = $this->currentEntry();
-        return $this->dynamicOptions[$this->entryKey($entry)]
-            ?? $this->screenOptions[$entry['name']]
-            ?? new ScreenOptions();
+        return $this->resolvedOptions($entry);
     }
 
-    public function setOptions(ScreenOptions $options): void
+    public function setOptions(ScreenOptions|ScreenOptionsPatch $options): void
     {
         $this->dynamicOptions[$this->entryKey($this->currentEntry())] = $options;
         $this->emitNavigation(NavigationEventType::State, [
             'state' => $this->getState(),
-            'options' => $options->toArray(),
+            'options' => $this->currentOptions()->toArray(),
+        ]);
+    }
+
+    public function clearOptions(): void
+    {
+        unset($this->dynamicOptions[$this->entryKey($this->currentEntry())]);
+        $this->emitNavigation(NavigationEventType::State, [
+            'state' => $this->getState(),
+            'options' => $this->currentOptions()->toArray(),
         ]);
     }
 
@@ -226,7 +293,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function getState(): array
     {
         return [
-            'version' => 3,
+            'version' => 4,
             'type' => 1,
             'key' => $this->navigationKey,
             'index' => count($this->stack) - 1,
@@ -236,9 +303,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                     'key' => $key,
                     'name' => $entry['name'],
                     'params' => $entry['params'],
-                    'options' => ($this->dynamicOptions[$key]
-                        ?? $this->screenOptions[$entry['name']]
-                        ?? new ScreenOptions())->toArray(),
+                    'id' => $entry['routeId'],
+                    'options' => $this->resolvedOptions($entry)->toArray(),
                 ];
                 $instance = $this->routeInstances[$key] ?? null;
                 if ($instance instanceof NavigationStateProvider) {
@@ -262,11 +328,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function dispatch(NavigationAction $action): bool
     {
         if ($action->target !== null && $action->target !== $this->navigationKey) {
+            if ($this->activeChildActionHandler()?->dispatch($action) === true) return true;
             $this->emitNavigation(NavigationEventType::UnhandledAction, ['action' => $action->toArray()]);
             return false;
         }
         $this->emitNavigation(NavigationEventType::Action, ['action' => $action->toArray()]);
-        return match ($action->type) {
+        $handled = match ($action->type) {
             NavigationActionType::Navigate => $this->dispatchRoute($action, fn () => $this->navigate($action->route ?? '', $action->params, $action->merge)),
             NavigationActionType::Push => $this->dispatchRoute($action, fn () => $this->push($action->route ?? '', $action->params)),
             NavigationActionType::Replace => $this->dispatchRoute($action, fn () => $this->replace($action->route ?? '', $action->params)),
@@ -278,6 +345,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             NavigationActionType::ReplaceParams => $this->replaceParams($action->params),
             NavigationActionType::Preload => $this->preload($action->route ?? '', $action->params),
         };
+        if ($handled) return true;
+        if ($this->activeChildActionHandler()?->dispatch($action) === true) return true;
+        $this->emitNavigation(NavigationEventType::UnhandledAction, ['action' => $action->toArray()]);
+        return false;
     }
 
     public function render(): Renderable
@@ -314,8 +385,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $activeOptions->animationDurationMs ?? $this->transitionDurationMs,
             $this->revision,
             ...$screens,
-        )->gestureNavigation($activeOptions->gestureEnabled)
+        )->gestureNavigation(
+            $activeOptions->gestureEnabled,
+            direction: $activeOptions->gestureDirection,
+            fullScreen: $activeOptions->fullScreenGestureEnabled,
+        )
         ->screenBehavior($activeOptions->orientation, $activeOptions->autoHideHomeIndicator)
+        ->screenOptions($activeOptions)
         ->onTransitionEnd(function (): void {
             $this->finalizeOutgoingRoute();
             $this->emitNavigation(NavigationEventType::TransitionEnd, ['route' => $this->current()]);
@@ -353,13 +429,18 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
+        $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) {
+            throw new InvalidArgumentException("Route {$route} is not currently available.");
+        }
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Replace, $route, $params))) return;
         $this->outgoing = array_pop($this->stack);
         $this->stack[] = [
             'name' => $route,
             'id' => $this->nextId++,
-            'params' => self::validatedParams($params),
+            'routeId' => $this->resolveRouteId($route, $validatedParams),
+            'params' => $validatedParams,
         ];
         $this->operation = NavigationOperation::Replace;
         $this->revision++;
@@ -372,13 +453,18 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
+        $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) {
+            throw new InvalidArgumentException("Route {$route} is not currently available.");
+        }
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Reset, $route, $params))) return;
         $this->outgoing = null;
         $this->stack = [[
             'name' => $route,
             'id' => $this->nextId++,
-            'params' => self::validatedParams($params),
+            'routeId' => $this->resolveRouteId($route, $validatedParams),
+            'params' => $validatedParams,
         ]];
         $this->operation = NavigationOperation::Reset;
         $this->revision++;
@@ -388,10 +474,19 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     /** @param array<string, string|int|float|bool|null> $params */
     public function navigate(string $route, array $params = [], bool $merge = false): void
     {
+        if (!isset($this->routes[$route])) {
+            throw new InvalidArgumentException("Route {$route} is not registered.");
+        }
+        $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) return;
+        $routeId = $this->resolveRouteId($route, $validatedParams);
         $previous = $this->currentEntry();
         $target = null;
         for ($index = count($this->stack) - 1; $index >= 0; $index--) {
-            if ($this->stack[$index]['name'] === $route) {
+            if (
+                $this->stack[$index]['name'] === $route
+                && ($routeId === null || $this->stack[$index]['routeId'] === $routeId)
+            ) {
                 $target = $index;
                 break;
             }
@@ -402,10 +497,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         if ($target === count($this->stack) - 1) {
             if ($params !== []) {
-                $validated = self::validatedParams($params);
                 $this->stack[$target]['params'] = $merge
-                    ? array_replace($this->stack[$target]['params'], $validated)
-                    : $validated;
+                    ? array_replace($this->stack[$target]['params'], $validatedParams)
+                    : $validatedParams;
+                $this->stack[$target]['routeId'] = $this->resolveRouteId(
+                    $route,
+                    $this->stack[$target]['params'],
+                );
                 unset($this->routeInstances[$this->entryKey($this->stack[$target])]);
                 $this->operation = NavigationOperation::Idle;
                 $this->revision++;
@@ -418,10 +516,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->outgoing = $this->stack[count($this->stack) - 1];
         $this->stack = array_slice($this->stack, 0, $target + 1);
         if ($params !== []) {
-            $validated = self::validatedParams($params);
             $this->stack[$target]['params'] = $merge
-                ? array_replace($this->stack[$target]['params'], $validated)
-                : $validated;
+                ? array_replace($this->stack[$target]['params'], $validatedParams)
+                : $validatedParams;
+            $this->stack[$target]['routeId'] = $this->resolveRouteId(
+                $route,
+                $this->stack[$target]['params'],
+            );
             unset($this->routeInstances[$this->entryKey($this->stack[$target])]);
         }
         $this->operation = NavigationOperation::Pop;
@@ -437,6 +538,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $this->stack[$index]['params'],
             self::validatedParams($params),
         );
+        $this->stack[$index]['routeId'] = $this->resolveRouteId(
+            $this->stack[$index]['name'],
+            $this->stack[$index]['params'],
+        );
         unset($this->routeInstances[$this->entryKey($this->stack[$index])]);
         $this->revision++;
         $this->emitNavigation(NavigationEventType::ParamsChanged, ['params' => $this->stack[$index]['params']]);
@@ -449,6 +554,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     {
         $index = count($this->stack) - 1;
         $this->stack[$index]['params'] = self::validatedParams($params);
+        $this->stack[$index]['routeId'] = $this->resolveRouteId(
+            $this->stack[$index]['name'],
+            $this->stack[$index]['params'],
+        );
         unset($this->routeInstances[$this->entryKey($this->stack[$index])]);
         $this->revision++;
         $this->emitNavigation(NavigationEventType::ParamsChanged, ['params' => $this->stack[$index]['params']]);
@@ -460,9 +569,26 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function preload(string $route, array $params = []): bool
     {
         if (!isset($this->routes[$route])) return false;
-        $entry = ['name' => $route, 'id' => 0, 'params' => self::validatedParams($params)];
-        $this->preloaded[$this->preloadKey($route, $entry['params'])] = $this->createRoute($entry);
+        $validatedParams = self::validatedParams($params);
+        $entry = [
+            'name' => $route,
+            'id' => 0,
+            'routeId' => $this->resolveRouteId($route, $validatedParams),
+            'params' => $validatedParams,
+        ];
+        $key = $this->preloadKey($route, $entry['params']);
+        unset($this->preloaded[$key]);
+        $this->preloaded[$key] = $this->createRoute($entry);
+        while (count($this->preloaded) > 16) {
+            array_shift($this->preloaded);
+        }
         return true;
+    }
+
+    /** Releases speculative route trees without touching mounted navigation state. */
+    public function trimMemory(): void
+    {
+        $this->preloaded = [];
     }
 
     public function popTo(string $route): bool
@@ -497,7 +623,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($this->linkFilter !== null && !($this->linkFilter)($uri)) return false;
         if (
             $this->linkingPrefixes !== []
-            && !array_any($this->linkingPrefixes, static fn (string $prefix): bool => str_starts_with($uri, $prefix))
+            && !array_any($this->linkingPrefixes, static function (string $prefix) use ($uri): bool {
+                if (!str_starts_with($uri, $prefix)) return false;
+                $boundary = $uri[strlen($prefix)] ?? '';
+                return $boundary === '' || str_ends_with($prefix, '/') || in_array($boundary, ['/', '?', '#'], true);
+            })
         ) return false;
         $parts = parse_url($uri);
         if ($parts === false) return false;
@@ -517,13 +647,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                 if (isset($parts['query'])) {
                     parse_str($parts['query'], $query);
                     foreach ($query as $key => $value) {
-                        if (is_string($key) && is_scalar($value)) {
+                        if (is_string($key) && !array_key_exists($key, $params) && is_scalar($value)) {
                             $params[$key] = (string) $value;
                         }
                     }
                 }
+                if (!$this->routeAvailable($link->route, $params)) return false;
                 $this->navigate($link->route, $params);
-
                 return true;
             }
         }
@@ -560,6 +690,44 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
     }
 
+    /** @param array<string, string|int|float|bool|null> $params */
+    public function routeAvailable(string $route, array $params = []): bool
+    {
+        if (!isset($this->routes[$route])) return false;
+        $guard = $this->routeGuards[$route] ?? null;
+        return $guard === null || $guard(new RouteContext($route, self::validatedParams($params))) === true;
+    }
+
+    /**
+     * Re-evaluates auth/feature conditions and removes inaccessible history in
+     * one state revision. Call after the session or entitlement state changes.
+     */
+    public function refreshConditions(): bool
+    {
+        $previous = $this->currentEntry();
+        $available = array_values(array_filter(
+            $this->stack,
+            fn (array $entry): bool => $this->routeAvailable($entry['name'], $entry['params']),
+        ));
+        if ($available === []) {
+            $fallback = $this->guardFallback;
+            if ($fallback === null || !$this->routeAvailable($fallback)) return false;
+            $available[] = [
+                'name' => $fallback,
+                'id' => $this->nextId++,
+                'routeId' => $this->resolveRouteId($fallback, []),
+                'params' => [],
+            ];
+        }
+        if ($available === $this->stack) return false;
+        $this->stack = $available;
+        $this->outgoing = null;
+        $this->operation = NavigationOperation::Reset;
+        $this->revision++;
+        $this->didNavigate($previous, NavigationAction::reset($this->currentRoute(), $this->current()->all()));
+        return true;
+    }
+
     public function stateKey(): string
     {
         return 'navigator.'.$this->persistenceKey;
@@ -567,6 +735,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
     public function restoreState(array $state): void
     {
+        $this->stateWasRestored();
         if (!$this->restorePersistedState) {
             return;
         }
@@ -596,10 +765,26 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             } catch (InvalidArgumentException) {
                 return;
             }
-            $restored[] = [
+            if (!$this->routeAvailable($route, $validatedParams)) continue;
+            $entry = [
                 'name' => $route,
                 'id' => $this->nextId++,
+                'routeId' => $this->resolveRouteId($route, $validatedParams),
                 'params' => $validatedParams,
+            ];
+            $restored[] = $entry;
+            if (is_array($saved) && is_array($saved['state'] ?? null)) {
+                $this->pendingChildState[$this->entryKey($entry)] = $saved['state'];
+            }
+        }
+        if ($restored === []) {
+            $fallback = $this->guardFallback;
+            if ($fallback === null || !$this->routeAvailable($fallback)) return;
+            $restored[] = [
+                'name' => $fallback,
+                'id' => $this->nextId++,
+                'routeId' => $this->resolveRouteId($fallback, []),
+                'params' => [],
             ];
         }
         $this->stack = $restored;
@@ -610,14 +795,20 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function saveState(): array
     {
         $stack = array_map(
-            static fn (array $entry): array => [
+            function (array $entry): array {
+                $saved = [
                 'name' => $entry['name'],
+                'id' => $entry['routeId'],
                 'params' => $entry['params'],
-            ],
+                ];
+                $instance = $this->routeInstances[$this->entryKey($entry)] ?? null;
+                if ($instance instanceof Restorable) $saved['state'] = $instance->saveState();
+                return $saved;
+            },
             $this->stack,
         );
         return [
-            'version' => 3,
+            'version' => 4,
             'stack' => $stack,
             'checksum' => self::stateChecksum($stack),
         ];
@@ -641,6 +832,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             return $renderable;
         }
         $renderable = $this->createRoute($entry);
+        $pendingState = $this->pendingChildState[$key] ?? null;
+        if ($pendingState !== null && $renderable instanceof Restorable) {
+            $renderable->restoreState($pendingState);
+            unset($this->pendingChildState[$key]);
+        }
         $this->routeInstances[$key] = $renderable;
         $this->observeChildNavigator($key, $renderable);
         $this->notifyRouteFocused($entry, $renderable);
@@ -660,9 +856,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     /** @param array{name: string, id: int, params: array<string, string|int|float|bool|null>} $entry */
     private function decorateRoute(array $entry): Renderable
     {
-        $options = $this->dynamicOptions[$this->entryKey($entry)]
-            ?? $this->screenOptions[$entry['name']]
-            ?? new ScreenOptions();
+        $options = $this->resolvedOptions($entry);
         return new NavigationScreen(
             $this->renderRoute($entry),
             $options,
@@ -682,6 +876,67 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private function entryKey(array $entry): string
     {
         return $entry['name'].'-'.$entry['id'];
+    }
+
+    /** @param array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>} $entry */
+    private function resolvedOptions(array $entry): ScreenOptions
+    {
+        $resolved = new ScreenOptions();
+        if ($this->defaultOptions !== null) {
+            $resolved = $this->applyOptionLayer($this->defaultOptions, $entry, $resolved);
+        }
+        foreach ($this->optionGroups as $group) {
+            if (in_array($entry['name'], $group['routes'], true)) {
+                $resolved = $this->applyOptionLayer($group['options'], $entry, $resolved);
+            }
+        }
+        $route = $this->screenOptions[$entry['name']] ?? null;
+        if ($route !== null) $resolved = $this->applyOptionLayer($route, $entry, $resolved);
+        $dynamic = $this->dynamicOptions[$this->entryKey($entry)] ?? null;
+        if ($dynamic !== null) {
+            $resolved = $this->applyOptionLayer($dynamic, $entry, $resolved);
+        }
+        return $resolved;
+    }
+
+    /** @param array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>} $entry */
+    private function applyOptionLayer(
+        ScreenOptions|ScreenOptionsPatch|Closure $layer,
+        array $entry,
+        ScreenOptions $inherited,
+    ): ScreenOptions {
+        if ($layer instanceof Closure) {
+            $reflection = new ReflectionFunction($layer);
+            $layer = match ($reflection->getNumberOfParameters()) {
+                0 => $layer(),
+                1 => $layer($this->contextFor($entry)),
+                default => $layer($this->contextFor($entry), $inherited),
+            };
+        }
+        if ($layer instanceof ScreenOptionsPatch) return $layer->apply($inherited);
+        if ($layer instanceof ScreenOptions) return $layer;
+        throw new InvalidArgumentException(
+            'Screen option resolvers must return ScreenOptions or ScreenOptionsPatch.',
+        );
+    }
+
+    /** @param array<string, string|int|float|bool|null> $params */
+    private function resolveRouteId(string $route, array $params): ?string
+    {
+        $resolver = $this->routeIds[$route] ?? null;
+        if ($resolver === null) return null;
+        $reflection = new ReflectionFunction($resolver);
+        $resolved = $reflection->getNumberOfParameters() === 0
+            ? $resolver()
+            : $resolver(new RouteContext($route, $params));
+        if (!is_string($resolved) && !is_int($resolved)) {
+            throw new InvalidArgumentException('Route identity resolvers must return a bounded string or integer.');
+        }
+        $identity = (string) $resolved;
+        if ($identity === '' || strlen($identity) > 256) {
+            throw new InvalidArgumentException('Route identities must contain between 1 and 256 bytes.');
+        }
+        return $identity;
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
@@ -740,7 +995,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($this->outgoing !== null) $retained[$this->entryKey($this->outgoing)] = true;
         foreach (array_keys($this->routeInstances) as $key) {
             if (!isset($retained[$key])) {
-                unset($this->routeInstances[$key], $this->childSubscriptions[$key]);
+                unset(
+                    $this->routeInstances[$key],
+                    $this->childSubscriptions[$key],
+                    $this->pendingChildState[$key],
+                    $this->dynamicOptions[$key],
+                );
             }
         }
     }
@@ -761,9 +1021,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private function dispatchRoute(NavigationAction $action, Closure $operation): bool
     {
         if ($action->route === null || !isset($this->routes[$action->route])) {
-            $this->emitNavigation(NavigationEventType::UnhandledAction, ['action' => $action->toArray()]);
             return false;
         }
+        if (!$this->routeAvailable($action->route, $action->params)) return false;
         $operation();
         return true;
     }
@@ -772,6 +1032,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     {
         $instance = $this->routeInstances[$this->entryKey($this->currentEntry())] ?? null;
         return $instance instanceof NavigationBackHandler ? $instance : null;
+    }
+
+    private function activeChildActionHandler(): ?NavigationActionHandler
+    {
+        $entry = $this->currentEntry();
+        $instance = $this->routeInstances[$this->entryKey($entry)] ?? $this->renderRoute($entry);
+        return $instance instanceof NavigationActionHandler ? $instance : null;
     }
 
     private function notifyRouteFocused(array $entry, Renderable $instance): void
@@ -794,7 +1061,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $instance->navigationRemoved($this->contextFor($entry));
         }
         if (!array_any($this->stack, fn (array $candidate): bool => $this->entryKey($candidate) === $key)) {
-            unset($this->routeInstances[$key], $this->childSubscriptions[$key]);
+            unset(
+                $this->routeInstances[$key],
+                $this->childSubscriptions[$key],
+                $this->pendingChildState[$key],
+                $this->dynamicOptions[$key],
+            );
         }
         $this->outgoing = null;
     }

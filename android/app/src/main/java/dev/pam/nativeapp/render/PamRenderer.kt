@@ -20,6 +20,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.util.DisplayMetrics
 import android.os.Handler
 import android.os.Looper
 import android.text.Editable
@@ -238,6 +239,7 @@ class PamRenderer(
     private var nextMountOrder = 1L
     private var statusBarDefaults: StatusBarConfig? = null
     private var statusBarColorAnimator: ValueAnimator? = null
+    private var lastFocusedInput: EditText? = null
 
     fun onHostPause() {
         for (index in 0 until views.size()) {
@@ -593,6 +595,8 @@ class PamRenderer(
             NodeKind.WEB_VIEW -> PamWebView(context)
             NodeKind.MEDIA -> PamMediaView(context, mediaCache)
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
+            NodeKind.TAB_HOST -> PamTabHost(context)
+            NodeKind.CANVAS -> PamVectorCanvas(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
                 val name = custom.properties[PropKey.HOST_NAME]?.text(PropKey.HOST_NAME)
@@ -841,7 +845,9 @@ class PamRenderer(
         (view as? PamWebView)?.destroy()
         view.let(nativeViews::release)
         clearHitSlop(view)
-        (view.parent as? ViewGroup)?.removeView(view)
+        val navigationParent = views[state.parent] as? PamNavigationHost
+        if (navigationParent != null) navigationParent.removeRoute(view)
+        else (view.parent as? ViewGroup)?.removeView(view)
         views.remove(id)
     }
 
@@ -855,6 +861,7 @@ class PamRenderer(
             is PamRefreshContainer -> parent.insert(view, index)
             is PamDrawerLayout -> parent.insert(view, index)
             is PamNavigationHost -> parent.insert(view, index)
+            is PamTabHost -> parent.insertScene(view, index)
             is PamModalHost -> parent.insert(view, index)
             is PamScrollContainer -> parent.insert(view)
             else -> {
@@ -1327,6 +1334,8 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text(key)
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text(key)
             PropKey.TEST_ID -> view.transitionName = value.text(key)
+            PropKey.SHARED_TRANSITION_TAG ->
+                view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_tag, value.text(key))
             PropKey.ITEMS -> applyStringList(view, state, value)
             PropKey.SECTION_ITEMS -> applySectionList(view, state, value)
             PropKey.NAVIGATION_OPERATION ->
@@ -1338,8 +1347,47 @@ class PamRenderer(
             PropKey.NAVIGATION_ORIENTATION ->
                 (view as? PamNavigationHost)?.navigationOrientation = value.integer().toInt()
             PropKey.NAVIGATION_AUTO_HIDE_HOME_INDICATOR -> Unit
+            PropKey.NAVIGATION_TITLE ->
+                (view as? PamNavigationHost)?.screenTitle = value.text(key)
+            PropKey.NAVIGATION_HEADER_SHOWN ->
+                (view as? PamNavigationHost)?.headerShown = value.flag()
+            PropKey.NAVIGATION_HEADER_TRANSPARENT ->
+                (view as? PamNavigationHost)?.headerTransparent = value.flag()
+            PropKey.NAVIGATION_HEADER_BACKGROUND_COLOR ->
+                (view as? PamNavigationHost)?.headerBackgroundColor = value.integer().toInt()
+            PropKey.NAVIGATION_HEADER_TINT_COLOR ->
+                (view as? PamNavigationHost)?.headerTintColor = value.integer().toInt()
+            PropKey.NAVIGATION_HEADER_SHADOW_VISIBLE ->
+                (view as? PamNavigationHost)?.headerShadowVisible = value.flag()
+            PropKey.NAVIGATION_HEADER_SEARCH_ENABLED,
+            PropKey.NAVIGATION_HEADER_SEARCH_PLACEHOLDER,
+            -> configureNavigationChrome(view, state)
+            PropKey.NAVIGATION_HEADER_LARGE_TITLE_ENABLED,
+            PropKey.NAVIGATION_GESTURE_DIRECTION,
+            PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED,
+            PropKey.NAVIGATION_FREEZE_ON_BLUR,
+            PropKey.NAVIGATION_SHEET_GRABBER_VISIBLE,
+            PropKey.NAVIGATION_SHEET_EXPANDS_WHEN_SCROLLED_TO_EDGE,
+            -> Unit
+            PropKey.NAVIGATION_PRESENTATION,
+            PropKey.NAVIGATION_SHEET_DETENTS,
+            PropKey.NAVIGATION_SHEET_INITIAL_DETENT_INDEX,
+            PropKey.NAVIGATION_SHEET_CORNER_RADIUS,
+            -> configureNavigationPresentation(view, state)
             PropKey.NAVIGATION_REVISION ->
                 (view as? PamNavigationHost)?.navigate(value.integer())
+            PropKey.TAB_ITEMS,
+            PropKey.TAB_SELECTED_INDEX,
+            PropKey.TAB_POSITION,
+            PropKey.TAB_ACTIVE_COLOR,
+            PropKey.TAB_INACTIVE_COLOR,
+            PropKey.TAB_BACKGROUND_COLOR,
+            PropKey.TAB_INDICATOR_COLOR,
+            PropKey.TAB_SWIPE_ENABLED,
+            PropKey.TAB_SCROLL_ENABLED,
+            -> configureTabHost(view, state)
+            PropKey.CANVAS_COMMANDS ->
+                (view as? PamVectorCanvas)?.setCommands(value.text(PropKey.CANVAS_COMMANDS))
             PropKey.NAVIGATION_GESTURE_ENABLED,
             PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
             PropKey.NAVIGATION_GESTURE_THRESHOLD,
@@ -2157,6 +2205,8 @@ class PamRenderer(
             PropKey.SAFE_AREA_MODE,
             -> applySafeAreaLayout(view, state)
             PropKey.TEST_ID -> view.transitionName = null
+            PropKey.SHARED_TRANSITION_TAG ->
+                view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_tag, null)
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
             -> (view as? PamRecyclerList)?.setItems(null)
@@ -2869,6 +2919,8 @@ class PamRenderer(
             enabled = state.flag(PropKey.NAVIGATION_GESTURE_ENABLED, true),
             edgeWidth = state.number(PropKey.NAVIGATION_GESTURE_EDGE_WIDTH, 24.0).toFloat(),
             threshold = state.number(PropKey.NAVIGATION_GESTURE_THRESHOLD, 0.35).toFloat(),
+            direction = state.integer(PropKey.NAVIGATION_GESTURE_DIRECTION, 1).toInt(),
+            fullScreen = state.flag(PropKey.NAVIGATION_FULL_SCREEN_GESTURE_ENABLED, false),
             onPop = state.callback(PropKey.ON_NAVIGATION_GESTURE_POP) {
                 dispatch(state.id, EventKind.NAVIGATION_GESTURE_POP.value)
             },
@@ -2885,6 +2937,47 @@ class PamRenderer(
                 dispatch(state.id, EventKind.GESTURE_CANCEL.value)
             },
         )
+    }
+
+    private fun configureNavigationChrome(view: View, state: NodeState) {
+        val navigation = view as? PamNavigationHost ?: return
+        navigation.headerSearchEnabled = state.flag(PropKey.NAVIGATION_HEADER_SEARCH_ENABLED, false)
+        navigation.headerSearchPlaceholder = state.textOrNull(PropKey.NAVIGATION_HEADER_SEARCH_PLACEHOLDER) ?: "Search"
+        navigation.onSearchChange = if (state.properties[PropKey.ON_CHANGE] != null) {
+            { text -> dispatch(state.id, EventKind.CHANGE.value, text) }
+        } else null
+    }
+
+    private fun configureNavigationPresentation(view: View, state: NodeState) {
+        val navigation = view as? PamNavigationHost ?: return
+        navigation.screenPresentation = state.integer(PropKey.NAVIGATION_PRESENTATION, 1).toInt()
+        navigation.sheetDetents = state.textOrNull(PropKey.NAVIGATION_SHEET_DETENTS)
+            ?.split(',')
+            ?.mapNotNull(String::toFloatOrNull)
+            ?.take(3)
+            .orEmpty()
+        navigation.sheetInitialDetentIndex = state.integer(
+            PropKey.NAVIGATION_SHEET_INITIAL_DETENT_INDEX,
+            1,
+        ).toInt()
+        navigation.sheetCornerRadius = state.number(PropKey.NAVIGATION_SHEET_CORNER_RADIUS, 0.0).toFloat()
+    }
+
+    private fun configureTabHost(view: View, state: NodeState) {
+        val tabs = view as? PamTabHost ?: return
+        tabs.configure(
+            encodedItems = state.textOrNull(PropKey.TAB_ITEMS) ?: "[]",
+            selectedIndex = state.integer(PropKey.TAB_SELECTED_INDEX, 1).toInt(),
+            position = state.integer(PropKey.TAB_POSITION, 1).toInt(),
+            activeColor = state.integer(PropKey.TAB_ACTIVE_COLOR, 0xFF000000).toInt(),
+            inactiveColor = state.integer(PropKey.TAB_INACTIVE_COLOR, 0xFF777777).toInt(),
+            barColor = state.integer(PropKey.TAB_BACKGROUND_COLOR, 0xFFFFFFFF).toInt(),
+            indicatorColor = state.integer(PropKey.TAB_INDICATOR_COLOR, 0xFF000000).toInt(),
+            swipeEnabled = state.flag(PropKey.TAB_SWIPE_ENABLED, false),
+        )
+        tabs.onSelect = if (state.properties[PropKey.ON_CHANGE] != null) {
+            { index -> dispatch(state.id, EventKind.CHANGE.value, index.toString()) }
+        } else null
     }
 
     private fun configureKeyframeAnimation(view: View, state: NodeState) {
@@ -3361,6 +3454,7 @@ class PamRenderer(
                 override fun afterTextChanged(editable: Editable?) {
                     if (state.updating) return
                     state.nativeValue = editable?.toString().orEmpty()
+                    state.nativeValueAcknowledged = false
                     if (state.properties[PropKey.ON_CHANGE] == null) return
                     when (state.inputSyncMode()) {
                         INPUT_SYNC_IMMEDIATE -> dispatchInput(state)
@@ -3376,6 +3470,7 @@ class PamRenderer(
         }
         input.onFocusChangeListener = View.OnFocusChangeListener { _, focused ->
             if (focused) {
+                lastFocusedInput = input
                 if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)
             } else {
                 if (state.inputSyncMode() == INPUT_SYNC_NATIVE || state.inputSyncMode() == INPUT_SYNC_BLUR) {
@@ -3657,15 +3752,20 @@ class PamRenderer(
         if (
             input.hasFocus() &&
             state.inputSyncMode() != INPUT_SYNC_IMMEDIATE &&
-            next != state.nativeValue
+            next != state.nativeValue &&
+            !state.nativeValueAcknowledged
         ) {
             return
         }
-        if (input.text.toString() == next) return
+        if (input.text.toString() == next) {
+            state.nativeValueAcknowledged = true
+            return
+        }
         state.updating = true
         input.setText(next)
         input.setSelection(input.text.length)
         state.nativeValue = next
+        state.nativeValueAcknowledged = true
         state.updating = false
     }
 
@@ -4396,13 +4496,18 @@ class PamRenderer(
     }
 
     private fun withStableRootInsets(current: SafeAreaInsets): SafeAreaInsets {
-        val stable = (activity() as? PamActivity)?.rootHost?.stableSafeAreaInsets
+        val rootHost = (activity() as? PamActivity)?.rootHost
             ?: return current
+        val stable = rootHost.stableSafeAreaInsets
         return SafeAreaInsets(
             left = max(current.left, stable.left),
             top = max(current.top, stable.top),
             right = max(current.right, stable.right),
-            bottom = max(current.bottom, stable.bottom),
+            bottom = if (rootHost.consumesBottomSystemInset) {
+                0
+            } else {
+                max(current.bottom, stable.bottom)
+            },
         )
     }
 
@@ -4515,7 +4620,7 @@ class PamRenderer(
                     currentHeight = height,
                     minimumKeyboardHeight = dp(80f),
                 )
-                applyKeyboardAvoidance(view, state)
+                if (!state.keyboardAnimating) applyKeyboardAvoidance(view, state)
             }
         }
         state.keyboardLayoutListener = layoutListener
@@ -4523,7 +4628,7 @@ class PamRenderer(
         host.setOnApplyWindowInsetsListener { _, insets ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 state.keyboardInset = insets.getInsets(WindowInsets.Type.ime()).bottom
-                applyKeyboardAvoidance(view, state)
+                if (!state.keyboardAnimating) applyKeyboardAvoidance(view, state)
             }
             insets
         }
@@ -4532,13 +4637,27 @@ class PamRenderer(
                 object : WindowInsetsAnimation.Callback(
                     WindowInsetsAnimation.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE,
                 ) {
+                    override fun onPrepare(animation: WindowInsetsAnimation) {
+                        if (animation.typeMask and WindowInsets.Type.ime() != 0) {
+                            state.keyboardAnimating = true
+                        }
+                    }
+
                     override fun onProgress(
                         insets: WindowInsets,
                         runningAnimations: MutableList<WindowInsetsAnimation>,
                     ): WindowInsets {
-                        state.keyboardInset = insets.getInsets(WindowInsets.Type.ime()).bottom
-                        applyKeyboardAvoidance(view, state)
+                        val nextInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+                        state.keyboardInset = nextInset
                         return insets
+                    }
+
+                    override fun onEnd(animation: WindowInsetsAnimation) {
+                        if (animation.typeMask and WindowInsets.Type.ime() != 0) {
+                            state.keyboardAnimating = false
+                            applyKeyboardAvoidance(view, state)
+                            view.post { restoreKeyboardAvoidingInput(state) }
+                        }
                     }
                 },
             )
@@ -4552,22 +4671,40 @@ class PamRenderer(
             state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat(),
         )
         val keyboard = if (enabled) {
-            max(0, state.keyboardInset + offset)
+            keyboardOverlap(view, state.keyboardInset, offset)
         } else {
             0
+        }
+        if (keyboard > 0) {
+            ((host.findFocus() as? EditText) ?: lastFocusedInput)
+                ?.let { state.keyboardFocusedInput = it }
+        } else {
+            state.keyboardFocusedInput = null
+            if (lastFocusedInput?.hasFocus() != true) lastFocusedInput = null
         }
         when (state.keyboardBehavior) {
             KEYBOARD_PAN -> {
                 view.translationY = -keyboard.toFloat()
                 view.setPadding(0, 0, 0, 0)
+                // A panning container may extend into a system-inset region even
+                // while the IME is closed. Keep its interactive descendants in
+                // the geometry-aware dispatcher so the first input tap is not
+                // clipped by an ancestor's pre-inset bounds.
+                updateTranslatedTouchTarget(
+                    view,
+                    enabled,
+                    includePressables = keyboard > 0,
+                )
             }
             KEYBOARD_PADDING -> {
                 view.translationY = 0f
                 view.setPadding(0, 0, 0, 0)
+                updateTranslatedTouchTarget(view, false)
             }
             else -> {
                 view.translationY = 0f
                 view.setPadding(0, 0, 0, 0)
+                updateTranslatedTouchTarget(view, false)
             }
         }
         val scroll = when (state.keyboardBehavior) {
@@ -4587,6 +4724,85 @@ class PamRenderer(
         scroll?.second?.setKeyboardAvoidanceInset(
             keyboard,
         )
+        if (keyboard > 0) {
+            view.post { restoreKeyboardAvoidingInput(state) }
+        }
+    }
+
+    private fun keyboardOverlap(view: View, keyboardInset: Int, offset: Int): Int {
+        if (keyboardInset <= 0) return 0
+        val root = (activity() as? PamActivity)?.rootHost ?: host
+        val rootLocation = IntArray(2)
+        val viewLocation = IntArray(2)
+        root.getLocationOnScreen(rootLocation)
+        view.getLocationOnScreen(viewLocation)
+        val originalBottom = viewLocation[1] - view.translationY + view.height
+        val pamActivity = activity() as? PamActivity
+        val windowBottom = if (pamActivity != null && !pamActivity.isInMultiWindowMode) {
+            @Suppress("DEPRECATION")
+            val metrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            pamActivity.windowManager.defaultDisplay.getRealMetrics(metrics)
+            metrics.heightPixels
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && pamActivity != null) {
+            val metrics = if (pamActivity.isInMultiWindowMode) {
+                pamActivity.window.windowManager.currentWindowMetrics
+            } else {
+                pamActivity.window.windowManager.maximumWindowMetrics
+            }
+            metrics.bounds.bottom
+        } else {
+            rootLocation[1] + root.height +
+                ((root as? PamRootHost)?.stableSafeAreaInsets?.bottom ?: 0)
+        }
+        val safe = (root as? PamRootHost)?.stableSafeAreaInsets
+        val effectiveInset = (keyboardInset - (safe?.top ?: 0))
+            .coerceAtLeast(0)
+        val keyboardTop = windowBottom - effectiveInset
+        return max(0, (originalBottom - keyboardTop + offset).toInt())
+    }
+
+    private fun updateTranslatedTouchTarget(
+        view: View,
+        translated: Boolean,
+        includePressables: Boolean = true,
+    ) {
+        (activity() as? PamActivity)?.rootHost?.replaceTranslatedTouchTargets(
+            view,
+            translated,
+            includePressables,
+        )
+        val delegateHost = host
+        val existing = delegateHost.touchDelegate as? PamTouchDelegateGroup
+        if (!translated) {
+            existing?.remove(view)
+            if (existing?.isEmpty() == true) delegateHost.touchDelegate = null
+            return
+        }
+        delegateHost.post {
+            if (!view.isAttachedToWindow) return@post
+            val hostLocation = IntArray(2)
+            val viewLocation = IntArray(2)
+            delegateHost.getLocationOnScreen(hostLocation)
+            view.getLocationOnScreen(viewLocation)
+            val left = viewLocation[0] - hostLocation[0]
+            val top = viewLocation[1] - hostLocation[1]
+            val bounds = Rect(left, top, left + view.width, top + view.height)
+            val group = delegateHost.touchDelegate as? PamTouchDelegateGroup
+                ?: PamTouchDelegateGroup(delegateHost).also {
+                    delegateHost.touchDelegate = it
+                }
+            group.updateTranslated(view, bounds)
+        }
+    }
+
+    private fun restoreKeyboardAvoidingInput(state: NodeState) {
+        if (state.keyboardInset <= 0) return
+        val input = state.keyboardFocusedInput ?: return
+        if (!input.isAttachedToWindow) return
+        if (!input.hasFocus()) input.requestFocus()
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
     }
 
     private fun containedScrollContainer(
@@ -5496,6 +5712,7 @@ class PamRenderer(
         var textWatcherInstalled: Boolean = false,
         var pendingChange: Runnable? = null,
         var nativeValue: String = "",
+        var nativeValueAcknowledged: Boolean = true,
         var baseText: String = "",
         var pressOpacity: Float = 0.72f,
         var scrollScheduled: Boolean = false,
@@ -5508,9 +5725,11 @@ class PamRenderer(
         var safeAreaRightInset: Int = 0,
         var safeAreaBottomInset: Int = 0,
         var keyboardInset: Int = 0,
+        var keyboardAnimating: Boolean = false,
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
         var keyboardAvoidingScrollId: Long = 0L,
+        var keyboardFocusedInput: EditText? = null,
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var keyframeAnimator: ValueAnimator? = null,

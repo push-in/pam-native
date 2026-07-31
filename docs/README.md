@@ -17,12 +17,15 @@ short end-to-end recipes.
 | Bottom sheets | [Bottom Sheet](bottom-sheet.md) |
 | Image, video and audio cache | [Native media cache](media-cache.md) |
 | Scheduler, compiler fast paths, profiling and recovery | [Runtime performance](runtime-performance.md) |
+| Typed IDL, Suspense, worklets, jobs, offline sync, Canvas and server-driven UI | [Platform runtime](platform-runtime.md) |
 | Native navigation | [Navigation](navigation.md) |
 | Navigation Core 2 architecture, actions, lifecycle and top tabs | [Navigation Core 2](navigation-core-2.md) |
+| React Navigation native-mobile parity across all 17 delivery blocks | [Navigation parity matrix](navigation-parity.md) |
 | Components and tags reference | [Components](components.md) |
 | Debug overlay and diagnostics | [DevTools](devtools.md) |
 | Native/community plugins | [Plugins](plugins.md) |
 | Release process | [Releasing](releasing.md) |
+| Migrating from 0.5 to 0.6 | [Migration guide](migration-0.6.md) |
 
 Examples use integer-backed enums for every coded status, type, state and
 priority. Imports are shown in the cookbook where they materially clarify a

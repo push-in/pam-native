@@ -250,7 +250,11 @@ public final class PamRenderer {
 
         if let view = views[id] {
             nativeViews.release(view: view)
-            view.removeFromSuperview()
+            if let navigation = views[state.parent] as? PamNavigationHost {
+                navigation.removeRoute(view)
+            } else {
+                view.removeFromSuperview()
+            }
         }
 
         removeChild(from: state.parent, child: id)
@@ -498,6 +502,10 @@ public final class PamRenderer {
             navigation.insert(view, index: index)
             return
         }
+        if let tabs = parent as? PamTabHost {
+            tabs.insertScene(view, index: index)
+            return
+        }
         if let modal = parent as? PamModalHost {
             modal.insert(view, index: index)
             return
@@ -587,6 +595,10 @@ public final class PamRenderer {
             return PamMediaView()
         case .drawingCanvas:
             return PamDrawingCanvas()
+        case .tabHost:
+            return PamTabHost()
+        case .canvas:
+            return PamVectorCanvas()
         case .refreshControl:
             return PamRefreshContainer()
         case .customView:
@@ -812,7 +824,10 @@ public final class PamRenderer {
 
         let hasScroll = eventProperties.contains(PamConstants.onScroll)
         let hasEndReached = eventProperties.contains(PamConstants.onEndReached)
-        if (hasScroll || hasEndReached), let scroll = view as? UIScrollView {
+        let hasNativePaging =
+            state.properties[PamConstants.scrollPagingEnabled]?.boolOrNil() == true ||
+            (state.properties[PamConstants.scrollSnapInterval]?.decimalOrNil() ?? 0) > 0
+        if (hasScroll || hasEndReached || hasNativePaging), let scroll = view as? UIScrollView {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.scroll.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachScrollEvents(
                 scroll,
@@ -829,6 +844,9 @@ public final class PamRenderer {
             }
             if hasEndReached {
                 eventBridges[nodeId]?[EventKind.endReached.rawValue] = bridge
+            }
+            if hasNativePaging {
+                eventBridges[nodeId]?[PamConstants.scrollPagingEnabled] = bridge
             }
         }
 
@@ -1289,6 +1307,8 @@ public final class PamRenderer {
             applyAccessibility(view: view, state: nodes[nodeId])
         case PamConstants.testId:
             view.accessibilityIdentifier = value.textOrNil()
+        case PamConstants.sharedTransitionTag:
+            view.layer.setValue(value.textOrNil(), forKey: "pamSharedTransitionTag")
         case PamConstants.textColor:
             if let color = value.integerOrNil() {
                 if let label = view as? UILabel {
@@ -1329,8 +1349,44 @@ public final class PamRenderer {
             (view as? PamNavigationHost)?.navigationOrientation = Int(value.integerOrNil() ?? 1)
         case PamConstants.navigationAutoHideHomeIndicator:
             (view as? PamNavigationHost)?.autoHideHomeIndicator = value.boolOrNil() ?? false
+        case PamConstants.navigationTitle:
+            (view as? PamNavigationHost)?.screenTitle = value.textOrNil() ?? ""
+        case PamConstants.navigationHeaderShown:
+            (view as? PamNavigationHost)?.headerShown = value.boolOrNil() ?? false
+        case PamConstants.navigationHeaderTransparent:
+            (view as? PamNavigationHost)?.headerTransparent = value.boolOrNil() ?? false
+        case PamConstants.navigationHeaderBackgroundColor:
+            (view as? PamNavigationHost)?.headerBackgroundColor = value.integerOrNil().map(UIColor.init(argb:))
+        case PamConstants.navigationHeaderTintColor:
+            (view as? PamNavigationHost)?.headerTintColor = value.integerOrNil().map(UIColor.init(argb:))
+        case PamConstants.navigationHeaderShadowVisible:
+            (view as? PamNavigationHost)?.headerShadowVisible = value.boolOrNil() ?? true
+        case PamConstants.navigationHeaderLargeTitleEnabled:
+            (view as? PamNavigationHost)?.headerLargeTitleEnabled = value.boolOrNil() ?? false
+        case PamConstants.navigationHeaderSearchEnabled,
+             PamConstants.navigationHeaderSearchPlaceholder:
+            configureNavigationChrome(nodeId: nodeId, view: view)
+        case PamConstants.navigationPresentation,
+             PamConstants.navigationSheetDetents,
+             PamConstants.navigationSheetInitialDetentIndex,
+             PamConstants.navigationSheetGrabberVisible,
+             PamConstants.navigationSheetCornerRadius,
+             PamConstants.navigationSheetExpandsWhenScrolledToEdge:
+            configureNavigationPresentation(nodeId: nodeId, view: view)
         case PamConstants.navigationRevision:
             (view as? PamNavigationHost)?.navigate(value.integerOrNil() ?? 0)
+        case PamConstants.tabItems,
+             PamConstants.tabSelectedIndex,
+             PamConstants.tabPosition,
+             PamConstants.tabActiveColor,
+             PamConstants.tabInactiveColor,
+             PamConstants.tabBackgroundColor,
+             PamConstants.tabIndicatorColor,
+             PamConstants.tabSwipeEnabled,
+             PamConstants.tabScrollEnabled:
+            configureTabHost(nodeId: nodeId, view: view)
+        case PamConstants.canvasCommands:
+            (view as? PamVectorCanvas)?.setCommands(value.textOrNil() ?? "[]")
         case PamConstants.navigationGestureEnabled,
              PamConstants.navigationGestureEdgeWidth,
              PamConstants.navigationGestureThreshold:
@@ -1451,6 +1507,16 @@ public final class PamRenderer {
         case PamConstants.scrollHorizontal:
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: value.boolOrNil() ?? false)
+            }
+        case PamConstants.scrollPagingEnabled:
+            (view as? PamAnchoredScrollView)?.pamPagingEnabled = value.boolOrNil() ?? false
+        case PamConstants.scrollSnapInterval:
+            (view as? PamAnchoredScrollView)?.pamSnapInterval =
+                max(0, CGFloat(value.decimalOrZero()))
+        case PamConstants.scrollDecelerationRate:
+            if let scroll = view as? UIScrollView {
+                let rate = min(max(value.decimalOrZero(), 0.8), 0.999)
+                scroll.decelerationRate = UIScrollView.DecelerationRate(rawValue: CGFloat(rate))
             }
         case PamConstants.scrollAnchorToEnd:
             (view as? PamAnchoredScrollView)?.anchorToEnd = value.boolOrNil() ?? false
@@ -1599,6 +1665,8 @@ public final class PamRenderer {
             } else {
                 view.isHidden = false
             }
+        case PamConstants.sharedTransitionTag:
+            view.layer.setValue(nil, forKey: "pamSharedTransitionTag")
         case PamConstants.navigationOperation:
             (view as? PamNavigationHost)?.operation = 1
         case PamConstants.navigationTransition:
@@ -1710,6 +1778,12 @@ public final class PamRenderer {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: false)
             }
+        case PamConstants.scrollPagingEnabled:
+            (view as? PamAnchoredScrollView)?.pamPagingEnabled = false
+        case PamConstants.scrollSnapInterval:
+            (view as? PamAnchoredScrollView)?.pamSnapInterval = 0
+        case PamConstants.scrollDecelerationRate:
+            (view as? UIScrollView)?.decelerationRate = .normal
         case PamConstants.scrollAnchorToEnd:
             (view as? PamAnchoredScrollView)?.anchorToEnd = false
         case PamConstants.scrollMaintainVisibleContentPosition:
@@ -2144,6 +2218,8 @@ public final class PamRenderer {
             threshold: CGFloat(
                 state.properties[PamConstants.navigationGestureThreshold]?.decimalOrNil() ?? 0.35
             ),
+            direction: Int(state.properties[PamConstants.navigationGestureDirection]?.integerOrNil() ?? 1),
+            fullScreen: state.properties[PamConstants.navigationFullScreenGestureEnabled]?.boolOrNil() ?? false,
             onPop: state.properties[PamConstants.onNavigationGesturePop] != nil ? {
                 [weak self] in
                 self?.dispatchEvent(
@@ -2169,6 +2245,47 @@ public final class PamRenderer {
                 self?.dispatchEvent(nodeId, EventKind.gestureCancel.rawValue, Data())
             } : nil
         )
+    }
+
+    private func configureNavigationChrome(nodeId: Int64, view: UIView) {
+        guard let navigation = view as? PamNavigationHost,
+              let state = nodes[nodeId] else { return }
+        navigation.headerSearchEnabled = state.properties[PamConstants.navigationHeaderSearchEnabled]?.boolOrNil() ?? false
+        navigation.headerSearchPlaceholder = state.properties[PamConstants.navigationHeaderSearchPlaceholder]?.textOrNil() ?? "Search"
+        navigation.onSearchChange = state.properties[PamConstants.onChange] != nil ? { [weak self] text in
+            self?.dispatchEvent(nodeId, EventKind.change.rawValue, Data(text.utf8))
+        } : nil
+    }
+
+    private func configureNavigationPresentation(nodeId: Int64, view: UIView) {
+        guard let navigation = view as? PamNavigationHost,
+              let state = nodes[nodeId] else { return }
+        navigation.screenPresentation = Int(state.properties[PamConstants.navigationPresentation]?.integerOrNil() ?? 1)
+        navigation.sheetDetents = (state.properties[PamConstants.navigationSheetDetents]?.textOrNil() ?? "1")
+            .split(separator: ",")
+            .compactMap { Double($0) }
+            .map { CGFloat($0) }
+        navigation.sheetInitialDetentIndex = Int(state.properties[PamConstants.navigationSheetInitialDetentIndex]?.integerOrNil() ?? 1)
+        navigation.sheetGrabberVisible = state.properties[PamConstants.navigationSheetGrabberVisible]?.boolOrNil() ?? false
+        navigation.sheetCornerRadius = CGFloat(state.properties[PamConstants.navigationSheetCornerRadius]?.decimalOrNil() ?? 0)
+        navigation.sheetExpandsWhenScrolledToEdge = state.properties[PamConstants.navigationSheetExpandsWhenScrolledToEdge]?.boolOrNil() ?? true
+    }
+
+    private func configureTabHost(nodeId: Int64, view: UIView) {
+        guard let tabs = view as? PamTabHost, let state = nodes[nodeId] else { return }
+        tabs.configure(
+            encodedItems: state.properties[PamConstants.tabItems]?.textOrNil() ?? "[]",
+            selectedIndex: Int(state.properties[PamConstants.tabSelectedIndex]?.integerOrNil() ?? 1),
+            position: Int(state.properties[PamConstants.tabPosition]?.integerOrNil() ?? 1),
+            activeColor: UIColor(argb: state.properties[PamConstants.tabActiveColor]?.integerOrNil() ?? 0xFF000000),
+            inactiveColor: UIColor(argb: state.properties[PamConstants.tabInactiveColor]?.integerOrNil() ?? 0xFF777777),
+            barColor: UIColor(argb: state.properties[PamConstants.tabBackgroundColor]?.integerOrNil() ?? 0xFFFFFFFF),
+            indicatorColor: UIColor(argb: state.properties[PamConstants.tabIndicatorColor]?.integerOrNil() ?? 0xFF000000),
+            swipeEnabled: state.properties[PamConstants.tabSwipeEnabled]?.boolOrNil() ?? false
+        )
+        tabs.onSelect = state.properties[PamConstants.onChange] != nil ? { [weak self] index in
+            self?.dispatchEvent(nodeId, EventKind.change.rawValue, Data(String(index).utf8))
+        } : nil
     }
 
     private func configureKeyframeAnimation(nodeId: Int64, view: UIView) {
@@ -3003,6 +3120,7 @@ public final class PamRenderer {
         private var nativeGestureMinimumScale: CGFloat = 1
         private var nativeGestureMaximumScale: CGFloat = 4
         private var nativeGestureBaseTransform = CGAffineTransform.identity
+        private var scrollGestureStart: CGFloat = 0
 
         init(nodeId: Int64, kind: Int, dispatchEvent: @escaping (Int64, Int, Data) -> Void) {
             self.nodeId = nodeId
@@ -3896,6 +4014,41 @@ public final class PamRenderer {
                     EventKind.scroll.rawValue,
                     self.scrollOffset,
                 )
+            }
+        }
+
+        func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            guard let scroll = scrollView as? PamAnchoredScrollView else { return }
+            scrollGestureStart = scroll.horizontal
+                ? scroll.contentOffset.x
+                : scroll.contentOffset.y
+        }
+
+        func scrollViewWillEndDragging(
+            _ scrollView: UIScrollView,
+            withVelocity velocity: CGPoint,
+            targetContentOffset: UnsafeMutablePointer<CGPoint>
+        ) {
+            guard let scroll = scrollView as? PamAnchoredScrollView else { return }
+            let extent = scroll.primaryPageExtent
+            guard extent > 0 else { return }
+            let horizontal = scroll.horizontal
+            let position = horizontal ? scroll.contentOffset.x : scroll.contentOffset.y
+            let maximum = horizontal
+                ? max(0, scroll.contentSize.width - scroll.bounds.width + scroll.adjustedContentInset.right)
+                : max(0, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
+            let pointsPerSecond = (horizontal ? velocity.x : velocity.y) * 1_000
+            let target = PamAnchoredScrollView.onePageTarget(
+                start: scrollGestureStart,
+                position: position,
+                velocity: pointsPerSecond,
+                extent: extent,
+                maximum: maximum
+            )
+            if horizontal {
+                targetContentOffset.pointee.x = target
+            } else {
+                targetContentOffset.pointee.y = target
             }
         }
 

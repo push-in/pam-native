@@ -5,13 +5,11 @@ declare(strict_types=1);
 namespace App;
 
 use Pam\Native\Component;
-use Pam\Native\Navigation\Navigator;
 use Pam\Native\Restorable;
 use Pam\Native\View;
 
 final class TemplateShowcase extends Component implements Restorable
 {
-    public Navigator $navigator;
     private string $name = 'PHP';
     private int $count = 0;
     private bool $enabled = true;
@@ -39,7 +37,7 @@ final class TemplateShowcase extends Component implements Restorable
 
     public function back(): void
     {
-        $this->navigator->pop();
+        $this->popRoute();
     }
 
     public function stateKey(): string

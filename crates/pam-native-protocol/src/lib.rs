@@ -43,6 +43,8 @@ pub enum NodeKind {
     WebView = 27,
     Media = 28,
     DrawingCanvas = 29,
+    TabHost = 30,
+    Canvas = 31,
 }
 
 impl TryFrom<u8> for NodeKind {
@@ -79,6 +81,8 @@ impl TryFrom<u8> for NodeKind {
             27 => Ok(Self::WebView),
             28 => Ok(Self::Media),
             29 => Ok(Self::DrawingCanvas),
+            30 => Ok(Self::TabHost),
+            31 => Ok(Self::Canvas),
             other => Err(ProtocolError::UnknownNodeKind(other)),
         }
     }
@@ -498,6 +502,35 @@ pub enum PropKey {
     GestureNativeResetKey = 409,
     NavigationOrientation = 410,
     NavigationAutoHideHomeIndicator = 411,
+    SharedTransitionTag = 412,
+    NavigationTitle = 413,
+    NavigationHeaderShown = 414,
+    NavigationHeaderTransparent = 415,
+    NavigationHeaderBackgroundColor = 416,
+    NavigationHeaderTintColor = 417,
+    NavigationHeaderShadowVisible = 418,
+    NavigationHeaderLargeTitleEnabled = 419,
+    NavigationHeaderSearchEnabled = 420,
+    NavigationHeaderSearchPlaceholder = 421,
+    NavigationPresentation = 422,
+    NavigationGestureDirection = 423,
+    NavigationFullScreenGestureEnabled = 424,
+    NavigationFreezeOnBlur = 425,
+    NavigationSheetDetents = 426,
+    NavigationSheetInitialDetentIndex = 427,
+    NavigationSheetGrabberVisible = 428,
+    NavigationSheetCornerRadius = 429,
+    NavigationSheetExpandsWhenScrolledToEdge = 430,
+    TabItems = 431,
+    TabSelectedIndex = 432,
+    TabPosition = 433,
+    TabActiveColor = 434,
+    TabInactiveColor = 435,
+    TabBackgroundColor = 436,
+    TabIndicatorColor = 437,
+    TabSwipeEnabled = 438,
+    TabScrollEnabled = 439,
+    CanvasCommands = 440,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -916,6 +949,35 @@ impl TryFrom<u16> for PropKey {
             409 => Ok(Self::GestureNativeResetKey),
             410 => Ok(Self::NavigationOrientation),
             411 => Ok(Self::NavigationAutoHideHomeIndicator),
+            412 => Ok(Self::SharedTransitionTag),
+            413 => Ok(Self::NavigationTitle),
+            414 => Ok(Self::NavigationHeaderShown),
+            415 => Ok(Self::NavigationHeaderTransparent),
+            416 => Ok(Self::NavigationHeaderBackgroundColor),
+            417 => Ok(Self::NavigationHeaderTintColor),
+            418 => Ok(Self::NavigationHeaderShadowVisible),
+            419 => Ok(Self::NavigationHeaderLargeTitleEnabled),
+            420 => Ok(Self::NavigationHeaderSearchEnabled),
+            421 => Ok(Self::NavigationHeaderSearchPlaceholder),
+            422 => Ok(Self::NavigationPresentation),
+            423 => Ok(Self::NavigationGestureDirection),
+            424 => Ok(Self::NavigationFullScreenGestureEnabled),
+            425 => Ok(Self::NavigationFreezeOnBlur),
+            426 => Ok(Self::NavigationSheetDetents),
+            427 => Ok(Self::NavigationSheetInitialDetentIndex),
+            428 => Ok(Self::NavigationSheetGrabberVisible),
+            429 => Ok(Self::NavigationSheetCornerRadius),
+            430 => Ok(Self::NavigationSheetExpandsWhenScrolledToEdge),
+            431 => Ok(Self::TabItems),
+            432 => Ok(Self::TabSelectedIndex),
+            433 => Ok(Self::TabPosition),
+            434 => Ok(Self::TabActiveColor),
+            435 => Ok(Self::TabInactiveColor),
+            436 => Ok(Self::TabBackgroundColor),
+            437 => Ok(Self::TabIndicatorColor),
+            438 => Ok(Self::TabSwipeEnabled),
+            439 => Ok(Self::TabScrollEnabled),
+            440 => Ok(Self::CanvasCommands),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1711,18 +1773,18 @@ mod tests {
 
     #[test]
     fn protocol_enums_are_sequential_and_append_only() {
-        for value in 1..=29 {
+        for value in 1..=31 {
             assert!(
                 NodeKind::try_from(value).is_ok(),
                 "missing node kind {value}"
             );
         }
-        assert!(NodeKind::try_from(30).is_err());
+        assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=411 {
+        for value in 1..=440 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(412).is_err());
+        assert!(PropKey::try_from(441).is_err());
     }
 
     fn tree(text: &str) -> Tree {

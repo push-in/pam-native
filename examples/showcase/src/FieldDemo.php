@@ -5,12 +5,10 @@ declare(strict_types=1);
 namespace App;
 
 use Pam\Native\Component;
-use Pam\Native\Navigation\Navigator;
 use Pam\Native\View;
 
 final class FieldDemo extends Component
 {
-    public Navigator $navigator;
     private SyncState $syncState = SyncState::Ready;
     private string $syncLabel = 'Sync 3 records';
     private string $connectionLabel = 'Offline · changes protected';
@@ -39,6 +37,6 @@ final class FieldDemo extends Component
 
     public function back(): void
     {
-        $this->navigator->pop();
+        $this->popRoute();
     }
 }

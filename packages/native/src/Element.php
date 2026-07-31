@@ -132,6 +132,20 @@ abstract class Element implements Renderable
         return $this->withProperty(PropKey::TestId, $id);
     }
 
+    /**
+     * Preserves the visual identity of this element across a native route
+     * transition. Matching tags are measured and animated entirely by UIKit or
+     * Android's UI thread; PHP is never involved per frame.
+     */
+    final public function sharedTransition(string $tag): static
+    {
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/', $tag) !== 1) {
+            throw new InvalidArgumentException('Shared transition tags must be bounded safe identifiers.');
+        }
+
+        return $this->withProperty(PropKey::SharedTransitionTag, $tag);
+    }
+
     final public function enabled(bool $enabled): static
     {
         return $this->withProperty(PropKey::Enabled, $enabled);

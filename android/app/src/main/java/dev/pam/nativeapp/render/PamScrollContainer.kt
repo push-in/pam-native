@@ -487,6 +487,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         override var decelerationRate = NORMAL_DECELERATION_RATE
         override var dismissKeyboardOnDrag = false
         private var flingStarted = false
+        private var gestureStartScroll = 0
+        private var gestureActive = false
         private val touch = ScrollTouchTracker(context)
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -504,7 +506,11 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) flingStarted = false
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                flingStarted = false
+                gestureStartScroll = scrollY
+                gestureActive = true
+            }
             touch.observe(event)
             val handled = super.onTouchEvent(event)
             if (handled && event.actionMasked == MotionEvent.ACTION_UP) {
@@ -512,6 +518,12 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
                 if (!flingStarted) post(::snapToNearest)
             }
             touch.finish(event)
+            if (
+                event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+            ) {
+                gestureActive = false
+            }
             return handled
         }
 
@@ -521,7 +533,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
             flingStarted = true
             val velocity = adjustedVelocity(velocityY, decelerationRate)
             if (snapExtent() > 0) {
-                snapWithVelocity(scrollY, velocity, snapExtent(), maxScroll()) {
+                val start = if (gestureActive) gestureStartScroll else scrollY
+                snapOnePage(start, scrollY, velocity, snapExtent(), maxScroll()) {
                     smoothScrollTo(0, it)
                 }
             } else {
@@ -534,7 +547,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
             if (extent > 0) {
                 smoothScrollTo(
                     0,
-                    nearestSnap(scrollY, extent).coerceIn(0, maxScroll()),
+                    pamOnePageTarget(gestureStartScroll, scrollY, 0, extent, maxScroll()),
                 )
             }
         }
@@ -566,6 +579,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         override var decelerationRate = NORMAL_DECELERATION_RATE
         override var dismissKeyboardOnDrag = false
         private var flingStarted = false
+        private var gestureStartScroll = 0
+        private var gestureActive = false
         private val touch = ScrollTouchTracker(context)
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
@@ -583,7 +598,11 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) flingStarted = false
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                flingStarted = false
+                gestureStartScroll = scrollX
+                gestureActive = true
+            }
             touch.observe(event)
             val handled = super.onTouchEvent(event)
             if (handled && event.actionMasked == MotionEvent.ACTION_UP) {
@@ -591,6 +610,12 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
                 if (!flingStarted) post(::snapToNearest)
             }
             touch.finish(event)
+            if (
+                event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL
+            ) {
+                gestureActive = false
+            }
             return handled
         }
 
@@ -600,7 +625,8 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
             flingStarted = true
             val velocity = adjustedVelocity(velocityX, decelerationRate)
             if (snapExtent() > 0) {
-                snapWithVelocity(scrollX, velocity, snapExtent(), maxScroll()) {
+                val start = if (gestureActive) gestureStartScroll else scrollX
+                snapOnePage(start, scrollX, velocity, snapExtent(), maxScroll()) {
                     smoothScrollTo(it, 0)
                 }
             } else {
@@ -612,7 +638,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
             val extent = snapExtent()
             if (extent > 0) {
                 smoothScrollTo(
-                    nearestSnap(scrollX, extent).coerceIn(0, maxScroll()),
+                    pamOnePageTarget(gestureStartScroll, scrollX, 0, extent, maxScroll()),
                     0,
                 )
             }
@@ -683,15 +709,35 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         fun nearestSnap(position: Int, extent: Int): Int =
             (position.toFloat() / extent).roundToInt() * extent
 
-        fun snapWithVelocity(
+        fun snapOnePage(
+            startPosition: Int,
             position: Int,
             velocity: Int,
             extent: Int,
             maxScroll: Int,
             scroll: (Int) -> Unit,
         ) {
-            val projected = position + velocity / 4
-            scroll(nearestSnap(projected, extent).coerceIn(0, maxScroll))
+            scroll(pamOnePageTarget(startPosition, position, velocity, extent, maxScroll))
         }
     }
+}
+
+internal fun pamOnePageTarget(
+    startPosition: Int,
+    position: Int,
+    velocity: Int,
+    extent: Int,
+    maxScroll: Int,
+): Int {
+    if (extent <= 0) return position.coerceIn(0, maxScroll)
+    val startPage = (startPosition.toFloat() / extent).roundToInt()
+    val displacement = position - startPage * extent
+    val direction = when {
+        velocity > 350 -> 1
+        velocity < -350 -> -1
+        displacement > extent * 0.18f -> 1
+        displacement < -extent * 0.18f -> -1
+        else -> 0
+    }
+    return ((startPage + direction) * extent).coerceIn(0, maxScroll)
 }

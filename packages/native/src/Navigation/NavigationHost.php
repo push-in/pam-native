@@ -36,6 +36,8 @@ final class NavigationHost extends Element
         bool $enabled = true,
         float $edgeWidth = 24.0,
         float $threshold = 0.35,
+        NavigationGestureDirection $direction = NavigationGestureDirection::Horizontal,
+        bool $fullScreen = false,
     ): self {
         return $this
             ->withProperty(PropKey::NavigationGestureEnabled, $enabled)
@@ -46,7 +48,9 @@ final class NavigationHost extends Element
             ->withProperty(
                 PropKey::NavigationGestureThreshold,
                 max(0.1, min(0.9, $threshold)),
-            );
+            )
+            ->withProperty(PropKey::NavigationGestureDirection, $direction->value)
+            ->withProperty(PropKey::NavigationFullScreenGestureEnabled, $fullScreen);
     }
 
     public function onGesturePop(Closure $handler): self
@@ -81,5 +85,39 @@ final class NavigationHost extends Element
         return $this
             ->withProperty(PropKey::NavigationOrientation, $orientation->value)
             ->withProperty(PropKey::NavigationAutoHideHomeIndicator, $autoHideHomeIndicator);
+    }
+
+    /** Sends the already-resolved active route options to native controllers. */
+    public function screenOptions(ScreenOptions $options): self
+    {
+        $host = $this
+            ->withProperty(PropKey::NavigationTitle, $options->title ?? '')
+            ->withProperty(PropKey::NavigationHeaderShown, $options->headerShown)
+            ->withProperty(PropKey::NavigationHeaderTransparent, $options->headerTransparent)
+            ->withProperty(PropKey::NavigationHeaderShadowVisible, $options->headerShadowVisible)
+            ->withProperty(PropKey::NavigationHeaderLargeTitleEnabled, $options->headerLargeTitleEnabled)
+            ->withProperty(PropKey::NavigationHeaderSearchEnabled, $options->headerSearchEnabled)
+            ->withProperty(PropKey::NavigationHeaderSearchPlaceholder, $options->headerSearchPlaceholder)
+            ->withProperty(PropKey::NavigationPresentation, $options->presentation->value)
+            ->withProperty(PropKey::NavigationGestureDirection, $options->gestureDirection->value)
+            ->withProperty(PropKey::NavigationFullScreenGestureEnabled, $options->fullScreenGestureEnabled)
+            ->withProperty(PropKey::NavigationFreezeOnBlur, $options->freezeOnBlur)
+            ->withProperty(PropKey::NavigationSheetDetents, implode(',', $options->sheetAllowedDetents ?? [1.0]))
+            ->withProperty(PropKey::NavigationSheetInitialDetentIndex, $options->sheetInitialDetentIndex)
+            ->withProperty(PropKey::NavigationSheetGrabberVisible, $options->sheetGrabberVisible)
+            ->withProperty(PropKey::NavigationSheetCornerRadius, $options->sheetCornerRadius ?? 0.0)
+            ->withProperty(PropKey::NavigationSheetExpandsWhenScrolledToEdge, $options->sheetExpandsWhenScrolledToEdge);
+
+        if ($options->headerBackgroundColor !== null) {
+            $host = $host->withProperty(PropKey::NavigationHeaderBackgroundColor, $options->headerBackgroundColor);
+        }
+        if ($options->headerTintColor !== null) {
+            $host = $host->withProperty(PropKey::NavigationHeaderTintColor, $options->headerTintColor);
+        }
+        if ($options->onHeaderSearchChange !== null) {
+            $host = $host->withEvent(EventKind::Change, $options->onHeaderSearchChange);
+        }
+
+        return $host;
     }
 }

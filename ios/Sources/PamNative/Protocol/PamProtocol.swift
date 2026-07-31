@@ -41,6 +41,8 @@ public enum NodeKind: Int {
     case webView = 27
     case media = 28
     case drawingCanvas = 29
+    case tabHost = 30
+    case canvas = 31
 
     public init(_ rawValue: Int) throws {
         guard let kind = NodeKind(rawValue: rawValue) else {
@@ -340,6 +342,9 @@ public enum PamConstants {
     public static let switchTrackColorTrue = 193
     public static let switchThumbColor = 194
     public static let scrollHorizontal = 177
+    public static let scrollPagingEnabled = 185
+    public static let scrollSnapInterval = 186
+    public static let scrollDecelerationRate = 187
     public static let scrollAnchorToEnd = 385
     public static let scrollMaintainVisibleContentPosition = 386
     public static let scrollAutoScrollToEndThreshold = 387
@@ -367,6 +372,35 @@ public enum PamConstants {
     public static let gestureNativeResetKey = 409
     public static let navigationOrientation = 410
     public static let navigationAutoHideHomeIndicator = 411
+    public static let sharedTransitionTag = 412
+    public static let navigationTitle = 413
+    public static let navigationHeaderShown = 414
+    public static let navigationHeaderTransparent = 415
+    public static let navigationHeaderBackgroundColor = 416
+    public static let navigationHeaderTintColor = 417
+    public static let navigationHeaderShadowVisible = 418
+    public static let navigationHeaderLargeTitleEnabled = 419
+    public static let navigationHeaderSearchEnabled = 420
+    public static let navigationHeaderSearchPlaceholder = 421
+    public static let navigationPresentation = 422
+    public static let navigationGestureDirection = 423
+    public static let navigationFullScreenGestureEnabled = 424
+    public static let navigationFreezeOnBlur = 425
+    public static let navigationSheetDetents = 426
+    public static let navigationSheetInitialDetentIndex = 427
+    public static let navigationSheetGrabberVisible = 428
+    public static let navigationSheetCornerRadius = 429
+    public static let navigationSheetExpandsWhenScrolledToEdge = 430
+    public static let tabItems = 431
+    public static let tabSelectedIndex = 432
+    public static let tabPosition = 433
+    public static let tabActiveColor = 434
+    public static let tabInactiveColor = 435
+    public static let tabBackgroundColor = 436
+    public static let tabIndicatorColor = 437
+    public static let tabSwipeEnabled = 438
+    public static let tabScrollEnabled = 439
+    public static let canvasCommands = 440
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

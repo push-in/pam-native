@@ -3,8 +3,73 @@ import UIKit
 @testable import PamNative
 
 final class PamNavigationHostTests: XCTestCase {
+    func testNativeTabHostRetainsScenesAndSelectsWithoutRemounting() {
+        let host = PamTabHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let first = UIView()
+        let second = UIView()
+        host.insertScene(first, index: 0)
+        host.insertScene(second, index: 1)
+        host.configure(
+            encodedItems: #"[{"name":"home","label":"Home","badge":null},{"name":"orders","label":"Orders","badge":"2"}]"#,
+            selectedIndex: 1,
+            position: 1,
+            activeColor: .label,
+            inactiveColor: .secondaryLabel,
+            barColor: .systemBackground,
+            indicatorColor: .label,
+            swipeEnabled: false
+        )
+        host.selectForTesting(2)
+
+        XCTAssertEqual(host.activeSceneIndex, 2)
+        XCTAssertTrue(first.isHidden)
+        XCTAssertFalse(second.isHidden)
+    }
+
+    func testAttachedRoutesReceiveNativeViewControllers() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let host = PamNavigationHost(frame: root.view.bounds)
+        root.view.addSubview(host)
+        let first = UIView()
+        let second = UIView()
+        host.insert(first, index: 0)
+        host.insert(second, index: 1)
+        host.operation = 2
+        host.transition = 8
+        host.navigate(1)
+
+        XCTAssertTrue(host.usesNativeNavigationController)
+        XCTAssertEqual(host.routeControllerCount, 2)
+        XCTAssertFalse(second.isHidden)
+        XCTAssertTrue(first.isHidden)
+    }
+
+    func testFormSheetUsesNativeControllerAndConfiguredDetents() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let host = PamNavigationHost(frame: root.view.bounds)
+        root.view.addSubview(host)
+        host.insert(UIView(), index: 0)
+        host.insert(UIView(), index: 1)
+        host.operation = 2
+        host.transition = 8
+        host.screenPresentation = 7
+        host.sheetDetents = [0.5, 1]
+        host.sheetInitialDetentIndex = 1
+        host.sheetGrabberVisible = true
+        host.navigate(1)
+
+        XCTAssertTrue(host.usesNativeModalController)
+        XCTAssertEqual(host.activeSheetDetentCount, 2)
+    }
+
     func testEveryPublicTransitionCompletesWithOnlyDestinationVisible() {
-        for transition in 2...11 where transition != 8 {
+        for transition in 2...13 where transition != 8 {
             let completed = expectation(description: "transition \(transition)")
             let host = PamNavigationHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
             host.operation = 2

@@ -53,3 +53,26 @@ devTools.toggle()
 The iOS overlay reports smoothed FPS, mount/decode duration, node and batch
 counts, patch/full commits, retained renderer memory and the capability
 timeline. Keep it out of the release view hierarchy.
+
+## Navigation traces
+
+`NavigationDevTools` records a bounded, nanosecond-stamped route timeline with
+integer trace kinds. It observes actions, state changes, rejected actions,
+transitions and gestures without participating in animation frames.
+
+```php
+$navigationTools = new NavigationDevTools($navigation, capacity: 256);
+$metrics = $navigationTools->metrics();
+$json = $navigationTools->exportJson();
+```
+
+Metrics include retained/dropped event counts, unhandled actions, gesture
+events, completed transitions, average and p95 transition duration, and the
+current route. JSON export version 2 contains the recursive state tree, metrics
+and timeline. Call `detach()` for deterministic teardown; destruction also
+detaches every observer.
+
+CI also runs `packages/native/tests/navigation_performance.php`, which gates
+the average PHP-side cost of 2,000 push/pop render decisions and 1,000 parsed
+deep links. Native frame pacing remains covered separately by the AndroidX
+Macrobenchmark and physical-device budgets under `benchmarks/mobile`.

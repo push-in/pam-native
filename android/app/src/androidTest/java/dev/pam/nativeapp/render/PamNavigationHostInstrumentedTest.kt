@@ -19,6 +19,68 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
     @Test
+    fun nativeTabHostRetainsAllScenesWhenSelectionChanges() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val tabs = PamTabHost(activity)
+                val first = View(activity)
+                val second = View(activity)
+                tabs.insertScene(first, 0)
+                tabs.insertScene(second, 1)
+                tabs.configure(
+                    """[{"name":"home","label":"Home","badge":null},{"name":"orders","label":"Orders","badge":"2"}]""",
+                    1, 1, Color.BLACK, Color.GRAY, Color.WHITE, Color.BLACK, false,
+                )
+                tabs.selectTab(2)
+
+                assertEquals(2, tabs.activeSceneIndex)
+                assertEquals(View.GONE, first.visibility)
+                assertEquals(View.VISIBLE, second.visibility)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun formSheetSizesNativeRouteControllerAtConfiguredDetent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var previous: View
+            lateinit var sheet: View
+            onMain(instrumentation) {
+                val navigation = PamNavigationHost(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(390, 800)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                    screenPresentation = 7
+                    sheetDetents = listOf(0.5f, 1f)
+                    sheetInitialDetentIndex = 1
+                    sheetCornerRadius = 24f
+                }
+                activity.host.addView(navigation)
+                navigation.layout(0, 0, 390, 800)
+                previous = View(activity)
+                sheet = View(activity)
+                navigation.insert(previous, 0)
+                navigation.insert(sheet, 1)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(400, sheet.layoutParams.height)
+                assertTrue(sheet.clipToOutline)
+                assertEquals(View.VISIBLE, previous.visibility)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun drawerAdaptsStatusBarIconsAndRestoresThemWhenClosed() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -116,6 +178,11 @@ class PamNavigationHostInstrumentedTest {
                     View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
                     second.importantForAccessibility,
                 )
+                assertEquals(2, navigation.routeControllerCount())
+                assertEquals(
+                    androidx.lifecycle.Lifecycle.State.RESUMED,
+                    navigation.activeControllerLifecycle(),
+                )
 
                 navigation.operation = OPERATION_POP
                 navigation.navigate(2)
@@ -144,7 +211,10 @@ class PamNavigationHostInstrumentedTest {
                 navigation = PamNavigationHost(activity).apply {
                     layout(0, 0, 1_080, 1_920)
                     operation = OPERATION_PUSH
-                    transition = TRANSITION_SLIDE_FROM_RIGHT
+                    // This test exercises predictive-back state, not the preceding push.
+                    // Keep setup deterministic on physical devices where animator scale and
+                    // refresh cadence may leave the push animator active after waitForIdleSync.
+                    transition = TRANSITION_NONE
                 }
                 activity.host.addView(navigation)
                 first = View(activity)

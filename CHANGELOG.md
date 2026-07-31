@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.6.0 - 2026-07-31
+
+- Add Laravel-inspired named route stacks, tabs, screens and modals. Components
+  navigate through their nearest application scope without receiving a
+  `Navigator`, and class-based screens hydrate typed constructor parameters.
+- Add a bounded typed bridge IDL compiler with sequential module/method/field
+  IDs, SHA-256 fingerprints and generated PHP, Kotlin, Swift and Rust
+  contracts.
+- Promote the priority scheduler into cancellable `AsyncResource` and
+  `Suspense` APIs; add deterministic bounded numeric `PNW1` worklet bytecode.
+- Formalize advanced retained list/grid/section virtualization and introduce
+  recoverable background jobs plus an idempotent offline mutation queue with
+  typed lifecycle states, persistence, conflict handling and capped backoff.
+- Add append-only Canvas node/property contracts and hardware-accelerated
+  Android/UIKit renderers for bounded retained vector commands.
+- Add bounded server-driven UI documents with integer node kinds, allowlisted
+  components/styles and locally resolved actions; remote documents cannot name
+  or execute PHP functions or classes.
+- Make Android paging move at most one page per gesture, protect programmatic
+  flings from stale gesture origins, and add matching paging, snap interval and
+  deceleration behavior plus tests on iOS.
+- Replace the repository landing page with an adoption-focused English README,
+  publish the platform-runtime guide and migrate the showcase to named routes.
+
+## 0.5.94 - 2026-07-31
+
+- Clear process-local linking, incoming-share, and push subscriptions during runtime shutdown so hot reload can rebuild an app without duplicate-listener exceptions.
+- Let a focused native-synced input accept an authoritative PHP value after its latest native value has been acknowledged, allowing composers to clear after send without dismissing the keyboard.
+
+## 0.5.93 - 2026-07-31
+
+- Make Android activity and transparent full-screen modal windows share one
+  explicit edge-to-edge contract, including stable system-bar/display-cutout
+  insets on Samsung and other OEM window implementations.
+- Correct geometric IME overlap in full-screen windows and keep translated
+  composer inputs and actions touch-aligned throughout keyboard animations.
+- Restrict the closed-IME touch fallback to text inputs so modal taps cannot
+  leak through to retained activity buttons, tabs or routes underneath.
+- Add an Android API 26–36, navigation-mode, cutout, orientation, multi-window
+  and OEM safe-area compatibility contract with a repeatable release matrix.
+- Update AndroidX Core to 1.17.0 and cover translated touch registration with
+  regression tests.
+
+## 0.5.92 - 2026-07-31
+
+- Complete the 17-block native navigation parity program: route identity,
+  layered options, typed actions and bubbling, recursive state, auth guards,
+  linking ownership, native controllers, headers/search, sheets, retained
+  bottom/top tabs, drawer coverage, gestures, transitions and shared elements.
+- Run shared-element geometry, tab selection, controller transitions and
+  interactive Back entirely on Kotlin/UIKit UI threads without per-frame PHP
+  work; add full-screen and vertical gestures, flip and simple-push variants.
+- Bound speculative routes and navigation traces, release subscriptions and
+  option layers deterministically, and forward complete Android/iOS lifecycle
+  and critical-memory events.
+- Add recursive navigation inspection, transition average/p95 metrics,
+  versioned JSON exports, deterministic performance gates and a public parity
+  matrix covering all delivered behavior.
+
 ## 0.5.91 - 2026-07-31
 
 - Introduce Navigation Core 2 with typed actions, interceptable lifecycle

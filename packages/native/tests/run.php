@@ -12,8 +12,10 @@ use Pam\Native\ActivityIndicatorSize;
 use Pam\Native\AnimationKind;
 use Pam\Native\AnimationKeyframe;
 use Pam\Native\BottomSheetKeyboardBehavior;
+use Pam\Native\Bridge\IdlCompiler;
 use Pam\Native\AsyncStatus;
 use Pam\Native\AsyncValue;
+use Pam\Native\AsyncResource;
 use Pam\Native\Component;
 use Pam\Native\Contact;
 use Pam\Native\CaptureType;
@@ -54,6 +56,7 @@ use Pam\Native\InputSelectionEvent;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\KeyboardType;
+use Pam\Native\Jobs\BackgroundJobs;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\PamPhpCompiler;
@@ -85,16 +88,22 @@ use Pam\Native\Navigation\NavigationOperation;
 use Pam\Native\Navigation\NavigationAction;
 use Pam\Native\Navigation\NavigationActionType;
 use Pam\Native\Navigation\NavigationContainer;
+use Pam\Native\Navigation\NavigationDevTools;
 use Pam\Native\Navigation\NavigationEvent;
 use Pam\Native\Navigation\NavigationEventType;
 use Pam\Native\Navigation\NavigationTransition;
+use Pam\Native\Navigation\NavigationTraceKind;
 use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\ScreenOptions;
+use Pam\Native\Navigation\ScreenOptionsPatch;
 use Pam\Native\Navigation\NavigationPresentation;
+use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
 use Pam\Native\Navigation\InteractsWithNavigationLifecycle;
+use Pam\Native\Routing\Route;
+use Pam\Native\Routing\Navigation as NamedNavigation;
 use Pam\Native\Navigation\TabNavigator;
 use Pam\Native\Navigation\TabPresentation;
 use Pam\Native\ModalAnimationType;
@@ -108,9 +117,11 @@ use Pam\Native\PointerEvents;
 use Pam\Native\PressEvent;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\RefreshIndicatorSize;
+use Pam\Native\Renderable;
 use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\ServerDriven\ServerDrivenUi;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Plugin\PluginException;
@@ -124,6 +135,8 @@ use Pam\Native\Store\Store;
 use Pam\Native\Store\StoreChangeKind;
 use Pam\Native\Store\StoreMiddleware;
 use Pam\Native\Store\Stores;
+use Pam\Native\Sync\MutationStatus;
+use Pam\Native\Sync\OfflineMutationQueue;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\System\Haptics;
 use Pam\Native\System\IncomingShares;
@@ -153,6 +166,7 @@ use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
 use Pam\Native\UI\Button;
+use Pam\Native\UI\Canvas;
 use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\GestureDetector;
 use Pam\Native\UI\ActivityIndicator;
@@ -175,11 +189,13 @@ use Pam\Native\UI\Screen;
 use Pam\Native\UI\Scroll;
 use Pam\Native\UI\SectionList;
 use Pam\Native\UI\StatusBar;
+use Pam\Native\UI\Suspense;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\Toggle;
 use Pam\Native\UI\VirtualGrid;
 use Pam\Native\UI\VirtualizedList;
 use Pam\Native\UI\WebView;
+use Pam\Native\Worklets\Worklet;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
@@ -208,6 +224,22 @@ final class TestDiagnostics
 
     /** @var array{requestId: int, operation: int, payload: string}|null */
     public static ?array $typedCall = null;
+}
+
+final class TypedRouteTestScreen extends Component
+{
+    public function __construct(
+        private readonly int $productId,
+        private readonly bool $preview = false,
+    ) {
+    }
+
+    public function render(): Renderable
+    {
+        return Screen::make(Text::make(
+            "Product {$this->productId}".($this->preview ? ' preview' : ''),
+        ));
+    }
 }
 
 if (!function_exists('pam_native_error')) {
@@ -4223,6 +4255,37 @@ $fluentNavigator = Router::stack('home')
     ->transitions(NavigationTransition::Scale, 180)
     ->build();
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
+$namedRouteNavigator = Route::stack(
+    name: 'named-routes-test',
+    initial: 'home',
+    routes: static function (): void {
+        Route::screen('home', static fn () => Screen::make(Text::make('Home')));
+        Route::screen('product', TypedRouteTestScreen::class);
+        Route::modal('filters', static fn () => Screen::make(Text::make('Filters')))
+            ->sheet();
+    },
+);
+$namedRouteNavigator->push('product', ['productId' => 42, 'preview' => true]);
+$namedProduct = $namedRouteNavigator->render()->toElement()->children()[1];
+$assert(
+    $namedRouteNavigator->currentRoute() === 'product'
+        && $namedProduct->children()[0]->properties()[PropKey::Text->value] === 'Product 42 preview',
+    'Laravel-style named routes must register screens and pass bounded parameters.',
+);
+$namedRouteNavigator->push('filters');
+$assert(
+    $namedRouteNavigator->currentOptions()->presentation === NavigationPresentation::FormSheet,
+    'Named modal routes must preserve native presentation options.',
+);
+$namedTabs = Route::tabs('named-tabs-test', 'home', static function (): void {
+    Route::tab('home', Screen::make(Text::make('Home')), label: 'Home');
+    Route::tab('settings', Screen::make(Text::make('Settings')), label: 'Settings', badge: '2');
+});
+$assert(
+    NamedNavigation::navigate('settings')
+        && $namedTabs->selectedTab() === 'settings',
+    'Laravel-style named tabs must select destinations through the shared navigation scope.',
+);
 $headerNavigator = Router::stack('home')
     ->route(
         'home',
@@ -4230,10 +4293,13 @@ $headerNavigator = Router::stack('home')
         new ScreenOptions(title: 'Native header', headerShown: true),
     )
     ->build();
+$headerElement = $headerNavigator->render()->toElement();
 $assert(
-    $headerNavigator->render()->toElement()->children()[0]->kind() === NodeKind::Column
+    $headerElement->children()[0]->kind() === NodeKind::Screen
+        && $headerElement->properties()[PropKey::NavigationTitle->value] === 'Native header'
+        && $headerElement->properties()[PropKey::NavigationHeaderShown->value] === true
         && $headerNavigator->currentOptions()->title === 'Native header',
-    'Screen options must render a retained native header with typed options.',
+    'Screen options must configure controller-owned native chrome with typed options.',
 );
 $sheetNavigator = Router::stack('home')
     ->route('home', static fn () => Screen::make(Text::make('Home')))
@@ -4251,9 +4317,13 @@ $sheetNavigator = Router::stack('home')
     )
     ->build();
 $sheetNavigator->push('filters');
+$sheetElement = $sheetNavigator->render()->toElement();
 $assert(
-    $sheetNavigator->render()->toElement()->children()[1]->kind() === NodeKind::Modal,
-    'Form-sheet routes must use the native modal sheet host and typed detents.',
+    $sheetElement->children()[1]->kind() === NodeKind::Column
+        && $sheetElement->properties()[PropKey::NavigationPresentation->value]
+            === NavigationPresentation::FormSheet->value
+        && $sheetElement->properties()[PropKey::NavigationSheetDetents->value] === '0.5,1',
+    'Form-sheet routes must be owned by native controllers with typed detents.',
 );
 
 $advancedNavigator = Router::stack('home')
@@ -4279,6 +4349,71 @@ $assert(
         && $advancedNavigator->render()->toElement()->children()[1]
             ->children()[0]->properties()[PropKey::Text->value] === 'Profile 42',
     'Route contexts must expose bounded typed parameters to screen factories.',
+);
+$identifiedNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route(
+        'profile',
+        static fn (RouteContext $route) => Screen::make(Text::make('Profile '.$route->integer('id'))),
+        static fn (RouteContext $route) => new ScreenOptions(title: 'Profile '.$route->integer('id')),
+        static fn (RouteContext $route): int => $route->integer('id') ?? 0,
+    )
+    ->build();
+$identifiedNavigator->push('profile', ['id' => 1]);
+$firstProfileKey = $identifiedNavigator->current()->key;
+$identifiedNavigator->push('profile', ['id' => 2]);
+$secondProfileKey = $identifiedNavigator->current()->key;
+$identifiedNavigator->navigate('profile', ['id' => 1]);
+$assert(
+    $identifiedNavigator->current()->integer('id') === 1
+        && $identifiedNavigator->current()->key === $firstProfileKey
+        && $firstProfileKey !== $secondProfileKey
+        && $identifiedNavigator->currentOptions()->title === 'Profile 1'
+        && ($identifiedNavigator->getState()['routes'][1]['id'] ?? null) === '1',
+    'getId route identity must distinguish same-name entities, reuse the matching entry, and resolve options from route context.',
+);
+$identifiedState = $identifiedNavigator->saveState();
+$assert(
+    $identifiedState['version'] === 4
+        && ($identifiedState['stack'][1]['id'] ?? null) === '1',
+    'Versioned navigation state must persist semantic route identities.',
+);
+$layeredOptionsNavigator = Router::stack('home')
+    ->screenOptions(new ScreenOptions(headerShown: true, headerTintColor: 0xFF102030))
+    ->group(
+        ['profile'],
+        ScreenOptionsPatch::from(['headerTransparent' => true]),
+    )
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route(
+        'profile',
+        static fn () => Screen::make(Text::make('Profile')),
+        ScreenOptionsPatch::from(['title' => 'Layered profile']),
+    )
+    ->build();
+$layeredOptionsNavigator->push('profile');
+$layered = $layeredOptionsNavigator->currentOptions();
+$assert(
+    $layered->headerShown
+        && $layered->headerTransparent
+        && $layered->headerTintColor === 0xFF102030
+        && $layered->title === 'Layered profile',
+    'Screen options must resolve navigator defaults, groups and sparse route overrides in order.',
+);
+$layeredOptionsNavigator->setOptions(ScreenOptionsPatch::from([
+    'headerShown' => false,
+    'headerTintColor' => null,
+]));
+$assert(
+    !$layeredOptionsNavigator->currentOptions()->headerShown
+        && $layeredOptionsNavigator->currentOptions()->headerTintColor === null,
+    'Runtime option patches must preserve explicit false and null values.',
+);
+$layeredOptionsNavigator->clearOptions();
+$assert(
+    $layeredOptionsNavigator->currentOptions()->headerShown
+        && $layeredOptionsNavigator->currentOptions()->headerTintColor === 0xFF102030,
+    'Clearing runtime options must reveal the inherited option chain again.',
 );
 $advancedNavigator->push('article', ['slug' => 'temporary']);
 $assert(
@@ -4356,9 +4491,55 @@ $assert(
         && $optionalLinkNavigator->current()->string('path') === 'guides/native/start'
         && $optionalLinkNavigator->currentPath() === '/documents/guides/native/start'
         && $optionalLinkNavigator->currentUrl() === 'pam://app/documents/guides/native/start'
+        && !$optionalLinkNavigator->open('pam://application/documents/private')
         && !$optionalLinkNavigator->open('other://documents/private')
         && !$optionalLinkNavigator->open('pam://app/blocked'),
-    'Deep links must support optional and terminal wildcard path parameters bidirectionally.',
+    'Deep links must support optional/wildcard parameters and enforce URI prefix boundaries.',
+);
+$pathPriorityNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->deepLink('/profile/{id}', 'profile')
+    ->build();
+$assert(
+    $pathPriorityNavigator->open('pam://app/profile/42?id=99')
+        && $pathPriorityNavigator->current()->string('id') === '42',
+    'A query string must not override an identity captured from the path.',
+);
+$authenticated = false;
+$authNavigator = Router::stack('login')
+    ->route('login', static fn () => Screen::make(Text::make('Login')))
+    ->route('account', static fn () => Screen::make(Text::make('Account')))
+    ->guard('account', static function () use (&$authenticated): bool {
+        return $authenticated;
+    })
+    ->guardFallback('login')
+    ->deepLink('/account', 'account')
+    ->build();
+$assert(
+    !$authNavigator->dispatch(NavigationAction::navigate('account'))
+        && !$authNavigator->open('pam://app/account')
+        && $authNavigator->currentRoute() === 'login',
+    'Guards must reject actions and deep links before protected route content is instantiated.',
+);
+$authenticated = true;
+$assert(
+    $authNavigator->dispatch(NavigationAction::navigate('account'))
+        && $authNavigator->currentRoute() === 'account',
+    'Conditional routes must become reachable immediately after their guard state changes.',
+);
+$authenticatedState = $authNavigator->saveState();
+$authenticated = false;
+$assert(
+    $authNavigator->refreshConditions()
+        && $authNavigator->currentRoute() === 'login'
+        && !$authNavigator->canGoBack(),
+    'Logout must atomically remove protected history and retain the registered public fallback.',
+);
+$authNavigator->restoreState($authenticatedState);
+$assert(
+    $authNavigator->currentRoute() === 'login' && !$authNavigator->canGoBack(),
+    'Cold restoration must never reopen a route whose auth guard is no longer satisfied.',
 );
 $assert(
     $advancedNavigator->popToTop()
@@ -4420,6 +4601,49 @@ $assert(
         && $containerStateChanges === 1,
     'NavigationContainer must dispatch actions and build canonical paths from state.',
 );
+$container->unmount();
+$advancedNavigator->navigate('profile', ['id' => 91]);
+$detachedStateChanges = $containerStateChanges;
+$container->mount();
+$advancedNavigator->navigate('article', ['slug' => 'remounted']);
+$assert(
+    $detachedStateChanges === 1 && $containerStateChanges === 2,
+    'NavigationContainer must release root listeners on unmount and restore exactly one subscription on remount.',
+);
+$navigationRef = new NavigationRef();
+$refNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static fn () => Screen::make(Text::make('Profile')))
+    ->build();
+$assert(
+    $navigationRef->navigate('profile') && !$navigationRef->isReady(),
+    'Navigation refs must safely queue actions before the root container mounts.',
+);
+$refContainer = NavigationContainer::make($refNavigator, $navigationRef);
+$refContainer->mount();
+$assert(
+    $navigationRef->isReady()
+        && $navigationRef->currentRoute()?->name === 'profile'
+        && ($navigationRef->rootState()['index'] ?? null) === 1,
+    'Navigation refs must replay queued actions in order and expose the mounted root state.',
+);
+$refContainer->unmount();
+$assert(!$navigationRef->isReady(), 'Unmounting must detach navigation refs without retaining the container.');
+$navigationDevTools = new NavigationDevTools($container, capacity: 16);
+$container->dispatch(NavigationAction::navigate('article', ['slug' => 'observed']));
+$navigationTimeline = $navigationDevTools->timeline();
+$navigationExport = json_decode($navigationDevTools->exportJson(), true, flags: JSON_THROW_ON_ERROR);
+$navigationMetrics = $navigationDevTools->metrics();
+$assert(
+    $navigationTimeline !== []
+        && $navigationTimeline[0]['kind'] === NavigationTraceKind::Action->value
+        && ($navigationDevTools->tree()['routes'][0]['name'] ?? null) === 'home'
+        && ($navigationExport['version'] ?? null) === 2
+        && ($navigationExport['metrics']['events'] ?? 0) === count($navigationTimeline)
+        && ($navigationMetrics['currentRoute'] ?? null) === 'article',
+    'Navigation DevTools must expose bounded traces, metrics and recursive tree snapshots.',
+);
+$navigationDevTools->detach();
 $preloadFactories = 0;
 $preloadNavigator = Router::stack('home')
     ->route('home', static fn () => Screen::make(Text::make('Home')))
@@ -4439,6 +4663,25 @@ $preloadNavigator->render();
 $assert(
     $preloadFactories === 1,
     'An exact preloaded route must be consumed and retained without rerunning its factory.',
+);
+$boundedPreloadFactories = 0;
+$boundedPreloads = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('detail', static function () use (&$boundedPreloadFactories): Screen {
+        $boundedPreloadFactories++;
+        return Screen::make(Text::make('Detail'));
+    })
+    ->build();
+for ($id = 1; $id <= 17; $id++) $boundedPreloads->preload('detail', ['id' => $id]);
+$boundedPreloads->push('detail', ['id' => 1]);
+$boundedPreloads->render();
+$boundedPreloads->preload('detail', ['id' => 99]);
+$boundedPreloads->trimMemory();
+$boundedPreloads->push('detail', ['id' => 99]);
+$boundedPreloads->render();
+$assert(
+    $boundedPreloadFactories === 20,
+    'Speculative routes must use a 16-entry LRU bound and be releasable under memory pressure.',
 );
 $lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
     use InteractsWithNavigationLifecycle;
@@ -4511,8 +4754,8 @@ $assert(
 $assert(
     $tabNavigator->select('orders')
         && $tabNavigator->selectedTab() === 'orders'
-        && $tabNavigator->toElement()->kind() === NodeKind::SafeAreaView,
-    'Tab navigator must retain independent tab content and expose safe native navigation.',
+        && $tabNavigator->toElement()->kind() === NodeKind::TabHost,
+    'Tab navigator must retain independent content in a platform-native tab host.',
 );
 $restoredTabs = Router::tabs('home')
     ->tab('home', 'Home', Screen::make(Text::make('Home tab')))
@@ -4532,8 +4775,8 @@ $topTabs = Router::topTabs('feed')
 $assert(
     $topTabs->selectedTab() === 'feed'
         && $topTabs->jumpTo('following')
-        && $topTabs->toElement()->kind() === NodeKind::Pressable,
-    'Top tabs must support lazy native scenes, jumpTo and native swipe recognition.',
+        && $topTabs->toElement()->kind() === NodeKind::TabHost,
+    'Top tabs must support lazy retained scenes, jumpTo and native swipe recognition.',
 );
 
 $homeTabRenders = 0;
@@ -4606,6 +4849,36 @@ $assert(
         && !$nestedStack->canGoBack(),
     'Back must recurse into the focused child navigator before changing the parent stack.',
 );
+$assert(
+    $outerNavigator->dispatch(
+        NavigationAction::push('nested.index')->target($nestedStack->key()),
+    )
+        && $nestedStack->getState()['index'] === 1
+        && $outerNavigator->dispatch(NavigationAction::goBack()->target($nestedStack->key()))
+        && $nestedStack->getState()['index'] === 0,
+    'Targeted actions must traverse stack, tabs and the focused nested stack without being consumed by an ancestor.',
+);
+$nestedStack->push('nested.index', ['generation' => 2]);
+$savedNestedTree = $outerNavigator->saveState();
+$freshNestedStack = Router::stack('nested.index')
+    ->route('nested.index', static fn () => Screen::make(Text::make('Restored nested')))
+    ->build();
+$freshNestedTabs = Router::tabs('nested')
+    ->tab('nested', 'Nested', $freshNestedStack)
+    ->tab('other', 'Other', Screen::make(Text::make('Other')))
+    ->persistence('test-restored-recursive-tabs')
+    ->build();
+$freshOuter = Router::stack('app')
+    ->route('app', static fn () => $freshNestedTabs)
+    ->build();
+$freshOuter->restoreState($savedNestedTree);
+$freshOuter->render();
+$freshNestedTabs->toElement();
+$assert(
+    $freshNestedStack->getState()['index'] === 1
+        && $freshNestedStack->current()->integer('generation') === 2,
+    'Cold restoration must recursively rehydrate focused child stacks without eagerly mounting inactive tabs.',
+);
 $nestedStateSubscription->unsubscribe();
 $groupedDrawer = Router::drawer('overview')
     ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
@@ -4654,8 +4927,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.91',
-    'The runtime SDK contract must match the 0.5.91 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.94',
+    'The runtime SDK contract must match the 0.5.94 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -4769,6 +5042,7 @@ $cachedImage = Image::make('https://example.com/hero.webp')
     ->maxCacheSize(64 * 1024 * 1024)
     ->resize(720, 1280)
     ->thumbnail('https://example.com/hero-thumb.webp')
+    ->sharedTransition('feed.hero.42')
     ->checksum(str_repeat('a', 64));
 $cachedImageProperties = $cachedImage->properties();
 $assert(
@@ -4776,6 +5050,7 @@ $assert(
         === MediaCachePolicy::StaleWhileRevalidate->value
         && $cachedImageProperties[PropKey::MediaCacheKey->value] === 'hero:v3'
         && $cachedImageProperties[PropKey::MediaCacheTags->value] === "feed\nhero"
+        && $cachedImageProperties[PropKey::SharedTransitionTag->value] === 'feed.hero.42'
         && $cachedImageProperties[PropKey::MediaCachePinOffline->value] === true
         && $cachedImageProperties[PropKey::MediaResizeWidth->value] === 720
         && $cachedImageProperties[PropKey::MediaCacheChecksum->value] === str_repeat('a', 64),
@@ -5154,6 +5429,131 @@ $assert(
         && $schedulerOrder === ['input', 'latest', 'background'],
     'Scheduler must prioritize user work and coalesce obsolete tasks.',
 );
+$resource = new AsyncResource(
+    static fn (\Pam\Native\Scheduling\CancellationToken $token): array => ['ready'],
+    'dashboard',
+);
+$resource->load(\Pam\Native\Scheduling\TaskPriority::UserBlocking);
+\Pam\Native\Scheduling\Scheduler::drain(100);
+$suspended = Suspense::make(
+    $resource->value(),
+    static fn (array $data): Text => Text::make($data[0]),
+    Text::make('Loading'),
+);
+$assert(
+    $resource->value()->status === AsyncStatus::Content
+        && $suspended->toElement()->properties()[PropKey::Text->value] === 'ready',
+    'Async resources must run through the priority scheduler and reveal Suspense content.',
+);
+
+$idl = IdlCompiler::compile(json_encode([
+    'version' => 1,
+    'namespace' => 'Dev.Pam.Generated',
+    'modules' => [[
+        'id' => 1,
+        'name' => 'camera',
+        'methods' => [[
+            'id' => 1,
+            'name' => 'capture',
+            'parameters' => [[
+                'id' => 1,
+                'name' => 'quality',
+                'type' => 3,
+                'required' => false,
+            ]],
+        ]],
+    ]],
+], JSON_THROW_ON_ERROR));
+$assert(
+    str_contains($idl->php, 'final class CameraBridge')
+        && str_contains($idl->kotlin, 'const val CAPTURE: Int = 1')
+        && str_contains($idl->swift, 'static let capture: Int = 1')
+        && str_contains($idl->rust, 'CAMERA_CAPTURE: u16 = 1')
+        && strlen($idl->fingerprint) === 64,
+    'Typed IDL must generate fingerprinted PHP, Kotlin, Swift, and Rust contracts.',
+);
+$worklet = Worklet::input()
+    ->interpolate(0, 200, 1, 0)
+    ->clamp(0, 1);
+$assert(
+    abs($worklet->evaluate(50) - 0.75) < 0.000001
+        && str_starts_with($worklet->bytecode(), 'PNW1')
+        && strlen($worklet->bytecode()) < 256,
+    'Worklets must compile bounded data-only numeric programs deterministically.',
+);
+$offline = new OfflineMutationQueue();
+$queued = $offline->enqueue('message:local-1', 'messages.send', ['body' => 'Hello']);
+$assert(
+    $offline->enqueue('message:local-1', 'messages.send', ['body' => 'Duplicate'])->id === $queued->id,
+    'Offline sync must deduplicate active mutations by idempotency key.',
+);
+$canvas = Canvas::make()
+    ->roundedRectangle(8, 8, 120, 48, 12, 0xFF6750A4)
+    ->circle(180, 32, 24, 0xFFFFD23F)
+    ->line(8, 80, 220, 80, 4, 0xFF111111);
+$assert(
+    $canvas->kind() === NodeKind::Canvas
+        && str_contains($canvas->properties()[PropKey::CanvasCommands->value], '"kind":2'),
+    'Canvas must encode bounded vector commands for hardware-accelerated native renderers.',
+);
+$serverAction = false;
+$serverTree = ServerDrivenUi::render(
+    json_encode([
+        'version' => 1,
+        'root' => [
+            'kind' => 2,
+            'props' => ['style' => ['padding' => 16, 'gap' => 8]],
+            'children' => [
+                ['kind' => 4, 'props' => ['text' => 'Remote offer']],
+                ['kind' => 5, 'props' => ['label' => 'Open', 'action' => 'offer.open']],
+            ],
+        ],
+    ], JSON_THROW_ON_ERROR),
+    static function (string $action) use (&$serverAction): ?Closure {
+        return $action === 'offer.open'
+            ? static function () use (&$serverAction): void { $serverAction = true; }
+            : null;
+    },
+);
+$serverElement = $serverTree->toElement();
+$assert(
+    $serverElement->kind() === NodeKind::Column
+        && count($serverElement->children()) === 2,
+    'Server-driven UI must render only allowlisted bounded native nodes and actions.',
+);
+$jobRan = false;
+$jobs = new BackgroundJobs();
+$jobs->register(
+    'sync.messages',
+    static function (array $payload, \Pam\Native\Scheduling\CancellationToken $token) use (&$jobRan): void {
+        $token->throwIfCancelled();
+        $jobRan = ($payload['conversationId'] ?? null) === 42;
+    },
+);
+$jobs->dispatch('sync.messages', 'conversation:42', ['conversationId' => 42]);
+$assert($jobs->runReady(1_000) === 1, 'Background jobs must schedule ready persisted work.');
+\Pam\Native\Scheduling\Scheduler::drain(100);
+$assert(
+    $jobRan && str_contains($jobs->snapshot(), '"status":3'),
+    'Background jobs must execute with cancellation and persist applied state.',
+);
+$offline->sending($queued->id);
+$retry = $offline->retry($queued->id, 1_000, 'network');
+$restoredOffline = OfflineMutationQueue::restore($offline->export());
+$assert(
+    $retry->status === MutationStatus::Retry
+        && $restoredOffline->ready($retry->availableAtMs)[0]->key === 'message:local-1',
+    'Offline sync must persist typed retry state and deterministic backoff.',
+);
+
+$firstLinkingSubscription = \Pam\Native\System\Linking::listen(static function (string $url): void {});
+\Pam\Native\Internal\Runtime::shutdown();
+$secondLinkingSubscription = \Pam\Native\System\Linking::listen(static function (string $url): void {});
+$assert(
+    $firstLinkingSubscription === 1 && $secondLinkingSubscription === 1,
+    'Runtime shutdown must clear process-local listeners before hot reload.',
+);
+\Pam\Native\System\Linking::unsubscribe($secondLinkingSubscription);
 
 ComponentLifecycle::shutdown();
 $assert(

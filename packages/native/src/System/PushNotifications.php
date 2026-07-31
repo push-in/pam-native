@@ -64,6 +64,13 @@ final class PushNotifications
         unset(self::$subscriptions[$subscription]);
     }
 
+    /** @internal */
+    public static function resetRuntime(): void
+    {
+        self::$subscriptions = [];
+        self::$nextSubscription = 1;
+    }
+
     /** @param null|Closure(PushMessage): void $callback */
     public static function listenAndRoute(
         Navigator $navigator,
