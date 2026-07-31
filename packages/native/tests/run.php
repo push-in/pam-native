@@ -4797,6 +4797,7 @@ $cachedImage = Image::make('https://example.com/hero.webp')
     ->maxCacheSize(64 * 1024 * 1024)
     ->resize(720, 1280)
     ->thumbnail('https://example.com/hero-thumb.webp')
+    ->sharedTransition('feed.hero.42')
     ->checksum(str_repeat('a', 64));
 $cachedImageProperties = $cachedImage->properties();
 $assert(
@@ -4804,6 +4805,7 @@ $assert(
         === MediaCachePolicy::StaleWhileRevalidate->value
         && $cachedImageProperties[PropKey::MediaCacheKey->value] === 'hero:v3'
         && $cachedImageProperties[PropKey::MediaCacheTags->value] === "feed\nhero"
+        && $cachedImageProperties[PropKey::SharedTransitionTag->value] === 'feed.hero.42'
         && $cachedImageProperties[PropKey::MediaCachePinOffline->value] === true
         && $cachedImageProperties[PropKey::MediaResizeWidth->value] === 720
         && $cachedImageProperties[PropKey::MediaCacheChecksum->value] === str_repeat('a', 64),

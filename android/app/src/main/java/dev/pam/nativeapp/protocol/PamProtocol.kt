@@ -525,7 +525,8 @@ enum class PropKey(val value: Int) {
     GESTURE_NATIVE_MAX_SCALE(408),
     GESTURE_NATIVE_RESET_KEY(409),
     NAVIGATION_ORIENTATION(410),
-    NAVIGATION_AUTO_HIDE_HOME_INDICATOR(411);
+    NAVIGATION_AUTO_HIDE_HOME_INDICATOR(411),
+    SHARED_TRANSITION_TAG(412);
 
     companion object {
         fun from(value: Int): PropKey =

@@ -1327,6 +1327,8 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text(key)
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text(key)
             PropKey.TEST_ID -> view.transitionName = value.text(key)
+            PropKey.SHARED_TRANSITION_TAG ->
+                view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_tag, value.text(key))
             PropKey.ITEMS -> applyStringList(view, state, value)
             PropKey.SECTION_ITEMS -> applySectionList(view, state, value)
             PropKey.NAVIGATION_OPERATION ->
@@ -2157,6 +2159,8 @@ class PamRenderer(
             PropKey.SAFE_AREA_MODE,
             -> applySafeAreaLayout(view, state)
             PropKey.TEST_ID -> view.transitionName = null
+            PropKey.SHARED_TRANSITION_TAG ->
+                view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_tag, null)
             PropKey.ITEMS,
             PropKey.SECTION_ITEMS,
             -> (view as? PamRecyclerList)?.setItems(null)

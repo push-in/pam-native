@@ -417,4 +417,5 @@ enum PropKey: int
     case GestureNativeResetKey = 409;
     case NavigationOrientation = 410;
     case NavigationAutoHideHomeIndicator = 411;
+    case SharedTransitionTag = 412;
 }

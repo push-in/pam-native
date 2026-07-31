@@ -20,6 +20,16 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     private var onGestureEnd: (() -> Void)?
     private var onGestureCancel: (() -> Void)?
     private var interactivePopCommitted = false
+    private struct SharedElementAnimation {
+        let snapshot: UIView
+        let source: UIView
+        let destination: UIView
+        let startFrame: CGRect
+        let endFrame: CGRect
+        let startRadius: CGFloat
+        let endRadius: CGFloat
+    }
+    private var sharedElements: [SharedElementAnimation] = []
     private lazy var edgeGesture = UIPanGestureRecognizer(
         target: self,
         action: #selector(handleEdgePan(_:))
@@ -104,6 +114,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         subviews.forEach { $0.isHidden = $0 !== incoming && $0 !== outgoing }
         incoming.isHidden = false
         outgoing?.isHidden = false
+        layoutIfNeeded()
+        prepareSharedElements(incoming: incoming, outgoing: outgoing)
         let kind = transition == 1 ? 2 : transition
         if UIAccessibility.isReduceMotionEnabled || duration == 0 || kind == 8 {
             finish(incoming: incoming, outgoing: outgoing)
@@ -202,6 +214,72 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
         default:
             break
         }
+        applySharedElementProgress(progress)
+    }
+
+    private func prepareSharedElements(incoming: UIView, outgoing: UIView?) {
+        clearSharedElements()
+        guard !UIAccessibility.isReduceMotionEnabled, duration > 0,
+              let outgoing else { return }
+        let sources = sharedElementViews(in: outgoing)
+        let destinations = sharedElementViews(in: incoming)
+        for (tag, source) in sources {
+            guard let destination = destinations[tag],
+                  source.bounds.width > 0, source.bounds.height > 0,
+                  destination.bounds.width > 0, destination.bounds.height > 0,
+                  let snapshot = source.snapshotView(afterScreenUpdates: false) else { continue }
+            let start = source.convert(source.bounds, to: self)
+            let end = destination.convert(destination.bounds, to: self)
+            snapshot.frame = start
+            snapshot.layer.masksToBounds = true
+            snapshot.layer.cornerRadius = source.layer.cornerRadius
+            source.isHidden = true
+            destination.isHidden = true
+            addSubview(snapshot)
+            sharedElements.append(SharedElementAnimation(
+                snapshot: snapshot,
+                source: source,
+                destination: destination,
+                startFrame: start,
+                endFrame: end,
+                startRadius: source.layer.cornerRadius,
+                endRadius: destination.layer.cornerRadius
+            ))
+        }
+    }
+
+    private func sharedElementViews(in root: UIView) -> [String: UIView] {
+        var result: [String: UIView] = [:]
+        func visit(_ view: UIView) {
+            if let tag = view.layer.value(forKey: "pamSharedTransitionTag") as? String,
+               !tag.isEmpty, result[tag] == nil {
+                result[tag] = view
+            }
+            view.subviews.forEach(visit)
+        }
+        visit(root)
+        return result
+    }
+
+    private func applySharedElementProgress(_ progress: CGFloat) {
+        for item in sharedElements {
+            item.snapshot.frame = CGRect(
+                x: item.startFrame.minX + (item.endFrame.minX - item.startFrame.minX) * progress,
+                y: item.startFrame.minY + (item.endFrame.minY - item.startFrame.minY) * progress,
+                width: item.startFrame.width + (item.endFrame.width - item.startFrame.width) * progress,
+                height: item.startFrame.height + (item.endFrame.height - item.startFrame.height) * progress
+            )
+            item.snapshot.layer.cornerRadius = item.startRadius + (item.endRadius - item.startRadius) * progress
+        }
+    }
+
+    private func clearSharedElements() {
+        for item in sharedElements {
+            item.source.isHidden = false
+            item.destination.isHidden = false
+            item.snapshot.removeFromSuperview()
+        }
+        sharedElements.removeAll(keepingCapacity: true)
     }
 
     @objc private func handleEdgePan(_ gesture: UIPanGestureRecognizer) {
@@ -277,6 +355,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func finish(incoming: UIView, outgoing: UIView?) {
+        clearSharedElements()
         incoming.alpha = 1
         incoming.transform = .identity
         incoming.isHidden = false

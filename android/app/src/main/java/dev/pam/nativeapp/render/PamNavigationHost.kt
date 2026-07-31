@@ -6,6 +6,9 @@ import android.animation.ValueAnimator
 import android.content.Context
 import android.app.Activity
 import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Rect
 import android.provider.Settings
 import android.view.View
 import android.view.MotionEvent
@@ -13,6 +16,8 @@ import android.view.VelocityTracker
 import android.view.ViewTreeObserver
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.ImageView
+import dev.pam.nativeapp.R
 
 internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var operation: Int = OPERATION_IDLE
@@ -43,6 +48,17 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var predictiveBackActive = false
     private var predictiveBackCommitted = false
     private var predictiveBackProgress = 0f
+    private data class SharedElementAnimation(
+        val snapshot: ImageView,
+        val bitmap: Bitmap,
+        val source: View,
+        val destination: View,
+        val deltaX: Float,
+        val deltaY: Float,
+        val scaleX: Float,
+        val scaleY: Float,
+    )
+    private val sharedElements = ArrayList<SharedElementAnimation>(4)
 
     init {
         clipChildren = true
@@ -240,6 +256,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     override fun onDetachedFromWindow() {
+        clearSharedElements()
         clearPendingTransition()
         running?.cancel()
         running = null
@@ -319,6 +336,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 }
             }
         }
+
+        prepareSharedElements(incoming, outgoing)
 
         val actualTransition =
             if (transition == TRANSITION_PLATFORM_DEFAULT) TRANSITION_SLIDE_FROM_RIGHT else transition
@@ -417,9 +436,91 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 outgoing?.translationY = -sign * height * 0.05f * progress
             }
         }
+        applySharedElementProgress(progress)
+    }
+
+    private fun prepareSharedElements(incoming: View, outgoing: View?) {
+        clearSharedElements()
+        if (outgoing == null || animationsDisabled() || durationMs <= 0L) return
+        val sources = sharedElementViews(outgoing)
+        val destinations = sharedElementViews(incoming)
+        sources.entries.take(16).forEach { (tag, source) ->
+            val destination = destinations[tag] ?: return@forEach
+            if (source.width <= 0 || source.height <= 0 || destination.width <= 0 || destination.height <= 0) {
+                return@forEach
+            }
+            val bitmap = runCatching {
+                Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888).also {
+                    source.draw(Canvas(it))
+                }
+            }.getOrNull() ?: return@forEach
+            val start = descendantRect(source)
+            val end = descendantRect(destination)
+            val snapshot = ImageView(context).apply {
+                setImageBitmap(bitmap)
+                scaleType = ImageView.ScaleType.FIT_XY
+                pivotX = 0f
+                pivotY = 0f
+                layout(0, 0, source.width, source.height)
+                x = start.left.toFloat()
+                y = start.top.toFloat()
+            }
+            source.visibility = View.INVISIBLE
+            destination.visibility = View.INVISIBLE
+            overlay.add(snapshot)
+            sharedElements += SharedElementAnimation(
+                snapshot = snapshot,
+                bitmap = bitmap,
+                source = source,
+                destination = destination,
+                deltaX = (end.left - start.left).toFloat(),
+                deltaY = (end.top - start.top).toFloat(),
+                scaleX = end.width().toFloat() / source.width,
+                scaleY = end.height().toFloat() / source.height,
+            )
+        }
+    }
+
+    private fun sharedElementViews(root: View): Map<String, View> {
+        val result = LinkedHashMap<String, View>()
+        fun visit(view: View) {
+            (view.getTag(R.id.pam_shared_transition_tag) as? String)
+                ?.takeIf { it.isNotEmpty() && !result.containsKey(it) }
+                ?.let { result[it] = view }
+            if (view is android.view.ViewGroup) {
+                for (index in 0 until view.childCount) visit(view.getChildAt(index))
+            }
+        }
+        visit(root)
+        return result
+    }
+
+    private fun descendantRect(view: View): Rect = Rect(0, 0, view.width, view.height).also {
+        offsetDescendantRectToMyCoords(view, it)
+    }
+
+    private fun applySharedElementProgress(progress: Float) {
+        sharedElements.forEach { item ->
+            item.snapshot.translationX = item.deltaX * progress
+            item.snapshot.translationY = item.deltaY * progress
+            item.snapshot.scaleX = 1f + (item.scaleX - 1f) * progress
+            item.snapshot.scaleY = 1f + (item.scaleY - 1f) * progress
+        }
+    }
+
+    private fun clearSharedElements() {
+        sharedElements.forEach { item ->
+            item.source.visibility = View.VISIBLE
+            item.destination.visibility = View.VISIBLE
+            overlay.remove(item.snapshot)
+            item.snapshot.setImageDrawable(null)
+            if (!item.bitmap.isRecycled) item.bitmap.recycle()
+        }
+        sharedElements.clear()
     }
 
     private fun finish(incoming: View, outgoing: View?) {
+        clearSharedElements()
         running = null
         setActiveRoute(incoming)
         reset(incoming)
