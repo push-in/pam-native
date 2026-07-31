@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.94 - 2026-07-31
+
+- Clear process-local linking, incoming-share, and push subscriptions during runtime shutdown so hot reload can rebuild an app without duplicate-listener exceptions.
+- Let a focused native-synced input accept an authoritative PHP value after its latest native value has been acknowledged, allowing composers to clear after send without dismissing the keyboard.
+
 ## 0.5.93 - 2026-07-31
 
 - Make Android activity and transparent full-screen modal windows share one

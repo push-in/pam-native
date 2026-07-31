@@ -3451,6 +3451,7 @@ class PamRenderer(
                 override fun afterTextChanged(editable: Editable?) {
                     if (state.updating) return
                     state.nativeValue = editable?.toString().orEmpty()
+                    state.nativeValueAcknowledged = false
                     if (state.properties[PropKey.ON_CHANGE] == null) return
                     when (state.inputSyncMode()) {
                         INPUT_SYNC_IMMEDIATE -> dispatchInput(state)
@@ -3748,15 +3749,20 @@ class PamRenderer(
         if (
             input.hasFocus() &&
             state.inputSyncMode() != INPUT_SYNC_IMMEDIATE &&
-            next != state.nativeValue
+            next != state.nativeValue &&
+            !state.nativeValueAcknowledged
         ) {
             return
         }
-        if (input.text.toString() == next) return
+        if (input.text.toString() == next) {
+            state.nativeValueAcknowledged = true
+            return
+        }
         state.updating = true
         input.setText(next)
         input.setSelection(input.text.length)
         state.nativeValue = next
+        state.nativeValueAcknowledged = true
         state.updating = false
     }
 
@@ -5703,6 +5709,7 @@ class PamRenderer(
         var textWatcherInstalled: Boolean = false,
         var pendingChange: Runnable? = null,
         var nativeValue: String = "",
+        var nativeValueAcknowledged: Boolean = true,
         var baseText: String = "",
         var pressOpacity: Float = 0.72f,
         var scrollScheduled: Boolean = false,

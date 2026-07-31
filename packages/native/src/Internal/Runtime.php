@@ -19,6 +19,9 @@ use Pam\Native\Store\Stores;
 use Pam\Native\Diagnostics\Profiler;
 use Pam\Native\Scheduling\Scheduler;
 use Pam\Native\Scheduling\TaskPriority;
+use Pam\Native\System\IncomingShares;
+use Pam\Native\System\Linking;
+use Pam\Native\System\PushNotifications;
 use Pam\Native\TemplateException;
 use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\WindowMetrics;
@@ -311,6 +314,9 @@ final class Runtime
         Scheduler::reset();
         Profiler::reset();
         RuntimeSupervisor::reset();
+        Linking::resetRuntime();
+        IncomingShares::resetRuntime();
+        PushNotifications::resetRuntime();
         State::resetCache();
     }
 

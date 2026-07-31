@@ -54,6 +54,13 @@ final class IncomingShares
         unset(self::$subscriptions[$subscription]);
     }
 
+    /** @internal */
+    public static function resetRuntime(): void
+    {
+        self::$subscriptions = [];
+        self::$nextSubscription = 1;
+    }
+
     private static function arm(int $subscription): void
     {
         if (!isset(self::$subscriptions[$subscription])) {

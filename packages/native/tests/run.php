@@ -4868,8 +4868,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.5.93',
-    'The runtime SDK contract must match the 0.5.93 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.5.94',
+    'The runtime SDK contract must match the 0.5.94 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -5370,6 +5370,15 @@ $assert(
         && $schedulerOrder === ['input', 'latest', 'background'],
     'Scheduler must prioritize user work and coalesce obsolete tasks.',
 );
+
+$firstLinkingSubscription = \Pam\Native\System\Linking::listen(static function (string $url): void {});
+\Pam\Native\Internal\Runtime::shutdown();
+$secondLinkingSubscription = \Pam\Native\System\Linking::listen(static function (string $url): void {});
+$assert(
+    $firstLinkingSubscription === 1 && $secondLinkingSubscription === 1,
+    'Runtime shutdown must clear process-local listeners before hot reload.',
+);
+\Pam\Native\System\Linking::unsubscribe($secondLinkingSubscription);
 
 ComponentLifecycle::shutdown();
 $assert(
