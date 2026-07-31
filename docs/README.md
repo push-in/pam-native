@@ -19,6 +19,7 @@ short end-to-end recipes.
 | Scheduler, compiler fast paths, profiling and recovery | [Runtime performance](runtime-performance.md) |
 | Native navigation | [Navigation](navigation.md) |
 | Navigation Core 2 architecture, actions, lifecycle and top tabs | [Navigation Core 2](navigation-core-2.md) |
+| React Navigation native-mobile parity across all 17 delivery blocks | [Navigation parity matrix](navigation-parity.md) |
 | Components and tags reference | [Components](components.md) |
 | Debug overlay and diagnostics | [DevTools](devtools.md) |
 | Native/community plugins | [Plugins](plugins.md) |

@@ -155,7 +155,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     override func gestureRecognizerShouldBegin(
         _ gestureRecognizer: UIGestureRecognizer
     ) -> Bool {
-        guard navigationController == nil, gestureEnabled, routeViews.count >= 2,
+        guard gestureEnabled, routeViews.count >= 2,
               let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
         let point = pan.location(in: self)
         let rtl = effectiveUserInterfaceLayoutDirection == .rightToLeft
@@ -463,6 +463,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
               let parent = nearestViewController() else { return }
         let navigation = UINavigationController()
         navigation.setNavigationBarHidden(true, animated: false)
+        navigation.interactivePopGestureRecognizer?.isEnabled = false
         parent.addChild(navigation)
         navigation.view.frame = bounds
         navigation.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -489,6 +490,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
               let incoming = incomingView() else { return }
         let outgoing = outgoingView()
         let allControllers = routeViews.compactMap { routeControllers[ObjectIdentifier($0)] }
+        if interactivePopCommitted && operation == 3 {
+            interactivePopCommitted = false
+            navigation.setViewControllers(allControllers, animated: false)
+            finish(incoming: incoming, outgoing: outgoing)
+            applyControllerChrome()
+            return
+        }
         if operation == 3, let presented = presentedNavigationController {
             presented.dismiss(animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
                 self?.presentedNavigationController = nil
