@@ -18,8 +18,11 @@ final class Router
     private bool $restoreState = true;
     /** @var list<DeepLink> */
     private array $deepLinks = [];
-    /** @var array<string, ScreenOptions|Closure> */
+    /** @var array<string, ScreenOptions|ScreenOptionsPatch|Closure> */
     private array $options = [];
+    private ScreenOptions|Closure|null $defaultOptions = null;
+    /** @var list<array{routes: list<string>, options: ScreenOptionsPatch|Closure}> */
+    private array $optionGroups = [];
     /** @var array<string, Closure> */
     private array $routeIds = [];
     /** @var array<string, Closure> */
@@ -59,7 +62,7 @@ final class Router
     public function route(
         string $name,
         Closure $screen,
-        ScreenOptions|Closure|null $options = null,
+        ScreenOptions|ScreenOptionsPatch|Closure|null $options = null,
         ?Closure $getId = null,
     ): self
     {
@@ -71,6 +74,21 @@ final class Router
         if ($options !== null) $copy->options[$name] = $options;
         if ($getId !== null) $copy->routeIds[$name] = $getId;
 
+        return $copy;
+    }
+
+    public function screenOptions(ScreenOptions|Closure $options): self
+    {
+        $copy = clone $this;
+        $copy->defaultOptions = $options;
+        return $copy;
+    }
+
+    /** @param list<string> $routes */
+    public function group(array $routes, ScreenOptionsPatch|Closure $options): self
+    {
+        $copy = clone $this;
+        $copy->optionGroups[] = ['routes' => array_values($routes), 'options' => $options];
         return $copy;
     }
 
@@ -162,6 +180,8 @@ final class Router
             routeIds: $this->routeIds,
             routeGuards: $this->routeGuards,
             guardFallback: $this->guardFallback,
+            defaultOptions: $this->defaultOptions,
+            optionGroups: $this->optionGroups,
         );
     }
 }

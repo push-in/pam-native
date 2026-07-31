@@ -40,14 +40,17 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private ?Closure $systemBackInterceptor = null;
     /** @var list<DeepLink> */
     private array $deepLinks;
-    /** @var array<string, ScreenOptions|Closure> */
+    /** @var array<string, ScreenOptions|ScreenOptionsPatch|Closure> */
     private array $screenOptions;
     /** @var array<string, Closure> */
     private array $routeIds;
     /** @var array<string, Closure> */
     private array $routeGuards;
-    /** @var array<string, ScreenOptions> */
+    /** @var array<string, ScreenOptions|ScreenOptionsPatch> */
     private array $dynamicOptions = [];
+    private ScreenOptions|Closure|null $defaultOptions;
+    /** @var list<array{routes: list<string>, options: ScreenOptionsPatch|Closure}> */
+    private array $optionGroups;
     /** @var list<string> */
     private array $linkingPrefixes;
     /** @var (Closure(string): bool)|null */
@@ -72,6 +75,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         array $routeIds = [],
         array $routeGuards = [],
         private readonly ?string $guardFallback = null,
+        ScreenOptions|Closure|null $defaultOptions = null,
+        array $optionGroups = [],
     )
     {
         $validated = [];
@@ -100,11 +105,26 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $this->deepLinks = array_values($deepLinks);
         foreach ($screenOptions as $route => $options) {
-            if (!is_string($route) || !isset($validated[$route]) || (!$options instanceof ScreenOptions && !$options instanceof Closure)) {
+            if (!is_string($route) || !isset($validated[$route]) || (!$options instanceof ScreenOptions && !$options instanceof ScreenOptionsPatch && !$options instanceof Closure)) {
                 throw new InvalidArgumentException('Screen options must target a registered route and be options or a resolver.');
             }
         }
         $this->screenOptions = $screenOptions;
+        foreach ($optionGroups as $group) {
+            if (!is_array($group) || !is_array($group['routes'] ?? null) || !isset($group['options'])) {
+                throw new InvalidArgumentException('Option groups require routes and an option layer.');
+            }
+            foreach ($group['routes'] as $route) {
+                if (!is_string($route) || !isset($validated[$route])) {
+                    throw new InvalidArgumentException('Option groups must target registered routes.');
+                }
+            }
+            if (!$group['options'] instanceof ScreenOptionsPatch && !$group['options'] instanceof Closure) {
+                throw new InvalidArgumentException('Option groups require sparse options or a resolver.');
+            }
+        }
+        $this->defaultOptions = $defaultOptions;
+        $this->optionGroups = array_values($optionGroups);
         foreach ($routeIds as $route => $getId) {
             if (!is_string($route) || !isset($validated[$route]) || !$getId instanceof Closure) {
                 throw new InvalidArgumentException('Route identity resolvers must target a registered route.');
@@ -240,12 +260,21 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         return $this->resolvedOptions($entry);
     }
 
-    public function setOptions(ScreenOptions $options): void
+    public function setOptions(ScreenOptions|ScreenOptionsPatch $options): void
     {
         $this->dynamicOptions[$this->entryKey($this->currentEntry())] = $options;
         $this->emitNavigation(NavigationEventType::State, [
             'state' => $this->getState(),
-            'options' => $options->toArray(),
+            'options' => $this->currentOptions()->toArray(),
+        ]);
+    }
+
+    public function clearOptions(): void
+    {
+        unset($this->dynamicOptions[$this->entryKey($this->currentEntry())]);
+        $this->emitNavigation(NavigationEventType::State, [
+            'state' => $this->getState(),
+            'options' => $this->currentOptions()->toArray(),
         ]);
     }
 
@@ -832,21 +861,43 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     /** @param array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>} $entry */
     private function resolvedOptions(array $entry): ScreenOptions
     {
-        $dynamic = $this->dynamicOptions[$this->entryKey($entry)] ?? null;
-        if ($dynamic instanceof ScreenOptions) return $dynamic;
-        $configured = $this->screenOptions[$entry['name']] ?? null;
-        if ($configured instanceof ScreenOptions) return $configured;
-        if ($configured instanceof Closure) {
-            $reflection = new ReflectionFunction($configured);
-            $resolved = $reflection->getNumberOfParameters() === 0
-                ? $configured()
-                : $configured($this->contextFor($entry));
-            if (!$resolved instanceof ScreenOptions) {
-                throw new InvalidArgumentException('Screen option resolvers must return ScreenOptions.');
-            }
-            return $resolved;
+        $resolved = new ScreenOptions();
+        if ($this->defaultOptions !== null) {
+            $resolved = $this->applyOptionLayer($this->defaultOptions, $entry, $resolved);
         }
-        return new ScreenOptions();
+        foreach ($this->optionGroups as $group) {
+            if (in_array($entry['name'], $group['routes'], true)) {
+                $resolved = $this->applyOptionLayer($group['options'], $entry, $resolved);
+            }
+        }
+        $route = $this->screenOptions[$entry['name']] ?? null;
+        if ($route !== null) $resolved = $this->applyOptionLayer($route, $entry, $resolved);
+        $dynamic = $this->dynamicOptions[$this->entryKey($entry)] ?? null;
+        if ($dynamic !== null) {
+            $resolved = $this->applyOptionLayer($dynamic, $entry, $resolved);
+        }
+        return $resolved;
+    }
+
+    /** @param array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>} $entry */
+    private function applyOptionLayer(
+        ScreenOptions|ScreenOptionsPatch|Closure $layer,
+        array $entry,
+        ScreenOptions $inherited,
+    ): ScreenOptions {
+        if ($layer instanceof Closure) {
+            $reflection = new ReflectionFunction($layer);
+            $layer = match ($reflection->getNumberOfParameters()) {
+                0 => $layer(),
+                1 => $layer($this->contextFor($entry)),
+                default => $layer($this->contextFor($entry), $inherited),
+            };
+        }
+        if ($layer instanceof ScreenOptionsPatch) return $layer->apply($inherited);
+        if ($layer instanceof ScreenOptions) return $layer;
+        throw new InvalidArgumentException(
+            'Screen option resolvers must return ScreenOptions or ScreenOptionsPatch.',
+        );
     }
 
     /** @param array<string, string|int|float|bool|null> $params */

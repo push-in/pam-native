@@ -94,6 +94,7 @@ use Pam\Native\Navigation\Navigator;
 use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\ScreenOptions;
+use Pam\Native\Navigation\ScreenOptionsPatch;
 use Pam\Native\Navigation\NavigationPresentation;
 use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
@@ -4310,6 +4311,43 @@ $assert(
     $identifiedState['version'] === 4
         && ($identifiedState['stack'][1]['id'] ?? null) === '1',
     'Versioned navigation state must persist semantic route identities.',
+);
+$layeredOptionsNavigator = Router::stack('home')
+    ->screenOptions(new ScreenOptions(headerShown: true, headerTintColor: 0xFF102030))
+    ->group(
+        ['profile'],
+        ScreenOptionsPatch::from(['headerTransparent' => true]),
+    )
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route(
+        'profile',
+        static fn () => Screen::make(Text::make('Profile')),
+        ScreenOptionsPatch::from(['title' => 'Layered profile']),
+    )
+    ->build();
+$layeredOptionsNavigator->push('profile');
+$layered = $layeredOptionsNavigator->currentOptions();
+$assert(
+    $layered->headerShown
+        && $layered->headerTransparent
+        && $layered->headerTintColor === 0xFF102030
+        && $layered->title === 'Layered profile',
+    'Screen options must resolve navigator defaults, groups and sparse route overrides in order.',
+);
+$layeredOptionsNavigator->setOptions(ScreenOptionsPatch::from([
+    'headerShown' => false,
+    'headerTintColor' => null,
+]));
+$assert(
+    !$layeredOptionsNavigator->currentOptions()->headerShown
+        && $layeredOptionsNavigator->currentOptions()->headerTintColor === null,
+    'Runtime option patches must preserve explicit false and null values.',
+);
+$layeredOptionsNavigator->clearOptions();
+$assert(
+    $layeredOptionsNavigator->currentOptions()->headerShown
+        && $layeredOptionsNavigator->currentOptions()->headerTintColor === 0xFF102030,
+    'Clearing runtime options must reveal the inherited option chain again.',
 );
 $advancedNavigator->push('article', ['slug' => 'temporary']);
 $assert(
