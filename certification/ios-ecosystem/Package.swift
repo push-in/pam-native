@@ -117,8 +117,28 @@ let package = Package(
             linkerSettings: [.linkedFramework("WidgetKit"), .linkedFramework("SwiftUI")],
         ),
         .target(
+            name: "PamExtensionIntents",
+            path: "Sources/PamExtensionIntents",
+            linkerSettings: [.linkedFramework("AppIntents")],
+        ),
+        .target(
+            name: "PamExtensionLiveActivities",
+            path: "Sources/PamExtensionLiveActivities",
+            linkerSettings: [.linkedFramework("ActivityKit"), .linkedFramework("WidgetKit"), .linkedFramework("SwiftUI")],
+        ),
+        .target(
+            name: "PamExtensionShare",
+            path: "Sources/PamExtensionShare",
+            linkerSettings: [.linkedFramework("Social"), .linkedFramework("UniformTypeIdentifiers")],
+        ),
+        .target(
+            name: "PamExtensionWidgets",
+            path: "Sources/PamExtensionWidgets",
+            linkerSettings: [.linkedFramework("WidgetKit"), .linkedFramework("SwiftUI")],
+        ),
+        .target(
             name: "PamNativePlugins",
-            dependencies: ["PamPlugin0PushinbrPamNativeAuth", "PamPlugin1PushinbrPamNativeBackgroundTransfer", "PamPlugin2PushinbrPamNativeBluetooth", "PamPlugin3PushinbrPamNativeFeatureFlags", "PamPlugin4PushinbrPamNativeFirebase", "PamPlugin5PushinbrPamNativeHealth", "PamPlugin6PushinbrPamNativeIntents", "PamPlugin7PushinbrPamNativeLiveActivities", "PamPlugin8PushinbrPamNativeMaps", "PamPlugin9PushinbrPamNativeMedia", "PamPlugin10PushinbrPamNativeNfc", "PamPlugin11PushinbrPamNativePayments", "PamPlugin12PushinbrPamNativeRealtime", "PamPlugin13PushinbrPamNativeScanner", "PamPlugin14PushinbrPamNativeShareExtension", "PamPlugin15PushinbrPamNativeSubscriptions", "PamPlugin16PushinbrPamNativeVideo", "PamPlugin17PushinbrPamNativeWidgets"],
+            dependencies: ["PamPlugin0PushinbrPamNativeAuth", "PamPlugin1PushinbrPamNativeBackgroundTransfer", "PamPlugin2PushinbrPamNativeBluetooth", "PamPlugin3PushinbrPamNativeFeatureFlags", "PamPlugin4PushinbrPamNativeFirebase", "PamPlugin5PushinbrPamNativeHealth", "PamPlugin6PushinbrPamNativeIntents", "PamPlugin7PushinbrPamNativeLiveActivities", "PamPlugin8PushinbrPamNativeMaps", "PamPlugin9PushinbrPamNativeMedia", "PamPlugin10PushinbrPamNativeNfc", "PamPlugin11PushinbrPamNativePayments", "PamPlugin12PushinbrPamNativeRealtime", "PamPlugin13PushinbrPamNativeScanner", "PamPlugin14PushinbrPamNativeShareExtension", "PamPlugin15PushinbrPamNativeSubscriptions", "PamPlugin16PushinbrPamNativeVideo", "PamPlugin17PushinbrPamNativeWidgets", "PamExtensionIntents", "PamExtensionLiveActivities", "PamExtensionShare", "PamExtensionWidgets"],
             path: "Sources/PamNativePlugins"
         ),
     ]

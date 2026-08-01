@@ -84,6 +84,17 @@ jobs:
           cp -R \
             "${RUNNER_TEMP}/pam-native-live-activities/ios/Shared/." \
             "${root}/PamPlugin7PushinbrPamNativeLiveActivities/"
+          mkdir -p \
+            "${root}/PamExtensionIntents" \
+            "${root}/PamExtensionLiveActivities" \
+            "${root}/PamExtensionShare" \
+            "${root}/PamExtensionWidgets"
+          cp -R "${RUNNER_TEMP}/pam-native-intents/ios/IntentExtension/." "${root}/PamExtensionIntents/"
+          cp -R "${RUNNER_TEMP}/pam-native-intents/ios/Shared/." "${root}/PamExtensionIntents/"
+          cp -R "${RUNNER_TEMP}/pam-native-live-activities/ios/LiveActivityExtension/." "${root}/PamExtensionLiveActivities/"
+          cp -R "${RUNNER_TEMP}/pam-native-live-activities/ios/Shared/." "${root}/PamExtensionLiveActivities/"
+          cp -R "${RUNNER_TEMP}/pam-native-share-extension/ios/ShareExtension/." "${root}/PamExtensionShare/"
+          cp -R "${RUNNER_TEMP}/pam-native-widgets/ios/WidgetExtension/." "${root}/PamExtensionWidgets/"
       - name: Resolve exact vendor SDKs
         working-directory: certification/ios-ecosystem
         run: swift package resolve
