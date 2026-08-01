@@ -165,6 +165,19 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         viewportChanged = listener
     }
 
+    fun trimMemory(critical: Boolean) {
+        if (!critical) return
+        stopScroll()
+        recycledViewPool.clear()
+        setItemViewCacheSize(0)
+        adaptivePrefetchItems = 0
+        lastScrollNanos = 0L
+        (layoutManager as? PrefetchLayoutManager)?.apply {
+            prefetchCount = 0
+            extraLayoutSpace = 0
+        }
+    }
+
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (!scrollEnabled) return false
         when (event.actionMasked) {
@@ -294,7 +307,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         val now = System.nanoTime()
         val elapsed = now - lastScrollNanos
         lastScrollNanos = now
-        if (elapsed <= 0L || elapsed > 250_000_000L) return
+        if (elapsed <= 0L || elapsed > 250_000_000L) {
+            if (adaptivePrefetchItems == 0) {
+                adaptivePrefetchItems = prefetchItems
+                updatePrefetch()
+            }
+            return
+        }
         val rowsPerSecond = abs(deltaPixels).toDouble() / dp(rowHeight) * 1_000_000_000.0 / elapsed
         val next = (prefetchItems + (rowsPerSecond * 0.15).toInt())
             .coerceIn(prefetchItems, MAX_PREFETCH_ITEMS)

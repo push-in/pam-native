@@ -487,6 +487,11 @@ class PamRenderer(
     fun trimMemory(critical: Boolean) {
         check(Looper.myLooper() == Looper.getMainLooper())
         imageLoader.trimMemory(critical)
+        if (critical) {
+            for (position in 0 until views.size()) {
+                (views.valueAt(position) as? PamRecyclerList)?.trimMemory(true)
+            }
+        }
     }
 
     override fun close() {

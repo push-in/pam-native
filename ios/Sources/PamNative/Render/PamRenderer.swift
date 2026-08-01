@@ -99,6 +99,7 @@ public final class PamRenderer {
             cancelImageLoad(for: node)
         }
         PamMediaDiskCache.shared.trimMemory()
+        syncVirtualLists(forceMinimal: true)
     }
 
     public func setApplicationActive(_ active: Bool) {
@@ -404,7 +405,7 @@ public final class PamRenderer {
         }
     }
 
-    private func syncVirtualLists() {
+    private func syncVirtualLists(forceMinimal: Bool = false) {
         let ids = nodes.values.compactMap { state -> Int64? in
             switch state.kind {
             case .list, .sectionList, .virtualList:
@@ -413,10 +414,10 @@ public final class PamRenderer {
                 return nil
             }
         }
-        ids.forEach(syncVirtualList)
+        ids.forEach { syncVirtualList($0, forceMinimal: forceMinimal) }
     }
 
-    private func syncVirtualList(_ id: Int64) {
+    private func syncVirtualList(_ id: Int64, forceMinimal: Bool = false) {
         guard let list = views[id] as? PamVirtualListView,
               let listFrame = frames[id],
               list.bounds.width > 0,
@@ -451,7 +452,7 @@ public final class PamRenderer {
             frames: localFrames,
             viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
             horizontal: horizontal,
-            overscan: list.adaptiveOverscan,
+            overscan: forceMinimal ? 0 : list.adaptiveOverscan,
             velocity: list.scrollVelocity
         )
         for cellId in cellIds {
