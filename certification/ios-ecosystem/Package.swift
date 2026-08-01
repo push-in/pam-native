@@ -9,7 +9,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../ios"),
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", exact: "12.17.0"),
-        .package(url: "https://github.com/stripe/stripe-ios.git", exact: "26.2.0"),
+        .package(url: "https://github.com/stripe/stripe-ios.git", exact: "26.0.0"),
     ],
     targets: [
         .target(
