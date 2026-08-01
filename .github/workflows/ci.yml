@@ -185,6 +185,9 @@ jobs:
         run: >-
           xcodebuild
           -scheme PamNative
+          -configuration Release
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
+          SWIFT_COMPILATION_MODE=wholemodule
+          DEAD_CODE_STRIPPING=YES
           build

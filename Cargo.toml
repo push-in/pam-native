@@ -16,7 +16,9 @@ repository = "https://github.com/push-in/pam-native"
 unsafe_op_in_unsafe_fn = "deny"
 
 [profile.release]
+opt-level = 3
 codegen-units = 1
 lto = "thin"
+overflow-checks = false
 panic = "abort"
 strip = "symbols"

@@ -74,6 +74,14 @@ target_include_directories(pam_native_android PRIVATE
 target_link_options(pam_native_android PRIVATE
     "-Wl,-z,max-page-size=16384"
     "-Wl,--exclude-libs,ALL"
+    "$<$<NOT:$<CONFIG:Debug>>:-Wl,--gc-sections>"
+    "$<$<NOT:$<CONFIG:Debug>>:-Wl,--icf=safe>"
+)
+
+target_compile_options(pam_native_android PRIVATE
+    "$<$<NOT:$<CONFIG:Debug>>:-O3>"
+    "$<$<NOT:$<CONFIG:Debug>>:-ffunction-sections>"
+    "$<$<NOT:$<CONFIG:Debug>>:-fdata-sections>"
 )
 
 target_link_libraries(pam_native_android

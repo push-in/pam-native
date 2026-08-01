@@ -119,3 +119,13 @@ its ceilings are configurable through `PAM_PERF_ENGINE_FULL_TREE_NS` and
 `PAM_PERF_ENGINE_PATCH_NS`. CI defaults deliberately allow shared-runner
 variance; physical-device macrobenchmark budgets remain the source of truth
 for startup, frame timing and memory.
+
+## Optimized native builds
+
+Rust release engines use `-O3`, one codegen unit, ThinLTO, aborting panics,
+disabled overflow checks and stripped symbols. Android release linkage adds
+function/data sections, section garbage collection and safe identical-code
+folding before R8 and resource shrinking. The release workflow compiles the
+iOS package with the Release configuration, whole-module Swift optimization,
+dead-code stripping and library-evolution metadata; CI builds that same
+optimized configuration so a debug-only success cannot certify a release.
