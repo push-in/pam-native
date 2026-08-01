@@ -12,6 +12,8 @@ pub(crate) type TextMetrics = BTreeMap<u64, GlyphAdvances>;
 pub(crate) struct FontMetricsCache {
     asset_root: Option<PathBuf>,
     fonts: BTreeMap<String, CachedFont>,
+    node_fonts: BTreeMap<u64, String>,
+    metrics: TextMetrics,
 }
 
 #[derive(Debug)]
@@ -27,24 +29,39 @@ impl FontMetricsCache {
         if self.asset_root.as_ref() != Some(&asset_root) {
             self.asset_root = Some(asset_root);
             self.fonts.clear();
+            self.node_fonts.clear();
+            self.metrics.clear();
         }
     }
 
-    pub(crate) fn measure_tree(&mut self, tree: &Tree) -> TextMetrics {
-        let mut node_fonts = BTreeMap::<u64, String>::new();
+    pub(crate) fn measure_tree(&mut self, tree: &Tree) -> &TextMetrics {
+        self.node_fonts.clear();
+        self.metrics.clear();
+        let ids = tree.nodes.keys().copied().collect::<Vec<_>>();
+        self.measure_nodes(tree, &ids)
+    }
+
+    pub(crate) fn measure_nodes(&mut self, tree: &Tree, ids: &[u64]) -> &TextMetrics {
         let mut required_characters = BTreeMap::<String, BTreeSet<char>>::new();
-        for node in tree
-            .nodes
-            .values()
-            .filter(|node| node.kind == NodeKind::Text)
-        {
+        let mut changed_nodes = Vec::new();
+        for id in ids {
+            self.node_fonts.remove(id);
+            self.metrics.remove(id);
+            let Some(node) = tree
+                .nodes
+                .get(id)
+                .filter(|node| node.kind == NodeKind::Text)
+            else {
+                continue;
+            };
             let Some(PropValue::String(family)) = node.properties.get(&PropKey::FontFamily) else {
                 continue;
             };
             let Some(PropValue::String(text)) = node.properties.get(&PropKey::Text) else {
                 continue;
             };
-            node_fonts.insert(node.id, family.clone());
+            self.node_fonts.insert(node.id, family.clone());
+            changed_nodes.push(node.id);
             let characters = required_characters.entry(family.clone()).or_default();
             for character in text.chars() {
                 characters.insert(character);
@@ -92,10 +109,15 @@ impl FontMetricsCache {
             snapshots.insert(family, Arc::clone(&cached.snapshot));
         }
 
-        node_fonts
-            .into_iter()
-            .filter_map(|(node, family)| snapshots.get(&family).cloned().map(|font| (node, font)))
-            .collect()
+        for node in changed_nodes {
+            let Some(family) = self.node_fonts.get(&node) else {
+                continue;
+            };
+            if let Some(font) = snapshots.get(family).cloned() {
+                self.metrics.insert(node, font);
+            }
+        }
+        &self.metrics
     }
 
     fn resolve_asset_font(&self, family: &str) -> Option<PathBuf> {
@@ -115,6 +137,8 @@ impl FontMetricsCache {
 #[cfg(test)]
 mod tests {
     use super::FontMetricsCache;
+    use pam_native_protocol::{Node, NodeKind, PropKey, PropValue, Tree};
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     #[test]
@@ -133,5 +157,52 @@ mod tests {
                 .is_none()
         );
         assert!(cache.resolve_asset_font("/private/font.ttf").is_none());
+    }
+
+    #[test]
+    fn incremental_measurement_only_reindexes_dirty_text_nodes() {
+        let text = |id, value: &str| Node {
+            id,
+            parent: 1,
+            index: id as u32,
+            kind: NodeKind::Text,
+            properties: BTreeMap::from([
+                (
+                    PropKey::FontFamily,
+                    PropValue::String("asset://fonts/app.ttf".to_owned()),
+                ),
+                (PropKey::Text, PropValue::String(value.to_owned())),
+            ]),
+        };
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::Screen,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (2, text(2, "first")),
+                (3, text(3, "second")),
+            ]),
+        };
+        let mut cache = FontMetricsCache::default();
+        cache.measure_tree(&tree);
+        assert_eq!(cache.node_fonts.len(), 2);
+
+        tree.nodes
+            .get_mut(&2)
+            .expect("text node")
+            .properties
+            .remove(&PropKey::FontFamily);
+        cache.measure_nodes(&tree, &[2]);
+
+        assert!(!cache.node_fonts.contains_key(&2));
+        assert!(cache.node_fonts.contains_key(&3));
     }
 }

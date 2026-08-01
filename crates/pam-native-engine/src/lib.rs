@@ -129,7 +129,7 @@ impl Engine {
             current,
             self.viewport,
             self.text_scale,
-            &text_metrics,
+            text_metrics,
         )?;
         self.performance.record(
             performance::PerformanceStage::Layout,
@@ -197,7 +197,7 @@ impl Engine {
             &next,
             self.viewport,
             self.text_scale,
-            &text_metrics,
+            text_metrics,
         )?;
         self.performance.record(
             performance::PerformanceStage::Layout,
@@ -273,6 +273,7 @@ impl Engine {
         let mut mutations = Vec::with_capacity(updates.len());
         let mut rollback = Vec::with_capacity(updates.len());
         let mut layout_dirty = false;
+        let mut layout_dirty_nodes = BTreeSet::new();
         let current = self.current.as_mut().expect("validated current tree");
         for PropertyPatch { id, key, value } in updates {
             let node = current.nodes.get_mut(&id).expect("prevalidated patch node");
@@ -283,7 +284,10 @@ impl Engine {
             if previous.as_ref() == value.as_ref() {
                 continue;
             }
-            layout_dirty |= affects_layout(key);
+            if affects_layout(key) {
+                layout_dirty = true;
+                layout_dirty_nodes.insert(id);
+            }
             rollback.push(PropertyPatch {
                 id,
                 key,
@@ -298,12 +302,13 @@ impl Engine {
                 .current
                 .as_ref()
                 .expect("current tree remains available");
-            let text_metrics = self.font_metrics.measure_tree(current);
+            let dirty_nodes = layout_dirty_nodes.into_iter().collect::<Vec<_>>();
+            let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
             let calculated = layout::calculate_with_text_metrics(
                 current,
                 self.viewport,
                 self.text_scale,
-                &text_metrics,
+                text_metrics,
             );
             let calculated = match calculated {
                 Ok(layouts) => layouts,
@@ -417,7 +422,7 @@ impl Engine {
             &next,
             self.viewport,
             self.text_scale,
-            &text_metrics,
+            text_metrics,
         )?;
         self.performance.record(
             performance::PerformanceStage::Layout,
