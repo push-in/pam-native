@@ -20,7 +20,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let timers = TimersModule()
     private let modules: [String: NativeModule]
 
-    public init() {
+    public init(additionalModules: [String: NativeModule] = [:]) {
         var values: [String: NativeModule] = [
             "http": http,
             "storage": storage,
@@ -40,6 +40,10 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "timers": timers,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
+        additionalModules.forEach { name, module in
+            precondition(values[name] == nil, "Duplicate native module \(name)")
+            values[name] = module
+        }
         self.modules = values
     }
 

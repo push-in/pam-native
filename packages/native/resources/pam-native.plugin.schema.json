@@ -64,7 +64,7 @@
                     "uniqueItems": true,
                     "items": {
                         "type": "string",
-                        "pattern": "^android\\.permission\\.[A-Z0-9_]+$"
+                        "pattern": "^android\\.permission\\.(?:[a-z][a-z0-9_]*\\.)*[A-Z][A-Z0-9_]*$"
                     }
                 },
                 "repositories": {
@@ -120,8 +120,49 @@
                 },
                 "resourceDirs": {
                     "$ref": "#/$defs/paths"
+                },
+                "swiftPackages": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "#/$defs/swiftPackage"
+                    }
+                },
+                "frameworks": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "#/$defs/appleIdentifier"
+                    }
+                },
+                "usageDescriptions": {
+                    "type": "object",
+                    "propertyNames": {
+                        "pattern": "^(?:NS[A-Za-z0-9_]+|NFCReader)UsageDescription$"
+                    },
+                    "additionalProperties": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                    }
+                },
+                "entitlements": {
+                    "$ref": "#/$defs/path"
+                },
+                "infoPlist": {
+                    "$ref": "#/$defs/path"
+                },
+                "extensions": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "#/$defs/iosExtension"
+                    }
                 }
             }
+        },
+        "idl": {
+            "$ref": "#/$defs/path"
         },
         "modules": {
             "$ref": "#/$defs/nativeBindings"
@@ -170,6 +211,81 @@
                         "type": "string",
                         "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
                     }
+                }
+            }
+        },
+        "appleIdentifier": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.+-]*$"
+        },
+        "swiftPackage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["url", "requirement", "products"],
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "pattern": "^https://[^\\u0000\\r\\n\\\"]+\\.git$",
+                    "maxLength": 2048
+                },
+                "requirement": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["kind", "value"],
+                    "properties": {
+                        "kind": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5
+                        },
+                        "value": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                        }
+                    }
+                },
+                "products": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "#/$defs/appleIdentifier"
+                    }
+                }
+            }
+        },
+        "iosExtension": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "name", "bundleSuffix", "sourceDirs"],
+            "properties": {
+                "kind": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 5
+                },
+                "name": {
+                    "$ref": "#/$defs/appleIdentifier"
+                },
+                "bundleSuffix": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+(?:\\.[a-z0-9-]+)*$",
+                    "maxLength": 120
+                },
+                "sourceDirs": {
+                    "$ref": "#/$defs/paths"
+                },
+                "resourceDirs": {
+                    "$ref": "#/$defs/paths"
+                },
+                "entitlements": {
+                    "$ref": "#/$defs/path"
+                },
+                "infoPlist": {
+                    "$ref": "#/$defs/path"
                 }
             }
         }

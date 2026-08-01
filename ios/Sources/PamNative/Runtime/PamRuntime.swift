@@ -227,7 +227,7 @@ public final class PamRuntime {
     private let reportError: ReportError
     private let onFrameCommitted: FrameCallback
     private let onDiagnostic: DiagnosticCallback
-    private let modules = NativeModuleRegistry()
+    private let modules: NativeModuleRegistry
 
     private let stateLock = NSLock()
     private var handle: UInt64 = 0
@@ -257,6 +257,8 @@ public final class PamRuntime {
 
     public init(
         hostView: UIView,
+        nativeModules: [String: NativeModule] = [:],
+        nativeViews: [String: NativeViewFactory] = [:],
         reportError: @escaping ReportError,
         onFrameCommitted: @escaping FrameCallback = { _ in },
         onDiagnostic: @escaping DiagnosticCallback = { _ in },
@@ -264,7 +266,8 @@ public final class PamRuntime {
         self.reportError = reportError
         self.onFrameCommitted = onFrameCommitted
         self.onDiagnostic = onDiagnostic
-        self.renderer = PamRenderer(hostView: hostView) { [weak self] nodeId, kind, payload in
+        self.modules = NativeModuleRegistry(additionalModules: nativeModules)
+        self.renderer = PamRenderer(hostView: hostView, nativeViews: nativeViews) { [weak self] nodeId, kind, payload in
             self?.dispatchEvent(nodeId, kind: kind, payload: payload)
         }
 

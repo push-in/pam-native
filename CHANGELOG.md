@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.1 - 2026-08-01
+
+- Add production plugin manifests for typed IDL fingerprints, Swift Package
+  dependencies, Apple frameworks, purpose strings, app entitlements, Info.plist
+  fragments, and signed iOS extension targets.
+- Generate deterministic Android and iOS plugin registries so third-party
+  modules and views autolink without editing the PAM Native host.
+- Add an injectable native-module transport for deterministic ecosystem tests
+  while retaining the production bridge as the default.
+- Accept official namespaced Android permissions and Apple's
+  `NFCReaderUsageDescription` key in validated plugin metadata.
+- Publish the official 24-package ecosystem architecture and compatibility
+  contract.
+
 ## 0.6.0 - 2026-07-31
 
 - Add Laravel-inspired named route stacks, tabs, screens and modals. Components

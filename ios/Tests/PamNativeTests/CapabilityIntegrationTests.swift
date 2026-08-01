@@ -1,8 +1,44 @@
 import XCTest
 @testable import PamNative
 
+private final class PluginFixtureModule: NativeModule {
+    func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        completion(.success, Data("\(method):".utf8) + payload)
+    }
+}
+
+@MainActor
+private final class PluginFixtureViewFactory: NativeViewFactory {
+    func create(context: AnyObject?, emit: @escaping (Data) -> Void) -> UIView {
+        UIView()
+    }
+
+    func update(view: UIView, properties: [String: WireValue]) {}
+    func close() {}
+}
+
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testPluginRegistriesInjectModulesAndViews() {
+        let modules = NativeModuleRegistry(additionalModules: [
+            "fixture.echo": PluginFixtureModule(),
+        ])
+        let moduleExpectation = expectation(description: "plugin module result")
+        modules.invoke(module: "fixture.echo", method: "ping", payload: Data("pam".utf8)) { status, data in
+            XCTAssertEqual(status, .success)
+            XCTAssertEqual(String(data: data, encoding: .utf8), "ping:pam")
+            moduleExpectation.fulfill()
+        }
+
+        let views = NativeViewRegistry(additionalFactories: [
+            "fixture.view": PluginFixtureViewFactory(),
+        ])
+        let view = views.create(name: "fixture.view") { _, _ in }
+        XCTAssertTrue(type(of: view) == UIView.self)
+        views.release(view: view)
+        wait(for: [moduleExpectation], timeout: 1)
+    }
+
     func testDevToolsRendersCapabilityFailureTimeline() {
         let overlay = PamDevToolsOverlay(frame: CGRect(x: 0, y: 0, width: 360, height: 500))
         overlay.update(RuntimeFrameMetrics(

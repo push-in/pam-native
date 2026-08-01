@@ -17,8 +17,13 @@ public final class NativeViewRegistry {
     private let factories: [String: NativeViewFactory]
     private var owners: [ObjectIdentifier: NativeViewFactory] = [:]
 
-    public init() {
-        self.factories = GeneratedPamViews.create()
+    public init(additionalFactories: [String: NativeViewFactory] = [:]) {
+        var values = GeneratedPamViews.create()
+        additionalFactories.forEach { name, factory in
+            precondition(values[name] == nil, "Duplicate native view \(name)")
+            values[name] = factory
+        }
+        self.factories = values
     }
 
     public func create(name: String, emit: @escaping (Int, Data) -> Void) -> UIView {

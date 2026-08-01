@@ -5,7 +5,7 @@ import UIKit
 public final class PamRenderer {
     private let host: UIView
     private let dispatchEvent: (Int64, Int, Data) -> Void
-    private let nativeViews = NativeViewRegistry()
+    private let nativeViews: NativeViewRegistry
     private let imageSession: URLSession
     private let imageSessionDelegate: ImageLoadSessionDelegate
     private var imageLoadContexts: [Int: ImageLoadContext] = [:]
@@ -23,9 +23,14 @@ public final class PamRenderer {
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
 
-    public init(hostView: UIView, dispatchEvent: @escaping (Int64, Int, Data) -> Void) {
+    public init(
+        hostView: UIView,
+        nativeViews: [String: NativeViewFactory] = [:],
+        dispatchEvent: @escaping (Int64, Int, Data) -> Void
+    ) {
         self.host = hostView
         self.dispatchEvent = dispatchEvent
+        self.nativeViews = NativeViewRegistry(additionalFactories: nativeViews)
         let sessionDelegate = ImageLoadSessionDelegate()
         self.imageSessionDelegate = sessionDelegate
         self.imageSession = URLSession(

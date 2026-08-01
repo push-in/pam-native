@@ -1,5 +1,6 @@
 package dev.pam.nativeapp.render
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -8,6 +9,7 @@ import android.widget.Switch
 import kotlin.math.roundToInt
 
 @Suppress("DEPRECATION")
+@SuppressLint("UseSwitchCompatOrMaterialCode")
 internal class PamSwitch(context: Context) : Switch(context) {
     private val defaultTrackTint = trackTintList
     private val defaultThumbTint = thumbTintList

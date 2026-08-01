@@ -16,6 +16,15 @@ final class NativeModules
     }
 
     /**
+     * Installs an alternate module transport, primarily for deterministic
+     * hosts and the official testing package. Pass null to restore native I/O.
+     */
+    public static function useTransport(?NativeModuleTransport $transport): void
+    {
+        Runtime::setModuleTransport($transport);
+    }
+
+    /**
      * @param array<string, string|int|float|bool> $payload
      * @param Closure(NativeModuleResult): void $callback
      */

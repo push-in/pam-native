@@ -12,6 +12,7 @@ use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\MemoryPressure;
 use Pam\Native\ModuleResultStatus;
+use Pam\Native\Modules\NativeModuleTransport;
 use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
 use Pam\Native\State;
@@ -40,6 +41,7 @@ final class Runtime
     private static array $moduleCallbacks = [];
 
     private static int $nextRequestId = 1;
+    private static ?NativeModuleTransport $moduleTransport = null;
     private static ?string $lastFrame = null;
     private static ?Closure $backHandler = null;
     private static ?Closure $appStateHandler = null;
@@ -248,11 +250,38 @@ final class Runtime
         $requestId = self::$nextRequestId++;
         self::$moduleCallbacks[$requestId] = $callback;
 
-        if (function_exists('pam_native_call')) {
+        if (self::$moduleTransport !== null) {
+            self::$moduleTransport->invoke(
+                $requestId,
+                $module,
+                $method,
+                $payload,
+                static fn (ModuleResultStatus $status, string $result): null => self::completeTransportCall(
+                    $requestId,
+                    $status,
+                    $result,
+                ),
+            );
+        } elseif (function_exists('pam_native_call')) {
             pam_native_call($requestId, $module, $method, $payload);
         }
 
         return $requestId;
+    }
+
+    public static function setModuleTransport(?NativeModuleTransport $transport): void
+    {
+        self::$moduleTransport = $transport;
+    }
+
+    private static function completeTransportCall(
+        int $requestId,
+        ModuleResultStatus $status,
+        string $payload,
+    ): null {
+        self::dispatchModuleResult($requestId, $status->value, $payload);
+
+        return null;
     }
 
     public static function callNative(
@@ -301,6 +330,7 @@ final class Runtime
         self::$moduleCallbacks = [];
         self::$lastFrame = null;
         self::$nextRequestId = 1;
+        self::$moduleTransport = null;
         self::$backHandler = null;
         self::$appStateHandler = null;
         self::$dimensionsHandler = null;

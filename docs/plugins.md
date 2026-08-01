@@ -6,7 +6,9 @@ Pam Native plugins are ordinary Composer packages. One package can publish:
 - Android native modules callable from persistent PHP;
 - Android native view factories rendered inside the Pam tree;
 - Android resources, assets, manifests, JNI libraries, Maven libraries, and
-  local AARs.
+  local AARs;
+- iOS native modules/views, Swift Package products, system frameworks,
+  resources, usage descriptions, entitlements, and signed extension plans.
 
 Discovery and autolinking happen at build time. Production apps do not scan
 classpaths, load DEX files, or parse plugin JSON during a frame.
@@ -18,6 +20,7 @@ composer require vendor/maps-plugin
 pam mobile plugin:doctor .
 pam mobile plugin:list .
 pam mobile codegen .
+pam mobile ios:prepare .
 ```
 
 `prepare`, `build`, `run`, and `dev` also run codegen automatically. The
@@ -93,10 +96,38 @@ The package advertises one descriptor:
         "manifest": "android/src/main/AndroidManifest.xml",
         "consumerRules": "android/consumer-rules.pro"
     },
+    "ios": {
+        "minimumVersion": "15.0",
+        "sourceDirs": ["ios/Sources"],
+        "resourceDirs": ["ios/Resources"],
+        "swiftPackages": [
+            {
+                "url": "https://github.com/vendor/mobile-sdk.git",
+                "requirement": {"kind": 2, "value": "4.2.0"},
+                "products": ["VendorMobile"]
+            }
+        ],
+        "frameworks": ["AuthenticationServices"],
+        "usageDescriptions": {
+            "NSFaceIDUsageDescription": "Authenticate your account."
+        },
+        "entitlements": "ios/App.entitlements",
+        "extensions": [
+            {
+                "kind": 1,
+                "name": "MapsShareExtension",
+                "bundleSuffix": "maps-share",
+                "sourceDirs": ["ios/ShareExtension"],
+                "infoPlist": "ios/ShareExtension/Info.plist"
+            }
+        ]
+    },
+    "idl": "pam-native.idl.json",
     "modules": [
         {
             "name": "maps.geocoder",
-            "class": "com.vendor.pam.maps.GeocoderModule"
+            "class": "com.vendor.pam.maps.GeocoderModule",
+            "iosClass": "GeocoderModule"
         }
     ],
     "views": [
@@ -116,6 +147,31 @@ plugin `minSdk` above the app `minSdk`.
 Maven View libraries and precompiled Compose/View AARs work through
 `dependencies` or `localAars`. The plugin module participates in normal Android
 manifest merging, resource processing, R8 consumer rules, and JNI packaging.
+
+`pam mobile ios:prepare` creates `.pam-native/ios/plugins.json` plus the local
+`.pam-native/ios/PamNativePlugins` Swift Package. Requirement kinds are exact
+`1`, from/up-to-next-major `2`, branch `3`, revision `4`, and
+up-to-next-minor `5`. Extension kinds are share `1`, widget `2`, notification
+service `3`, App Intents `4`, and Live Activity `5`. Values are append-only.
+
+The generated package exposes one registry for runtime injection:
+
+```swift
+import PamNative
+import PamNativePlugins
+
+let runtime = PamRuntime(
+    hostView: hostView,
+    nativeModules: PamNativePluginRegistry.modules(),
+    nativeViews: PamNativePluginRegistry.views(),
+    reportError: reportError
+)
+```
+
+Swift Package Manager compiles modules, views and resources. App extensions
+still require signed Xcode application targets; their canonical source paths,
+plist, entitlements, kind and bundle suffix are emitted in `plugins.json` for
+the host target generator.
 
 ## PHP provider
 
