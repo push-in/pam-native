@@ -184,7 +184,7 @@ PHP_FUNCTION(pam_native_commit) {
         RETURN_FALSE;
     }
 
-    PamNativeBuffer batch{nullptr, 0};
+    PamNativeBuffer batch{nullptr, 0, 0};
     PamStatus status;
     std::string detail;
     {
@@ -196,7 +196,7 @@ PHP_FUNCTION(pam_native_commit) {
             &batch
         );
         if (status != PAM_STATUS_SUCCESS) {
-            PamNativeBuffer error_buffer{nullptr, 0};
+            PamNativeBuffer error_buffer{nullptr, 0, 0};
             if (
                 pam_native_engine_last_error(state->engine, &error_buffer)
                     == PAM_STATUS_SUCCESS
@@ -630,7 +630,7 @@ void pam_native_runtime_relayout(
     state->dark_appearance = dark_appearance;
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
 
-    PamNativeBuffer batch{nullptr, 0};
+    PamNativeBuffer batch{nullptr, 0, 0};
     PamStatus status;
     {
         std::lock_guard<std::mutex> lock(state->engine_mutex);
@@ -765,6 +765,13 @@ void pam_native_runtime_stats(uint64_t handle, uint64_t values[PAM_NATIVE_MAX_ST
     values[7] = stats.patch_commits;
     values[8] = stats.input_bytes;
     values[9] = stats.output_bytes;
+    values[10] = stats.decode_p95_micros;
+    values[11] = stats.reconcile_p95_micros;
+    values[12] = stats.layout_p95_micros;
+    values[13] = stats.encode_p95_micros;
+    values[14] = stats.coalesced_commands;
+    values[15] = stats.buffer_reuses;
+    values[16] = stats.reused_buffer_bytes;
 }
 
 void pam_native_runtime_release_batch(uint64_t batch_handle) {

@@ -1,6 +1,8 @@
 use std::ffi::c_void;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::ptr;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use crate::{Engine, EngineStats};
 
@@ -17,6 +19,7 @@ pub enum PamStatus {
 pub struct PamNativeBuffer {
     pub data: *mut u8,
     pub length: usize,
+    pub lease: u64,
 }
 
 impl Default for PamNativeBuffer {
@@ -24,6 +27,7 @@ impl Default for PamNativeBuffer {
         Self {
             data: ptr::null_mut(),
             length: 0,
+            lease: 0,
         }
     }
 }
@@ -41,6 +45,13 @@ pub struct PamNativeStats {
     pub patch_commits: u64,
     pub input_bytes: u64,
     pub output_bytes: u64,
+    pub decode_p95_micros: u64,
+    pub reconcile_p95_micros: u64,
+    pub layout_p95_micros: u64,
+    pub encode_p95_micros: u64,
+    pub coalesced_commands: u64,
+    pub buffer_reuses: u64,
+    pub reused_buffer_bytes: u64,
 }
 
 impl From<EngineStats> for PamNativeStats {
@@ -56,6 +67,13 @@ impl From<EngineStats> for PamNativeStats {
             patch_commits: value.patch_commits,
             input_bytes: value.input_bytes,
             output_bytes: value.output_bytes,
+            decode_p95_micros: value.decode_p95_micros,
+            reconcile_p95_micros: value.reconcile_p95_micros,
+            layout_p95_micros: value.layout_p95_micros,
+            encode_p95_micros: value.encode_p95_micros,
+            coalesced_commands: value.coalesced_commands,
+            buffer_reuses: BUFFER_REUSES.load(Ordering::Relaxed),
+            reused_buffer_bytes: REUSED_BUFFER_BYTES.load(Ordering::Relaxed),
         }
     }
 }
@@ -186,9 +204,15 @@ pub unsafe extern "C" fn pam_native_engine_relayout(
         return PamStatus::InvalidArgument;
     };
     *output = PamNativeBuffer::default();
-    match catch_unwind(AssertUnwindSafe(|| handle.engine.relayout(width, height))) {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut batch = acquire_buffer();
+        handle
+            .engine
+            .relayout_with_metrics_into(width, height, handle.engine.text_scale(), &mut batch)
+            .map(|()| batch)
+    })) {
         Ok(Ok(batch)) => {
-            *output = leak_buffer(batch);
+            *output = lease_buffer(batch);
             PamStatus::Success
         }
         Ok(Err(_)) => PamStatus::InvalidArgument,
@@ -218,12 +242,14 @@ pub unsafe extern "C" fn pam_native_engine_relayout_with_metrics(
     };
     *output = PamNativeBuffer::default();
     match catch_unwind(AssertUnwindSafe(|| {
+        let mut batch = acquire_buffer();
         handle
             .engine
-            .relayout_with_metrics(width, height, text_scale)
+            .relayout_with_metrics_into(width, height, text_scale, &mut batch)
+            .map(|()| batch)
     })) {
         Ok(Ok(batch)) => {
-            *output = leak_buffer(batch);
+            *output = lease_buffer(batch);
             PamStatus::Success
         }
         Ok(Err(_)) => PamStatus::InvalidArgument,
@@ -259,10 +285,13 @@ pub unsafe extern "C" fn pam_native_engine_commit(
     // SAFETY: The caller guarantees input points to input_length readable bytes
     // and retains the allocation for this call.
     let input = unsafe { std::slice::from_raw_parts(input, input_length) };
-    match catch_unwind(AssertUnwindSafe(|| handle.engine.commit(input))) {
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut batch = acquire_buffer();
+        handle.engine.commit_into(input, &mut batch).map(|()| batch)
+    })) {
         Ok(Ok(batch)) => {
             handle.last_error = None;
-            *output = leak_buffer(batch);
+            *output = lease_buffer(batch);
             PamStatus::Success
         }
         Ok(Err(error)) => {
@@ -298,7 +327,7 @@ pub unsafe extern "C" fn pam_native_engine_last_error(
     };
     *output = PamNativeBuffer::default();
     if let Some(error) = &handle.last_error {
-        *output = leak_buffer(error.as_bytes().to_vec());
+        *output = lease_buffer(error.as_bytes().to_vec());
     }
     PamStatus::Success
 }
@@ -332,23 +361,71 @@ pub unsafe extern "C" fn pam_native_engine_stats(
 /// A non-empty `buffer` must be the exact, unmodified value returned by a
 /// successful output call and may be released exactly once.
 pub unsafe extern "C" fn pam_native_buffer_free(buffer: PamNativeBuffer) {
-    if buffer.data.is_null() || buffer.length == 0 {
+    if buffer.lease == 0 {
         return;
     }
-    let slice = ptr::slice_from_raw_parts_mut(buffer.data, buffer.length);
-    // SAFETY: Engine output functions return this exact boxed slice and
-    // transfer unique ownership to the caller.
-    drop(unsafe { Box::from_raw(slice) });
+    // SAFETY: `lease` is the unique Box<Vec<u8>> token created by
+    // `lease_buffer`; the caller returns it exactly once and does not modify it.
+    let mut bytes = unsafe { Box::from_raw(buffer.lease as *mut Vec<u8>) };
+    if bytes.as_mut_ptr() != buffer.data || bytes.len() != buffer.length {
+        return;
+    }
+    bytes.clear();
+    recycle_buffer(*bytes);
 }
 
-fn leak_buffer(buffer: Vec<u8>) -> PamNativeBuffer {
+const MAX_POOLED_BUFFERS: usize = 8;
+const MAX_POOLED_CAPACITY: usize = 4 * 1024 * 1024;
+static BUFFER_REUSES: AtomicU64 = AtomicU64::new(0);
+static REUSED_BUFFER_BYTES: AtomicU64 = AtomicU64::new(0);
+
+fn buffer_pool() -> &'static Mutex<Vec<Vec<u8>>> {
+    static POOL: OnceLock<Mutex<Vec<Vec<u8>>>> = OnceLock::new();
+    POOL.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+fn acquire_buffer() -> Vec<u8> {
+    let buffer = buffer_pool()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .pop()
+        .unwrap_or_default();
+    if buffer.capacity() > 0 {
+        BUFFER_REUSES.fetch_add(1, Ordering::Relaxed);
+        REUSED_BUFFER_BYTES.fetch_add(
+            u64::try_from(buffer.capacity()).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+    }
+    buffer
+}
+
+fn recycle_buffer(buffer: Vec<u8>) {
+    if buffer.capacity() > MAX_POOLED_CAPACITY {
+        return;
+    }
+    let mut pool = buffer_pool()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if pool.len() < MAX_POOLED_BUFFERS {
+        pool.push(buffer);
+    }
+}
+
+fn lease_buffer(buffer: Vec<u8>) -> PamNativeBuffer {
     if buffer.is_empty() {
+        recycle_buffer(buffer);
         return PamNativeBuffer::default();
     }
-    let boxed = buffer.into_boxed_slice();
-    let length = boxed.len();
-    let data = Box::into_raw(boxed).cast::<u8>();
-    PamNativeBuffer { data, length }
+    let mut leased = Box::new(buffer);
+    let data = leased.as_mut_ptr();
+    let length = leased.len();
+    let lease = Box::into_raw(leased) as u64;
+    PamNativeBuffer {
+        data,
+        length,
+        lease,
+    }
 }
 
 #[allow(dead_code)]
@@ -361,6 +438,23 @@ mod tests {
     use pam_native_protocol::{Node, NodeKind, Tree};
 
     use super::*;
+
+    #[test]
+    fn released_abi_buffers_return_their_allocation_to_the_bounded_pool() {
+        let mut bytes = Vec::with_capacity(32_768);
+        bytes.extend_from_slice(b"reusable-command-buffer");
+        let allocation = bytes.as_ptr();
+        let capacity = bytes.capacity();
+        let leased = lease_buffer(bytes);
+        assert_ne!(leased.lease, 0);
+        // SAFETY: The lease came from this module and is returned exactly once.
+        unsafe { pam_native_buffer_free(leased) };
+
+        let recycled = acquire_buffer();
+        assert_eq!(recycled.as_ptr(), allocation);
+        assert_eq!(recycled.capacity(), capacity);
+        recycle_buffer(recycled);
+    }
 
     #[test]
     fn ffi_owns_and_releases_every_output() {

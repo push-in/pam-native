@@ -7,10 +7,11 @@ pub mod reactive;
 pub mod scheduler;
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
 
 use pam_native_protocol::{
     Layout, Mutation, Node, PATCH_MAGIC, Patch, PatchOperation, PropKey, PropertyPatch, TREE_MAGIC,
-    Tree, encode_batch,
+    Tree, encode_batch_into,
 };
 
 pub use ffi::{
@@ -36,6 +37,7 @@ pub struct Engine {
     patch_commits: u64,
     input_bytes: u64,
     output_bytes: u64,
+    performance: performance::PerformanceObserver,
 }
 
 impl Default for Engine {
@@ -57,6 +59,7 @@ impl Default for Engine {
             patch_commits: 0,
             input_bytes: 0,
             output_bytes: 0,
+            performance: performance::PerformanceObserver::default(),
         }
     }
 }
@@ -83,6 +86,10 @@ impl Engine {
         Ok(())
     }
 
+    pub(crate) fn text_scale(&self) -> f32 {
+        self.text_scale
+    }
+
     pub fn set_asset_root(&mut self, asset_root: impl Into<std::path::PathBuf>) {
         self.font_metrics.set_asset_root(asset_root);
     }
@@ -97,11 +104,25 @@ impl Engine {
         height: f32,
         text_scale: f32,
     ) -> Result<Vec<u8>, EngineError> {
+        let mut output = Vec::new();
+        self.relayout_with_metrics_into(width, height, text_scale, &mut output)?;
+        Ok(output)
+    }
+
+    pub fn relayout_with_metrics_into(
+        &mut self,
+        width: f32,
+        height: f32,
+        text_scale: f32,
+        output: &mut Vec<u8>,
+    ) -> Result<(), EngineError> {
+        output.clear();
         self.set_viewport(width, height)?;
         self.set_text_scale(text_scale)?;
         let Some(current) = self.current.as_ref() else {
-            return Ok(Vec::new());
+            return Ok(());
         };
+        let layout_started = Instant::now();
         let text_metrics = self.font_metrics.measure_tree(current);
         let next_layouts = layout::calculate_with_text_metrics(
             current,
@@ -109,7 +130,11 @@ impl Engine {
             self.text_scale,
             &text_metrics,
         )?;
-        let mutations = next_layouts
+        self.performance.record(
+            performance::PerformanceStage::Layout,
+            layout_started.elapsed(),
+        );
+        let mut mutations = next_layouts
             .iter()
             .filter_map(|(id, frame)| {
                 (self.layouts.get(id) != Some(frame)).then_some(Mutation::Layout {
@@ -120,39 +145,52 @@ impl Engine {
             .collect::<Vec<_>>();
         self.layouts = next_layouts;
         if mutations.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
-        let output = encode_batch(&mutations).map_err(EngineError::Protocol)?;
+        self.encode_mutations(output, &mut mutations)?;
         self.output_bytes = self
             .output_bytes
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
-        Ok(output)
+        Ok(())
     }
 
     pub fn commit(&mut self, frame: &[u8]) -> Result<Vec<u8>, EngineError> {
+        let mut output = Vec::new();
+        self.commit_into(frame, &mut output)?;
+        Ok(output)
+    }
+
+    pub fn commit_into(&mut self, frame: &[u8], output: &mut Vec<u8>) -> Result<(), EngineError> {
+        output.clear();
         let magic = frame.get(..4).ok_or(EngineError::Protocol(
             pam_native_protocol::ProtocolError::UnexpectedEnd,
         ))?;
-        let output = if magic == TREE_MAGIC {
-            self.commit_tree(frame)?
+        if magic == TREE_MAGIC {
+            self.commit_tree(frame, output)?;
         } else if magic == PATCH_MAGIC {
-            self.commit_patch(frame)?
+            self.commit_patch(frame, output)?;
         } else {
             return Err(EngineError::Protocol(
                 pam_native_protocol::ProtocolError::InvalidMagic,
             ));
-        };
+        }
         self.input_bytes = self
             .input_bytes
             .saturating_add(u64::try_from(frame.len()).unwrap_or(u64::MAX));
         self.output_bytes = self
             .output_bytes
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
-        Ok(output)
+        Ok(())
     }
 
-    fn commit_tree(&mut self, frame: &[u8]) -> Result<Vec<u8>, EngineError> {
+    fn commit_tree(&mut self, frame: &[u8], output: &mut Vec<u8>) -> Result<(), EngineError> {
+        let decode_started = Instant::now();
         let next = Tree::decode(frame).map_err(EngineError::Protocol)?;
+        self.performance.record(
+            performance::PerformanceStage::Decode,
+            decode_started.elapsed(),
+        );
+        let layout_started = Instant::now();
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -160,9 +198,14 @@ impl Engine {
             self.text_scale,
             &text_metrics,
         )?;
+        self.performance.record(
+            performance::PerformanceStage::Layout,
+            layout_started.elapsed(),
+        );
         let mut mutations = Vec::new();
         let next_children = child_index(&next);
 
+        let reconcile_started = Instant::now();
         match &self.current {
             None => {
                 mutations.push(Mutation::SetRoot { id: next.root });
@@ -170,6 +213,10 @@ impl Engine {
             }
             Some(current) => diff(current, &next, &next_children, &mut mutations),
         }
+        self.performance.record(
+            performance::PerformanceStage::Reconcile,
+            reconcile_started.elapsed(),
+        );
 
         for (id, frame) in &next_layouts {
             if self.layouts.get(id) != Some(frame) {
@@ -194,13 +241,18 @@ impl Engine {
         self.full_commits = self.full_commits.saturating_add(1);
         self.current = Some(next);
         self.layouts = next_layouts;
-        encode_batch(&mutations).map_err(EngineError::Protocol)
+        self.encode_mutations(output, &mut mutations)
     }
 
-    fn commit_patch(&mut self, frame: &[u8]) -> Result<Vec<u8>, EngineError> {
+    fn commit_patch(&mut self, frame: &[u8], output: &mut Vec<u8>) -> Result<(), EngineError> {
+        let decode_started = Instant::now();
         let patch = Patch::decode(frame).map_err(EngineError::Protocol)?;
+        self.performance.record(
+            performance::PerformanceStage::Decode,
+            decode_started.elapsed(),
+        );
         if !patch.is_property_only() {
-            return self.commit_structural_patch(patch);
+            return self.commit_structural_patch(patch, output);
         }
         let updates = patch
             .operations
@@ -240,6 +292,7 @@ impl Engine {
         }
 
         let next_layouts = if layout_dirty {
+            let layout_started = Instant::now();
             let current = self
                 .current
                 .as_ref()
@@ -263,6 +316,10 @@ impl Engine {
                     return Err(error.into());
                 }
             };
+            self.performance.record(
+                performance::PerformanceStage::Layout,
+                layout_started.elapsed(),
+            );
             for (id, next) in &calculated {
                 if self.layouts.get(id) != Some(next) {
                     mutations.push(Mutation::Layout {
@@ -276,8 +333,8 @@ impl Engine {
             None
         };
 
-        let output = match encode_batch(&mutations) {
-            Ok(output) => output,
+        match self.encode_mutations(output, &mut mutations) {
+            Ok(()) => {}
             Err(error) => {
                 rollback_property_updates(
                     self.current
@@ -285,9 +342,9 @@ impl Engine {
                         .expect("current tree remains available"),
                     rollback,
                 );
-                return Err(EngineError::Protocol(error));
+                return Err(error);
             }
-        };
+        }
         if let Some(next_layouts) = next_layouts {
             self.layouts = next_layouts;
         }
@@ -296,11 +353,16 @@ impl Engine {
             .saturating_add(u64::try_from(rollback.len()).unwrap_or(u64::MAX));
         self.commits = self.commits.saturating_add(1);
         self.patch_commits = self.patch_commits.saturating_add(1);
-        Ok(output)
+        Ok(())
     }
 
-    fn commit_structural_patch(&mut self, patch: Patch) -> Result<Vec<u8>, EngineError> {
+    fn commit_structural_patch(
+        &mut self,
+        patch: Patch,
+        output: &mut Vec<u8>,
+    ) -> Result<(), EngineError> {
         let current = self.current.as_ref().ok_or(EngineError::PatchWithoutTree)?;
+        let reconcile_started = Instant::now();
         let mut next = current.clone();
         for operation in patch.operations {
             match operation {
@@ -343,7 +405,12 @@ impl Engine {
             }
         }
         next.validate().map_err(EngineError::Protocol)?;
+        self.performance.record(
+            performance::PerformanceStage::Reconcile,
+            reconcile_started.elapsed(),
+        );
 
+        let layout_started = Instant::now();
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -351,6 +418,10 @@ impl Engine {
             self.text_scale,
             &text_metrics,
         )?;
+        self.performance.record(
+            performance::PerformanceStage::Layout,
+            layout_started.elapsed(),
+        );
         let next_children = child_index(&next);
         let mut mutations = Vec::new();
         diff(current, &next, &next_children, &mut mutations);
@@ -376,11 +447,18 @@ impl Engine {
         self.layouts = next_layouts;
         self.commits = self.commits.saturating_add(1);
         self.patch_commits = self.patch_commits.saturating_add(1);
-        encode_batch(&mutations).map_err(EngineError::Protocol)
+        self.encode_mutations(output, &mut mutations)
     }
 
     #[must_use]
     pub fn stats(&self) -> EngineStats {
+        let performance = self.performance.snapshot();
+        let percentile = |stage| {
+            performance
+                .stages
+                .get(&stage)
+                .map_or(0, |snapshot| snapshot.percentile_micros(95))
+        };
         EngineStats {
             commits: self.commits,
             nodes: self
@@ -395,7 +473,33 @@ impl Engine {
             patch_commits: self.patch_commits,
             input_bytes: self.input_bytes,
             output_bytes: self.output_bytes,
+            decode_p95_micros: percentile(performance::PerformanceStage::Decode),
+            reconcile_p95_micros: percentile(performance::PerformanceStage::Reconcile),
+            layout_p95_micros: percentile(performance::PerformanceStage::Layout),
+            encode_p95_micros: percentile(performance::PerformanceStage::Encode),
+            coalesced_commands: performance.coalesced_commands,
+            deadline_misses: performance.deadline_misses,
+            measured_frames: performance.frames,
         }
+    }
+
+    #[must_use]
+    pub fn performance_snapshot(&self) -> performance::PerformanceSnapshot {
+        self.performance.snapshot()
+    }
+
+    fn encode_mutations(
+        &mut self,
+        output: &mut Vec<u8>,
+        mutations: &mut Vec<Mutation>,
+    ) -> Result<(), EngineError> {
+        let removed = bridge_v2::coalesce_in_place(mutations);
+        self.performance.commands_coalesced(removed);
+        let started = Instant::now();
+        let result = encode_batch_into(output, mutations).map_err(EngineError::Protocol);
+        self.performance
+            .record(performance::PerformanceStage::Encode, started.elapsed());
+        result
     }
 }
 
@@ -411,6 +515,13 @@ pub struct EngineStats {
     pub patch_commits: u64,
     pub input_bytes: u64,
     pub output_bytes: u64,
+    pub decode_p95_micros: u64,
+    pub reconcile_p95_micros: u64,
+    pub layout_p95_micros: u64,
+    pub encode_p95_micros: u64,
+    pub coalesced_commands: u64,
+    pub deadline_misses: u64,
+    pub measured_frames: u64,
 }
 
 #[derive(Debug)]

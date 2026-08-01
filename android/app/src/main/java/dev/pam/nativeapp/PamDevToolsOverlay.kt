@@ -119,14 +119,21 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         val heapMiB = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
         val summary = String.format(
             Locale.US,
-            "PAM  %.0f fps\nmount %.2f ms  decode %.2f ms\nnodes %d  batches %d\npatch %d  full %d\nnative heap %.1f MiB",
+            "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nengine p95 d/r/l/e %d/%d/%d/%d µs\nnodes %d  batches %d\npatch %d  full %d  coalesced %d\nbuffer reuse %d · %.1f MiB\nnative heap %.1f MiB",
             smoothedFps,
             metrics.mountNanos / 1_000_000.0,
             metrics.decodeNanos / 1_000_000.0,
+            stats.decodeP95Micros,
+            stats.reconcileP95Micros,
+            stats.layoutP95Micros,
+            stats.encodeP95Micros,
             stats.nodes,
             metrics.batches,
             stats.patchCommits,
             stats.fullCommits,
+            stats.coalescedCommands,
+            stats.bufferReuses,
+            stats.reusedBufferBytes / (1024.0 * 1024.0),
             heapMiB,
         )
         val timeline = diagnostics.joinToString(separator = "\n") { item ->

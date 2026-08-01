@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define PAM_NATIVE_MAX_STAT_VALUES 10
+#define PAM_NATIVE_MAX_STAT_VALUES 17
 
 typedef bool (*PamNativeBatchCallback)(
     uint64_t runtime_handle,

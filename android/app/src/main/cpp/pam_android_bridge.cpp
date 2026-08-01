@@ -259,7 +259,7 @@ PHP_FUNCTION(pam_native_commit) {
     }
     log_debug("Received a PHP render frame.");
 
-    PamNativeBuffer batch{nullptr, 0};
+    PamNativeBuffer batch{nullptr, 0, 0};
     PamStatus status;
     std::string detail;
     {
@@ -271,7 +271,7 @@ PHP_FUNCTION(pam_native_commit) {
             &batch
         );
         if (status != PAM_STATUS_SUCCESS) {
-            PamNativeBuffer error_buffer{nullptr, 0};
+            PamNativeBuffer error_buffer{nullptr, 0, 0};
             if (
                 pam_native_engine_last_error(state->engine, &error_buffer)
                     == PAM_STATUS_SUCCESS
@@ -740,7 +740,7 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
     }
     state->dark_appearance = dark_appearance == JNI_TRUE;
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
-    PamNativeBuffer batch{nullptr, 0};
+    PamNativeBuffer batch{nullptr, 0, 0};
     PamStatus status;
     {
         std::lock_guard<std::mutex> lock(state->engine_mutex);
@@ -854,7 +854,7 @@ Java_dev_pam_nativeapp_PamRuntime_nativeReload(
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativeStats(JNIEnv* env, jobject, jlong handle) {
     RuntimeState* state = from_handle(handle);
-    jlong values[10] = {};
+    jlong values[17] = {};
     if (state != nullptr) {
         PamNativeStats stats{};
         std::lock_guard<std::mutex> lock(state->engine_mutex);
@@ -869,11 +869,18 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStats(JNIEnv* env, jobject, jlong handle
             values[7] = static_cast<jlong>(stats.patch_commits);
             values[8] = static_cast<jlong>(stats.input_bytes);
             values[9] = static_cast<jlong>(stats.output_bytes);
+            values[10] = static_cast<jlong>(stats.decode_p95_micros);
+            values[11] = static_cast<jlong>(stats.reconcile_p95_micros);
+            values[12] = static_cast<jlong>(stats.layout_p95_micros);
+            values[13] = static_cast<jlong>(stats.encode_p95_micros);
+            values[14] = static_cast<jlong>(stats.coalesced_commands);
+            values[15] = static_cast<jlong>(stats.buffer_reuses);
+            values[16] = static_cast<jlong>(stats.reused_buffer_bytes);
         }
     }
-    jlongArray result = env->NewLongArray(10);
+    jlongArray result = env->NewLongArray(17);
     if (result != nullptr) {
-        env->SetLongArrayRegion(result, 0, 10, values);
+        env->SetLongArrayRegion(result, 0, 17, values);
     }
     return result;
 }

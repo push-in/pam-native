@@ -150,7 +150,7 @@ class PamRuntime(
     fun stats(): RuntimeStats {
         val values = synchronized(handleLock) {
             val active = handle
-            if (active == 0L) LongArray(10) else nativeStats(active)
+            if (active == 0L) LongArray(17) else nativeStats(active)
         }
         return RuntimeStats(
             commits = values.getOrElse(0) { 0 },
@@ -163,6 +163,13 @@ class PamRuntime(
             patchCommits = values.getOrElse(7) { 0 },
             inputBytes = values.getOrElse(8) { 0 },
             outputBytes = values.getOrElse(9) { 0 },
+            decodeP95Micros = values.getOrElse(10) { 0 },
+            reconcileP95Micros = values.getOrElse(11) { 0 },
+            layoutP95Micros = values.getOrElse(12) { 0 },
+            encodeP95Micros = values.getOrElse(13) { 0 },
+            coalescedCommands = values.getOrElse(14) { 0 },
+            bufferReuses = values.getOrElse(15) { 0 },
+            reusedBufferBytes = values.getOrElse(16) { 0 },
         )
     }
 
@@ -470,6 +477,13 @@ data class RuntimeStats(
     val patchCommits: Long,
     val inputBytes: Long,
     val outputBytes: Long,
+    val decodeP95Micros: Long = 0,
+    val reconcileP95Micros: Long = 0,
+    val layoutP95Micros: Long = 0,
+    val encodeP95Micros: Long = 0,
+    val coalescedCommands: Long = 0,
+    val bufferReuses: Long = 0,
+    val reusedBufferBytes: Long = 0,
 )
 
 data class RuntimeFrameMetrics(

@@ -209,6 +209,13 @@ public struct RuntimeStats {
     public let patchCommits: Int64
     public let inputBytes: Int64
     public let outputBytes: Int64
+    public let decodeP95Micros: Int64
+    public let reconcileP95Micros: Int64
+    public let layoutP95Micros: Int64
+    public let encodeP95Micros: Int64
+    public let coalescedCommands: Int64
+    public let bufferReuses: Int64
+    public let reusedBufferBytes: Int64
 }
 
 public struct RuntimeFrameMetrics {
@@ -428,7 +435,7 @@ public final class PamRuntime {
     }
 
     public func stats() -> RuntimeStats {
-        var values = [UInt64](repeating: 0, count: 10)
+        var values = [UInt64](repeating: 0, count: 17)
         let currentHandle = currentHandle()
         if currentHandle != 0 {
             values.withUnsafeMutableBufferPointer { pointer in
@@ -447,6 +454,13 @@ public final class PamRuntime {
             patchCommits: Int64(values[7]),
             inputBytes: Int64(values[8]),
             outputBytes: Int64(values[9]),
+            decodeP95Micros: Int64(values[10]),
+            reconcileP95Micros: Int64(values[11]),
+            layoutP95Micros: Int64(values[12]),
+            encodeP95Micros: Int64(values[13]),
+            coalescedCommands: Int64(values[14]),
+            bufferReuses: Int64(values[15]),
+            reusedBufferBytes: Int64(values[16]),
         )
     }
 

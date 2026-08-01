@@ -22,6 +22,7 @@ typedef enum PamStatus {
 typedef struct PamNativeBuffer {
     uint8_t *data;
     size_t length;
+    uint64_t lease;
 } PamNativeBuffer;
 
 typedef struct PamNativeStats {
@@ -35,6 +36,13 @@ typedef struct PamNativeStats {
     uint64_t patch_commits;
     uint64_t input_bytes;
     uint64_t output_bytes;
+    uint64_t decode_p95_micros;
+    uint64_t reconcile_p95_micros;
+    uint64_t layout_p95_micros;
+    uint64_t encode_p95_micros;
+    uint64_t coalesced_commands;
+    uint64_t buffer_reuses;
+    uint64_t reused_buffer_bytes;
 } PamNativeStats;
 
 PamNativeEngineHandle *pam_native_engine_new(void);

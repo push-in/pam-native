@@ -108,6 +108,23 @@ pub fn coalesce(commands: &[Mutation]) -> (Vec<Mutation>, usize) {
     (output, coalesced)
 }
 
+pub fn coalesce_in_place(commands: &mut Vec<Mutation>) -> usize {
+    let mut last = BTreeMap::new();
+    for (index, command) in commands.iter().enumerate() {
+        if let Some(key) = coalescing_key(command) {
+            last.insert(key, index);
+        }
+    }
+    let original = commands.len();
+    let mut index = 0_usize;
+    commands.retain(|command| {
+        let keep = coalescing_key(command).is_none_or(|key| last.get(&key) == Some(&index));
+        index = index.saturating_add(1);
+        keep
+    });
+    original.saturating_sub(commands.len())
+}
+
 #[cfg(test)]
 mod tests {
     use pam_native_protocol::{Layout, PropValue, decode_batch};
@@ -163,5 +180,21 @@ mod tests {
         assert_eq!(second.generation, first_generation + 1);
         assert_eq!(decode_batch(second.bytes).expect("decode"), commands);
         assert!(arena.reused_bytes() > 0);
+    }
+
+    #[test]
+    fn coalesces_an_owned_command_vector_without_a_second_command_allocation() {
+        let mut commands = vec![
+            Mutation::SetRoot { id: 1 },
+            Mutation::SetRoot { id: 2 },
+            Mutation::Remove { id: 4 },
+        ];
+        let capacity = commands.capacity();
+        assert_eq!(coalesce_in_place(&mut commands), 1);
+        assert_eq!(commands.capacity(), capacity);
+        assert_eq!(
+            commands,
+            [Mutation::SetRoot { id: 2 }, Mutation::Remove { id: 4 }]
+        );
     }
 }

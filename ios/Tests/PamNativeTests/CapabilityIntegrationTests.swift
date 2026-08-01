@@ -55,7 +55,14 @@ final class CapabilityIntegrationTests: XCTestCase {
                 fullCommits: 1,
                 patchCommits: 0,
                 inputBytes: 128,
-                outputBytes: 256
+                outputBytes: 256,
+                decodeP95Micros: 900,
+                reconcileP95Micros: 700,
+                layoutP95Micros: 1_100,
+                encodeP95Micros: 100,
+                coalescedCommands: 3,
+                bufferReuses: 8,
+                reusedBufferBytes: 4_096
             )
         ))
         overlay.record(RuntimeDiagnostic(
