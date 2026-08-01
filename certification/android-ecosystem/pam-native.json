@@ -1,0 +1,17 @@
+{
+    "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
+    "version": 1,
+    "applicationId": "dev.pam.ecosystem.certification",
+    "name": "PAM Native Ecosystem Certification",
+    "entry": "index.php",
+    "runtime": {
+        "php": "8.4",
+        "channel": "stable"
+    },
+    "android": {
+        "minSdk": 26,
+        "targetSdk": 36
+    },
+    "modules": [],
+    "views": []
+}
