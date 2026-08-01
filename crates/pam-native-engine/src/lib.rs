@@ -315,16 +315,18 @@ impl Engine {
                 .current
                 .as_ref()
                 .expect("current tree remains available");
-            let dirty_nodes = layout_dirty_nodes.into_iter().collect::<Vec<_>>();
+            let dirty_nodes = layout_dirty_nodes.iter().copied().collect::<Vec<_>>();
             let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
-            let calculated = layout::calculate_with_text_metrics(
+            let calculated = layout::calculate_incremental_with_text_metrics(
                 current,
                 self.viewport,
                 self.text_scale,
                 text_metrics,
+                &self.layouts,
+                &layout_dirty_nodes,
             );
             let calculated = match calculated {
-                Ok(layouts) => layouts,
+                Ok((layouts, _visited_nodes)) => layouts,
                 Err(error) => {
                     rollback_property_updates(
                         self.current

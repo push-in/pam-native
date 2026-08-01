@@ -45,6 +45,18 @@ components retain their previous element subtree, including descendant
 lifecycle state. Components using untracked mutable public fields retain the
 legacy full-render behavior for compatibility.
 
+## Incremental layout
+
+Property patches mark only their changed node IDs and ancestor paths as dirty.
+The Rust layout engine re-evaluates the affected container so flex, grid and
+sibling displacement remain correct, then stops descending whenever a clean
+subtree receives the same retained frame. Dirty subtrees are removed from the
+previous map before calculation, preventing stale geometry when visibility
+changes. Fixed-size text boxes additionally bypass intrinsic measurement for
+text/font changes because their resolved geometry cannot change. Tests compare
+incremental output byte-for-byte with a complete layout and require a deep
+two-branch fixture to visit less than one quarter of its retained nodes.
+
 ## Compiled metadata
 
 Component constructor and prop reflection is performed once and cached as a

@@ -1,4 +1,5 @@
-use std::collections::BTreeMap;
+use std::cell::Cell;
+use std::collections::{BTreeMap, BTreeSet};
 
 use pam_native_protocol::{Layout, Node, NodeKind, PropKey, Tree};
 
@@ -35,6 +36,9 @@ struct LayoutContext<'a> {
     children: &'a BTreeMap<u64, Vec<&'a Node>>,
     text_scale: f32,
     text_metrics: &'a TextMetrics,
+    previous: Option<&'a BTreeMap<u64, Layout>>,
+    dirty_path: Option<&'a BTreeSet<u64>>,
+    visited_nodes: Cell<usize>,
 }
 
 #[derive(Clone, Copy)]
@@ -81,6 +85,9 @@ pub fn calculate_with_text_metrics(
         children: &children,
         text_scale,
         text_metrics,
+        previous: None,
+        dirty_path: None,
+        visited_nodes: Cell::new(0),
     };
     let mut result = BTreeMap::new();
     layout_node(
@@ -118,6 +125,92 @@ pub fn calculate_with_text_metrics(
     Ok(result)
 }
 
+pub fn calculate_incremental_with_text_metrics(
+    tree: &Tree,
+    viewport: Size,
+    text_scale: f32,
+    text_metrics: &TextMetrics,
+    previous: &BTreeMap<u64, Layout>,
+    dirty_nodes: &BTreeSet<u64>,
+) -> Result<(BTreeMap<u64, Layout>, usize), LayoutError> {
+    if !viewport.width.is_finite()
+        || !viewport.height.is_finite()
+        || viewport.width <= 0.0
+        || viewport.height <= 0.0
+        || !text_scale.is_finite()
+        || text_scale <= 0.0
+    {
+        return Err(LayoutError::InvalidDimension);
+    }
+    let children = child_index(tree);
+    let mut dirty_path = BTreeSet::new();
+    for dirty in dirty_nodes {
+        let mut current = *dirty;
+        for _ in 0..=MAX_LAYOUT_DEPTH {
+            if !dirty_path.insert(current) {
+                break;
+            }
+            let Some(node) = tree.nodes.get(&current) else {
+                return Err(LayoutError::MissingNode(current));
+            };
+            if node.parent == 0 {
+                break;
+            }
+            current = node.parent;
+        }
+    }
+    let context = LayoutContext {
+        tree,
+        children: &children,
+        text_scale,
+        text_metrics,
+        previous: Some(previous),
+        dirty_path: Some(&dirty_path),
+        visited_nodes: Cell::new(0),
+    };
+    let mut result = previous.clone();
+    let mut pending = dirty_nodes.iter().copied().collect::<Vec<_>>();
+    while let Some(id) = pending.pop() {
+        result.remove(&id);
+        if let Some(descendants) = children.get(&id) {
+            pending.extend(descendants.iter().map(|node| node.id));
+        }
+    }
+    layout_node(
+        &context,
+        tree.root,
+        Layout {
+            x: 0.0,
+            y: 0.0,
+            width: viewport.width,
+            height: viewport.height,
+        },
+        true,
+        0,
+        &mut result,
+    )?;
+    for modal in tree
+        .nodes
+        .values()
+        .filter(|node| node.kind == NodeKind::Modal && visible(node) && node.id != tree.root)
+    {
+        layout_node(
+            &context,
+            modal.id,
+            Layout {
+                x: 0.0,
+                y: 0.0,
+                width: viewport.width,
+                height: viewport.height,
+            },
+            false,
+            0,
+            &mut result,
+        )?;
+    }
+    Ok((result, context.visited_nodes.get()))
+}
+
 fn layout_node(
     context: &LayoutContext<'_>,
     id: u64,
@@ -126,6 +219,9 @@ fn layout_node(
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
 ) -> Result<(), LayoutError> {
+    context
+        .visited_nodes
+        .set(context.visited_nodes.get().saturating_add(1));
     if depth > MAX_LAYOUT_DEPTH {
         return Err(LayoutError::DepthExceeded);
     }
@@ -169,6 +265,15 @@ fn layout_node(
     } else {
         bounds
     };
+    if context
+        .previous
+        .is_some_and(|previous| previous.get(&id) == Some(&frame))
+        && context
+            .dirty_path
+            .is_some_and(|dirty_path| !dirty_path.contains(&id))
+    {
+        return Ok(());
+    }
     output.insert(id, frame);
 
     let node_children = context.children.get(&id).map_or(&[][..], Vec::as_slice);
@@ -3745,5 +3850,126 @@ mod tests {
         assert_eq!(layout[&2].width, 140.0);
         assert_eq!(layout[&3].x, 140.0);
         assert_eq!(layout[&3].width, 80.0);
+    }
+
+    #[test]
+    fn incremental_layout_skips_clean_stable_subtrees() {
+        let mut nodes = BTreeMap::from([(1, node(1, 0, 0, NodeKind::Screen, []))]);
+        let mut next_id = 2_u64;
+        let mut dirty = 0_u64;
+        for branch_index in 0..2 {
+            let branch = next_id;
+            next_id += 1;
+            nodes.insert(
+                branch,
+                node(
+                    branch,
+                    1,
+                    branch_index,
+                    NodeKind::Column,
+                    [(PropKey::Height, PropValue::Float(300.0))],
+                ),
+            );
+            for row_index in 0..50 {
+                let row = next_id;
+                next_id += 1;
+                nodes.insert(
+                    row,
+                    node(
+                        row,
+                        branch,
+                        row_index,
+                        NodeKind::Row,
+                        [(PropKey::Height, PropValue::Float(6.0))],
+                    ),
+                );
+                for text_index in 0..5 {
+                    let text = next_id;
+                    next_id += 1;
+                    nodes.insert(
+                        text,
+                        node(
+                            text,
+                            row,
+                            text_index,
+                            NodeKind::Text,
+                            [(PropKey::Text, PropValue::String("value".to_owned()))],
+                        ),
+                    );
+                    if branch_index == 0 && row_index == 0 && text_index == 0 {
+                        dirty = text;
+                    }
+                }
+            }
+        }
+        let mut tree = Tree { root: 1, nodes };
+        let viewport = Size {
+            width: 390.0,
+            height: 844.0,
+        };
+        let metrics = TextMetrics::new();
+        let previous =
+            calculate_with_text_metrics(&tree, viewport, 1.0, &metrics).expect("initial layout");
+        tree.nodes
+            .get_mut(&dirty)
+            .expect("dirty text")
+            .properties
+            .insert(PropKey::FontSize, PropValue::Float(18.0));
+        let (incremental, visited) = calculate_incremental_with_text_metrics(
+            &tree,
+            viewport,
+            1.0,
+            &metrics,
+            &previous,
+            &BTreeSet::from([dirty]),
+        )
+        .expect("incremental layout");
+        let full =
+            calculate_with_text_metrics(&tree, viewport, 1.0, &metrics).expect("full layout");
+
+        assert_eq!(incremental, full);
+        assert!(visited < tree.nodes.len() / 4, "visited {visited} nodes");
+    }
+
+    #[test]
+    fn incremental_layout_removes_hidden_dirty_subtrees() {
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, [])),
+                (2, node(2, 1, 0, NodeKind::Column, [])),
+                (3, node(3, 2, 0, NodeKind::Text, [])),
+                (4, node(4, 1, 1, NodeKind::Text, [])),
+            ]),
+        };
+        let viewport = Size {
+            width: 390.0,
+            height: 844.0,
+        };
+        let metrics = TextMetrics::new();
+        let previous =
+            calculate_with_text_metrics(&tree, viewport, 1.0, &metrics).expect("initial layout");
+        tree.nodes
+            .get_mut(&2)
+            .expect("container")
+            .properties
+            .insert(PropKey::Visible, PropValue::Boolean(false));
+
+        let (incremental, _) = calculate_incremental_with_text_metrics(
+            &tree,
+            viewport,
+            1.0,
+            &metrics,
+            &previous,
+            &BTreeSet::from([2]),
+        )
+        .expect("incremental layout");
+        let full =
+            calculate_with_text_metrics(&tree, viewport, 1.0, &metrics).expect("full layout");
+
+        assert_eq!(incremental, full);
+        assert!(!incremental.contains_key(&2));
+        assert!(!incremental.contains_key(&3));
+        assert!(incremental.contains_key(&4));
     }
 }
