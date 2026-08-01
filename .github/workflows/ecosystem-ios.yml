@@ -79,6 +79,9 @@ jobs:
             cp -R "${source}/." "${target}/"
           done
           cp -R \
+            "${RUNNER_TEMP}/pam-native-intents/ios/Shared/." \
+            "${root}/PamPlugin6PushinbrPamNativeIntents/"
+          cp -R \
             "${RUNNER_TEMP}/pam-native-live-activities/ios/Shared/." \
             "${root}/PamPlugin7PushinbrPamNativeLiveActivities/"
       - name: Resolve exact vendor SDKs
