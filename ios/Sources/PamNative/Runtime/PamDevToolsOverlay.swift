@@ -130,7 +130,7 @@ public final class PamDevToolsOverlay: UIView {
             return
         }
         let summary = String(
-            format: "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nengine p95 d/r/l/e %lld/%lld/%lld/%lld µs\nnodes %lld  batches %d\npatch %lld  full %lld  coalesced %lld\nbuffer reuse %lld · %.2f MiB\nretained %.2f MiB",
+            format: "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nengine p95 d/r/l/e %lld/%lld/%lld/%lld µs\nframes %lld  deadline misses %lld\nnodes %lld  batches %d\npatch %lld  full %lld  coalesced %lld\nbuffer reuse %lld · %.2f MiB\nretained %.2f MiB",
             smoothedFps,
             Double(metrics.mountNanos) / 1_000_000,
             Double(metrics.decodeNanos) / 1_000_000,
@@ -138,6 +138,8 @@ public final class PamDevToolsOverlay: UIView {
             metrics.stats.reconcileP95Micros,
             metrics.stats.layoutP95Micros,
             metrics.stats.encodeP95Micros,
+            metrics.stats.measuredFrames,
+            metrics.stats.deadlineMisses,
             metrics.stats.nodes,
             metrics.batches,
             metrics.stats.patchCommits,

@@ -1,6 +1,7 @@
 package dev.pam.nativeapp
 
 import android.content.Context
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.os.Trace
@@ -66,6 +67,9 @@ class PamRuntime(
                 darkAppearance,
             )
             check(handle != 0L) { "Pam Runtime failed to start" }
+            val display = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
+                ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+            nativeSetRefreshRate(handle, display?.refreshRate?.toDouble() ?: 60.0)
         }
     }
 
@@ -150,7 +154,7 @@ class PamRuntime(
     fun stats(): RuntimeStats {
         val values = synchronized(handleLock) {
             val active = handle
-            if (active == 0L) LongArray(17) else nativeStats(active)
+            if (active == 0L) LongArray(19) else nativeStats(active)
         }
         return RuntimeStats(
             commits = values.getOrElse(0) { 0 },
@@ -170,6 +174,8 @@ class PamRuntime(
             coalescedCommands = values.getOrElse(14) { 0 },
             bufferReuses = values.getOrElse(15) { 0 },
             reusedBufferBytes = values.getOrElse(16) { 0 },
+            measuredFrames = values.getOrElse(17) { 0 },
+            deadlineMisses = values.getOrElse(18) { 0 },
         )
     }
 
@@ -315,6 +321,7 @@ class PamRuntime(
         textScale: Float,
         darkAppearance: Boolean,
     )
+    private external fun nativeSetRefreshRate(handle: Long, refreshRateHz: Double)
 
     private external fun nativeDispatchEvent(
         handle: Long,
@@ -484,6 +491,8 @@ data class RuntimeStats(
     val coalescedCommands: Long = 0,
     val bufferReuses: Long = 0,
     val reusedBufferBytes: Long = 0,
+    val measuredFrames: Long = 0,
+    val deadlineMisses: Long = 0,
 )
 
 data class RuntimeFrameMetrics(

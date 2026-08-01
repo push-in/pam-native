@@ -61,6 +61,12 @@ private func pam_native_runtime_relayout(
     _ dark_appearance: Bool,
 )
 
+@_silgen_name("pam_native_runtime_set_refresh_rate")
+private func pam_native_runtime_set_refresh_rate(
+    _ handle: UInt64,
+    _ refresh_rate_hz: Double,
+)
+
 @_silgen_name("pam_native_runtime_dispatch_event")
 private func pam_native_runtime_dispatch_event(
     _ handle: UInt64,
@@ -216,6 +222,8 @@ public struct RuntimeStats {
     public let coalescedCommands: Int64
     public let bufferReuses: Int64
     public let reusedBufferBytes: Int64
+    public let measuredFrames: Int64 = 0
+    public let deadlineMisses: Int64 = 0
 }
 
 public struct RuntimeFrameMetrics {
@@ -387,6 +395,10 @@ public final class PamRuntime {
         }
 
         handle = startedHandle
+        pam_native_runtime_set_refresh_rate(
+            startedHandle,
+            Double(UIScreen.main.maximumFramesPerSecond)
+        )
         readyForEvents = false
         stateLock.unlock()
 
@@ -435,7 +447,7 @@ public final class PamRuntime {
     }
 
     public func stats() -> RuntimeStats {
-        var values = [UInt64](repeating: 0, count: 17)
+        var values = [UInt64](repeating: 0, count: 19)
         let currentHandle = currentHandle()
         if currentHandle != 0 {
             values.withUnsafeMutableBufferPointer { pointer in
@@ -461,6 +473,8 @@ public final class PamRuntime {
             coalescedCommands: Int64(values[14]),
             bufferReuses: Int64(values[15]),
             reusedBufferBytes: Int64(values[16]),
+            measuredFrames: Int64(values[17]),
+            deadlineMisses: Int64(values[18]),
         )
     }
 

@@ -52,6 +52,8 @@ pub struct PamNativeStats {
     pub coalesced_commands: u64,
     pub buffer_reuses: u64,
     pub reused_buffer_bytes: u64,
+    pub measured_frames: u64,
+    pub deadline_misses: u64,
 }
 
 impl From<EngineStats> for PamNativeStats {
@@ -74,6 +76,8 @@ impl From<EngineStats> for PamNativeStats {
             coalesced_commands: value.coalesced_commands,
             buffer_reuses: BUFFER_REUSES.load(Ordering::Relaxed),
             reused_buffer_bytes: REUSED_BUFFER_BYTES.load(Ordering::Relaxed),
+            measured_frames: value.measured_frames,
+            deadline_misses: value.deadline_misses,
         }
     }
 }
@@ -154,6 +158,29 @@ pub unsafe extern "C" fn pam_native_engine_set_viewport(
     };
     match catch_unwind(AssertUnwindSafe(|| {
         handle.engine.set_viewport(width, height)
+    })) {
+        Ok(Ok(())) => PamStatus::Success,
+        Ok(Err(_)) => PamStatus::InvalidArgument,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
+/// Changes the display refresh rate used by the deadline observer.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine and the caller must provide exclusive
+/// access to it for the duration of this call.
+pub unsafe extern "C" fn pam_native_engine_set_refresh_rate(
+    handle: *mut PamNativeEngineHandle,
+    refresh_rate_hz: f64,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    match catch_unwind(AssertUnwindSafe(|| {
+        handle.engine.set_refresh_rate(refresh_rate_hz)
     })) {
         Ok(Ok(())) => PamStatus::Success,
         Ok(Err(_)) => PamStatus::InvalidArgument,

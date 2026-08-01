@@ -8,7 +8,7 @@ pub mod scheduler;
 pub mod virtualization;
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use pam_native_protocol::{
     Layout, Mutation, Node, PATCH_MAGIC, Patch, PatchOperation, PropKey, PropertyPatch, TREE_MAGIC,
@@ -19,8 +19,8 @@ pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
-    pam_native_engine_set_asset_root, pam_native_engine_set_text_scale,
-    pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_asset_root, pam_native_engine_set_refresh_rate,
+    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 
 #[derive(Debug)]
@@ -38,6 +38,7 @@ pub struct Engine {
     patch_commits: u64,
     input_bytes: u64,
     output_bytes: u64,
+    frame_budget: Duration,
     performance: performance::PerformanceObserver,
 }
 
@@ -60,6 +61,7 @@ impl Default for Engine {
             patch_commits: 0,
             input_bytes: 0,
             output_bytes: 0,
+            frame_budget: scheduler::RefreshRate::Hertz60.frame_budget(),
             performance: performance::PerformanceObserver::default(),
         }
     }
@@ -84,6 +86,14 @@ impl Engine {
             return Err(EngineError::InvalidViewport);
         }
         self.text_scale = text_scale;
+        Ok(())
+    }
+
+    pub fn set_refresh_rate(&mut self, refresh_rate_hz: f64) -> Result<(), EngineError> {
+        if !refresh_rate_hz.is_finite() || refresh_rate_hz <= 0.0 {
+            return Err(EngineError::InvalidViewport);
+        }
+        self.frame_budget = scheduler::RefreshRate::closest(refresh_rate_hz).frame_budget();
         Ok(())
     }
 
@@ -162,6 +172,7 @@ impl Engine {
     }
 
     pub fn commit_into(&mut self, frame: &[u8], output: &mut Vec<u8>) -> Result<(), EngineError> {
+        let frame_started = Instant::now();
         output.clear();
         let magic = frame.get(..4).ok_or(EngineError::Protocol(
             pam_native_protocol::ProtocolError::UnexpectedEnd,
@@ -181,6 +192,8 @@ impl Engine {
         self.output_bytes = self
             .output_bytes
             .saturating_add(u64::try_from(output.len()).unwrap_or(u64::MAX));
+        self.performance
+            .frame_completed(frame_started.elapsed(), self.frame_budget);
         Ok(())
     }
 
@@ -903,6 +916,7 @@ mod tests {
     #[test]
     fn repeated_identical_frames_do_not_grow_retained_state() {
         let mut engine = Engine::new();
+        engine.set_refresh_rate(120.0).expect("display rate");
         let input = frame("stable", true);
         engine.commit(&input).expect("initial");
         let retained = engine.stats().retained_bytes;
@@ -912,6 +926,15 @@ mod tests {
         }
         assert_eq!(engine.stats().retained_bytes, retained);
         assert_eq!(engine.stats().nodes, 4);
+        assert_eq!(engine.stats().measured_frames, 10_001);
+    }
+
+    #[test]
+    fn rejects_invalid_display_refresh_rates() {
+        let mut engine = Engine::new();
+        assert!(engine.set_refresh_rate(0.0).is_err());
+        assert!(engine.set_refresh_rate(f64::NAN).is_err());
+        assert!(engine.set_refresh_rate(90.0).is_ok());
     }
 
     #[test]

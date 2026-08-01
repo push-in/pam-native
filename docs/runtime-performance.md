@@ -72,6 +72,15 @@ Android continues to publish decode/mount `Trace` sections, frame metrics,
 startup macrobenchmarks and Baseline Profile journeys. iOS renderer metrics are
 available to the existing runtime callback and Instruments.
 
+The Rust engine also receives the physical display refresh rate from
+`DisplayManager` on Android and `UIScreen.maximumFramesPerSecond` on iOS. Every
+successful commit is evaluated against the corresponding 60/90/120 Hz budget.
+The bounded observatory exports measured frames, deadline misses, P95
+decode/reconcile/layout/encode latency, coalesced commands, retained bytes and
+zero-copy buffer reuse through the stable C ABI. Both DevTools overlays display
+the same counters, so a deadline regression is visible without attaching a
+platform profiler.
+
 ## Failure containment
 
 The runtime publishes a throttled atomic checkpoint after a confirmed native

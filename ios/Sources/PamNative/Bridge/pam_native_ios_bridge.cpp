@@ -650,6 +650,15 @@ void pam_native_runtime_relayout(
     publish_batch(state, batch);
 }
 
+void pam_native_runtime_set_refresh_rate(uint64_t handle, double refresh_rate_hz) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || refresh_rate_hz <= 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(state->engine_mutex);
+    pam_native_engine_set_refresh_rate(state->engine, refresh_rate_hz);
+}
+
 void pam_native_runtime_dispatch_event(
     uint64_t handle,
     int64_t node_id,
@@ -772,6 +781,8 @@ void pam_native_runtime_stats(uint64_t handle, uint64_t values[PAM_NATIVE_MAX_ST
     values[14] = stats.coalesced_commands;
     values[15] = stats.buffer_reuses;
     values[16] = stats.reused_buffer_bytes;
+    values[17] = stats.measured_frames;
+    values[18] = stats.deadline_misses;
 }
 
 void pam_native_runtime_release_batch(uint64_t batch_handle) {

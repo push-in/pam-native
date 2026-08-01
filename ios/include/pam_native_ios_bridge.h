@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-#define PAM_NATIVE_MAX_STAT_VALUES 17
+#define PAM_NATIVE_MAX_STAT_VALUES 19
 
 typedef bool (*PamNativeBatchCallback)(
     uint64_t runtime_handle,
@@ -63,6 +63,11 @@ void pam_native_runtime_relayout(
     float height_dp,
     float text_scale,
     bool dark_appearance
+);
+
+void pam_native_runtime_set_refresh_rate(
+    uint64_t handle,
+    double refresh_rate_hz
 );
 
 void pam_native_runtime_dispatch_event(

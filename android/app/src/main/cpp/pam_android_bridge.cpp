@@ -760,6 +760,21 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeSetRefreshRate(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jdouble refresh_rate_hz
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || refresh_rate_hz <= 0) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(state->engine_mutex);
+    pam_native_engine_set_refresh_rate(state->engine, refresh_rate_hz);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativeDispatchEvent(
     JNIEnv* env,
     jobject,
@@ -854,7 +869,7 @@ Java_dev_pam_nativeapp_PamRuntime_nativeReload(
 extern "C" JNIEXPORT jlongArray JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativeStats(JNIEnv* env, jobject, jlong handle) {
     RuntimeState* state = from_handle(handle);
-    jlong values[17] = {};
+    jlong values[19] = {};
     if (state != nullptr) {
         PamNativeStats stats{};
         std::lock_guard<std::mutex> lock(state->engine_mutex);
@@ -876,11 +891,13 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStats(JNIEnv* env, jobject, jlong handle
             values[14] = static_cast<jlong>(stats.coalesced_commands);
             values[15] = static_cast<jlong>(stats.buffer_reuses);
             values[16] = static_cast<jlong>(stats.reused_buffer_bytes);
+            values[17] = static_cast<jlong>(stats.measured_frames);
+            values[18] = static_cast<jlong>(stats.deadline_misses);
         }
     }
-    jlongArray result = env->NewLongArray(17);
+    jlongArray result = env->NewLongArray(19);
     if (result != nullptr) {
-        env->SetLongArrayRegion(result, 0, 17, values);
+        env->SetLongArrayRegion(result, 0, 19, values);
     }
     return result;
 }

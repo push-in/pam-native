@@ -43,6 +43,8 @@ typedef struct PamNativeStats {
     uint64_t coalesced_commands;
     uint64_t buffer_reuses;
     uint64_t reused_buffer_bytes;
+    uint64_t measured_frames;
+    uint64_t deadline_misses;
 } PamNativeStats;
 
 PamNativeEngineHandle *pam_native_engine_new(void);
@@ -56,6 +58,10 @@ PamStatus pam_native_engine_set_viewport(
     PamNativeEngineHandle *handle,
     float width,
     float height
+);
+PamStatus pam_native_engine_set_refresh_rate(
+    PamNativeEngineHandle *handle,
+    double refresh_rate_hz
 );
 PamStatus pam_native_engine_set_text_scale(
     PamNativeEngineHandle *handle,
