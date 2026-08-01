@@ -8,6 +8,11 @@ public final class PamRenderer {
     private let nativeViews: NativeViewRegistry
     private let imageSession: URLSession
     private let imageSessionDelegate: ImageLoadSessionDelegate
+    private let imageDecodeQueue = DispatchQueue(
+        label: "dev.pam.native.image-decode",
+        qos: .userInitiated,
+        attributes: .concurrent
+    )
     private var imageLoadContexts: [Int: ImageLoadContext] = [:]
 
     private var views: [Int64: UIView] = [:]
@@ -2869,29 +2874,29 @@ public final class PamRenderer {
                   let imageView = self.imageView(for: hostView) else {
                 return
             }
-            let multiplier = state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
-            guard let image = self.decodeImage(
-                data,
-                targetSize: imageView.bounds.size,
-                multiplier: CGFloat(multiplier)
-            ) else { return }
+            let targetSize = imageView.bounds.size
+            let multiplier = CGFloat(
+                state.properties[PamConstants.imageResizeMultiplier]?.decimalOrNil() ?? 1
+            )
             let mediaPolicy = Int(
                 state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 4
             )
+            let cacheKey = state.properties[PamConstants.mediaCacheKey]?.textOrNil()
+            let checksum = state.properties[PamConstants.mediaCacheChecksum]?.textOrNil()
+            let cacheLimit = state.properties[PamConstants.mediaCacheMaxBytes]?.integerOrNil() ?? 0
+            let pinned = state.properties[PamConstants.mediaCachePinOffline]?.boolOrNil() ?? false
             if [3, 4, 5, 6, 8].contains(mediaPolicy) {
-                let key = state.properties[PamConstants.mediaCacheKey]?.textOrNil()
                 let identity = PamMediaDiskCache.shared.identity(
                     source: context.source,
-                    stableKey: key
+                    stableKey: cacheKey
                 )
                 PamMediaDiskCache.shared.store(
                     data,
                     source: context.source,
-                    stableKey: key,
-                    checksum: state.properties[PamConstants.mediaCacheChecksum]?.textOrNil(),
-                    limit: state.properties[PamConstants.mediaCacheMaxBytes]?.integerOrNil() ?? 0,
-                    pinned:
-                        state.properties[PamConstants.mediaCachePinOffline]?.boolOrNil() ?? false
+                    stableKey: cacheKey,
+                    checksum: checksum,
+                    limit: cacheLimit,
+                    pinned: pinned
                 ) { [weak self] stored in
                     guard stored else { return }
                     DispatchQueue.main.async {
@@ -2911,36 +2916,44 @@ public final class PamRenderer {
                     }
                 }
             }
-            DispatchQueue.main.async {
-                guard let state = self.nodes[context.nodeId], state.imageGeneration == context.generation else {
-                    return
-                }
-                let fade = state.properties[PamConstants.imageFadeDurationMs]?.integerOrNil() ?? 300
-                if fade > 0 && !UIAccessibility.isReduceMotionEnabled {
-                    UIView.transition(
-                        with: imageView,
-                        duration: min(Double(fade) / 1_000, 10),
-                        options: .transitionCrossDissolve,
-                        animations: { imageView.image = image }
+            self.imageDecodeQueue.async { [weak self, weak imageView] in
+                guard let self,
+                      let image = self.decodeImage(
+                        data,
+                        targetSize: targetSize,
+                        multiplier: multiplier
+                      ) else { return }
+                DispatchQueue.main.async {
+                    guard let state = self.nodes[context.nodeId],
+                          state.imageGeneration == context.generation,
+                          let imageView else { return }
+                    let fade = state.properties[PamConstants.imageFadeDurationMs]?.integerOrNil() ?? 300
+                    if fade > 0 && !UIAccessibility.isReduceMotionEnabled {
+                        UIView.transition(
+                            with: imageView,
+                            duration: min(Double(fade) / 1_000, 10),
+                            options: .transitionCrossDissolve,
+                            animations: { imageView.image = image }
+                        )
+                    } else {
+                        imageView.image = image
+                    }
+                    self.notifyDrawingImageChanged(nodeId: context.nodeId)
+                    state.imageLoading = false
+                    guard state.properties[PamConstants.onImageLoad] != nil else { return }
+                    let payload = (try? WireMap.encode(
+                        [
+                            "uri": .text(context.source),
+                            "width": .decimal(Double(image.size.width)),
+                            "height": .decimal(Double(image.size.height)),
+                        ],
+                    )) ?? Data()
+                    self.dispatchEvent(
+                        context.nodeId,
+                        EventKind.imageLoad.rawValue,
+                        payload,
                     )
-                } else {
-                    imageView.image = image
                 }
-                self.notifyDrawingImageChanged(nodeId: context.nodeId)
-                state.imageLoading = false
-                guard state.properties[PamConstants.onImageLoad] != nil else { return }
-                let payload = (try? WireMap.encode(
-                    [
-                        "uri": .text(context.source),
-                        "width": .decimal(Double(image.size.width)),
-                        "height": .decimal(Double(image.size.height)),
-                    ],
-                )) ?? Data()
-                self.dispatchEvent(
-                    context.nodeId,
-                    EventKind.imageLoad.rawValue,
-                    payload,
-                )
             }
         }
 
