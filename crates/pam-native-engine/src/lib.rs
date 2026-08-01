@@ -297,7 +297,7 @@ impl Engine {
             if previous.as_ref() == value.as_ref() {
                 continue;
             }
-            if affects_layout(key) {
+            if affects_resolved_layout(node, key) {
                 layout_dirty = true;
                 layout_dirty_nodes.insert(id);
             }
@@ -802,6 +802,36 @@ fn affects_layout(key: PropKey) -> bool {
     )
 }
 
+fn affects_resolved_layout(node: &Node, key: PropKey) -> bool {
+    if !affects_layout(key) {
+        return false;
+    }
+    let fixed_text_box = node.kind == pam_native_protocol::NodeKind::Text
+        && node.properties.contains_key(&PropKey::Width)
+        && node.properties.contains_key(&PropKey::Height);
+    if fixed_text_box
+        && matches!(
+            key,
+            PropKey::Text
+                | PropKey::FontSize
+                | PropKey::FontWeight
+                | PropKey::NumberOfLines
+                | PropKey::LetterSpacing
+                | PropKey::LineHeight
+                | PropKey::TextTransform
+                | PropKey::FontStyle
+                | PropKey::FontFamily
+                | PropKey::TextAllowFontScaling
+                | PropKey::TextMaxFontSizeMultiplier
+                | PropKey::TextAdjustsFontSizeToFit
+                | PropKey::TextMinimumFontScale
+        )
+    {
+        return false;
+    }
+    true
+}
+
 fn estimated_tree_bytes(tree: &Tree) -> usize {
     tree.nodes.values().fold(0_usize, |total, node| {
         total
@@ -965,6 +995,70 @@ mod tests {
                 .any(|mutation| matches!(mutation, Mutation::Layout { .. }))
         );
         assert_eq!(engine.stats().patch_commits, 1);
+    }
+
+    #[test]
+    fn fixed_text_box_skips_intrinsic_relayout() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::Screen,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (
+                    2,
+                    Node {
+                        id: 2,
+                        parent: 1,
+                        index: 0,
+                        kind: NodeKind::Text,
+                        properties: BTreeMap::from([
+                            (PropKey::Text, PropValue::String("short".to_owned())),
+                            (PropKey::Width, PropValue::Float(240.0)),
+                            (PropKey::Height, PropValue::Float(48.0)),
+                        ]),
+                    },
+                ),
+            ]),
+        };
+        let mut engine = Engine::new();
+        engine
+            .commit(&tree.encode().expect("tree"))
+            .expect("initial");
+        let before = engine
+            .performance_snapshot()
+            .stages
+            .get(&performance::PerformanceStage::Layout)
+            .map_or(0, |stage| stage.samples);
+        let patch = Patch {
+            operations: vec![PatchOperation::Update(PropertyPatch {
+                id: 2,
+                key: PropKey::Text,
+                value: Some(PropValue::String("a much longer label".to_owned())),
+            })],
+        };
+        let mutations = decode_batch(
+            &engine
+                .commit(&patch.encode().expect("patch"))
+                .expect("commit"),
+        )
+        .expect("batch");
+        let after = engine
+            .performance_snapshot()
+            .stages
+            .get(&performance::PerformanceStage::Layout)
+            .map_or(0, |stage| stage.samples);
+
+        assert_eq!(before, after);
+        assert_eq!(mutations.len(), 1);
+        assert!(matches!(mutations[0], Mutation::Update { id: 2, .. }));
     }
 
     #[test]

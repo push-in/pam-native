@@ -222,8 +222,8 @@ public struct RuntimeStats {
     public let coalescedCommands: Int64
     public let bufferReuses: Int64
     public let reusedBufferBytes: Int64
-    public let measuredFrames: Int64 = 0
-    public let deadlineMisses: Int64 = 0
+    public let measuredFrames: Int64
+    public let deadlineMisses: Int64
 }
 
 public struct RuntimeFrameMetrics {

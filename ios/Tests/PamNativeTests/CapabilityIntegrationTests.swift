@@ -62,7 +62,9 @@ final class CapabilityIntegrationTests: XCTestCase {
                 encodeP95Micros: 100,
                 coalescedCommands: 3,
                 bufferReuses: 8,
-                reusedBufferBytes: 4_096
+                reusedBufferBytes: 4_096,
+                measuredFrames: 120,
+                deadlineMisses: 2
             )
         ))
         overlay.record(RuntimeDiagnostic(
