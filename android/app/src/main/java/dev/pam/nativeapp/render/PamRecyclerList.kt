@@ -29,6 +29,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var columns = 1
     private var inverted = false
     private var prefetchItems = 5
+    private var adaptivePrefetchItems = prefetchItems
+    private var lastScrollNanos = 0L
     private var initialIndex = 0
     private var initialPositionApplied = false
     private var scrollEnabled = true
@@ -53,6 +55,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         updateLayoutManager()
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                updateAdaptivePrefetch(if (horizontal) dx else dy)
                 dispatchViewport()
             }
         })
@@ -123,6 +126,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     fun setPrefetchItems(value: Int) {
         prefetchItems = value.coerceIn(1, MAX_PREFETCH_ITEMS)
+        adaptivePrefetchItems = prefetchItems
         updatePrefetch()
     }
 
@@ -270,19 +274,33 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private fun updatePrefetch() {
         val extent = dp(rowHeight)
         (layoutManager as? PrefetchLayoutManager)?.apply {
-            prefetchCount = prefetchItems
-            extraLayoutSpace = extent * prefetchItems
+            prefetchCount = adaptivePrefetchItems
+            extraLayoutSpace = extent * adaptivePrefetchItems
         }
-        val requestedCache = prefetchItems * max(1, columns)
+        val requestedCache = adaptivePrefetchItems * max(1, columns)
         val cache = if (removeClippedSubviews) {
             requestedCache
         } else {
             max(requestedCache, (adapter?.itemCount ?: 0).coerceAtMost(64))
         }
         setItemViewCacheSize(cache.coerceAtMost(64))
-        val recycled = (prefetchItems * max(1, columns) * 2).coerceAtMost(96)
+        val recycled = (adaptivePrefetchItems * max(1, columns) * 2).coerceAtMost(96)
         recycledViewPool.setMaxRecycledViews(PackedRowAdapter.TYPE_ITEM, recycled)
-        recycledViewPool.setMaxRecycledViews(PackedRowAdapter.TYPE_HEADER, prefetchItems)
+        recycledViewPool.setMaxRecycledViews(PackedRowAdapter.TYPE_HEADER, adaptivePrefetchItems)
+    }
+
+    private fun updateAdaptivePrefetch(deltaPixels: Int) {
+        if (deltaPixels == 0) return
+        val now = System.nanoTime()
+        val elapsed = now - lastScrollNanos
+        lastScrollNanos = now
+        if (elapsed <= 0L || elapsed > 250_000_000L) return
+        val rowsPerSecond = abs(deltaPixels).toDouble() / dp(rowHeight) * 1_000_000_000.0 / elapsed
+        val next = (prefetchItems + (rowsPerSecond * 0.15).toInt())
+            .coerceIn(prefetchItems, MAX_PREFETCH_ITEMS)
+        if (next == adaptivePrefetchItems) return
+        adaptivePrefetchItems = next
+        updatePrefetch()
     }
 
     private fun configureAdapter() {
