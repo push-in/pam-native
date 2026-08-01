@@ -1,0 +1,49 @@
+name: Publish ecosystem to Packagist
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create or refresh official packages
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${PACKAGIST_USERNAME}"
+          test -n "${PACKAGIST_TOKEN}"
+          encoded_username=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_USERNAME"));')
+          encoded_token=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_TOKEN"));')
+          for package in \
+            pam-native-http \
+            pam-native-storage \
+            pam-native-database \
+            pam-native-forms \
+            pam-native-notifications \
+            pam-native-camera \
+            pam-native-location \
+            pam-native-animations \
+            pam-native-sentry
+          do
+            payload=$(printf '{"repository":{"url":"https://github.com/push-in/%s"}}' "${package}")
+            if ! curl --proto '=https' --tlsv1.2 \
+              --fail --silent --show-error \
+              --request POST \
+              --header 'Content-Type: application/json' \
+              --data "${payload}" \
+              "https://packagist.org/api/update-package?username=${encoded_username}&apiToken=${encoded_token}"
+            then
+              curl --proto '=https' --tlsv1.2 \
+                --fail --silent --show-error \
+                --request POST \
+                --header 'Content-Type: application/json' \
+                --data "${payload}" \
+                "https://packagist.org/api/create-package?username=${encoded_username}&apiToken=${encoded_token}"
+            fi
+          done
