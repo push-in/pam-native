@@ -1,0 +1,17 @@
+{
+    "version": 1,
+    "budgets": [
+        {
+            "scenario": "hundredThousandItemVirtualWindow",
+            "metric": "wallTimeMs",
+            "statistic": "maximum",
+            "maximum": 2000.0
+        },
+        {
+            "scenario": "hundredThousandItemVirtualWindow",
+            "metric": "eligibleViews",
+            "statistic": "maximum",
+            "maximum": 128.0
+        }
+    ]
+}

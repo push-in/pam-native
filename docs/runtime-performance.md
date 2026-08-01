@@ -110,7 +110,8 @@ CI runs:
 - a 1,001-node cold/steady encoder budget;
 - Rust tests, Clippy and a release-mode engine performance gate;
 - Android unit, instrumented API 26/36 and macrobenchmark projects;
-- iOS simulator tests.
+- iOS simulator tests, including the 100,000-item bounded-window performance
+  contract, followed by an optimized Release build.
 
 Override local performance thresholds with `PAM_PERF_FIRST_FRAME_MS` and
 `PAM_PERF_STEADY_FRAME_MS`. The native engine gate can be reproduced with

@@ -178,7 +178,31 @@ enum PamVirtualWindow {
                 dx: 0,
                 dy: -(before + after) / 2
             ).offsetBy(dx: 0, dy: (after - before) / 2)
-        return Set(frames.lazy.filter { $0.1.intersects(window) }.map(\.0))
+        let windowStart = horizontal ? window.minX : window.minY
+        let windowEnd = horizontal ? window.maxX : window.maxY
+        var lower = 0
+        var upper = frames.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            let frameEnd = horizontal ? frames[middle].1.maxX : frames[middle].1.maxY
+            if frameEnd <= windowStart {
+                lower = middle + 1
+            } else {
+                upper = middle
+            }
+        }
+        var visible = Set<Int64>()
+        var index = lower
+        while index < frames.count {
+            let candidate = frames[index]
+            let frameStart = horizontal ? candidate.1.minX : candidate.1.minY
+            if frameStart >= windowEnd { break }
+            if candidate.1.intersects(window) {
+                visible.insert(candidate.0)
+            }
+            index += 1
+        }
+        return visible
     }
 }
 

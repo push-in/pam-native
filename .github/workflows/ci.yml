@@ -59,6 +59,7 @@ jobs:
           php packages/native/tests/fuzz.php
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null
+          python3 -m json.tool benchmarks/ios/budgets.json >/dev/null
 
   android:
     name: Android renderer build and unit contracts
