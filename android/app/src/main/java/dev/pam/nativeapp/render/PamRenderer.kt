@@ -503,6 +503,7 @@ class PamRenderer(
             val state = nodes.valueAt(position)
             state.propertyAnimator?.cancel()
             state.keyframeAnimator?.cancel()
+            state.workletAnimator?.cancel()
             state.loadingDrawable?.stop()
             state.outsidePointerObserver?.let { observer ->
                 (host as? PamRootHost)?.removePointerObserver(observer)
@@ -625,6 +626,7 @@ class PamRenderer(
         val view = views[id]
         state.propertyAnimator?.cancel()
         state.keyframeAnimator?.cancel()
+        state.workletAnimator?.cancel()
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
@@ -844,6 +846,7 @@ class PamRenderer(
         val state = nodes[id] ?: return
         state.propertyAnimator?.cancel()
         state.keyframeAnimator?.cancel()
+        state.workletAnimator?.cancel()
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         pamImageView(view)?.let(imageLoader::cancel)
@@ -1616,6 +1619,11 @@ class PamRenderer(
             PropKey.ANIMATION_PLAY_STATE,
             PropKey.ANIMATION_AUTO_REVERSE,
             -> configureKeyframeAnimation(view, state)
+            PropKey.WORKLET_PROGRAM,
+            PropKey.WORKLET_TARGET,
+            PropKey.WORKLET_DURATION_MS,
+            PropKey.WORKLET_ITERATIONS,
+            -> configureWorkletAnimation(view, state)
             PropKey.STATUS_BAR_COLOR,
             PropKey.STATUS_BAR_STYLE,
             PropKey.STATUS_BAR_HIDDEN,
@@ -2397,6 +2405,14 @@ class PamRenderer(
                 state.keyframeAnimator?.cancel()
                 state.keyframeAnimator = null
             }
+            PropKey.WORKLET_PROGRAM,
+            PropKey.WORKLET_TARGET,
+            PropKey.WORKLET_DURATION_MS,
+            PropKey.WORKLET_ITERATIONS,
+            -> {
+                state.workletAnimator?.cancel()
+                state.workletAnimator = null
+            }
             PropKey.CHECKED -> (view as? Switch)?.isChecked = false
             PropKey.ACTIVITY_ANIMATING ->
                 (view as? PamActivityIndicator)?.setAnimating(true)
@@ -2986,6 +3002,8 @@ class PamRenderer(
     }
 
     private fun configureKeyframeAnimation(view: View, state: NodeState) {
+        state.workletAnimator?.cancel()
+        state.workletAnimator = null
         val bytes = (state.properties[PropKey.ANIMATION_KEYFRAMES] as? PropValue.Bytes)
             ?.value
             ?.duplicate()
@@ -3048,6 +3066,70 @@ class PamRenderer(
                 override fun onAnimationEnd(animation: Animator) {
                     if (cancelled || repeatCount == ValueAnimator.INFINITE) return
                     if (state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+                        dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
+                    }
+                }
+            })
+            start()
+        }
+    }
+
+    private fun configureWorkletAnimation(view: View, state: NodeState) {
+        state.workletAnimator?.cancel()
+        state.workletAnimator = null
+        val bytes = (state.properties[PropKey.WORKLET_PROGRAM] as? PropValue.Bytes)
+            ?.value
+            ?.duplicate()
+            ?.let { buffer -> ByteArray(buffer.remaining()).also(buffer::get) }
+            ?: return
+        val program = PamWorkletProgram.decode(bytes) ?: return
+        val target = PamWorkletTarget.from(
+            state.integer(PropKey.WORKLET_TARGET, 0).toInt(),
+        ) ?: return
+        val durationMs = state.integer(PropKey.WORKLET_DURATION_MS, 300)
+            .coerceIn(1, 60_000)
+        val iterations = state.integer(PropKey.WORKLET_ITERATIONS, 1)
+            .coerceIn(0, 10_000)
+        state.keyframeAnimator?.cancel()
+        state.keyframeAnimator = null
+
+        fun apply(inputMs: Double) {
+            val value = program.evaluate(inputMs) ?: return
+            when (target) {
+                PamWorkletTarget.OPACITY -> view.alpha = value.toFloat().coerceIn(0f, 1f)
+                PamWorkletTarget.TRANSLATION_X ->
+                    view.translationX = dp(value.coerceIn(-1_000_000.0, 1_000_000.0).toFloat()).toFloat()
+                PamWorkletTarget.TRANSLATION_Y ->
+                    view.translationY = dp(value.coerceIn(-1_000_000.0, 1_000_000.0).toFloat()).toFloat()
+                PamWorkletTarget.SCALE -> {
+                    val scale = value.toFloat().coerceIn(-100f, 100f)
+                    view.scaleX = scale
+                    view.scaleY = scale
+                }
+                PamWorkletTarget.ROTATION_DEGREES -> {
+                    view.rotation = value.toFloat().coerceIn(-36_000f, 36_000f)
+                }
+            }
+        }
+        if (!ValueAnimator.areAnimatorsEnabled()) {
+            apply(durationMs.toDouble())
+            if (iterations != 0L && state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+                dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
+            }
+            return
+        }
+        state.workletAnimator = ValueAnimator.ofFloat(0f, durationMs.toFloat()).apply {
+            duration = durationMs
+            repeatCount = if (iterations == 0L) ValueAnimator.INFINITE else iterations.toInt() - 1
+            interpolator = LinearInterpolator()
+            addUpdateListener { apply((it.animatedValue as Float).toDouble()) }
+            addListener(object : AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: Animator) { cancelled = true }
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!cancelled && repeatCount != ValueAnimator.INFINITE &&
+                        state.properties[PropKey.ON_ANIMATION_COMPLETE] != null
+                    ) {
                         dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
                     }
                 }
@@ -5738,6 +5820,7 @@ class PamRenderer(
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var keyframeAnimator: ValueAnimator? = null,
+        var workletAnimator: ValueAnimator? = null,
         var loadingDrawable: PamButtonLoadingDrawable? = null,
         var virtual: Boolean = false,
         var imageLoading: Boolean = false,

@@ -59,6 +59,7 @@ use Pam\Native\KeyboardType;
 use Pam\Native\Jobs\BackgroundJobs;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Internal\BinaryValue;
 use Pam\Native\Internal\PamPhpCompiler;
 use Pam\Native\Internal\PamPhpPreloader;
 use Pam\Native\Internal\PamPhpRegistry;
@@ -198,6 +199,7 @@ use Pam\Native\UI\VirtualGrid;
 use Pam\Native\UI\VirtualizedList;
 use Pam\Native\UI\WebView;
 use Pam\Native\Worklets\Worklet;
+use Pam\Native\Worklets\WorkletTarget;
 use Pam\Native\Tests\Fixtures\ExamplePluginProvider;
 
 spl_autoload_register(static function (string $class): void {
@@ -5511,6 +5513,20 @@ $assert(
         && str_starts_with($worklet->bytecode(), 'PNW1')
         && strlen($worklet->bytecode()) < 256,
     'Worklets must compile bounded data-only numeric programs deterministically.',
+);
+$nativeWorklet = Animated::worklet(
+    Text::make('Native frame'),
+    $worklet,
+    WorkletTarget::Opacity,
+    200,
+)->iterations(3);
+$nativeWorkletProperties = $nativeWorklet->properties();
+$assert(
+    $nativeWorkletProperties[PropKey::WorkletProgram->value] instanceof BinaryValue
+        && $nativeWorkletProperties[PropKey::WorkletTarget->value] === 1
+        && $nativeWorkletProperties[PropKey::WorkletDurationMs->value] === 200
+        && $nativeWorkletProperties[PropKey::WorkletIterations->value] === 3,
+    'Animated worklets must cross the render protocol as bounded native programs.',
 );
 $offline = new OfflineMutationQueue();
 $queued = $offline->enqueue('message:local-1', 'messages.send', ['body' => 'Hello']);

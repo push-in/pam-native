@@ -22,6 +22,7 @@ public final class PamRenderer {
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
     private var interactionBridges: [Int64: PamInteractionBridge] = [:]
     private var animationDelegates: [Int64: PamAnimationDelegate] = [:]
+    private var workletAnimators: [Int64: PamWorkletAnimator] = [:]
     private var localModalActions: [Int64: UIAction.Identifier] = [:]
     private var borderLayers: [Int64: PamBorderLayers] = [:]
     private var rootId: Int64 = 0
@@ -135,6 +136,8 @@ public final class PamRenderer {
         interactionBridges.values.forEach { $0.detach() }
         interactionBridges.removeAll()
         animationDelegates.removeAll()
+        workletAnimators.values.forEach { $0.stop() }
+        workletAnimators.removeAll()
         localModalActions.removeAll()
         borderLayers.removeAll()
 
@@ -247,6 +250,7 @@ public final class PamRenderer {
         eventBridges[id] = nil
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
+        workletAnimators.removeValue(forKey: id)?.stop()
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
@@ -392,6 +396,7 @@ public final class PamRenderer {
         eventBridges[id] = nil
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
+        workletAnimators.removeValue(forKey: id)?.stop()
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
@@ -1637,6 +1642,11 @@ public final class PamRenderer {
              PamConstants.animationPlayState,
              PamConstants.animationAutoReverse:
             configureKeyframeAnimation(nodeId: nodeId, view: view)
+        case PamConstants.workletProgram,
+             PamConstants.workletTarget,
+             PamConstants.workletDurationMs,
+             PamConstants.workletIterations:
+            configureWorkletAnimation(nodeId: nodeId, view: view)
         case PamConstants.refreshing:
             (view as? PamRefreshContainer)?.setRefreshing(value.boolOrNil() ?? false)
         case PamConstants.refreshColors:
@@ -1909,6 +1919,11 @@ public final class PamRenderer {
              PamConstants.animationAutoReverse:
             view.layer.removeAnimation(forKey: "pam.keyframes")
             animationDelegates[nodeId] = nil
+        case PamConstants.workletProgram,
+             PamConstants.workletTarget,
+             PamConstants.workletDurationMs,
+             PamConstants.workletIterations:
+            workletAnimators.removeValue(forKey: nodeId)?.stop()
         case PamConstants.refreshing:
             (view as? PamRefreshContainer)?.setRefreshing(false)
         case PamConstants.refreshColors:
@@ -2435,6 +2450,7 @@ public final class PamRenderer {
     }
 
     private func configureKeyframeAnimation(nodeId: Int64, view: UIView) {
+        workletAnimators.removeValue(forKey: nodeId)?.stop()
         guard let state = nodes[nodeId],
               let data = state.properties[PamConstants.animationKeyframes]?.bytesOrNil(),
               let frames = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
@@ -2540,6 +2556,40 @@ public final class PamRenderer {
         group.delegate = delegate
         animationDelegates[nodeId] = delegate
         view.layer.add(group, forKey: "pam.keyframes")
+    }
+
+    private func configureWorkletAnimation(nodeId: Int64, view: UIView) {
+        workletAnimators.removeValue(forKey: nodeId)?.stop()
+        guard let state = nodes[nodeId],
+              let data = state.properties[PamConstants.workletProgram]?.bytesOrNil(),
+              let program = PamWorkletProgram.decode(data),
+              let target = PamWorkletTarget(
+                rawValue: Int(state.properties[PamConstants.workletTarget]?.integerOrNil() ?? 0)
+              ) else { return }
+        view.layer.removeAnimation(forKey: "pam.keyframes")
+        animationDelegates[nodeId] = nil
+        let iterations = Int(
+            min(max(state.properties[PamConstants.workletIterations]?.integerOrNil() ?? 1, 0), 10_000)
+        )
+        let duration = Int(
+            min(max(state.properties[PamConstants.workletDurationMs]?.integerOrNil() ?? 300, 1), 60_000)
+        )
+        let animator = PamWorkletAnimator(
+            view: view,
+            program: program,
+            target: target,
+            durationMs: duration,
+            iterations: iterations
+        ) { [weak self] in
+            guard let self else { return }
+            self.workletAnimators[nodeId] = nil
+            guard self.nodes[nodeId]?.properties[PamConstants.onAnimationComplete] != nil else {
+                return
+            }
+            self.dispatchEvent(nodeId, EventKind.animationComplete.rawValue, Data())
+        }
+        workletAnimators[nodeId] = animator
+        animator.start()
     }
 
     private func animationTimingFunction(_ value: Int) -> CAMediaTimingFunction {

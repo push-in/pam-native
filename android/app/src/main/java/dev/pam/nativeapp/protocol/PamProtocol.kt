@@ -556,7 +556,11 @@ enum class PropKey(val value: Int) {
     TAB_INDICATOR_COLOR(437),
     TAB_SWIPE_ENABLED(438),
     TAB_SCROLL_ENABLED(439),
-    CANVAS_COMMANDS(440);
+    CANVAS_COMMANDS(440),
+    WORKLET_PROGRAM(441),
+    WORKLET_TARGET(442),
+    WORKLET_DURATION_MS(443),
+    WORKLET_ITERATIONS(444);
 
     companion object {
         fun from(value: Int): PropKey =

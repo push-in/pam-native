@@ -57,16 +57,25 @@ Loading may retain stale data; replacement loads cancel obsolete work.
 ## Worklet bytecode
 
 ```php
-$opacity = Worklet::input()
-    ->interpolate(0, 200, 1, 0)
-    ->clamp(0, 1);
+use Pam\Native\UI\Animated;
+use Pam\Native\UI\Text;
+use Pam\Native\Worklets\Worklet;
+use Pam\Native\Worklets\WorkletTarget;
 
-$bytecode = $opacity->bytecode(); // PNW1
+return Animated::worklet(
+    Text::make('Runs without PHP on every frame'),
+    Worklet::input()->interpolate(0, 300, 0, 1)->clamp(0, 1),
+    WorkletTarget::Opacity,
+    durationMs: 300,
+)->iterations(3);
 ```
 
 Worklets are data-only numeric programs. They cannot call PHP, allocate
 objects, perform I/O, or access global state. Programs are limited to 256
-instructions and all values must remain finite.
+instructions and all values must remain finite. Android evaluates PNW1 on its
+native frame animator and iOS evaluates it from `CADisplayLink`; PHP is not
+entered between frames. Opacity, X/Y translation, scale, and rotation targets
+are available, and the numeric input is elapsed time in milliseconds.
 
 ## Advanced virtualization
 

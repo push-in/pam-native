@@ -531,6 +531,10 @@ pub enum PropKey {
     TabSwipeEnabled = 438,
     TabScrollEnabled = 439,
     CanvasCommands = 440,
+    WorkletProgram = 441,
+    WorkletTarget = 442,
+    WorkletDurationMs = 443,
+    WorkletIterations = 444,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -978,6 +982,10 @@ impl TryFrom<u16> for PropKey {
             438 => Ok(Self::TabSwipeEnabled),
             439 => Ok(Self::TabScrollEnabled),
             440 => Ok(Self::CanvasCommands),
+            441 => Ok(Self::WorkletProgram),
+            442 => Ok(Self::WorkletTarget),
+            443 => Ok(Self::WorkletDurationMs),
+            444 => Ok(Self::WorkletIterations),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1842,10 +1850,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=440 {
+        for value in 1..=444 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(441).is_err());
+        assert!(PropKey::try_from(445).is_err());
     }
 
     #[test]

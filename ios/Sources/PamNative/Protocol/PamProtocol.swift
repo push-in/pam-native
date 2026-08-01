@@ -401,6 +401,10 @@ public enum PamConstants {
     public static let tabSwipeEnabled = 438
     public static let tabScrollEnabled = 439
     public static let canvasCommands = 440
+    public static let workletProgram = 441
+    public static let workletTarget = 442
+    public static let workletDurationMs = 443
+    public static let workletIterations = 444
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

@@ -446,4 +446,8 @@ enum PropKey: int
     case TabSwipeEnabled = 438;
     case TabScrollEnabled = 439;
     case CanvasCommands = 440;
+    case WorkletProgram = 441;
+    case WorkletTarget = 442;
+    case WorkletDurationMs = 443;
+    case WorkletIterations = 444;
 }

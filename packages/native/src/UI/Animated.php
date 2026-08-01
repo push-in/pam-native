@@ -17,9 +17,25 @@ use Pam\Native\Internal\BinaryValue;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
+use Pam\Native\Worklets\Worklet;
+use Pam\Native\Worklets\WorkletTarget;
 
 final class Animated extends Element
 {
+    public static function worklet(
+        Renderable $content,
+        Worklet $worklet,
+        WorkletTarget $target,
+        int $durationMs = 300,
+    ): self {
+        return (new self(NodeKind::View))
+            ->withChildren([$content])
+            ->withProperty(PropKey::WorkletProgram, new BinaryValue($worklet->bytecode()))
+            ->withProperty(PropKey::WorkletTarget, $target->value)
+            ->withProperty(PropKey::WorkletDurationMs, max(1, min(60_000, $durationMs)))
+            ->withProperty(PropKey::WorkletIterations, 1);
+    }
+
     /** @param list<AnimationKeyframe> $keyframes */
     public static function make(
         Renderable $content,
@@ -64,7 +80,10 @@ final class Animated extends Element
 
     public function iterations(int $iterations): self
     {
-        return $this->withProperty(PropKey::AnimationIterations, max(0, min(10_000, $iterations)));
+        $bounded = max(0, min(10_000, $iterations));
+        return $this
+            ->withProperty(PropKey::AnimationIterations, $bounded)
+            ->withProperty(PropKey::WorkletIterations, $bounded);
     }
 
     public function delay(int $milliseconds): self

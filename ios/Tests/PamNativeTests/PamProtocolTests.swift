@@ -91,6 +91,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.webViewAllowedHosts, 366)
         XCTAssertEqual(PamConstants.mediaCacheChecksum, 384)
         XCTAssertEqual(PamConstants.canvasCommands, 440)
+        XCTAssertEqual(PamConstants.workletIterations, 444)
         XCTAssertEqual(
             [
                 NativeOperation.httpGet,
