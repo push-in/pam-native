@@ -52,6 +52,13 @@ factory/schema fast path. Subsequent mounts use direct constructor invocation,
 cached prop metadata and direct public-property access. Production compilation
 emits versioned cache metadata and invalidates older cache formats.
 
+Run `vendor/bin/pam-native-optimize src build/pam-cache` during a production
+build to compile every `.pam.php` component, emit a SHA-256 manifest and create
+a relocatable `pam-preload.php`. Loading that file primes OPcache and eagerly
+generates constructor factories plus prop schemas before the first application
+frame; no template parsing or component reflection remains on the startup hot
+path.
+
 ## Profiling
 
 `Profiler` retains a bounded 512-span timeline containing:

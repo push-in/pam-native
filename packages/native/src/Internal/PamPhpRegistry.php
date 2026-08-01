@@ -191,6 +191,23 @@ final class PamPhpRegistry
     }
 
     /**
+     * Builds constructor factories and prop schemas before the first frame.
+     *
+     * @param list<class-string<Component>> $classNames
+     */
+    public static function preloadMetadata(array $classNames): int
+    {
+        $loaded = 0;
+        foreach ($classNames as $className) {
+            self::autoload($className);
+            self::metadata($className);
+            $loaded++;
+        }
+
+        return $loaded;
+    }
+
+    /**
      * @param class-string<Component> $className
      * @param array<string, mixed> $values
      * @param list<\Pam\Native\Element> $children

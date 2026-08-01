@@ -15,7 +15,7 @@ final class PamVirtualWindowTests: XCTestCase {
             velocity: 0
         )
 
-        XCTAssertEqual(visible, Set([4, 5, 6, 7, 8]))
+        XCTAssertEqual(visible, Set([3, 4, 5, 6, 7, 8]))
         XCTAssertFalse(visible.contains(1))
         XCTAssertFalse(visible.contains(10))
     }
@@ -54,6 +54,6 @@ final class PamVirtualWindowTests: XCTestCase {
             velocity: 0
         )
 
-        XCTAssertEqual(visible, Set([3, 4, 5, 6, 7]))
+        XCTAssertEqual(visible, Set([2, 3, 4, 5, 6, 7]))
     }
 }

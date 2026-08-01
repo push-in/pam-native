@@ -81,7 +81,9 @@ final class PamPhpPreloader
     private static function preloadSource(array $entries): string
     {
         $files = array_column($entries, 'file');
+        $classes = array_column($entries, 'class');
         $export = var_export($files, true);
+        $classExport = var_export($classes, true);
 
         return <<<PHP
 <?php
@@ -99,6 +101,7 @@ foreach ({$export} as \$file) {
     }
     require_once \$path;
 }
+\Pam\Native\Internal\PamPhpRegistry::preloadMetadata({$classExport});
 
 PHP;
     }

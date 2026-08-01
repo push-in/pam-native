@@ -61,6 +61,7 @@ use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\PamPhpCompiler;
 use Pam\Native\Internal\PamPhpPreloader;
+use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\CssColor;
 use Pam\Native\Internal\CompiledTemplateNode;
 use Pam\Native\Internal\ScopedStyleCompiler;
@@ -4083,6 +4084,12 @@ $assert(
     'PHP Runtime Turbo must emit a complete deterministic preload manifest.',
 );
 require $preloadResult['preload'];
+$assert(
+    PamPhpRegistry::preloadMetadata([
+        'Pam\\Native\\Tests\\Sfc\\CounterCard',
+    ]) === 1,
+    'PHP Runtime Turbo must warm generated constructor and prop metadata.',
+);
 App::components($pamPhpDirectory, $pamPhpCache);
 $dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
 $counterClass = 'Pam\\Native\\Tests\\Sfc\\CounterCard';
