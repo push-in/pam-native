@@ -1321,6 +1321,24 @@ pub enum Mutation {
 
 pub fn encode_batch(mutations: &[Mutation]) -> Result<Vec<u8>, ProtocolError> {
     let mut writer = Writer::with_capacity(mutations.len().saturating_mul(40));
+    encode_batch_with_writer(&mut writer, mutations)?;
+    writer.finish()
+}
+
+pub fn encode_batch_into(
+    output: &mut Vec<u8>,
+    mutations: &[Mutation],
+) -> Result<(), ProtocolError> {
+    output.clear();
+    let mut writer = Writer::from_reusable(output);
+    encode_batch_with_writer(&mut writer, mutations)?;
+    writer.finish_reusable()
+}
+
+fn encode_batch_with_writer(
+    writer: &mut Writer<'_>,
+    mutations: &[Mutation],
+) -> Result<(), ProtocolError> {
     writer.bytes(&BATCH_MAGIC);
     writer.u16(PROTOCOL_VERSION);
     writer.u32(usize_to_u32(mutations.len())?);
@@ -1328,7 +1346,7 @@ pub fn encode_batch(mutations: &[Mutation]) -> Result<Vec<u8>, ProtocolError> {
         match mutation {
             Mutation::Create(node) => {
                 writer.u8(1);
-                encode_node(&mut writer, node)?;
+                encode_node(writer, node)?;
             }
             Mutation::Remove { id } => {
                 writer.u8(2);
@@ -1341,7 +1359,7 @@ pub fn encode_batch(mutations: &[Mutation]) -> Result<Vec<u8>, ProtocolError> {
                 match value {
                     Some(value) => {
                         writer.u8(1);
-                        encode_value(&mut writer, value)?;
+                        encode_value(writer, value)?;
                     }
                     None => writer.u8(2),
                 }
@@ -1366,7 +1384,7 @@ pub fn encode_batch(mutations: &[Mutation]) -> Result<Vec<u8>, ProtocolError> {
             }
         }
     }
-    writer.finish()
+    Ok(())
 }
 
 pub fn decode_batch(frame: &[u8]) -> Result<Vec<Mutation>, ProtocolError> {
@@ -1698,14 +1716,45 @@ impl<'a> Reader<'a> {
     }
 }
 
-struct Writer {
-    bytes: Vec<u8>,
+struct Writer<'a> {
+    bytes: WriterBytes<'a>,
 }
 
-impl Writer {
+enum WriterBytes<'a> {
+    Owned(Vec<u8>),
+    Reused(&'a mut Vec<u8>),
+}
+
+impl std::ops::Deref for WriterBytes<'_> {
+    type Target = Vec<u8>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::Reused(bytes) => bytes,
+        }
+    }
+}
+
+impl std::ops::DerefMut for WriterBytes<'_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::Reused(bytes) => bytes,
+        }
+    }
+}
+
+impl Writer<'_> {
     fn with_capacity(capacity: usize) -> Self {
         Self {
-            bytes: Vec::with_capacity(capacity.min(MAX_FRAME_BYTES)),
+            bytes: WriterBytes::Owned(Vec::with_capacity(capacity.min(MAX_FRAME_BYTES))),
+        }
+    }
+
+    fn from_reusable(bytes: &mut Vec<u8>) -> Writer<'_> {
+        Writer {
+            bytes: WriterBytes::Reused(bytes),
         }
     }
 
@@ -1754,7 +1803,19 @@ impl Writer {
         if self.bytes.len() > MAX_FRAME_BYTES {
             Err(ProtocolError::LimitExceeded("frame bytes"))
         } else {
-            Ok(self.bytes)
+            match self.bytes {
+                WriterBytes::Owned(bytes) => Ok(bytes),
+                WriterBytes::Reused(_) => unreachable!("owned writer required"),
+            }
+        }
+    }
+
+    fn finish_reusable(mut self) -> Result<(), ProtocolError> {
+        if self.bytes.len() > MAX_FRAME_BYTES {
+            self.bytes.clear();
+            Err(ProtocolError::LimitExceeded("frame bytes"))
+        } else {
+            Ok(())
         }
     }
 }
@@ -1785,6 +1846,19 @@ mod tests {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
         assert!(PropKey::try_from(441).is_err());
+    }
+
+    #[test]
+    fn batch_encoder_reuses_the_callers_allocation() {
+        let mutations = [Mutation::SetRoot { id: 7 }];
+        let mut output = Vec::with_capacity(4_096);
+        encode_batch_into(&mut output, &mutations).expect("first batch");
+        let allocation = output.as_ptr();
+        let capacity = output.capacity();
+        encode_batch_into(&mut output, &mutations).expect("reused batch");
+        assert_eq!(output.as_ptr(), allocation);
+        assert_eq!(output.capacity(), capacity);
+        assert_eq!(decode_batch(&output).expect("decode"), mutations);
     }
 
     fn tree(text: &str) -> Tree {

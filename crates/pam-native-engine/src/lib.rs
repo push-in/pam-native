@@ -1,6 +1,10 @@
+pub mod bridge_v2;
 mod ffi;
 mod font_metrics;
 mod layout;
+pub mod performance;
+pub mod reactive;
+pub mod scheduler;
 
 use std::collections::{BTreeMap, BTreeSet};
 
