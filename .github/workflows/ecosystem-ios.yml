@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - name: Fetch immutable plugin sources
+      - name: Fetch released plugin sources
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -35,8 +35,18 @@ jobs:
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
           )
-          for repo in "${repos[@]}"; do
-            git clone --depth 1 "https://github.com/push-in/${repo}.git" \
+          versions=(
+            v0.1.0 v0.1.0 v0.1.0
+            v0.1.1 v0.1.0 v0.1.0
+            v0.1.0 v0.1.0 v0.1.0
+            v0.1.0 v0.1.0 v0.1.0
+            v0.1.0 v0.1.0 v0.1.0
+            v0.1.0 v0.1.0 v0.1.0
+          )
+          for index in "${!repos[@]}"; do
+            repo="${repos[$index]}"
+            git clone --depth 1 --branch "${versions[$index]}" \
+              "https://github.com/push-in/${repo}.git" \
               "${RUNNER_TEMP}/${repo}"
           done
       - name: Assemble generated Swift package
