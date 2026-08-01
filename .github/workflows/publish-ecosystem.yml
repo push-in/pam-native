@@ -2,6 +2,12 @@ name: Publish official ecosystem to Packagist
 
 on:
   workflow_dispatch:
+    inputs:
+      package:
+        description: Package repository name, or "all"
+        required: true
+        default: all
+        type: string
 
 permissions:
   contents: read
@@ -14,6 +20,7 @@ jobs:
         env:
           PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
           PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+          SELECTED_PACKAGE: ${{ inputs.package }}
         run: |
           set -euo pipefail
           test -n "${PACKAGIST_USERNAME}"
@@ -30,6 +37,20 @@ jobs:
             pam-native-share-extension pam-native-subscriptions pam-native-video
             pam-native-widgets pam-native-firebase pam-native-laravel-sync
           )
+          if [[ "${SELECTED_PACKAGE}" != all ]]; then
+            valid=false
+            for package in "${packages[@]}"; do
+              if [[ "${package}" == "${SELECTED_PACKAGE}" ]]; then
+                valid=true
+                break
+              fi
+            done
+            [[ "${valid}" == true ]] || {
+              echo "Unknown official ecosystem package: ${SELECTED_PACKAGE}" >&2
+              exit 64
+            }
+            packages=("${SELECTED_PACKAGE}")
+          fi
           for package in "${packages[@]}"; do
             payload=$(printf '{"repository":{"url":"https://github.com/push-in/%s"}}' "${package}")
             if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
