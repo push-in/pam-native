@@ -1,0 +1,91 @@
+name: Ecosystem iOS certification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - certification/ios-ecosystem/**
+      - .github/workflows/ecosystem-ios.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecosystem-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Compile all official Swift plugins
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Fetch immutable plugin sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repos=(
+            pam-native-auth pam-native-background-transfer pam-native-bluetooth
+            pam-native-feature-flags pam-native-firebase pam-native-health
+            pam-native-intents pam-native-live-activities pam-native-maps
+            pam-native-media pam-native-nfc pam-native-payments
+            pam-native-realtime pam-native-scanner pam-native-share-extension
+            pam-native-subscriptions pam-native-video pam-native-widgets
+          )
+          for repo in "${repos[@]}"; do
+            git clone --depth 1 "https://github.com/push-in/${repo}.git" \
+              "${RUNNER_TEMP}/${repo}"
+          done
+      - name: Assemble generated Swift package
+        run: |
+          set -euo pipefail
+          root=certification/ios-ecosystem/Sources
+          repos=(
+            pam-native-auth pam-native-background-transfer pam-native-bluetooth
+            pam-native-feature-flags pam-native-firebase pam-native-health
+            pam-native-intents pam-native-live-activities pam-native-maps
+            pam-native-media pam-native-nfc pam-native-payments
+            pam-native-realtime pam-native-scanner pam-native-share-extension
+            pam-native-subscriptions pam-native-video pam-native-widgets
+          )
+          targets=(
+            PamPlugin0PushinbrPamNativeAuth
+            PamPlugin1PushinbrPamNativeBackgroundTransfer
+            PamPlugin2PushinbrPamNativeBluetooth
+            PamPlugin3PushinbrPamNativeFeatureFlags
+            PamPlugin4PushinbrPamNativeFirebase
+            PamPlugin5PushinbrPamNativeHealth
+            PamPlugin6PushinbrPamNativeIntents
+            PamPlugin7PushinbrPamNativeLiveActivities
+            PamPlugin8PushinbrPamNativeMaps
+            PamPlugin9PushinbrPamNativeMedia
+            PamPlugin10PushinbrPamNativeNfc
+            PamPlugin11PushinbrPamNativePayments
+            PamPlugin12PushinbrPamNativeRealtime
+            PamPlugin13PushinbrPamNativeScanner
+            PamPlugin14PushinbrPamNativeShareExtension
+            PamPlugin15PushinbrPamNativeSubscriptions
+            PamPlugin16PushinbrPamNativeVideo
+            PamPlugin17PushinbrPamNativeWidgets
+          )
+          for index in "${!repos[@]}"; do
+            source="${RUNNER_TEMP}/${repos[$index]}/ios/Sources"
+            test -d "${source}"
+            target="${root}/${targets[$index]}"
+            mkdir -p "${target}"
+            cp -R "${source}/." "${target}/"
+          done
+      - name: Resolve exact vendor SDKs
+        working-directory: certification/ios-ecosystem
+        run: swift package resolve
+      - name: Build every plugin for the iOS Simulator
+        working-directory: certification/ios-ecosystem
+        run: >-
+          xcodebuild
+          -scheme PamNativePlugins
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
