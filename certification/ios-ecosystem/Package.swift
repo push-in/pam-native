@@ -4,7 +4,7 @@ import PackageDescription
 
 let package = Package(
     name: "PamNativePlugins",
-    platforms: [.iOS(.v15)],
+    platforms: [.iOS(.v16_2)],
     products: [.library(name: "PamNativePlugins", targets: ["PamNativePlugins"])],
     dependencies: [
         .package(path: "../../ios"),

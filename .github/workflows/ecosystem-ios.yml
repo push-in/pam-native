@@ -78,6 +78,9 @@ jobs:
             mkdir -p "${target}"
             cp -R "${source}/." "${target}/"
           done
+          cp -R \
+            "${RUNNER_TEMP}/pam-native-live-activities/ios/Shared/." \
+            "${root}/PamPlugin7PushinbrPamNativeLiveActivities/"
       - name: Resolve exact vendor SDKs
         working-directory: certification/ios-ecosystem
         run: swift package resolve
