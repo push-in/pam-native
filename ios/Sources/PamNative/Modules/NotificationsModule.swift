@@ -29,7 +29,10 @@ public enum PamPushNotifications {
 }
 
 final class NotificationsModule: NativeModule, ClosableNativeModule {
-    private let center = UNUserNotificationCenter.current()
+    // UserNotifications requires a real application bundle. Resolve it only
+    // when the notifications capability is invoked so registry composition,
+    // package tests, and non-application hosts remain safe.
+    private lazy var center = UNUserNotificationCenter.current()
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         do {

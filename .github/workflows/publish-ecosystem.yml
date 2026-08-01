@@ -1,0 +1,43 @@
+name: Publish official ecosystem to Packagist
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create or refresh official packages
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${PACKAGIST_USERNAME}"
+          test -n "${PACKAGIST_TOKEN}"
+          encoded_username=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_USERNAME"));')
+          encoded_token=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_TOKEN"));')
+          packages=(
+            pam-native-plugin-kit pam-native-testing pam-native-feature-flags
+            pam-native-sync pam-native-auth pam-native-background-transfer
+            pam-native-bluetooth pam-native-devtools pam-native-health
+            pam-native-intents pam-native-live-activities pam-native-maps
+            pam-native-media pam-native-nfc pam-native-observability
+            pam-native-payments pam-native-realtime pam-native-scanner
+            pam-native-share-extension pam-native-subscriptions pam-native-video
+            pam-native-widgets pam-native-firebase pam-native-laravel-sync
+          )
+          for package in "${packages[@]}"; do
+            payload=$(printf '{"repository":{"url":"https://github.com/push-in/%s"}}' "${package}")
+            if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+              --request POST --header 'Content-Type: application/json' --data "${payload}" \
+              "https://packagist.org/api/update-package?username=${encoded_username}&apiToken=${encoded_token}"
+            then
+              curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
+                --request POST --header 'Content-Type: application/json' --data "${payload}" \
+                "https://packagist.org/api/create-package?username=${encoded_username}&apiToken=${encoded_token}"
+            fi
+          done
