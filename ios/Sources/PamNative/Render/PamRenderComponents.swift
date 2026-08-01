@@ -129,6 +129,59 @@ final class PamAnchoredScrollView: UIScrollView {
     }
 }
 
+final class PamVirtualListView: UIScrollView {
+    var onViewportChange: (() -> Void)?
+    private(set) var scrollVelocity: CGFloat = 0
+    private var previousOffset: CGFloat = 0
+    private var previousTimestamp = CACurrentMediaTime()
+    private var notifyingViewport = false
+
+    var horizontal = false
+
+    var adaptiveOverscan: CGFloat {
+        let viewport = horizontal ? bounds.width : bounds.height
+        let velocityPages = abs(scrollVelocity) / max(viewport, 1)
+        return viewport * min(max(1.5 + velocityPages * 0.35, 1.5), 6)
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let now = CACurrentMediaTime()
+        let offset = horizontal ? contentOffset.x : contentOffset.y
+        let elapsed = max(now - previousTimestamp, 1.0 / 240.0)
+        scrollVelocity = (offset - previousOffset) / elapsed
+        previousOffset = offset
+        previousTimestamp = now
+        guard !notifyingViewport else { return }
+        notifyingViewport = true
+        onViewportChange?()
+        notifyingViewport = false
+    }
+}
+
+enum PamVirtualWindow {
+    static func visibleIds(
+        frames: [(Int64, CGRect)],
+        viewport: CGRect,
+        horizontal: Bool,
+        overscan: CGFloat,
+        velocity: CGFloat
+    ) -> Set<Int64> {
+        let before = velocity < 0 ? overscan * 1.5 : overscan
+        let after = velocity > 0 ? overscan * 1.5 : overscan
+        let window = horizontal
+            ? viewport.insetBy(dx: 0, dy: -overscan).insetBy(
+                dx: -(before + after) / 2,
+                dy: 0
+            ).offsetBy(dx: (after - before) / 2, dy: 0)
+            : viewport.insetBy(dx: -overscan, dy: 0).insetBy(
+                dx: 0,
+                dy: -(before + after) / 2
+            ).offsetBy(dx: 0, dy: (after - before) / 2)
+        return Set(frames.lazy.filter { $0.1.intersects(window) }.map(\.0))
+    }
+}
+
 final class PamVuetifySwitch: UIControl {
     private let trackLayer = CALayer()
     private let thumbLayer = CALayer()

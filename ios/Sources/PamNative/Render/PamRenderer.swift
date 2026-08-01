@@ -80,10 +80,11 @@ public final class PamRenderer {
             }
         }
 
-        syncLocalModalTriggers()
         dirtyLayouts.forEach { id in
             applyLayout(id)
         }
+        syncVirtualLists()
+        syncLocalModalTriggers()
     }
 
     public func trimMemory(_ critical: Bool) {
@@ -183,16 +184,9 @@ public final class PamRenderer {
         nodes[spec.id] = state
         addChild(to: state.parent, child: state.id)
 
-        let view = createView(for: spec)
-        views[spec.id] = view
-        view.tag = Int(clamping: state.id)
-        attach(view, parentId: state.parent, index: state.index)
-
-        for (key, value) in state.properties {
-            applyProperty(view: view, nodeId: state.id, key: key, value: value)
+        if virtualListAncestor(of: state.parent) == nil {
+            materialize(state)
         }
-
-        installEvents(for: state.id)
     }
 
     private func syncLocalModalTriggers() {
@@ -282,15 +276,20 @@ public final class PamRenderer {
     }
 
     private func update(id: Int64, key: Int, value: PropValue?) {
-        guard let state = nodes[id], let view = views[id] else {
+        guard let state = nodes[id] else {
             return
         }
 
         if let value {
             state.properties[key] = value
-            applyProperty(view: view, nodeId: id, key: key, value: value)
         } else {
             state.properties.removeValue(forKey: key)
+        }
+        guard let view = views[id] else { return }
+
+        if let value {
+            applyProperty(view: view, nodeId: id, key: key, value: value)
+        } else {
             resetProperty(view: view, nodeId: id, key: key, state: state)
             if key == PamConstants.source,
                let imageView = imageView(for: view) {
@@ -321,16 +320,147 @@ public final class PamRenderer {
     }
 
     private func move(id: Int64, parent: Int64, index: Int) {
-        guard let state = nodes[id], let view = views[id] else {
+        guard let state = nodes[id] else {
             return
         }
 
-        view.removeFromSuperview()
+        views[id]?.removeFromSuperview()
         removeChild(from: state.parent, child: id)
         state.parent = parent
         state.index = index
         addChild(to: parent, child: id)
-        attach(view, parentId: parent, index: index)
+        if let view = views[id] {
+            attach(view, parentId: parent, index: index)
+        } else if virtualListAncestor(of: parent) == nil {
+            materializeSubtree(id)
+        }
+        syncVirtualLists()
+    }
+
+    private func virtualListAncestor(of id: Int64) -> Int64? {
+        var current = id
+        var visited = Set<Int64>()
+        while current != 0, visited.insert(current).inserted {
+            guard let state = nodes[current] else { return nil }
+            if state.kind == .list || state.kind == .sectionList || state.kind == .virtualList {
+                return current
+            }
+            current = state.parent
+        }
+        return nil
+    }
+
+    private func materialize(_ state: NodeState) {
+        guard views[state.id] == nil else { return }
+        let spec = NodeSpec(
+            id: state.id,
+            parent: state.parent,
+            index: state.index,
+            kind: state.kind,
+            properties: state.properties
+        )
+        let view = createView(for: spec)
+        views[state.id] = view
+        view.tag = Int(clamping: state.id)
+        attach(view, parentId: state.parent, index: state.index)
+        for (key, value) in state.properties {
+            applyProperty(view: view, nodeId: state.id, key: key, value: value)
+        }
+        installEvents(for: state.id)
+        applyLayout(state.id)
+    }
+
+    private func materializeSubtree(_ id: Int64) {
+        guard let state = nodes[id] else { return }
+        materialize(state)
+        if state.kind == .list || state.kind == .sectionList || state.kind == .virtualList {
+            syncVirtualList(id)
+            return
+        }
+        for childId in children[id] ?? [] {
+            materializeSubtree(childId)
+        }
+    }
+
+    private func dematerializeSubtree(_ id: Int64) {
+        for childId in children[id] ?? [] {
+            dematerializeSubtree(childId)
+        }
+        guard let state = nodes[id], let view = views[id] else { return }
+        eventBridges[id]?.forEach { _, bridge in bridge.detach() }
+        eventBridges[id] = nil
+        interactionBridges.removeValue(forKey: id)?.detach()
+        animationDelegates[id] = nil
+        localModalActions[id] = nil
+        borderLayers[id]?.remove()
+        borderLayers[id] = nil
+        cancelImageLoad(for: state)
+        state.childrenNeedRethrow = nil
+        nativeViews.release(view: view)
+        view.removeFromSuperview()
+        views[id] = nil
+        imageLoadContexts = imageLoadContexts.filter { _, context in
+            context.nodeId != id
+        }
+    }
+
+    private func syncVirtualLists() {
+        let ids = nodes.values.compactMap { state -> Int64? in
+            switch state.kind {
+            case .list, .sectionList, .virtualList:
+                return state.id
+            default:
+                return nil
+            }
+        }
+        ids.forEach(syncVirtualList)
+    }
+
+    private func syncVirtualList(_ id: Int64) {
+        guard let list = views[id] as? PamVirtualListView,
+              let listFrame = frames[id],
+              list.bounds.width > 0,
+              list.bounds.height > 0 else { return }
+        let horizontal = nodes[id]?
+            .properties[PamConstants.scrollHorizontal]?.boolOrNil() ?? false
+        list.horizontal = horizontal
+        let cellIds = children[id] ?? []
+        let localFrames = cellIds.compactMap { cellId -> (Int64, CGRect)? in
+            guard let frame = frames[cellId] else { return nil }
+            return (
+                cellId,
+                CGRect(
+                    x: CGFloat(frame.x - listFrame.x),
+                    y: CGFloat(frame.y - listFrame.y),
+                    width: CGFloat(max(0, frame.width)),
+                    height: CGFloat(max(0, frame.height))
+                )
+            )
+        }
+        let contentWidth = localFrames.reduce(list.bounds.width) {
+            max($0, $1.1.maxX)
+        }
+        let contentHeight = localFrames.reduce(list.bounds.height) {
+            max($0, $1.1.maxY)
+        }
+        let contentSize = CGSize(width: contentWidth, height: contentHeight)
+        if list.contentSize != contentSize {
+            list.contentSize = contentSize
+        }
+        let visible = PamVirtualWindow.visibleIds(
+            frames: localFrames,
+            viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
+            horizontal: horizontal,
+            overscan: list.adaptiveOverscan,
+            velocity: list.scrollVelocity
+        )
+        for cellId in cellIds {
+            if visible.contains(cellId) {
+                materializeSubtree(cellId)
+            } else if views[cellId] != nil {
+                dematerializeSubtree(cellId)
+            }
+        }
     }
 
     private func applyLayout(_ id: Int64) {
@@ -582,7 +712,11 @@ public final class PamRenderer {
         case .scroll:
             return PamAnchoredScrollView()
         case .list, .sectionList, .virtualList:
-            return UIScrollView()
+            let list = PamVirtualListView()
+            list.onViewportChange = { [weak self] in
+                self?.syncVirtualList(spec.id)
+            }
+            return list
         case .spacer:
             return UIView()
         case .activityIndicator:
@@ -2136,6 +2270,7 @@ public final class PamRenderer {
 
     private func configureScrollView(_ scroll: UIScrollView, horizontal: Bool) {
         (scroll as? PamAnchoredScrollView)?.horizontal = horizontal
+        (scroll as? PamVirtualListView)?.horizontal = horizontal
         scroll.alwaysBounceVertical = !horizontal
         scroll.alwaysBounceHorizontal = horizontal
         scroll.showsHorizontalScrollIndicator = horizontal
