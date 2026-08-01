@@ -52,6 +52,7 @@ jobs:
       - name: PHP and benchmark contracts
         run: |
           composer install --working-dir=examples/showcase --no-interaction
+          cargo run --locked --release -p pam-native-engine --example benchmark -- --check
           php packages/native/tests/run.php
           php packages/native/tests/performance.php
           php packages/native/tests/navigation_performance.php

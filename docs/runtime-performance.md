@@ -92,11 +92,14 @@ CI runs:
 - PHP SDK and lifecycle contracts;
 - deterministic 1,000-frame tree fuzzing;
 - a 1,001-node cold/steady encoder budget;
-- Rust tests, Clippy and benchmark compilation;
+- Rust tests, Clippy and a release-mode engine performance gate;
 - Android unit, instrumented API 26/36 and macrobenchmark projects;
 - iOS simulator tests.
 
 Override local performance thresholds with `PAM_PERF_FIRST_FRAME_MS` and
-`PAM_PERF_STEADY_FRAME_MS`. CI defaults deliberately allow shared-runner
-variance; device macrobenchmark budgets remain the source of truth for startup,
-frame timing and memory.
+`PAM_PERF_STEADY_FRAME_MS`. The native engine gate can be reproduced with
+`cargo run --release -p pam-native-engine --example benchmark -- --check`;
+its ceilings are configurable through `PAM_PERF_ENGINE_FULL_TREE_NS` and
+`PAM_PERF_ENGINE_PATCH_NS`. CI defaults deliberately allow shared-runner
+variance; physical-device macrobenchmark budgets remain the source of truth
+for startup, frame timing and memory.

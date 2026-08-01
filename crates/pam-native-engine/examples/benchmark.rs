@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+use std::env;
 use std::hint::black_box;
+use std::process::ExitCode;
 use std::time::Instant;
 
 use pam_native_engine::Engine;
@@ -45,7 +47,17 @@ fn frame(label: &str) -> Vec<u8> {
         .expect("valid benchmark tree")
 }
 
-fn main() {
+const DEFAULT_FULL_TREE_BUDGET_NS: u128 = 1_000_000;
+const DEFAULT_PATCH_BUDGET_NS: u128 = 500_000;
+
+fn budget(name: &str, fallback: u128) -> u128 {
+    env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(fallback)
+}
+
+fn main() -> ExitCode {
     let frames = [frame("A"), frame("B")];
     let mut engine = Engine::new();
     black_box(engine.commit(&frames[0]).expect("warm-up"));
@@ -59,10 +71,11 @@ fn main() {
         output_bytes = output_bytes.saturating_add(black_box(output.len()));
     }
     let elapsed = started.elapsed();
+    let full_tree_ns = elapsed.as_nanos() / u128::from(ITERATIONS);
     println!(
         "full-tree: nodes={NODE_COUNT} iterations={ITERATIONS} total_ms={:.3} ns_per_commit={} output_bytes={output_bytes}",
         elapsed.as_secs_f64() * 1_000.0,
-        elapsed.as_nanos() / u128::from(ITERATIONS),
+        full_tree_ns,
     );
 
     let patches = ["A", "B"].map(|label| {
@@ -87,9 +100,37 @@ fn main() {
         output_bytes = output_bytes.saturating_add(black_box(output.len()));
     }
     let elapsed = started.elapsed();
+    let patch_ns = elapsed.as_nanos() / u128::from(ITERATIONS);
     println!(
         "property-patch: nodes={NODE_COUNT} iterations={ITERATIONS} total_ms={:.3} ns_per_commit={} output_bytes={output_bytes}",
         elapsed.as_secs_f64() * 1_000.0,
-        elapsed.as_nanos() / u128::from(ITERATIONS),
+        patch_ns,
     );
+
+    if env::args().any(|argument| argument == "--check") {
+        let full_tree_budget = budget("PAM_PERF_ENGINE_FULL_TREE_NS", DEFAULT_FULL_TREE_BUDGET_NS);
+        let patch_budget = budget("PAM_PERF_ENGINE_PATCH_NS", DEFAULT_PATCH_BUDGET_NS);
+        let mut failures = Vec::new();
+        if full_tree_ns > full_tree_budget {
+            failures.push(format!(
+                "full-tree {full_tree_ns}ns exceeds {full_tree_budget}ns",
+            ));
+        }
+        if patch_ns > patch_budget {
+            failures.push(format!(
+                "property-patch {patch_ns}ns exceeds {patch_budget}ns",
+            ));
+        }
+        if !failures.is_empty() {
+            eprintln!(
+                "PAM engine performance contract failed: {}",
+                failures.join(", ")
+            );
+            return ExitCode::FAILURE;
+        }
+        println!(
+            "performance-contract: passed full_tree_budget_ns={full_tree_budget} patch_budget_ns={patch_budget}",
+        );
+    }
+    ExitCode::SUCCESS
 }
