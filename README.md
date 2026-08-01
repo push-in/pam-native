@@ -189,6 +189,10 @@ Explore the [showcase source](examples/showcase) or follow the
 
 ## The PAM ecosystem
 
+- **[24 official ecosystem packages](docs/ecosystem-architecture.md)** — Firebase,
+  auth, payments, subscriptions, maps, media, background transfer, realtime,
+  offline sync, extensions, device capabilities, observability, testing, and
+  plugin tooling. Install only the capabilities your application uses.
 - **[PAM Native Nitro](https://github.com/push-in/pam-native-nitro)** — typed,
   offline-first models and native SQLite queries.
 - **[PAM](https://github.com/push-in/pam)** — the persistent PHP runtime,
