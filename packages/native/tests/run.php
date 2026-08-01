@@ -60,6 +60,7 @@ use Pam\Native\Jobs\BackgroundJobs;
 use Pam\Native\IncomingShare;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\PamPhpCompiler;
+use Pam\Native\Internal\PamPhpPreloader;
 use Pam\Native\Internal\CssColor;
 use Pam\Native\Internal\CompiledTemplateNode;
 use Pam\Native\Internal\ScopedStyleCompiler;
@@ -4059,6 +4060,29 @@ $assert(
 );
 
 TemplateRegistry::reset();
+$preloadResult = PamPhpPreloader::optimize($pamPhpDirectory, $pamPhpCache);
+$preloadManifest = json_decode(
+    (string) file_get_contents($preloadResult['manifest']),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$preloadComponents = $preloadManifest['components'] ?? [];
+$assert(
+    $preloadResult['components'] === count($preloadComponents)
+        && $preloadResult['components'] >= 5
+        && is_file($preloadResult['preload'])
+        && array_reduce(
+            $preloadComponents,
+            static fn (bool $valid, mixed $entry): bool => $valid
+                && is_array($entry)
+                && isset($entry['sha256'])
+                && is_string($entry['sha256'])
+                && strlen($entry['sha256']) === 64,
+            true,
+        ),
+    'PHP Runtime Turbo must emit a complete deterministic preload manifest.',
+);
+require $preloadResult['preload'];
 App::components($pamPhpDirectory, $pamPhpCache);
 $dashboardClass = 'Pam\\Native\\Tests\\Sfc\\Dashboard';
 $counterClass = 'Pam\\Native\\Tests\\Sfc\\CounterCard';

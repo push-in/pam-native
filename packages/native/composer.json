@@ -24,7 +24,8 @@
         }
     },
     "bin": [
-        "bin/pam-native-format"
+        "bin/pam-native-format",
+        "bin/pam-native-optimize"
     ],
     "extra": {
         "pam-native": {

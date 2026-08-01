@@ -1,0 +1,50 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    dirname(__DIR__, 3).'/autoload.php',
+    dirname(__DIR__).'/vendor/autoload.php',
+];
+$loaded = false;
+foreach ($autoloadCandidates as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        $loaded = true;
+        break;
+    }
+}
+if (!$loaded) {
+    spl_autoload_register(static function (string $class): void {
+        $prefix = 'Pam\\Native\\';
+        if (!str_starts_with($class, $prefix)) {
+            return;
+        }
+        $path = dirname(__DIR__).'/src/'
+            .str_replace('\\', '/', substr($class, strlen($prefix))).'.php';
+        if (is_file($path)) {
+            require $path;
+        }
+    });
+}
+
+use Pam\Native\Internal\PamPhpPreloader;
+
+if ($argc !== 3) {
+    fwrite(STDERR, "Usage: pam-native-optimize <component-directory> <cache-directory>\n");
+    exit(2);
+}
+
+try {
+    $result = PamPhpPreloader::optimize($argv[1], $argv[2]);
+    fwrite(
+        STDOUT,
+        "Optimized {$result['components']} PAM components.\n"
+        ."Preload: {$result['preload']}\n"
+        ."Manifest: {$result['manifest']}\n",
+    );
+} catch (Throwable $error) {
+    fwrite(STDERR, $error->getMessage()."\n");
+    exit(1);
+}

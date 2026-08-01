@@ -18,6 +18,7 @@ pub(crate) struct FontMetricsCache {
 struct CachedFont {
     bytes: Vec<u8>,
     advances: BTreeMap<char, f32>,
+    snapshot: GlyphAdvances,
 }
 
 impl FontMetricsCache {
@@ -63,6 +64,7 @@ impl FontMetricsCache {
                 .or_insert_with(|| CachedFont {
                     bytes: fs::read(path).unwrap_or_default(),
                     advances: BTreeMap::new(),
+                    snapshot: Arc::new(BTreeMap::new()),
                 });
             if cached.bytes.is_empty() {
                 continue;
@@ -71,14 +73,23 @@ impl FontMetricsCache {
                 continue;
             };
             let units_per_em = f32::from(face.units_per_em());
+            let mut changed = false;
             for character in characters {
-                cached.advances.entry(character).or_insert_with(|| {
+                if cached.advances.contains_key(&character) {
+                    continue;
+                }
+                let advance = {
                     face.glyph_index(character)
                         .and_then(|glyph| face.glyph_hor_advance(glyph))
                         .map_or(0.0, |advance| f32::from(advance) / units_per_em)
-                });
+                };
+                cached.advances.insert(character, advance);
+                changed = true;
             }
-            snapshots.insert(family, Arc::new(cached.advances.clone()));
+            if changed {
+                cached.snapshot = Arc::new(cached.advances.clone());
+            }
+            snapshots.insert(family, Arc::clone(&cached.snapshot));
         }
 
         node_fonts
