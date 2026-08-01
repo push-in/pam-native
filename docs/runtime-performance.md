@@ -6,6 +6,33 @@ compiled runtime paths.
 See the [capability cookbook](examples.md#scheduler-and-profiling) for a
 copyable scheduled-work example with priority, coalescing and cancellation.
 
+## Performance architecture
+
+Pam treats performance as fifteen cooperating contracts rather than one
+benchmark number:
+
+| Pillar | Production path |
+| --- | --- |
+| Bridge V2 | Bounded binary batches, pooled ABI output buffers and append-only typed IDL avoid JSON and recycle native allocations. |
+| Critical-frame execution | PNW1 worklets run from `ValueAnimator` on Android and `CADisplayLink` on iOS without re-entering PHP between frames. |
+| Incremental renderer | Stable node identity and property/structure patches mutate only changed retained native views. |
+| Display-aware scheduler | The physical 60/90/120 Hz refresh rate sets the commit deadline; priority, cancellation and coalescing protect input work. |
+| Virtualization V2 | Variable extents, stable keys, velocity-biased overscan and logarithmic window lookup keep 100,000-item lists bounded. |
+| Incremental layout | Dirty node/ancestor paths reuse retained frames and prune unchanged subtrees. |
+| Text engine | Platform font advances feed a bounded Rust metrics cache; font changes remeasure only affected text nodes. |
+| Image pipeline | Deduplicated requests, target-size downsampling, decoded-memory/disk LRU caches and generation-safe recycling stay off the UI thread. |
+| PHP Runtime Turbo | Production strict mode, OPcache preload and compiled component metadata remove parsing and reflection from startup. |
+| Aggressive codegen | Generated native view registries, property schemas and constructor factories replace hot-path discovery. |
+| Fast paths | Paint-only patches skip layout, fixed text boxes skip intrinsic measurement and unchanged component subtrees retain their output. |
+| Optimized native builds | Rust ThinLTO/O3, Android R8/section GC and Swift whole-module optimization are certified in release builds. |
+| Memory control | Every queue/cache is bounded; pooled buffers, view dematerialization and platform pressure signals reclaim retained resources. |
+| Performance Observatory | Bounded histograms export P95 stages, deadlines, retained bytes, buffer reuse, nodes and frame misses to both overlays. |
+| Performance Contract | PHP/Rust budgets, 100,000-item iOS coverage, Android renderer tests, release builds and device macrobenchmarks gate regressions. |
+
+The worklet API and its safety limits are documented in
+[Platform runtime](platform-runtime.md#worklet-bytecode); image pipeline policies
+and cache behavior are documented in [Native media cache](media-cache.md).
+
 ## Modes
 
 Set `PAM_NATIVE_MODE` to:
