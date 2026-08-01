@@ -191,9 +191,6 @@ Explore the [showcase source](examples/showcase) or follow the
 
 - **[PAM Native Nitro](https://github.com/push-in/pam-native-nitro)** — typed,
   offline-first models and native SQLite queries.
-- **[Official packages](https://push-in.github.io/pam-docs/native/ecosystem/)** —
-  install HTTP, storage, database, forms, notifications, camera, location,
-  animations, and Sentry independently through Composer.
 - **[PAM](https://github.com/push-in/pam)** — the persistent PHP runtime,
   async I/O, CLI, and wider application platform.
 - **[Plugin SDK](docs/plugins.md)** — connect native SDKs, modules, views,
