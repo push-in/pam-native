@@ -1,0 +1,129 @@
+name: Publish ecosystem package to Packagist
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Allowlisted PAM Native ecosystem package
+        required: true
+        type: choice
+        options:
+          - pam-native-sync
+          - pam-native-laravel-sync
+          - pam-native-nitro
+      release_tag:
+        description: Existing immutable v* GitHub release tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packagist-${{ inputs.package }}-${{ inputs.release_tag }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Resolve allowlisted package
+        id: package
+        env:
+          PACKAGE: ${{ inputs.package }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            printf 'release_tag must be an exact stable vMAJOR.MINOR.PATCH tag\n' >&2
+            exit 2
+          fi
+          case "${PACKAGE}" in
+            pam-native-sync)
+              repository=push-in/pam-native-sync
+              composer=pushinbr/pam-native-sync
+              ;;
+            pam-native-laravel-sync)
+              repository=push-in/pam-native-laravel-sync
+              composer=pushinbr/pam-native-laravel-sync
+              ;;
+            pam-native-nitro)
+              repository=push-in/pam-native-nitro
+              composer=pushinbr/pam-native-nitro
+              ;;
+            *)
+              printf 'Package is not allowlisted.\n' >&2
+              exit 2
+              ;;
+          esac
+          printf 'repository=%s\ncomposer=%s\n' \
+            "${repository}" "${composer}" >>"${GITHUB_OUTPUT}"
+
+      - name: Verify immutable GitHub release and Composer identity
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ steps.package.outputs.repository }}
+          COMPOSER_PACKAGE: ${{ steps.package.outputs.composer }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          gh api "repos/${REPOSITORY}/releases/tags/${RELEASE_TAG}" \
+            --jq '.draft == false and .prerelease == false' | grep -qx true
+          manifest=$(gh api \
+            "repos/${REPOSITORY}/contents/composer.json?ref=${RELEASE_TAG}" \
+            --jq '.content' | tr -d '\n' | base64 --decode)
+          actual_name=$(php -r '
+            $manifest = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+            echo $manifest["name"] ?? "";
+          ' <<<"${manifest}")
+          if [[ "${actual_name}" != "${COMPOSER_PACKAGE}" ]]; then
+            printf 'Composer identity mismatch: expected %s, got %s\n' \
+              "${COMPOSER_PACKAGE}" "${actual_name}" >&2
+            exit 1
+          fi
+
+      - name: Refresh Packagist metadata
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_TOKEN: ${{ secrets.PACKAGIST_TOKEN }}
+          REPOSITORY: ${{ steps.package.outputs.repository }}
+        run: |
+          test -n "${PACKAGIST_USERNAME}"
+          test -n "${PACKAGIST_TOKEN}"
+          payload=$(php -r '
+            echo json_encode(
+              ["repository" => ["url" => "https://github.com/".getenv("REPOSITORY")]],
+              JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            );
+          ')
+          encoded_username=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_USERNAME"));')
+          encoded_token=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_TOKEN"));')
+          curl --proto '=https' --tlsv1.2 \
+            --fail --silent --show-error \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "${payload}" \
+            "https://packagist.org/api/update-package?username=${encoded_username}&apiToken=${encoded_token}"
+
+      - name: Verify public release metadata
+        env:
+          COMPOSER_PACKAGE: ${{ steps.package.outputs.composer }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          for attempt in $(seq 1 24); do
+            latest=$(curl --proto '=https' --tlsv1.2 \
+              --fail --silent --show-error \
+              "https://repo.packagist.org/p2/${COMPOSER_PACKAGE}.json" |
+              php -r '
+                $metadata = json_decode(stream_get_contents(STDIN), true, 512, JSON_THROW_ON_ERROR);
+                $versions = array_values($metadata["packages"])[0] ?? [];
+                echo $versions[0]["version"] ?? "";
+              ')
+            if [[ "${latest}" == "${RELEASE_TAG}" ]]; then
+              printf '%s is public at %s\n' "${COMPOSER_PACKAGE}" "${RELEASE_TAG}"
+              exit 0
+            fi
+            sleep 5
+          done
+          printf 'Packagist did not expose %s at %s within 120 seconds.\n' \
+            "${COMPOSER_PACKAGE}" "${RELEASE_TAG}" >&2
+          exit 1
