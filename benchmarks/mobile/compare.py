@@ -16,6 +16,11 @@ def arguments() -> argparse.Namespace:
     parser.add_argument("--pam", required=True, type=Path)
     parser.add_argument("--react-native", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--contract",
+        type=Path,
+        default=Path(__file__).with_name("contract.json"),
+    )
     return parser.parse_args()
 
 
@@ -31,25 +36,32 @@ def reports(path: Path) -> list[dict[str, Any]]:
     return result
 
 
-def median(value: Any) -> float | None:
+def statistic(value: Any, name: str) -> float | None:
     if isinstance(value, (int, float)) and math.isfinite(float(value)):
         return float(value)
     if not isinstance(value, dict):
         return None
-    for key in ("median", "p50", "P50", "minimum"):
+    aliases = {
+        "median": ("median", "p50", "P50", "minimum"),
+        "P50": ("P50", "p50", "median"),
+        "P95": ("P95", "p95"),
+        "P99": ("P99", "p99"),
+        "maximum": ("maximum", "max"),
+    }
+    for key in aliases.get(name, (name,)):
         result = value.get(key)
         if isinstance(result, (int, float)) and math.isfinite(float(result)):
             return float(result)
     runs = value.get("runs")
-    if isinstance(runs, list):
+    if name == "median" and isinstance(runs, list):
         numbers = sorted(float(item) for item in runs if isinstance(item, (int, float)))
         if numbers:
             return numbers[len(numbers) // 2]
     return None
 
 
-def metrics(entries: list[dict[str, Any]]) -> dict[tuple[str, str], float]:
-    result: dict[tuple[str, str], float] = {}
+def metrics(entries: list[dict[str, Any]]) -> dict[tuple[str, str, str], float]:
+    result: dict[tuple[str, str, str], float] = {}
     for entry in entries:
         name = str(entry.get("name", "")).split(".")[-1]
         if not name:
@@ -59,13 +71,42 @@ def metrics(entries: list[dict[str, Any]]) -> dict[tuple[str, str], float]:
             if not isinstance(values, dict):
                 continue
             for metric, raw in values.items():
-                value = median(raw)
-                if value is not None:
-                    result[(name, str(metric))] = value
+                for summary in ("median", "P50", "P95", "P99", "maximum"):
+                    value = statistic(raw, summary)
+                    if value is not None:
+                        result[(name, str(metric), summary)] = value
     return result
 
 
-def render(pam: dict[tuple[str, str], float], react: dict[tuple[str, str], float]) -> str:
+def required_metrics(contract: dict[str, Any]) -> set[tuple[str, str]]:
+    required: set[tuple[str, str]] = set()
+    for scenario in contract.get("scenarios", []):
+        identifier = str(scenario["id"])
+        names = scenario.get("metrics")
+        if not isinstance(names, list):
+            metric = scenario.get("metric")
+            names = [metric] if isinstance(metric, str) else []
+        required.update((identifier, str(metric)) for metric in names)
+    return required
+
+
+def validate_contract(
+    pam: dict[tuple[str, str, str], float],
+    react: dict[tuple[str, str, str], float],
+    contract: dict[str, Any],
+) -> None:
+    for label, values in (("Pam Native", pam), ("React Native", react)):
+        available = {(scenario, metric) for scenario, metric, _ in values}
+        missing = sorted(required_metrics(contract) - available)
+        if missing:
+            names = ", ".join(f"{scenario}.{metric}" for scenario, metric in missing)
+            raise ValueError(f"{label} report is missing contract metrics: {names}")
+
+
+def render(
+    pam: dict[tuple[str, str, str], float],
+    react: dict[tuple[str, str, str], float],
+) -> str:
     shared = sorted(set(pam) & set(react))
     if not shared:
         raise ValueError("Reports do not contain matching scenario and metric names")
@@ -74,16 +115,16 @@ def render(pam: dict[tuple[str, str], float], react: dict[tuple[str, str], float
         "",
         "Lower is better. Values are medians from release-like Android Macrobenchmarks.",
         "",
-        "| Scenario | Metric | Pam Native | React Native/Nitro | RN ÷ PAM |",
-        "| --- | --- | ---: | ---: | ---: |",
+        "| Scenario | Metric | Statistic | Pam Native | React Native | RN ÷ PAM |",
+        "| --- | --- | --- | ---: | ---: | ---: |",
     ]
-    for scenario, metric in shared:
-        pam_value = pam[(scenario, metric)]
-        react_value = react[(scenario, metric)]
+    for scenario, metric, summary in shared:
+        pam_value = pam[(scenario, metric, summary)]
+        react_value = react[(scenario, metric, summary)]
         ratio = react_value / pam_value if pam_value > 0.0 and react_value >= 0.0 else None
         ratio_text = f"{ratio:.2f}×" if ratio is not None else "—"
         lines.append(
-            f"| `{scenario}` | `{metric}` | {pam_value:.3f} | "
+            f"| `{scenario}` | `{metric}` | `{summary}` | {pam_value:.3f} | "
             f"{react_value:.3f} | {ratio_text} |",
         )
     lines.extend(
@@ -99,7 +140,11 @@ def render(pam: dict[tuple[str, str], float], react: dict[tuple[str, str], float
 
 def main() -> None:
     options = arguments()
-    output = render(metrics(reports(options.pam)), metrics(reports(options.react_native)))
+    pam = metrics(reports(options.pam))
+    react = metrics(reports(options.react_native))
+    contract = json.loads(options.contract.read_text(encoding="utf-8"))
+    validate_contract(pam, react, contract)
+    output = render(pam, react)
     options.output.parent.mkdir(parents=True, exist_ok=True)
     options.output.write_text(output, encoding="utf-8")
     print(options.output)
