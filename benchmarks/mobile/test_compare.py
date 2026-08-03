@@ -23,27 +23,57 @@ class CompareReportsTest(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(values[("virtualizedListScroll", "frameCount")], 16)
-        self.assertEqual(values[("virtualizedListScroll", "frameOverrunMs")], 0.835)
+        self.assertEqual(values[("virtualizedListScroll", "frameCount", "median")], 16)
+        self.assertEqual(values[("virtualizedListScroll", "frameOverrunMs", "P50")], 0.835)
+        self.assertEqual(values[("virtualizedListScroll", "frameOverrunMs", "P95")], 23.48)
 
     def test_renders_only_shared_scenario_metrics(self) -> None:
         pam = {
-            ("coldStartup", "timeToFullDisplayMs"): 400.0,
-            ("propertyPatches", "frameOverrunMs"): -3.0,
-            ("pamOnly", "frameCount"): 1.0,
+            ("coldStartup", "timeToFullDisplayMs", "median"): 400.0,
+            ("propertyPatches", "frameOverrunMs", "P95"): -3.0,
+            ("pamOnly", "frameCount", "median"): 1.0,
         }
         react = {
-            ("coldStartup", "timeToFullDisplayMs"): 800.0,
-            ("propertyPatches", "frameOverrunMs"): -1.0,
-            ("reactOnly", "frameCount"): 1.0,
+            ("coldStartup", "timeToFullDisplayMs", "median"): 800.0,
+            ("propertyPatches", "frameOverrunMs", "P95"): -1.0,
+            ("reactOnly", "frameCount", "median"): 1.0,
         }
 
         report = compare.render(pam, react)
 
         self.assertIn("2.00×", report)
-        self.assertIn("-3.000 | -1.000 | —", report)
+        self.assertIn("`P95` | -3.000 | -1.000 | —", report)
         self.assertNotIn("pamOnly", report)
         self.assertNotIn("reactOnly", report)
+
+    def test_rejects_reports_that_omit_contract_metrics(self) -> None:
+        contract = {
+            "scenarios": [
+                {
+                    "id": "coldStartup",
+                    "metric": "timeToFullDisplayMs",
+                },
+                {
+                    "id": "propertyPatches",
+                    "metrics": ["frameOverrunMs", "memoryRssKb"],
+                },
+            ],
+        }
+        pam = {
+            ("coldStartup", "timeToFullDisplayMs", "median"): 400.0,
+            ("propertyPatches", "frameOverrunMs", "P95"): 1.0,
+            ("propertyPatches", "memoryRssKb", "median"): 45_000.0,
+        }
+        react = {
+            ("coldStartup", "timeToFullDisplayMs", "median"): 500.0,
+            ("propertyPatches", "frameOverrunMs", "P95"): 2.0,
+        }
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "React Native report is missing contract metrics: propertyPatches.memoryRssKb",
+        ):
+            compare.validate_contract(pam, react, contract)
 
     def test_performance_gate_checks_tail_percentiles_and_missing_metrics(self) -> None:
         entries = [

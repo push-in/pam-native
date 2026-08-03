@@ -39,6 +39,11 @@ python3 compare.py \
   --output results/comparison.md
 ```
 
+The comparison validates both reports against `contract.json` and refuses to
+produce a table if either implementation omits a required scenario or metric.
+It publishes every shared median, P50, P95, P99 and maximum supplied by
+AndroidX, so tail-frame regressions cannot be hidden behind a good median.
+
 Block a release when startup, mount, memory or tail-frame latency regresses:
 
 ```bash
