@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.3 - 2026-08-03
+
+- Honor dark status-bar icons on Android 15 and newer instead of silently
+  forcing light icons after the platform's edge-to-edge transition.
+- Cover active retained-route status-bar appearance changes on both modern and
+  legacy Android window APIs.
+- Compile static and bound `disabled` template attributes to the inverse native
+  enabled state so controls stop interaction and report their state correctly
+  to accessibility services.
+
 ## 0.6.1 - 2026-08-01
 
 - Add production plugin manifests for typed IDL fingerprints, Swift Package

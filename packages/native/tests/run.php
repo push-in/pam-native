@@ -1291,6 +1291,16 @@ $assert(
     $secureAliasElement->properties()[PropKey::Secure->value] === true,
     'Input secureTextEntry must remain a compatible alias for secure.',
 );
+$disabledAliasElement = TemplateRenderer::render(
+    TemplateCompiler::compile('<Pressable disabled="true" />'),
+    new class {
+    },
+    [],
+);
+$assert(
+    $disabledAliasElement->properties()[PropKey::Enabled->value] === false,
+    'Template disabled must invert to the native enabled property.',
+);
 $memoryDiskImage = TemplateRenderer::render(
     TemplateCompiler::compile('<Image source="https://example.test/image.webp" cachePolicy="memory-disk" />'),
     new class {
@@ -4960,8 +4970,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.2',
-    'The runtime SDK contract must match the 0.6.2 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.3',
+    'The runtime SDK contract must match the 0.6.3 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

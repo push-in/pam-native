@@ -5040,8 +5040,7 @@ class PamRenderer(
         val decor = activity()?.window?.decorView ?: return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val controller = decor.windowInsetsController ?: return
-            val useDarkIcons =
-                value == STATUS_BAR_DARK && Build.VERSION.SDK_INT < 35
+            val useDarkIcons = value == STATUS_BAR_DARK
             controller.setSystemBarsAppearance(
                 if (useDarkIcons) {
                     WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
