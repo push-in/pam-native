@@ -19,6 +19,10 @@ their actual on-screen bounds.
 - `KeyboardAvoidingView` calculates overlap from window and view geometry. IME
   movement does not assume a fixed keyboard height or subtract a manufacturer
   navigation bar twice.
+- Padding-mode keyboard avoidance gives a contained vertical `ScrollView` the
+  overlap inset and automatically reveals its focused input with 16 dp of
+  clearance. `keyboardVerticalOffset` can reserve additional space for a form
+  CTA that must remain visible with the field.
 - While a panning container is translated, touch coordinates are remapped to
   its visible descendants. With the IME closed only text inputs use the
   geometry-aware fallback, preventing touches from leaking through a modal to

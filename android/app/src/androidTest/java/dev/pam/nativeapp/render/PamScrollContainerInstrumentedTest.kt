@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
@@ -171,6 +172,51 @@ class PamScrollContainerInstrumentedTest {
             instrumentation.waitForIdleSync()
             onMain(instrumentation) {
                 assertEquals(200, scroll.snapshotOffsetPixels().second)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun keyboardInsetScrollsFocusedFormTargetIntoVisibleViewport() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            lateinit var input: View
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                val column = FrameLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                }
+                input = View(activity)
+                column.addView(
+                    input,
+                    FrameLayout.LayoutParams(300, 80).apply { topMargin = 720 },
+                )
+                scroll.insert(column)
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+
+                scroll.setKeyboardAvoidanceInset(200)
+                relayout(activity.host)
+                scroll.ensureKeyboardTargetVisible(input)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val targetLocation = IntArray(2)
+                val scrollLocation = IntArray(2)
+                input.getLocationOnScreen(targetLocation)
+                scroll.getLocationOnScreen(scrollLocation)
+                val visibleBottom =
+                    scrollLocation[1] + scroll.height - scroll.keyboardAvoidanceInsetPixels()
+
+                assertTrue(scroll.snapshotOffsetPixels().second > 0)
+                assertTrue(targetLocation[1] + input.height <= visibleBottom)
             }
         } finally {
             activity.finish()

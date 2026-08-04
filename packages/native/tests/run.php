@@ -5075,8 +5075,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.9',
-    'The runtime SDK contract must match the 0.6.9 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.10',
+    'The runtime SDK contract must match the 0.6.10 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
