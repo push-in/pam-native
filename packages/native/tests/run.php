@@ -3259,11 +3259,13 @@ $deviceInfo = new DeviceInfo(
     safeAreaRight: 0.0,
     safeAreaBottom: 24.0,
     safeAreaLeft: 0.0,
+    timeZone: 'America/Sao_Paulo',
 );
 $assert(
     $deviceInfo->safeAreaTop === 32.0
-        && $deviceInfo->safeAreaBottom === 24.0,
-    'Device info must expose platform safe-area insets in logical points.',
+        && $deviceInfo->safeAreaBottom === 24.0
+        && $deviceInfo->timeZone === 'America/Sao_Paulo',
+    'Device info must expose platform safe-area insets and the IANA time-zone identifier.',
 );
 $legacyDeviceInfo = new DeviceInfo(
     width: 360.0,
@@ -3276,7 +3278,8 @@ $assert(
     $legacyDeviceInfo->safeAreaTop === 0.0
         && $legacyDeviceInfo->safeAreaRight === 0.0
         && $legacyDeviceInfo->safeAreaBottom === 0.0
-        && $legacyDeviceInfo->safeAreaLeft === 0.0,
+        && $legacyDeviceInfo->safeAreaLeft === 0.0
+        && $legacyDeviceInfo->timeZone === 'UTC',
     'Device info safe-area additions must preserve constructor compatibility.',
 );
 
@@ -4970,8 +4973,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.3',
-    'The runtime SDK contract must match the 0.6.3 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.4',
+    'The runtime SDK contract must match the 0.6.4 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

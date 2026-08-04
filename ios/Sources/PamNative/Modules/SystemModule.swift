@@ -129,6 +129,7 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                         "density": .decimal(Double(density)),
                         "appearance": .integer(Int64(appearance)),
                         "appState": .integer(Int64(appState)),
+                        "timeZone": .text(TimeZone.current.identifier),
                         "safeAreaTop": .decimal(Double(insets.top)),
                         "safeAreaRight": .decimal(Double(insets.right)),
                         "safeAreaBottom": .decimal(Double(insets.bottom)),

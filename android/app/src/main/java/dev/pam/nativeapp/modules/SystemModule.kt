@@ -31,6 +31,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.Collections
+import java.util.TimeZone
 
 internal class SystemModule(private val context: Context) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
@@ -245,6 +246,7 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                         "density" to WireValue.Decimal(density.toDouble()),
                         "appearance" to WireValue.Integer(appearance.toLong()),
                         "appState" to WireValue.Integer(appState.toLong()),
+                        "timeZone" to WireValue.Text(TimeZone.getDefault().id),
                         "safeAreaTop" to WireValue.Decimal(
                             safeTop / density.toDouble(),
                         ),
