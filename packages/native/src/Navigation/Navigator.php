@@ -1054,7 +1054,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private function finalizeOutgoingRoute(): void
     {
         $entry = $this->outgoing;
-        if ($entry === null) return;
+        if ($entry === null) {
+            $this->operation = NavigationOperation::Idle;
+
+            return;
+        }
         $key = $this->entryKey($entry);
         $instance = $this->routeInstances[$key] ?? null;
         if ($instance instanceof NavigationLifecycleAware) {
@@ -1069,6 +1073,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             );
         }
         $this->outgoing = null;
+        $this->operation = NavigationOperation::Idle;
     }
 
     private function observeChildNavigator(string $key, Renderable $instance): void

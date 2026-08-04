@@ -108,6 +108,9 @@ integer-backed enums and are rendered natively with transform
 and opacity. Android's disabled-animation accessibility setting is respected,
 horizontal transitions automatically mirror in RTL layouts, and only the
 incoming screen remains reachable by TalkBack during and after a transition.
+When the native transition completes, the outgoing route is released and the
+host returns to the `Idle` operation before subsequent renders. A completed
+pop is therefore never replayed against the remaining single-screen host.
 
 ## Adaptive tabs
 
