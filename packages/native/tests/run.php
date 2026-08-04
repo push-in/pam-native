@@ -1882,6 +1882,7 @@ $nativeControlTemplate = TemplateRenderer::render(
         scrollRequest="9"
         pagingEnabled="true"
         snapToInterval="80"
+        decelerationRate="fast"
         overScrollMode="never"
         keyboardDismissMode="on-drag"
     >
@@ -1933,6 +1934,8 @@ $assert(
         && $templateScroll->properties()[PropKey::ScrollRequest->value] === 9
         && $templateScroll->properties()[PropKey::ScrollPagingEnabled->value] === true
         && $templateScroll->properties()[PropKey::ScrollSnapInterval->value] === 80
+        && $templateScroll
+            ->properties()[PropKey::ScrollDecelerationRate->value] === 0.9
         && $templateIndicator->properties()[PropKey::ActivityAnimating->value] === false
         && $templateIndicator
             ->properties()[PropKey::ActivityHidesWhenStopped->value] === false
@@ -1950,6 +1953,27 @@ $assert(
         && $templateDrawing->properties()[PropKey::DrawingClearRequest->value] === 4
         && $templateDrawing->properties()[PropKey::DrawingUndoRequest->value] === 5,
     'Native control tags must map to typed scroll, indicator, switch and drawing protocols.',
+);
+$normalDecelerationScroll = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<ScrollView decelerationRate="normal"><Text>Normal</Text></ScrollView>',
+    ),
+    null,
+    [],
+);
+$boundedDecelerationScroll = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<ScrollView decelerationRate="1.5"><Text>Bounded</Text></ScrollView>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $normalDecelerationScroll
+        ->properties()[PropKey::ScrollDecelerationRate->value] === 0.985
+        && $boundedDecelerationScroll
+            ->properties()[PropKey::ScrollDecelerationRate->value] === 1.0,
+    'Declarative ScrollView deceleration rates must normalize named aliases and bound numeric values.',
 );
 
 $listElement = FlatList::make(['One', 'Two', 'Three'])
@@ -5051,8 +5075,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.8',
-    'The runtime SDK contract must match the 0.6.8 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.9',
+    'The runtime SDK contract must match the 0.6.9 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
