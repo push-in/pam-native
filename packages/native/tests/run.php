@@ -941,6 +941,56 @@ $templatePinch = TemplateRenderer::render(
     null,
     [],
 );
+$invalidForRejected = false;
+try {
+    TemplateCompiler::compile(
+        '<Column><Text p-for="$item, $index in $items">Invalid</Text></Column>',
+        'invalid-indexed-loop.pam.php',
+    );
+} catch (RuntimeException $error) {
+    $invalidForRejected = str_contains($error->getMessage(), 'p-for must use');
+}
+$assert(
+    $invalidForRejected,
+    'Template compilation must reject invalid p-for syntax before runtime.',
+);
+$invalidLegacyForRejected = false;
+try {
+    TemplateCompiler::compile(
+        '<Column><Text v-for="$item, $index in $items">Invalid</Text></Column>',
+        'invalid-legacy-for.pam.php',
+    );
+} catch (RuntimeException $error) {
+    $invalidLegacyForRejected = str_contains($error->getMessage(), 'v-for must use');
+}
+$assert(
+    $invalidLegacyForRejected,
+    'Template compilation must also reject invalid legacy v-for syntax.',
+);
+$invalidGestureChildrenRejected = false;
+try {
+    TemplateCompiler::compile(
+        '<GestureDetector><Text>One</Text><Text>Two</Text></GestureDetector>',
+        'invalid-gesture-children.pam.php',
+    );
+} catch (RuntimeException $error) {
+    $invalidGestureChildrenRejected = str_contains(
+        $error->getMessage(),
+        'must resolve to exactly one child',
+    );
+}
+$assert(
+    $invalidGestureChildrenRejected,
+    'Template compilation must reject ambiguous GestureDetector children before runtime.',
+);
+TemplateCompiler::compile(
+    '<GestureDetector><Image p-if="$video" /><Text p-else>Image</Text></GestureDetector>',
+    'conditional-gesture-child.pam.php',
+);
+TemplateCompiler::compile(
+    '<GestureDetector><Image v-if="$video" /><Text v-else>Image</Text></GestureDetector>',
+    'legacy-conditional-gesture-child.pam.php',
+);
 $assert(
     $templatePinch->properties()[PropKey::GestureMinPointers->value] === 2
         && $templatePinch->properties()[PropKey::GestureMaxPointers->value] === 2,
@@ -5075,8 +5125,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.11',
-    'The runtime SDK contract must match the 0.6.11 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.12',
+    'The runtime SDK contract must match the 0.6.12 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
