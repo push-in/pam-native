@@ -53,6 +53,39 @@ final class Files
         );
     }
 
+    /**
+     * Downloads an HTTPS resource into the PAM file sandbox.
+     *
+     * @param Closure(FileReference): void $callback
+     */
+    public static function download(
+        string $url,
+        string $destination,
+        Closure $callback,
+        int $maximumBytes = 67_108_864,
+    ): int {
+        $parts = parse_url($url);
+        if (
+            strlen($url) > 2_048
+            || !is_array($parts)
+            || strtolower((string) ($parts['scheme'] ?? '')) !== 'https'
+            || ($parts['host'] ?? '') === ''
+            || isset($parts['user'])
+            || isset($parts['pass'])
+        ) {
+            throw new InvalidArgumentException('Download URL must be an absolute HTTPS URL without credentials.');
+        }
+        if ($maximumBytes < 1 || $maximumBytes > 268_435_456) {
+            throw new InvalidArgumentException('Download limit must be between 1 byte and 256 MiB.');
+        }
+
+        return self::invoke(
+            'download',
+            ['url' => $url, 'path' => $destination, 'maximumBytes' => $maximumBytes],
+            static fn (array $values): mixed => $callback(self::reference($values)),
+        );
+    }
+
     /** @param Closure(FileReference): void $callback */
     public static function stat(string $path, Closure $callback): int
     {
