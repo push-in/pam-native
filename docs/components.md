@@ -416,6 +416,33 @@ subsequent offsets start exactly at the requested contact. This makes the
 default `Contacts::all()` call and explicit paginated reads use the same
 zero-based contract on Android and iOS.
 
+## SMS drafts
+
+Use `Sms::isAvailable()` before presenting an invite action when the product
+requires an SMS app. `Sms::compose()` opens the platform composer with the
+recipients and body already filled; it never sends a message automatically.
+
+```php
+use Pam\Native\System\Sms;
+
+Sms::isAvailable(function (bool $available): void {
+    if (!$available) {
+        return;
+    }
+
+    Sms::compose(
+        ['+5511999990000'],
+        'Vem conversar comigo no Zé Chat!',
+    );
+});
+```
+
+Android uses an `ACTION_SENDTO` intent constrained to the `smsto:` scheme, so
+the chooser cannot offer unrelated share targets. iOS presents
+`MFMessageComposeViewController`. Applications should provide an unavailable
+state because emulators, tablets and devices without a configured messaging
+service can legitimately return `false`.
+
 ## Declarative scroll views
 
 `ScrollView` accepts one or many direct children in `.pam.php` templates. PAM

@@ -14,6 +14,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let permissions = PermissionsModule()
     private let sensors = SensorsModule()
     private let contacts = ContactsModule()
+    private let sms = SmsModule()
     private let location = LocationModule()
     private let audioRecorder = AudioRecorderModule()
     private let imageEditor = ImageEditorModule()
@@ -34,6 +35,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "permissions": permissions,
             "sensors": sensors,
             "contacts": contacts,
+            "sms": sms,
             "location": location,
             "audio-recorder": audioRecorder,
             "image-editor": imageEditor,

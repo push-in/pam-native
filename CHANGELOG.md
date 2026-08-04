@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.8 - 2026-08-04
+
+- Add `Sms::isAvailable()` and `Sms::compose()` for querying platform support
+  and opening a pre-addressed native SMS draft without sending automatically.
+- Restrict Android drafts to `ACTION_SENDTO` with the `smsto:` scheme so only
+  messaging applications can handle the request, and use MessageUI's native
+  composer on iOS.
+- Validate recipient count, recipient length and draft size in the PHP SDK and
+  both native hosts, with PHP and Android regression coverage.
+
 ## 0.6.7 - 2026-08-04
 
 - Preserve an Android dialog modal's intrinsic card width and height and center
