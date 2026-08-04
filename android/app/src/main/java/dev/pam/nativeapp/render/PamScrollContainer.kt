@@ -255,6 +255,32 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     fun keyboardAvoidanceInsetPixels(): Int = keyboardAvoidanceInsetPx
 
+    fun ensureKeyboardTargetVisible(target: View) {
+        if (keyboardAvoidanceInsetPx <= 0 || horizontal) return
+        activeScroll.post {
+            if (
+                !isAttachedToWindow ||
+                !target.isAttachedToWindow ||
+                !isDescendantOfContent(target)
+            ) {
+                return@post
+            }
+            val rect = Rect(0, 0, target.width, target.height)
+            content.offsetDescendantRectToMyCoords(target, rect)
+            val current = primaryCurrentOffset()
+            val clearance = dp(KEYBOARD_TARGET_CLEARANCE_DP)
+            val visibleEnd = current +
+                (activeScroll.height - keyboardAvoidanceInsetPx).coerceAtLeast(0)
+            val next = when {
+                rect.bottom + clearance > visibleEnd ->
+                    current + rect.bottom + clearance - visibleEnd
+                rect.top - clearance < current -> rect.top - clearance
+                else -> current
+            }
+            if (next != current) scrollToPrimary(next.coerceAtLeast(0))
+        }
+    }
+
     fun setOnViewportChanged(listener: ((Float, Float) -> Unit)?) {
         viewportChanged = listener
     }
@@ -409,6 +435,15 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         (context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(focused.windowToken, 0)
         focused.clearFocus()
+    }
+
+    private fun isDescendantOfContent(target: View): Boolean {
+        var current: View? = target
+        while (current != null) {
+            if (current === content) return true
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun configurable(): ConfigurableScroll =
@@ -702,6 +737,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         const val KEYBOARD_DISMISS_NONE = 1
         const val KEYBOARD_DISMISS_INTERACTIVE = 3
         const val NORMAL_DECELERATION_RATE = 0.985f
+        const val KEYBOARD_TARGET_CLEARANCE_DP = 16f
 
         fun adjustedVelocity(velocity: Int, rate: Float): Int =
             (velocity * (rate / NORMAL_DECELERATION_RATE)).roundToInt()

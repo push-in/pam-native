@@ -4808,9 +4808,12 @@ class PamRenderer(
             }
             state.keyboardAvoidingScrollId = scrollId
         }
-        scroll?.second?.setKeyboardAvoidanceInset(
-            keyboard,
-        )
+        scroll?.second?.let { container ->
+            container.setKeyboardAvoidanceInset(keyboard)
+            if (keyboard > 0) {
+                state.keyboardFocusedInput?.let(container::ensureKeyboardTargetVisible)
+            }
+        }
         if (keyboard > 0) {
             view.post { restoreKeyboardAvoidingInput(state) }
         }

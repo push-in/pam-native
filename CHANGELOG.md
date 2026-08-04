@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.10 - 2026-08-04
+
+- Reveal the focused input automatically when padding-mode Android keyboard
+  avoidance owns a contained vertical scroll view.
+- Preserve a 16 dp focus clearance and honor `keyboardVerticalOffset` as extra
+  space for adjacent form actions, with API 26–36 instrumentation coverage.
+
 ## 0.6.9 - 2026-08-04
 
 - Normalize declarative `ScrollView` deceleration aliases so `normal` and
