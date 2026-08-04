@@ -18,14 +18,19 @@ final class Sms
     }
 
     /** @param Closure(bool): void $callback */
-    public static function isAvailable(Closure $callback): int
+    public static function isAvailable(Closure $callback, ?Closure $failed = null): int
     {
         return NativeModules::call(
             'sms',
             'isAvailable',
             [],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failed): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failed !== null) {
+                        $failed($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = Wire::decodeMap($result->payload);
@@ -43,6 +48,7 @@ final class Sms
         array $recipients,
         string $body = '',
         ?Closure $opened = null,
+        ?Closure $failed = null,
     ): int {
         $normalized = [];
         foreach ($recipients as $recipient) {
@@ -70,8 +76,13 @@ final class Sms
             'sms',
             'compose',
             ['recipients' => implode("\n", $normalized), 'body' => $body],
-            static function ($result) use ($opened): void {
+            static function ($result) use ($opened, $failed): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failed !== null) {
+                        $failed($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $opened?->__invoke();

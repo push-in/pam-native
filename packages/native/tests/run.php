@@ -3047,6 +3047,23 @@ Runtime::dispatchModuleResult(
     '',
 );
 $assert($smsOpened, 'SMS facade must report a presented composer.');
+$smsFailure = '';
+$smsFailureRequest = Sms::compose(
+    ['+5511999990000'],
+    'Convite',
+    failed: static function (string $message) use (&$smsFailure): void {
+        $smsFailure = $message;
+    },
+);
+Runtime::dispatchModuleResult(
+    $smsFailureRequest,
+    ModuleResultStatus::Failure->value,
+    'SMS unavailable',
+);
+$assert(
+    $smsFailure === 'SMS unavailable',
+    'SMS facade must expose recoverable native failures to applications.',
+);
 
 $incomingShare = null;
 $incomingShareRequestId = IncomingShares::initial(
