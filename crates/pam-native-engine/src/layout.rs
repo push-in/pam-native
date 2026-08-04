@@ -1800,7 +1800,12 @@ fn measured_text_width(
         }
     }
     if glyph_advances.is_some() {
-        return width;
+        // TTF advances describe the ideal unhinted run. Android's TextView can
+        // round a hinted run a fraction wider when it builds its StaticLayout.
+        // Without the same sub-pixel guard used by the fallback estimator, an
+        // intrinsically-sized label can wrap its last word while the engine
+        // still reserves one line of height, clipping that word completely.
+        return if width > 0.0 { width + 0.5 } else { 0.0 };
     }
     // Bounding-box based em classes need a small conversion to platform glyph
     // advances. The old broad classes plus a 6% safety margin substantially
@@ -3499,7 +3504,36 @@ mod tests {
 
         assert_eq!(
             measured_text_width("Seguidores", font_size, 0.0, Some(&advances)),
-            expected,
+            expected + 0.5,
+        );
+    }
+
+    #[test]
+    fn loaded_font_intrinsic_width_keeps_platform_subpixel_guard() {
+        let advances = BTreeMap::from([
+            (' ', 0.25),
+            ('?', 0.54),
+            ('Q', 0.61),
+            ('a', 0.54),
+            ('c', 0.49),
+            ('e', 0.54),
+            ('m', 0.78),
+            ('o', 0.56),
+            ('p', 0.56),
+            ('r', 0.32),
+            ('u', 0.56),
+        ]);
+        let label = "Quer comprar ?";
+        let raw = label
+            .chars()
+            .map(|character| advances[&character] * 16.0)
+            .sum::<f32>();
+        let intrinsic = measured_text_width(label, 16.0, 0.0, Some(&advances));
+
+        assert!((intrinsic - raw - 0.5).abs() < 0.01);
+        assert_eq!(
+            wrapped_text_lines_with_metrics(label, 16.0, 0.0, intrinsic, Some(&advances)),
+            vec![label],
         );
     }
 

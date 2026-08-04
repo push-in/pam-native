@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.5 - 2026-08-03
+
+- Preserve a subpixel safety guard for intrinsic text measured from packaged
+  TTF/OTF advances. This prevents Android `TextView` from wrapping a final word
+  into a clipped second line when platform hinting rounds the run fractionally
+  wider than the font's ideal advance sum.
+- Cover packaged-font intrinsic measurement with a regression fixture based on
+  a compact chat bubble whose full final word must remain on one line.
+
 ## 0.6.4 - 2026-08-03
 
 - Expose the device's IANA time-zone identifier through `DeviceInfo::timeZone`

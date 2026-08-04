@@ -83,6 +83,9 @@ changes. Fixed-size text boxes additionally bypass intrinsic measurement for
 text/font changes because their resolved geometry cannot change. Tests compare
 incremental output byte-for-byte with a complete layout and require a deep
 two-branch fixture to visit less than one quarter of its retained nodes.
+Packaged-font advances include a bounded half-point platform guard so Android
+hinting cannot create a native wrap that the retained Rust height did not
+reserve; this remains deterministic and requires no measurement bridge call.
 
 ## Compiled metadata
 
