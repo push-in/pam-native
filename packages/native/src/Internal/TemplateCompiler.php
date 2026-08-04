@@ -152,7 +152,107 @@ final class TemplateCompiler
             );
         }
 
+        self::validateContracts($root);
+
         return $root;
+    }
+
+    private static function validateContracts(CompiledTemplateNode $node): void
+    {
+        $forAttribute = self::directiveAttribute($node, 'p-for', 'v-for');
+        if ($forAttribute !== null) {
+            $directive = $node->attributes[$forAttribute];
+            if (
+                !is_string($directive)
+                || preg_match(
+                    '/^\s*\$?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+)\s*$/D',
+                    $directive,
+                ) !== 1
+            ) {
+                throw new RuntimeException(
+                    "{$forAttribute} must use \"\$item in \$items\" syntax at {$node->source}:{$node->line}:{$node->column}.",
+                );
+            }
+        }
+
+        if ($node->name === 'GestureDetector') {
+            [$minimum, $maximum] = self::renderedChildBounds($node->children);
+            if ($minimum !== 1 || $maximum !== 1) {
+                throw new RuntimeException(
+                    "GestureDetector must resolve to exactly one child at {$node->source}:{$node->line}:{$node->column}.",
+                );
+            }
+        }
+
+        foreach ($node->children as $child) {
+            self::validateContracts($child);
+        }
+    }
+
+    /**
+     * @param list<CompiledTemplateNode> $children
+     * @return array{int, int}
+     */
+    private static function renderedChildBounds(array $children): array
+    {
+        $minimum = 0;
+        $maximum = 0;
+        $count = count($children);
+
+        for ($index = 0; $index < $count; $index++) {
+            $child = $children[$index];
+            if (self::hasDirective($child, 'p-for', 'v-for')) {
+                return [0, PHP_INT_MAX];
+            }
+            if (self::hasDirective($child, 'p-if', 'v-if')) {
+                $hasElse = false;
+                while ($index + 1 < $count) {
+                    $next = $children[$index + 1];
+                    if (self::hasDirective($next, 'p-else-if', 'v-else-if')) {
+                        $index++;
+                        continue;
+                    }
+                    if (self::hasDirective($next, 'p-else', 'v-else')) {
+                        $index++;
+                        $hasElse = true;
+                    }
+                    break;
+                }
+                $minimum += $hasElse ? 1 : 0;
+                $maximum++;
+                continue;
+            }
+            if (
+                self::hasDirective($child, 'p-else-if', 'v-else-if')
+                || self::hasDirective($child, 'p-else', 'v-else')
+            ) {
+                return [0, PHP_INT_MAX];
+            }
+            $minimum++;
+            $maximum++;
+        }
+
+        return [$minimum, $maximum];
+    }
+
+    private static function hasDirective(
+        CompiledTemplateNode $node,
+        string $canonical,
+        string $legacy,
+    ): bool {
+        return self::directiveAttribute($node, $canonical, $legacy) !== null;
+    }
+
+    private static function directiveAttribute(
+        CompiledTemplateNode $node,
+        string $canonical,
+        string $legacy,
+    ): ?string {
+        if (array_key_exists($canonical, $node->attributes)) {
+            return $canonical;
+        }
+
+        return array_key_exists($legacy, $node->attributes) ? $legacy : null;
     }
 
     /**

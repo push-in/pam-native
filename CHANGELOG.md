@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.12 - 2026-08-04
+
+- Reject malformed `p-for` directives during template compilation instead of
+  deferring the deterministic failure until the component renders on-device.
+- Validate that declarative `GestureDetector` trees resolve to exactly one
+  child across conditional branches, while accepting complete mutually
+  exclusive `p-if`/`p-else-if`/`p-else` chains.
+
 ## 0.6.11 - 2026-08-04
 
 - Measure dialog-modal cards at their authored percentage or fixed width and
