@@ -1,6 +1,7 @@
 package dev.pam.nativeapp
 
 import dev.pam.nativeapp.modules.normalizedBundledAssetPath
+import dev.pam.nativeapp.modules.relativeSandboxPath
 import java.nio.file.Files
 import kotlin.io.path.createDirectory
 import kotlin.io.path.createFile
@@ -12,6 +13,25 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AssetInstallerTest {
+    @Test
+    fun derivesPathsAgainstCanonicalSandboxRoot() {
+        val parent = Files.createTempDirectory("pam-file-root-test")
+        try {
+            val canonicalRoot = parent.resolve("canonical").createDirectory()
+            val alias = parent.resolve("alias")
+            Files.createSymbolicLink(alias, canonicalRoot)
+            val child = canonicalRoot.resolve("story-responses").createDirectory()
+                .resolve("response.webp").createFile()
+
+            assertEquals(
+                "story-responses/response.webp",
+                relativeSandboxPath(alias.toFile(), child.toFile()),
+            )
+        } finally {
+            parent.toFile().deleteRecursively()
+        }
+    }
+
     @Test
     fun validatesBundledAssetPaths() {
         assertEquals("assets/stories/background.webp", normalizedBundledAssetPath(" assets/stories/background.webp "))
