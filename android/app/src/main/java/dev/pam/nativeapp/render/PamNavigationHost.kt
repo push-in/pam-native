@@ -134,6 +134,18 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     override fun onViewRemoved(child: View) {
         super.onViewRemoved(child)
+        if (child === activeRoute) {
+            activeRoute = null
+            if (childCount > 0) {
+                getChildAt(childCount - 1).also { replacement ->
+                    replacement.visibility = View.VISIBLE
+                    replacement.importantForAccessibility =
+                        View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+                    setActiveRoute(replacement)
+                    applyRoutePresentation(replacement)
+                }
+            }
+        }
         if (suppressControllerRemoval) return
         val fragment = routeControllers.remove(child) ?: return
         fragmentManager()?.takeUnless(FragmentManager::isStateSaved)?.let { manager ->

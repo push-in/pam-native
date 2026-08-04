@@ -4276,6 +4276,18 @@ $assert($navigator->pop(), 'Navigator must pop a secondary route.');
 $popped = $navigator->render()->toElement();
 $assert(count($popped->children()) === 2, 'Pop must retain its outgoing screen until native animation completes.');
 $assert($navigator->currentRoute() === 'home', 'Pop must reveal the previous route.');
+$transitionEnd = $popped->events()[EventKind::AnimationComplete->value] ?? null;
+$assert($transitionEnd instanceof Closure, 'Navigator must expose native transition completion.');
+$transitionEnd('');
+$settledPop = $navigator->render()->toElement();
+$assert(
+    count($settledPop->children()) === 1,
+    'Settled pop must release its outgoing route.',
+);
+$assert(
+    $settledPop->properties()[PropKey::NavigationOperation->value] === NavigationOperation::Idle->value,
+    'Settled pop must restore the native host operation to idle.',
+);
 $systemBackConsumed = false;
 $navigator->interceptSystemBack(static function () use (&$systemBackConsumed): bool {
     $systemBackConsumed = true;
@@ -4973,8 +4985,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.5',
-    'The runtime SDK contract must match the 0.6.5 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.6',
+    'The runtime SDK contract must match the 0.6.6 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

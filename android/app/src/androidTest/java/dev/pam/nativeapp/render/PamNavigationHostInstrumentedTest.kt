@@ -19,6 +19,42 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
     @Test
+    fun replacingTheActiveRoutePromotesTheRemainingReplacement() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var active: View
+            lateinit var replacement: View
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity)
+                activity.host.addView(navigation)
+                active = View(activity)
+                replacement = View(activity)
+                navigation.insert(active, 0)
+                navigation.insert(replacement, 1)
+
+                assertEquals(View.VISIBLE, active.visibility)
+                assertEquals(View.INVISIBLE, replacement.visibility)
+
+                navigation.removeRoute(active)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertSame(replacement, navigation.getChildAt(0))
+                assertTrue(navigation.isActiveRoute(replacement))
+                assertEquals(View.VISIBLE, replacement.visibility)
+                assertEquals(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
+                    replacement.importantForAccessibility,
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun nativeTabHostRetainsAllScenesWhenSelectionChanges() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

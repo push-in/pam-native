@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.6 - 2026-08-03
+
+- Promote the remaining replacement route when a renderer update removes the
+  currently active Android route after a completed pop. This prevents a valid
+  navigation stack from becoming an entirely blank native surface.
+- Return the PHP navigator operation to `Idle` after native transition
+  completion instead of leaving a settled pop encoded in later renders.
+- Cover active-route replacement and settled-pop finalization with Android and
+  PHP regression tests.
+
 ## 0.6.5 - 2026-08-03
 
 - Preserve a subpixel safety guard for intrinsic text measured from packaged
