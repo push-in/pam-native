@@ -6,9 +6,11 @@ namespace Pam\Native\System;
 
 use Closure;
 use InvalidArgumentException;
+use JsonException;
 use Pam\Native\FileReference;
 use Pam\Native\ImageCropRatio;
 use Pam\Native\ImageFilterType;
+use Pam\Native\ImageTextLayerStyle;
 use Pam\Native\Modules\NativeModules;
 
 final class ImageEditor
@@ -34,6 +36,7 @@ final class ImageEditor
         int $maxHeight = 0,
         int $outputQuality = 94,
         string $drawing = '',
+        array $textLayers = [],
     ): int {
         return NativeModules::call(
             'image-editor',
@@ -47,6 +50,7 @@ final class ImageEditor
                 'flipHorizontal' => $flipHorizontal ? 1 : 0,
                 'maxHeight' => max(0, $maxHeight),
                 'maxWidth' => max(0, $maxWidth),
+                'textLayers' => self::textLayers($textLayers),
                 'overlayText' => mb_substr(trim($overlayText), 0, 120),
                 'outputQuality' => max(1, min(100, $outputQuality)),
                 'path' => $source->path,
@@ -98,5 +102,43 @@ final class ImageEditor
         }
 
         return $value;
+    }
+
+    /** @param list<array<string, mixed>> $layers */
+    private static function textLayers(array $layers): string
+    {
+        if (count($layers) > 80) {
+            throw new InvalidArgumentException('Image editor accepts at most 80 text layers.');
+        }
+        $normalized = [];
+        foreach ($layers as $layer) {
+            if (!is_array($layer)) {
+                throw new InvalidArgumentException('Image editor text layers must be maps.');
+            }
+            $text = mb_substr(trim((string) ($layer['text'] ?? '')), 0, 500);
+            if ($text === '') {
+                continue;
+            }
+            $color = strtoupper(trim((string) ($layer['color'] ?? '#FFFFFF')));
+            if (preg_match('/^#[0-9A-F]{6}([0-9A-F]{2})?$/', $color) !== 1) {
+                $color = '#FFFFFF';
+            }
+            $normalized[] = [
+                'color' => $color,
+                'rotation' => max(-M_PI * 2, min(M_PI * 2, (float) ($layer['rotation'] ?? 0.0))),
+                'scale' => max(0.25, min(4.0, (float) ($layer['scale'] ?? 1.0))),
+                'styleType' => ImageTextLayerStyle::tryFrom(
+                    (int) ($layer['style_type'] ?? $layer['styleType'] ?? 1),
+                )?->value ?? ImageTextLayerStyle::Plain->value,
+                'text' => $text,
+                'x' => max(0.0, min(1.0, (float) ($layer['x'] ?? 0.5))),
+                'y' => max(0.0, min(1.0, (float) ($layer['y'] ?? 0.5))),
+            ];
+        }
+        try {
+            return json_encode($normalized, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+        } catch (JsonException $error) {
+            throw new InvalidArgumentException('Image editor text layers are invalid.', previous: $error);
+        }
     }
 }

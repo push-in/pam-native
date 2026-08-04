@@ -8,8 +8,12 @@ import android.graphics.ColorMatrix
 import android.graphics.ColorMatrixColorFilter
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.text.Layout
+import android.text.StaticLayout
+import android.text.TextPaint
 import dev.pam.nativeapp.render.PamDrawingCodec
 import dev.pam.nativeapp.render.PamDrawingStroke
 import dev.pam.nativeapp.protocol.WireMap
@@ -17,6 +21,7 @@ import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.Executors
+import org.json.JSONArray
 import kotlin.math.floor
 import kotlin.math.min
 
@@ -68,8 +73,10 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
         if (filtered !== cropped) cropped.recycle()
         val adjusted = adjust(filtered, values.integer("brightness"), values.integer("contrast"), values.integer("saturation"))
         if (adjusted !== filtered) filtered.recycle()
-        val withText = compose(adjusted, values.text("overlayText").trim().take(120), false)
-        if (withText !== adjusted) adjusted.recycle()
+        val layered = composeTextLayers(adjusted, values.text("textLayers"))
+        if (layered !== adjusted) adjusted.recycle()
+        val withText = compose(layered, values.text("overlayText").trim().take(120), false)
+        if (withText !== layered) layered.recycle()
         val composed = compose(withText, values.text("sticker").trim().take(8), true)
         if (composed !== withText) withText.recycle()
         val resized = resize(composed, maxWidth, maxHeight)
@@ -189,6 +196,61 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
         }
         val baseline = source.height * (if (sticker) 0.48f else 0.72f) - (paint.ascent() + paint.descent()) / 2f
         Canvas(output).drawText(value, source.width / 2f, baseline, paint)
+        return output
+    }
+
+    private fun composeTextLayers(source: Bitmap, encoded: String): Bitmap {
+        val layers = runCatching { JSONArray(encoded) }.getOrNull() ?: return source
+        if (layers.length() == 0) return source
+        val output = source.copy(Bitmap.Config.ARGB_8888, true)
+        val canvas = Canvas(output)
+        repeat(layers.length().coerceAtMost(80)) { index ->
+            val layer = layers.optJSONObject(index) ?: return@repeat
+            val text = layer.optString("text").trim().take(500)
+            if (text.isEmpty()) return@repeat
+            val scale = layer.optDouble("scale", 1.0).toFloat().coerceIn(0.25f, 4f)
+            val textSize = (source.width * 0.055f * scale).coerceIn(18f, source.width * 0.22f)
+            val paint = TextPaint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+                color = runCatching { android.graphics.Color.parseColor(layer.optString("color", "#FFFFFF")) }
+                    .getOrDefault(android.graphics.Color.WHITE)
+                this.textSize = textSize
+                textAlign = Paint.Align.LEFT
+                typeface = android.graphics.Typeface.DEFAULT_BOLD
+                if (layer.optInt("styleType", 1) == 1) {
+                    setShadowLayer(textSize * 0.09f, 0f, textSize * 0.06f, 0xCC000000.toInt())
+                }
+            }
+            val width = (source.width * 0.78f).toInt().coerceAtLeast(1)
+            val layout = StaticLayout.Builder.obtain(text, 0, text.length, paint, width)
+                .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                .setIncludePad(false)
+                .setMaxLines(8)
+                .build()
+            val padding = textSize * 0.36f
+            val boxWidth = layout.width + padding * 2
+            val boxHeight = layout.height + padding * 2
+            val centerX = layer.optDouble("x", 0.5).toFloat().coerceIn(0f, 1f) * source.width
+            val centerY = layer.optDouble("y", 0.5).toFloat().coerceIn(0f, 1f) * source.height
+            canvas.save()
+            canvas.translate(centerX, centerY)
+            canvas.rotate(Math.toDegrees(layer.optDouble("rotation", 0.0)).toFloat())
+            val style = layer.optInt("styleType", 1).coerceIn(1, 3)
+            if (style != 1) {
+                val box = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = if (style == 2) 0xEFFFFFFF.toInt() else 0xB3101318.toInt()
+                    this.style = Paint.Style.FILL
+                }
+                canvas.drawRoundRect(
+                    RectF(-boxWidth / 2, -boxHeight / 2, boxWidth / 2, boxHeight / 2),
+                    textSize * 0.28f,
+                    textSize * 0.28f,
+                    box,
+                )
+            }
+            canvas.translate(-layout.width / 2f, -layout.height / 2f)
+            layout.draw(canvas)
+            canvas.restore()
+        }
         return output
     }
 

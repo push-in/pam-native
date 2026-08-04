@@ -55,6 +55,7 @@ final class ImageEditorModule: NativeModule {
             contrast: Int(values["contrast"]?.imageEditorInteger ?? 0),
             saturation: Int(values["saturation"]?.imageEditorInteger ?? 0)
         )
+        image = composeTextLayers(image, encoded: values["textLayers"]?.imageEditorText ?? "")
         image = compose(image, text: String((values["overlayText"]?.imageEditorText ?? "").prefix(120)), sticker: false)
         image = compose(image, text: String((values["sticker"]?.imageEditorText ?? "").prefix(8)), sticker: true)
         image = resize(
@@ -168,6 +169,92 @@ final class ImageEditorModule: NativeModule {
             let y = image.size.height * (sticker ? 0.48 : 0.72) - size / 2
             value.draw(in: CGRect(x: image.size.width * 0.07, y: y, width: image.size.width * 0.86, height: size * 2), withAttributes: attributes)
         }
+    }
+
+    private func composeTextLayers(_ image: UIImage, encoded: String) -> UIImage {
+        guard
+            let data = encoded.data(using: .utf8),
+            let raw = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+            !raw.isEmpty
+        else { return image }
+        return UIGraphicsImageRenderer(size: image.size).image { renderer in
+            image.draw(at: .zero)
+            let context = renderer.cgContext
+            raw.prefix(80).forEach { layer in
+                let text = String((layer["text"] as? String ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines).prefix(500))
+                guard !text.isEmpty else { return }
+                let scale = CGFloat(max(0.25, min(4, layer["scale"] as? Double ?? 1)))
+                let fontSize = max(18, min(image.size.width * 0.22, image.size.width * 0.055 * scale))
+                let styleType = max(1, min(3, layer["styleType"] as? Int ?? 1))
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.alignment = .center
+                let shadow = NSShadow()
+                shadow.shadowColor = UIColor.black.withAlphaComponent(styleType == 1 ? 0.78 : 0)
+                shadow.shadowOffset = CGSize(width: 0, height: fontSize * 0.06)
+                shadow.shadowBlurRadius = fontSize * 0.09
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: fontSize),
+                    .foregroundColor: textLayerColor(layer["color"] as? String),
+                    .paragraphStyle: paragraph,
+                    .shadow: shadow,
+                ]
+                let maximum = CGSize(width: image.size.width * 0.78, height: image.size.height * 0.5)
+                let measured = (text as NSString).boundingRect(
+                    with: maximum,
+                    options: [.usesLineFragmentOrigin, .usesFontLeading],
+                    attributes: attributes,
+                    context: nil
+                ).integral.size
+                let padding = fontSize * 0.36
+                let center = CGPoint(
+                    x: CGFloat(max(0, min(1, layer["x"] as? Double ?? 0.5))) * image.size.width,
+                    y: CGFloat(max(0, min(1, layer["y"] as? Double ?? 0.5))) * image.size.height
+                )
+                context.saveGState()
+                context.translateBy(x: center.x, y: center.y)
+                context.rotate(by: CGFloat(layer["rotation"] as? Double ?? 0))
+                let box = CGRect(
+                    x: -(measured.width + padding * 2) / 2,
+                    y: -(measured.height + padding * 2) / 2,
+                    width: measured.width + padding * 2,
+                    height: measured.height + padding * 2
+                )
+                if styleType != 1 {
+                    let color = styleType == 2
+                        ? UIColor.white.withAlphaComponent(0.94)
+                        : UIColor(red: CGFloat(16) / 255, green: CGFloat(19) / 255, blue: CGFloat(24) / 255, alpha: 0.70)
+                    color.setFill()
+                    UIBezierPath(roundedRect: box, cornerRadius: fontSize * 0.28).fill()
+                }
+                (text as NSString).draw(
+                    in: CGRect(x: -measured.width / 2, y: -measured.height / 2, width: measured.width, height: measured.height),
+                    withAttributes: attributes
+                )
+                context.restoreGState()
+            }
+        }
+    }
+
+    private func textLayerColor(_ value: String?) -> UIColor {
+        let text = (value ?? "#FFFFFF").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("#") else { return .white }
+        let hex = String(text.dropFirst())
+        guard (hex.count == 6 || hex.count == 8), let raw = UInt64(hex, radix: 16) else { return .white }
+        if hex.count == 8 {
+            return UIColor(
+                red: CGFloat((raw >> 24) & 0xFF) / 255,
+                green: CGFloat((raw >> 16) & 0xFF) / 255,
+                blue: CGFloat((raw >> 8) & 0xFF) / 255,
+                alpha: CGFloat(raw & 0xFF) / 255
+            )
+        }
+        return UIColor(
+            red: CGFloat((raw >> 16) & 0xFF) / 255,
+            green: CGFloat((raw >> 8) & 0xFF) / 255,
+            blue: CGFloat(raw & 0xFF) / 255,
+            alpha: 1
+        )
     }
 
     private func composeDrawing(_ image: UIImage, drawing: String) -> UIImage {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.14 - 2026-08-04
+
+- Add bounded, normalized positioned text-layer compositing to
+  `ImageEditor::render()`, including scale, radian rotation, color and integer
+  presentation style for editable social-media compositions.
+
 ## 0.6.13 - 2026-08-04
 
 - Decode explicitly passed `$event` expression arguments into `GestureEvent`
