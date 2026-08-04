@@ -148,6 +148,7 @@ use Pam\Native\System\Clipboard;
 use Pam\Native\System\Contacts;
 use Pam\Native\System\DeviceInfo;
 use Pam\Native\System\Sensors;
+use Pam\Native\System\Sms;
 use Pam\Native\System\Location;
 use Pam\Native\System\Files;
 use Pam\Native\System\MediaLibrary;
@@ -2999,6 +3000,71 @@ $assert(
     'MediaLibrary albums must decode typed album metadata.',
 );
 
+$smsAvailable = null;
+$smsAvailabilityRequest = Sms::isAvailable(
+    static function (bool $available) use (&$smsAvailable): void {
+        $smsAvailable = $available;
+    },
+);
+$smsAvailabilityCall = TestDiagnostics::$moduleCall;
+$assert(
+    $smsAvailabilityCall !== null
+        && $smsAvailabilityCall['requestId'] === $smsAvailabilityRequest
+        && $smsAvailabilityCall['module'] === 'sms'
+        && $smsAvailabilityCall['method'] === 'isAvailable',
+    'SMS facade must query platform availability.',
+);
+Runtime::dispatchModuleResult(
+    $smsAvailabilityRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map(['available' => true]),
+);
+$assert($smsAvailable === true, 'SMS facade must decode platform availability.');
+
+$smsOpened = false;
+$smsComposeRequest = Sms::compose(
+    [' +55 11 99999-0000 ', '+55 11 99999-0000'],
+    'Convite do Zé Chat',
+    static function () use (&$smsOpened): void {
+        $smsOpened = true;
+    },
+);
+$smsComposeCall = TestDiagnostics::$moduleCall;
+$assert(
+    $smsComposeCall !== null
+        && $smsComposeCall['requestId'] === $smsComposeRequest
+        && $smsComposeCall['module'] === 'sms'
+        && $smsComposeCall['method'] === 'compose'
+        && Wire::decodeMap($smsComposeCall['payload']) === [
+            'recipients' => '+55 11 99999-0000',
+            'body' => 'Convite do Zé Chat',
+        ],
+    'SMS facade must normalize recipients and encode the draft.',
+);
+Runtime::dispatchModuleResult(
+    $smsComposeRequest,
+    ModuleResultStatus::Success->value,
+    '',
+);
+$assert($smsOpened, 'SMS facade must report a presented composer.');
+$smsFailure = '';
+$smsFailureRequest = Sms::compose(
+    ['+5511999990000'],
+    'Convite',
+    failed: static function (string $message) use (&$smsFailure): void {
+        $smsFailure = $message;
+    },
+);
+Runtime::dispatchModuleResult(
+    $smsFailureRequest,
+    ModuleResultStatus::Failure->value,
+    'SMS unavailable',
+);
+$assert(
+    $smsFailure === 'SMS unavailable',
+    'SMS facade must expose recoverable native failures to applications.',
+);
+
 $incomingShare = null;
 $incomingShareRequestId = IncomingShares::initial(
     static function (?IncomingShare $share) use (&$incomingShare): void {
@@ -4985,8 +5051,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.7',
-    'The runtime SDK contract must match the 0.6.7 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.8',
+    'The runtime SDK contract must match the 0.6.8 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
