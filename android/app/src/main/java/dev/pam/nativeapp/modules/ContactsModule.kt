@@ -3,6 +3,7 @@ package dev.pam.nativeapp.modules
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.database.Cursor
 import android.provider.ContactsContract
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
@@ -60,13 +61,13 @@ internal class ContactsModule(private val context: Context) : NativeModule, Auto
             null,
             "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC",
         )?.use { cursor ->
-            if (offset < cursor.count && cursor.moveToPosition(offset - 1)) {
-                while (cursor.moveToNext() && rows.size < limit + 1) {
+            if (cursor.moveToOffset(offset)) {
+                do {
                     rows += ContactRow(
                         id = cursor.getString(0),
                         displayName = cursor.getString(1).orEmpty(),
                     )
-                }
+                } while (rows.size < limit + 1 && cursor.moveToNext())
             }
         }
         val hasMore = rows.size > limit
@@ -139,3 +140,6 @@ internal class ContactsModule(private val context: Context) : NativeModule, Auto
         val emailAddresses: MutableList<String> = mutableListOf(),
     )
 }
+
+internal fun Cursor.moveToOffset(offset: Int): Boolean =
+    offset >= 0 && offset < count && moveToPosition(offset)
