@@ -475,17 +475,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         repeat(content.childCount) { index ->
             val child = content.getChildAt(index)
             if (child === handle) return@repeat
-            child.layoutParams = when (presentation) {
-                PRESENTATION_SHEET -> FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    sheetHeight,
-                    Gravity.BOTTOM,
-                )
-                else -> FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                )
-            }
+            child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
         }
         modal.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -775,6 +765,26 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         const val MODAL_EXIT_DURATION_MS = 125L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
     }
+}
+
+internal fun modalChildLayoutParams(
+    presentation: Int,
+    sheetHeight: Int,
+): FrameLayout.LayoutParams = when (presentation) {
+    2 -> FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT,
+        Gravity.CENTER,
+    )
+    3 -> FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        sheetHeight,
+        Gravity.BOTTOM,
+    )
+    else -> FrameLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.MATCH_PARENT,
+    )
 }
 
 private class PamModalContent(context: Context) : FrameLayout(context) {

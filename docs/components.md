@@ -391,6 +391,26 @@ Inline properties remain useful for dynamic values and isolated exceptions:
 </Text>
 ```
 
+## Modal presentation sizing
+
+`ModalPresentation::Dialog` preserves the intrinsic width and height authored
+on its single content card and centers that card over the native backdrop. Use
+an explicit card width (and optional maximum width) plus intrinsic content
+height for compact confirmations. Dialog presentation does not turn the card
+into a full-screen page.
+
+`ModalPresentation::FullScreen` continues to fill the available window, while
+`ModalPresentation::Sheet` fills the width and uses its selected snap-point
+height. Choose the presentation from the intended interaction instead of
+compensating with platform-specific inner padding.
+
+```php
+Modal::make(
+    Column::make(/* title, copy and actions */)->width(320),
+    presentation: ModalPresentation::Dialog,
+);
+```
+
 ## Declarative scroll views
 
 `ScrollView` accepts one or many direct children in `.pam.php` templates. PAM

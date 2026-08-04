@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.7 - 2026-08-04
+
+- Preserve an Android dialog modal's intrinsic card width and height and center
+  it inside the native backdrop instead of stretching every dialog child to a
+  full-screen page.
+- Keep full-screen and sheet modal sizing unchanged and cover all three Android
+  presentation contracts with instrumentation tests.
+
 ## 0.6.6 - 2026-08-03
 
 - Promote the remaining replacement route when a renderer update removes the
