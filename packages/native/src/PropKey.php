@@ -450,4 +450,5 @@ enum PropKey: int
     case WorkletTarget = 442;
     case WorkletDurationMs = 443;
     case WorkletIterations = 444;
+    case NavigationBarHidden = 445;
 }

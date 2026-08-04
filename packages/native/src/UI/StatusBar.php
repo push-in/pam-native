@@ -32,4 +32,9 @@ final class StatusBar extends Element
     {
         return $this->withProperty(PropKey::StatusBarTranslucent, $translucent);
     }
+
+    public function navigationBarHidden(bool $hidden = true): self
+    {
+        return $this->withProperty(PropKey::NavigationBarHidden, $hidden);
+    }
 }

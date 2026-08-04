@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.18 - 2026-08-04
+
+- Add Android immersive navigation control through
+  `StatusBar::navigationBarHidden()` and the declarative
+  `navigationBarHidden` property, including transient swipe recovery and
+  safe-area inset updates when system navigation is hidden.
+- Apply declarative `StatusBar` color, icon appearance, visibility and
+  translucency to active Android modal windows, so full-screen modal routes no
+  longer retain the dialog theme's light system bar.
+
 ## 0.6.17 - 2026-08-04
 
 - Add bounded, atomic `Files::download()` support on Android and iOS for

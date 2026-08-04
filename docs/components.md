@@ -325,6 +325,10 @@ routes no longer override the system UI of the visible screen.
 version, including Android 15 and newer where edge-to-edge is enforced by the
 platform. Use it over a light status-bar background; `appearance="light"`
 keeps light icons for dark backgrounds.
+Set `navigationBarHidden="true"` to enter Android immersive navigation mode
+without hiding the status bar. System navigation remains transiently available
+with an edge swipe, and the bottom safe-area inset updates after the bar hides
+so application chrome does not retain an empty system-navigation strip.
 
 Interactive templates accept either `enabled` or the familiar inverse
 `disabled` attribute, including bound expressions. Disabled native controls
@@ -402,6 +406,11 @@ Inline properties remain useful for dynamic values and isolated exceptions:
 ```
 
 ## Modal presentation sizing
+
+On Android, a `StatusBar` rendered inside an active `Modal` configures the
+modal dialog window as well as the host activity. Full-screen modal content can
+therefore declare its own background color, light/dark icon appearance,
+visibility and translucency without inheriting the dialog theme's defaults.
 
 `ModalPresentation::Dialog` preserves the intrinsic width and height authored
 on its single content card and centers that card over the native backdrop. Use

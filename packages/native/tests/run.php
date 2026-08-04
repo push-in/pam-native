@@ -1666,20 +1666,21 @@ $statusBarElement = StatusBar::make(
     0x80112233,
     StatusBarAppearance::Light,
     true,
-)->animated()->translucent();
+)->animated()->translucent()->navigationBarHidden();
 $assert(
     $statusBarElement->properties()[PropKey::StatusBarColor->value] === 0x80112233
         && $statusBarElement->properties()[PropKey::StatusBarStyle->value]
             === StatusBarAppearance::Light->value
         && $statusBarElement->properties()[PropKey::StatusBarHidden->value] === true
         && $statusBarElement->properties()[PropKey::StatusBarAnimated->value] === true
-        && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true,
+        && $statusBarElement->properties()[PropKey::StatusBarTranslucent->value] === true
+        && $statusBarElement->properties()[PropKey::NavigationBarHidden->value] === true,
     'Status bar helpers must preserve color, style, visibility and edge-to-edge properties.',
 );
 $statusBarAliases = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<StatusBar barStyle="light-content" backgroundColor="#F7F6F2" '
-        .'animated="true" translucent="true" />',
+            .'animated="true" translucent="true" navigationBarHidden="true" />',
     ),
     null,
     [],
@@ -1689,7 +1690,8 @@ $assert(
         && $statusBarAliases->properties()[PropKey::StatusBarStyle->value]
             === StatusBarAppearance::Light->value
         && $statusBarAliases->properties()[PropKey::StatusBarAnimated->value] === true
-        && $statusBarAliases->properties()[PropKey::StatusBarTranslucent->value] === true,
+        && $statusBarAliases->properties()[PropKey::StatusBarTranslucent->value] === true
+        && $statusBarAliases->properties()[PropKey::NavigationBarHidden->value] === true,
     'StatusBar must accept the familiar backgroundColor and barStyle aliases.',
 );
 $modalShown = false;
@@ -5243,8 +5245,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.17',
-    'The runtime SDK contract must match the 0.6.17 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.18',
+    'The runtime SDK contract must match the 0.6.18 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

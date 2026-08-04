@@ -1629,6 +1629,7 @@ class PamRenderer(
             PropKey.STATUS_BAR_HIDDEN,
             PropKey.STATUS_BAR_ANIMATED,
             PropKey.STATUS_BAR_TRANSLUCENT,
+            PropKey.NAVIGATION_BAR_HIDDEN,
             -> applyMergedStatusBar()
             PropKey.KEYBOARD_BEHAVIOR -> {
                 state.keyboardBehavior = value.integer().toInt()
@@ -2131,6 +2132,7 @@ class PamRenderer(
             PropKey.STATUS_BAR_HIDDEN,
             PropKey.STATUS_BAR_ANIMATED,
             PropKey.STATUS_BAR_TRANSLUCENT,
+            PropKey.NAVIGATION_BAR_HIDDEN,
             -> applyMergedStatusBar()
             PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
             PropKey.IMAGE_FIT -> {
@@ -4986,8 +4988,24 @@ class PamRenderer(
                     ),
                 )
             }
+            if (state.properties.containsKey(PropKey.NAVIGATION_BAR_HIDDEN)) {
+                merged = merged.copy(
+                    navigationBarHidden = state.flag(
+                        PropKey.NAVIGATION_BAR_HIDDEN,
+                        merged.navigationBarHidden,
+                    ),
+                )
+            }
         }
         applyStatusBarConfig(merged)
+        for (position in 0 until views.size()) {
+            (views.valueAt(position) as? PamModalHost)?.applyStatusBar(
+                color = merged.color,
+                useDarkIcons = merged.appearance == STATUS_BAR_DARK,
+                hidden = merged.hidden,
+                translucent = merged.translucent,
+            )
+        }
     }
 
     private fun isInActiveNavigationRoute(view: View): Boolean {
@@ -5006,7 +5024,7 @@ class PamRenderer(
     @Suppress("DEPRECATION")
     private fun captureStatusBarDefaults(): StatusBarConfig {
         val window = activity()?.window
-            ?: return StatusBarConfig(Color.BLACK, STATUS_BAR_LIGHT, false, false, false)
+            ?: return StatusBarConfig(Color.BLACK, STATUS_BAR_LIGHT, false, false, false, false)
         val decor = window.decorView
         val lightIcons = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val appearance = decor.windowInsetsController?.systemBarsAppearance ?: 0
@@ -5028,6 +5046,7 @@ class PamRenderer(
             hidden = hidden,
             animated = false,
             translucent = translucent,
+            navigationBarHidden = false,
         )
     }
 
@@ -5036,6 +5055,33 @@ class PamRenderer(
         applyStatusBarColor(config.color, config.animated)
         applyStatusBarAppearance(config.appearance)
         applyStatusBarHidden(config.hidden)
+        applyNavigationBarHidden(config.navigationBarHidden)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyNavigationBarHidden(hidden: Boolean) {
+        val window = activity()?.window ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            window.decorView.windowInsetsController?.let { controller ->
+                controller.systemBarsBehavior =
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                if (hidden) {
+                    controller.hide(WindowInsets.Type.navigationBars())
+                } else {
+                    controller.show(WindowInsets.Type.navigationBars())
+                }
+            }
+            return
+        }
+        window.decorView.systemUiVisibility = if (hidden) {
+            window.decorView.systemUiVisibility or
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+        } else {
+            window.decorView.systemUiVisibility and
+                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION.inv() and
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY.inv()
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -5788,6 +5834,7 @@ class PamRenderer(
         val hidden: Boolean,
         val animated: Boolean,
         val translucent: Boolean,
+        val navigationBarHidden: Boolean,
     )
 
     private data class NodeState(

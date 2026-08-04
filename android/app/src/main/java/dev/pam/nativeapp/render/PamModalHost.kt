@@ -191,6 +191,26 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         updateBottomSheetChrome()
     }
 
+    @Suppress("DEPRECATION")
+    fun applyStatusBar(
+        color: Int,
+        useDarkIcons: Boolean,
+        hidden: Boolean,
+        translucent: Boolean,
+    ) {
+        val window = dialog?.window ?: return
+        if (!translucent) {
+            window.statusBarColor = color
+        }
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = useDarkIcons
+        if (hidden) {
+            controller.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        } else {
+            controller.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+        }
+    }
+
     fun setBottomSheetKeyboardBehavior(value: Int) {
         bottomSheetKeyboardBehavior = value.coerceIn(KEYBOARD_INTERACTIVE, KEYBOARD_FILL_PARENT)
         dialog?.let(::applyWindowConfiguration)

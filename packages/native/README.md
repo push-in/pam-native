@@ -304,10 +304,12 @@ load-start/progress/load/error/load-end callbacks share the same path.
 Callbacks are opt-in, and download progress is coalesced to one event per
 display frame before crossing into PHP.
 
-`StatusBar::animated()` and `StatusBar::translucent()` complement color, icon
+`StatusBar::animated()`, `StatusBar::translucent()` and Android
+`StatusBar::navigationBarHidden()` complement color, icon
 appearance and visibility. Multiple mounted bars merge in order and restore
 the previous native window state when removed. Android 15+ follows mandatory
-edge-to-edge semantics.
+edge-to-edge semantics. Active Android modal windows receive the same resolved
+configuration, including full-screen modal dialogs.
 
 Both scroll directions use the same core host:
 

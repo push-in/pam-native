@@ -224,6 +224,7 @@ final class TemplateRenderer
         'statusBarHidden' => PropKey::StatusBarHidden,
         'statusBarAnimated' => PropKey::StatusBarAnimated,
         'statusBarTranslucent' => PropKey::StatusBarTranslucent,
+        'navigationBarHidden' => PropKey::NavigationBarHidden,
         'keyboardBehavior' => PropKey::KeyboardBehavior,
         'refreshing' => PropKey::Refreshing,
         'refreshColors' => PropKey::RefreshColors,
@@ -1649,6 +1650,7 @@ final class TemplateRenderer
             PropKey::StatusBarHidden,
             PropKey::StatusBarAnimated,
             PropKey::StatusBarTranslucent,
+            PropKey::NavigationBarHidden,
             => $kind === NodeKind::StatusBar,
             PropKey::ModalPresentation,
             PropKey::ModalAnimationType,
@@ -3398,6 +3400,10 @@ final class TemplateRenderer
             ->translucent(self::boolValue(
                 $values['translucent'] ?? false,
                 'StatusBar translucent',
+            ))
+            ->navigationBarHidden(self::boolValue(
+                $values['navigationBarHidden'] ?? false,
+                'StatusBar navigationBarHidden',
             ));
     }
 
