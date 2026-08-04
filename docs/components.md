@@ -718,6 +718,33 @@ Pass the emitted string to `System\ImageEditor::render(drawing: $drawing)` to
 flatten it before crop, rotation, filters, resize, and JPEG encoding on the
 native worker.
 
+`ImageEditor::render()` also accepts `textLayers`, a bounded list of positioned
+text maps for social-media compositions. Coordinates are normalized from `0`
+to `1`, rotation uses radians, scale is clamped from `0.25` to `4`, and
+`style_type` uses `ImageTextLayerStyle` (`1` plain, `2` filled card, `3`
+translucent card):
+
+```php
+ImageEditor::render(
+    source: $source,
+    cropRatio: ImageCropRatio::Story,
+    filter: ImageFilterType::Original,
+    quarterTurns: 0,
+    flipHorizontal: false,
+    overlayText: '',
+    callback: $done,
+    textLayers: [[
+        'color' => '#101318',
+        'rotation' => 0.0,
+        'scale' => 1.0,
+        'style_type' => 2,
+        'text' => 'Resposta',
+        'x' => 0.5,
+        'y' => 0.4,
+    ]],
+);
+```
+
 ## Generators
 
 ```bash

@@ -5149,8 +5149,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.13',
-    'The runtime SDK contract must match the 0.6.13 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.14',
+    'The runtime SDK contract must match the 0.6.14 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -5167,11 +5167,37 @@ $assert(
         ) === [1, 2, 3, 4, 5]
         && array_map(
             static fn (ReflectionParameter $parameter): string => $parameter->getName(),
-            array_slice($imageEditorParameters, -4),
-        ) === ['maxWidth', 'maxHeight', 'outputQuality', 'drawing']
-        && $imageEditorParameters[count($imageEditorParameters) - 2]->getDefaultValue() === 94
-        && $imageEditorParameters[array_key_last($imageEditorParameters)]->getDefaultValue() === '',
-    'The image editor contract must expose typed transforms, bounded output and drawing.',
+            array_slice($imageEditorParameters, -5),
+        ) === ['maxWidth', 'maxHeight', 'outputQuality', 'drawing', 'textLayers']
+        && $imageEditorParameters[count($imageEditorParameters) - 3]->getDefaultValue() === 94
+        && $imageEditorParameters[count($imageEditorParameters) - 2]->getDefaultValue() === ''
+        && $imageEditorParameters[array_key_last($imageEditorParameters)]->getDefaultValue() === [],
+    'The image editor contract must expose typed transforms, bounded output, drawing and text layers.',
+);
+$textLayersMethod = new ReflectionMethod(\Pam\Native\System\ImageEditor::class, 'textLayers');
+$normalizedTextLayers = json_decode($textLayersMethod->invoke(null, [[
+    'color' => 'invalid',
+    'rotation' => 99,
+    'scale' => 9,
+    'style_type' => 2,
+    'text' => ' Resposta ',
+    'x' => -1,
+    'y' => 2,
+]]), true, 64, JSON_THROW_ON_ERROR);
+$normalizedTextLayer = $normalizedTextLayers[0] ?? [];
+$assert(
+    array_map(
+        static fn (\Pam\Native\ImageTextLayerStyle $case): int => $case->value,
+        \Pam\Native\ImageTextLayerStyle::cases(),
+    ) === [1, 2, 3]
+        && ($normalizedTextLayer['color'] ?? '') === '#FFFFFF'
+        && abs((float) ($normalizedTextLayer['rotation'] ?? 0) - M_PI * 2) < 0.000001
+        && (float) ($normalizedTextLayer['scale'] ?? 0) === 4.0
+        && ($normalizedTextLayer['styleType'] ?? 0) === 2
+        && ($normalizedTextLayer['text'] ?? '') === 'Resposta'
+        && (float) ($normalizedTextLayer['x'] ?? -1) === 0.0
+        && (float) ($normalizedTextLayer['y'] ?? -1) === 1.0,
+    'Image editor text layers must normalize bounds, color and integer presentation style.',
 );
 
 $bottomSheet = BottomSheet::make(
