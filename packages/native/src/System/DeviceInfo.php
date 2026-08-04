@@ -25,6 +25,7 @@ final readonly class DeviceInfo
         public float $safeAreaRight = 0.0,
         public float $safeAreaBottom = 0.0,
         public float $safeAreaLeft = 0.0,
+        public string $timeZone = 'UTC',
     ) {
     }
 
@@ -50,6 +51,7 @@ final readonly class DeviceInfo
                     safeAreaRight: (float) ($values['safeAreaRight'] ?? 0.0),
                     safeAreaBottom: (float) ($values['safeAreaBottom'] ?? 0.0),
                     safeAreaLeft: (float) ($values['safeAreaLeft'] ?? 0.0),
+                    timeZone: (string) ($values['timeZone'] ?? 'UTC'),
                 ));
             },
         );

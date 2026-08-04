@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.4 - 2026-08-03
+
+- Expose the device's IANA time-zone identifier through `DeviceInfo::timeZone`
+  on Android and iOS so applications can format API timestamps in local time.
+- Preserve source compatibility for manually constructed `DeviceInfo` values
+  with a documented `UTC` fallback when older native hosts omit the field.
+
 ## 0.6.3 - 2026-08-03
 
 - Honor dark status-bar icons on Android 15 and newer instead of silently
