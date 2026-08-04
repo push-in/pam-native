@@ -64,6 +64,13 @@ are bounded to 64 MiB. `Files::stat()` returns typed metadata,
 `Files::delete()` removes a single sandbox file. Directory deletion and paths
 escaping the application sandbox are rejected.
 
+`Files::copyAsset()` copies a project-relative packaged asset directly into a
+sandbox-relative destination on the native file worker and returns its typed
+`FileReference`. It does not base64-encode the asset or move its bytes through
+PHP, so packaged editor templates and other large immutable resources can be
+materialized safely. Absolute paths, empty segments and traversal are rejected
+for both the asset and destination.
+
 The system document picker does not require broad storage permission.
 Applications that call `MediaLibrary` request `PermissionKind::Photos`;
 Android 13+ reports image/video access and Android 14+ selected-photo access

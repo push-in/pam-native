@@ -2844,6 +2844,50 @@ $assert(
     'Files pickMany must decode every native file reference in selection order.',
 );
 
+$copiedAsset = null;
+$copyAssetRequest = Files::copyAsset(
+    'assets/templates/story.webp',
+    'drafts/story.webp',
+    static function (FileReference $file) use (&$copiedAsset): void {
+        $copiedAsset = $file;
+    },
+);
+$copyAssetCall = TestDiagnostics::$moduleCall;
+$assert(
+    $copyAssetCall !== null
+        && $copyAssetCall['requestId'] === $copyAssetRequest
+        && $copyAssetCall['module'] === 'files'
+        && $copyAssetCall['method'] === 'copyAsset'
+        && Wire::decodeMap($copyAssetCall['payload']) === [
+            'assetPath' => 'assets/templates/story.webp',
+            'path' => 'drafts/story.webp',
+        ],
+    'Files copyAsset must emit safe project and sandbox paths.',
+);
+Runtime::dispatchModuleResult(
+    $copyAssetRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'path' => 'drafts/story.webp',
+        'name' => 'story.webp',
+        'mimeType' => 'image/webp',
+        'size' => 75_446,
+    ]),
+);
+$assert(
+    $copiedAsset instanceof FileReference
+        && $copiedAsset->path === 'drafts/story.webp'
+        && $copiedAsset->mimeType === 'image/webp',
+    'Files copyAsset must return the materialized typed file reference.',
+);
+$unsafeAssetRejected = false;
+try {
+    Files::copyAsset('../secret', 'drafts/secret', static function (FileReference $_): void {});
+} catch (InvalidArgumentException) {
+    $unsafeAssetRejected = true;
+}
+$assert($unsafeAssetRejected, 'Files copyAsset must reject traversal before crossing the bridge.');
+
 $importedFile = null;
 $importUriRequest = Files::importUri(
     'content://media/external/images/media/42',
@@ -5149,8 +5193,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.14',
-    'The runtime SDK contract must match the 0.6.14 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.15',
+    'The runtime SDK contract must match the 0.6.15 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

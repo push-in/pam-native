@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.15 - 2026-08-04
+
+- Add `Files::copyAsset()` for atomically materializing packaged project assets
+  in the application file sandbox without transporting base64 bytes through
+  PHP, with traversal protection and Android/iOS implementations.
+
 ## 0.6.14 - 2026-08-04
 
 - Add bounded, normalized positioned text-layer compositing to
