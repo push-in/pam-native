@@ -354,15 +354,95 @@ fn layout_node(
         }
         return Ok(());
     }
-    if matches!(
-        node.kind,
-        NodeKind::Modal | NodeKind::RefreshControl | NodeKind::NavigationHost | NodeKind::TabHost
-    ) {
+    if node.kind == NodeKind::Modal {
+        let dialog = integer(node, PropKey::ModalPresentation).unwrap_or(2) == 2;
         for child in node_children {
             if !visible(child) {
                 continue;
             }
-            layout_node(context, child.id, inner, true, depth + 1, output)?;
+            if !dialog {
+                layout_node(context, child.id, inner, true, depth + 1, output)?;
+                continue;
+            }
+
+            let left = dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width);
+            let right = dimension(child, PropKey::Right, PropKey::RightPercent, inner.width);
+            let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height);
+            let bottom = dimension(child, PropKey::Bottom, PropKey::BottomPercent, inner.height);
+            let width = constrained(
+                dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width)
+                    .or_else(|| match (left, right) {
+                        (Some(left), Some(right)) => Some((inner.width - left - right).max(0.0)),
+                        _ => None,
+                    })
+                    .unwrap_or(intrinsic_extent(
+                        context.children,
+                        child,
+                        Axis::Horizontal,
+                        inner.width,
+                        inner.height,
+                        context.text_scale,
+                        context.text_metrics,
+                        depth + 1,
+                    )?),
+                number(child, PropKey::MinWidth),
+                dimension(
+                    child,
+                    PropKey::MaxWidth,
+                    PropKey::MaxWidthPercent,
+                    inner.width,
+                ),
+            )?
+            .min(inner.width);
+            let height = constrained(
+                dimension(child, PropKey::Height, PropKey::HeightPercent, inner.height)
+                    .or_else(|| match (top, bottom) {
+                        (Some(top), Some(bottom)) => Some((inner.height - top - bottom).max(0.0)),
+                        _ => None,
+                    })
+                    .unwrap_or(intrinsic_extent(
+                        context.children,
+                        child,
+                        Axis::Vertical,
+                        width,
+                        inner.height,
+                        context.text_scale,
+                        context.text_metrics,
+                        depth + 1,
+                    )?),
+                number(child, PropKey::MinHeight),
+                dimension(
+                    child,
+                    PropKey::MaxHeight,
+                    PropKey::MaxHeightPercent,
+                    inner.height,
+                ),
+            )?
+            .min(inner.height);
+            layout_node(
+                context,
+                child.id,
+                Layout {
+                    x: inner.x + (inner.width - width) / 2.0,
+                    y: inner.y + (inner.height - height) / 2.0,
+                    width,
+                    height,
+                },
+                false,
+                depth + 1,
+                output,
+            )?;
+        }
+        return Ok(());
+    }
+    if matches!(
+        node.kind,
+        NodeKind::RefreshControl | NodeKind::NavigationHost | NodeKind::TabHost
+    ) {
+        for child in node_children {
+            if visible(child) {
+                layout_node(context, child.id, inner, true, depth + 1, output)?;
+            }
         }
         return Ok(());
     }
@@ -3085,6 +3165,75 @@ mod tests {
         assert_eq!(layouts[&4].width, 360.0);
         assert_eq!(layouts[&4].height, 640.0);
         assert_eq!(layouts[&5].y, 30.0);
+    }
+
+    #[test]
+    fn dialog_modal_centers_percent_width_card_at_intrinsic_height() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        [(PropKey::ModalPresentation, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Column,
+                        [
+                            (PropKey::WidthPercent, PropValue::Float(88.0)),
+                            (PropKey::Padding, PropValue::Float(20.0)),
+                            (PropKey::Gap, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Text,
+                        [(PropKey::Height, PropValue::Float(40.0))],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        3,
+                        1,
+                        NodeKind::Text,
+                        [(PropKey::Height, PropValue::Float(20.0))],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("dialog intrinsic layout");
+        let card = layouts[&3];
+
+        assert!((card.width - 316.8).abs() < 0.001);
+        assert!((card.x - 21.6).abs() < 0.001);
+        assert_eq!(card.height, 108.0);
+        assert_eq!(card.y, 266.0);
     }
 
     #[test]

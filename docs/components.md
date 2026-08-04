@@ -397,7 +397,10 @@ Inline properties remain useful for dynamic values and isolated exceptions:
 on its single content card and centers that card over the native backdrop. Use
 an explicit card width (and optional maximum width) plus intrinsic content
 height for compact confirmations. Dialog presentation does not turn the card
-into a full-screen page.
+into a full-screen page. Percentage widths are resolved against the modal
+viewport before vertical intrinsic measurement, so wrapped copy and action rows
+produce the same compact centered card on Android and iOS. Explicit height,
+minimum/maximum constraints and edge-pinned portal content remain authoritative.
 
 `ModalPresentation::FullScreen` continues to fill the available window, while
 `ModalPresentation::Sheet` fills the width and uses its selected snap-point

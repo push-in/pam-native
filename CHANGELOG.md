@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.11 - 2026-08-04
+
+- Measure dialog-modal cards at their authored percentage or fixed width and
+  intrinsic content height in the shared layout engine, then center the result
+  in the viewport instead of assigning an implicit full-screen height.
+- Preserve explicit dialog dimensions, min/max constraints, edge-pinned portal
+  content and the existing full-screen/sheet presentation contracts.
+
 ## 0.6.10 - 2026-08-04
 
 - Reveal the focused input automatically when padding-mode Android keyboard
