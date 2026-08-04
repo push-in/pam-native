@@ -22,7 +22,7 @@ import org.json.JSONObject
 
 internal class FilesModule(private val activity: PamActivity) : NativeModule, AutoCloseable {
     private val executor = Executors.newSingleThreadExecutor()
-    private val root = File(activity.filesDir, "pam-files").apply { mkdirs() }
+    private val root = File(activity.filesDir, "pam-files").apply { mkdirs() }.canonicalFile
 
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
         runCatching {
@@ -350,7 +350,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             ModuleResultStatus.SUCCESS,
             WireMap.encode(
                 mapOf(
-                    "path" to WireValue.Text(file.relativeTo(root).path),
+                    "path" to WireValue.Text(relativeSandboxPath(root, file)),
                     "name" to WireValue.Text(displayName),
                     "mimeType" to WireValue.Text(mime),
                     "size" to WireValue.Integer(file.length()),
@@ -396,4 +396,13 @@ internal fun normalizedBundledAssetPath(path: String): String {
         "Bundled asset path escapes application bundle"
     }
     return normalized
+}
+
+internal fun relativeSandboxPath(root: File, file: File): String {
+    val canonicalRoot = root.canonicalFile
+    val canonicalFile = file.canonicalFile
+    require(canonicalFile.path.startsWith(canonicalRoot.path + File.separator)) {
+        "File path escapes sandbox"
+    }
+    return canonicalFile.relativeTo(canonicalRoot).path
 }

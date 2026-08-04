@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.16 - 2026-08-04
+
+- Canonicalize the Android file-sandbox root before deriving returned relative
+  paths, preventing `/data/user/0` and `/data/data` aliases from producing a
+  traversal-shaped `FileReference` after `Files::copyAsset()`.
+
 ## 0.6.15 - 2026-08-04
 
 - Add `Files::copyAsset()` for atomically materializing packaged project assets
