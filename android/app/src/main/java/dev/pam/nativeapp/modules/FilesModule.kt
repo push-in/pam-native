@@ -12,6 +12,8 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -27,6 +29,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             when (method) {
                 "read" -> executor.execute { read(payload, completion) }
                 "write" -> executor.execute { write(payload, completion) }
+                "copyAsset" -> executor.execute { copyAsset(payload, completion) }
                 "stat" -> executor.execute { stat(payload, completion) }
                 "list" -> executor.execute { list(payload, completion) }
                 "delete" -> executor.execute { delete(payload, completion) }
@@ -103,6 +106,30 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
             completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun copyAsset(payload: ByteArray, completion: ModuleCompletion) {
+        runCatching {
+            val values = WireMap.decode(payload)
+            val assetPath = normalizedBundledAssetPath(values.requiredText("assetPath"))
+            val file = resolve(values.requiredText("path"))
+            file.parentFile?.mkdirs()
+            val temporary = File(file.parentFile, "${file.name}.tmp-${UUID.randomUUID()}")
+            try {
+                activity.assets.open("pam/$assetPath").use { input ->
+                    temporary.outputStream().use { output -> input.copyTo(output) }
+                }
+                Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            } finally {
+                temporary.delete()
+            }
+            completion.success(file, mimeFor(file))
         }.onFailure { completion.failure(it) }
     }
 
@@ -358,4 +385,15 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     }
 
     private data class ImportedFile(val file: File, val mime: String, val name: String)
+}
+
+internal fun normalizedBundledAssetPath(path: String): String {
+    val normalized = path.trim().replace('\\', '/')
+    require(normalized.isNotEmpty() && !normalized.startsWith('/') && normalized.length <= 1_024) {
+        "Invalid bundled asset path"
+    }
+    require(normalized.split('/').none { it.isEmpty() || it == "." || it == ".." }) {
+        "Bundled asset path escapes application bundle"
+    }
+    return normalized
 }

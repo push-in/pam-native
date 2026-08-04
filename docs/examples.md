@@ -35,6 +35,7 @@ pinning and cache events.
 
 ```php
 use Pam\Native\CaptureType;
+use Pam\Native\FileReference;
 use Pam\Native\MediaPickerType;
 use Pam\Native\PermissionKind;
 use Pam\Native\PermissionStatus;
@@ -46,6 +47,12 @@ use Pam\Native\System\Permissions;
 Files::write('drafts/message.txt', 'Hello', function (): void {
     Files::read('drafts/message.txt', fn (string $text) => $this->show($text));
 });
+
+Files::copyAsset(
+    'assets/templates/story.webp',
+    'drafts/story.webp',
+    fn (FileReference $file) => $this->storySource = $file->uri(),
+);
 
 Files::pick(MediaPickerType::Image, function ($file): void {
     $this->selectedPath = $file->path;

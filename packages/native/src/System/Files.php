@@ -11,6 +11,7 @@ use Pam\Native\MediaPickerType;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 use JsonException;
+use InvalidArgumentException;
 use RuntimeException;
 
 final class Files
@@ -37,6 +38,18 @@ final class Files
             'write',
             ['path' => $path, 'data' => base64_encode($contents)],
             static fn (array $_): mixed => $callback?->__invoke(),
+        );
+    }
+
+    /** @param Closure(FileReference): void $callback */
+    public static function copyAsset(string $assetPath, string $destination, Closure $callback): int
+    {
+        $assetPath = self::assetPath($assetPath);
+
+        return self::invoke(
+            'copyAsset',
+            ['assetPath' => $assetPath, 'path' => $destination],
+            static fn (array $values): mixed => $callback(self::reference($values)),
         );
     }
 
@@ -72,6 +85,24 @@ final class Files
             ['path' => $path],
             static fn (array $_): mixed => $callback?->__invoke(),
         );
+    }
+
+    private static function assetPath(string $path): string
+    {
+        $path = str_replace('\\', '/', trim($path));
+        if (
+            $path === ''
+            || str_starts_with($path, '/')
+            || strlen($path) > 1_024
+            || array_any(
+                explode('/', $path),
+                static fn (string $segment): bool => $segment === '' || $segment === '.' || $segment === '..',
+            )
+        ) {
+            throw new InvalidArgumentException('Bundled asset path must be safe and project-relative.');
+        }
+
+        return $path;
     }
 
     /** @param Closure(FileReference): void $callback */

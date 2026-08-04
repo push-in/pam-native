@@ -1,5 +1,6 @@
 package dev.pam.nativeapp
 
+import dev.pam.nativeapp.modules.normalizedBundledAssetPath
 import java.nio.file.Files
 import kotlin.io.path.createDirectory
 import kotlin.io.path.createFile
@@ -11,6 +12,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AssetInstallerTest {
+    @Test
+    fun validatesBundledAssetPaths() {
+        assertEquals("assets/stories/background.webp", normalizedBundledAssetPath(" assets/stories/background.webp "))
+        listOf("", "/absolute.png", "../secret", "assets/../secret", "assets//image.png").forEach { path ->
+            val result = runCatching { normalizedBundledAssetPath(path) }
+            assertTrue("Expected unsafe path to fail: $path", result.isFailure)
+        }
+    }
+
     @Test
     fun keepsActiveAndNewestRollbackRelease() {
         val root = Files.createTempDirectory("pam-releases-test")

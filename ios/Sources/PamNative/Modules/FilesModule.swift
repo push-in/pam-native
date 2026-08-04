@@ -25,6 +25,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 queue.async { self.read(payload, completion) }
             case "write":
                 queue.async { self.write(payload, completion) }
+            case "copyAsset":
+                queue.async { self.copyAsset(payload, completion) }
             case "stat":
                 queue.async { self.stat(payload, completion) }
             case "list":
@@ -130,6 +132,39 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             )
             try data.write(to: destination, options: .atomic)
             completion(.success, Data())
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func copyAsset(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(assetPath)? = values["assetPath"],
+                  case let .text(path)? = values["path"],
+                  let bundledPath = try normalizedPamAssetPath("asset://\(assetPath)"),
+                  let resourceRoot = Bundle.main.resourceURL else {
+                throw FileModuleError("Invalid bundled asset payload")
+            }
+            let source = resourceRoot.appendingPathComponent(bundledPath, isDirectory: false)
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: source.path, isDirectory: &isDirectory),
+                  !isDirectory.boolValue else {
+                throw FileModuleError("Bundled asset does not exist")
+            }
+            let destination = try resolve(path)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            let temporary = destination.deletingLastPathComponent()
+                .appendingPathComponent("\(destination.lastPathComponent).tmp-\(UUID().uuidString)")
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            try FileManager.default.copyItem(at: source, to: temporary)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temporary)
+            } else {
+                try FileManager.default.moveItem(at: temporary, to: destination)
+            }
+            completion(.success, try WireMap.encode(reference(destination)))
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
