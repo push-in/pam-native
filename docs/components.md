@@ -308,6 +308,15 @@ familiar `backgroundColor`/`barStyle` aliases, including `animated` and
 `translucent`.
 Android resolves those properties from the active retained stack route; hidden
 routes no longer override the system UI of the visible screen.
+`appearance="dark"` requests dark system icons on every supported Android
+version, including Android 15 and newer where edge-to-edge is enforced by the
+platform. Use it over a light status-bar background; `appearance="light"`
+keeps light icons for dark backgrounds.
+
+Interactive templates accept either `enabled` or the familiar inverse
+`disabled` attribute, including bound expressions. Disabled native controls
+stop pointer activation and expose the disabled state to platform
+accessibility services.
 
 CSS custom properties are declared in `:root`, may reference one another, and
 support nested fallbacks such as `var(--brand, var(--fallback, rebeccapurple))`.

@@ -1462,7 +1462,12 @@ final class TemplateRenderer
             $element = $element->testId(self::stringValue($attributes['testId'], 'Test ID'));
         }
 
-        if (isset($attributes['enabled'])) {
+        if (isset($attributes['disabled'])) {
+            $element = $element->enabled(!self::boolValue(
+                $attributes['disabled'],
+                'Disabled',
+            ));
+        } elseif (isset($attributes['enabled'])) {
             $element = $element->enabled(self::boolValue($attributes['enabled'], 'Enabled'));
         }
 

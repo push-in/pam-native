@@ -13,6 +13,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.TextureView
+import android.view.WindowInsetsController
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -65,6 +66,8 @@ class PamRendererInstrumentedTest {
                                     mapOf(
                                         PropKey.STATUS_BAR_COLOR to
                                             PropValue.Integer(Color.RED.toLong()),
+                                        PropKey.STATUS_BAR_STYLE to
+                                            PropValue.Integer(1L),
                                     ),
                                 ),
                             ),
@@ -77,6 +80,8 @@ class PamRendererInstrumentedTest {
                                     mapOf(
                                         PropKey.STATUS_BAR_COLOR to
                                             PropValue.Integer(Color.BLUE.toLong()),
+                                        PropKey.STATUS_BAR_STYLE to
+                                            PropValue.Integer(2L),
                                     ),
                                 ),
                             ),
@@ -109,6 +114,7 @@ class PamRendererInstrumentedTest {
                         activity.window.statusBarColor
                     },
                 )
+                assertStatusBarUsesDarkIcons(activity, false)
 
                 renderer.commit(
                     listOf(
@@ -136,11 +142,24 @@ class PamRendererInstrumentedTest {
                         activity.window.statusBarColor
                     },
                 )
+                assertStatusBarUsesDarkIcons(activity, true)
                 renderer.close()
             }
         } finally {
             activity.finish()
         }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun assertStatusBarUsesDarkIcons(activity: PamTestActivity, expected: Boolean) {
+        val enabled = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val appearance = activity.window.insetsController?.systemBarsAppearance ?: 0
+            appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS != 0
+        } else {
+            activity.window.decorView.systemUiVisibility and
+                View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR != 0
+        }
+        assertEquals(expected, enabled)
     }
 
     @Test
