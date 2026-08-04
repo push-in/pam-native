@@ -39,6 +39,23 @@ Templates use the same native contract:
 </GestureDetector>
 ```
 
+Handlers that also need item context may pass `$event` explicitly. PAM decodes
+the wire payload according to the method's `GestureEvent` type instead of
+exposing the encoded transport string:
+
+```xml
+<GestureDetector on:gestureEnd="moveLayer($layer['id'], $event)">
+    <Card />
+</GestureDetector>
+```
+
+```php
+public function moveLayer(string $layerId, GestureEvent $event): void
+{
+    $this->commitLayer($layerId, $event->translationX, $event->translationY);
+}
+```
+
 ## Native transforms
 
 For direct-manipulation surfaces such as image galleries, enable

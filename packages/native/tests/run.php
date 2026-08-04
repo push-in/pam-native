@@ -68,6 +68,7 @@ use Pam\Native\Internal\CompiledTemplateNode;
 use Pam\Native\Internal\ScopedStyleCompiler;
 use Pam\Native\Internal\ComponentLifecycle;
 use Pam\Native\Internal\TemplateCompiler;
+use Pam\Native\Internal\TemplateExpression;
 use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\TreeEncoder;
 use Pam\Native\Internal\Wire;
@@ -920,9 +921,16 @@ $assert(
 );
 $templateGestureScope = new class {
     public ?GestureEvent $event = null;
+    public string $layerId = '';
 
     public function changed(GestureEvent $event): void
     {
+        $this->event = $event;
+    }
+
+    public function changedLayer(string $layerId, GestureEvent $event): void
+    {
+        $this->layerId = $layerId;
         $this->event = $event;
     }
 };
@@ -940,6 +948,22 @@ $templatePinch = TemplateRenderer::render(
     ),
     null,
     [],
+);
+$explicitGesturePayload = Wire::map([
+    'type' => GestureType::Pan->value,
+    'state' => GestureState::Ended->value,
+    'translationX' => 42.0,
+]);
+TemplateExpression::evaluate(
+    'changedLayer("layer-1", $event)',
+    $templateGestureScope,
+    ['event' => $explicitGesturePayload],
+);
+$assert(
+    $templateGestureScope->layerId === 'layer-1'
+        && $templateGestureScope->event instanceof GestureEvent
+        && $templateGestureScope->event->translationX === 42.0,
+    'Explicit expression event arguments must honor typed GestureEvent parameters.',
 );
 $invalidForRejected = false;
 try {
@@ -5125,8 +5149,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.12',
-    'The runtime SDK contract must match the 0.6.12 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.13',
+    'The runtime SDK contract must match the 0.6.13 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

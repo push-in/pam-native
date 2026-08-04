@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.13 - 2026-08-04
+
+- Decode explicitly passed `$event` expression arguments into `GestureEvent`
+  when the target method uses that type, enabling contextual handlers such as
+  `moveLayer($id, $event)` without exposing the binary wire payload.
+
 ## 0.6.12 - 2026-08-04
 
 - Reject malformed `p-for` directives during template compilation instead of
