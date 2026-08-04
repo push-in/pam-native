@@ -567,7 +567,7 @@ private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @u
               url.user == nil,
               url.password == nil else {
             completionHandler(nil)
-            finish(.failure, Data("Download redirect must use HTTPS without credentials".utf8)))
+            finish(.failure, Data("Download redirect must use HTTPS without credentials".utf8))
             return
         }
         completionHandler(request)
@@ -615,10 +615,10 @@ private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @u
         if let error { finish(.failure, Data(error.localizedDescription.utf8)) }
     }
 
-    private func finish(_ status: (ModuleResultStatus, Data)) {
+    private func finish(_ status: ModuleResultStatus, _ data: Data) {
         guard !finished else { return }
         finished = true
-        completion(status.0, status.1)
+        completion(status, data)
         session?.finishTasksAndInvalidate()
         session = nil
     }
