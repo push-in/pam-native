@@ -411,6 +411,11 @@ Modal::make(
 );
 ```
 
+Android contact reads likewise treat `offset: 0` as the first provider row;
+subsequent offsets start exactly at the requested contact. This makes the
+default `Contacts::all()` call and explicit paginated reads use the same
+zero-based contract on Android and iOS.
+
 ## Declarative scroll views
 
 `ScrollView` accepts one or many direct children in `.pam.php` templates. PAM

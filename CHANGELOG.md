@@ -7,6 +7,9 @@
   full-screen page.
 - Keep full-screen and sheet modal sizing unchanged and cover all three Android
   presentation contracts with instrumentation tests.
+- Start Android contact pagination at the requested row, including offset zero,
+  instead of discarding the entire first page when the cursor is initially
+  positioned before its first result.
 
 ## 0.6.6 - 2026-08-03
 
