@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\GestureEvent;
 use ReflectionMethod;
+use ReflectionNamedType;
 use ReflectionProperty;
 use RuntimeException;
 use Stringable;
@@ -501,6 +503,21 @@ final class TemplateExpression
         $method = new ReflectionMethod($this->scope, $name);
         if (!$method->isPublic()) {
             throw new RuntimeException("Template method {$name} must be public.");
+        }
+
+        foreach ($method->getParameters() as $index => $parameter) {
+            if (!array_key_exists($index, $arguments)) {
+                break;
+            }
+            $type = $parameter->getType();
+            if (
+                $type instanceof ReflectionNamedType
+                && !$type->isBuiltin()
+                && $type->getName() === GestureEvent::class
+                && is_string($arguments[$index])
+            ) {
+                $arguments[$index] = GestureEvent::fromPayload($arguments[$index]);
+            }
         }
 
         return $method->invokeArgs($this->scope, $arguments);
