@@ -225,7 +225,10 @@ Before the first native mount, the Rust layout engine reads each selected TTF
 or OTF face directly from the extracted application assets and caches its
 normalized glyph advances. Intrinsic widths, wrapping, accessibility font
 scaling, and flex centering therefore use the metrics of the font Android and
-iOS actually render. A missing or unsupported face falls back to PAM's
+iOS actually render. PAM retains a half-point subpixel guard around the ideal
+advance sum because platform hinting can round a native text run fractionally
+wider; this keeps the native widget's wrapping decision consistent with the
+height reserved by the engine. A missing or unsupported face falls back to PAM's
 allocation-free generic estimator; layout never waits for a native measurement
 round trip and does not visibly correct itself after mount.
 Android converts retained logical frames to physical pixels by rounding their
