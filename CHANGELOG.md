@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.17 - 2026-08-04
+
+- Add bounded, atomic `Files::download()` support on Android and iOS for
+  materializing HTTPS media into the PAM sandbox as a typed `FileReference`.
+
 ## 0.6.16 - 2026-08-04
 
 - Canonicalize the Android file-sandbox root before deriving returned relative

@@ -14,6 +14,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
+import java.net.HttpURLConnection
+import java.net.URI
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -30,6 +32,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "read" -> executor.execute { read(payload, completion) }
                 "write" -> executor.execute { write(payload, completion) }
                 "copyAsset" -> executor.execute { copyAsset(payload, completion) }
+                "download" -> executor.execute { download(payload, completion) }
                 "stat" -> executor.execute { stat(payload, completion) }
                 "list" -> executor.execute { list(payload, completion) }
                 "delete" -> executor.execute { delete(payload, completion) }
@@ -130,6 +133,63 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 temporary.delete()
             }
             completion.success(file, mimeFor(file))
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun download(payload: ByteArray, completion: ModuleCompletion) {
+        runCatching {
+            val values = WireMap.decode(payload)
+            val uri = URI(values.requiredText("url"))
+            require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()) {
+                "Download URL must be an absolute HTTPS URL"
+            }
+            require(uri.userInfo == null) { "Download URL cannot contain credentials" }
+            val maximumBytes = values.integer("maximumBytes", MAX_IMPORT_BYTES)
+            require(maximumBytes in 1..MAX_DOWNLOAD_BYTES) { "Invalid download size limit" }
+            val file = resolve(values.requiredText("path"))
+            file.parentFile?.mkdirs()
+            val temporary = File(file.parentFile, "${file.name}.tmp-${UUID.randomUUID()}")
+            val connection = uri.toURL().openConnection() as HttpURLConnection
+            try {
+                connection.instanceFollowRedirects = false
+                connection.connectTimeout = 15_000
+                connection.readTimeout = 30_000
+                connection.requestMethod = "GET"
+                connection.setRequestProperty("Accept-Encoding", "identity")
+                connection.connect()
+                require(connection.responseCode in 200..299) {
+                    "Download failed with HTTP ${connection.responseCode}"
+                }
+                val declaredSize = connection.contentLengthLong
+                require(declaredSize < 0 || declaredSize <= maximumBytes) {
+                    "Download exceeds configured size limit"
+                }
+                connection.inputStream.use { input ->
+                    temporary.outputStream().use { output ->
+                        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                        var total = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            total += read
+                            require(total <= maximumBytes) { "Download exceeds configured size limit" }
+                            output.write(buffer, 0, read)
+                        }
+                    }
+                }
+                Files.move(
+                    temporary.toPath(),
+                    file.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+                val mime = connection.contentType?.substringBefore(';')?.trim()
+                    ?.takeIf(String::isNotEmpty) ?: mimeFor(file)
+                completion.success(file, mime)
+            } finally {
+                connection.disconnect()
+                temporary.delete()
+            }
         }.onFailure { completion.failure(it) }
     }
 
@@ -381,6 +441,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         const val MAX_PICK_LIMIT = 50
         const val MAX_READ_BYTES = 1024 * 1024L
         const val MAX_IMPORT_BYTES = 64L * 1024L * 1024L
+        const val MAX_DOWNLOAD_BYTES = 256L * 1024L * 1024L
         const val MAX_MULTI_IMPORT_BYTES = 256L * 1024L * 1024L
     }
 

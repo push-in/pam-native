@@ -71,6 +71,13 @@ PHP, so packaged editor templates and other large immutable resources can be
 materialized safely. Absolute paths, empty segments and traversal are rejected
 for both the asset and destination.
 
+`Files::download()` materializes an absolute HTTPS resource at a
+sandbox-relative destination and returns a `FileReference` suitable for image
+editing, upload or durable app-owned use. Downloads run off the UI thread,
+reject embedded credentials and non-HTTPS URLs, enforce a caller-controlled
+size limit (64 MiB by default, 256 MiB maximum), and replace the destination
+atomically only after a successful transfer.
+
 The system document picker does not require broad storage permission.
 Applications that call `MediaLibrary` request `PermissionKind::Photos`;
 Android 13+ reports image/video access and Android 14+ selected-photo access

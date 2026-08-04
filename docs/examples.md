@@ -54,6 +54,13 @@ Files::copyAsset(
     fn (FileReference $file) => $this->storySource = $file->uri(),
 );
 
+Files::download(
+    'https://cdn.example.com/posts/42.webp',
+    'drafts/shared-post.webp',
+    fn (FileReference $file) => $this->sharedPostSource = $file->uri(),
+    maximumBytes: 16 * 1_024 * 1_024,
+);
+
 Files::pick(MediaPickerType::Image, function ($file): void {
     $this->selectedPath = $file->path;
     $this->selectedImageSource = $file->uri();

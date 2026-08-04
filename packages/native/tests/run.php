@@ -2888,6 +2888,56 @@ try {
 }
 $assert($unsafeAssetRejected, 'Files copyAsset must reject traversal before crossing the bridge.');
 
+$downloadedFile = null;
+$downloadRequest = Files::download(
+    'https://cdn.example.test/media/story.webp',
+    'drafts/remote-story.webp',
+    static function (FileReference $file) use (&$downloadedFile): void {
+        $downloadedFile = $file;
+    },
+    8_388_608,
+);
+$downloadCall = TestDiagnostics::$moduleCall;
+$assert(
+    $downloadCall !== null
+        && $downloadCall['requestId'] === $downloadRequest
+        && $downloadCall['module'] === 'files'
+        && $downloadCall['method'] === 'download'
+        && Wire::decodeMap($downloadCall['payload']) === [
+            'url' => 'https://cdn.example.test/media/story.webp',
+            'path' => 'drafts/remote-story.webp',
+            'maximumBytes' => 8_388_608,
+        ],
+    'Files download must emit a bounded HTTPS sandbox download.',
+);
+Runtime::dispatchModuleResult(
+    $downloadRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'path' => 'drafts/remote-story.webp',
+        'name' => 'remote-story.webp',
+        'mimeType' => 'image/webp',
+        'size' => 82_944,
+    ]),
+);
+$assert(
+    $downloadedFile instanceof FileReference
+        && $downloadedFile->path === 'drafts/remote-story.webp'
+        && $downloadedFile->size === 82_944,
+    'Files download must decode the materialized typed file reference.',
+);
+$unsafeDownloadRejected = false;
+try {
+    Files::download(
+        'http://example.test/media.webp',
+        'drafts/media.webp',
+        static function (FileReference $_): void {},
+    );
+} catch (InvalidArgumentException) {
+    $unsafeDownloadRejected = true;
+}
+$assert($unsafeDownloadRejected, 'Files download must reject non-HTTPS URLs before crossing the bridge.');
+
 $importedFile = null;
 $importUriRequest = Files::importUri(
     'content://media/external/images/media/42',
@@ -5193,8 +5243,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.16',
-    'The runtime SDK contract must match the 0.6.16 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.17',
+    'The runtime SDK contract must match the 0.6.17 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

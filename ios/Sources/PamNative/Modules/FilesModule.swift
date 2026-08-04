@@ -27,6 +27,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 queue.async { self.write(payload, completion) }
             case "copyAsset":
                 queue.async { self.copyAsset(payload, completion) }
+            case "download":
+                queue.async { self.download(payload, completion) }
             case "stat":
                 queue.async { self.stat(payload, completion) }
             case "list":
@@ -165,6 +167,37 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 try FileManager.default.moveItem(at: temporary, to: destination)
             }
             completion(.success, try WireMap.encode(reference(destination)))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func download(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(rawURL)? = values["url"],
+                  let url = URL(string: rawURL),
+                  url.scheme?.lowercased() == "https",
+                  url.host?.isEmpty == false,
+                  url.user == nil,
+                  url.password == nil,
+                  case let .text(path)? = values["path"] else {
+                throw FileModuleError("Download URL must be an absolute HTTPS URL without credentials")
+            }
+            let maximumBytes = values["maximumBytes"]?.integerValue ?? 64 * 1_024 * 1_024
+            guard maximumBytes > 0, maximumBytes <= 256 * 1_024 * 1_024 else {
+                throw FileModuleError("Invalid download size limit")
+            }
+            let destination = try resolve(path)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            RemoteFileDownload.start(
+                url: url,
+                destination: destination,
+                root: root,
+                maximumBytes: maximumBytes,
+                completion: completion
+            )
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
@@ -460,6 +493,135 @@ private struct FileModuleError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
+    private let destination: URL
+    private let root: URL
+    private let maximumBytes: Int64
+    private let completion: ModuleCompletion
+    private var session: URLSession?
+    private var finished = false
+
+    private init(
+        destination: URL,
+        root: URL,
+        maximumBytes: Int64,
+        completion: @escaping ModuleCompletion
+    ) {
+        self.destination = destination
+        self.root = root
+        self.maximumBytes = maximumBytes
+        self.completion = completion
+    }
+
+    static func start(
+        url: URL,
+        destination: URL,
+        root: URL,
+        maximumBytes: Int64,
+        completion: @escaping ModuleCompletion
+    ) {
+        let delegate = RemoteFileDownload(
+            destination: destination,
+            root: root,
+            maximumBytes: maximumBytes,
+            completion: completion
+        )
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.httpShouldUsePipelining = true
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 120
+        let queue = OperationQueue()
+        queue.maxConcurrentOperationCount = 1
+        let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
+        delegate.session = session
+        session.downloadTask(with: url).resume()
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didWriteData bytesWritten: Int64,
+        totalBytesWritten: Int64,
+        totalBytesExpectedToWrite: Int64
+    ) {
+        if totalBytesWritten > maximumBytes
+            || (totalBytesExpectedToWrite > maximumBytes && totalBytesExpectedToWrite > 0) {
+            downloadTask.cancel()
+            finish(.failure, Data("Download exceeds configured size limit".utf8))
+        }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        guard let url = request.url,
+              url.scheme?.lowercased() == "https",
+              url.host?.isEmpty == false,
+              url.user == nil,
+              url.password == nil else {
+            completionHandler(nil)
+            finish(.failure, Data("Download redirect must use HTTPS without credentials".utf8))
+            return
+        }
+        completionHandler(request)
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        downloadTask: URLSessionDownloadTask,
+        didFinishDownloadingTo location: URL
+    ) {
+        do {
+            guard let response = downloadTask.response as? HTTPURLResponse,
+                  (200...299).contains(response.statusCode),
+                  response.url?.scheme?.lowercased() == "https" else {
+                throw FileModuleError(
+                    "Download failed with HTTP \((downloadTask.response as? HTTPURLResponse)?.statusCode ?? 0)"
+                )
+            }
+            let size = try location.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+            guard size <= maximumBytes else {
+                throw FileModuleError("Download exceeds configured size limit")
+            }
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: location)
+            } else {
+                try FileManager.default.moveItem(at: location, to: destination)
+            }
+            let relative = String(destination.standardizedFileURL.path.dropFirst(root.standardizedFileURL.path.count + 1))
+            finish(.success, try WireMap.encode([
+                "path": .text(relative),
+                "name": .text(destination.lastPathComponent),
+                "mimeType": .text(response.mimeType
+                    ?? UTType(filenameExtension: destination.pathExtension)?.preferredMIMEType
+                    ?? "application/octet-stream"),
+                "size": .integer(Int64(size)),
+            ]))
+        } catch { finish(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didCompleteWithError error: Error?
+    ) {
+        if let error { finish(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func finish(_ status: ModuleResultStatus, _ data: Data) {
+        guard !finished else { return }
+        finished = true
+        completion(status, data)
+        session?.finishTasksAndInvalidate()
+        session = nil
+    }
 }
 
 private extension WireValue {
