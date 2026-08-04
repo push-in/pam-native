@@ -468,6 +468,10 @@ The explicit PHP API remains intentionally lower-level:
 `Scroll::make($content)` receives exactly one content element. Use a `Row` or
 `Column` yourself when authoring an imperative element tree.
 
+Declarative scroll views accept `decelerationRate="normal"` (`0.985`) and
+`decelerationRate="fast"` (`0.9`) aliases as well as numeric values from `0`
+through `1`. Numeric values outside that range are clamped before encoding.
+
 Observed logical offsets can be restored without controlling the scroll on
 every render:
 

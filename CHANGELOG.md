@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.9 - 2026-08-04
+
+- Normalize declarative `ScrollView` deceleration aliases so `normal` and
+  `fast` encode as numeric protocol values accepted by both native hosts.
+- Clamp declarative numeric deceleration rates to the supported `0...1` range
+  and cover alias and numeric behavior with PHP SDK regressions.
+
 ## 0.6.8 - 2026-08-04
 
 - Add `Sms::isAvailable()` and `Sms::compose()` for querying platform support

@@ -1994,6 +1994,17 @@ final class TemplateRenderer
                 'on-drag' => ScrollKeyboardDismissMode::OnDrag->value,
                 'interactive' => ScrollKeyboardDismissMode::Interactive->value,
             ]),
+            PropKey::ScrollDecelerationRate => match ($value) {
+                'normal' => 0.985,
+                'fast' => 0.9,
+                default => min(
+                    1.0,
+                    max(
+                        0.0,
+                        self::floatValue($value, 'ScrollView decelerationRate'),
+                    ),
+                ),
+            },
             PropKey::ActivitySize => match ($value) {
                 'small' => ActivityIndicatorSize::Small
                     ->densityIndependentPixels(),
