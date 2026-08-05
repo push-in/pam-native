@@ -1830,6 +1830,7 @@ final class TemplateRenderer
                 'memoryDisk' => ImageCachePolicy::ForceCache->value,
                 'only-if-cached' => ImageCachePolicy::OnlyIfCached->value,
                 'onlyIfCached' => ImageCachePolicy::OnlyIfCached->value,
+                'none' => ImageCachePolicy::None->value,
             ]),
             PropKey::ModalPresentation => self::named($value, [
                 'fullScreen' => 1, 'dialog' => 2, 'sheet' => 3,

@@ -231,7 +231,7 @@ internal class NativeImageLoader(
         pending.decodedKey = key
 
         if (
-            pending.request.cachePolicy != IMAGE_CACHE_RELOAD &&
+            pending.request.cachePolicy !in setOf(IMAGE_CACHE_RELOAD, IMAGE_CACHE_NONE) &&
             pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
             pending.request.mediaCachePolicy != MEDIA_CACHE_DISK &&
             pending.request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
@@ -293,6 +293,7 @@ internal class NativeImageLoader(
                         )
                         if (
                             !closed.get() &&
+                            pending.request.cachePolicy != IMAGE_CACHE_NONE &&
                             pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
                             pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
                         ) {
@@ -536,7 +537,8 @@ internal class NativeImageLoader(
         val origin = URI(source)
         val cacheFile = diskFile(source, headers, request.mediaCacheKey)
         val identity = cacheIdentity(source, request)
-        val diskEnabled = request.mediaCachePolicy in setOf(
+        val diskEnabled = request.cachePolicy != IMAGE_CACHE_NONE &&
+            request.mediaCachePolicy in setOf(
             MEDIA_CACHE_DISK,
             MEDIA_CACHE_MEMORY_AND_DISK,
             MEDIA_CACHE_CACHE_FIRST,
@@ -545,7 +547,7 @@ internal class NativeImageLoader(
             MEDIA_CACHE_STALE_WHILE_REVALIDATE,
         )
         val readDiskFirst = diskEnabled &&
-            request.cachePolicy != IMAGE_CACHE_RELOAD &&
+            request.cachePolicy !in setOf(IMAGE_CACHE_RELOAD, IMAGE_CACHE_NONE) &&
             request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
         if (readDiskFirst) {
             readDisk(cacheFile, request.mediaCacheMaxAgeMs)?.let {
@@ -588,6 +590,11 @@ internal class NativeImageLoader(
             connection.connectTimeout = CONNECT_TIMEOUT_MS
             connection.readTimeout = READ_TIMEOUT_MS
             connection.instanceFollowRedirects = false
+            connection.useCaches = request.cachePolicy != IMAGE_CACHE_NONE
+            if (request.cachePolicy == IMAGE_CACHE_NONE) {
+                connection.setRequestProperty("Cache-Control", "no-cache, no-store")
+                connection.setRequestProperty("Pragma", "no-cache")
+            }
             connection.setRequestProperty("Accept", "image/*")
             if (sameOrigin(origin, uri)) {
                 headers.forEach(connection::setRequestProperty)
@@ -1084,6 +1091,7 @@ internal const val IMAGE_RESIZE_NONE = 4
 internal const val IMAGE_CACHE_DEFAULT = 1
 internal const val IMAGE_CACHE_RELOAD = 2
 internal const val IMAGE_CACHE_ONLY_IF_CACHED = 4
+internal const val IMAGE_CACHE_NONE = 5
 internal const val MEDIA_CACHE_NONE = 1
 internal const val MEDIA_CACHE_MEMORY = 2
 internal const val MEDIA_CACHE_DISK = 3

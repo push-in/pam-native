@@ -10,4 +10,5 @@ enum ImageCachePolicy: int
     case Reload = 2;
     case ForceCache = 3;
     case OnlyIfCached = 4;
+    case None = 5;
 }

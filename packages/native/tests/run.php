@@ -1387,6 +1387,17 @@ $assert(
         === ImageCachePolicy::ForceCache->value,
     'Image memory-disk must map the familiar Expo policy to the native memory/disk cache.',
 );
+$uncachedImage = TemplateRenderer::render(
+    TemplateCompiler::compile('<Image source="https://example.test/image.webp" cachePolicy="none" />'),
+    new class {
+    },
+    [],
+);
+$assert(
+    $uncachedImage->properties()[PropKey::ImageCachePolicy->value]
+        === ImageCachePolicy::None->value,
+    'Image none must map to the native read/write cache bypass policy.',
+);
 $keyboardAliasElement = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<Column>'
@@ -5290,8 +5301,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.21',
-    'The runtime SDK contract must match the 0.6.21 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.22',
+    'The runtime SDK contract must match the 0.6.22 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

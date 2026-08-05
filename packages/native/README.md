@@ -290,6 +290,12 @@ aliases for the same native memory-plus-disk behavior as `force-cache`. This
 keeps ports from Expo Image explicit without introducing a JavaScript image
 pipeline.
 
+Use `cachePolicy="none"` (or `ImageCachePolicy::None`) for a one-shot network
+request that bypasses decoded-memory, HTTP and PAM media-disk caches and does
+not write the response back to them. This is intended for explicit recovery
+after a cached remote image fails; ordinary images should keep a cache-enabled
+policy.
+
 `asset://` always starts at the PAM project root. For example,
 `asset://assets/logos/brand.png` loads
 `assets/logos/brand.png` on both Android and iOS. Keep the internal `pam/`

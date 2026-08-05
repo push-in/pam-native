@@ -2998,10 +2998,16 @@ public final class PamRenderer {
             requestCachePolicy = .returnCacheDataElseLoad
         case 4:
             requestCachePolicy = .returnCacheDataDontLoad
+        case 5:
+            requestCachePolicy = .reloadIgnoringLocalCacheData
         default:
             requestCachePolicy = .useProtocolCachePolicy
         }
         var request = URLRequest(url: url, cachePolicy: requestCachePolicy)
+        if cachePolicy == 5 {
+            request.setValue("no-cache, no-store", forHTTPHeaderField: "Cache-Control")
+            request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        }
         parseImageHeaders(
             state.properties[PamConstants.imageRequestHeaders]?.textOrNil()
         ).forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
@@ -3071,7 +3077,7 @@ public final class PamRenderer {
             let checksum = state.properties[PamConstants.mediaCacheChecksum]?.textOrNil()
             let cacheLimit = state.properties[PamConstants.mediaCacheMaxBytes]?.integerOrNil() ?? 0
             let pinned = state.properties[PamConstants.mediaCachePinOffline]?.boolOrNil() ?? false
-            if [3, 4, 5, 6, 8].contains(mediaPolicy) {
+            if cachePolicy != 5 && [3, 4, 5, 6, 8].contains(mediaPolicy) {
                 let identity = PamMediaDiskCache.shared.identity(
                     source: context.source,
                     stableKey: cacheKey

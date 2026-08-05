@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.22 - 2026-08-05
+
+- Fix `Image`/`ImageBackground` `cachePolicy="none"` so templates map it to a
+  typed native policy instead of throwing `Unknown template option none`.
+- Make the no-cache policy bypass decoded-memory, HTTP and PAM media-disk
+  reads/writes on Android and iOS, enabling safe retry after corrupt/stale
+  remote image cache entries.
+
 ## 0.6.21 - 2026-08-05
 
 - Paint the active declarative `StatusBar` color over the Android 15+
