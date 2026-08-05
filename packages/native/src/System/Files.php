@@ -138,7 +138,12 @@ final class Files
         return $path;
     }
 
-    /** @param Closure(FileReference): void $callback */
+    /**
+     * @param Closure(?FileReference): void $callback
+     *
+     * A user-cancelled platform picker resolves with null. Cancellation is a
+     * normal UI outcome and is never surfaced as a native-module exception.
+     */
     public static function pick(
         MediaPickerType $type,
         Closure $callback,
@@ -146,12 +151,18 @@ final class Files
         return self::invoke(
             'pick',
             ['type' => $type->value],
-            static fn (array $values): mixed => $callback(self::reference($values)),
+            static function (array $values) use ($callback): mixed {
+                $reference = self::reference($values);
+
+                return $callback($reference->path === '' ? null : $reference);
+            },
         );
     }
 
     /**
      * @param Closure(list<FileReference>): void $callback
+     *
+     * A user-cancelled platform picker resolves with an empty list.
      */
     public static function pickMany(
         MediaPickerType $type,

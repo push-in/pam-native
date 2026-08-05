@@ -19,7 +19,7 @@ final class MediaCapture
     }
 
     /**
-     * @param Closure(FileReference): void $callback
+     * @param Closure(?FileReference): void $callback
      * @param Closure(string): void|null $failure
      */
     public static function capture(
@@ -40,7 +40,17 @@ final class MediaCapture
                     }
                     throw new RuntimeException($result->payload);
                 }
+                if ($result->payload === '') {
+                    $callback(null);
+
+                    return;
+                }
                 $values = Wire::decodeMap($result->payload);
+                if ((string) ($values['path'] ?? '') === '') {
+                    $callback(null);
+
+                    return;
+                }
                 $callback(new FileReference(
                     path: (string) ($values['path'] ?? ''),
                     name: (string) ($values['name'] ?? ''),

@@ -210,7 +210,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }
         activity.launchForResult(intent) { result, data ->
             if (result != Activity.RESULT_OK || data?.data == null) {
-                completion.complete(ModuleResultStatus.FAILURE, "File selection was cancelled".toByteArray())
+                completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
             } else {
                 executor.execute { importUri(data.data!!, completion) }
             }
@@ -240,8 +240,8 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         activity.launchForResult(intent) { result, data ->
             if (result != Activity.RESULT_OK || data == null) {
                 completion.complete(
-                    ModuleResultStatus.FAILURE,
-                    "File selection was cancelled".toByteArray(),
+                    ModuleResultStatus.SUCCESS,
+                    WireMap.encode(mapOf("items" to WireValue.Text("[]"))),
                 )
                 return@launchForResult
             }
@@ -306,7 +306,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         activity.launchForResult(intent) { result, data ->
             if (result != Activity.RESULT_OK) {
                 activity.contentResolver.delete(output, null, null)
-                completion.complete(ModuleResultStatus.FAILURE, "Media capture was cancelled".toByteArray())
+                completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                 return@launchForResult
             }
             executor.execute {

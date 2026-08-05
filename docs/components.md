@@ -524,6 +524,13 @@ every render:
 that logical offset, and omitting both targets preserves the scroll-to-end
 behavior.
 
+File and media picker cancellation is a normal control-flow result. `Files::pick()`
+invokes its callback with `null`, while `Files::pickMany()` invokes its callback
+with an empty list. Platform back/cancel actions do not throw native-module
+exceptions; actual picker/import failures still do.
+Camera cancellation follows the same contract and invokes the
+`MediaCapture::capture()` callback with `null`.
+
 ## Format PAM components
 
 The Composer package installs an official formatter:

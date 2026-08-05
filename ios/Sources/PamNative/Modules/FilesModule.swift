@@ -264,7 +264,14 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     }
 
     func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
-        finishFailure("File selection was cancelled")
+        let multiple = pendingMultiple
+        let completion = takePending()
+        if multiple {
+            let emptyItems = try? WireMap.encode(["items": .text("[]")])
+            completion?(.success, emptyItems ?? Data())
+        } else {
+            completion?(.success, Data())
+        }
     }
 
     func imagePickerController(
@@ -287,7 +294,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
 
     func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
         picker.dismiss(animated: true)
-        finishFailure("Media capture was cancelled")
+        takePending()?(.success, Data())
     }
 
     private func importFile(_ source: URL, completion: ModuleCompletion?) {

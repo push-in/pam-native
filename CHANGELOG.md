@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.28 - 2026-08-05
+
+- Treat Android and iOS file/media picker cancellation as normal UI control
+  flow: `Files::pick()` now resolves `null` and `Files::pickMany()` resolves an
+  empty list instead of raising a native-module failure when users press back.
+- Resolve camera cancellation with `null` through `MediaCapture::capture()` as
+  well, while preserving native failures for actual capture/import errors.
+
 ## 0.6.27 - 2026-08-05
 
 - Render Android `MediaPlayer` thumbnails as native posters and keep them

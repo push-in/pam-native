@@ -2904,6 +2904,57 @@ $assert(
     'Files pickMany must decode every native file reference in selection order.',
 );
 
+$cancelledPick = new FileReference('unexpected', 'unexpected', 'text/plain', 1);
+$cancelledPickRequest = Files::pick(
+    MediaPickerType::Image,
+    static function (?FileReference $file) use (&$cancelledPick): void {
+        $cancelledPick = $file;
+    },
+);
+Runtime::dispatchModuleResult(
+    $cancelledPickRequest,
+    ModuleResultStatus::Success->value,
+    '',
+);
+$assert(
+    $cancelledPick === null,
+    'Files pick must resolve user cancellation with null instead of throwing.',
+);
+
+$cancelledMany = [new FileReference('unexpected', 'unexpected', 'text/plain', 1)];
+$cancelledManyRequest = Files::pickMany(
+    MediaPickerType::Media,
+    static function (array $files) use (&$cancelledMany): void {
+        $cancelledMany = $files;
+    },
+);
+Runtime::dispatchModuleResult(
+    $cancelledManyRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map(['items' => '[]']),
+);
+$assert(
+    $cancelledMany === [],
+    'Files pickMany must resolve user cancellation with an empty list.',
+);
+
+$cancelledCapture = new FileReference('unexpected', 'unexpected', 'text/plain', 1);
+$cancelledCaptureRequest = \Pam\Native\System\MediaCapture::capture(
+    \Pam\Native\CaptureType::Photo,
+    static function (?FileReference $file) use (&$cancelledCapture): void {
+        $cancelledCapture = $file;
+    },
+);
+Runtime::dispatchModuleResult(
+    $cancelledCaptureRequest,
+    ModuleResultStatus::Success->value,
+    '',
+);
+$assert(
+    $cancelledCapture === null,
+    'Media capture must resolve user cancellation with null instead of throwing.',
+);
+
 $copiedAsset = null;
 $copyAssetRequest = Files::copyAsset(
     'assets/templates/story.webp',
@@ -5303,8 +5354,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.27',
-    'The runtime SDK contract must match the 0.6.27 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.28',
+    'The runtime SDK contract must match the 0.6.28 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
