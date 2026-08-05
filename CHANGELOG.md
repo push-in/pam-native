@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.24 - 2026-08-05
+
+- Make the Android renderer release artifact self-contained for SDK assembly
+  by shipping its matching Cargo workspace and Rust engine/protocol sources.
+- Prevent a copied older SDK workspace from rebuilding the bundled native
+  libraries with a stale protocol after an upgrade.
+
 ## 0.6.23 - 2026-08-05
 
 - Add the typed `BorderStyle`/`borderStyle` protocol contract with `solid`,
