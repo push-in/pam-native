@@ -38,6 +38,7 @@ final class ServerDrivenUi
         'borderRadius' => true,
         'borderWidth' => true,
         'borderColor' => true,
+        'borderStyle' => true,
         'opacity' => true,
     ];
 

@@ -144,6 +144,7 @@ final class TemplateRenderer
         'borderRadius' => PropKey::BorderRadius,
         'borderWidth' => PropKey::BorderWidth,
         'borderColor' => PropKey::BorderColor,
+        'borderStyle' => PropKey::BorderStyle,
         'opacity' => PropKey::Opacity,
         'alignItems' => PropKey::AlignItems,
         'alignSelf' => PropKey::AlignSelf,
@@ -1723,6 +1724,9 @@ final class TemplateRenderer
             PropKey::DrawerOverlayColor,
             PropKey::DrawingColor,
             => self::colorValue($value, "Template {$key->name}"),
+            PropKey::BorderStyle => self::named($value, [
+                'solid' => 1, 'dashed' => 2, 'dotted' => 3,
+            ]),
             PropKey::AlignItems, PropKey::AlignSelf => self::named($value, [
                 'start' => 1, 'flex-start' => 1, 'center' => 2,
                 'end' => 3, 'flex-end' => 3, 'stretch' => 4,

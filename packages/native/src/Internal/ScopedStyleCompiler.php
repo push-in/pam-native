@@ -28,6 +28,7 @@ final class ScopedStyleCompiler
         'border-bottom-color' => 'borderColor',
         'border-color' => 'borderColor',
         'border-radius' => 'borderRadius',
+        'border-style' => 'borderStyle',
         'border-top-left-radius' => 'borderTopLeftRadius',
         'border-top-right-radius' => 'borderTopRightRadius',
         'border-top-width' => 'borderTopWidth',
@@ -523,6 +524,17 @@ final class ScopedStyleCompiler
                         "Pam Native uses border-box layout; content-box is unsupported in {$name}.",
                     );
                 }
+                continue;
+            }
+            if ($property === 'border-style') {
+                $output['borderStyle'] = match (strtolower(trim($value))) {
+                    'solid' => 1,
+                    'dashed' => 2,
+                    'dotted' => 3,
+                    default => throw new RuntimeException(
+                        "Unsupported border-style value {$value} in {$name}.",
+                    ),
+                };
                 continue;
             }
             if (in_array($property, ['row-gap', 'column-gap'], true)) {

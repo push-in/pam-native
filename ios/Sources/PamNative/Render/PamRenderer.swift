@@ -25,6 +25,7 @@ public final class PamRenderer {
     private var workletAnimators: [Int64: PamWorkletAnimator] = [:]
     private var localModalActions: [Int64: UIAction.Identifier] = [:]
     private var borderLayers: [Int64: PamBorderLayers] = [:]
+    private var patternedBorderLayers: [Int64: CAShapeLayer] = [:]
     private var rootId: Int64 = 0
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
@@ -140,6 +141,8 @@ public final class PamRenderer {
         workletAnimators.removeAll()
         localModalActions.removeAll()
         borderLayers.removeAll()
+        patternedBorderLayers.values.forEach { $0.removeFromSuperlayer() }
+        patternedBorderLayers.removeAll()
 
         for node in nodes.values {
             cancelImageLoad(for: node)
@@ -254,6 +257,7 @@ public final class PamRenderer {
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
+        patternedBorderLayers.removeValue(forKey: id)?.removeFromSuperlayer()
 
         cancelImageLoad(for: state)
 
@@ -400,6 +404,7 @@ public final class PamRenderer {
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
+        patternedBorderLayers.removeValue(forKey: id)?.removeFromSuperlayer()
         cancelImageLoad(for: state)
         state.childrenNeedRethrow = nil
         nativeViews.release(view: view)
@@ -1412,6 +1417,7 @@ public final class PamRenderer {
             }
         case PamConstants.borderColor,
              PamConstants.borderWidth,
+             PamConstants.borderStyle,
              PamConstants.borderLeftWidth,
              PamConstants.borderTopWidth,
              PamConstants.borderRightWidth,
@@ -1419,6 +1425,7 @@ public final class PamRenderer {
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             view.layer.cornerRadius = CGFloat(value.decimalOrZero())
+            applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.shadowOffsetX,
              PamConstants.shadowOffsetY,
@@ -1763,6 +1770,7 @@ public final class PamRenderer {
             (view as? PamMediaView)?.setResizeMode(1)
         case PamConstants.borderColor,
              PamConstants.borderWidth,
+             PamConstants.borderStyle,
              PamConstants.borderLeftWidth,
              PamConstants.borderTopWidth,
              PamConstants.borderRightWidth,
@@ -1770,6 +1778,7 @@ public final class PamRenderer {
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
             view.layer.cornerRadius = 0
+            applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.textAlign:
             applyTextAlignment(view: view, nodeId: nodeId)
@@ -1990,10 +1999,14 @@ public final class PamRenderer {
             argb: state.properties[PamConstants.borderColor]?.integerOrNil() ?? 0
         ).cgColor
         let directional = left != top || left != right || left != bottom
+        let borderStyle = Int(
+            state.properties[PamConstants.borderStyle]?.integerOrNil() ?? 1
+        )
 
-        if !directional {
+        if !directional && borderStyle == 1 {
             borderLayers[nodeId]?.remove()
             borderLayers[nodeId] = nil
+            patternedBorderLayers.removeValue(forKey: nodeId)?.removeFromSuperlayer()
             view.layer.borderWidth = left
             view.layer.borderColor = color
             return
@@ -2001,6 +2014,31 @@ public final class PamRenderer {
 
         view.layer.borderWidth = 0
         view.layer.borderColor = nil
+        if !directional && left > 0 {
+            borderLayers[nodeId]?.remove()
+            borderLayers[nodeId] = nil
+            let layer = patternedBorderLayers[nodeId] ?? CAShapeLayer()
+            if layer.superlayer == nil {
+                view.layer.addSublayer(layer)
+            }
+            patternedBorderLayers[nodeId] = layer
+            let inset = left / 2
+            let pathBounds = view.bounds.insetBy(dx: inset, dy: inset)
+            layer.frame = view.bounds
+            layer.path = UIBezierPath(
+                roundedRect: pathBounds,
+                cornerRadius: max(0, view.layer.cornerRadius - inset)
+            ).cgPath
+            layer.fillColor = UIColor.clear.cgColor
+            layer.strokeColor = color
+            layer.lineWidth = left
+            layer.lineCap = borderStyle == 3 ? .round : .butt
+            layer.lineDashPattern = borderStyle == 3
+                ? [NSNumber(value: Double(left)), NSNumber(value: Double(left * 1.5))]
+                : [NSNumber(value: Double(left * 3)), NSNumber(value: Double(left * 2))]
+            return
+        }
+        patternedBorderLayers.removeValue(forKey: nodeId)?.removeFromSuperlayer()
         let layers = borderLayers[nodeId] ?? PamBorderLayers(host: view.layer)
         borderLayers[nodeId] = layers
         layers.update(

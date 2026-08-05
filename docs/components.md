@@ -294,7 +294,7 @@ Supported CSS covers PAM's common native layout and paint contracts:
 - `inset`, `inset-inline/block`, individual position edges, `transform`
   (`translateX/Y`, `scale/X/Y`, and `rotate`), and compositor
   `translation-x/y`;
-- border width/color/radii plus `border` and directional
+- border width/color/radii/style plus `border` and directional
   `border-top/right/bottom/left` `<width> solid <color>` shorthands, including
   `border: none`;
 - background colors (including `background: none`), text color, percentage or
@@ -317,6 +317,9 @@ device-specific offsets.
 Directional border colors are accepted for familiar CSS authoring; Android
 and iOS currently paint one shared native border color, so the last authored
 directional color applies to every edge.
+`border-style` accepts `solid`, `dashed`, and `dotted`. Patterned styles apply
+to uniform borders and preserve the authored width, color, and corner radius;
+directional per-edge widths continue to use solid native edge painting.
 `box-shadow` accepts one native shadow in standard CSS order:
 `x-offset y-offset [blur-radius] [spread-radius] [color]`, or `none`.
 Multiple comma-separated shadows and inset shadows are rejected explicitly.

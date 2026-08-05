@@ -536,6 +536,7 @@ pub enum PropKey {
     WorkletDurationMs = 443,
     WorkletIterations = 444,
     NavigationBarHidden = 445,
+    BorderStyle = 446,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -988,6 +989,7 @@ impl TryFrom<u16> for PropKey {
             443 => Ok(Self::WorkletDurationMs),
             444 => Ok(Self::WorkletIterations),
             445 => Ok(Self::NavigationBarHidden),
+            446 => Ok(Self::BorderStyle),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1852,10 +1854,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=445 {
+        for value in 1..=446 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(446).is_err());
+        assert!(PropKey::try_from(447).is_err());
     }
 
     #[test]

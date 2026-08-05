@@ -272,6 +272,7 @@
         { "name": "borderRadius" },
         { "name": "borderWidth" },
         { "name": "borderColor" },
+        { "name": "borderStyle", "values": [{ "name": "solid" }, { "name": "dashed" }, { "name": "dotted" }] },
         { "name": "opacity" },
         { "name": "model", "description": "Two-way component property binding for Input." },
         { "name": "bind:value", "description": "Two-way Input binding to a component property." },

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.23 - 2026-08-05
+
+- Add the typed `BorderStyle`/`borderStyle` protocol contract with `solid`,
+  `dashed`, and `dotted` values.
+- Compile scoped CSS `border-style` and render uniform patterned borders
+  natively on Android and iOS, including rounded corners and image hosts.
+
 ## 0.6.22 - 2026-08-05
 
 - Fix `Image`/`ImageBackground` `cachePolicy="none"` so templates map it to a

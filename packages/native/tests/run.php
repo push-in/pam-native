@@ -338,6 +338,7 @@ $compiledCss = ScopedStyleCompiler::compile(
         border-bottom: 2px solid #101410;
         border-left: 3px solid #101410;
         border-left-color: #D6ECDD;
+        border-style: dashed;
         border-radius: 28px 28px 0 0;
         inset: 5px 6px 7px 8px;
         flex-wrap: wrap;
@@ -386,6 +387,7 @@ $assert(
         'borderBottomWidth' => '2',
         'borderLeftWidth' => '3',
         'borderColor' => 0xFFD6ECDD,
+        'borderStyle' => 2,
         'borderTopLeftRadius' => '28',
         'borderTopRightRadius' => '28',
         'borderBottomRightRadius' => '0',
@@ -5301,8 +5303,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.22',
-    'The runtime SDK contract must match the 0.6.22 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.23',
+    'The runtime SDK contract must match the 0.6.23 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

@@ -172,6 +172,8 @@ native text decoration. `border` and its directional forms accept
 native border color. Absolute position edges accept percentages and
 `border-radius` accepts one to four circular corner values. Unknown web-only
 CSS fails compilation with the component path.
+Uniform borders additionally accept `border-style: solid`, `dashed`, or
+`dotted`; Android and iOS render the pattern natively around rounded corners.
 `box-shadow` accepts one native shadow as
 `x-offset y-offset [blur-radius] [spread-radius] [color]` and `none`.
 Android and iOS render the typed shadow directly; inset and multiple shadows

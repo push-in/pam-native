@@ -1372,6 +1372,7 @@ class PamRenderer(
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.BORDER_STYLE,
             PropKey.BORDER_TOP_LEFT_RADIUS,
             PropKey.BORDER_TOP_RIGHT_RADIUS,
             PropKey.BORDER_BOTTOM_RIGHT_RADIUS,
@@ -2140,6 +2141,7 @@ class PamRenderer(
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.BORDER_STYLE,
             PropKey.BORDER_TOP_LEFT_RADIUS,
             PropKey.BORDER_TOP_RIGHT_RADIUS,
             PropKey.BORDER_BOTTOM_RIGHT_RADIUS,
@@ -4033,6 +4035,7 @@ class PamRenderer(
                 leftBorderWidth != bottomBorderWidth
             )
         val borderColor = state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        val borderStyle = state.integer(PropKey.BORDER_STYLE, 1).toInt()
         val imageHost = state.kind == NodeKind.IMAGE ||
             state.kind == NodeKind.IMAGE_BACKGROUND ||
             state.kind == NodeKind.DRAWING_CANVAS
@@ -4054,7 +4057,21 @@ class PamRenderer(
             setColor(color)
             cornerRadii = radii
             if (!imageHost && borderWidth > 0 && !hasDirectionalBorder) {
-                setStroke(borderWidth, borderColor)
+                when (borderStyle) {
+                    2 -> setStroke(
+                        borderWidth,
+                        borderColor,
+                        maxOf(borderWidth * 3f, dp(3f).toFloat()),
+                        maxOf(borderWidth * 2f, dp(2f).toFloat()),
+                    )
+                    3 -> setStroke(
+                        borderWidth,
+                        borderColor,
+                        maxOf(borderWidth.toFloat(), dp(1f).toFloat()),
+                        maxOf(borderWidth * 1.5f, dp(1.5f).toFloat()),
+                    )
+                    else -> setStroke(borderWidth, borderColor)
+                }
             }
         }
         val background = if (!imageHost && hasDirectionalBorder) {
@@ -4128,7 +4145,11 @@ class PamRenderer(
                 GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
                     cornerRadii = radii
-                    setStroke(borderWidth, borderColor)
+                    when (borderStyle) {
+                        2 -> setStroke(borderWidth, borderColor, borderWidth * 3f, borderWidth * 2f)
+                        3 -> setStroke(borderWidth, borderColor, borderWidth.toFloat(), borderWidth * 1.5f)
+                        else -> setStroke(borderWidth, borderColor)
+                    }
                 }
             } else {
                 null
@@ -6103,6 +6124,7 @@ class PamRenderer(
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.BORDER_STYLE,
             PropKey.BORDER_TOP_LEFT_RADIUS,
             PropKey.BORDER_TOP_RIGHT_RADIUS,
             PropKey.BORDER_BOTTOM_RIGHT_RADIUS,
