@@ -1694,6 +1694,18 @@ $assert(
         && $statusBarAliases->properties()[PropKey::NavigationBarHidden->value] === true,
     'StatusBar must accept the familiar backgroundColor and barStyle aliases.',
 );
+$statusBarDefaults = TemplateRenderer::render(
+    TemplateCompiler::compile('<StatusBar barStyle="dark-content" />'),
+    null,
+    [],
+);
+$assert(
+    !array_key_exists(
+        PropKey::NavigationBarHidden->value,
+        $statusBarDefaults->properties(),
+    ),
+    'StatusBar must not override global navigation visibility when the property is absent.',
+);
 $modalShown = false;
 $modalDismissed = false;
 $modalRequestedClose = false;
@@ -1916,6 +1928,39 @@ $assert(
         && $imageBackground->properties()[PropKey::TintColor->value]
             === 0xFFFFFFFF,
     'Image helpers must preserve native loading, cache, resize, lifecycle and background behavior.',
+);
+
+$templateMediaScope = new class extends Component {
+    public float $currentTime = -1.0;
+    public float $duration = -1.0;
+
+    public function mediaProgress(float $currentTime, float $duration): void
+    {
+        $this->currentTime = $currentTime;
+        $this->duration = $duration;
+    }
+
+    public function render(): \Pam\Native\Element
+    {
+        return Text::make('media progress fixture');
+    }
+};
+$templateMedia = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<MediaPlayer source="https://example.test/video.mp4" '
+        .'on:mediaProgress="mediaProgress" />',
+    ),
+    $templateMediaScope,
+    [],
+);
+($templateMedia->events()[EventKind::MediaProgress->value])(Wire::map([
+    'currentTime' => 2.5,
+    'duration' => 10.0,
+]));
+$assert(
+    $templateMediaScope->currentTime === 2.5
+        && $templateMediaScope->duration === 10.0,
+    'Declarative MediaPlayer progress must decode the wire map into two typed arguments.',
 );
 
 $drawingChanged = '';
@@ -5245,8 +5290,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.18',
-    'The runtime SDK contract must match the 0.6.18 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.19',
+    'The runtime SDK contract must match the 0.6.19 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

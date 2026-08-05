@@ -111,6 +111,10 @@ incoming screen remains reachable by TalkBack during and after a transition.
 When the native transition completes, the outgoing route is released and the
 host returns to the `Idle` operation before subsequent renders. A completed
 pop is therefore never replayed against the remaining single-screen host.
+During reconciliation, Android identifies a newly inserted route independently
+from retained routes that are temporarily detached and reinserted for ordering.
+The inserted route remains the transition target, and system Back then pops it
+directly to the previously active route.
 
 ## Adaptive tabs
 

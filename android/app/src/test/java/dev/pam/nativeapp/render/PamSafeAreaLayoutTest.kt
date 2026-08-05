@@ -50,4 +50,16 @@ class PamSafeAreaLayoutTest {
             ),
         )
     }
+
+    @Test
+    fun measuredParentSizeWinsAfterTheFirstNativeLayout() {
+        assertEquals(2_148, measuredParentExtent(2_148, 2_211))
+        assertEquals(2_211, measuredParentExtent(0, 2_211))
+    }
+
+    @Test
+    fun layoutOnlyDescendantUsesTheNativeParentsContentBox() {
+        assertEquals(2_085, hostedContentExtent(2_148, 2_211, 63))
+        assertEquals(0, hostedContentExtent(40, 40, 63))
+    }
 }

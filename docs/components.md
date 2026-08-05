@@ -252,6 +252,10 @@ decor-fitted view receives no duplicate padding, an edge-to-edge view receives
 the full overlapping inset, and nested, mixed or bottom-bar layouts receive
 only the edges they physically overlap. Transient gesture/button bars and
 rotation therefore do not move interactive content underneath system chrome.
+Absolute descendants hosted through layout-only rows or columns use the
+materialized safe-area parent's measured content box after native padding is
+applied. Their authored size and bottom/right offsets therefore remain intact
+above persistent app bars on gesture and three-button Android navigation.
 Conservative auto-width text frames follow the relevant flex alignment axis:
 `align-items`/`align-self` in columns and `justify-content` in rows. Explicitly
 sized or growing text keeps normal start alignment unless `text-align` is
@@ -696,6 +700,26 @@ final class Checkout extends Component
 Tree components and `.pam.php` components can render each other because both
 use the same component lifecycle, element identities, Rust diff engine, binary
 protocol, and Android UI-thread commit queue.
+
+## Media progress
+
+Declarative `MediaPlayer` progress handlers receive the same typed arguments as
+the programmatic `MediaPlayer::onProgress()` API:
+
+```xml
+<MediaPlayer source="$video" on:mediaProgress="trackProgress" />
+```
+
+```php
+public function trackProgress(float $currentTime, float $duration): void
+{
+    $this->progress = $duration > 0.0 ? $currentTime / $duration : 0.0;
+}
+```
+
+The template runtime decodes the native wire map before invoking the handler.
+A single-parameter handler remains available for applications that intentionally
+consume the raw event payload.
 
 ## Native drawing canvas
 

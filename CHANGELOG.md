@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.19 - 2026-08-04
+
+- Decode declarative `MediaPlayer` progress payloads and invoke template
+  handlers with the documented `(float $currentTime, float $duration)` pair,
+  matching the programmatic component API instead of passing one wire string.
+- Preserve the actual incoming Android stack route when reconciliation moves a
+  retained route after inserting a new route, so media viewers open directly
+  and one system Back returns to the originating screen.
+- Reapply absolute descendant layout after the native safe-area viewport is
+  measured, including layout-only parent chains and native padding, so floating
+  controls remain fully visible above persistent app and system navigation bars.
+- Leave Android system-navigation visibility unchanged when a declarative
+  `StatusBar` omits `navigationBarHidden`, preventing retained routes from
+  overriding the active global navigation-bar contract.
+
 ## 0.6.18 - 2026-08-04
 
 - Add Android immersive navigation control through

@@ -55,6 +55,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
     private var activeRoute: View? = null
+    private var pendingIncomingRoute: View? = null
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingObserver: ViewTreeObserver? = null
@@ -104,8 +105,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     fun insert(view: View, index: Int) {
         val isInitialRoute = childCount == 0
-        view.visibility = if (isInitialRoute) View.VISIBLE else View.INVISIBLE
-        view.importantForAccessibility = if (isInitialRoute) {
+        val isRetainedRoute = view === activeRoute || routeControllers.containsKey(view)
+        if (!isInitialRoute && !isRetainedRoute) pendingIncomingRoute = view
+        val isVisibleRoute = isInitialRoute || view === activeRoute
+        view.visibility = if (isVisibleRoute) View.VISIBLE else View.INVISIBLE
+        view.importantForAccessibility = if (isVisibleRoute) {
             View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         } else {
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -134,6 +138,10 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
     override fun onViewRemoved(child: View) {
         super.onViewRemoved(child)
+        if (suppressControllerRemoval) return
+        if (child === pendingIncomingRoute) {
+            pendingIncomingRoute = null
+        }
         if (child === activeRoute) {
             activeRoute = null
             if (childCount > 0) {
@@ -146,7 +154,6 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 }
             }
         }
-        if (suppressControllerRemoval) return
         val fragment = routeControllers.remove(child) ?: return
         fragmentManager()?.takeUnless(FragmentManager::isStateSaved)?.let { manager ->
             manager.beginTransaction().remove(fragment).commitNowAllowingStateLoss()
@@ -164,6 +171,16 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (view.parent === this) removeView(view)
         else routeControllers.remove(view)?.let { fragment ->
             fragmentManager()?.beginTransaction()?.remove(fragment)?.commitNowAllowingStateLoss()
+        }
+    }
+
+    fun detachRouteForMove(view: View) {
+        if (view.parent !== this) return
+        suppressControllerRemoval = true
+        try {
+            removeView(view)
+        } finally {
+            suppressControllerRemoval = false
         }
     }
 
@@ -406,14 +423,19 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val incoming: View
         when (operation) {
             OPERATION_PUSH, OPERATION_REPLACE -> {
-                incoming = getChildAt(childCount - 1)
-                outgoing = if (childCount > 1) getChildAt(childCount - 2) else null
+                incoming = pendingIncomingRoute
+                    ?.takeIf { it.parent === this }
+                    ?: getChildAt(childCount - 1)
+                outgoing = activeRoute
+                    ?.takeIf { it !== incoming && it.parent === this }
+                    ?: childrenSnapshot().lastOrNull { it !== incoming }
             }
             OPERATION_POP -> {
                 incoming = getChildAt((childCount - 2).coerceAtLeast(0))
                 outgoing = if (childCount > 1) getChildAt(childCount - 1) else null
             }
             else -> {
+                pendingIncomingRoute = null
                 showOnlyTop()
                 return
             }
@@ -633,6 +655,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun finish(incoming: View, outgoing: View?) {
         clearSharedElements()
         running = null
+        pendingIncomingRoute = null
         setActiveRoute(incoming)
         reset(incoming)
         outgoing?.let {

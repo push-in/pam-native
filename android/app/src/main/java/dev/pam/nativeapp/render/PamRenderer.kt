@@ -121,6 +121,17 @@ internal fun safeAreaFlexViewportExtent(
         }
     }
 
+internal fun measuredParentExtent(measuredExtent: Int, layoutParamExtent: Int): Int =
+    measuredExtent.takeIf { it > 0 }
+        ?: layoutParamExtent.coerceAtLeast(0)
+
+internal fun hostedContentExtent(
+    measuredExtent: Int,
+    layoutParamExtent: Int,
+    nativePadding: Int,
+): Int = (measuredParentExtent(measuredExtent, layoutParamExtent) - nativePadding)
+    .coerceAtLeast(0)
+
 internal fun resolvedAndroidLetterSpacing(
     logicalSpacing: Float,
     logicalFontSize: Float,
@@ -240,6 +251,7 @@ class PamRenderer(
     private var statusBarDefaults: StatusBarConfig? = null
     private var statusBarColorAnimator: ValueAnimator? = null
     private var lastFocusedInput: EditText? = null
+    private val deferredViewportLayouts = HashMap<Long, Pair<View, View.OnLayoutChangeListener>>()
 
     fun onHostPause() {
         for (index in 0 until views.size()) {
@@ -514,6 +526,10 @@ class PamRenderer(
         }
         statusBarDefaults?.let(::applyStatusBarConfig)
         statusBarColorAnimator?.cancel()
+        deferredViewportLayouts.values.forEach { (parent, listener) ->
+            parent.removeOnLayoutChangeListener(listener)
+        }
+        deferredViewportLayouts.clear()
         imageLoader.close()
         mediaCache.close()
         nativeViews.close()
@@ -624,6 +640,9 @@ class PamRenderer(
         val state = nodes[id] ?: return
         val removedStatusBar = state.kind == NodeKind.STATUS_BAR
         val view = views[id]
+        deferredViewportLayouts.remove(id)?.let { (parent, listener) ->
+            parent.removeOnLayoutChangeListener(listener)
+        }
         state.propertyAnimator?.cancel()
         state.keyframeAnimator?.cancel()
         state.workletAnimator?.cancel()
@@ -705,7 +724,13 @@ class PamRenderer(
         val wasVirtualized = virtualListAncestor(state.parent) != null
         val view = views[id]
         view?.let(::clearHitSlop)
-        (view?.parent as? ViewGroup)?.removeView(view)
+        val sourceNavigation = view?.parent as? PamNavigationHost
+        val destinationNavigation = views[effectiveParent(parent)] as? PamNavigationHost
+        if (sourceNavigation != null && sourceNavigation === destinationNavigation) {
+            sourceNavigation.detachRouteForMove(requireNotNull(view))
+        } else {
+            (view?.parent as? ViewGroup)?.removeView(view)
+        }
         removeChild(state.parent, id)
         state.parent = parent
         state.index = index
@@ -1095,7 +1120,10 @@ class PamRenderer(
             state = state,
             parentState = parentState,
             parentFrame = parentFrame,
-            parentView = views[state.parent],
+            // Layout-only parents have no Android View. Their children are hosted by the
+            // nearest materialized ancestor, whose measured viewport is the one that can be
+            // reduced by safe areas or fixed siblings.
+            parentView = views[effectiveParent(state.parent)],
             applyHorizontal = { offset, reduction ->
                 leftPx -= offset
                 width = (width - reduction).coerceAtLeast(0)
@@ -1160,13 +1188,33 @@ class PamRenderer(
             Axis.HORIZONTAL -> dp(parentFrame.width)
             Axis.VERTICAL -> dp(parentFrame.height)
         }
+        val rawMeasuredExtent = when (axis) {
+            Axis.HORIZONTAL -> parentView.width
+            Axis.VERTICAL -> parentView.height
+        }
+        if (!parentView.isLaidOut || rawMeasuredExtent <= 0) {
+            deferViewportLayoutUntilMeasured(state.id, parentView, axis)
+        }
+        val hostedThroughLayoutOnlyParent = views[state.parent] == null
+        val nativePadding = if (hostedThroughLayoutOnlyParent) {
+            when (axis) {
+                Axis.HORIZONTAL -> parentView.paddingLeft + parentView.paddingRight
+                Axis.VERTICAL -> parentView.paddingTop + parentView.paddingBottom
+            }
+        } else {
+            0
+        }
         val measuredExtent = when (axis) {
-            Axis.HORIZONTAL -> parentView.width.takeIf { it > 0 }
-                ?: parentView.layoutParams?.width
-                ?: 0
-            Axis.VERTICAL -> parentView.height.takeIf { it > 0 }
-                ?: parentView.layoutParams?.height
-                ?: 0
+            Axis.HORIZONTAL -> hostedContentExtent(
+                parentView.width,
+                parentView.layoutParams?.width ?: 0,
+                nativePadding,
+            )
+            Axis.VERTICAL -> hostedContentExtent(
+                parentView.height,
+                parentView.layoutParams?.height ?: 0,
+                nativePadding,
+            )
         }
         val hostExtent = when (axis) {
             Axis.HORIZONTAL -> host.width
@@ -1247,6 +1295,26 @@ class PamRenderer(
             Axis.HORIZONTAL -> applyHorizontal(reductionBefore, ownReduction)
             Axis.VERTICAL -> applyVertical(reductionBefore, ownReduction)
         }
+    }
+
+    private fun deferViewportLayoutUntilMeasured(
+        stateId: Long,
+        parentView: View,
+        axis: Axis,
+    ) {
+        if (deferredViewportLayouts.containsKey(stateId)) return
+        lateinit var listener: View.OnLayoutChangeListener
+        listener = View.OnLayoutChangeListener { view, left, top, right, bottom, _, _, _, _ ->
+            val extent = if (axis == Axis.HORIZONTAL) right - left else bottom - top
+            if (extent <= 0) return@OnLayoutChangeListener
+            view.removeOnLayoutChangeListener(listener)
+            deferredViewportLayouts.remove(stateId)
+            main.post {
+                if (nodes[stateId] != null) applyLayout(stateId)
+            }
+        }
+        deferredViewportLayouts[stateId] = parentView to listener
+        parentView.addOnLayoutChangeListener(listener)
     }
 
     private fun virtualCellRoot(id: Long): Long? {

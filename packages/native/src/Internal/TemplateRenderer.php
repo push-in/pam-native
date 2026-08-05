@@ -2859,6 +2859,20 @@ final class TemplateRenderer
             }
 
             if (
+                $kind === EventKind::MediaProgress
+                && is_string($payload)
+                && $method->getNumberOfParameters() >= 2
+            ) {
+                $values = Wire::decodeMap($payload);
+                $method->invoke(
+                    $scope,
+                    (float) ($values['currentTime'] ?? 0.0),
+                    (float) ($values['duration'] ?? 0.0),
+                );
+                return;
+            }
+
+            if (
                 is_string($payload)
                 && in_array($kind, [
                     EventKind::GestureBegin,
@@ -3395,16 +3409,19 @@ final class TemplateRenderer
             self::boolValue($values['hidden'] ?? false, 'StatusBar hidden'),
         );
 
-        return $bar
+        $bar = $bar
             ->animated(self::boolValue($values['animated'] ?? false, 'StatusBar animated'))
             ->translucent(self::boolValue(
                 $values['translucent'] ?? false,
                 'StatusBar translucent',
-            ))
-            ->navigationBarHidden(self::boolValue(
+            ));
+
+        return array_key_exists('navigationBarHidden', $values)
+            ? $bar->navigationBarHidden(self::boolValue(
                 $values['navigationBarHidden'] ?? false,
                 'StatusBar navigationBarHidden',
-            ));
+            ))
+            : $bar;
     }
 
     private static function stringValue(mixed $value, string $label): string

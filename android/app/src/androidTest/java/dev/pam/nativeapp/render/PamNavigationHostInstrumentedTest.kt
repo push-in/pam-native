@@ -236,6 +236,64 @@ class PamNavigationHostInstrumentedTest {
     }
 
     @Test
+    fun pushActivatesInsertedRouteWhenReconciliationPlacesItBeforeTheRetainedRoute() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var retainedChat: View
+            lateinit var insertedMedia: View
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    )
+                    transition = TRANSITION_NONE
+                }
+                activity.host.addView(navigation)
+                val discardedInbox = View(activity)
+                retainedChat = View(activity)
+                navigation.insert(discardedInbox, 0)
+                navigation.insert(retainedChat, 1)
+                navigation.operation = OPERATION_PUSH
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.isActiveRoute(retainedChat))
+
+                navigation.removeRoute(navigation.getChildAt(0))
+                insertedMedia = View(activity)
+                navigation.insert(insertedMedia, 1)
+                navigation.detachRouteForMove(retainedChat)
+                navigation.insert(retainedChat, 0)
+                assertSame(retainedChat, navigation.getChildAt(0))
+                assertSame(insertedMedia, navigation.getChildAt(1))
+
+                navigation.operation = OPERATION_PUSH
+                navigation.navigate(2)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(navigation.isActiveRoute(insertedMedia))
+                assertEquals(View.VISIBLE, insertedMedia.visibility)
+                assertEquals(View.INVISIBLE, retainedChat.visibility)
+                assertEquals(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_AUTO,
+                    insertedMedia.importantForAccessibility,
+                )
+                assertEquals(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                    retainedChat.importantForAccessibility,
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun predictiveBackProgressStaysNativeAndCommitsWithoutSecondAnimation() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
