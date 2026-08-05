@@ -722,6 +722,14 @@ the programmatic `MediaPlayer::onProgress()` API:
 changing it to `false` pauses playback without resetting the current position.
 This makes a bound boolean suitable for custom play/pause controls.
 
+Set `thumbnail` to avoid an empty surface while a video prepares. The Android
+renderer keeps the poster in front of the video surface until the first frame
+is actually rendered:
+
+```xml
+<MediaPlayer source="$video" thumbnail="$poster" autoPlay />
+```
+
 ```php
 public function trackProgress(float $currentTime, float $duration): void
 {

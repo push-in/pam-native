@@ -306,14 +306,17 @@ class PamRendererInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
         val cache = NativeMediaFileCache(activity)
+        val imageLoader = NativeImageLoader(activity)
         try {
             onMain(instrumentation) {
-                val media = PamMediaView(activity, cache)
+                val media = PamMediaView(activity, cache, imageLoader)
                 activity.host.addView(media, FrameLayout.LayoutParams(200, 120))
 
                 assertTrue(media.getChildAt(0) is TextureView)
+                assertTrue(media.getChildAt(1) is PamImageView)
             }
         } finally {
+            imageLoader.close()
             cache.close()
             activity.finish()
         }

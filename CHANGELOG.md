@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.27 - 2026-08-05
+
+- Render Android `MediaPlayer` thumbnails as native posters and keep them
+  visible until the first video frame reaches the `TextureView`, preventing
+  blank media surfaces while remote playback prepares or buffers.
+
 ## 0.6.26 - 2026-08-05
 
 - Make declarative `MediaPlayer autoPlay` fully reactive on Android and iOS:

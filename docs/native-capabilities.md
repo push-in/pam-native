@@ -32,6 +32,9 @@ table, see the [capability cookbook](examples.md).
 DOM storage and a safe `PamNative.postMessage(value)` bridge. `MediaPlayer`
 uses `TextureView`/`MediaPlayer` on Android and `AVPlayerViewController` on iOS,
 with controls, autoplay, looping, mute, volume, seek, rate and progress events.
+When `thumbnail` is set, Android keeps that poster visible until the first
+decoded video frame is rendered, including during remote preparation and
+initial buffering.
 
 ## Files, camera and gallery
 

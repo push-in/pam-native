@@ -60,10 +60,12 @@ internal fun resolveVideoScale(
 internal class PamMediaView(
     context: Context,
     private val mediaCache: NativeMediaFileCache,
+    private val imageLoader: NativeImageLoader,
 ) : FrameLayout(context),
     MediaController.MediaPlayerControl,
     TextureView.SurfaceTextureListener {
     private val video = TextureView(context)
+    private val poster = PamImageView(context)
     private val main = Handler(Looper.getMainLooper())
     private var source = ""
     private var autoPlay = false
@@ -111,6 +113,10 @@ internal class PamMediaView(
                 gravity = android.view.Gravity.CENTER
             },
         )
+        addView(
+            poster,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
+        )
         video.surfaceTextureListener = this
         clipChildren = true
         clipToPadding = true
@@ -120,6 +126,7 @@ internal class PamMediaView(
     fun setSource(value: String) {
         if (source == value) return
         source = value
+        showPoster()
         sourceGeneration++
         if (value.isEmpty()) {
             releasePlayer()
@@ -166,6 +173,16 @@ internal class PamMediaView(
                 }
             }
         }
+    }
+
+    fun setThumbnail(request: NativeImageRequest?) {
+        if (request == null || request.source.isBlank()) {
+            imageLoader.cancel(poster)
+            poster.visibility = GONE
+            return
+        }
+        poster.visibility = VISIBLE
+        imageLoader.load(request, poster, NativeImageCallbacks())
     }
 
     fun setCacheRequest(request: MediaCacheRequest) {
@@ -219,6 +236,12 @@ internal class PamMediaView(
 
     fun setResizeMode(value: Int) {
         resizeMode = value.coerceIn(1, 5)
+        poster.scaleType = when (resizeMode) {
+            2 -> android.widget.ImageView.ScaleType.FIT_CENTER
+            3 -> android.widget.ImageView.ScaleType.FIT_XY
+            4, 5 -> android.widget.ImageView.ScaleType.CENTER
+            else -> android.widget.ImageView.ScaleType.CENTER_CROP
+        }
         video.post(::applyVideoTransform)
     }
 
@@ -260,6 +283,7 @@ internal class PamMediaView(
         }
         player.setOnErrorListener { _, what, extra ->
             prepared = false
+            showPoster()
             mediaController?.isEnabled = false
             onError?.invoke("Media playback failed ($what/$extra)")
             true
@@ -274,6 +298,7 @@ internal class PamMediaView(
     }
 
     private fun releasePlayer() {
+        showPoster()
         prepared = false
         bufferedPercentage = 0
         mediaController?.isEnabled = false
@@ -330,7 +355,17 @@ internal class PamMediaView(
         return true
     }
 
-    override fun onSurfaceTextureUpdated(texture: SurfaceTexture) = Unit
+    override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
+        if (prepared && poster.visibility != GONE) {
+            poster.visibility = GONE
+        }
+    }
+
+    private fun showPoster() {
+        if (poster.drawable != null || poster.onImageSizeChanged != null) {
+            poster.visibility = VISIBLE
+        }
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_UP) performClick()

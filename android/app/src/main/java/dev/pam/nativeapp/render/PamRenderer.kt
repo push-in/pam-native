@@ -619,7 +619,7 @@ class PamRenderer(
                 it.onActiveRouteChanged = ::applyMergedStatusBar
             }
             NodeKind.WEB_VIEW -> PamWebView(context)
-            NodeKind.MEDIA -> PamMediaView(context, mediaCache)
+            NodeKind.MEDIA -> PamMediaView(context, mediaCache, imageLoader)
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
             NodeKind.TAB_HOST -> PamTabHost(context)
             NodeKind.CANVAS -> PamVectorCanvas(context)
@@ -1672,6 +1672,7 @@ class PamRenderer(
             PropKey.MEDIA_CACHE_CHECKSUM,
             -> if (view is PamMediaView) {
                 configureMediaCache(view, state)
+                configureMediaThumbnail(view, state)
             } else if (pamImageView(view) != null) {
                 loadImage(view, state)
             }
@@ -2454,7 +2455,10 @@ class PamRenderer(
             PropKey.MEDIA_PRIORITY,
             PropKey.MEDIA_CACHE_CHECKSUM,
             -> when (view) {
-                is PamMediaView -> configureMediaCache(view, state)
+                is PamMediaView -> {
+                    configureMediaCache(view, state)
+                    configureMediaThumbnail(view, state)
+                }
                 is PamImageView -> loadImage(view, state)
             }
             PropKey.ON_MEDIA_CACHE_HIT,
@@ -5429,6 +5433,28 @@ class PamRenderer(
                     }
                 },
             ),
+        )
+    }
+
+    private fun configureMediaThumbnail(view: PamMediaView, state: NodeState) {
+        val source = state.textOrNull(PropKey.MEDIA_THUMBNAIL_SOURCE)
+        view.setThumbnail(
+            source?.let {
+                NativeImageRequest(
+                    source = it,
+                    fadeDurationMs = 0,
+                    mediaCachePolicy = state.integer(
+                        PropKey.MEDIA_CACHE_POLICY,
+                        MEDIA_CACHE_MEMORY_AND_DISK.toLong(),
+                    ).toInt(),
+                    mediaCacheKey = state.textOrNull(PropKey.MEDIA_CACHE_KEY)?.let { key ->
+                        "$key:thumbnail"
+                    },
+                    mediaCacheMaxAgeMs = state.integer(PropKey.MEDIA_CACHE_MAX_AGE_MS, 0),
+                    mediaCacheMaxBytes = state.integer(PropKey.MEDIA_CACHE_MAX_BYTES, 0),
+                    mediaCacheChecksum = null,
+                )
+            },
         )
     }
 
