@@ -316,6 +316,10 @@ class PamRenderer(
         }
         syncLocalModalTriggers()
         syncHostBackground()
+        // Android 15 renders the status-bar surface through the decor view.
+        // Host background synchronization also writes that surface, so the
+        // authored StatusBar color must win at the end of every commit.
+        applyMergedStatusBar()
         syncVirtualLists()
         dirtyLayouts.forEach(::applyLayout)
         retainedScrollOffsets.forEach { (id, offset) ->

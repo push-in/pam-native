@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.20 - 2026-08-05
+
+- Reapply the active declarative `StatusBar` configuration after host-root
+  background synchronization on Android 15 and newer, so a status-bar color
+  different from the screen root is not overwritten at the end of a render
+  commit.
+
 ## 0.6.19 - 2026-08-04
 
 - Decode declarative `MediaPlayer` progress payloads and invoke template
