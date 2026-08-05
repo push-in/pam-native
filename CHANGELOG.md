@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.21 - 2026-08-05
+
+- Paint the active declarative `StatusBar` color over the Android 15+
+  edge-to-edge status-bar inset, so a light root view cannot show through a
+  dark authored system-bar surface.
+- Cover the Android 15+ rendered status-bar pixels in instrumentation tests,
+  in addition to checking the window color and icon appearance contracts.
+
 ## 0.6.20 - 2026-08-05
 
 - Reapply the active declarative `StatusBar` configuration after host-root

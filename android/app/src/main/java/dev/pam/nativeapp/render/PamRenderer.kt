@@ -5202,6 +5202,7 @@ class PamRenderer(
         val window = activity()?.window ?: return
         if (Build.VERSION.SDK_INT >= 35) {
             window.decorView.setBackgroundColor(color)
+            (host as? PamRootHost)?.setStatusBarSurfaceColor(color)
             return
         }
         statusBarColorAnimator?.cancel()

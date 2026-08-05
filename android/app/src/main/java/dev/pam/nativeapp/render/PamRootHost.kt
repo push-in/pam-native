@@ -1,6 +1,9 @@
 package dev.pam.nativeapp.render
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.os.Build
 import android.view.MotionEvent
 import android.view.View
@@ -16,6 +19,7 @@ internal fun shouldRegisterTranslatedTouchTarget(
 ): Boolean = isInput || (includePressables && isPressable)
 
 internal class PamRootHost(context: Context) : FrameLayout(context) {
+    private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()
     private val translatedTouchTargets = LinkedHashSet<View>()
     private var translatedTouchTarget: View? = null
@@ -26,6 +30,23 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     var consumedBottomSystemInset: Int = 0
         private set
     var onStableInsetsChanged: (() -> Unit)? = null
+    internal var statusBarSurfaceColor: Int = Color.TRANSPARENT
+        private set
+
+    fun setStatusBarSurfaceColor(color: Int) {
+        if (statusBarSurfaceColor == color) return
+        statusBarSurfaceColor = color
+        invalidate()
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        val inset = stableSafeAreaInsets.top
+        if (inset > 0 && Color.alpha(statusBarSurfaceColor) > 0) {
+            statusBarSurfacePaint.color = statusBarSurfaceColor
+            canvas.drawRect(0f, 0f, width.toFloat(), inset.toFloat(), statusBarSurfacePaint)
+        }
+    }
 
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
         val previous = stableSafeAreaInsets

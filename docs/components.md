@@ -327,7 +327,9 @@ Android resolves those properties from the active retained stack route; hidden
 routes no longer override the system UI of the visible screen.
 On Android 15 and newer, the active `StatusBar` color also remains authoritative
 when it differs from the root view background and when either value changes in
-the same render commit.
+the same render commit. PAM paints that color over exactly the status-bar safe
+inset in the edge-to-edge host; the screen root cannot bleed through the system
+icon surface, and application content below the inset remains untouched.
 `appearance="dark"` requests dark system icons on every supported Android
 version, including Android 15 and newer where edge-to-edge is enforced by the
 platform. Use it over a light status-bar background; `appearance="light"`

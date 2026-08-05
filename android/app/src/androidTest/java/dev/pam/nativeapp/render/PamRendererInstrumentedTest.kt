@@ -212,6 +212,15 @@ class PamRendererInstrumentedTest {
                         activity.window.statusBarColor
                     },
                 )
+                assertEquals(Color.BLACK, activity.host.statusBarSurfaceColor)
+                assertTrue(activity.host.stableSafeAreaInsets.top > 0)
+                val rendered = Bitmap.createBitmap(
+                    activity.host.width,
+                    activity.host.height,
+                    Bitmap.Config.ARGB_8888,
+                )
+                activity.host.draw(Canvas(rendered))
+                assertEquals(Color.BLACK, rendered.getPixel(0, 0))
                 assertStatusBarUsesDarkIcons(activity, false)
                 renderer.close()
             }
