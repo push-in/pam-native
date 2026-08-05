@@ -199,7 +199,9 @@ invisible placeholder with no layout footprint.
 
 For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
 image/video metadata and `System\MediaLibrary::albums()` reads album summaries
-on a native worker. Thumbnail `content://` sources are not copied. After the
+on a native worker. Recent assets use descending added time and then descending
+modified time, matching Android CameraRoll ordering when captures share the
+same added timestamp. Thumbnail `content://` sources are not copied. After the
 user selects one, `System\Files::importUri()` materializes only that asset as a
 sandboxed `FileReference`. Request `PermissionKind::Photos` first and accept
 both granted and limited access; use `Files::pick()` as the portable fallback.

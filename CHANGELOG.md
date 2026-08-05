@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.25 - 2026-08-05
+
+- Match Android CameraRoll recent-media ordering by sorting equal added-time
+  assets by modified time instead of media ID.
+- Keep custom PAM galleries aligned with native React Native gallery order and
+  initial selection when several captures enter MediaStore in the same second.
+
 ## 0.6.24 - 2026-08-05
 
 - Make the Android renderer release artifact self-contained for SDK assembly

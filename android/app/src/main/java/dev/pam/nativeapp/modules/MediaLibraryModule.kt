@@ -66,7 +66,7 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
             putStringArray(ContentResolverArgs.SQL_SELECTION_ARGS, arguments)
             putStringArray(
                 ContentResolverArgs.SORT_COLUMNS,
-                arrayOf(MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns._ID),
+                recentSortColumns(),
             )
             putInt(ContentResolverArgs.SORT_DIRECTION, ContentResolverArgs.SORT_DESCENDING)
             putInt(ContentResolverArgs.LIMIT, limit + 1)
@@ -102,7 +102,7 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
             putStringArray(ContentResolverArgs.SQL_SELECTION_ARGS, arguments)
             putStringArray(
                 ContentResolverArgs.SORT_COLUMNS,
-                arrayOf(MediaStore.MediaColumns.DATE_ADDED, MediaStore.MediaColumns._ID),
+                recentSortColumns(),
             )
             putInt(ContentResolverArgs.SORT_DIRECTION, ContentResolverArgs.SORT_DESCENDING)
         }
@@ -270,7 +270,12 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
         val coverUri: String,
     )
 
-    private companion object {
+    internal companion object {
+        fun recentSortColumns(): Array<String> = arrayOf(
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.DATE_MODIFIED,
+        )
+
         const val BUCKET_ID = "bucket_id"
         const val BUCKET_NAME = "bucket_display_name"
         const val DEFAULT_PAGE_SIZE = 80
