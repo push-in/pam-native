@@ -334,7 +334,8 @@ final class PamMediaView: UIView {
 
     func setAutoPlay(_ value: Bool) {
         autoPlay = value
-        if value, player?.currentItem?.status == .readyToPlay { play() }
+        guard player?.currentItem?.status == .readyToPlay else { return }
+        if value { play() } else { pause() }
     }
     func setControls(_ value: Bool) { controller.showsPlaybackControls = value }
     func setResizeMode(_ value: Int) {

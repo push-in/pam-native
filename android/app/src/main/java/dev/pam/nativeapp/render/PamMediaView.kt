@@ -180,7 +180,8 @@ internal class PamMediaView(
 
     fun setAutoPlay(value: Boolean) {
         autoPlay = value
-        if (value && prepared) start()
+        if (!prepared) return
+        if (value) start() else pause()
     }
 
     fun setControls(value: Boolean) {

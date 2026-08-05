@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.26 - 2026-08-05
+
+- Make declarative `MediaPlayer autoPlay` fully reactive on Android and iOS:
+  switching the bound value to `false` now pauses a prepared player at its
+  current position instead of leaving native playback running.
+
 ## 0.6.25 - 2026-08-05
 
 - Match Android CameraRoll recent-media ordering by sorting equal added-time

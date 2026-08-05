@@ -718,6 +718,10 @@ the programmatic `MediaPlayer::onProgress()` API:
 <MediaPlayer source="$video" on:mediaProgress="trackProgress" />
 ```
 
+`autoPlay` is reactive: changing it to `true` starts a prepared player and
+changing it to `false` pauses playback without resetting the current position.
+This makes a bound boolean suitable for custom play/pause controls.
+
 ```php
 public function trackProgress(float $currentTime, float $duration): void
 {
