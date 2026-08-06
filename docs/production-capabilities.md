@@ -75,8 +75,16 @@ native failures retain the legacy exception behavior.
 ## Push delivery, opening and deep links
 
 ```php
+$registration = PushNotifications::register(
+    $sendTokenToServer,
+    $recordProviderFailure,
+);
 $subscription = PushNotifications::listenAndRoute($navigator, $onMessage);
 ```
+
+The second `register()` callback receives provider/configuration failures and
+keeps them in application control. It is optional; omitting it preserves the
+legacy exception behavior.
 
 Android projects only need their Firebase client file at
 `.pam/google-services.json` (preferred) or root `google-services.json`. PAM

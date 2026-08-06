@@ -204,6 +204,20 @@ the persistent PAM event stream automatically. Projects without that file do
 not compile or package Firebase. iOS hosts forward their app-delegate
 callbacks:
 
+Push token acquisition can fail when the provider is unavailable or the client
+configuration is rejected. Pass the optional failure callback to recover
+without turning an expected asynchronous provider failure into a global runtime
+exception:
+
+```php
+PushNotifications::register(
+    fn ($token) => $this->sendTokenToServer($token),
+    fn (string $message) => $this->recordPushRegistrationFailure($message),
+);
+```
+
+Omitting the callback preserves the legacy exception behavior.
+
 ```swift
 func application(
     _ application: UIApplication,

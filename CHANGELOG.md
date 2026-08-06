@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.40 - 2026-08-06
+
+- Add an optional failure callback to `PushNotifications::register()` so FCM
+  and APNs provider/configuration failures can recover application UI without
+  throwing from an asynchronous native-module result. Existing positional API
+  and exception behavior remain compatible when no callback is supplied.
+
 ## 0.6.39 - 2026-08-06
 
 - Add native baseline cross-axis alignment throughout the typed API, template

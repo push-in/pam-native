@@ -153,6 +153,7 @@ use Pam\Native\System\DeviceInfo;
 use Pam\Native\System\Sensors;
 use Pam\Native\System\Sms;
 use Pam\Native\System\Location;
+use Pam\Native\System\PushNotifications;
 use Pam\Native\System\Files;
 use Pam\Native\System\MediaLibrary;
 use Pam\Native\LocationPosition;
@@ -2876,6 +2877,33 @@ $assert(
     'Location failures must reach the optional failure callback.',
 );
 
+$pushRegistrationFailure = null;
+$pushRegistrationRequest = PushNotifications::register(
+    static function (): void {
+        throw new RuntimeException('Failed push registration must not invoke success.');
+    },
+    static function (string $message) use (&$pushRegistrationFailure): void {
+        $pushRegistrationFailure = $message;
+    },
+);
+$pushRegistrationCall = TestDiagnostics::$moduleCall;
+$assert(
+    $pushRegistrationCall !== null
+        && $pushRegistrationCall['requestId'] === $pushRegistrationRequest
+        && $pushRegistrationCall['module'] === 'notifications'
+        && $pushRegistrationCall['method'] === 'registerPush',
+    'Push registration must emit its typed native module call.',
+);
+Runtime::dispatchModuleResult(
+    $pushRegistrationRequest,
+    ModuleResultStatus::Failure->value,
+    'Firebase rejected push token registration.',
+);
+$assert(
+    $pushRegistrationFailure === 'Firebase rejected push token registration.',
+    'Push registration failures must reach the optional failure callback.',
+);
+
 $recording = null;
 $audioRequest = AudioRecorder::stop(
     static function (AudioRecording $value) use (&$recording): void {
@@ -5537,8 +5565,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.39',
-    'The runtime SDK contract must match the 0.6.39 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.40',
+    'The runtime SDK contract must match the 0.6.40 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

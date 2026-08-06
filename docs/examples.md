@@ -206,7 +206,10 @@ Permissions::requestKind(PermissionKind::Notifications, function ($decision): vo
     );
 });
 
-PushNotifications::register(fn ($token) => $this->sendTokenToServer($token));
+PushNotifications::register(
+    fn ($token) => $this->sendTokenToServer($token),
+    fn (string $message) => $this->recordPushRegistrationFailure($message),
+);
 $pushSubscription = PushNotifications::listenAndRoute(
     $this->navigator,
     fn ($message) => $this->onPushMessage($message),

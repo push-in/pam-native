@@ -27,15 +27,26 @@ final class PushNotifications
     {
     }
 
-    /** @param Closure(PushToken): void $callback */
-    public static function register(Closure $callback): int
+    /**
+     * @param Closure(PushToken): void $callback
+     * @param Closure(string): void|null $failure
+     */
+    public static function register(
+        Closure $callback,
+        ?Closure $failure = null,
+    ): int
     {
         return NativeModules::call(
             'notifications',
             'registerPush',
             [],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = Wire::decodeMap($result->payload);
