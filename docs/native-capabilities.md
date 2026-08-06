@@ -10,6 +10,7 @@ table, see the [capability cookbook](examples.md).
 | --- | --- |
 | Gestures | `UI\GestureDetector` |
 | Video and audio | `UI\MediaPlayer` |
+| Voice recording | `System\AudioRecorder` |
 | Camera and gallery | `System\MediaCapture`, `System\MediaLibrary`, `System\Files` |
 | Gesture navigation | `Navigation\Navigator`, `NavigationHost` |
 | Bottom Sheet | `UI\BottomSheet` |
@@ -35,6 +36,37 @@ with controls, autoplay, looping, mute, volume, seek, rate and progress events.
 When `thumbnail` is set, Android keeps that poster visible until the first
 decoded video frame is rendered, including during remote preparation and
 initial buffering.
+
+## Voice recording
+
+`AudioRecorder` records AAC/M4A voice media and exposes bounded amplitude
+updates. Every asynchronous operation accepts an optional failure callback so
+the application can restore its UI when the native recorder is unavailable:
+
+```php
+use Pam\Native\AudioRecording;
+use Pam\Native\System\AudioRecorder;
+
+AudioRecorder::start(
+    static function (): void {
+        // Recording started. AudioRecorder::watch() can now drive a waveform.
+    },
+    static function (string $message): void {
+        // Restore the composer and show non-blocking feedback.
+    },
+);
+
+AudioRecorder::stop(
+    static function (AudioRecording $recording): void {
+        // Upload $recording->relativePath and preserve $recording->durationMs.
+    },
+    static function (string $message): void {
+        // Restore the composer; the native stop failed.
+    },
+);
+```
+
+Omitting the failure callback preserves the original exception behavior.
 
 ## Files, camera and gallery
 

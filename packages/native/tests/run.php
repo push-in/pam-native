@@ -2870,6 +2870,25 @@ $assert(
     'Audio recorder facade did not decode the native recording.',
 );
 
+$audioFailure = null;
+$audioStartRequest = AudioRecorder::start(
+    static function (): void {
+        throw new RuntimeException('Failed audio start must not invoke success.');
+    },
+    static function (string $message) use (&$audioFailure): void {
+        $audioFailure = $message;
+    },
+);
+Runtime::dispatchModuleResult(
+    $audioStartRequest,
+    ModuleResultStatus::Failure->value,
+    'Microphone is unavailable.',
+);
+$assert(
+    $audioFailure === 'Microphone is unavailable.',
+    'Audio recorder failures must reach the optional failure callback.',
+);
+
 $pickedFiles = [];
 $pickManyRequest = Files::pickMany(
     MediaPickerType::Media,
@@ -5370,8 +5389,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.31',
-    'The runtime SDK contract must match the 0.6.31 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.32',
+    'The runtime SDK contract must match the 0.6.32 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

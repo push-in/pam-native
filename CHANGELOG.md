@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.32 - 2026-08-06
+
+- Add optional failure callbacks to `AudioRecorder::start()`, `stop()`,
+  `cancel()`, `discard()`, and `watch()` so applications can recover their UI
+  from asynchronous native recorder failures without an uncaught exception.
+
 ## 0.6.31 - 2026-08-05
 
 - Support tokenized `scrollRequest`, `scrollTargetOffset`, and

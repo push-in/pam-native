@@ -16,39 +16,43 @@ final class AudioRecorder
 {
     private static int $nextSubscription = 1;
 
-    /** @var array<int, array{callback: Closure, native: ?int}> */
+    /** @var array<int, array{callback: Closure, failure: ?Closure, native: ?int}> */
     private static array $subscriptions = [];
 
     private function __construct()
     {
     }
 
-    /** @param Closure(): void $callback */
-    public static function start(Closure $callback): int
+    /** @param Closure(): void $callback @param null|Closure(string): void $failure */
+    public static function start(Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'audio-recorder',
             'start',
             [],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($result->payload);
+                    self::fail($failure, $result->payload);
+
+                    return;
                 }
                 $callback();
             },
         );
     }
 
-    /** @param Closure(AudioRecording): void $callback */
-    public static function stop(Closure $callback): int
+    /** @param Closure(AudioRecording): void $callback @param null|Closure(string): void $failure */
+    public static function stop(Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'audio-recorder',
             'stop',
             [],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($result->payload);
+                    self::fail($failure, $result->payload);
+
+                    return;
                 }
                 $values = Wire::decodeMap($result->payload);
                 $callback(new AudioRecording(
@@ -63,51 +67,62 @@ final class AudioRecorder
         );
     }
 
-    /** @param Closure(): void $callback */
-    public static function cancel(Closure $callback): int
+    /** @param Closure(): void $callback @param null|Closure(string): void $failure */
+    public static function cancel(Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'audio-recorder',
             'cancel',
             [],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($result->payload);
+                    self::fail($failure, $result->payload);
+
+                    return;
                 }
                 $callback();
             },
         );
     }
 
-    /** @param Closure(): void $callback */
-    public static function discard(string $uri, Closure $callback): int
+    /** @param Closure(): void $callback @param null|Closure(string): void $failure */
+    public static function discard(string $uri, Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'audio-recorder',
             'discard',
             ['uri' => $uri],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($result->payload);
+                    self::fail($failure, $result->payload);
+
+                    return;
                 }
                 $callback();
             },
         );
     }
 
-    /** @param Closure(AudioRecordingProgress): void $callback */
-    public static function watch(Closure $callback, int $intervalMs = 100): int
+    /** @param Closure(AudioRecordingProgress): void $callback @param null|Closure(string): void $failure */
+    public static function watch(Closure $callback, int $intervalMs = 100, ?Closure $failure = null): int
     {
         $subscription = self::$nextSubscription++;
-        self::$subscriptions[$subscription] = ['callback' => $callback, 'native' => null];
+        self::$subscriptions[$subscription] = [
+            'callback' => $callback,
+            'failure' => $failure,
+            'native' => null,
+        ];
         NativeModules::call(
             'audio-recorder',
             'watch',
             ['intervalMs' => max(50, min(1_000, $intervalMs))],
             static function ($result) use ($subscription): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    $failure = self::$subscriptions[$subscription]['failure'] ?? null;
                     unset(self::$subscriptions[$subscription]);
-                    throw new RuntimeException($result->payload);
+                    self::fail($failure, $result->payload);
+
+                    return;
                 }
                 $native = (int) (Wire::decodeMap($result->payload)['subscription'] ?? 0);
                 if (!isset(self::$subscriptions[$subscription])) {
@@ -158,7 +173,10 @@ final class AudioRecorder
                     return;
                 }
                 if ($result->status === ModuleResultStatus::Failure) {
+                    $failure = $watch['failure'];
                     unset(self::$subscriptions[$subscription]);
+
+                    self::fail($failure, $result->payload);
 
                     return;
                 }
@@ -170,5 +188,17 @@ final class AudioRecorder
                 self::next($subscription);
             },
         );
+    }
+
+    /** @param null|Closure(string): void $failure */
+    private static function fail(?Closure $failure, string $message): void
+    {
+        if ($failure !== null) {
+            $failure($message);
+
+            return;
+        }
+
+        throw new RuntimeException($message);
     }
 }
