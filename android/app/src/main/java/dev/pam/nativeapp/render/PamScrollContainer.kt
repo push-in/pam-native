@@ -41,6 +41,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     private var autoScrollToEndThresholdPx = 24
     private var scrollTargetTestId = ""
     private var scrollTargetOffsetPx = -1
+    private var scrollTargetAlignment = SCROLL_TARGET_START
     private var keyboardAvoidanceInsetPx = 0
     private var keyboardBaseContentExtentPx = 0
     private val applyOffsetRunnable = Runnable {
@@ -199,6 +200,10 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         scrollTargetOffsetPx = if (value < 0f) -1 else dp(value)
     }
 
+    fun setScrollTargetAlignment(value: Int) {
+        scrollTargetAlignment = value.coerceIn(SCROLL_TARGET_START, SCROLL_TARGET_END)
+    }
+
     fun requestScroll() {
         activeScroll.post {
             if (!isAttachedToWindow) return@post
@@ -207,7 +212,17 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
                     ?: return@post
                 val rect = Rect(0, 0, target.width, target.height)
                 content.offsetDescendantRectToMyCoords(target, rect)
-                scrollToPrimary(if (horizontal) rect.left else rect.top)
+                val targetStart = if (horizontal) rect.left else rect.top
+                val targetExtent = if (horizontal) rect.width() else rect.height()
+                val viewportExtent = if (horizontal) activeScroll.width else activeScroll.height
+                scrollToPrimary(
+                    alignedTargetOffset(
+                        targetStart,
+                        targetExtent,
+                        viewportExtent,
+                        scrollTargetAlignment,
+                    ),
+                )
                 return@post
             }
             if (scrollTargetOffsetPx >= 0) {
@@ -732,12 +747,30 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     }
 
     private companion object {
+        const val SCROLL_TARGET_START = 1
+        const val SCROLL_TARGET_CENTER = 2
+        const val SCROLL_TARGET_END = 3
         const val OVER_SCROLL_ALWAYS_VALUE = 2
         const val OVER_SCROLL_NEVER_VALUE = 3
         const val KEYBOARD_DISMISS_NONE = 1
         const val KEYBOARD_DISMISS_INTERACTIVE = 3
         const val NORMAL_DECELERATION_RATE = 0.985f
         const val KEYBOARD_TARGET_CLEARANCE_DP = 16f
+
+        fun alignedTargetOffset(
+            targetStart: Int,
+            targetExtent: Int,
+            viewportExtent: Int,
+            alignment: Int,
+        ): Int {
+            val available = (viewportExtent - targetExtent).coerceAtLeast(0)
+            val adjustment = when (alignment) {
+                SCROLL_TARGET_CENTER -> available / 2
+                SCROLL_TARGET_END -> available
+                else -> 0
+            }
+            return (targetStart - adjustment).coerceAtLeast(0)
+        }
 
         fun adjustedVelocity(velocity: Int, rate: Float): Int =
             (velocity * (rate / NORMAL_DECELERATION_RATE)).roundToInt()

@@ -383,6 +383,8 @@ In a `.pam.php` template use `scrollTargetOffset` beside `scrollRequest`.
 an empty target keeps the original scroll-to-end behavior. These tokenized
 requests also apply to `VirtualizedList`, `VirtualGrid`, and `SectionList`,
 including variable-height cells and targets outside the mounted window.
+Set `scrollTargetAlignment="center"` or `"end"` to position an identified target
+within the viewport; `"start"` remains the backward-compatible default.
 
 Android owns drag, fling, snapping, fading edges, scrollbars and IME dismissal.
 When `onScroll` is present PAM sends only the active-axis offset, coalesced once

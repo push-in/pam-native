@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.36 - 2026-08-06
+
+- Add typed `scrollTargetAlignment` (`start`, `center`, or `end`) to tokenized
+  descendant scroll requests on Android and iOS scroll views and virtualized
+  lists. Alignment accounts for target and viewport extent and clamps edge
+  targets without changing the existing start-aligned default.
+
 ## 0.6.35 - 2026-08-06
 
 - Add an optional failure callback to `Location::current()` so permission,

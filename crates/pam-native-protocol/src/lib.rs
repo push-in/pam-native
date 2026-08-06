@@ -537,6 +537,7 @@ pub enum PropKey {
     WorkletIterations = 444,
     NavigationBarHidden = 445,
     BorderStyle = 446,
+    ScrollTargetAlignment = 447,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -990,6 +991,7 @@ impl TryFrom<u16> for PropKey {
             444 => Ok(Self::WorkletIterations),
             445 => Ok(Self::NavigationBarHidden),
             446 => Ok(Self::BorderStyle),
+            447 => Ok(Self::ScrollTargetAlignment),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1854,10 +1856,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=446 {
+        for value in 1..=447 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(447).is_err());
+        assert!(PropKey::try_from(448).is_err());
     }
 
     #[test]

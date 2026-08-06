@@ -431,14 +431,31 @@ public final class PamRenderer {
         DispatchQueue.main.async { [weak self, weak list] in
             guard let self, let list, let state = self.nodes[nodeId] else { return }
             let targetTestId = state.properties[PamConstants.scrollTargetTestId]?.textOrNil() ?? ""
+            let targetAlignment = Int(
+                state.properties[PamConstants.scrollTargetAlignment]?.integerOrNil() ?? 1
+            )
             let targetOffset: CGFloat
             if !targetTestId.isEmpty {
                 guard let targetId = self.descendantWithTestId(nodeId, testId: targetTestId),
                       let targetFrame = self.frames[targetId],
                       let listFrame = self.frames[nodeId] else { return }
-                targetOffset = list.horizontal
+                let targetStart = list.horizontal
                     ? CGFloat(targetFrame.x - listFrame.x)
                     : CGFloat(targetFrame.y - listFrame.y)
+                let targetExtent = list.horizontal
+                    ? CGFloat(targetFrame.width)
+                    : CGFloat(targetFrame.height)
+                let viewportExtent = list.horizontal
+                    ? CGFloat(listFrame.width)
+                    : CGFloat(listFrame.height)
+                let available = max(0, viewportExtent - targetExtent)
+                let adjustment: CGFloat
+                switch targetAlignment {
+                case 2: adjustment = available / 2
+                case 3: adjustment = available
+                default: adjustment = 0
+                }
+                targetOffset = max(0, targetStart - adjustment)
             } else {
                 targetOffset = CGFloat(
                     state.properties[PamConstants.scrollTargetOffset]?.decimalOrNil() ?? -1
@@ -1730,6 +1747,9 @@ public final class PamRenderer {
         case PamConstants.scrollTargetOffset:
             (view as? PamAnchoredScrollView)?.scrollTargetOffset =
                 CGFloat(value.decimalOrZero())
+        case PamConstants.scrollTargetAlignment:
+            (view as? PamAnchoredScrollView)?.scrollTargetAlignment =
+                min(3, max(1, Int(value.integerOrNil() ?? 1)))
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(value.integerOrNil() ?? Int64(UInt32.max))
         case PamConstants.drawingWidth:
@@ -2003,6 +2023,8 @@ public final class PamRenderer {
             (view as? PamAnchoredScrollView)?.scrollTargetTestId = ""
         case PamConstants.scrollTargetOffset:
             (view as? PamAnchoredScrollView)?.scrollTargetOffset = -1
+        case PamConstants.scrollTargetAlignment:
+            (view as? PamAnchoredScrollView)?.scrollTargetAlignment = 1
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(Int64(UInt32.max))
         case PamConstants.drawingWidth:

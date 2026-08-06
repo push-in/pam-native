@@ -795,11 +795,20 @@ class PamRenderer(
                 val targetFrame = targetId?.let { frames[it] }
                 val listFrame = frames[state.id]
                 if (targetFrame != null && listFrame != null) {
-                    if (state.flag(PropKey.LIST_HORIZONTAL, false)) {
+                    val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
+                    val targetStart = if (horizontal) {
                         targetFrame.x - listFrame.x
                     } else {
                         targetFrame.y - listFrame.y
                     }
+                    val targetExtent = if (horizontal) targetFrame.width else targetFrame.height
+                    val viewportExtent = if (horizontal) listFrame.width else listFrame.height
+                    alignedTargetOffset(
+                        targetStart,
+                        targetExtent,
+                        viewportExtent,
+                        state.integer(PropKey.SCROLL_TARGET_ALIGNMENT, 1).toInt(),
+                    )
                 } else {
                     return@post
                 }
@@ -810,6 +819,21 @@ class PamRenderer(
                 list.scrollToLogicalOffset(targetOffset)
             }
         }
+    }
+
+    private fun alignedTargetOffset(
+        targetStart: Float,
+        targetExtent: Float,
+        viewportExtent: Float,
+        alignment: Int,
+    ): Float {
+        val available = (viewportExtent - targetExtent).coerceAtLeast(0f)
+        val adjustment = when (alignment) {
+            2 -> available / 2f
+            3 -> available
+            else -> 0f
+        }
+        return (targetStart - adjustment).coerceAtLeast(0f)
     }
 
     private fun descendantWithTestId(rootId: Long, testId: String): Long? {
@@ -1806,6 +1830,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setScrollTargetOffset(
                     value.decimal().toFloat(),
                 )
+            PropKey.SCROLL_TARGET_ALIGNMENT ->
+                (view as? PamScrollContainer)?.setScrollTargetAlignment(
+                    value.integer().toInt(),
+                )
             PropKey.DRAWING_COLOR ->
                 (view as? PamDrawingCanvas)?.setBrushColor(value.integer().toInt())
             PropKey.DRAWING_WIDTH ->
@@ -2365,6 +2393,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setScrollTargetTestId("")
             PropKey.SCROLL_TARGET_OFFSET ->
                 (view as? PamScrollContainer)?.setScrollTargetOffset(-1f)
+            PropKey.SCROLL_TARGET_ALIGNMENT ->
+                (view as? PamScrollContainer)?.setScrollTargetAlignment(1)
             PropKey.DRAWING_COLOR ->
                 (view as? PamDrawingCanvas)?.setBrushColor(Color.WHITE)
             PropKey.DRAWING_WIDTH ->

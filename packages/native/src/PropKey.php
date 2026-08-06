@@ -452,4 +452,5 @@ enum PropKey: int
     case WorkletIterations = 444;
     case NavigationBarHidden = 445;
     case BorderStyle = 446;
+    case ScrollTargetAlignment = 447;
 }

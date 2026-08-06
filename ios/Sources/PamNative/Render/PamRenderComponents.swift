@@ -17,6 +17,7 @@ final class PamAnchoredScrollView: UIScrollView {
     var pamSnapInterval: CGFloat = 0
     var scrollTargetTestId = ""
     var scrollTargetOffset: CGFloat = -1
+    var scrollTargetAlignment = 1
 
     private var initialEndAnchorApplied = false
     private var previousMaxOffset: CGFloat = 0
@@ -89,9 +90,15 @@ final class PamAnchoredScrollView: UIScrollView {
 
     private func setPrimaryOffset(_ value: CGFloat) {
         if horizontal {
-            contentOffset.x = max(-adjustedContentInset.left, value)
+            contentOffset.x = min(
+                primaryMaxOffset,
+                max(-adjustedContentInset.left, value)
+            )
         } else {
-            contentOffset.y = max(-adjustedContentInset.top, value)
+            contentOffset.y = min(
+                primaryMaxOffset,
+                max(-adjustedContentInset.top, value)
+            )
         }
     }
 
@@ -103,9 +110,21 @@ final class PamAnchoredScrollView: UIScrollView {
                     return
                 }
                 let frame = target.convert(target.bounds, to: self)
-                let offset = self.horizontal
+                let targetStart = self.horizontal
                     ? frame.minX + self.contentOffset.x
                     : frame.minY + self.contentOffset.y
+                let targetExtent = self.horizontal ? frame.width : frame.height
+                let viewportExtent = self.horizontal
+                    ? self.bounds.width - self.adjustedContentInset.left - self.adjustedContentInset.right
+                    : self.bounds.height - self.adjustedContentInset.top - self.adjustedContentInset.bottom
+                let available = max(0, viewportExtent - targetExtent)
+                let adjustment: CGFloat
+                switch self.scrollTargetAlignment {
+                case 2: adjustment = available / 2
+                case 3: adjustment = available
+                default: adjustment = 0
+                }
+                let offset = max(0, targetStart - adjustment)
                 self.setPrimaryOffset(offset)
                 return
             }

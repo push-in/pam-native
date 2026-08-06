@@ -513,6 +513,7 @@ every render:
 <ScrollView
     anchorToEnd="true"
     :scrollTargetOffset="$savedOffset"
+    scrollTargetAlignment="center"
     :scrollRequest="$restoreGeneration"
 >
     <!-- timeline -->
@@ -525,6 +526,9 @@ that logical offset, and omitting both targets preserves the scroll-to-end
 behavior. The same request and target properties work on `VirtualizedList`,
 `VirtualGrid`, and `SectionList`; virtual lists resolve offscreen targets from
 their retained layout frames before asking the platform list to scroll.
+`scrollTargetAlignment` accepts `start` (default), `center`, or `end` and aligns
+the identified descendant within the visible viewport on both axes and both
+platforms. Edge targets are clamped to the available scroll range.
 
 File and media picker cancellation is a normal control-flow result. `Files::pick()`
 invokes its callback with `null`, while `Files::pickMany()` invokes its callback

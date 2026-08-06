@@ -126,6 +126,7 @@ use Pam\Native\Renderable;
 use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\ServerDriven\ServerDrivenUi;
 use Pam\Native\PositionType;
 use Pam\Native\Plugin\PluginManager;
@@ -1793,7 +1794,7 @@ $scrollElement = Scroll::make(Text::make('Scrollable'))
     ->snapToInterval(80.0)
     ->decelerationRate(0.9)
     ->keyboardDismissMode(ScrollKeyboardDismissMode::OnDrag)
-    ->scrollRequest(7, 'first-unread', 143.5)
+    ->scrollRequest(7, 'first-unread', 143.5, ScrollTargetAlignment::Center)
     ->scrollEnabled(false)
     ->showsIndicator()
     ->onScroll(static function (): void {
@@ -1817,6 +1818,8 @@ $assert(
         && $scrollElement->properties()[PropKey::ScrollTargetTestId->value]
             === 'first-unread'
         && $scrollElement->properties()[PropKey::ScrollTargetOffset->value] === 143.5
+        && $scrollElement->properties()[PropKey::ScrollTargetAlignment->value]
+            === ScrollTargetAlignment::Center->value
         && $scrollElement->properties()[PropKey::ScrollRequest->value] === 7
         && isset($scrollElement->events()[EventKind::Scroll->value]),
     'Scroll helpers must preserve Android-owned orientation, momentum and viewport behavior.',
@@ -2014,6 +2017,7 @@ $nativeControlTemplate = TemplateRenderer::render(
         autoScrollToEndThreshold="32"
         scrollTargetTestId="first-unread"
         scrollTargetOffset="143.5"
+        scrollTargetAlignment="center"
         scrollRequest="9"
         pagingEnabled="true"
         snapToInterval="80"
@@ -2066,6 +2070,9 @@ $assert(
             ->properties()[PropKey::ScrollTargetTestId->value] === 'first-unread'
         && $templateScroll
             ->properties()[PropKey::ScrollTargetOffset->value] === 143.5
+        && $templateScroll
+            ->properties()[PropKey::ScrollTargetAlignment->value]
+            === ScrollTargetAlignment::Center->value
         && $templateScroll->properties()[PropKey::ScrollRequest->value] === 9
         && $templateScroll->properties()[PropKey::ScrollPagingEnabled->value] === true
         && $templateScroll->properties()[PropKey::ScrollSnapInterval->value] === 80
@@ -2150,7 +2157,7 @@ $richListElement = VirtualizedList::make(
     ->estimatedRowHeight(180.0)
     ->columns(2)
     ->prefetch(6)
-    ->scrollRequest(4, 'target-cell', 320.0);
+    ->scrollRequest(4, 'target-cell', 320.0, ScrollTargetAlignment::End);
 $assert(
     $richListElement->kind() === NodeKind::VirtualList
         && count($richListElement->children()) === 2
@@ -2160,6 +2167,8 @@ $assert(
         && $richListElement->properties()[PropKey::ListPrefetch->value] === 6
         && $richListElement->properties()[PropKey::ScrollTargetTestId->value] === 'target-cell'
         && $richListElement->properties()[PropKey::ScrollTargetOffset->value] === 320.0
+        && $richListElement->properties()[PropKey::ScrollTargetAlignment->value]
+            === ScrollTargetAlignment::End->value
         && $richListElement->properties()[PropKey::ScrollRequest->value] === 4,
     'VirtualizedList must retain arbitrary keyed component trees as recyclable cells.',
 );
@@ -5517,8 +5526,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.35',
-    'The runtime SDK contract must match the 0.6.35 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.36',
+    'The runtime SDK contract must match the 0.6.36 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

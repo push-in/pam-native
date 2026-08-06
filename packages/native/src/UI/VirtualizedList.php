@@ -12,6 +12,7 @@ use Pam\Native\Internal\BinaryValue;
 use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
+use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\Renderable;
 
 final class VirtualizedList extends Element
@@ -103,10 +104,12 @@ final class VirtualizedList extends Element
         int $request,
         string $targetTestId = '',
         float $targetOffset = -1.0,
+        ScrollTargetAlignment $targetAlignment = ScrollTargetAlignment::Start,
     ): self {
         return $this
             ->withProperty(PropKey::ScrollTargetTestId, $targetTestId)
             ->withProperty(PropKey::ScrollTargetOffset, $targetOffset)
+            ->withProperty(PropKey::ScrollTargetAlignment, $targetAlignment->value)
             ->withProperty(PropKey::ScrollRequest, max(0, $request));
     }
 

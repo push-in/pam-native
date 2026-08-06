@@ -255,6 +255,18 @@ class PamScrollContainerInstrumentedTest {
             instrumentation.waitForIdleSync()
             onMain(instrumentation) {
                 assertEquals(720, scroll.snapshotOffsetPixels().second)
+                scroll.setScrollTargetAlignment(2)
+                scroll.requestScroll()
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(560, scroll.snapshotOffsetPixels().second)
+                scroll.setScrollTargetAlignment(3)
+                scroll.requestScroll()
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(400, scroll.snapshotOffsetPixels().second)
                 scroll.setScrollTargetTestId("")
                 scroll.requestScroll()
             }

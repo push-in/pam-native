@@ -49,6 +49,7 @@ use Pam\Native\Renderable;
 use Pam\Native\ReturnKeyType;
 use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
+use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\ScrollOverScrollMode;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
@@ -244,6 +245,7 @@ final class TemplateRenderer
         'scrollTargetTestId' => PropKey::ScrollTargetTestId,
         'scrollRequest' => PropKey::ScrollRequest,
         'scrollTargetOffset' => PropKey::ScrollTargetOffset,
+        'scrollTargetAlignment' => PropKey::ScrollTargetAlignment,
         'brushColor' => PropKey::DrawingColor,
         'drawingColor' => PropKey::DrawingColor,
         'brushWidth' => PropKey::DrawingWidth,
@@ -1626,6 +1628,7 @@ final class TemplateRenderer
             => $kind === NodeKind::Scroll,
             PropKey::ScrollTargetTestId,
             PropKey::ScrollTargetOffset,
+            PropKey::ScrollTargetAlignment,
             PropKey::ScrollRequest,
             => in_array(
                 $kind,
@@ -2011,6 +2014,11 @@ final class TemplateRenderer
                 'none' => ScrollKeyboardDismissMode::None->value,
                 'on-drag' => ScrollKeyboardDismissMode::OnDrag->value,
                 'interactive' => ScrollKeyboardDismissMode::Interactive->value,
+            ]),
+            PropKey::ScrollTargetAlignment => self::named($value, [
+                'start' => ScrollTargetAlignment::Start->value,
+                'center' => ScrollTargetAlignment::Center->value,
+                'end' => ScrollTargetAlignment::End->value,
             ]),
             PropKey::ScrollDecelerationRate => match ($value) {
                 'normal' => 0.985,

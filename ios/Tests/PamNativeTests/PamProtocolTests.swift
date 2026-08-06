@@ -94,6 +94,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.workletIterations, 444)
         XCTAssertEqual(PamConstants.navigationBarHidden, 445)
         XCTAssertEqual(PamConstants.borderStyle, 446)
+        XCTAssertEqual(PamConstants.scrollTargetAlignment, 447)
         XCTAssertEqual(
             [
                 NativeOperation.httpGet,
