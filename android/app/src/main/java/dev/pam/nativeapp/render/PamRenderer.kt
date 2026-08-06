@@ -787,6 +787,43 @@ class PamRenderer(
         }
     }
 
+    private fun requestVirtualListScroll(list: PamRecyclerList, state: NodeState) {
+        list.post {
+            val targetTestId = state.textOrNull(PropKey.SCROLL_TARGET_TEST_ID).orEmpty()
+            val targetOffset = if (targetTestId.isNotEmpty()) {
+                val targetId = descendantWithTestId(state.id, targetTestId)
+                val targetFrame = targetId?.let { frames[it] }
+                val listFrame = frames[state.id]
+                if (targetFrame != null && listFrame != null) {
+                    if (state.flag(PropKey.LIST_HORIZONTAL, false)) {
+                        targetFrame.x - listFrame.x
+                    } else {
+                        targetFrame.y - listFrame.y
+                    }
+                } else {
+                    return@post
+                }
+            } else {
+                state.number(PropKey.SCROLL_TARGET_OFFSET, -1.0).toFloat()
+            }
+            if (targetOffset >= 0f) {
+                list.scrollToLogicalOffset(targetOffset)
+            }
+        }
+    }
+
+    private fun descendantWithTestId(rootId: Long, testId: String): Long? {
+        val pending = ArrayDeque<Long>()
+        children[rootId]?.forEach(pending::addLast)
+        while (pending.isNotEmpty()) {
+            val id = pending.removeFirst()
+            val state = nodes[id] ?: continue
+            if (state.textOrNull(PropKey.TEST_ID) == testId) return id
+            children[id]?.forEach(pending::addLast)
+        }
+        return null
+    }
+
     private fun virtualListAncestor(start: Long): Long? {
         var current = start
         var depth = 0
@@ -1780,7 +1817,10 @@ class PamRenderer(
             PropKey.DRAWING_UNDO_REQUEST ->
                 (view as? PamDrawingCanvas)?.setUndoRequest(value.integer().toInt())
             PropKey.SCROLL_REQUEST ->
-                (view as? PamScrollContainer)?.requestScroll()
+                when (view) {
+                    is PamScrollContainer -> view.requestScroll()
+                    is PamRecyclerList -> requestVirtualListScroll(view, state)
+                }
             PropKey.SCROLL_FILL_VIEWPORT ->
                 (view as? PamScrollContainer)?.setFillViewport(value.flag())
             PropKey.SCROLL_OVER_SCROLL_MODE ->

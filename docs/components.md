@@ -522,7 +522,9 @@ every render:
 `scrollRequest` is tokenized and runs only when its value changes. A non-empty
 `scrollTargetTestId` has priority, a non-negative `scrollTargetOffset` restores
 that logical offset, and omitting both targets preserves the scroll-to-end
-behavior.
+behavior. The same request and target properties work on `VirtualizedList`,
+`VirtualGrid`, and `SectionList`; virtual lists resolve offscreen targets from
+their retained layout frames before asking the platform list to scroll.
 
 File and media picker cancellation is a normal control-flow result. `Files::pick()`
 invokes its callback with `null`, while `Files::pickMany()` invokes its callback

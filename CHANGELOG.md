@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.31 - 2026-08-05
+
+- Support tokenized `scrollRequest`, `scrollTargetOffset`, and
+  `scrollTargetTestId` on Android and iOS virtualized lists, grids, and section
+  lists, including variable-height cells and offscreen targets.
+
 ## 0.6.30 - 2026-08-05
 
 - Route Android `MediaPlayer` HTTP and HTTPS sources through the network URL

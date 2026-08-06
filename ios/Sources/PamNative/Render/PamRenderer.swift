@@ -427,6 +427,42 @@ public final class PamRenderer {
         ids.forEach { syncVirtualList($0, forceMinimal: forceMinimal) }
     }
 
+    private func requestVirtualListScroll(_ list: PamVirtualListView, nodeId: Int64) {
+        DispatchQueue.main.async { [weak self, weak list] in
+            guard let self, let list, let state = self.nodes[nodeId] else { return }
+            let targetTestId = state.properties[PamConstants.scrollTargetTestId]?.textOrNil() ?? ""
+            let targetOffset: CGFloat
+            if !targetTestId.isEmpty {
+                guard let targetId = self.descendantWithTestId(nodeId, testId: targetTestId),
+                      let targetFrame = self.frames[targetId],
+                      let listFrame = self.frames[nodeId] else { return }
+                targetOffset = list.horizontal
+                    ? CGFloat(targetFrame.x - listFrame.x)
+                    : CGFloat(targetFrame.y - listFrame.y)
+            } else {
+                targetOffset = CGFloat(
+                    state.properties[PamConstants.scrollTargetOffset]?.decimalOrNil() ?? -1
+                )
+            }
+            if targetOffset >= 0 {
+                list.scrollToLogicalOffset(targetOffset)
+            }
+        }
+    }
+
+    private func descendantWithTestId(_ rootId: Int64, testId: String) -> Int64? {
+        var pending = children[rootId] ?? []
+        while !pending.isEmpty {
+            let id = pending.removeFirst()
+            guard let state = nodes[id] else { continue }
+            if state.properties[PamConstants.testId]?.textOrNil() == testId {
+                return id
+            }
+            pending.append(contentsOf: children[id] ?? [])
+        }
+        return nil
+    }
+
     private func syncVirtualList(_ id: Int64, forceMinimal: Bool = false) {
         guard let list = views[id] as? PamVirtualListView,
               let listFrame = frames[id],
@@ -1705,7 +1741,11 @@ public final class PamRenderer {
         case PamConstants.drawingUndoRequest:
             (view as? PamDrawingCanvas)?.setUndoRequest(Int(value.integerOrNil() ?? 0))
         case PamConstants.scrollRequest:
-            (view as? PamAnchoredScrollView)?.requestScroll()
+            if let scroll = view as? PamAnchoredScrollView {
+                scroll.requestScroll()
+            } else if let list = view as? PamVirtualListView {
+                requestVirtualListScroll(list, nodeId: nodeId)
+            }
         case PamConstants.drawerOpen:
             (view as? PamDrawerLayout)?.setOpen(value.boolOrNil() ?? false, animated: true)
         case PamConstants.drawerType:

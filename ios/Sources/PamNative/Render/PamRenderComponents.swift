@@ -138,6 +138,19 @@ final class PamVirtualListView: UIScrollView {
 
     var horizontal = false
 
+    func scrollToLogicalOffset(_ value: CGFloat) {
+        let requested = max(0, value)
+        let maximum = horizontal
+            ? max(0, contentSize.width - bounds.width + adjustedContentInset.right)
+            : max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+        let offset = min(requested, maximum)
+        if horizontal {
+            setContentOffset(CGPoint(x: offset, y: contentOffset.y), animated: true)
+        } else {
+            setContentOffset(CGPoint(x: contentOffset.x, y: offset), animated: true)
+        }
+    }
+
     var adaptiveOverscan: CGFloat {
         let viewport = horizontal ? bounds.width : bounds.height
         let velocityPages = abs(scrollVelocity) / max(viewport, 1)

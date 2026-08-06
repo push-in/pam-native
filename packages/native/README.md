@@ -380,7 +380,9 @@ Scroll::make($messages)
 
 In a `.pam.php` template use `scrollTargetOffset` beside `scrollRequest`.
 `scrollTargetTestId` wins when both targets are present; a negative offset with
-an empty target keeps the original scroll-to-end behavior.
+an empty target keeps the original scroll-to-end behavior. These tokenized
+requests also apply to `VirtualizedList`, `VirtualGrid`, and `SectionList`,
+including variable-height cells and targets outside the mounted window.
 
 Android owns drag, fling, snapping, fading edges, scrollbars and IME dismissal.
 When `onScroll` is present PAM sends only the active-axis offset, coalesced once

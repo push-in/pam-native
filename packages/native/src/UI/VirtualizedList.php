@@ -99,6 +99,17 @@ final class VirtualizedList extends Element
         return $this->withProperty(PropKey::ShowsScrollIndicator, $visible);
     }
 
+    public function scrollRequest(
+        int $request,
+        string $targetTestId = '',
+        float $targetOffset = -1.0,
+    ): self {
+        return $this
+            ->withProperty(PropKey::ScrollTargetTestId, $targetTestId)
+            ->withProperty(PropKey::ScrollTargetOffset, $targetOffset)
+            ->withProperty(PropKey::ScrollRequest, max(0, $request));
+    }
+
     public function onScroll(Closure $handler): self
     {
         return $this->withEvent(EventKind::Scroll, $handler);

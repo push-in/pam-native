@@ -45,6 +45,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var touchDownY = 0f
     private var touchMoved = false
     private var viewportChanged: ((Float, Int, Int, Int) -> Unit)? = null
+    private var richIds: List<Long> = emptyList()
+    private var richExtents: Map<Long, Int> = emptyMap()
 
     init {
         itemAnimator = null
@@ -81,6 +83,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         unmount: (Long, FrameLayout) -> Unit,
     ) {
         val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(1f)) }
+        richIds = ids
+        richExtents = pixelExtents
         val current = adapter as? RichRecyclerAdapter
         if (current == null) {
             adapter = RichRecyclerAdapter(
@@ -96,6 +100,26 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         configureAdapter()
         updateHeaderSpans()
         applyInitialPosition()
+    }
+
+    fun scrollToLogicalOffset(value: Float) {
+        val targetPx = dp(value.coerceAtLeast(0f))
+        if (richIds.isEmpty()) {
+            scrollBy(
+                if (horizontal) targetPx - computeHorizontalScrollOffset() else 0,
+                if (horizontal) 0 else targetPx - computeVerticalScrollOffset(),
+            )
+            return
+        }
+        val position = virtualScrollPosition(
+            richIds.map { richExtents[it] ?: dp(rowHeight) },
+            targetPx,
+        )
+        (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(
+            position.index,
+            -position.offset,
+        )
+        dispatchViewport()
     }
 
     fun setRowHeight(value: Float) {
@@ -432,6 +456,21 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private companion object {
         const val MAX_PREFETCH_ITEMS = 32
     }
+}
+
+internal data class VirtualScrollPosition(val index: Int, val offset: Int)
+
+internal fun virtualScrollPosition(extents: List<Int>, target: Int): VirtualScrollPosition {
+    if (extents.isEmpty()) return VirtualScrollPosition(0, 0)
+    var remaining = target.coerceAtLeast(0)
+    for ((index, extent) in extents.withIndex()) {
+        val safeExtent = extent.coerceAtLeast(1)
+        if (remaining < safeExtent || index == extents.lastIndex) {
+            return VirtualScrollPosition(index, remaining.coerceAtMost(safeExtent - 1))
+        }
+        remaining -= safeExtent
+    }
+    return VirtualScrollPosition(extents.lastIndex, 0)
 }
 
 private class RichRecyclerAdapter(

@@ -1614,8 +1614,6 @@ final class TemplateRenderer
             PropKey::ScrollAnchorToEnd,
             PropKey::ScrollMaintainVisibleContentPosition,
             PropKey::ScrollAutoScrollToEndThreshold,
-            PropKey::ScrollTargetTestId,
-            PropKey::ScrollRequest,
             PropKey::ScrollFillViewport,
             PropKey::ScrollOverScrollMode,
             PropKey::ScrollNestedEnabled,
@@ -1626,6 +1624,19 @@ final class TemplateRenderer
             PropKey::ScrollDecelerationRate,
             PropKey::ScrollKeyboardDismissMode,
             => $kind === NodeKind::Scroll,
+            PropKey::ScrollTargetTestId,
+            PropKey::ScrollTargetOffset,
+            PropKey::ScrollRequest,
+            => in_array(
+                $kind,
+                [
+                    NodeKind::Scroll,
+                    NodeKind::List,
+                    NodeKind::SectionList,
+                    NodeKind::VirtualList,
+                ],
+                true,
+            ),
             PropKey::ScrollEnabled =>
                 in_array(
                     $kind,

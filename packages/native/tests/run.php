@@ -2148,14 +2148,18 @@ $richListElement = VirtualizedList::make(
 )
     ->estimatedRowHeight(180.0)
     ->columns(2)
-    ->prefetch(6);
+    ->prefetch(6)
+    ->scrollRequest(4, 'target-cell', 320.0);
 $assert(
     $richListElement->kind() === NodeKind::VirtualList
         && count($richListElement->children()) === 2
         && $richListElement->children()[0]->children()[0]->kind() === NodeKind::Image
         && $richListElement->properties()[PropKey::ListRowHeight->value] === 180.0
         && $richListElement->properties()[PropKey::ListNumColumns->value] === 2
-        && $richListElement->properties()[PropKey::ListPrefetch->value] === 6,
+        && $richListElement->properties()[PropKey::ListPrefetch->value] === 6
+        && $richListElement->properties()[PropKey::ScrollTargetTestId->value] === 'target-cell'
+        && $richListElement->properties()[PropKey::ScrollTargetOffset->value] === 320.0
+        && $richListElement->properties()[PropKey::ScrollRequest->value] === 4,
     'VirtualizedList must retain arbitrary keyed component trees as recyclable cells.',
 );
 $adaptiveListTemplate = TemplateRenderer::render(
@@ -2169,6 +2173,18 @@ $assert(
     $adaptiveListTemplate->properties()[PropKey::ListRowHeight->value] == 180.0
         && $adaptiveListTemplate->children()[0]->properties()[PropKey::Height->value] == 240.0,
     'VirtualizedList estimatedRowHeight must preserve an explicit rich-cell extent.',
+);
+$virtualScrollTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<VirtualizedList scrollTargetOffset="0" scrollRequest="9"><Text>Top</Text></VirtualizedList>',
+    ),
+    null,
+    [],
+);
+$assert(
+    $virtualScrollTemplate->properties()[PropKey::ScrollTargetOffset->value] == 0.0
+        && $virtualScrollTemplate->properties()[PropKey::ScrollRequest->value] === 9,
+    'VirtualizedList must retain tokenized imperative scroll requests.',
 );
 $legacyVirtualizedList = VirtualizedList::make(['One', 'Two']);
 $assert(
@@ -5354,8 +5370,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.30',
-    'The runtime SDK contract must match the 0.6.30 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.31',
+    'The runtime SDK contract must match the 0.6.31 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
