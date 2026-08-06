@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.34 - 2026-08-06
+
+- Add authenticated, observable sandbox downloads through
+  `Files::downloadWithProgress()`, including validated request headers, typed
+  byte progress, explicit failure callbacks and cancellation. The Android
+  implementation streams off the UI thread, enforces the existing 256 MiB
+  ceiling and atomically publishes only completed files.
+- Add `Files::open()` and an app-private Android `FileProvider`, allowing a
+  downloaded sandbox document to open in a compatible platform application
+  without exposing `file://` URIs or granting broad storage access.
+- Extend `Files::download()` with optional validated request headers and a
+  non-throwing failure callback while preserving its existing positional API.
+
 ## 0.6.33 - 2026-08-06
 
 - Add optional failure callbacks to `Linking::open()`, `canOpen()`, and

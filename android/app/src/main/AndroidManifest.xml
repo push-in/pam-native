@@ -56,6 +56,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PamNative"
         android:usesCleartextTraffic="false">
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.pam.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/pam_file_paths" />
+        </provider>
         <receiver
             android:name="dev.pam.nativeapp.modules.NotificationReceiver"
             android:exported="false" />

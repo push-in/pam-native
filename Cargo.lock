@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "pam-native-engine"
-version = "0.6.33"
+version = "0.6.34"
 dependencies = [
  "pam-native-protocol",
  "ttf-parser",
@@ -12,7 +12,7 @@ dependencies = [
 
 [[package]]
 name = "pam-native-protocol"
-version = "0.6.33"
+version = "0.6.34"
 
 [[package]]
 name = "ttf-parser"

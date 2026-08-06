@@ -22,6 +22,7 @@ use Pam\Native\CaptureType;
 use Pam\Native\DrawingMode;
 use Pam\Native\EventKind;
 use Pam\Native\FileReference;
+use Pam\Native\FileDownloadProgress;
 use Pam\Native\FontStyle;
 use Pam\Native\GestureComposition;
 use Pam\Native\GestureDirection;
@@ -3073,6 +3074,7 @@ $assert(
             'url' => 'https://cdn.example.test/media/story.webp',
             'path' => 'drafts/remote-story.webp',
             'maximumBytes' => 8_388_608,
+            'headers' => '[]',
         ],
     'Files download must emit a bounded HTTPS sandbox download.',
 );
@@ -3103,6 +3105,93 @@ try {
     $unsafeDownloadRejected = true;
 }
 $assert($unsafeDownloadRejected, 'Files download must reject non-HTTPS URLs before crossing the bridge.');
+
+$downloadProgress = null;
+$downloadWithProgressFile = null;
+$downloadWithProgressError = null;
+$downloadSubscription = Files::downloadWithProgress(
+    'https://api.example.test/private/report.pdf',
+    'documents/report.pdf',
+    static function (FileReference $file) use (&$downloadWithProgressFile): void {
+        $downloadWithProgressFile = $file;
+    },
+    static function (FileDownloadProgress $progress) use (&$downloadProgress): void {
+        $downloadProgress = $progress;
+    },
+    ['Authorization' => 'Bearer secret-token'],
+    16_777_216,
+    static function (string $message) use (&$downloadWithProgressError): void {
+        $downloadWithProgressError = $message;
+    },
+);
+$downloadStartRequest = TestDiagnostics::$moduleCall['requestId'] ?? 0;
+$downloadStartPayload = Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '');
+$assert(
+    $downloadSubscription > 0
+        && (TestDiagnostics::$moduleCall['method'] ?? '') === 'downloadStart'
+        && $downloadStartPayload['headers'] === '{"Authorization":"Bearer secret-token"}',
+    'Progress downloads must forward validated authentication headers.',
+);
+Runtime::dispatchModuleResult(
+    $downloadStartRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map(['subscription' => 77]),
+);
+$downloadNextRequest = TestDiagnostics::$moduleCall['requestId'] ?? 0;
+$assert(
+    (TestDiagnostics::$moduleCall['method'] ?? '') === 'downloadNext'
+        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '') === ['subscription' => 77],
+    'Progress downloads must consume the native observation channel.',
+);
+Runtime::dispatchModuleResult(
+    $downloadNextRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'state' => 1,
+        'bytesWritten' => 512,
+        'totalBytes' => 1024,
+    ]),
+);
+$assert(
+    $downloadProgress instanceof FileDownloadProgress
+        && $downloadProgress->fraction() === 0.5,
+    'Progress downloads must expose typed byte progress.',
+);
+$downloadCompleteRequest = TestDiagnostics::$moduleCall['requestId'] ?? 0;
+Runtime::dispatchModuleResult(
+    $downloadCompleteRequest,
+    ModuleResultStatus::Success->value,
+    Wire::map([
+        'state' => 2,
+        'path' => 'documents/report.pdf',
+        'name' => 'report.pdf',
+        'mimeType' => 'application/pdf',
+        'size' => 1024,
+    ]),
+);
+$assert(
+    $downloadWithProgressFile instanceof FileReference
+        && $downloadWithProgressFile->path === 'documents/report.pdf'
+        && $downloadWithProgressError === null,
+    'Progress downloads must resolve their typed sandbox file.',
+);
+$openFile = false;
+$openRequest = Files::open(
+    'documents/report.pdf',
+    'application/pdf',
+    static function () use (&$openFile): void { $openFile = true; },
+    static function (string $_): void {},
+);
+$assert(
+    (TestDiagnostics::$moduleCall['method'] ?? '') === 'open'
+        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '') === [
+            'path' => 'documents/report.pdf',
+            'mimeType' => 'application/pdf',
+        ],
+    'Files open must request a sandboxed platform viewer.',
+);
+Runtime::dispatchModuleResult($openRequest, ModuleResultStatus::Success->value, '');
+$assert($openFile, 'Files open must report a successful viewer launch.');
 
 $importedFile = null;
 $importUriRequest = Files::importUri(
@@ -5409,8 +5498,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.33',
-    'The runtime SDK contract must match the 0.6.33 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.34',
+    'The runtime SDK contract must match the 0.6.34 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

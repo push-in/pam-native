@@ -137,6 +137,14 @@ reject embedded credentials and non-HTTPS URLs, enforce a caller-controlled
 size limit (64 MiB by default, 256 MiB maximum), and replace the destination
 atomically only after a successful transfer.
 
+Use `Files::downloadWithProgress()` for authenticated documents or visible
+transfer UI. Request headers are validated on both sides of the bridge;
+connection framing headers and CR/LF values are rejected. The progress closure
+receives a typed `FileDownloadProgress`, while completion returns the same
+`FileReference` as `download()`. Call `Files::cancelDownload()` when the owning
+screen is disposed. `Files::open()` grants a temporary read-only content URI to
+a compatible platform viewer; the sandbox path itself is never exposed.
+
 The system document picker does not require broad storage permission.
 Applications that call `MediaLibrary` request `PermissionKind::Photos`;
 Android 13+ reports image/video access and Android 14+ selected-photo access

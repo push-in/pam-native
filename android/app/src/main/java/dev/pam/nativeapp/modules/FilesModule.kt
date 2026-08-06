@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.core.content.FileProvider
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
@@ -19,11 +20,17 @@ import java.net.URI
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicInteger
 import org.json.JSONArray
 import org.json.JSONObject
 
 internal class FilesModule(private val activity: PamActivity) : NativeModule, AutoCloseable {
     private val executor = Executors.newSingleThreadExecutor()
+    private val downloadExecutor = Executors.newCachedThreadPool()
+    private val nextDownloadId = AtomicInteger(1)
+    private val downloads = ConcurrentHashMap<Int, DownloadTask>()
     private val root = File(activity.filesDir, "pam-files").apply { mkdirs() }.canonicalFile
 
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
@@ -33,6 +40,10 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "write" -> executor.execute { write(payload, completion) }
                 "copyAsset" -> executor.execute { copyAsset(payload, completion) }
                 "download" -> executor.execute { download(payload, completion) }
+                "downloadStart" -> startDownload(payload, completion)
+                "downloadNext" -> downloadTask(payload).channel.next(completion)
+                "downloadCancel" -> cancelDownload(subscription(payload), completion)
+                "open" -> open(payload, completion)
                 "stat" -> executor.execute { stat(payload, completion) }
                 "list" -> executor.execute { list(payload, completion) }
                 "delete" -> executor.execute { delete(payload, completion) }
@@ -156,6 +167,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 connection.readTimeout = 30_000
                 connection.requestMethod = "GET"
                 connection.setRequestProperty("Accept-Encoding", "identity")
+                requestHeaders(values).forEach(connection::setRequestProperty)
                 connection.connect()
                 require(connection.responseCode in 200..299) {
                     "Download failed with HTTP ${connection.responseCode}"
@@ -191,6 +203,177 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 temporary.delete()
             }
         }.onFailure { completion.failure(it) }
+    }
+
+    private fun startDownload(payload: ByteArray, completion: ModuleCompletion) {
+        val values = WireMap.decode(payload)
+        val uri = URI(values.requiredText("url"))
+        require(uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank()) {
+            "Download URL must be an absolute HTTPS URL"
+        }
+        require(uri.userInfo == null) { "Download URL cannot contain credentials" }
+        val maximumBytes = values.integer("maximumBytes", MAX_IMPORT_BYTES)
+        require(maximumBytes in 1..MAX_DOWNLOAD_BYTES) { "Invalid download size limit" }
+        val file = resolve(values.requiredText("path"))
+        val headers = requestHeaders(values)
+        val id = nextDownloadId.getAndIncrement()
+        val task = DownloadTask(channel = WatchChannel())
+        downloads[id] = task
+        task.future = downloadExecutor.submit {
+            runCatching {
+                performObservedDownload(uri, file, maximumBytes, headers, task.channel)
+            }.onFailure { error ->
+                task.channel.offer(downloadEvent(
+                    state = DOWNLOAD_FAILED,
+                    message = error.message ?: "Download failed",
+                ))
+            }
+        }
+        completion.complete(
+            ModuleResultStatus.SUCCESS,
+            WireMap.encode(mapOf("subscription" to WireValue.Integer(id.toLong()))),
+        )
+    }
+
+    private fun performObservedDownload(
+        uri: URI,
+        file: File,
+        maximumBytes: Long,
+        headers: Map<String, String>,
+        channel: WatchChannel,
+    ) {
+        file.parentFile?.mkdirs()
+        val temporary = File(file.parentFile, "${file.name}.tmp-${UUID.randomUUID()}")
+        val connection = uri.toURL().openConnection() as HttpURLConnection
+        try {
+            connection.instanceFollowRedirects = false
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.requestMethod = "GET"
+            connection.setRequestProperty("Accept-Encoding", "identity")
+            headers.forEach(connection::setRequestProperty)
+            connection.connect()
+            require(connection.responseCode in 200..299) {
+                "Download failed with HTTP ${connection.responseCode}"
+            }
+            val declaredSize = connection.contentLengthLong
+            require(declaredSize < 0 || declaredSize <= maximumBytes) {
+                "Download exceeds configured size limit"
+            }
+            connection.inputStream.use { input ->
+                temporary.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var total = 0L
+                    var reported = -1
+                    while (true) {
+                        check(!Thread.currentThread().isInterrupted) { "Download cancelled" }
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        total += read
+                        require(total <= maximumBytes) { "Download exceeds configured size limit" }
+                        output.write(buffer, 0, read)
+                        val percent = if (declaredSize > 0) ((total * 100) / declaredSize).toInt() else 0
+                        if (percent != reported) {
+                            reported = percent
+                            channel.offer(downloadEvent(
+                                state = DOWNLOAD_PROGRESS,
+                                bytesWritten = total,
+                                totalBytes = declaredSize.coerceAtLeast(0),
+                            ))
+                        }
+                    }
+                }
+            }
+            Files.move(
+                temporary.toPath(),
+                file.toPath(),
+                StandardCopyOption.ATOMIC_MOVE,
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+            val mime = connection.contentType?.substringBefore(';')?.trim()
+                ?.takeIf(String::isNotEmpty) ?: mimeFor(file)
+            channel.offer(downloadEvent(
+                state = DOWNLOAD_COMPLETE,
+                file = file,
+                mime = mime,
+            ))
+        } finally {
+            connection.disconnect()
+            temporary.delete()
+        }
+    }
+
+    private fun downloadEvent(
+        state: Long,
+        bytesWritten: Long = 0,
+        totalBytes: Long = 0,
+        file: File? = null,
+        mime: String = "application/octet-stream",
+        message: String = "",
+    ): ByteArray {
+        val values = mutableMapOf<String, WireValue>(
+            "state" to WireValue.Integer(state),
+            "bytesWritten" to WireValue.Integer(bytesWritten),
+            "totalBytes" to WireValue.Integer(totalBytes),
+        )
+        if (file != null) {
+            values["path"] = WireValue.Text(relativeSandboxPath(root, file))
+            values["name"] = WireValue.Text(file.name)
+            values["mimeType"] = WireValue.Text(mime)
+            values["size"] = WireValue.Integer(file.length())
+        }
+        if (message.isNotEmpty()) values["message"] = WireValue.Text(message)
+        return WireMap.encode(values)
+    }
+
+    private fun cancelDownload(id: Int, completion: ModuleCompletion) {
+        downloads.remove(id)?.let { task ->
+            task.future?.cancel(true)
+            task.channel.close()
+        }
+        completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+    }
+
+    private fun downloadTask(payload: ByteArray): DownloadTask =
+        downloads[subscription(payload)] ?: error("File download not found")
+
+    private fun subscription(payload: ByteArray): Int =
+        ((WireMap.decode(payload)["subscription"] as? WireValue.Integer)?.value
+            ?: error("File download subscription is required")).toInt()
+
+    private fun requestHeaders(values: Map<String, WireValue>): Map<String, String> {
+        val raw = (values["headers"] as? WireValue.Text)?.value.orEmpty()
+        if (raw.isBlank()) return emptyMap()
+        val json = JSONObject(raw)
+        require(json.length() <= 32) { "Downloads accept at most 32 request headers" }
+        return buildMap {
+            json.keys().forEach { name ->
+                val value = json.getString(name)
+                require(HEADER_NAME.matches(name) && value.length <= 8_192 && !value.contains('\r') && !value.contains('\n')) {
+                    "Download request headers are invalid or unsafe"
+                }
+                require(name.lowercase() !in BLOCKED_HEADERS) { "Download request header is not allowed" }
+                put(name, value)
+            }
+        }
+    }
+
+    private fun open(payload: ByteArray, completion: ModuleCompletion) {
+        val values = WireMap.decode(payload)
+        val file = resolve(values.requiredText("path"))
+        require(file.isFile) { "File does not exist" }
+        val mime = (values["mimeType"] as? WireValue.Text)?.value
+            ?.trim()?.takeIf(String::isNotEmpty) ?: mimeFor(file)
+        val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.pam.files", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        require(intent.resolveActivity(activity.packageManager) != null) {
+            "No application can open this file type"
+        }
+        activity.startActivity(intent)
+        completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
     }
 
     private fun pick(payload: ByteArray, completion: ModuleCompletion) {
@@ -433,10 +616,22 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         (this[key] as? WireValue.Integer)?.value ?: fallback
 
     override fun close() {
+        downloads.keys.toList().forEach { id ->
+            downloads.remove(id)?.let { task ->
+                task.future?.cancel(true)
+                task.channel.close()
+            }
+        }
+        downloadExecutor.shutdownNow()
         executor.shutdown()
     }
 
     private companion object {
+        const val DOWNLOAD_PROGRESS = 1L
+        const val DOWNLOAD_COMPLETE = 2L
+        const val DOWNLOAD_FAILED = 3L
+        val HEADER_NAME = Regex("^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}$")
+        val BLOCKED_HEADERS = setOf("connection", "content-length", "host", "transfer-encoding")
         const val DEFAULT_PICK_LIMIT = 10
         const val MAX_PICK_LIMIT = 50
         const val MAX_READ_BYTES = 1024 * 1024L
@@ -444,6 +639,11 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         const val MAX_DOWNLOAD_BYTES = 256L * 1024L * 1024L
         const val MAX_MULTI_IMPORT_BYTES = 256L * 1024L * 1024L
     }
+
+    private data class DownloadTask(
+        val channel: WatchChannel,
+        @Volatile var future: Future<*>? = null,
+    )
 
     private data class ImportedFile(val file: File, val mime: String, val name: String)
 }

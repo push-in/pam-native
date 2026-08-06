@@ -36,6 +36,7 @@ pinning and cache events.
 ```php
 use Pam\Native\CaptureType;
 use Pam\Native\FileReference;
+use Pam\Native\FileDownloadProgress;
 use Pam\Native\MediaPickerType;
 use Pam\Native\PermissionKind;
 use Pam\Native\PermissionStatus;
@@ -60,6 +61,25 @@ Files::download(
     fn (FileReference $file) => $this->sharedPostSource = $file->uri(),
     maximumBytes: 16 * 1_024 * 1_024,
 );
+
+$this->reportDownload = Files::downloadWithProgress(
+    'https://api.example.com/reports/42.pdf',
+    'documents/report-42.pdf',
+    function (FileReference $file): void {
+        Files::open(
+            $file->path,
+            $file->mimeType,
+            static function (): void {},
+            fn (string $message) => $this->show($message),
+        );
+    },
+    fn (FileDownloadProgress $progress) => $this->progress = $progress->fraction(),
+    headers: ['Authorization' => 'Bearer '.$this->token],
+    failure: fn (string $message) => $this->show($message),
+);
+
+// When leaving a screen with an active transfer:
+Files::cancelDownload($this->reportDownload);
 
 Files::pick(MediaPickerType::Image, function ($file): void {
     $this->selectedPath = $file->path;
