@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c02920f3d17ccd73ce98135bd75320db",
+    "content-hash": "b68daa953b15d5ffb50987917f911c31",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -44,7 +44,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "5643bba79703e7415ec40d2c19aabc6eef7b4d67"
+                "reference": "5616e1230ee3679df21ee9086af3f4bc71390cd5"
             },
             "require": {
                 "php": "^8.4"
