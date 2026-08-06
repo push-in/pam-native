@@ -291,6 +291,7 @@ class PamRenderer(
                         && (
                             mutation.key == PropKey.SCROLL_CONTENT_OFFSET_X
                                 || mutation.key == PropKey.SCROLL_CONTENT_OFFSET_Y
+                                || mutation.key == PropKey.SCROLL_REQUEST
                         )
                     ) {
                         add(mutation.id)

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.29 - 2026-08-05
+
+- Preserve explicit reactive `scrollRequest` commands on Android instead of
+  restoring the pre-commit viewport afterward, fixing jump-to-target and
+  jump-to-end controls that appeared to run but left the list in place.
+
 ## 0.6.28 - 2026-08-05
 
 - Treat Android and iOS file/media picker cancellation as normal UI control

@@ -36,6 +36,76 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun reactiveScrollRequestIsNotOverwrittenByRetainedViewport() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var renderer: PamRenderer
+            lateinit var scroll: PamScrollContainer
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.SCROLL,
+                                    mapOf(PropKey.TEST_ID to PropValue.Text("timeline")),
+                                ),
+                            ),
+                            Mutation.Create(node(3, 2, NodeKind.COLUMN)),
+                            Mutation.Create(
+                                node(
+                                    4,
+                                    3,
+                                    NodeKind.VIEW,
+                                    mapOf(PropKey.TEST_ID to PropValue.Text("timeline-end")),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(0f, 0f, 360f, 400f)),
+                            Mutation.Layout(3, Frame(0f, 0f, 360f, 1_400f)),
+                            Mutation.Layout(4, Frame(0f, 1_200f, 1f, 1f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                scroll = activity.host.findByTransitionName("timeline") as PamScrollContainer
+                scroll.restoreOffsetPixels(0, dp(activity.host, 200f))
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(dp(activity.host, 200f), scroll.snapshotOffsetPixels().second)
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Update(
+                                2,
+                                PropKey.SCROLL_TARGET_TEST_ID,
+                                PropValue.Text("timeline-end"),
+                            ),
+                            Mutation.Update(2, PropKey.SCROLL_REQUEST, PropValue.Integer(1)),
+                        ),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue(
+                    "Expected reactive target scroll, offset=${scroll.snapshotOffsetPixels().second}",
+                    scroll.snapshotOffsetPixels().second > dp(activity.host, 600f),
+                )
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Suppress("DEPRECATION")
     @Test
     fun statusBarConfigurationFollowsTheActiveRetainedRoute() {
