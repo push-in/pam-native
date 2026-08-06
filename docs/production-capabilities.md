@@ -49,6 +49,29 @@ Permissions::requestKind(PermissionKind::Contacts, function ($decision): void {
 `Contacts::all()` transparently reads bounded pages so a large address book
 does not exceed the native bridge payload limit.
 
+## Current location
+
+Request location permission first, then provide both success and failure
+callbacks so timeout/provider failures can restore loading state without an
+uncaught asynchronous exception:
+
+```php
+Location::current(
+    callback: function (LocationPosition $position): void {
+        // Use $position->latitude, longitude and accuracy.
+    },
+    highAccuracy: true,
+    timeoutMs: 15_000,
+    maximumAgeMs: 10_000,
+    failure: function (string $message): void {
+        Toast::show($message !== '' ? $message : 'Location is unavailable.');
+    },
+);
+```
+
+The failure callback is optional for backwards compatibility. Without one,
+native failures retain the legacy exception behavior.
+
 ## Push delivery, opening and deep links
 
 ```php

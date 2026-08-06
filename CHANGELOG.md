@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.35 - 2026-08-06
+
+- Add an optional failure callback to `Location::current()` so permission,
+  provider and timeout failures can recover application UI without throwing
+  from an asynchronous native-module result. Existing positional parameters
+  and exception behavior remain compatible when no failure callback is given.
+
 ## 0.6.34 - 2026-08-06
 
 - Add authenticated, observable sandbox downloads through

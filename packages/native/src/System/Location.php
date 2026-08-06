@@ -17,12 +17,16 @@ final class Location
     {
     }
 
-    /** @param Closure(LocationPosition): void $callback */
+    /**
+     * @param Closure(LocationPosition): void $callback
+     * @param Closure(string): void|null $failure
+     */
     public static function current(
         Closure $callback,
         bool $highAccuracy = true,
         int $timeoutMs = 10_000,
         int $maximumAgeMs = 30_000,
+        ?Closure $failure = null,
     ): int {
         return NativeModules::call(
             'location',
@@ -32,8 +36,13 @@ final class Location
                 'maximumAgeMs' => max(0, min(300_000, $maximumAgeMs)),
                 'timeoutMs' => max(1_000, min(60_000, $timeoutMs)),
             ],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = Wire::decodeMap($result->payload);

@@ -2837,6 +2837,25 @@ $assert(
     'Location facade did not decode the native position.',
 );
 
+$locationFailure = null;
+$failedLocationRequest = Location::current(
+    static function (LocationPosition $_): void {
+        throw new RuntimeException('A failed location request must not resolve a position.');
+    },
+    failure: static function (string $message) use (&$locationFailure): void {
+        $locationFailure = $message;
+    },
+);
+Runtime::dispatchModuleResult(
+    $failedLocationRequest,
+    ModuleResultStatus::Failure->value,
+    'Location request timed out.',
+);
+$assert(
+    $locationFailure === 'Location request timed out.',
+    'Location failures must reach the optional failure callback.',
+);
+
 $recording = null;
 $audioRequest = AudioRecorder::stop(
     static function (AudioRecording $value) use (&$recording): void {
@@ -5498,8 +5517,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.34',
-    'The runtime SDK contract must match the 0.6.34 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.35',
+    'The runtime SDK contract must match the 0.6.35 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
