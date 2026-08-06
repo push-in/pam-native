@@ -2889,6 +2889,26 @@ $assert(
     'Audio recorder failures must reach the optional failure callback.',
 );
 
+$linkOpenFailure = null;
+$linkOpenRequest = \Pam\Native\System\Linking::open(
+    'invalid://destination',
+    static function (): void {
+        throw new RuntimeException('Failed link open must not invoke success.');
+    },
+    static function (string $message) use (&$linkOpenFailure): void {
+        $linkOpenFailure = $message;
+    },
+);
+Runtime::dispatchModuleResult(
+    $linkOpenRequest,
+    ModuleResultStatus::Failure->value,
+    'No application can open this URL.',
+);
+$assert(
+    $linkOpenFailure === 'No application can open this URL.',
+    'Link open failures must reach the optional failure callback.',
+);
+
 $pickedFiles = [];
 $pickManyRequest = Files::pickMany(
     MediaPickerType::Media,
@@ -5389,8 +5409,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.32',
-    'The runtime SDK contract must match the 0.6.32 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.33',
+    'The runtime SDK contract must match the 0.6.33 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

@@ -37,6 +37,30 @@ When `thumbnail` is set, Android keeps that poster visible until the first
 decoded video frame is rendered, including during remote preparation and
 initial buffering.
 
+## Links
+
+Outgoing and incoming link operations accept optional failure callbacks. Use
+them for product UI because native failures arrive asynchronously and cannot be
+caught around the original method call:
+
+```php
+use Pam\Native\System\Linking;
+
+Linking::open(
+    'https://example.com',
+    static function (): void {
+        // The platform accepted the URL.
+    },
+    static function (string $message): void {
+        // Show non-blocking feedback or offer a fallback action.
+    },
+);
+```
+
+`Linking::canOpen()` and `Linking::initial()` expose the same optional failure
+callback as their final argument. Omitting it preserves the original exception
+behavior for compatibility.
+
 ## Voice recording
 
 `AudioRecorder` records AAC/M4A voice media and exposes bounded amplitude

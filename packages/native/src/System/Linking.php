@@ -25,13 +25,23 @@ final class Linking
     {
     }
 
-    public static function open(string $url, ?Closure $opened = null): int
+    /** @param null|Closure(string): void $failure */
+    public static function open(
+        string $url,
+        ?Closure $opened = null,
+        ?Closure $failure = null,
+    ): int
     {
         return Runtime::callNative(
             NativeOperation::OpenUrl,
             Wire::map(['url' => $url]),
-            static function (ModuleResultStatus $status, string $payload) use ($opened): void {
+            static function (ModuleResultStatus $status, string $payload) use ($opened, $failure): void {
                 if ($status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($payload);
+
+                        return;
+                    }
                     throw new RuntimeException($payload);
                 }
 
@@ -40,14 +50,26 @@ final class Linking
         );
     }
 
-    /** @param Closure(bool): void $callback */
-    public static function canOpen(string $url, Closure $callback): int
+    /**
+     * @param Closure(bool): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function canOpen(
+        string $url,
+        Closure $callback,
+        ?Closure $failure = null,
+    ): int
     {
         return Runtime::callNative(
             NativeOperation::CanOpenUrl,
             Wire::map(['url' => $url]),
-            static function (ModuleResultStatus $status, string $payload) use ($callback): void {
+            static function (ModuleResultStatus $status, string $payload) use ($callback, $failure): void {
                 if ($status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($payload);
+
+                        return;
+                    }
                     throw new RuntimeException($payload);
                 }
 
@@ -57,15 +79,23 @@ final class Linking
         );
     }
 
-    /** @param Closure(?string): void $callback */
-    public static function initial(Closure $callback): int
+    /**
+     * @param Closure(?string): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function initial(Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'linking',
             'initialUrl',
             [],
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $values = Wire::decodeMap($result->payload);

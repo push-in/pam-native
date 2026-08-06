@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.33 - 2026-08-06
+
+- Add optional failure callbacks to `Linking::open()`, `canOpen()`, and
+  `initial()` so applications can recover from asynchronous platform link
+  failures without an uncaught exception.
+
 ## 0.6.32 - 2026-08-06
 
 - Add optional failure callbacks to `AudioRecorder::start()`, `stop()`,
