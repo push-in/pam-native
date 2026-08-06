@@ -306,6 +306,11 @@ Supported CSS covers PAM's common native layout and paint contracts:
 Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points. `rem`
 uses a stable native root of 16 logical points.
 Percentages are supported for width, height, max-width, and max-height.
+`align-items: baseline` and `align-self: baseline` are supported in templates
+and scoped CSS, along with typed `Align::Baseline` and the `items-baseline`
+utility. Horizontal flex rows align text and input baselines; wrapped rows
+resolve the baseline independently per line. On a vertical flex axis,
+`baseline` follows the cross-axis start edge as defined by the native fallback.
 They are also supported for absolute `left`, `top`, `right`, and `bottom`
 offsets. `border-radius` accepts the standard one-to-four circular-radius
 shorthand; elliptical slash syntax is intentionally rejected.

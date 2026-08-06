@@ -29,6 +29,7 @@ enum CrossAlignment {
     Center,
     End,
     Stretch,
+    Baseline,
 }
 
 struct LayoutContext<'a> {
@@ -673,6 +674,40 @@ fn layout_node(
     );
     let parent_alignment = cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4));
 
+    let has_baseline_alignment = parent_alignment == CrossAlignment::Baseline
+        || flow_children.iter().any(|child| {
+            integer(child, PropKey::AlignSelf).map(cross_alignment)
+                == Some(CrossAlignment::Baseline)
+        });
+    let baseline_target = if axis == Axis::Horizontal && has_baseline_alignment {
+        flow_children
+            .iter()
+            .map(|child| {
+                let main = resolved_main[&child.id];
+                let cross = child_cross(child, axis, available_cross, main)
+                    .ok()
+                    .flatten()
+                    .or_else(|| {
+                        intrinsic_cross(
+                            context.children,
+                            child,
+                            axis,
+                            available_main,
+                            available_cross,
+                            context.text_scale,
+                            context.text_metrics,
+                            depth + 1,
+                        )
+                        .ok()
+                    })
+                    .unwrap_or(0.0);
+                baseline_from_top(child, cross, context.text_scale)
+            })
+            .fold(0.0_f32, f32::max)
+    } else {
+        0.0
+    };
+
     for child in ordered_children {
         let flex = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
         let main = if flex > 0.0 && total_flex > 0.0 {
@@ -711,6 +746,10 @@ fn layout_node(
             CrossAlignment::Start | CrossAlignment::Stretch => cross_before,
             CrossAlignment::Center => (available_cross - cross + cross_before - cross_after) / 2.0,
             CrossAlignment::End => available_cross - cross - cross_after,
+            CrossAlignment::Baseline if axis == Axis::Horizontal => {
+                baseline_target - baseline_from_top(child, cross, context.text_scale) + cross_before
+            }
+            CrossAlignment::Baseline => cross_before,
         }
         .max(0.0);
         cursor += main_before;
@@ -926,6 +965,22 @@ fn layout_wrapped_children(
         let free = (available_main - consumed_main).max(0.0);
         let (mut main_cursor, distributed_gap) = justify_offsets(justify, free, line.len(), gap);
 
+        let has_line_baseline = parent_alignment == CrossAlignment::Baseline
+            || line.iter().any(|child| {
+                integer(child, PropKey::AlignSelf).map(cross_alignment)
+                    == Some(CrossAlignment::Baseline)
+            });
+        let line_baseline = if axis == Axis::Horizontal && has_line_baseline {
+            line.iter()
+                .map(|child| {
+                    let (_, explicit, intrinsic) = resolved_cross[&child.id];
+                    baseline_from_top(child, explicit.unwrap_or(intrinsic), context.text_scale)
+                })
+                .fold(0.0_f32, f32::max)
+        } else {
+            0.0
+        };
+
         for child in line {
             let (main, explicit_cross, intrinsic_cross) = resolved_cross[&child.id];
             let (main_before, main_after) = margin_main(child, axis);
@@ -944,6 +999,11 @@ fn layout_wrapped_children(
                 CrossAlignment::Start | CrossAlignment::Stretch => cross_before,
                 CrossAlignment::Center => (line_cross - cross + cross_before - cross_after) / 2.0,
                 CrossAlignment::End => line_cross - cross - cross_after,
+                CrossAlignment::Baseline if axis == Axis::Horizontal => {
+                    line_baseline - baseline_from_top(child, cross, context.text_scale)
+                        + cross_before
+                }
+                CrossAlignment::Baseline => cross_before,
             }
             .max(0.0);
             main_cursor += main_before;
@@ -1415,6 +1475,7 @@ fn intrinsic_extent(
         let content = wrapped_intrinsic_cross(
             children,
             &node_children,
+            node,
             flow_axis,
             available_main,
             inner_width,
@@ -1431,7 +1492,7 @@ fn intrinsic_extent(
         return finite_non_negative(content + padding_extent);
     }
     let mut child_extents = Vec::with_capacity(node_children.len());
-    for child in node_children {
+    for child in &node_children {
         let child_extent = constrained_intrinsic_extent(
             children,
             child,
@@ -1447,12 +1508,38 @@ fn intrinsic_extent(
         } else {
             margin_cross(child, flow_axis)
         };
-        child_extents.push(child_extent + before + after);
+        child_extents.push((child_extent, before, after));
     }
     let content = if requested_axis == flow_axis {
-        child_extents.iter().sum::<f32>() + gap * child_extents.len().saturating_sub(1) as f32
+        child_extents
+            .iter()
+            .map(|(extent, before, after)| extent + before + after)
+            .sum::<f32>()
+            + gap * child_extents.len().saturating_sub(1) as f32
+    } else if flow_axis == Axis::Horizontal
+        && (cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4))
+            == CrossAlignment::Baseline
+            || node_children.iter().any(|child| {
+                integer(child, PropKey::AlignSelf).map(cross_alignment)
+                    == Some(CrossAlignment::Baseline)
+            }))
+    {
+        let (ascent, descent) = node_children.iter().zip(&child_extents).fold(
+            (0.0_f32, 0.0_f32),
+            |(ascent, descent), (child, (extent, before, after))| {
+                let baseline = baseline_from_top(child, *extent, text_scale);
+                (
+                    ascent.max(before + baseline),
+                    descent.max(after + extent - baseline),
+                )
+            },
+        );
+        ascent + descent
     } else {
-        child_extents.into_iter().fold(0.0, f32::max)
+        child_extents
+            .into_iter()
+            .map(|(extent, before, after)| extent + before + after)
+            .fold(0.0, f32::max)
     };
     let padding_extent = match requested_axis {
         Axis::Vertical => padding_top + padding_bottom,
@@ -1466,6 +1553,7 @@ fn intrinsic_extent(
 fn wrapped_intrinsic_cross(
     children_index: &BTreeMap<u64, Vec<&Node>>,
     children: &[&Node],
+    parent: &Node,
     flow_axis: Axis,
     available_main: f32,
     available_width: f32,
@@ -1482,9 +1570,12 @@ fn wrapped_intrinsic_cross(
     let mut total_cross = 0.0_f32;
     let mut line_main = 0.0_f32;
     let mut line_cross = 0.0_f32;
+    let mut line_ascent = 0.0_f32;
+    let mut line_descent = 0.0_f32;
     let mut line_count = 0_usize;
     let mut line_total = 0_usize;
 
+    let parent_alignment = cross_alignment(integer(parent, PropKey::AlignItems).unwrap_or(4));
     for child in children {
         let main = constrained_intrinsic_extent(
             children_index,
@@ -1508,6 +1599,12 @@ fn wrapped_intrinsic_cross(
         )?;
         let (main_before, main_after) = margin_main(child, flow_axis);
         let (cross_before, cross_after) = margin_cross(child, flow_axis);
+        let baseline_aligned = flow_axis == Axis::Horizontal
+            && integer(child, PropKey::AlignSelf)
+                .map(cross_alignment)
+                .unwrap_or(parent_alignment)
+                == CrossAlignment::Baseline;
+        let baseline = baseline_from_top(child, cross, text_scale);
         let outer_main = main + main_before + main_after;
         let candidate = if line_count == 0 {
             outer_main
@@ -1519,10 +1616,25 @@ fn wrapped_intrinsic_cross(
             line_total += 1;
             line_main = outer_main;
             line_cross = cross + cross_before + cross_after;
+            line_ascent = if baseline_aligned {
+                cross_before + baseline
+            } else {
+                0.0
+            };
+            line_descent = if baseline_aligned {
+                cross_after + cross - baseline
+            } else {
+                0.0
+            };
             line_count = 1;
         } else {
             line_main = candidate;
             line_cross = line_cross.max(cross + cross_before + cross_after);
+            if baseline_aligned {
+                line_ascent = line_ascent.max(cross_before + baseline);
+                line_descent = line_descent.max(cross_after + cross - baseline);
+                line_cross = line_cross.max(line_ascent + line_descent);
+            }
             line_count += 1;
         }
     }
@@ -2221,8 +2333,30 @@ fn cross_alignment(value: i64) -> CrossAlignment {
         1 => CrossAlignment::Start,
         2 => CrossAlignment::Center,
         3 => CrossAlignment::End,
+        5 => CrossAlignment::Baseline,
         _ => CrossAlignment::Stretch,
     }
+}
+
+fn baseline_from_top(node: &Node, height: f32, text_scale: f32) -> f32 {
+    if matches!(
+        node.kind,
+        NodeKind::Text | NodeKind::Input | NodeKind::Button
+    ) {
+        let allow_scaling = !matches!(
+            node.properties.get(&PropKey::TextAllowFontScaling),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        );
+        let scale = if allow_scaling { text_scale } else { 1.0 };
+        let font_size = number(node, PropKey::FontSize).unwrap_or(14.0).max(1.0) * scale;
+        let base_font_size = number(node, PropKey::FontSize).unwrap_or(14.0).max(1.0);
+        let line_height = number(node, PropKey::LineHeight)
+            .unwrap_or((base_font_size * 1.4).max(DEFAULT_TEXT_HEIGHT / 2.0))
+            * scale;
+        let content_baseline = ((line_height - font_size).max(0.0) / 2.0) + font_size * 0.8;
+        return content_baseline.min(height.max(0.0));
+    }
+    height.max(0.0)
 }
 
 fn absolute_static_offset(
@@ -2250,7 +2384,7 @@ fn absolute_static_offset(
     match alignment {
         CrossAlignment::Center => free / 2.0,
         CrossAlignment::End => free,
-        CrossAlignment::Start | CrossAlignment::Stretch => 0.0,
+        CrossAlignment::Start | CrossAlignment::Stretch | CrossAlignment::Baseline => 0.0,
     }
 }
 
@@ -2432,6 +2566,72 @@ mod tests {
         assert_eq!(child.height, 156.0);
         assert_eq!(child.x, 114.0);
         assert_eq!(child.y, 200.0);
+    }
+
+    #[test]
+    fn row_baseline_aligns_text_with_different_font_sizes() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Screen,
+                        [
+                            (PropKey::FlexDirection, PropValue::Integer(2)),
+                            (PropKey::AlignItems, PropValue::Integer(5)),
+                        ],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Text,
+                        [
+                            (PropKey::Text, PropValue::String("small".to_owned())),
+                            (PropKey::FontSize, PropValue::Float(10.0)),
+                            (PropKey::LineHeight, PropValue::Float(14.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::Text,
+                        [
+                            (PropKey::Text, PropValue::String("large".to_owned())),
+                            (PropKey::FontSize, PropValue::Float(20.0)),
+                            (PropKey::LineHeight, PropValue::Float(28.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 240.0,
+                height: 80.0,
+            },
+        )
+        .expect("baseline layout");
+        let small_baseline =
+            layouts[&2].y + baseline_from_top(&tree.nodes[&2], layouts[&2].height, 1.0);
+        let large_baseline =
+            layouts[&3].y + baseline_from_top(&tree.nodes[&3], layouts[&3].height, 1.0);
+
+        assert!((small_baseline - large_baseline).abs() < 0.01);
+        assert!(layouts[&2].y > layouts[&3].y);
     }
 
     #[test]

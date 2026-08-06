@@ -2372,6 +2372,15 @@ $assert(
         && $flexAliasElement->properties()[PropKey::JustifyContent->value] === 3,
     'Template flex-start and flex-end aliases must match native start and end layout values.',
 );
+$baselineElement = TemplateRenderer::render(
+    TemplateCompiler::compile('<Row alignItems="baseline" />'),
+    null,
+    [],
+);
+$assert(
+    $baselineElement->properties()[PropKey::AlignItems->value] === \Pam\Native\Align::Baseline->value,
+    'Template baseline alignment must reach the native layout engine.',
+);
 $gridElement = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<Grid gutterX="16" gutterY="8"><Column span="12" spanSm="6" spanMd="4"><Image source="cover.webp" aspectRatio="1" /><Pressable><Text>Open</Text></Pressable></Column><Column class="col-6 col-lg-3 offset-lg-1 order-md-2" /></Grid>',
@@ -5528,8 +5537,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.38',
-    'The runtime SDK contract must match the 0.6.38 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.39',
+    'The runtime SDK contract must match the 0.6.39 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.39 - 2026-08-06
+
+- Add native baseline cross-axis alignment throughout the typed API, template
+  renderer, scoped CSS utility compiler and Rust layout engine. Horizontal
+  flex rows now align text and controls by their typographic baseline while
+  wrapped lines calculate an independent baseline for each line.
+
 ## 0.6.38 - 2026-08-06
 
 - Match React Native text-input baselines on Android by disabling the platform

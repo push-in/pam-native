@@ -1745,6 +1745,7 @@ final class TemplateRenderer
             PropKey::AlignItems, PropKey::AlignSelf => self::named($value, [
                 'start' => 1, 'flex-start' => 1, 'center' => 2,
                 'end' => 3, 'flex-end' => 3, 'stretch' => 4,
+                'baseline' => 5,
             ]),
             PropKey::JustifyContent => self::named($value, [
                 'start' => 1, 'flex-start' => 1, 'center' => 2,
@@ -2560,6 +2561,7 @@ final class TemplateRenderer
             'items-center' => [PropKey::AlignItems, Align::Center->value],
             'items-end' => [PropKey::AlignItems, Align::End->value],
             'items-stretch' => [PropKey::AlignItems, Align::Stretch->value],
+            'items-baseline' => [PropKey::AlignItems, Align::Baseline->value],
         ];
 
         if (isset($fixed[$class])) {

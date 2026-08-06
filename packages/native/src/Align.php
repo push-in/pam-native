@@ -10,4 +10,5 @@ enum Align: int
     case Center = 2;
     case End = 3;
     case Stretch = 4;
+    case Baseline = 5;
 }
