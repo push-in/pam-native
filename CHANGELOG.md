@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.38 - 2026-08-06
+
+- Match React Native text-input baselines on Android by disabling the platform
+  font padding, and retry imperative scroll requests after the next rendered
+  frame so end/target jumps survive concurrent content layout.
+
 ## 0.6.37 - 2026-08-06
 
 - Add bounded `pressedScale` feedback to `Pressable` on Android and iOS,

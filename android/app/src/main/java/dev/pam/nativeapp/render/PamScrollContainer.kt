@@ -205,6 +205,10 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     }
 
     fun requestScroll() {
+        requestScrollAfterLayout(retry = true)
+    }
+
+    private fun requestScrollAfterLayout(retry: Boolean) {
         activeScroll.post {
             if (!isAttachedToWindow) return@post
             if (scrollTargetTestId.isNotEmpty()) {
@@ -223,12 +227,22 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
                         scrollTargetAlignment,
                     ),
                 )
+                if (retry) {
+                    activeScroll.postOnAnimation {
+                        requestScrollAfterLayout(retry = false)
+                    }
+                }
                 return@post
             }
             if (scrollTargetOffsetPx >= 0) {
                 scrollToPrimary(scrollTargetOffsetPx)
             } else {
                 scrollToPrimary(primaryMaxOffset())
+            }
+            if (retry) {
+                activeScroll.postOnAnimation {
+                    requestScrollAfterLayout(retry = false)
+                }
             }
         }
     }

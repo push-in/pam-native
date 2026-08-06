@@ -591,6 +591,7 @@ class PamRenderer(
             }
             NodeKind.INPUT -> PamEditText(context).apply {
                 isSingleLine = true
+                includeFontPadding = false
                 minHeight = 0
                 background = null
                 setPadding(0, 0, 0, 0)
