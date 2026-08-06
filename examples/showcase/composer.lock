@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c0e5a28d85893d8a8808b1b335224334",
+    "content-hash": "c02920f3d17ccd73ce98135bd75320db",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -12,11 +12,11 @@
             "dist": {
                 "type": "path",
                 "url": "../community-plugin",
-                "reference": "a7c2c2a71511f8c9d195919ead340b5945267b0b"
+                "reference": "433a28baadb065973e814630a93d78543cfc5404"
             },
             "require": {
                 "php": "^8.4",
-                "pushinbr/pam-native": "^0.5.0"
+                "pushinbr/pam-native": "^0.6.1"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -40,15 +40,19 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.5.0",
+            "version": "0.6.39",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "f096b52a09f73273632a92d304e8a8c45c367c7a"
+                "reference": "5643bba79703e7415ec40d2c19aabc6eef7b4d67"
             },
             "require": {
                 "php": "^8.4"
             },
+            "bin": [
+                "bin/pam-native-format",
+                "bin/pam-native-optimize"
+            ],
             "type": "library",
             "extra": {
                 "pam-native": {

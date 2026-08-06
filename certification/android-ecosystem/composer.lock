@@ -4,27 +4,28 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "86d4b059a1343a14eb15f07ae984abf8",
+    "content-hash": "37cd3679a7db1a9d635817d39ca56c62",
     "packages": [
         {
             "name": "pushinbr/pam-native",
-            "version": "v0.6.1",
+            "version": "v0.6.39",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-php.git",
-                "reference": "3fa222adeaf9c1e9bc82842af37e488c52b46dd7"
+                "reference": "bd8ef1bca452452a4399ee7b1be75a5d75e3327e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-php/zipball/3fa222adeaf9c1e9bc82842af37e488c52b46dd7",
-                "reference": "3fa222adeaf9c1e9bc82842af37e488c52b46dd7",
+                "url": "https://api.github.com/repos/push-in/pam-native-php/zipball/bd8ef1bca452452a4399ee7b1be75a5d75e3327e",
+                "reference": "bd8ef1bca452452a4399ee7b1be75a5d75e3327e",
                 "shasum": ""
             },
             "require": {
                 "php": "^8.4"
             },
             "bin": [
-                "bin/pam-native-format"
+                "bin/pam-native-format",
+                "bin/pam-native-optimize"
             ],
             "type": "library",
             "extra": {
@@ -42,7 +43,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Build fast native Android and iOS applications with PHP and PAM.",
             "homepage": "https://github.com/push-in/pam-native",
@@ -57,7 +58,7 @@
                 "issues": "https://github.com/push-in/pam-native/issues",
                 "source": "https://github.com/push-in/pam-native"
             },
-            "time": "2026-08-01T03:24:35+00:00"
+            "time": "2026-08-06T12:09:27+00:00"
         },
         {
             "name": "pushinbr/pam-native-auth",
@@ -90,7 +91,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Secure sessions, encrypted credential vaults and OAuth 2.1/PKCE primitives for PAM Native.",
             "support": {
@@ -133,7 +134,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Durable background uploads and downloads for PAM Native.",
             "support": {
@@ -173,7 +174,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Lifecycle-safe Bluetooth LE scanning, GATT and notifications for PAM Native.",
             "support": {
@@ -216,7 +217,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Typed targeting, deterministic rollouts and offline feature-flag snapshots for PAM Native.",
             "support": {
@@ -260,7 +261,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Production Firebase Analytics, Remote Config, Messaging, Crashlytics and multi-app integration for PAM Native.",
             "support": {
@@ -300,7 +301,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Health Connect and HealthKit authorization, reads and writes for PAM Native.",
             "support": {
@@ -340,7 +341,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Android dynamic shortcuts and Apple App Intents for PAM Native routes.",
             "support": {
@@ -380,7 +381,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "ActivityKit Live Activities and Android ongoing live notifications for PAM Native.",
             "support": {
@@ -420,7 +421,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Declarative native maps, cameras, markers and overlays for PAM Native.",
             "support": {
@@ -463,7 +464,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Native media inspection and thumbnail generation for PAM Native.",
             "support": {
@@ -503,7 +504,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Lifecycle-safe NDEF reading and writing for PAM Native on Android and iOS.",
             "support": {
@@ -543,7 +544,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "PCI-conscious Stripe PaymentSheet payments for PAM Native.",
             "support": {
@@ -586,7 +587,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Persistent native WebSocket connections with bounded event queues for PAM Native.",
             "support": {
@@ -626,7 +627,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Real-time QR and barcode scanning with native camera previews for PAM Native.",
             "support": {
@@ -666,7 +667,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Receive text, URLs and files through native Android shares and an iOS Share Extension.",
             "support": {
@@ -706,7 +707,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "StoreKit 2 and Google Play Billing subscriptions for PAM Native.",
             "support": {
@@ -746,7 +747,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Adaptive streaming, subtitles and native Media3/AVPlayer playback for PAM Native.",
             "support": {
@@ -786,7 +787,7 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "Apache-2.0"
+                "BUSL-1.1"
             ],
             "description": "Android App Widgets and iOS WidgetKit timelines for PAM Native.",
             "support": {

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - Cargo.toml
+      - packages/native/**
       - certification/ios-ecosystem/**
       - .github/workflows/ecosystem-ios.yml
   workflow_dispatch:
@@ -35,17 +37,8 @@ jobs:
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
           )
-          versions=(
-            v0.1.0 v0.1.0 v0.1.0
-            v0.1.1 v0.1.0 v0.1.0
-            v0.1.0 v0.1.0 v0.1.0
-            v0.1.0 v0.1.0 v0.1.0
-            v0.1.0 v0.1.0 v0.1.0
-            v0.1.0 v0.1.0 v0.1.0
-          )
-          for index in "${!repos[@]}"; do
-            repo="${repos[$index]}"
-            git clone --depth 1 --branch "${versions[$index]}" \
+          for repo in "${repos[@]}"; do
+            git clone --depth 1 --branch main \
               "https://github.com/push-in/${repo}.git" \
               "${RUNNER_TEMP}/${repo}"
           done

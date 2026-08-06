@@ -5,7 +5,7 @@
     "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-native": "^0.5.0"
+    "pushinbr/pam-native": "^0.6.1"
     },
     "autoload": {
         "psr-4": {

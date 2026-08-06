@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - Cargo.toml
+      - packages/native/**
       - certification/android-ecosystem/**
       - .github/workflows/ecosystem-android.yml
   workflow_dispatch:
@@ -35,10 +37,10 @@ jobs:
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006' 'cmake;3.22.1'
       - name: Install verified PAM CLI release
         env:
-          PAM_VERSION: v0.1.45
+          PAM_VERSION: v0.1.47
         run: |
           curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-            https://github.com/push-in/pam/releases/download/v0.1.45/install.sh | sh
+            https://github.com/push-in/pam/releases/download/${PAM_VERSION}/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Install exact public Composer packages
         working-directory: certification/android-ecosystem
