@@ -725,6 +725,10 @@ the programmatic `MediaPlayer::onProgress()` API:
 <MediaPlayer source="$video" on:mediaProgress="trackProgress" />
 ```
 
+On Android, `http://` and `https://` sources are opened as network media URLs.
+Provider and local sources keep their context-aware handling through
+`content://`, `file://`, and `android.resource://` URIs.
+
 `autoPlay` is reactive: changing it to `true` starts a prepared player and
 changing it to `false` pauses playback without resetting the current position.
 This makes a bound boolean suitable for custom play/pause controls.

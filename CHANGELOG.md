@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.30 - 2026-08-05
+
+- Route Android `MediaPlayer` HTTP and HTTPS sources through the network URL
+  overload instead of `ContentResolver`, fixing remote audio/video failures
+  reported as `No content provider` while preserving `content://`, `file://`
+  and `android.resource://` playback.
+
 ## 0.6.29 - 2026-08-05
 
 - Preserve explicit reactive `scrollRequest` commands on Android instead of

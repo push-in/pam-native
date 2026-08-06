@@ -289,7 +289,11 @@ internal class PamMediaView(
             true
         }
         runCatching {
-            player.setDataSource(context, uri)
+            if (mediaDataSourceUsesNetworkString(uri.scheme)) {
+                player.setDataSource(uri.toString())
+            } else {
+                player.setDataSource(context, uri)
+            }
             player.prepareAsync()
         }.onFailure {
             releasePlayer()
@@ -429,3 +433,7 @@ internal class PamMediaView(
         super.onDetachedFromWindow()
     }
 }
+
+internal fun mediaDataSourceUsesNetworkString(scheme: String?): Boolean =
+    scheme.equals("http", ignoreCase = true) ||
+        scheme.equals("https", ignoreCase = true)
