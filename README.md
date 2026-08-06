@@ -11,7 +11,7 @@
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-API%2026–36-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![iOS](https://img.shields.io/badge/iOS-15%2B-000000?style=flat-square&logo=apple&logoColor=white)
-![License](https://img.shields.io/badge/license-BUSL--1.1-f59e0b?style=flat-square)
+![License](https://img.shields.io/badge/license-Apache--2.0-22c55e?style=flat-square)
 
 **[Get started](https://push-in.github.io/pam-docs/native/overview/) · [Components](https://push-in.github.io/pam-docs/native/components/) · [Examples](docs/examples.md) · [Showcase](docs/showcase.md)**
 
@@ -230,7 +230,7 @@ plugins are welcome. Start with the
 [contribution guide](https://push-in.github.io/pam-docs/community/contributing/)
 or open a discussion describing the application you want to build.
 
-PAM Native is source-available under BUSL-1.1. You may build and sell
+PAM Native is open source under Apache-2.0. You may build and sell
 proprietary or open applications with it without a revenue limit or runtime
 royalty. See [LICENSING.md](LICENSING.md) for the plain-language grant and the
 full [LICENSE](LICENSE) for controlling terms.

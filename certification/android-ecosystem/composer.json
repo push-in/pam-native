@@ -2,7 +2,7 @@
     "name": "pushinbr/pam-native-android-certification",
     "description": "Public aggregate Android build for the official PAM Native plugins.",
     "type": "project",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
         "pushinbr/pam-native": "0.6.1",

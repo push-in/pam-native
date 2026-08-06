@@ -2,7 +2,7 @@
     "name": "pam/example-native-showcase",
     "description": "Pam Native Android showcase application.",
     "type": "project",
-    "license": "BUSL-1.1",
+    "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
         "pushinbr/pam-native": "^0.5.0",

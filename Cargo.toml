@@ -9,7 +9,7 @@ members = [
 version = "0.6.39"
 edition = "2024"
 rust-version = "1.88"
-license = "BUSL-1.1"
+license = "Apache-2.0"
 repository = "https://github.com/push-in/pam-native"
 
 [workspace.lints.rust]

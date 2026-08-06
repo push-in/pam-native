@@ -30,7 +30,7 @@
                 }
             },
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Reference Composer plugin for Pam Native.",
             "transport-options": {
@@ -64,7 +64,7 @@
                 }
             },
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Build fast native Android and iOS applications with PHP and PAM.",
             "homepage": "https://github.com/push-in/pam-native",

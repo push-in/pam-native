@@ -2,7 +2,7 @@
     "name": "pam-community/example-plugin",
     "description": "Reference Composer plugin for Pam Native.",
     "type": "pam-native-plugin",
-    "license": "BUSL-1.1",
+    "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
         "pushinbr/pam-native": "^0.5.0"

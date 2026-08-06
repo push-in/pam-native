@@ -479,7 +479,5 @@ same callback with status `0`; they never crash the component runtime.
 
 ## License
 
-Source-available under the [Business Source License 1.1](LICENSE). Android
-applications built with PAM may be commercial or proprietary; offering PAM as a
-competing framework, runtime, developer platform, or UI engine requires a
-commercial license.
+Free and open-source under the [Apache License 2.0](LICENSE). You may use,
+modify, and distribute this package for any purpose, including commercially.
