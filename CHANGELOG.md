@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.37 - 2026-08-06
+
+- Add bounded `pressedScale` feedback to `Pressable` on Android and iOS,
+  compositing it with authored `scaleX`/`scaleY` transforms and the existing
+  `pressedOpacity` animation. The declarative `pressedScale` attribute and
+  fluent `Pressable::pressedScale()` API preserve a scale of `1` by default.
+
 ## 0.6.36 - 2026-08-06
 
 - Add typed `scrollTargetAlignment` (`start`, `center`, or `end`) to tokenized

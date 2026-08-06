@@ -538,6 +538,7 @@ pub enum PropKey {
     NavigationBarHidden = 445,
     BorderStyle = 446,
     ScrollTargetAlignment = 447,
+    PressScale = 448,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -992,6 +993,7 @@ impl TryFrom<u16> for PropKey {
             445 => Ok(Self::NavigationBarHidden),
             446 => Ok(Self::BorderStyle),
             447 => Ok(Self::ScrollTargetAlignment),
+            448 => Ok(Self::PressScale),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1856,10 +1858,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=447 {
+        for value in 1..=448 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(448).is_err());
+        assert!(PropKey::try_from(449).is_err());
     }
 
     #[test]

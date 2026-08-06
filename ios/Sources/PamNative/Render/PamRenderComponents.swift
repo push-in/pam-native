@@ -1,6 +1,46 @@
 import Foundation
 import UIKit
 
+final class PamPressButton: UIButton {
+    var pamPressedOpacity: CGFloat = 0.72
+    var pamPressedScale: CGFloat = 1
+
+    private var restingAlpha: CGFloat?
+    private var restingTransform: CGAffineTransform?
+
+    override var isHighlighted: Bool {
+        didSet {
+            guard isHighlighted != oldValue else { return }
+            if isHighlighted {
+                restingAlpha = alpha
+                restingTransform = transform
+                UIView.animate(
+                    withDuration: 0.07,
+                    delay: 0,
+                    options: [.beginFromCurrentState, .allowUserInteraction]
+                ) {
+                    self.alpha = self.pamPressedOpacity
+                    self.transform = (self.restingTransform ?? .identity)
+                        .scaledBy(x: self.pamPressedScale, y: self.pamPressedScale)
+                }
+            } else {
+                let alpha = restingAlpha ?? self.alpha
+                let transform = restingTransform ?? self.transform
+                UIView.animate(
+                    withDuration: 0.11,
+                    delay: 0,
+                    options: [.beginFromCurrentState, .allowUserInteraction]
+                ) {
+                    self.alpha = alpha
+                    self.transform = transform
+                }
+                restingAlpha = nil
+                restingTransform = nil
+            }
+        }
+    }
+}
+
 final class PamAnchoredScrollView: UIScrollView {
     var anchorToEnd = false {
         didSet {

@@ -271,6 +271,7 @@ final class TemplateRenderer
         'selected' => PropKey::Selected,
         'rippleColor' => PropKey::RippleColor,
         'pressedOpacity' => PropKey::PressOpacity,
+        'pressedScale' => PropKey::PressScale,
         'collapsable' => PropKey::Collapsable,
         'accessibilityRole' => PropKey::AccessibilityRole,
         'accessibilityHint' => PropKey::AccessibilityHint,

@@ -563,7 +563,8 @@ enum class PropKey(val value: Int) {
     WORKLET_ITERATIONS(444),
     NAVIGATION_BAR_HIDDEN(445),
     BORDER_STYLE(446),
-    SCROLL_TARGET_ALIGNMENT(447);
+    SCROLL_TARGET_ALIGNMENT(447),
+    PRESS_SCALE(448);
 
     companion object {
         fun from(value: Int): PropKey =

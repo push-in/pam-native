@@ -29,7 +29,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var onPressOut: ((PamPressPointer) -> Unit)? = null
     private var onPressMove: ((PamPressPointer) -> Unit)? = null
     private var pressOpacity = DEFAULT_PRESS_OPACITY
+    private var pressScale = 1f
     private var targetOpacity = 1f
+    private var targetScaleX = 1f
+    private var targetScaleY = 1f
     private var delayLongPressMs = ViewConfiguration.getLongPressTimeout().toLong()
     private var delayPressInMs = 0L
     private var delayPressOutMs = 0L
@@ -71,6 +74,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             isPressed = false
             animate()
                 .alpha(targetOpacity)
+                .scaleX(targetScaleX)
+                .scaleY(targetScaleY)
                 .setDuration(PRESS_OUT_ANIMATION_MS)
                 .start()
             onPressOut?.invoke(lastPointer)
@@ -92,7 +97,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     fun configure(
         pressOpacity: Float,
+        pressScale: Float,
         targetOpacity: Float,
+        targetScaleX: Float,
+        targetScaleY: Float,
         delayLongPressMs: Long,
         delayPressInMs: Long,
         delayPressOutMs: Long,
@@ -103,7 +111,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         androidDisableSound: Boolean,
     ) {
         this.pressOpacity = pressOpacity.coerceIn(0f, 1f)
+        this.pressScale = pressScale.coerceIn(0.01f, 4f)
         this.targetOpacity = targetOpacity.coerceIn(0f, 1f)
+        this.targetScaleX = targetScaleX
+        this.targetScaleY = targetScaleY
         this.delayLongPressMs = delayLongPressMs.coerceIn(0L, MAX_PRESS_DELAY_MS)
         this.delayPressInMs = delayPressInMs.coerceIn(0L, MAX_PRESS_DELAY_MS)
         this.delayPressOutMs = delayPressOutMs.coerceIn(0L, MAX_PRESS_DELAY_MS)
@@ -378,6 +389,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         isPressed = true
         animate()
             .alpha(pressOpacity)
+            .scaleX(targetScaleX * pressScale)
+            .scaleY(targetScaleY * pressScale)
             .setDuration(PRESS_IN_ANIMATION_MS)
             .start()
         onPressIn?.invoke(pointer)
@@ -403,6 +416,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             pressInDispatched = false
             isPressed = false
             alpha = targetOpacity
+            scaleX = targetScaleX
+            scaleY = targetScaleY
         }
         removeCallbacks(moveRunnable)
         moveScheduled = false

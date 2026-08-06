@@ -384,6 +384,18 @@ Unsupported web-only properties such as `box-shadow`, nested selectors, media
 queries, descendant selectors, and unknown variables fail the build instead of
 silently producing a different native layout.
 
+Press feedback is native and can combine opacity with a bounded scale while
+preserving the element's authored transform:
+
+```xml
+<Pressable pressedOpacity="0.9" pressedScale="0.92" on:press="send">
+    <AppIcon name="send" />
+</Pressable>
+```
+
+The equivalent fluent API is
+`Pressable::make($content)->pressedOpacity(0.9)->pressedScale(0.92)`.
+
 Rounded clipping uses the platform compositor rather than a browser mask:
 
 ```xml

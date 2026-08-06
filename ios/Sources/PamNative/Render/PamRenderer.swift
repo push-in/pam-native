@@ -762,9 +762,9 @@ public final class PamRenderer {
         case .screen, .column, .row, .view, .keyboardAvoidingView, .inputAccessoryView:
             return UIView()
         case .pressable:
-            return UIButton(type: .system)
+            return PamPressButton(type: .system)
         case .button:
-            return UIButton(type: .system)
+            return PamPressButton(type: .system)
         case .text:
             return UILabel()
         case .input:
@@ -1750,6 +1750,12 @@ public final class PamRenderer {
         case PamConstants.scrollTargetAlignment:
             (view as? PamAnchoredScrollView)?.scrollTargetAlignment =
                 min(3, max(1, Int(value.integerOrNil() ?? 1)))
+        case PamConstants.pressOpacity:
+            (view as? PamPressButton)?.pamPressedOpacity =
+                min(1, max(0, CGFloat(value.decimalOrZero())))
+        case PamConstants.pressScale:
+            (view as? PamPressButton)?.pamPressedScale =
+                min(4, max(0.01, CGFloat(value.decimalOrZero())))
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(value.integerOrNil() ?? Int64(UInt32.max))
         case PamConstants.drawingWidth:
@@ -2025,6 +2031,10 @@ public final class PamRenderer {
             (view as? PamAnchoredScrollView)?.scrollTargetOffset = -1
         case PamConstants.scrollTargetAlignment:
             (view as? PamAnchoredScrollView)?.scrollTargetAlignment = 1
+        case PamConstants.pressOpacity:
+            (view as? PamPressButton)?.pamPressedOpacity = 0.72
+        case PamConstants.pressScale:
+            (view as? PamPressButton)?.pamPressedScale = 1
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(Int64(UInt32.max))
         case PamConstants.drawingWidth:

@@ -408,9 +408,11 @@ public enum PamConstants {
     public static let navigationBarHidden = 445
     public static let borderStyle = 446
     public static let scrollTargetAlignment = 447
+    public static let pressScale = 448
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38
+    public static let pressOpacity = 68
     public static let alignItems = 39
     public static let alignSelf = 40
     public static let justifyContent = 41

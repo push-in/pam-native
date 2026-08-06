@@ -1518,6 +1518,7 @@ $pressMoveEvent = null;
 $pressableElement = Pressable::make(Text::make('Open'))
     ->ripple(0x66010203, true, 24.0, true, 0.5)
     ->pressedOpacity(0.7)
+    ->pressedScale(0.92)
     ->hitSlopEdges(4.0, 6.0, 8.0, 10.0)
     ->pressRetentionEdges(12.0, 14.0, 16.0, 18.0)
     ->delayLongPress(420)
@@ -1552,6 +1553,7 @@ $assert(
         && $pressableElement->properties()[PropKey::PressDelayInMs->value] === 25
         && $pressableElement->properties()[PropKey::PressDelayOutMs->value] === 40
         && $pressableElement->properties()[PropKey::PressAndroidDisableSound->value] === true
+        && $pressableElement->properties()[PropKey::PressScale->value] === 0.92
         && $pressableElement->properties()[PropKey::RippleBorderless->value] === true
         && $pressableElement->properties()[PropKey::RippleRadius->value] === 24.0
         && $pressableElement->properties()[PropKey::RippleForeground->value] === true
@@ -5526,8 +5528,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.36',
-    'The runtime SDK contract must match the 0.6.36 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.37',
+    'The runtime SDK contract must match the 0.6.37 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

@@ -1908,6 +1908,10 @@ class PamRenderer(
                 state.pressOpacity = value.decimal().toFloat()
                 configurePressable(view, state)
             }
+            PropKey.PRESS_SCALE -> {
+                state.pressScale = value.decimal().toFloat()
+                configurePressable(view, state)
+            }
             PropKey.ACCESSIBILITY_ROLE -> {
                 val role = value.integer().toInt()
                 val className = accessibilityClass(role)
@@ -2622,6 +2626,10 @@ class PamRenderer(
             PropKey.PRESS_DELAY_OUT_MS,
             PropKey.PRESS_ANDROID_DISABLE_SOUND,
             -> configurePressable(view, state)
+            PropKey.PRESS_SCALE -> {
+                state.pressScale = 1f
+                configurePressable(view, state)
+            }
             PropKey.HOST_PROPERTIES -> Unit
             PropKey.ON_INPUT_END_EDITING,
             PropKey.ON_INPUT_SELECTION_CHANGE,
@@ -3370,7 +3378,12 @@ class PamRenderer(
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    view.animate().alpha(state.pressOpacity).setDuration(70).start()
+                    view.animate()
+                        .alpha(state.pressOpacity)
+                        .scaleX(state.targetScaleX() * state.pressScale)
+                        .scaleY(state.targetScaleY() * state.pressScale)
+                        .setDuration(70)
+                        .start()
                     dispatchDirectiveTouch(state, EventKind.TOUCH_START.value, event)
                 }
                 MotionEvent.ACTION_MOVE ->
@@ -3378,7 +3391,12 @@ class PamRenderer(
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL,
                 -> {
-                    view.animate().alpha(state.targetAlpha()).setDuration(110).start()
+                    view.animate()
+                        .alpha(state.targetAlpha())
+                        .scaleX(state.targetScaleX())
+                        .scaleY(state.targetScaleY())
+                        .setDuration(110)
+                        .start()
                     dispatchDirectiveTouch(state, EventKind.TOUCH_END.value, event)
                 }
             }
@@ -3548,7 +3566,10 @@ class PamRenderer(
         val pressable = view as? PamPressable ?: return
         pressable.configure(
             pressOpacity = state.pressOpacity,
+            pressScale = state.pressScale,
             targetOpacity = state.targetAlpha(),
+            targetScaleX = state.targetScaleX(),
+            targetScaleY = state.targetScaleY(),
             delayLongPressMs = state.integer(PropKey.PRESS_DELAY_LONG_MS, 500L),
             delayPressInMs = state.integer(PropKey.PRESS_DELAY_IN_MS, 0L),
             delayPressOutMs = state.integer(PropKey.PRESS_DELAY_OUT_MS, 0L),
@@ -6042,6 +6063,7 @@ class PamRenderer(
         var nativeValueAcknowledged: Boolean = true,
         var baseText: String = "",
         var pressOpacity: Float = 0.72f,
+        var pressScale: Float = 1f,
         var scrollScheduled: Boolean = false,
         var pendingScrollOffset: Float = 0f,
         var endReachedSent: Boolean = false,
@@ -6081,6 +6103,10 @@ class PamRenderer(
             integer(PropKey.INPUT_DEBOUNCE_MS, 48L).coerceIn(0L, 5_000L)
 
         fun targetAlpha(): Float = number(PropKey.OPACITY, 1.0).toFloat()
+
+        fun targetScaleX(): Float = number(PropKey.SCALE_X, 1.0).toFloat()
+
+        fun targetScaleY(): Float = number(PropKey.SCALE_Y, 1.0).toFloat()
 
         fun flag(key: PropKey, fallback: Boolean): Boolean =
             (properties[key] as? PropValue.Flag)?.value ?: fallback
@@ -6293,6 +6319,7 @@ class PamRenderer(
             PropKey.RIPPLE_FOREGROUND,
             PropKey.RIPPLE_ALPHA,
             PropKey.PRESS_OPACITY,
+            PropKey.PRESS_SCALE,
             PropKey.HIT_SLOP,
             PropKey.HIT_SLOP_LEFT,
             PropKey.HIT_SLOP_TOP,

@@ -67,6 +67,11 @@ final class Pressable extends Element
         return $this->withProperty(PropKey::PressOpacity, min(1.0, max(0.0, $opacity)));
     }
 
+    public function pressedScale(float $scale): self
+    {
+        return $this->withProperty(PropKey::PressScale, min(4.0, max(0.01, $scale)));
+    }
+
     public function hitSlop(float $amount): self
     {
         return $this->hitSlopEdges($amount, $amount, $amount, $amount);

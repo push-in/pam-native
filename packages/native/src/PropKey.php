@@ -453,4 +453,5 @@ enum PropKey: int
     case NavigationBarHidden = 445;
     case BorderStyle = 446;
     case ScrollTargetAlignment = 447;
+    case PressScale = 448;
 }
