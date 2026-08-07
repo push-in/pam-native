@@ -206,6 +206,13 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (gestureRequiresParentInterception(
+                event.actionMasked,
+                gestureRecognizer.requiresMultiPointerStream(),
+            )
+        ) {
+            parent?.requestDisallowInterceptTouchEvent(true)
+        }
         gestureRecognizer.onTouch(event)
         if (gestureRecognitionCancelsPress(
                 recognized = gestureRecognizer.hasRecognized(),
@@ -214,7 +221,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         ) {
             cancelGesture(emitOut = true)
         }
-        return super.dispatchTouchEvent(event)
+        val handled = super.dispatchTouchEvent(event)
+        if (
+            event.actionMasked == MotionEvent.ACTION_POINTER_UP ||
+            event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return handled
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -470,6 +485,11 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         const val PRESS_OUT_ANIMATION_MS = 110L
     }
 }
+
+internal fun gestureRequiresParentInterception(
+    actionMasked: Int,
+    multiPointerGesture: Boolean,
+): Boolean = multiPointerGesture && actionMasked == MotionEvent.ACTION_POINTER_DOWN
 
 internal fun gestureRecognitionCancelsPress(
     recognized: Boolean,

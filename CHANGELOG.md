@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.45 - 2026-08-07
+
+- Keep Android pinch and rotation gestures inside their detector when nested
+  in a `ScrollView` or pager. The detector now claims the touch stream when the
+  second pointer lands and releases it when the gesture finishes, preventing a
+  gallery pinch from being misinterpreted as horizontal page navigation.
+
 ## 0.6.44 - 2026-08-06
 
 - Recover Android `autoFocus` when an already-retained conditional ancestor

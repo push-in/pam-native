@@ -84,6 +84,9 @@ internal class PamGestureRecognizer(private val view: View) {
 
     fun hasRecognized(): Boolean = recognized
 
+    fun requiresMultiPointerStream(): Boolean =
+        isEnabled() && (config?.type == TYPE_PINCH || config?.type == TYPE_ROTATION)
+
     fun ownsTouchStream(): Boolean =
         isEnabled() && (
             config?.composition == COMPOSITION_EXCLUSIVE ||

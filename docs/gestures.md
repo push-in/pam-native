@@ -78,6 +78,11 @@ of the frame loop.
 </GestureDetector>
 ```
 
+On Android, pinch and rotation detectors claim the active multi-pointer touch
+stream as soon as the second pointer lands. This prevents an ancestor
+`ScrollView` or pager from stealing the gesture while still allowing ordinary
+single-pointer paging before zoom starts.
+
 Increment `gestureNativeResetKey` when the displayed item changes or when the
 transform should return to its identity value.
 
