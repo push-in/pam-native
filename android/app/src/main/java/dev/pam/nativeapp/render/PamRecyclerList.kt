@@ -262,6 +262,16 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     override fun performClick(): Boolean = super.performClick()
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        repairEmptyRichHolders()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) repairEmptyRichHolders()
+    }
+
     override fun draw(canvas: Canvas) {
         val checkpoint = canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
@@ -393,6 +403,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         viewportChanged?.invoke(offset, first, visible, total)
     }
 
+    private fun repairEmptyRichHolders() {
+        post {
+            (adapter as? RichRecyclerAdapter)?.remountEmptyHolders()
+        }
+    }
+
     private fun dp(value: Float): Int =
         max(1, (value * resources.displayMetrics.density + 0.5f).toInt())
 
@@ -493,7 +509,10 @@ private class RichRecyclerAdapter(
     }
 
     fun submit(next: List<Long>, nextExtents: Map<Long, Int>) {
-        if (ids == next && extents == nextExtents) return
+        if (ids == next && extents == nextExtents) {
+            remountEmptyHolders()
+            return
+        }
         val previous = ids
         val previousExtents = extents
         val replacement = next.toList()
@@ -534,6 +553,19 @@ private class RichRecyclerAdapter(
         ids = replacement
         extents = replacementExtents
         diff.dispatchUpdatesTo(this)
+    }
+
+    fun remountEmptyHolders() {
+        boundHolders
+            .mapNotNull { holder ->
+                val id = holder.boundId
+                val position = ids.indexOf(id)
+                position.takeIf {
+                    richHolderNeedsResumeRebind(id, holder.container.childCount, position)
+                }
+            }
+            .distinct()
+            .forEach { position -> notifyItemChanged(position, PAYLOAD_LAYOUT) }
     }
 
     fun configure(extent: Int, horizontal: Boolean) {
@@ -626,6 +658,12 @@ private class RichRecyclerAdapter(
 
 internal fun richHolderNeedsFullBind(boundId: Long, requestedId: Long, childCount: Int): Boolean =
     boundId != requestedId || childCount == 0
+
+internal fun richHolderNeedsResumeRebind(
+    boundId: Long,
+    childCount: Int,
+    position: Int,
+): Boolean = boundId != RecyclerView.NO_ID && childCount == 0 && position >= 0
 
 private abstract class PackedRowAdapter(
     private val context: Context,

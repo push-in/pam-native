@@ -644,7 +644,10 @@ Scrolling media cannot draw over screen headers, adjacent rows, or tab bars;
 `overflow` remains available to control clipping inside the cell itself.
 Layout-only updates also recover an empty recycled holder with a complete cell
 bind, so changing `rowHeight`, prefetch, or clipping during the first layout
-cannot leave visible rich cells blank.
+cannot leave visible rich cells blank. When a retained Android window returns
+from the background, PAM also remounts any visible holder whose native subtree
+was released; applications do not need to mutate list data or force a scroll
+to recover those cells.
 
 `FlatList` remains source-compatible for lightweight string arrays.
 

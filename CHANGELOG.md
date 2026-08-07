@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.48 - 2026-08-07
+
+- Remount empty Android rich-list holders when a retained window becomes
+  visible again. `VirtualizedList` and `VirtualGrid` now recover cells whose
+  native subtree was released while the app was backgrounded, without waiting
+  for scrolling or a data change.
+
 ## 0.6.47 - 2026-08-07
 
 - Fully bind empty Android rich-list holders when a layout payload arrives

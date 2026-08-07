@@ -17,4 +17,12 @@ class PamRichRecyclerBindingTest {
         assertFalse(richHolderNeedsFullBind(41L, 41L, 1))
         assertTrue(richHolderNeedsFullBind(40L, 41L, 1))
     }
+
+    @Test
+    fun resumeRebindsOnlyEmptyKnownRichHolders() {
+        assertTrue(richHolderNeedsResumeRebind(41L, 0, 2))
+        assertFalse(richHolderNeedsResumeRebind(41L, 1, 2))
+        assertFalse(richHolderNeedsResumeRebind(RecyclerView.NO_ID, 0, 2))
+        assertFalse(richHolderNeedsResumeRebind(41L, 0, -1))
+    }
 }
