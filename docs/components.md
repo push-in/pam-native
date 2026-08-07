@@ -861,8 +861,9 @@ lowest-level model is always visible and available.
 
 ## Switch sizing
 
-On Android, a `Switch` without explicit dimensions uses a React Native-compatible
-intrinsic footprint of `46.5 × 27` logical pixels. Explicit `width` or `height`
-still wins, and a parent `max-width` or `max-height` constraint is respected.
+On Android, the layout engine and native view give a `Switch` without explicit
+dimensions a React Native-compatible intrinsic footprint of `46.5 × 27` logical
+pixels. Explicit `width` or `height` still wins, and a parent `max-width` or
+`max-height` constraint is respected.
 Track and thumb colors remain configurable through `trackColorFalse`,
 `trackColorTrue`, and `thumbColor`.

@@ -7,6 +7,8 @@ use crate::font_metrics::TextMetrics;
 
 const DEFAULT_TEXT_HEIGHT: f32 = 28.0;
 const DEFAULT_CONTROL_HEIGHT: f32 = 48.0;
+const DEFAULT_SWITCH_WIDTH: f32 = 46.5;
+const DEFAULT_SWITCH_HEIGHT: f32 = 27.0;
 const DEFAULT_IMAGE_HEIGHT: f32 = 160.0;
 const DEFAULT_LIST_HEIGHT: f32 = 240.0;
 const MAX_LAYOUT_DEPTH: usize = 512;
@@ -1808,7 +1810,7 @@ fn leaf_intrinsic(
         (Axis::Horizontal, NodeKind::Text) => {
             text_extent(node, axis, f32::INFINITY, text_scale, glyph_advances)
         }
-        (Axis::Horizontal, NodeKind::Switch) => 52.0,
+        (Axis::Horizontal, NodeKind::Switch) => DEFAULT_SWITCH_WIDTH,
         (Axis::Horizontal, NodeKind::ActivityIndicator) => DEFAULT_CONTROL_HEIGHT,
         (Axis::Horizontal, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (Axis::Horizontal, NodeKind::Spacer) => 8.0,
@@ -1819,9 +1821,9 @@ fn leaf_intrinsic(
             NodeKind::Button
             | NodeKind::Input
             | NodeKind::Pressable
-            | NodeKind::Switch
             | NodeKind::ActivityIndicator,
         ) => DEFAULT_CONTROL_HEIGHT,
+        (Axis::Vertical, NodeKind::Switch) => DEFAULT_SWITCH_HEIGHT,
         (Axis::Vertical, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,
         (
             Axis::Vertical,
@@ -4120,6 +4122,20 @@ mod tests {
             )
             .expect("padded text width")
                 > 48.0,
+        );
+    }
+
+    #[test]
+    fn intrinsic_switch_matches_react_native_geometry() {
+        let switch = node(1, 0, 0, NodeKind::Switch, []);
+
+        assert_eq!(
+            leaf_intrinsic(&switch, Axis::Horizontal, 1.0, None),
+            DEFAULT_SWITCH_WIDTH,
+        );
+        assert_eq!(
+            leaf_intrinsic(&switch, Axis::Vertical, 1.0, None),
+            DEFAULT_SWITCH_HEIGHT,
         );
     }
 

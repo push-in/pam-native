@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.50 - 2026-08-07
+
+- Use the React Native-compatible `46.5 × 27` logical-pixel footprint in the
+  layout engine's intrinsic `Switch` geometry. This removes the legacy
+  `52 × 48` frame before Android receives its exact native measure specs.
+
 ## 0.6.49 - 2026-08-07
 
 - Match the intrinsic Android `Switch` footprint used by React Native
