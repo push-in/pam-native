@@ -2075,7 +2075,7 @@ fn intrinsic_cross(
         Axis::Vertical => (Axis::Horizontal, available_cross, available_main),
         Axis::Horizontal => (Axis::Vertical, available_main, available_cross),
     };
-    intrinsic_extent(
+    constrained_intrinsic_extent(
         children,
         node,
         requested_axis,
@@ -2889,6 +2889,79 @@ mod tests {
         assert_eq!((layouts[&3].x, layouts[&3].y), (0.0, 0.0));
         assert_eq!((layouts[&4].x, layouts[&4].y), (52.0, 0.0));
         assert_eq!((layouts[&5].x, layouts[&5].y), (0.0, 26.0));
+    }
+
+    #[test]
+    fn flex_wrap_respects_intrinsic_cross_axis_minimums() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::AlignItems, PropValue::Integer(1))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Row,
+                        [
+                            (PropKey::Width, PropValue::Float(100.0)),
+                            (PropKey::FlexWrap, PropValue::Integer(2)),
+                            (PropKey::GridRowGap, PropValue::Float(6.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(44.0)),
+                            (PropKey::MinHeight, PropValue::Float(52.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(60.0)),
+                            (PropKey::MinHeight, PropValue::Float(52.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 100.0,
+                height: 140.0,
+            },
+        )
+        .expect("wrapped minimum layout");
+
+        assert_eq!(layouts[&2].height, 110.0);
+        assert_eq!(layouts[&3].height, 52.0);
+        assert_eq!(layouts[&4].height, 52.0);
+        assert_eq!(layouts[&4].y, 58.0);
     }
 
     #[test]

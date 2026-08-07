@@ -312,6 +312,9 @@ Supported CSS covers PAM's common native layout and paint contracts:
 Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points. `rem`
 uses a stable native root of 16 logical points.
 Percentages are supported for width, height, max-width, and max-height.
+Intrinsic flex measurement applies `min-width` and `min-height` before sizing
+and placing each line, including `flex-wrap` rows, so auto-sized controls keep
+the same logical minimum on every device density.
 `align-items: baseline` and `align-self: baseline` are supported in templates
 and scoped CSS, along with typed `Align::Baseline` and the `items-baseline`
 utility. Horizontal flex rows align text and input baselines; wrapped rows

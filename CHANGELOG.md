@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.46 - 2026-08-07
+
+- Respect `min-width` and `min-height` while intrinsically measuring the cross
+  axis of flex children, including wrapped rows. Auto-sized controls now reserve
+  their authored logical minimum before line sizing and placement instead of
+  collapsing to their label's intrinsic extent.
+
 ## 0.6.45 - 2026-08-07
 
 - Keep Android pinch and rotation gestures inside their detector when nested
