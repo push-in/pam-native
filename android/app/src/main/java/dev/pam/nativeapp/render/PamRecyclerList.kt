@@ -563,10 +563,15 @@ private class RichRecyclerAdapter(
         position: Int,
         payloads: MutableList<Any>,
     ) {
-        if (payloads.size == 1 && payloads[0] === PAYLOAD_LAYOUT) {
-            applyLayout(holder.container, ids[position])
+        val id = ids[position]
+        if (
+            payloads.size == 1 &&
+            payloads[0] === PAYLOAD_LAYOUT &&
+            !richHolderNeedsFullBind(holder.boundId, id, holder.container.childCount)
+        ) {
+            applyLayout(holder.container, id)
         } else {
-            bind(holder, ids[position])
+            bind(holder, id)
         }
     }
 
@@ -618,6 +623,9 @@ private class RichRecyclerAdapter(
         val PAYLOAD_LAYOUT = Any()
     }
 }
+
+internal fun richHolderNeedsFullBind(boundId: Long, requestedId: Long, childCount: Int): Boolean =
+    boundId != requestedId || childCount == 0
 
 private abstract class PackedRowAdapter(
     private val context: Context,

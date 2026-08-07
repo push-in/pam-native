@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.47 - 2026-08-07
+
+- Fully bind empty Android rich-list holders when a layout payload arrives
+  before their initial materialization. `VirtualizedList` and `VirtualGrid`
+  cells no longer remain blank after row-height, prefetch, or clipping setup.
+
 ## 0.6.46 - 2026-08-07
 
 - Respect `min-width` and `min-height` while intrinsically measuring the cross

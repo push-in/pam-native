@@ -642,6 +642,9 @@ different media aspect ratios without measuring them on the UI thread.
 The native list viewport and every recycled holder are paint boundaries.
 Scrolling media cannot draw over screen headers, adjacent rows, or tab bars;
 `overflow` remains available to control clipping inside the cell itself.
+Layout-only updates also recover an empty recycled holder with a complete cell
+bind, so changing `rowHeight`, prefetch, or clipping during the first layout
+cannot leave visible rich cells blank.
 
 `FlatList` remains source-compatible for lightweight string arrays.
 
