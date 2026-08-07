@@ -5088,12 +5088,23 @@ class PamRenderer(
     }
 
     private fun requestAutoFocus(view: View) {
-        view.post {
-            if (!view.isAttachedToWindow || !view.requestFocus()) return@post
-            val input = view as? PamEditText ?: return@post
-            if (!input.showSoftInputOnFocus) return@post
+        attemptAutoFocus(view, attempt = 0)
+    }
+
+    private fun attemptAutoFocus(view: View, attempt: Int) {
+        view.postDelayed({
+            if (!view.isAttachedToWindow || !view.hasWindowFocus()) {
+                if (attempt < AUTO_FOCUS_RETRIES) attemptAutoFocus(view, attempt + 1)
+                return@postDelayed
+            }
+            if (!view.hasFocus() && !view.requestFocus()) {
+                if (attempt < AUTO_FOCUS_RETRIES) attemptAutoFocus(view, attempt + 1)
+                return@postDelayed
+            }
+            val input = view as? PamEditText ?: return@postDelayed
+            if (!input.showSoftInputOnFocus) return@postDelayed
             showAutoFocusKeyboard(input, attempt = 0)
-        }
+        }, if (attempt == 0) 0L else AUTO_FOCUS_RETRY_MS)
     }
 
     private fun showAutoFocusKeyboard(input: PamEditText, attempt: Int) {
@@ -6160,6 +6171,8 @@ class PamRenderer(
     }
 
     private companion object {
+        const val AUTO_FOCUS_RETRIES = 20
+        const val AUTO_FOCUS_RETRY_MS = 50L
         const val AUTO_FOCUS_KEYBOARD_RETRIES = 4
         const val AUTO_FOCUS_KEYBOARD_RETRY_MS = 50L
         const val LOCAL_MODAL_PREFIX = "pam:local-modal:"

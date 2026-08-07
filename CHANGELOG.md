@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.43 - 2026-08-06
+
+- Keep reactive Android `autoFocus` pending while its screen is detached or a
+  navigation transition does not yet own window focus. A bounded retry now
+  focuses the input and opens the IME as soon as that screen becomes active.
+
 ## 0.6.42 - 2026-08-06
 
 - Make Android `autoFocus` open the software keyboard for inputs introduced by

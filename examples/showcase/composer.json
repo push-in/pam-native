@@ -15,7 +15,7 @@
             "options": {
                 "symlink": false,
                 "versions": {
-          "pushinbr/pam-native": "0.6.42"
+          "pushinbr/pam-native": "0.6.43"
                 }
             }
         },

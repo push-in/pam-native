@@ -37,7 +37,7 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
-    fun dynamicallyInsertedAutoFocusInputReceivesFocus() {
+    fun autoFocusInputWaitsUntilItsReactiveScreenIsAttached() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
         try {
@@ -48,7 +48,9 @@ class PamRendererInstrumentedTest {
                     listOf(
                         listOf(
                             Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(node(3, 0, NodeKind.SCREEN)),
                             Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(3, Frame(0f, 0f, 360f, 720f)),
                             Mutation.SetRoot(1),
                         ),
                     ),
@@ -59,7 +61,7 @@ class PamRendererInstrumentedTest {
                             Mutation.Create(
                                 node(
                                     2,
-                                    1,
+                                    3,
                                     NodeKind.INPUT,
                                     mapOf(
                                         PropKey.AUTO_FOCUS to PropValue.Flag(true),
@@ -71,6 +73,10 @@ class PamRendererInstrumentedTest {
                         ),
                     ),
                 )
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                renderer.commit(listOf(listOf(Mutation.SetRoot(3))))
             }
             instrumentation.waitForIdleSync()
             onMain(instrumentation) {
