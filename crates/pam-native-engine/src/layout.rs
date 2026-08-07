@@ -1818,10 +1818,7 @@ fn leaf_intrinsic(
         (Axis::Horizontal, _) => 100.0,
         (
             Axis::Vertical,
-            NodeKind::Button
-            | NodeKind::Input
-            | NodeKind::Pressable
-            | NodeKind::ActivityIndicator,
+            NodeKind::Button | NodeKind::Input | NodeKind::Pressable | NodeKind::ActivityIndicator,
         ) => DEFAULT_CONTROL_HEIGHT,
         (Axis::Vertical, NodeKind::Switch) => DEFAULT_SWITCH_HEIGHT,
         (Axis::Vertical, NodeKind::Image | NodeKind::ImageBackground) => DEFAULT_IMAGE_HEIGHT,

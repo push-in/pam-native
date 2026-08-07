@@ -272,6 +272,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (visibility == VISIBLE) repairEmptyRichHolders()
     }
 
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        if (isVisible) repairEmptyRichHolders()
+    }
+
     override fun draw(canvas: Canvas) {
         val checkpoint = canvas.save()
         canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())

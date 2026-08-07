@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.51 - 2026-08-07
+
+- Remount empty Android rich-list holders when a retained navigation route
+  becomes visible again. `VirtualizedList` and `VirtualGrid` now recover their
+  cells after route transitions and reactive appearance changes even when the
+  containing window itself never changed visibility.
+
 ## 0.6.50 - 2026-08-07
 
 - Use the React Native-compatible `46.5 × 27` logical-pixel footprint in the

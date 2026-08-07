@@ -621,6 +621,63 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun richVirtualListRemountsEmptyHoldersWhenRouteBecomesVisibleAgain() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        var mounts = 0
+        lateinit var list: PamRecyclerList
+        try {
+            onMain(instrumentation) {
+                list = PamRecyclerList(activity)
+                activity.host.addView(
+                    list,
+                    FrameLayout.LayoutParams(
+                        dp(activity.host, 300f),
+                        dp(activity.host, 160f),
+                    ),
+                )
+                list.setRichItems(
+                    ids = listOf(101L),
+                    extents = mapOf(101L to 72f),
+                    mount = { id, holder ->
+                        mounts += 1
+                        holder.addView(View(activity).apply { tag = id })
+                    },
+                    unmount = { _, holder -> holder.removeAllViews() },
+                )
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 300f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                    View.MeasureSpec.makeMeasureSpec(
+                        dp(activity.host, 160f),
+                        View.MeasureSpec.EXACTLY,
+                    ),
+                )
+                list.layout(
+                    0,
+                    0,
+                    dp(activity.host, 300f),
+                    dp(activity.host, 160f),
+                )
+                val holder = requireNotNull(list.findViewHolderForAdapterPosition(0))
+                (holder.itemView as FrameLayout).removeAllViews()
+                assertEquals(0, (holder.itemView as FrameLayout).childCount)
+                list.onVisibilityAggregated(true)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val holder = requireNotNull(list.findViewHolderForAdapterPosition(0))
+                assertEquals(1, (holder.itemView as FrameLayout).childCount)
+                assertTrue(mounts >= 2)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun richVirtualListClipsTranslatedDescendantsAtItsViewport() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

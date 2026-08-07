@@ -612,6 +612,11 @@ are real component trees, but Android materializes only the visible and
 prefetched window through `RecyclerView`; recycled cells release their native
 views while preserving stable keyed identity and event routing:
 
+On Android, retained virtualized routes automatically remount any released
+visible cell when the route becomes visible again. Applications do not need to
+change list keys after navigation, theme, or other appearance updates merely
+to recover recycled native subtrees.
+
 ```php
 use Pam\Native\UI\{Column, Image, Pressable, Text, VirtualGrid};
 
