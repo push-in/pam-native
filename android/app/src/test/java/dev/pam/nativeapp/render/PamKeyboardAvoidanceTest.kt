@@ -5,6 +5,30 @@ import org.junit.Test
 
 class PamKeyboardAvoidanceTest {
     @Test
+    fun interactiveSheetStopsBelowSafeTopChrome() {
+        assertEquals(
+            185,
+            interactiveKeyboardTranslation(
+                keyboardOverlap = 820,
+                originalTop = 290,
+                minimumTop = 105,
+            ),
+        )
+    }
+
+    @Test
+    fun interactiveSheetStillUsesSmallerKeyboardOverlap() {
+        assertEquals(
+            96,
+            interactiveKeyboardTranslation(
+                keyboardOverlap = 96,
+                originalTop = 290,
+                minimumTop = 105,
+            ),
+        )
+    }
+
+    @Test
     fun usesAnimatedImeInsetWhenWindowDoesNotResize() {
         assertEquals(
             840,

@@ -76,6 +76,10 @@ Safe-area and keyboard avoidance remain native:
 Android applies system-bar and IME insets directly on the UI thread. The same
 options are available through `SafeAreaView::edges()->mode()` and
 `KeyboardAvoidingView::verticalOffset()->avoidingEnabled()`.
+Use `behavior="interactive"` for a bottom-anchored sheet: Android follows the
+IME while clamping the sheet below the safe top chrome instead of translating
+the entire sheet by the keyboard height. `resize`, `pan`, and `padding` remain
+available for ordinary forms, composers, and scroll containers.
 When custom chrome must size itself around those regions,
 `DeviceInfo::get()` exposes `safeAreaTop`, `safeAreaRight`, `safeAreaBottom`,
 and `safeAreaLeft` in logical points plus the device's IANA `timeZone` identifier

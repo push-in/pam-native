@@ -1637,6 +1637,16 @@ $assert(
     'Keyboard avoidance helpers must preserve behavior, offset and enabled state.',
 );
 
+$interactiveKeyboardElement = KeyboardAvoidingView::make(
+    Text::make('Interactive sheet'),
+    KeyboardAvoidingBehavior::Interactive,
+);
+$assert(
+    $interactiveKeyboardElement->properties()[PropKey::KeyboardBehavior->value]
+        === KeyboardAvoidingBehavior::Interactive->value,
+    'Interactive keyboard avoidance must preserve its sequential protocol value.',
+);
+
 $refreshColors = [0xff112233, 0xff445566];
 $refreshElement = RefreshControl::make(Text::make('Refresh content'), true)
     ->colors(...$refreshColors)
@@ -5580,8 +5590,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.56',
-    'The runtime SDK contract must match the 0.6.56 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.57',
+    'The runtime SDK contract must match the 0.6.57 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

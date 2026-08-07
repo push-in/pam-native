@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.57 - 2026-08-07
+
+- Add Android `KeyboardAvoidingView` behavior `interactive` for bottom sheets.
+  The sheet follows the IME but clamps below safe top chrome, keeping headers,
+  search fields, and actions visible instead of panning the entire surface off
+  screen.
+
 ## 0.6.56 - 2026-08-07
 
 - Keep translated Android composer actions tappable above a geometrically

@@ -3424,6 +3424,7 @@ final class TemplateRenderer
         return match ($value) {
             2, 'pan' => KeyboardAvoidingBehavior::Pan,
             3, 'padding' => KeyboardAvoidingBehavior::Padding,
+            4, 'interactive' => KeyboardAvoidingBehavior::Interactive,
             default => KeyboardAvoidingBehavior::Resize,
         };
     }

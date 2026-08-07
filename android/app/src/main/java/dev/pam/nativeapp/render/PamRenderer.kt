@@ -98,6 +98,15 @@ internal fun resolvedKeyboardInset(
     return max(platformInset, resizedInset)
 }
 
+internal fun interactiveKeyboardTranslation(
+    keyboardOverlap: Int,
+    originalTop: Int,
+    minimumTop: Int,
+): Int = min(
+    keyboardOverlap.coerceAtLeast(0),
+    (originalTop - minimumTop).coerceAtLeast(0),
+)
+
 internal fun safeAreaChildCrossAxisReduction(
     mainAxisHorizontal: Boolean,
     horizontalInsets: Int,
@@ -4982,6 +4991,27 @@ class PamRenderer(
                     includePressables = keyboard > 0,
                 )
             }
+            KEYBOARD_INTERACTIVE -> {
+                val root = (activity() as? PamActivity)?.rootHost ?: host
+                val rootLocation = IntArray(2)
+                val viewLocation = IntArray(2)
+                root.getLocationOnScreen(rootLocation)
+                view.getLocationOnScreen(viewLocation)
+                val originalTop = viewLocation[1] - view.translationY.toInt()
+                val safeTop = (root as? PamRootHost)?.stableSafeAreaInsets?.top ?: 0
+                val translation = interactiveKeyboardTranslation(
+                    keyboardOverlap = keyboard,
+                    originalTop = originalTop,
+                    minimumTop = rootLocation[1] + safeTop + dp(16f),
+                )
+                view.translationY = -translation.toFloat()
+                view.setPadding(0, 0, 0, 0)
+                updateTranslatedTouchTarget(
+                    view,
+                    enabled,
+                    includePressables = keyboard > 0,
+                )
+            }
             KEYBOARD_PADDING -> {
                 view.translationY = 0f
                 view.setPadding(0, 0, 0, 0)
@@ -6269,6 +6299,7 @@ class PamRenderer(
         const val KEYBOARD_RESIZE = 1
         const val KEYBOARD_PAN = 2
         const val KEYBOARD_PADDING = 3
+        const val KEYBOARD_INTERACTIVE = 4
         const val SAFE_AREA_PADDING = 1
         const val SAFE_AREA_MARGIN = 2
         const val OVERFLOW_VISIBLE = 1L
