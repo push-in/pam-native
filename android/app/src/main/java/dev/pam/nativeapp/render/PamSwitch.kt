@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.view.View
 import android.widget.Switch
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 @Suppress("DEPRECATION")
@@ -41,6 +43,22 @@ internal class PamSwitch(context: Context) : Switch(context) {
 
     fun setThumbColor(color: Int?) {
         thumbTintList = color?.let(::thumbColors) ?: defaultThumbTint
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        setMeasuredDimension(
+            resolvePamSwitchMeasuredExtent(
+                View.MeasureSpec.getMode(widthMeasureSpec),
+                View.MeasureSpec.getSize(widthMeasureSpec),
+                dp(46.5f),
+            ),
+            resolvePamSwitchMeasuredExtent(
+                View.MeasureSpec.getMode(heightMeasureSpec),
+                View.MeasureSpec.getSize(heightMeasureSpec),
+                dp(27f),
+            ),
+        )
     }
 
     private fun applyTrackTint() {
@@ -106,7 +124,20 @@ internal class PamSwitch(context: Context) : Switch(context) {
     private fun dp(value: Int): Int =
         (value * resources.displayMetrics.density).roundToInt()
 
+    private fun dp(value: Float): Int =
+        (value * resources.displayMetrics.density).roundToInt()
+
     private companion object {
         const val DISABLED_ALPHA = 0.38f
     }
+}
+
+internal fun resolvePamSwitchMeasuredExtent(
+    mode: Int,
+    available: Int,
+    preferred: Int,
+): Int = when (mode) {
+    View.MeasureSpec.EXACTLY -> available
+    View.MeasureSpec.AT_MOST -> min(available, preferred)
+    else -> preferred
 }

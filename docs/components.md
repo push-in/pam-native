@@ -858,3 +858,11 @@ These commands generate `src/Screens/Orders.pam.php` and
 `src/Components/MetricCard.pam.php` without overwriting existing files.
 `pam init --template mobile` still starts with the explicit PHP tree so the
 lowest-level model is always visible and available.
+
+## Switch sizing
+
+On Android, a `Switch` without explicit dimensions uses a React Native-compatible
+intrinsic footprint of `46.5 × 27` logical pixels. Explicit `width` or `height`
+still wins, and a parent `max-width` or `max-height` constraint is respected.
+Track and thumb colors remain configurable through `trackColorFalse`,
+`trackColorTrue`, and `thumbColor`.

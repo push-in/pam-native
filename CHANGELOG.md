@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.49 - 2026-08-07
+
+- Match the intrinsic Android `Switch` footprint used by React Native
+  (`46.5 × 27` logical pixels) while preserving authored exact dimensions and
+  respecting bounded measure specs. Switches no longer expand compact rows to
+  the platform widget's legacy 40dp minimum height.
+
 ## 0.6.48 - 2026-08-07
 
 - Remount empty Android rich-list holders when a retained window becomes
