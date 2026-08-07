@@ -37,6 +37,55 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun dynamicallyInsertedAutoFocusInputReceivesFocus() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var renderer: PamRenderer
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.INPUT,
+                                    mapOf(
+                                        PropKey.AUTO_FOCUS to PropValue.Flag(true),
+                                        PropKey.TEST_ID to PropValue.Text("dynamic-search"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(2, Frame(16f, 24f, 328f, 48f)),
+                        ),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val input = activity.host.findByTransitionName("dynamic-search")
+                assertTrue(input is PamEditText)
+                assertTrue("The dynamically inserted input must retain autofocus.", input?.hasFocus() == true)
+                assertTrue((input as PamEditText).showSoftInputOnFocus)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun reactiveScrollRequestIsNotOverwrittenByRetainedViewport() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

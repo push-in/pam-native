@@ -268,6 +268,10 @@ authored. `text-align` accepts the familiar CSS values `left`, `center`, and
 `decimal-pad`, `ascii-capable`, `ascii-capable-number-pad`,
 `numbers-and-punctuation`, `name-phone-pad`, `twitter`, `web-search`, and
 `visible-password`.
+On Android, `autoFocus="true"` focuses inputs added by a reactive render and
+explicitly requests the software keyboard once the view and window are ready.
+Set `showSoftInputOnFocus="false"` when focus is required without opening the
+keyboard.
 
 `pam-native-format` removes an empty `<style scoped>` block automatically, so
 components that rely only on `src/app.css` keep no placeholder markup.

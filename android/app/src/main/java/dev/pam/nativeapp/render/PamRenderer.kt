@@ -2014,7 +2014,7 @@ class PamRenderer(
                 InputFilter.LengthFilter(value.integer().toInt()),
             )
             PropKey.AUTO_FOCUS -> if (value.flag()) {
-                view.post { view.requestFocus() }
+                requestAutoFocus(view)
             } else {
                 Unit
             }
@@ -5087,6 +5087,27 @@ class PamRenderer(
             ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
     }
 
+    private fun requestAutoFocus(view: View) {
+        view.post {
+            if (!view.isAttachedToWindow || !view.requestFocus()) return@post
+            val input = view as? PamEditText ?: return@post
+            if (!input.showSoftInputOnFocus) return@post
+            showAutoFocusKeyboard(input, attempt = 0)
+        }
+    }
+
+    private fun showAutoFocusKeyboard(input: PamEditText, attempt: Int) {
+        input.postDelayed({
+            if (!input.isAttachedToWindow || !input.hasFocus()) return@postDelayed
+            if (!input.hasWindowFocus() && attempt < AUTO_FOCUS_KEYBOARD_RETRIES) {
+                showAutoFocusKeyboard(input, attempt + 1)
+                return@postDelayed
+            }
+            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+        }, if (attempt == 0) 0L else AUTO_FOCUS_KEYBOARD_RETRY_MS)
+    }
+
     private fun containedScrollContainer(
         state: NodeState,
     ): Pair<Long, PamScrollContainer>? {
@@ -6139,6 +6160,8 @@ class PamRenderer(
     }
 
     private companion object {
+        const val AUTO_FOCUS_KEYBOARD_RETRIES = 4
+        const val AUTO_FOCUS_KEYBOARD_RETRY_MS = 50L
         const val LOCAL_MODAL_PREFIX = "pam:local-modal:"
         const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"
         const val MODAL_CLOSE_MARKER = "pam:modal-close"

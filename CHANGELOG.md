@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.42 - 2026-08-06
+
+- Make Android `autoFocus` open the software keyboard for inputs introduced by
+  reactive renders. The renderer waits for attachment/window focus with a
+  bounded retry and respects `showSoftInputOnFocus="false"`.
+
 ## 0.6.41 - 2026-08-06
 
 - Preserve independent CSS `column-gap` and `row-gap` values in flex and
