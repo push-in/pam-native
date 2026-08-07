@@ -40,7 +40,7 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.6.44",
+            "version": "0.6.45",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
