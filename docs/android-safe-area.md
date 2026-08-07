@@ -30,6 +30,8 @@ their actual on-screen bounds.
   instead of focusing a visually covered input underneath it. Interactive
   descendants are refreshed at pointer-down, so a composer control that changes
   from microphone to send while the IME remains open is immediately tappable.
+  A background `ScrollView` may geometrically extend behind the translated
+  composer, but it is not treated as an overlay that can steal that touch.
 
 ## Platform matrix
 

@@ -86,4 +86,20 @@ class PamTranslatedTouchTargetTest {
             ),
         )
     }
+
+    @Test
+    fun `message scroller does not occlude translated composer action`() {
+        assertFalse(
+            isEligibleTranslatedTouchOccluder(
+                isScrollContainer = true,
+                containsInteractiveTarget = true,
+            ),
+        )
+        assertTrue(
+            isEligibleTranslatedTouchOccluder(
+                isScrollContainer = false,
+                containsInteractiveTarget = true,
+            ),
+        )
+    }
 }

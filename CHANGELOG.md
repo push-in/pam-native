@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.56 - 2026-08-07
+
+- Keep translated Android composer actions tappable above a geometrically
+  overlapping message scroller while still honoring interactive camera and
+  media overlays in the visual stacking order.
+
 ## 0.6.55 - 2026-08-07
 
 - Publish the translated composer touch-target refresh with synchronized

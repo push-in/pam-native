@@ -26,6 +26,11 @@ internal fun isPamViewDrawnAbove(
 ): Boolean = candidateZ > branchZ ||
     (candidateZ == branchZ && candidateIndex > branchIndex)
 
+internal fun isEligibleTranslatedTouchOccluder(
+    isScrollContainer: Boolean,
+    containsInteractiveTarget: Boolean,
+): Boolean = !isScrollContainer && containsInteractiveTarget
+
 internal class PamRootHost(context: Context) : FrameLayout(context) {
     private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()
@@ -218,7 +223,11 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
                 if (
                     sibling !== branch &&
                     isPamViewDrawnAbove(sibling.z, index, branch.z, branchIndex) &&
-                    containsScreenPoint(sibling, x, y)
+                    containsScreenPoint(sibling, x, y) &&
+                    isEligibleTranslatedTouchOccluder(
+                        isScrollContainer = sibling is PamScrollContainer,
+                        containsInteractiveTarget = containsInteractiveTargetAtPoint(sibling, x, y),
+                    )
                 ) {
                     return true
                 }
@@ -226,6 +235,16 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
             branch = parent
             if (branch === this) break
             parent = branch.parent as? ViewGroup
+        }
+        return false
+    }
+
+    private fun containsInteractiveTargetAtPoint(view: View, x: Float, y: Float): Boolean {
+        if (!containsScreenPoint(view, x, y)) return false
+        if (view is PamPressable || view is PamEditText) return true
+        if (view !is ViewGroup) return false
+        for (index in view.childCount - 1 downTo 0) {
+            if (containsInteractiveTargetAtPoint(view.getChildAt(index), x, y)) return true
         }
         return false
     }
