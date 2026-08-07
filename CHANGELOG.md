@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.55 - 2026-08-07
+
+- Publish the translated composer touch-target refresh with synchronized
+  Android, Rust protocol, and PHP SDK version metadata.
+
 ## 0.6.54 - 2026-08-07
 
 - Refresh Android translated keyboard-avoidance touch targets at pointer-down.
