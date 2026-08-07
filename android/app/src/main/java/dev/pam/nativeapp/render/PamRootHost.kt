@@ -18,6 +18,14 @@ internal fun shouldRegisterTranslatedTouchTarget(
     includePressables: Boolean,
 ): Boolean = isInput || (includePressables && isPressable)
 
+internal fun isPamViewDrawnAbove(
+    candidateZ: Float,
+    candidateIndex: Int,
+    branchZ: Float,
+    branchIndex: Int,
+): Boolean = candidateZ > branchZ ||
+    (candidateZ == branchZ && candidateIndex > branchIndex)
+
 internal class PamRootHost(context: Context) : FrameLayout(context) {
     private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()
@@ -110,7 +118,8 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             val target = translatedTouchTargets.toList().asReversed().firstOrNull { child ->
-                containsScreenPoint(child, event.rawX, event.rawY)
+                containsScreenPoint(child, event.rawX, event.rawY) &&
+                    !isOccludedByHigherSibling(child, event.rawX, event.rawY)
             }
             if (target != null) {
                 translatedTouchTarget = target
@@ -174,6 +183,34 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         target.getLocationOnScreen(location)
         return x >= location[0] && x < location[0] + target.width &&
             y >= location[1] && y < location[1] + target.height
+    }
+
+    /**
+     * Translated IME targets are dispatched before Android's regular ViewGroup hit test because
+     * they can extend outside a panned ancestor. They must still respect the visual stacking order:
+     * an absolute overlay (for example a camera or media composer) drawn above the input owns the
+     * pointer even when the old input rectangle remains underneath it.
+     */
+    private fun isOccludedByHigherSibling(target: View, x: Float, y: Float): Boolean {
+        var branch = target
+        var parent = branch.parent as? ViewGroup
+        while (parent != null) {
+            val branchIndex = parent.indexOfChild(branch)
+            repeat(parent.childCount) { index ->
+                val sibling = parent.getChildAt(index)
+                if (
+                    sibling !== branch &&
+                    isPamViewDrawnAbove(sibling.z, index, branch.z, branchIndex) &&
+                    containsScreenPoint(sibling, x, y)
+                ) {
+                    return true
+                }
+            }
+            branch = parent
+            if (branch === this) break
+            parent = branch.parent as? ViewGroup
+        }
+        return false
     }
 
     fun startPredictiveBack(): Boolean = activeNavigationHost()?.startPredictiveBack() == true

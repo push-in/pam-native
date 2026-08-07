@@ -25,8 +25,9 @@ their actual on-screen bounds.
   CTA that must remain visible with the field.
 - While a panning container is translated, touch coordinates are remapped to
   its visible descendants. With the IME closed only text inputs use the
-  geometry-aware fallback, preventing touches from leaking through a modal to
-  buttons in the activity below it.
+  geometry-aware fallback. The fallback follows Android sibling order and
+  `z-index`, so an absolute camera or media overlay keeps ownership of its taps
+  instead of focusing a visually covered input underneath it.
 
 ## Platform matrix
 

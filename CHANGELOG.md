@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.53 - 2026-08-07
+
+- Respect Android visual stacking when dispatching translated keyboard-avoidance
+  touch targets. Absolute camera, media, and composer overlays now receive taps
+  instead of leaking them to a visually covered input underneath.
+
 ## 0.6.52 - 2026-08-07
 
 - Invalidate dependency-skipped component trees before invoking template event

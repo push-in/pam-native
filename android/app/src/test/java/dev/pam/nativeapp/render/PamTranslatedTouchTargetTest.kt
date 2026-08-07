@@ -6,6 +6,34 @@ import org.junit.Test
 
 class PamTranslatedTouchTargetTest {
     @Test
+    fun `absolute overlay is drawn above translated input branch`() {
+        assertTrue(
+            isPamViewDrawnAbove(
+                candidateZ = 100f,
+                candidateIndex = 0,
+                branchZ = 0f,
+                branchIndex = 1,
+            ),
+        )
+        assertTrue(
+            isPamViewDrawnAbove(
+                candidateZ = 0f,
+                candidateIndex = 2,
+                branchZ = 0f,
+                branchIndex = 1,
+            ),
+        )
+        assertFalse(
+            isPamViewDrawnAbove(
+                candidateZ = 0f,
+                candidateIndex = 0,
+                branchZ = 0f,
+                branchIndex = 1,
+            ),
+        )
+    }
+
+    @Test
     fun `closed ime registers inputs but not underlying pressables`() {
         assertTrue(
             shouldRegisterTranslatedTouchTarget(
