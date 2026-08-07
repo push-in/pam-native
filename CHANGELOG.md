@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.52 - 2026-08-07
+
+- Invalidate dependency-skipped component trees before invoking template event
+  handlers. Direct mutations of component properties from press, native-view,
+  gesture, input, and other template events now reach the next encoded patch
+  instead of reusing stale elements and native host properties.
+
 ## 0.6.51 - 2026-08-07
 
 - Remount empty Android rich-list holders when a retained navigation route

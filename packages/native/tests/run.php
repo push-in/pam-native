@@ -4048,6 +4048,10 @@ if ($pressCallback === null) {
 [$templateNode, $templateEvent] = array_map('intval', explode(':', $pressCallback));
 Runtime::dispatchEvent($templateNode, $templateEvent, '');
 $assert($template->count() === 1, 'Template event did not invoke its component method.');
+$assert(
+    $template->toElement() !== $templateRoot,
+    'Template events must invalidate dependency-skipped component trees after direct state mutation.',
+);
 Runtime::shutdown();
 
 $slotView = View::make('slots')->toElement();
@@ -5576,8 +5580,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.51',
-    'The runtime SDK contract must match the 0.6.51 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.52',
+    'The runtime SDK contract must match the 0.6.52 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

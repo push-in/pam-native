@@ -2809,6 +2809,9 @@ final class TemplateRenderer
                 $method,
                 $scope,
             ): void {
+                if ($scope instanceof Component) {
+                    DependencyTracker::markDirty($scope);
+                }
                 if ($method->getNumberOfParameters() === 0) {
                     $method->invoke($scope);
                 } else {
@@ -2822,6 +2825,9 @@ final class TemplateRenderer
             $scope,
             $data,
         ): void {
+            if ($scope instanceof Component) {
+                DependencyTracker::markDirty($scope);
+            }
             TemplateExpression::evaluate(
                 $raw,
                 $scope,
@@ -2854,6 +2860,9 @@ final class TemplateRenderer
                 $scope,
                 $data,
             ): void {
+                if ($scope instanceof Component) {
+                    DependencyTracker::markDirty($scope);
+                }
                 TemplateExpression::evaluate(
                     $raw,
                     $scope,
@@ -2882,6 +2891,9 @@ final class TemplateRenderer
         }
 
         return static function (mixed $payload = '') use ($kind, $method, $scope): void {
+            if ($scope instanceof Component) {
+                DependencyTracker::markDirty($scope);
+            }
             if ($method->getNumberOfParameters() === 0) {
                 $method->invoke($scope);
                 return;

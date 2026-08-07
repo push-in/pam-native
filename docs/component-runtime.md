@@ -77,6 +77,10 @@ Local state accepts JSON-compatible values. Equal writes are ignored. Changes
 invalidate computed values and request a retained-tree render. Memo values use
 explicit dependency lists and are discarded during cleanup.
 
+Template event handlers invalidate their owning component before invocation.
+This also makes direct mutations of ordinary component properties observable in
+the following render, including values nested in native-view property maps.
+
 `setup()` is the right place to resolve stores and services. Do not start work
 in the constructor.
 
