@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.54 - 2026-08-07
+
+- Refresh Android translated keyboard-avoidance touch targets at pointer-down.
+  Interactive composer descendants that change while the IME remains open,
+  such as a microphone button becoming a send button, now receive taps at
+  their visible position immediately.
+
 ## 0.6.53 - 2026-08-07
 
 - Respect Android visual stacking when dispatching translated keyboard-avoidance

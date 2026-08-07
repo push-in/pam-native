@@ -29,6 +29,7 @@ internal fun isPamViewDrawnAbove(
 internal class PamRootHost(context: Context) : FrameLayout(context) {
     private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()
+    private val translatedTouchContainers = LinkedHashMap<View, Boolean>()
     private val translatedTouchTargets = LinkedHashSet<View>()
     private var translatedTouchTarget: View? = null
     var stableSafeAreaInsets: SafeAreaInsets = SafeAreaInsets(0, 0, 0, 0)
@@ -94,10 +95,15 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         enabled: Boolean,
         includePressables: Boolean = true,
     ) {
+        translatedTouchContainers.keys.removeAll { registered ->
+            registered === container || isDescendantOf(registered, container) ||
+                !registered.isAttachedToWindow
+        }
         translatedTouchTargets.removeAll { target ->
             target === container || isDescendantOf(target, container) || !target.isAttachedToWindow
         }
         if (enabled && container is ViewGroup) {
+            translatedTouchContainers[container] = includePressables
             collectTranslatedTargets(container, includePressables)
         }
     }
@@ -117,6 +123,7 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
             return handled
         }
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            refreshTranslatedTouchTargets()
             val target = translatedTouchTargets.toList().asReversed().firstOrNull { child ->
                 containsScreenPoint(child, event.rawX, event.rawY) &&
                     !isOccludedByHigherSibling(child, event.rawX, event.rawY)
@@ -127,6 +134,16 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
             }
         }
         return super.dispatchTouchEvent(event)
+    }
+
+    private fun refreshTranslatedTouchTargets() {
+        translatedTouchTargets.clear()
+        translatedTouchContainers.entries.removeAll { (container, _) ->
+            !container.isAttachedToWindow
+        }
+        translatedTouchContainers.forEach { (container, includePressables) ->
+            if (container is ViewGroup) collectTranslatedTargets(container, includePressables)
+        }
     }
 
     private fun dispatchToTranslatedTarget(target: View, event: MotionEvent): Boolean {

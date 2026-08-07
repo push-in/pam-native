@@ -75,4 +75,15 @@ class PamTranslatedTouchTargetTest {
             ),
         )
     }
+
+    @Test
+    fun `interactive replacement remains eligible while ime stays open`() {
+        assertTrue(
+            shouldRegisterTranslatedTouchTarget(
+                isInput = false,
+                isPressable = true,
+                includePressables = true,
+            ),
+        )
+    }
 }

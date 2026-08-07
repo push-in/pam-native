@@ -27,7 +27,9 @@ their actual on-screen bounds.
   its visible descendants. With the IME closed only text inputs use the
   geometry-aware fallback. The fallback follows Android sibling order and
   `z-index`, so an absolute camera or media overlay keeps ownership of its taps
-  instead of focusing a visually covered input underneath it.
+  instead of focusing a visually covered input underneath it. Interactive
+  descendants are refreshed at pointer-down, so a composer control that changes
+  from microphone to send while the IME remains open is immediately tappable.
 
 ## Platform matrix
 
