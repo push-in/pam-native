@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.41 - 2026-08-06
+
+- Preserve independent CSS `column-gap` and `row-gap` values in flex and
+  `flex-wrap` layouts. The retained Rust engine now applies the horizontal and
+  vertical axes independently during line breaking, placement and intrinsic
+  measurement, while `gap` remains the fallback for either omitted axis.
+
 ## 0.6.40 - 2026-08-06
 
 - Add an optional failure callback to `PushNotifications::register()` so FCM

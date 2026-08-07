@@ -434,6 +434,8 @@ final class TemplateRenderer
         'orderXl' => PropKey::GridOrderXl,
         'gutterX' => PropKey::GridColumnGap,
         'gutterY' => PropKey::GridRowGap,
+        'gridColumnGap' => PropKey::GridColumnGap,
+        'gridRowGap' => PropKey::GridRowGap,
     ];
 
     /** @var array<string, EventKind> */

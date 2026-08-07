@@ -287,8 +287,8 @@ in public component methods and expressions never use `eval`.
 Supported CSS covers PAM's common native layout and paint contracts:
 
 - dimensions, min/max dimensions, `aspect-ratio`, position edges and `z-index`;
-- `flex`, growth/shrink/direction, native `flex-wrap`, gap, alignment and
-  justification;
+- `flex`, growth/shrink/direction, native `flex-wrap`, `gap`, independent
+  `column-gap`/`row-gap`, alignment and justification;
 - padding and margin edges, standard one-to-four-value shorthands, and
   `padding-inline/block` plus `margin-inline/block`;
 - `inset`, `inset-inline/block`, individual position edges, `transform`

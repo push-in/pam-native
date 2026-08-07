@@ -538,7 +538,7 @@ final class ScopedStyleCompiler
                 continue;
             }
             if (in_array($property, ['row-gap', 'column-gap'], true)) {
-                $output['gap'] = self::scalar($value, $name);
+                $output[$property === 'column-gap' ? 'gridColumnGap' : 'gridRowGap'] = self::scalar($value, $name);
                 continue;
             }
             $attribute = self::PROPERTIES[$property] ?? null;

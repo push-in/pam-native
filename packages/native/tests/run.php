@@ -825,6 +825,17 @@ $assert(
         && $shadowStyles['classes']['flat']['shadowColor'] === 0,
     'Scoped CSS box-shadow must compile to the typed native shadow contract.',
 );
+$axisGapStyles = ScopedStyleCompiler::compile(
+    '.wrapped { column-gap: 14px; row-gap: 8px; }',
+    'AxisGapStyle.pam.php',
+);
+$assert(
+    $axisGapStyles['classes']['wrapped'] === [
+        'gridColumnGap' => '14',
+        'gridRowGap' => '8',
+    ],
+    'Scoped CSS row-gap and column-gap must preserve independent flex axes.',
+);
 $unformattedPam = <<<'PAM'
 <?php
 
@@ -5565,8 +5576,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.40',
-    'The runtime SDK contract must match the 0.6.40 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.41',
+    'The runtime SDK contract must match the 0.6.41 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

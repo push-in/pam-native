@@ -295,7 +295,7 @@ fn layout_node(
         finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(padding_horizontal))?;
     let padding_bottom =
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
-    let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
+    let gap = finite_non_negative(number(node, PropKey::Gap).unwrap_or(0.0))?;
     let inner = Layout {
         x: frame.x + padding_left,
         y: frame.y + padding_top,
@@ -534,6 +534,12 @@ fn layout_node(
     } else {
         Axis::Vertical
     };
+    let column_gap = finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(gap))?;
+    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(gap))?;
+    let (main_gap, cross_gap) = match axis {
+        Axis::Horizontal => (column_gap, row_gap),
+        Axis::Vertical => (row_gap, column_gap),
+    };
     let mut flow_children = node_children
         .iter()
         .copied()
@@ -574,14 +580,15 @@ fn layout_node(
             axis,
             available_main,
             available_cross,
-            gap,
+            main_gap,
+            cross_gap,
             depth,
             output,
         )?;
         flow_children.clear();
         ordered_children.clear();
     }
-    let total_gap = gap * flow_children.len().saturating_sub(1) as f32;
+    let total_gap = main_gap * flow_children.len().saturating_sub(1) as f32;
     let total_flex = flow_children
         .iter()
         .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
@@ -670,7 +677,7 @@ fn layout_node(
         justify,
         if auto_margin_count > 0 { 0.0 } else { free },
         flow_children.len(),
-        gap,
+        main_gap,
     );
     let parent_alignment = cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4));
 
@@ -870,7 +877,8 @@ fn layout_wrapped_children(
     axis: Axis,
     available_main: f32,
     available_cross: f32,
-    gap: f32,
+    main_gap: f32,
+    cross_gap: f32,
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
 ) -> Result<(), LayoutError> {
@@ -899,7 +907,7 @@ fn layout_wrapped_children(
         let candidate = if line.is_empty() {
             outer
         } else {
-            consumed + gap + outer
+            consumed + main_gap + outer
         };
         if !line.is_empty() && candidate > available_main {
             lines.push(std::mem::take(&mut line));
@@ -925,7 +933,7 @@ fn layout_wrapped_children(
                 base_main[&child.id] + before + after
             })
             .sum::<f32>();
-        let line_gaps = gap * line.len().saturating_sub(1) as f32;
+        let line_gaps = main_gap * line.len().saturating_sub(1) as f32;
         let grow = line
             .iter()
             .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
@@ -963,7 +971,8 @@ fn layout_wrapped_children(
         let consumed_main =
             fixed_with_margins + line_gaps + if grow > 0.0 { grow_space } else { 0.0 };
         let free = (available_main - consumed_main).max(0.0);
-        let (mut main_cursor, distributed_gap) = justify_offsets(justify, free, line.len(), gap);
+        let (mut main_cursor, distributed_gap) =
+            justify_offsets(justify, free, line.len(), main_gap);
 
         let has_line_baseline = parent_alignment == CrossAlignment::Baseline
             || line.iter().any(|child| {
@@ -1024,7 +1033,7 @@ fn layout_wrapped_children(
             layout_node(context, child.id, child_frame, false, depth + 1, output)?;
             main_cursor += main + main_after + distributed_gap;
         }
-        cross_cursor += line_cross + gap;
+        cross_cursor += line_cross + cross_gap;
     }
 
     Ok(())
@@ -1466,7 +1475,13 @@ fn intrinsic_extent(
     } else {
         Axis::Vertical
     };
-    let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
+    let gap = finite_non_negative(number(node, PropKey::Gap).unwrap_or(0.0))?;
+    let column_gap = finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(gap))?;
+    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(gap))?;
+    let (main_gap, cross_gap) = match flow_axis {
+        Axis::Horizontal => (column_gap, row_gap),
+        Axis::Vertical => (row_gap, column_gap),
+    };
     if integer(node, PropKey::FlexWrap).unwrap_or(1) == 2 && requested_axis != flow_axis {
         let available_main = match flow_axis {
             Axis::Horizontal => inner_width,
@@ -1480,7 +1495,8 @@ fn intrinsic_extent(
             available_main,
             inner_width,
             inner_height,
-            gap,
+            main_gap,
+            cross_gap,
             text_scale,
             text_metrics,
             depth + 1,
@@ -1515,7 +1531,7 @@ fn intrinsic_extent(
             .iter()
             .map(|(extent, before, after)| extent + before + after)
             .sum::<f32>()
-            + gap * child_extents.len().saturating_sub(1) as f32
+            + main_gap * child_extents.len().saturating_sub(1) as f32
     } else if flow_axis == Axis::Horizontal
         && (cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4))
             == CrossAlignment::Baseline
@@ -1558,7 +1574,8 @@ fn wrapped_intrinsic_cross(
     available_main: f32,
     available_width: f32,
     available_height: f32,
-    gap: f32,
+    main_gap: f32,
+    cross_gap: f32,
     text_scale: f32,
     text_metrics: &TextMetrics,
     depth: usize,
@@ -1609,10 +1626,10 @@ fn wrapped_intrinsic_cross(
         let candidate = if line_count == 0 {
             outer_main
         } else {
-            line_main + gap + outer_main
+            line_main + main_gap + outer_main
         };
         if line_count > 0 && candidate > available_main {
-            total_cross += if line_total == 0 { 0.0 } else { gap } + line_cross;
+            total_cross += if line_total == 0 { 0.0 } else { cross_gap } + line_cross;
             line_total += 1;
             line_main = outer_main;
             line_cross = cross + cross_before + cross_after;
@@ -1639,7 +1656,7 @@ fn wrapped_intrinsic_cross(
         }
     }
     if line_count > 0 {
-        total_cross += if line_total == 0 { 0.0 } else { gap } + line_cross;
+        total_cross += if line_total == 0 { 0.0 } else { cross_gap } + line_cross;
     }
 
     finite_non_negative(total_cross)
@@ -2812,7 +2829,8 @@ mod tests {
                         [
                             (PropKey::Width, PropValue::Float(100.0)),
                             (PropKey::FlexWrap, PropValue::Integer(2)),
-                            (PropKey::Gap, PropValue::Float(4.0)),
+                            (PropKey::GridColumnGap, PropValue::Float(8.0)),
+                            (PropKey::GridRowGap, PropValue::Float(6.0)),
                         ],
                     ),
                 ),
@@ -2867,10 +2885,10 @@ mod tests {
         )
         .expect("wrapped layout");
 
-        assert_eq!(layouts[&2].height, 44.0);
+        assert_eq!(layouts[&2].height, 46.0);
         assert_eq!((layouts[&3].x, layouts[&3].y), (0.0, 0.0));
-        assert_eq!((layouts[&4].x, layouts[&4].y), (48.0, 0.0));
-        assert_eq!((layouts[&5].x, layouts[&5].y), (0.0, 24.0));
+        assert_eq!((layouts[&4].x, layouts[&4].y), (52.0, 0.0));
+        assert_eq!((layouts[&5].x, layouts[&5].y), (0.0, 26.0));
     }
 
     #[test]
