@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.44 - 2026-08-06
+
+- Recover Android `autoFocus` when an already-retained conditional ancestor
+  becomes visible. Inputs inside `p-if` subtrees now focus and request the IME
+  at the visibility transition, even after the initial bounded retry elapsed.
+
 ## 0.6.43 - 2026-08-06
 
 - Keep reactive Android `autoFocus` pending while its screen is detached or a

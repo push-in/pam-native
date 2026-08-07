@@ -1647,10 +1647,14 @@ class PamRenderer(
             -> loadImage(view, state)
             PropKey.IMAGE_OVERLAY_COLOR -> updateBackground(view, state)
             PropKey.ELEVATION -> view.elevation = dp(value.decimal().toFloat()).toFloat()
-            PropKey.VISIBLE -> when (view) {
-                is PamModalHost -> view.setVisible(value.flag())
-                is PamActivityIndicator -> view.setRequestedVisible(value.flag())
-                else -> view.visibility = if (value.flag()) View.VISIBLE else View.GONE
+            PropKey.VISIBLE -> {
+                val visible = value.flag()
+                when (view) {
+                    is PamModalHost -> view.setVisible(visible)
+                    is PamActivityIndicator -> view.setRequestedVisible(visible)
+                    else -> view.visibility = if (visible) View.VISIBLE else View.GONE
+                }
+                if (visible) requestAutoFocusDescendant(state.id)
             }
             PropKey.MODAL_PRESENTATION -> (view as? PamModalHost)?.setPresentation(
                 value.integer().toInt(),
@@ -2458,10 +2462,13 @@ class PamRenderer(
             PropKey.SCALE_Y -> view.scaleY = 1f
             PropKey.ROTATION -> view.rotation = 0f
             PropKey.OVERFLOW -> applyOverflowClip(view, state)
-            PropKey.VISIBLE -> when (view) {
-                is PamModalHost -> view.setVisible(true)
-                is PamActivityIndicator -> view.setRequestedVisible(true)
-                else -> view.visibility = View.VISIBLE
+            PropKey.VISIBLE -> {
+                when (view) {
+                    is PamModalHost -> view.setVisible(true)
+                    is PamActivityIndicator -> view.setRequestedVisible(true)
+                    else -> view.visibility = View.VISIBLE
+                }
+                requestAutoFocusDescendant(state.id)
             }
             PropKey.MODAL_PRESENTATION ->
                 (view as? PamModalHost)?.setPresentation(2)
@@ -5089,6 +5096,25 @@ class PamRenderer(
 
     private fun requestAutoFocus(view: View) {
         attemptAutoFocus(view, attempt = 0)
+    }
+
+    private fun requestAutoFocusDescendant(rootId: Long) {
+        val pending = ArrayDeque<Long>()
+        pending.add(rootId)
+        while (pending.isNotEmpty()) {
+            val id = pending.removeFirst()
+            val state = nodes[id] ?: continue
+            val view = views[id]
+            if (
+                state.flag(PropKey.AUTO_FOCUS, false) &&
+                view is PamEditText &&
+                view.visibility == View.VISIBLE
+            ) {
+                requestAutoFocus(view)
+                return
+            }
+            children[id]?.forEach(pending::addLast)
+        }
     }
 
     private fun attemptAutoFocus(view: View, attempt: Int) {

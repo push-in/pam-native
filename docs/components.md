@@ -270,6 +270,8 @@ authored. `text-align` accepts the familiar CSS values `left`, `center`, and
 `visible-password`.
 On Android, `autoFocus="true"` focuses inputs added by a reactive render and
 explicitly requests the software keyboard once the view and window are ready.
+Retained inputs under conditionally visible ancestors retry autofocus when that
+ancestor becomes visible, including subtrees controlled by `p-if`.
 Set `showSoftInputOnFocus="false"` when focus is required without opening the
 keyboard.
 

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "637d47791d3393f390576b1c59a4651e",
+    "content-hash": "42aa2f2f1ed4d0300661410b786145f2",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -40,11 +40,11 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.6.43",
+            "version": "0.6.44",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "f2705922f8ccfa1505e54b7f9af278ee2781df0c"
+                "reference": "9af31a9f6f64623c825ea818702cade6447af4e5"
             },
             "require": {
                 "php": "^8.4"

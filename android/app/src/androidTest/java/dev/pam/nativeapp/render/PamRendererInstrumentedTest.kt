@@ -79,10 +79,76 @@ class PamRendererInstrumentedTest {
                 renderer.commit(listOf(listOf(Mutation.SetRoot(3))))
             }
             instrumentation.waitForIdleSync()
+            Thread.sleep(150)
             onMain(instrumentation) {
                 val input = activity.host.findByTransitionName("dynamic-search")
                 assertTrue(input is PamEditText)
                 assertTrue("The dynamically inserted input must retain autofocus.", input?.hasFocus() == true)
+                assertTrue((input as PamEditText).showSoftInputOnFocus)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun autoFocusInputRetriesWhenRetainedAncestorBecomesVisible() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var renderer: PamRenderer
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.VIEW,
+                                    mapOf(PropKey.VISIBLE to PropValue.Flag(false)),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    2,
+                                    NodeKind.INPUT,
+                                    mapOf(
+                                        PropKey.AUTO_FOCUS to PropValue.Flag(true),
+                                        PropKey.TEST_ID to PropValue.Text("retained-search"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(0f, 0f, 360f, 96f)),
+                            Mutation.Layout(3, Frame(16f, 24f, 328f, 48f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(1_150)
+            onMain(instrumentation) {
+                val input = activity.host.findByTransitionName("retained-search")
+                assertTrue(input is PamEditText)
+                input?.clearFocus()
+                assertFalse("The stale hidden focus must be cleared for the regression.", input?.hasFocus() == true)
+                renderer.commit(
+                    listOf(
+                        listOf(Mutation.Update(2, PropKey.VISIBLE, PropValue.Flag(true))),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val input = activity.host.findByTransitionName("retained-search")
+                assertTrue(input is PamEditText)
+                assertTrue("Visible retained input must recover autofocus.", input?.hasFocus() == true)
                 assertTrue((input as PamEditText).showSoftInputOnFocus)
                 renderer.close()
             }
