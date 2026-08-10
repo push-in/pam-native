@@ -114,6 +114,19 @@ android {
         }
     }
 
+    val pamKeystore = providers.environmentVariable("PAM_ANDROID_KEYSTORE").orNull
+    val pamKeyAlias = providers.environmentVariable("PAM_ANDROID_KEY_ALIAS").orNull
+    val pamStorePassword = providers.environmentVariable("PAM_ANDROID_KEYSTORE_PASSWORD").orNull
+    val pamKeyPassword = providers.environmentVariable("PAM_ANDROID_KEY_PASSWORD").orNull
+    if (pamKeystore != null && pamKeyAlias != null && pamStorePassword != null && pamKeyPassword != null) {
+        signingConfigs.create("pamRelease") {
+            storeFile = file(pamKeystore)
+            storePassword = pamStorePassword
+            keyAlias = pamKeyAlias
+            keyPassword = pamKeyPassword
+        }
+    }
+
     buildTypes {
         debug {
             if (!pamFirebaseMessagingEnabled) {
@@ -128,6 +141,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (signingConfigs.names.contains("pamRelease")) {
+                signingConfig = signingConfigs.getByName("pamRelease")
+            }
         }
         create("benchmark") {
             initWith(getByName("release"))

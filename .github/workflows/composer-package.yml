@@ -12,9 +12,6 @@ on:
         required: true
         default: false
         type: boolean
-  push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
@@ -28,16 +25,38 @@ defaults:
     shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
-  publish:
-    name: Validate and publish PHP SDK
-    if: github.event_name == 'push' || inputs.publish
+  validate:
+    name: Validate PHP SDK release
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
+          ref: ${{ inputs.release_tag }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Validate immutable Composer split
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          scripts/composer-package.sh validate-tag "${RELEASE_TAG}"
+          split_sha=$(scripts/composer-package.sh split "${RELEASE_TAG}")
+          scripts/composer-package.sh verify-split "${split_sha}"
+
+  publish:
+    name: Validate and publish PHP SDK
+    if: inputs.publish
+    needs: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.release_tag }}
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
@@ -45,20 +64,21 @@ jobs:
       - name: Resolve and validate release
         id: release
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_TAG: ${{ github.ref_name }}
           DISPATCH_TAG: ${{ inputs.release_tag }}
         run: |
-          if [[ "${EVENT_NAME}" == "push" ]]; then
-            release_tag=${PUSH_TAG}
-          else
-            release_tag=${DISPATCH_TAG}
-          fi
+          release_tag=${DISPATCH_TAG}
           scripts/composer-package.sh validate-tag "${release_tag}"
           split_sha=$(scripts/composer-package.sh split "${release_tag}")
           scripts/composer-package.sh verify-split "${split_sha}"
           printf 'tag=%s\n' "${release_tag}" >>"${GITHUB_OUTPUT}"
           printf 'split=%s\n' "${split_sha}" >>"${GITHUB_OUTPUT}"
+      - name: Require the completed PAM Native GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: >-
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          --jq '.draft == false and .prerelease == false' | grep -qx true
       - name: Configure scoped mirror deploy key
         env:
           DEPLOY_KEY: ${{ secrets.PAM_NATIVE_COMPOSER_DEPLOY_KEY }}

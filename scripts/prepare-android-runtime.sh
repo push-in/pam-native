@@ -24,9 +24,9 @@ if [[ -z ${android_sdk_root} ]]; then
     exit 1
 fi
 
-ndk_root=${ANDROID_NDK_HOME:-"${android_sdk_root}/ndk/27.0.12077973"}
+ndk_root=${ANDROID_NDK_HOME:-"${android_sdk_root}/ndk/27.1.12297006"}
 if [[ ! -d ${ndk_root} ]]; then
-    echo "Android NDK 27.0.12077973 was not found at ${ndk_root}." >&2
+    echo "Android NDK 27.1.12297006 was not found at ${ndk_root}." >&2
     exit 1
 fi
 

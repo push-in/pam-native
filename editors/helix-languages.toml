@@ -1,0 +1,9 @@
+[language-server.pam-native]
+command = "vendor/bin/pam-native-language-server"
+
+[[language]]
+name = "pam"
+scope = "source.pam"
+file-types = ["pam", {glob = "*.pam.php"}]
+language-servers = ["pam-native"]
+auto-format = true

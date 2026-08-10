@@ -124,6 +124,17 @@
                 }
             }
         },
+        "ios": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "minimumVersion": {
+                    "type": "string",
+                    "pattern": "^(?:1[5-9]|[2-9][0-9])\\.[0-9]+$",
+                    "default": "15.0"
+                }
+            }
+        },
         "modules": {
             "$ref": "#/$defs/nativeBindings"
         },

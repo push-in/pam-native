@@ -122,7 +122,7 @@ final class PamPhpRegistry
         if ($definition === null) {
             throw new LogicException(
                 'Component '.$component::class
-                .' must implement render() or be loaded from a .pam.php file.',
+                .' must implement render() or be loaded from a .pam component file.',
             );
         }
 

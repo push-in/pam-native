@@ -1,0 +1,78 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* PamAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* PamAppDelegate.swift */; };
+		100000000000000000000002 /* pam_native_ios_bridge.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* pam_native_ios_bridge.cpp */; };
+		100000000000000000000003 /* PamBundle in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* PamBundle */; };
+		100000000000000000000004 /* PamPhp.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000004 /* PamPhp.xcframework */; };
+		100000000000000000000005 /* PamNativeEngine.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* PamNativeEngine.xcframework */; };
+		100000000000000000000006 /* PamNative in Frameworks */ = {isa = PBXBuildFile; productRef = 600000000000000000000001 /* PamNative */; };
+		100000000000000000000007 /* PamNativePlugins in Frameworks */ = {isa = PBXBuildFile; productRef = 600000000000000000000002 /* PamNativePlugins */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* PamAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PamAppDelegate.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* pam_native_ios_bridge.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = pam_native_ios_bridge.cpp; sourceTree = "<group>"; };
+		200000000000000000000003 /* PamBundle */ = {isa = PBXFileReference; lastKnownFileType = folder; path = PamBundle; sourceTree = "<group>"; };
+		200000000000000000000004 /* PamPhp.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = PamPhp.xcframework; sourceTree = "<group>"; };
+		200000000000000000000005 /* PamNativeEngine.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = PamNativeEngine.xcframework; sourceTree = "<group>"; };
+		200000000000000000000006 /* PamNativeApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PamNativeApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		300000000000000000000001 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000004, 100000000000000000000005, 100000000000000000000006, 100000000000000000000007); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		400000000000000000000001 = {isa = PBXGroup; children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000005); sourceTree = "<group>"; };
+		400000000000000000000002 /* App */ = {isa = PBXGroup; children = (200000000000000000000001); path = App; sourceTree = "<group>"; };
+		400000000000000000000003 /* Bridge */ = {isa = PBXGroup; children = (200000000000000000000002); path = Bridge; sourceTree = "<group>"; };
+		400000000000000000000004 /* Runtime */ = {isa = PBXGroup; children = (200000000000000000000003, 200000000000000000000004, 200000000000000000000005); path = Runtime; sourceTree = "<group>"; };
+		400000000000000000000005 /* Products */ = {isa = PBXGroup; children = (200000000000000000000006); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* PamNativeApp */ = {isa = PBXNativeTarget; buildConfigurationList = 700000000000000000000002; buildPhases = (300000000000000000000003, 300000000000000000000001, 300000000000000000000002); buildRules = (); dependencies = (); name = PamNativeApp; packageProductDependencies = (600000000000000000000001, 600000000000000000000002); productName = PamNativeApp; productReference = 200000000000000000000006; productType = "com.apple.product-type.application"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		500000000000000000000002 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; TargetAttributes = {500000000000000000000001 = {CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = 700000000000000000000001; compatibilityVersion = "Xcode 16.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 400000000000000000000001; minimizedProjectReferenceProxies = 1; packageReferences = (800000000000000000000001, 800000000000000000000002); preferredProjectObjectVersion = 77; productRefGroup = 400000000000000000000005; projectDirPath = ""; projectRoot = ""; targets = (500000000000000000000001); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		300000000000000000000002 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000003); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		300000000000000000000003 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000001, 100000000000000000000002); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		900000000000000000000001 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = __PAM_IOS_MINIMUM__; SDKROOT = iphoneos; }; name = Debug; };
+		900000000000000000000002 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_CXX_LANGUAGE_STANDARD = "c++20"; CLANG_ENABLE_MODULES = YES; IPHONEOS_DEPLOYMENT_TARGET = __PAM_IOS_MINIMUM__; SDKROOT = iphoneos; }; name = Release; };
+		900000000000000000000003 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = __PAM_VERSION_CODE__; DEVELOPMENT_TEAM = "__PAM_DEVELOPMENT_TEAM__"; GENERATE_INFOPLIST_FILE = NO; HEADER_SEARCH_PATHS = ("$(inherited)", "$(SRCROOT)/Bridge/include", "$(SRCROOT)/Runtime/PamPhp.xcframework/**/Headers", "$(SRCROOT)/Runtime/PamNativeEngine.xcframework/**/Headers"); INFOPLIST_FILE = App/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = __PAM_VERSION_NAME__; OTHER_LDFLAGS = ("$(inherited)", "-lc++"); PRODUCT_BUNDLE_IDENTIFIER = __PAM_APPLICATION_ID__; PRODUCT_NAME = __PAM_APPLICATION_NAME__; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; }; name = Debug; };
+		900000000000000000000004 = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = __PAM_VERSION_CODE__; DEVELOPMENT_TEAM = "__PAM_DEVELOPMENT_TEAM__"; GENERATE_INFOPLIST_FILE = NO; HEADER_SEARCH_PATHS = ("$(inherited)", "$(SRCROOT)/Bridge/include", "$(SRCROOT)/Runtime/PamPhp.xcframework/**/Headers", "$(SRCROOT)/Runtime/PamNativeEngine.xcframework/**/Headers"); INFOPLIST_FILE = App/Info.plist; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = __PAM_VERSION_NAME__; OTHER_LDFLAGS = ("$(inherited)", "-lc++"); PRODUCT_BUNDLE_IDENTIFIER = __PAM_APPLICATION_ID__; PRODUCT_NAME = __PAM_APPLICATION_NAME__; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; VALIDATE_PRODUCT = YES; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		700000000000000000000001 = {isa = XCConfigurationList; buildConfigurations = (900000000000000000000001, 900000000000000000000002); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		700000000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (900000000000000000000003, 900000000000000000000004); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		800000000000000000000001 /* PamNative */ = {isa = XCLocalSwiftPackageReference; relativePath = PamNativeSDK/ios; };
+		800000000000000000000002 /* PamNativePlugins */ = {isa = XCLocalSwiftPackageReference; relativePath = PamNativePlugins; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		600000000000000000000001 /* PamNative */ = {isa = XCSwiftPackageProductDependency; package = 800000000000000000000001 /* PamNative */; productName = PamNative; };
+		600000000000000000000002 /* PamNativePlugins */ = {isa = XCSwiftPackageProductDependency; package = 800000000000000000000002 /* PamNativePlugins */; productName = PamNativePlugins; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 500000000000000000000002 /* Project object */;
+}

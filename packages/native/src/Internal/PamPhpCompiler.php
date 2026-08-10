@@ -63,7 +63,7 @@ final class PamPhpCompiler
                     "PAM component directories cannot contain symlinks: {$file->getPathname()}.",
                 );
             }
-            if (!$file->isFile() || !str_ends_with($file->getFilename(), '.pam.php')) {
+            if (!$file->isFile() || !self::isComponentFile($file->getFilename())) {
                 continue;
             }
             $resolved = $file->getRealPath();
@@ -87,6 +87,12 @@ final class PamPhpCompiler
                 self::compileFile($source, $cachePath),
             $sources,
         );
+    }
+
+    private static function isComponentFile(string $filename): bool
+    {
+        return str_ends_with($filename, '.pam')
+            || str_ends_with($filename, '.pam.php');
     }
 
     public static function compileFile(

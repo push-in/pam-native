@@ -2,7 +2,7 @@
 
 PAM supports two authoring styles over one renderer. Normal `.php` components
 build an explicit `Element` tree and remain the default starting point.
-`.pam.php` components are an optional single-file syntax for teams that prefer
+`.pam` components are the recommended single-file syntax for teams that prefer
 Laravel, Vue, or React-style composition.
 
 Both styles become the same `Renderable -> Element -> PNT1/PNP1` render plan.
@@ -22,7 +22,7 @@ App::components(__DIR__.'/src', __DIR__.'/.pam-native/components');
 App::run(App::make(Home::class, ['userName' => 'Taylor']));
 ```
 
-Discovery recursively compiles only `*.pam.php` files. PHP code and templates
+Discovery recursively compiles `*.pam` and legacy `*.pam.php` files. PHP code and templates
 are cached separately, while all expressions are parsed by PAM's restricted
 expression engine. Templates never use `eval` and cannot call global PHP
 functions.
@@ -761,7 +761,7 @@ final class Checkout extends Component
 }
 ```
 
-Tree components and `.pam.php` components can render each other because both
+Tree components and `.pam` components can render each other because both
 use the same component lifecycle, element identities, Rust diff engine, binary
 protocol, and Android UI-thread commit queue.
 
@@ -861,12 +861,13 @@ ImageEditor::render(
 ## Generators
 
 ```bash
-pam mobile make:screen Orders .
-pam mobile make:component MetricCard .
+pam make:screen Orders
+pam make:component MetricCard
 ```
 
-These commands generate `src/Screens/Orders.pam.php` and
-`src/Components/MetricCard.pam.php` without overwriting existing files.
+These commands generate `src/Screens/Orders.pam` and
+`src/Components/MetricCard.pam` without overwriting existing files. Legacy
+`.pam.php` components remain supported throughout the 1.x compatibility line.
 `pam init --template mobile` still starts with the explicit PHP tree so the
 lowest-level model is always visible and available.
 

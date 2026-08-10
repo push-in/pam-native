@@ -25,6 +25,7 @@
     },
     "bin": [
         "bin/pam-native-format",
+        "bin/pam-native-language-server",
         "bin/pam-native-optimize"
     ],
     "extra": {

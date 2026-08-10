@@ -60,6 +60,8 @@ jobs:
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null
           python3 -m json.tool benchmarks/ios/budgets.json >/dev/null
+          node --check editors/vscode/extension.js
+          node editors/vscode/test.js
 
   android:
     name: Android renderer build and unit contracts
@@ -74,7 +76,7 @@ jobs:
           cache: gradle
       - uses: android-actions/setup-android@v4
       - name: Install Android build dependencies
-        run: sdkmanager "platforms;android-36" "ndk;27.0.12077973"
+        run: sdkmanager "platforms;android-36" "ndk;27.1.12297006" "cmake;3.22.1"
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
         with:
@@ -133,7 +135,7 @@ jobs:
           cache: gradle
       - uses: android-actions/setup-android@v4
       - name: Install Android build dependencies
-        run: sdkmanager "platforms;android-36" "ndk;27.0.12077973"
+        run: sdkmanager "platforms;android-36" "ndk;27.1.12297006" "cmake;3.22.1"
       - uses: actions/download-artifact@v8
         with:
           name: pam-native-android-prerequisites

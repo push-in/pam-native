@@ -77,15 +77,56 @@ final class ProductScreen extends Component
 }
 ```
 
-## From an empty folder to a native app
+## Start here
+
+PAM Native is installed, built, run, and updated through the **PAM CLI**. You
+install PAM once; PAM then manages its private PHP runtime, Composer, the PAM
+Native SDK, native hosts, plugins, code generation, development sessions, and
+release builds for every project.
+
+### 1. Install PAM
+
+```bash
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+  https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+```
+
+Restart your terminal if requested, then verify the installation:
+
+```bash
+pam --version
+pam doctor
+```
+
+PAM includes and verifies Composer when it is first needed. You do not need a
+global Composer or a separate PHP installation for the normal workflow.
+
+### 2. Create a native application
 
 ```bash
 pam init hello-native --template mobile
 cd hello-native
-pam composer install
-pam mobile doctor .
-pam mobile dev .
+pam doctor
+pam dev
 ```
+
+Run `pam` without arguments for the guided project launcher. The explicit
+`pam mobile ...` commands remain available for CI and advanced multi-project
+automation, but inside a PAM Native project the short contextual commands are
+the primary interface.
+
+### 3. Grow and ship it
+
+```bash
+pam make:screen Products
+pam add maps
+pam test
+pam build
+```
+
+Use `pam packages` to explore official capabilities. Package installation,
+compatibility preflight, native code generation, and project validation stay
+behind the PAM CLI.
 
 Edit PHP and save. PAM refreshes the mounted native tree while preserving the
 state that can safely survive the change—including navigation, scroll, and
@@ -214,10 +255,11 @@ Start with the short path, then open the internals only when you need them:
 For protocol, renderer, and runtime details, use the
 [technical documentation index](docs/README.md).
 
-## Install the SDK directly
+## Advanced: install only the SDK
 
-Generated PAM projects already configure this dependency. For an existing
-project:
+Generated PAM projects already configure this dependency. Direct Composer
+installation is intended for custom hosts and framework contributors; most
+applications should start with `pam init` or `pam add`:
 
 ```bash
 composer require pushinbr/pam-native:^0.6

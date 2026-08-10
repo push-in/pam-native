@@ -1,0 +1,338 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [
+    dirname(__DIR__, 3).'/autoload.php',
+    dirname(__DIR__).'/vendor/autoload.php',
+];
+foreach ($autoloadCandidates as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
+if (!class_exists(Pam\Native\Tooling\PamFormatter::class)) {
+    spl_autoload_register(static function (string $class): void {
+        $prefix = 'Pam\\Native\\';
+        if (!str_starts_with($class, $prefix)) {
+            return;
+        }
+        $path = dirname(__DIR__).'/src/'
+            .str_replace('\\', '/', substr($class, strlen($prefix))).'.php';
+        if (is_file($path)) {
+            require $path;
+        }
+    });
+}
+
+use Pam\Native\Tooling\PamFormatter;
+
+/** @var array<string, string> $documents */
+$documents = [];
+$shutdown = false;
+$workspaceRoot = null;
+
+while (($message = readMessage(STDIN)) !== null) {
+    $method = $message['method'] ?? null;
+    $id = $message['id'] ?? null;
+    $params = is_array($message['params'] ?? null) ? $message['params'] : [];
+
+    if ($method === 'initialize') {
+        $workspaceRoot = workspacePath($params);
+        respond($id, [
+            'capabilities' => [
+                'textDocumentSync' => 1,
+                'documentFormattingProvider' => true,
+                'completionProvider' => ['triggerCharacters' => ['<', ':', '@']],
+                'hoverProvider' => true,
+                'definitionProvider' => true,
+            ],
+            'serverInfo' => ['name' => 'PAM Native Language Server', 'version' => '0.1.0'],
+        ]);
+        continue;
+    }
+    if ($method === 'shutdown') {
+        $shutdown = true;
+        respond($id, null);
+        continue;
+    }
+    if ($method === 'exit') {
+        exit($shutdown ? 0 : 1);
+    }
+    if ($method === 'textDocument/didOpen') {
+        $document = $params['textDocument'] ?? [];
+        $uri = (string) ($document['uri'] ?? '');
+        $documents[$uri] = (string) ($document['text'] ?? '');
+        diagnose($uri, $documents[$uri]);
+        continue;
+    }
+    if ($method === 'textDocument/didChange') {
+        $uri = (string) ($params['textDocument']['uri'] ?? '');
+        $changes = $params['contentChanges'] ?? [];
+        $last = is_array($changes) ? end($changes) : false;
+        if (is_array($last) && isset($last['text'])) {
+            $documents[$uri] = (string) $last['text'];
+            diagnose($uri, $documents[$uri]);
+        }
+        continue;
+    }
+    if ($method === 'textDocument/didClose') {
+        $uri = (string) ($params['textDocument']['uri'] ?? '');
+        unset($documents[$uri]);
+        notify('textDocument/publishDiagnostics', ['uri' => $uri, 'diagnostics' => []]);
+        continue;
+    }
+    if ($method === 'textDocument/formatting') {
+        $uri = (string) ($params['textDocument']['uri'] ?? '');
+        $source = $documents[$uri] ?? readUri($uri);
+        try {
+            $formatted = PamFormatter::format($source, basename(parse_url($uri, PHP_URL_PATH) ?: 'Component.pam'));
+            respond($id, [[
+                'range' => [
+                    'start' => ['line' => 0, 'character' => 0],
+                    'end' => ['line' => substr_count($source, "\n") + 1, 'character' => 0],
+                ],
+                'newText' => $formatted,
+            ]]);
+        } catch (Throwable $error) {
+            fail($id, -32603, $error->getMessage());
+        }
+        continue;
+    }
+    if ($method === 'textDocument/completion') {
+        $uri = (string) ($params['textDocument']['uri'] ?? '');
+        respond($id, completionItems($documents[$uri] ?? readUri($uri), $workspaceRoot));
+        continue;
+    }
+    if ($method === 'textDocument/hover') {
+        $uri = (string) ($params['textDocument']['uri'] ?? '');
+        $source = $documents[$uri] ?? readUri($uri);
+        $position = $params['position'] ?? [];
+        $word = wordAt($source, (int) ($position['line'] ?? 0), (int) ($position['character'] ?? 0));
+        $help = pamHelp($word);
+        respond($id, $help === null ? null : ['contents' => ['kind' => 'markdown', 'value' => $help]]);
+        continue;
+    }
+    if ($method === 'textDocument/definition') {
+        $uri = (string) ($params['textDocument']['uri'] ?? '');
+        $source = $documents[$uri] ?? readUri($uri);
+        $position = $params['position'] ?? [];
+        $word = wordAt($source, (int) ($position['line'] ?? 0), (int) ($position['character'] ?? 0));
+        $definition = componentDefinitions($workspaceRoot)[$word] ?? null;
+        respond($id, $definition);
+        continue;
+    }
+    if ($id !== null) {
+        fail($id, -32601, 'Method not found');
+    }
+}
+
+/** @return array<string, mixed>|null */
+function readMessage($stream): ?array
+{
+    $length = null;
+    while (($line = fgets($stream)) !== false) {
+        $line = rtrim($line, "\r\n");
+        if ($line === '') {
+            break;
+        }
+        if (stripos($line, 'Content-Length:') === 0) {
+            $length = (int) trim(substr($line, 15));
+        }
+    }
+    if ($length === null || $length < 0 || $length > 16_777_216) {
+        return null;
+    }
+    $body = '';
+    while (strlen($body) < $length && !feof($stream)) {
+        $chunk = fread($stream, $length - strlen($body));
+        if ($chunk === false || $chunk === '') {
+            break;
+        }
+        $body .= $chunk;
+    }
+    $decoded = json_decode($body, true);
+    return is_array($decoded) ? $decoded : null;
+}
+
+function respond(mixed $id, mixed $result): void
+{
+    send(['jsonrpc' => '2.0', 'id' => $id, 'result' => $result]);
+}
+
+function fail(mixed $id, int $code, string $message): void
+{
+    send(['jsonrpc' => '2.0', 'id' => $id, 'error' => ['code' => $code, 'message' => $message]]);
+}
+
+/** @param array<string, mixed> $params */
+function notify(string $method, array $params): void
+{
+    send(['jsonrpc' => '2.0', 'method' => $method, 'params' => $params]);
+}
+
+/** @param array<string, mixed> $payload */
+function send(array $payload): void
+{
+    $json = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+    fwrite(STDOUT, 'Content-Length: '.strlen($json)."\r\n\r\n".$json);
+    fflush(STDOUT);
+}
+
+function diagnose(string $uri, string $source): void
+{
+    $diagnostics = [];
+    try {
+        PamFormatter::format($source, basename(parse_url($uri, PHP_URL_PATH) ?: 'Component.pam'));
+    } catch (Throwable $error) {
+        $diagnostics[] = [
+            'range' => [
+                'start' => ['line' => 0, 'character' => 0],
+                'end' => ['line' => 0, 'character' => 1],
+            ],
+            'severity' => 1,
+            'source' => 'pam-native',
+            'message' => $error->getMessage(),
+        ];
+    }
+    notify('textDocument/publishDiagnostics', ['uri' => $uri, 'diagnostics' => $diagnostics]);
+}
+
+function readUri(string $uri): string
+{
+    $path = parse_url($uri, PHP_URL_PATH);
+    if (!is_string($path)) {
+        return '';
+    }
+    $source = @file_get_contents(rawurldecode($path));
+    return is_string($source) ? $source : '';
+}
+
+/** @return list<array<string, mixed>> */
+function completionItems(string $source, ?string $workspaceRoot): array
+{
+    $items = [];
+    $tags = [
+        'Screen', 'SafeAreaView', 'View', 'Column', 'Row', 'Text', 'Button',
+        'Input', 'Image', 'ScrollView', 'VirtualizedList', 'VirtualGrid',
+        'Modal', 'BottomSheet', 'GestureDetector', 'Slot', 'Fragment',
+    ];
+    foreach ($tags as $tag) {
+        $items[] = ['label' => $tag, 'kind' => 7, 'detail' => 'PAM Native component'];
+    }
+    foreach (componentDefinitions($workspaceRoot) as $name => $_definition) {
+        $items[] = ['label' => $name, 'kind' => 7, 'detail' => 'Project PAM component'];
+    }
+    foreach (['p-if', 'p-else-if', 'p-else', 'p-for', 'p-key', 'p-index', 'bind:value', 'bind:checked'] as $directive) {
+        $items[] = ['label' => $directive, 'kind' => 14, 'detail' => 'PAM template directive'];
+    }
+    preg_match_all('/public\s+(?:readonly\s+)?[\\?A-Za-z0-9_|]+\s+\$([A-Za-z_][A-Za-z0-9_]*)/', $source, $properties);
+    foreach (array_unique($properties[1] ?? []) as $property) {
+        $items[] = ['label' => '$'.$property, 'kind' => 6, 'detail' => 'Component property'];
+    }
+    preg_match_all('/public\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $source, $methods);
+    foreach (array_unique($methods[1] ?? []) as $method) {
+        if ($method === '__construct') {
+            continue;
+        }
+        $items[] = ['label' => $method, 'kind' => 2, 'detail' => 'Component action'];
+    }
+    return $items;
+}
+
+/** @param array<string, mixed> $params */
+function workspacePath(array $params): ?string
+{
+    $uri = $params['rootUri'] ?? null;
+    if (!is_string($uri) || $uri === '') {
+        $folders = $params['workspaceFolders'] ?? [];
+        $uri = is_array($folders) && is_array($folders[0] ?? null)
+            ? ($folders[0]['uri'] ?? null)
+            : null;
+    }
+    if (!is_string($uri)) {
+        return null;
+    }
+    $path = parse_url($uri, PHP_URL_PATH);
+    return is_string($path) && is_dir(rawurldecode($path)) ? rawurldecode($path) : null;
+}
+
+/** @return array<string, array<string, mixed>> */
+function componentDefinitions(?string $workspaceRoot): array
+{
+    if ($workspaceRoot === null || !is_dir($workspaceRoot)) {
+        return [];
+    }
+    $definitions = [];
+    $directory = new RecursiveDirectoryIterator($workspaceRoot, FilesystemIterator::SKIP_DOTS);
+    $filter = new RecursiveCallbackFilterIterator(
+        $directory,
+        static function (SplFileInfo $file): bool {
+            if (!$file->isDir()) {
+                return true;
+            }
+            return !in_array($file->getFilename(), ['vendor', 'node_modules', '.git', '.pam-native'], true);
+        },
+    );
+    $files = new RecursiveIteratorIterator($filter);
+    $seen = 0;
+    foreach ($files as $file) {
+        if (!$file->isFile() || ++$seen > 20_000) {
+            continue;
+        }
+        $filename = $file->getFilename();
+        if (!str_ends_with($filename, '.pam') && !str_ends_with($filename, '.pam.php')) {
+            continue;
+        }
+        $source = @file_get_contents($file->getPathname());
+        if (!is_string($source) || !preg_match('/\bclass\s+([A-Za-z_][A-Za-z0-9_]*)/', $source, $match, PREG_OFFSET_CAPTURE)) {
+            continue;
+        }
+        $name = $match[1][0];
+        $offset = $match[1][1];
+        $before = substr($source, 0, $offset);
+        $line = substr_count($before, "\n");
+        $lastNewline = strrpos($before, "\n");
+        $character = $lastNewline === false ? strlen($before) : strlen($before) - $lastNewline - 1;
+        $uri = 'file://'.str_replace('%2F', '/', rawurlencode($file->getPathname()));
+        $definitions[$name] = [
+            'uri' => $uri,
+            'range' => [
+                'start' => ['line' => $line, 'character' => $character],
+                'end' => ['line' => $line, 'character' => $character + strlen($name)],
+            ],
+        ];
+    }
+    return $definitions;
+}
+
+function wordAt(string $source, int $line, int $character): string
+{
+    $lines = preg_split('/\R/', $source) ?: [];
+    $text = $lines[$line] ?? '';
+    $character = max(0, min(strlen($text), $character));
+    $start = $character;
+    while ($start > 0 && preg_match('/[A-Za-z0-9_:@-]/', $text[$start - 1]) === 1) {
+        $start--;
+    }
+    $end = $character;
+    while ($end < strlen($text) && preg_match('/[A-Za-z0-9_:@-]/', $text[$end]) === 1) {
+        $end++;
+    }
+    return substr($text, $start, $end - $start);
+}
+
+function pamHelp(string $word): ?string
+{
+    return match ($word) {
+        'p-if' => '**p-if** — Renders the element only when its bounded PAM expression is truthy.',
+        'p-for' => '**p-for** — Repeats the element for an iterable or positive integer. Pair it with a stable key.',
+        'bind:value' => '**bind:value** — Two-way native input binding to typed component state.',
+        'bind:checked' => '**bind:checked** — Two-way native boolean binding.',
+        '@press' => '**@press** — Calls a component action after a native press event.',
+        'Fragment' => '**Fragment** — Groups component output without creating a native layout view.',
+        default => null,
+    };
+}

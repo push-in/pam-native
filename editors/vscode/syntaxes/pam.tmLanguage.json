@@ -1,0 +1,35 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "PAM Native",
+    "scopeName": "source.pam",
+    "patterns": [
+        {"include": "#php"},
+        {"include": "#style"},
+        {"include": "#template"}
+    ],
+    "repository": {
+        "php": {
+            "begin": "<\\?php",
+            "end": "\\?>",
+            "beginCaptures": {"0": {"name": "punctuation.section.embedded.begin.php"}},
+            "endCaptures": {"0": {"name": "punctuation.section.embedded.end.php"}},
+            "contentName": "source.php"
+        },
+        "style": {
+            "begin": "(<style)(\\s+scoped)?(>)",
+            "end": "</style>",
+            "contentName": "source.css"
+        },
+        "template": {
+            "begin": "<template>",
+            "end": "</template>",
+            "contentName": "text.html.pam",
+            "patterns": [
+                {"match": "\\b(p-if|p-else-if|p-else|p-for|p-key|p-index)\\b", "name": "keyword.control.pam"},
+                {"match": "(@[A-Za-z][A-Za-z0-9:-]*|:[A-Za-z][A-Za-z0-9:-]*|bind:[A-Za-z][A-Za-z0-9:-]*)", "name": "entity.other.attribute-name.pam"},
+                {"begin": "\\{\\{", "end": "\\}\\}", "contentName": "source.pam-expression"},
+                {"include": "text.html.basic"}
+            ]
+        }
+    }
+}
