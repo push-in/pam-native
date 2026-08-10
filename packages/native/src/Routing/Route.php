@@ -165,11 +165,16 @@ final class Route
         return $navigator;
     }
 
-    public static function group(ScreenOptionsPatch|Closure $options, Closure $routes): void
+    public static function preset(ScreenOptions|ScreenOptionsPatch|Closure $options): RoutePreset
+    {
+        return new RoutePreset($options);
+    }
+
+    public static function group(ScreenOptionsPatch|RoutePreset|Closure $options, Closure $routes): void
     {
         $registrar = self::$registrar
             ?? throw new LogicException('Route::group() must be declared inside Route::stack().');
-        $registrar->beginGroup($options);
+        $registrar->beginGroup($options instanceof RoutePreset ? $options->options : $options);
         try {
             $routes();
         } finally {

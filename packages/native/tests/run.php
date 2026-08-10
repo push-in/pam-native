@@ -4969,18 +4969,20 @@ $assert(
     'Route code generation must emit enum destinations and statically typed helper signatures.',
 );
 
+$editorPreset = Route::preset(ScreenOptionsPatch::from([
+    'headerShown' => true,
+    'gestureDirection' => NavigationGestureDirection::Vertical,
+    'animation' => NavigationTransition::FadeFromBottom,
+]));
 $namedRouteNavigator = Route::stack(
     name: 'named-routes-test',
     initial: TypedRouteTestName::Home,
-    routes: static function (): void {
+    routes: static function () use ($editorPreset): void {
         Route::screen(TypedRouteTestName::Home, static fn () => Screen::make(Text::make('Home')))
             ->deepLink('/home')
             ->deepLink('/start');
         Route::group(
-            ScreenOptionsPatch::from([
-                'headerShown' => true,
-                'gestureDirection' => NavigationGestureDirection::Vertical,
-            ]),
+            $editorPreset,
             static function (): void {
                 Route::screen(TypedRouteTestName::Product, TypedRouteTestScreen::class)
                     ->transition(NavigationTransition::Fade, 175)
@@ -4991,6 +4993,8 @@ $namedRouteNavigator = Route::stack(
         Route::modal('filters', static fn () => Screen::make(Text::make('Filters')))
             ->transition(NavigationTransition::SlideFromBottom, 260)
             ->sheet(detents: [0.4, 1.0], grabber: true, cornerRadius: 24.0);
+        Route::screen('preset-copy', static fn () => Screen::make(Text::make('Preset')))
+            ->preset($editorPreset);
     },
 );
 $assert(
@@ -5022,6 +5026,13 @@ $assert(
         && $namedRouteNavigator->currentOptions()->sheetGrabberVisible
         && $namedRouteNavigator->currentOptions()->sheetCornerRadius === 24.0,
     'Named modal routes must compose native presentation, animation and sheet options.',
+);
+$namedRouteNavigator->push('preset-copy');
+$assert(
+    $namedRouteNavigator->currentOptions()->headerShown
+        && $namedRouteNavigator->currentOptions()->gestureDirection === NavigationGestureDirection::Vertical
+        && $namedRouteNavigator->currentOptions()->animation === NavigationTransition::FadeFromBottom,
+    'Reusable route presets must compose identically in groups and individual destinations.',
 );
 $namedTabs = Route::tabs('named-tabs-test', 'home', static function (): void {
     Route::tab('home', Screen::make(Text::make('Home')), label: 'Home');

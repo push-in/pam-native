@@ -18,10 +18,15 @@ final class PendingRoute
     {
     }
 
-    public function options(ScreenOptions|ScreenOptionsPatch|Closure $options): self
+    public function options(ScreenOptions|ScreenOptionsPatch|RoutePreset|Closure $options): self
     {
-        $this->definition->options[] = $options;
+        $this->definition->options[] = $options instanceof RoutePreset ? $options->options : $options;
         return $this;
+    }
+
+    public function preset(RoutePreset $preset): self
+    {
+        return $this->options($preset);
     }
 
     public function transition(

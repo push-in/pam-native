@@ -104,13 +104,18 @@ use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
 
+$editor = Route::preset(ScreenOptionsPatch::from([
+    'headerShown' => true,
+    'animation' => NavigationTransition::FadeFromBottom,
+]));
+
 $navigator = Route::stack(
     name: 'main',
     initial: 'home',
     options: new ScreenOptions(headerShown: false),
-    routes: function (): void {
+    routes: function () use ($editor): void {
         Route::group(
-            ScreenOptionsPatch::one('headerShown', true),
+            $editor,
             routes: function (): void {
                 Route::screen('profile', ProfileScreen::class)
                     ->transition(NavigationTransition::SlideFromRight, 240)
@@ -136,6 +141,10 @@ $navigator = Route::stack(
 duration from 0 through 2,000 ms. `gesture()` controls enablement, direction
 and full-screen recognition. `presentation()`, `fullScreen()` and `sheet()` are
 sparse layers and can safely be chained with `options()` in any order.
+`Route::preset()` creates a reusable, immutable option layer accepted by both
+`Route::group()` and a destination's `preset()` or `options()` method. Presets
+are ordinary PHP values, so feature route modules can export them without a
+global string registry or declaration-order coupling.
 
 ## Nested navigators
 
