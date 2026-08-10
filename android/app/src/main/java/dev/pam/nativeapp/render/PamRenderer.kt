@@ -109,6 +109,9 @@ internal fun resolvedKeyboardInset(
     return max(platformInset, resizedInset)
 }
 
+internal fun visibleImeInset(rawInset: Int, visible: Boolean): Int =
+    if (visible) rawInset.coerceAtLeast(0) else 0
+
 internal fun interactiveKeyboardTranslation(
     keyboardOverlap: Int,
     originalTop: Int,
@@ -4931,10 +4934,7 @@ class PamRenderer(
             }
             if (oldBottom != bottom && state.keyboardBaseHeight > 0) {
                 val platformInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    host.rootWindowInsets
-                        ?.getInsets(WindowInsets.Type.ime())
-                        ?.bottom
-                        ?: 0
+                    currentPlatformImeInset()
                 } else {
                     0
                 }
@@ -4951,7 +4951,10 @@ class PamRenderer(
         host.addOnLayoutChangeListener(layoutListener)
         host.setOnApplyWindowInsetsListener { _, insets ->
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                state.keyboardInset = insets.getInsets(WindowInsets.Type.ime()).bottom
+                state.keyboardInset = visibleImeInset(
+                    rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
+                    visible = insets.isVisible(WindowInsets.Type.ime()),
+                )
                 if (!state.keyboardAnimating) applyKeyboardAvoidance(view, state)
             }
             insets
@@ -4979,6 +4982,7 @@ class PamRenderer(
                     override fun onEnd(animation: WindowInsetsAnimation) {
                         if (animation.typeMask and WindowInsets.Type.ime() != 0) {
                             state.keyboardAnimating = false
+                            state.keyboardInset = currentPlatformImeInset()
                             applyKeyboardAvoidance(view, state)
                             view.post { restoreKeyboardAvoidingInput(state) }
                         }
@@ -4987,6 +4991,35 @@ class PamRenderer(
             )
         }
         host.requestApplyInsets()
+        // A KAV can mount after an IME animation has started. Android does not guarantee
+        // that a callback registered mid-animation receives onEnd, so reconcile against
+        // the authoritative root inset after the current traversal and once more after
+        // the animation settling window.
+        reconcileMountedKeyboardInsets(view, state)
+    }
+
+    private fun currentPlatformImeInset(): Int {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
+        val insets = host.rootWindowInsets ?: return 0
+        return visibleImeInset(
+            rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
+            visible = insets.isVisible(WindowInsets.Type.ime()),
+        )
+    }
+
+    private fun reconcileMountedKeyboardInsets(view: View, state: NodeState) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        fun reconcile() {
+            if (nodes[state.id] !== state) return
+            val inset = currentPlatformImeInset()
+            if (state.keyboardInset != inset || inset == 0) {
+                state.keyboardInset = inset
+                state.keyboardAnimating = false
+                applyKeyboardAvoidance(view, state)
+            }
+        }
+        view.postOnAnimation(::reconcile)
+        view.postDelayed(::reconcile, 300L)
     }
 
     private fun applyKeyboardAvoidance(view: View, state: NodeState) {

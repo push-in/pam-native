@@ -5,6 +5,16 @@ import org.junit.Test
 
 class PamKeyboardAvoidanceTest {
     @Test
+    fun hiddenImeDiscardsAStaleAnimatedInset() {
+        assertEquals(0, visibleImeInset(rawInset = 820, visible = false))
+    }
+
+    @Test
+    fun visibleImePreservesItsCurrentInset() {
+        assertEquals(820, visibleImeInset(rawInset = 820, visible = true))
+    }
+
+    @Test
     fun resizeBehaviorReducesTheKeyboardAvoidingViewport() {
         assertEquals(
             1_280,

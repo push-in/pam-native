@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.63 - 2026-08-10
+
+- Fix Android `KeyboardAvoidingView` instances mounted while the IME is closing
+  retaining an intermediate resize inset after the keyboard is hidden. PAM now
+  reconciles newly mounted views with the authoritative IME visibility after
+  traversal and animation settling.
+
 ## 0.6.62 - 2026-08-10
 
 - Fix Android `KeyboardAvoidingView` resize behavior to reduce its native

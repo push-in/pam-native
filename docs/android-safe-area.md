@@ -26,6 +26,10 @@ their actual on-screen bounds.
   overlap inset and automatically reveals its focused input with 16 dp of
   clearance. `keyboardVerticalOffset` can reserve additional space for a form
   CTA that must remain visible with the field.
+- A keyboard-avoiding view mounted during IME closing is reconciled after the
+  current traversal and animation settling. It returns to the full viewport
+  when Android reports the IME hidden even if its newly registered animation
+  callback did not receive the transition's final event.
 - While a panning container is translated, touch coordinates are remapped to
   its visible descendants. With the IME closed only text inputs use the
   geometry-aware fallback. The fallback follows Android sibling order and
