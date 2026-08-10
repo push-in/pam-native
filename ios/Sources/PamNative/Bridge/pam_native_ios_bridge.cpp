@@ -577,7 +577,10 @@ uint64_t pam_native_runtime_start(
     float height_dp,
     float text_scale,
     bool dark_appearance,
-    PamNativeRuntimeCallbacks callbacks
+    PamNativeBatchCallback on_batch,
+    PamNativeCallCallback on_call,
+    PamNativeTypedCallCallback on_typed_call,
+    PamNativeErrorCallback on_error
 ) {
     if (
         entry == nullptr
@@ -590,16 +593,21 @@ uint64_t pam_native_runtime_start(
     }
 
     if (
-        callbacks.on_batch == nullptr
-        || callbacks.on_call == nullptr
-        || callbacks.on_typed_call == nullptr
-        || callbacks.on_error == nullptr
+        on_batch == nullptr
+        || on_call == nullptr
+        || on_typed_call == nullptr
+        || on_error == nullptr
     ) {
         return 0;
     }
 
     auto state = std::make_unique<RuntimeState>();
-    state->callbacks = callbacks;
+    state->callbacks = PamNativeRuntimeCallbacks{
+        on_batch,
+        on_call,
+        on_typed_call,
+        on_error,
+    };
     state->entry = entry;
     state->state_dir = state_directory;
     state->dark_appearance = dark_appearance;

@@ -17,13 +17,6 @@ private typealias PamNativeCallCallback = @convention(c) (
 private typealias PamNativeTypedCallCallback = @convention(c) (UInt64, Int64, Int32, UnsafePointer<UInt8>?, Int) -> Void
 private typealias PamNativeErrorCallback = @convention(c) (UInt64, UnsafePointer<CChar>?) -> Void
 
-private struct PamNativeRuntimeCallbacks {
-    var on_batch: PamNativeBatchCallback
-    var on_call: PamNativeCallCallback
-    var on_typed_call: PamNativeTypedCallCallback
-    var on_error: PamNativeErrorCallback
-}
-
 private struct EventIdentity: Hashable {
     let nodeId: Int64
     let kind: Int
@@ -49,7 +42,10 @@ private func pam_native_runtime_start(
     _ height_dp: Float,
     _ text_scale: Float,
     _ dark_appearance: Bool,
-    _ callbacks: PamNativeRuntimeCallbacks,
+    _ on_batch: PamNativeBatchCallback,
+    _ on_call: PamNativeCallCallback,
+    _ on_typed_call: PamNativeTypedCallCallback,
+    _ on_error: PamNativeErrorCallback,
 ) -> UInt64
 
 @_silgen_name("pam_native_runtime_relayout")
@@ -367,13 +363,6 @@ public final class PamRuntime {
             stateLock.unlock()
             return
         }
-        let callbacks = PamNativeRuntimeCallbacks(
-            on_batch: pamNativeRuntimeBatchCallback,
-            on_call: pamNativeRuntimeCallCallback,
-            on_typed_call: pamNativeRuntimeTypedCallCallback,
-            on_error: pamNativeRuntimeErrorCallback,
-        )
-
         normalizedEntry.withCString { entryBuffer in
             stateDirectory.withCString { stateBuffer in
                 startedHandle = pam_native_runtime_start(
@@ -383,7 +372,10 @@ public final class PamRuntime {
                     heightDp,
                     textScale,
                     darkAppearance,
-                    callbacks,
+                    pamNativeRuntimeBatchCallback,
+                    pamNativeRuntimeCallCallback,
+                    pamNativeRuntimeTypedCallCallback,
+                    pamNativeRuntimeErrorCallback,
                 )
             }
         }

@@ -54,7 +54,10 @@ uint64_t pam_native_runtime_start(
     float height_dp,
     float text_scale,
     bool dark_appearance,
-    PamNativeRuntimeCallbacks callbacks
+    PamNativeBatchCallback on_batch,
+    PamNativeCallCallback on_call,
+    PamNativeTypedCallCallback on_typed_call,
+    PamNativeErrorCallback on_error
 );
 
 void pam_native_runtime_relayout(
