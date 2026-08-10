@@ -116,7 +116,7 @@ final class RouteCodeGenerator
                 if ($default === null && !$nullable) {
                     throw new InvalidArgumentException("Optional parameter {$route}.{$name} needs a default or nullable=true.");
                 }
-                $declaration .= ' = '.var_export($default, true);
+                $declaration .= ' = '.self::export($default);
             }
             $signature[] = $declaration;
             $arguments[] = $name.': $'.$name;
@@ -148,5 +148,15 @@ final class RouteCodeGenerator
     private static function camel(string $value): string
     {
         return lcfirst(self::studly($value));
+    }
+
+    private static function export(string|int|float|bool|null $value): string
+    {
+        return match ($value) {
+            null => 'null',
+            true => 'true',
+            false => 'false',
+            default => var_export($value, true),
+        };
     }
 }
