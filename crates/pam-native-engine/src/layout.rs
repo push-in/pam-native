@@ -2009,11 +2009,12 @@ fn measured_text_width(
     }
     if glyph_advances.is_some() {
         // TTF advances describe the ideal unhinted run. Android's TextView can
-        // round a hinted run a fraction wider when it builds its StaticLayout.
-        // Without the same sub-pixel guard used by the fallback estimator, an
-        // intrinsically-sized label can wrap its last word while the engine
-        // still reserves one line of height, clipping that word completely.
-        return if width > 0.0 { width + 0.5 } else { 0.0 };
+        // shape and hint the same run slightly wider when it builds its
+        // StaticLayout. A fixed half-pixel guard was insufficient for longer
+        // multi-word labels: the last word wrapped while numberOfLines kept
+        // only the first line, clipping it completely. Keep a small relative
+        // platform guard plus the sub-pixel rounding allowance.
+        return if width > 0.0 { width * 1.02 + 0.5 } else { 0.0 };
     }
     // Bounding-box based em classes need a small conversion to platform glyph
     // advances. The old broad classes plus a 6% safety margin substantially
@@ -3943,7 +3944,7 @@ mod tests {
 
         assert_eq!(
             measured_text_width("Seguidores", font_size, 0.0, Some(&advances)),
-            expected + 0.5,
+            expected * 1.02 + 0.5,
         );
     }
 
@@ -3969,7 +3970,7 @@ mod tests {
             .sum::<f32>();
         let intrinsic = measured_text_width(label, 16.0, 0.0, Some(&advances));
 
-        assert!((intrinsic - raw - 0.5).abs() < 0.01);
+        assert!((intrinsic - (raw * 1.02 + 0.5)).abs() < 0.01);
         assert_eq!(
             wrapped_text_lines_with_metrics(label, 16.0, 0.0, intrinsic, Some(&advances)),
             vec![label],

@@ -6,7 +6,7 @@ namespace Pam\Native;
 
 final class Protocol
 {
-    public const string SDK_VERSION = '0.6.60';
+    public const string SDK_VERSION = '0.6.61';
     public const int VERSION = 1;
     public const string TREE_MAGIC = 'PNT1';
     public const string PATCH_MAGIC = 'PNP1';

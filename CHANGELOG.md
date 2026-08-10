@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.61 - 2026-08-10
+
+- Fixed Android intrinsic text measurement for packaged fonts by reserving a
+  small relative shaping/hinting allowance. Multi-word labels no longer wrap
+  their final word into a clipped second line when `numberOfLines="1"` and the
+  native `TextView` rounds slightly wider than the TTF advance metrics.
+
 ## 0.6.60 - 2026-08-10
 
 - Preserve native module results and runtime reload signals when sustained UI
