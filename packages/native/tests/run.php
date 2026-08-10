@@ -4974,10 +4974,18 @@ $editorPreset = Route::preset(ScreenOptionsPatch::from([
     'gestureDirection' => NavigationGestureDirection::Vertical,
     'animation' => NavigationTransition::FadeFromBottom,
 ]));
+$testRouteModule = new class implements \Pam\Native\Routing\RouteModule {
+    public function register(): void
+    {
+        Route::screen('module-route', static fn () => Screen::make(Text::make('Module')))
+            ->deepLink('/module');
+    }
+};
 $namedRouteNavigator = Route::stack(
     name: 'named-routes-test',
     initial: TypedRouteTestName::Home,
-    routes: static function () use ($editorPreset): void {
+    routes: static function () use ($editorPreset, $testRouteModule): void {
+        Route::module($testRouteModule);
         Route::screen(TypedRouteTestName::Home, static fn () => Screen::make(Text::make('Home')))
             ->deepLink('/home')
             ->deepLink('/start');
@@ -4996,6 +5004,11 @@ $namedRouteNavigator = Route::stack(
         Route::screen('preset-copy', static fn () => Screen::make(Text::make('Preset')))
             ->preset($editorPreset);
     },
+);
+$assert(
+    $namedRouteNavigator->open('pam://app/module')
+        && $namedRouteNavigator->currentRoute() === 'module-route',
+    'Route modules must register destinations in the active stack without bootstrap coupling.',
 );
 $assert(
     $namedRouteNavigator->open('pam://app/home')

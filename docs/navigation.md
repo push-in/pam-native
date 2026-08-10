@@ -146,6 +146,13 @@ sparse layers and can safely be chained with `options()` in any order.
 are ordinary PHP values, so feature route modules can export them without a
 global string registry or declaration-order coupling.
 
+Feature packages can implement `RouteModule` and compose their graph through
+`Route::module(new ChatRoutes($dependencies))` inside a stack. A module's
+`register()` method uses the same `Route::screen()`, `group()` and nested
+navigator declarations; it does not own or attach a native host. Stateless
+modules may be passed by class name, while modules with dependencies should be
+constructed explicitly. Closures remain supported for small inline modules.
+
 ## Nested navigators
 
 Stacks and tabs may be declared inline and registered as ordinary named route

@@ -170,6 +170,25 @@ final class Route
         return new RoutePreset($options);
     }
 
+    /** @param RouteModule|class-string<RouteModule>|Closure $module */
+    public static function module(RouteModule|string|Closure $module): void
+    {
+        if (self::$registrar === null) {
+            throw new LogicException('Route::module() must be declared inside Route::stack().');
+        }
+        if ($module instanceof Closure) {
+            $module();
+            return;
+        }
+        if (is_string($module)) {
+            if (!is_a($module, RouteModule::class, true)) {
+                throw new LogicException("Route module {$module} must implement RouteModule.");
+            }
+            $module = new $module();
+        }
+        $module->register();
+    }
+
     public static function group(ScreenOptionsPatch|RoutePreset|Closure $options, Closure $routes): void
     {
         $registrar = self::$registrar
