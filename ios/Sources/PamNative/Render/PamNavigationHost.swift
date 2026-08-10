@@ -310,13 +310,17 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         applySharedElementProgress(progress)
     }
 
-    private func prepareSharedElements(incoming: UIView, outgoing: UIView?) {
+    private func prepareSharedElements(
+        incoming: UIView,
+        outgoing: UIView?,
+        sourceFrames: [String: CGRect] = [:]
+    ) {
         clearSharedElements()
         guard !UIAccessibility.isReduceMotionEnabled, duration > 0,
               let outgoing else { return }
         let sources = sharedElementViews(in: outgoing)
         let destinations = sharedElementViews(in: incoming)
-        for (tag, source) in sources {
+        for (tag, source) in sources.prefix(16) {
             guard let destination = destinations[tag],
                   source.bounds.width > 0, source.bounds.height > 0,
                   destination.bounds.width > 0, destination.bounds.height > 0,
@@ -324,7 +328,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             let config = sharedElementConfig(for: destination)
                 ?? sharedElementConfig(for: source)
                 ?? SharedElementConfig(durationMs: Int(duration * 1000))
-            let start = source.convert(source.bounds, to: self)
+            let start = sourceFrames[tag] ?? source.convert(source.bounds, to: self)
             let end = destination.convert(destination.bounds, to: self)
             snapshot.frame = start
             snapshot.layer.masksToBounds = true
@@ -380,6 +384,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         }
         visit(root)
         return result
+    }
+
+    private func sharedElementFrames(in root: UIView?) -> [String: CGRect] {
+        guard let root else { return [:] }
+        return sharedElementViews(in: root).mapValues { $0.convert($0.bounds, to: self) }
     }
 
     private func applySharedElementProgress(_ progress: CGFloat) {
@@ -596,6 +605,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             : allControllers
         let kind = transition == 1 ? 2 : transition
         let animated = !UIAccessibility.isReduceMotionEnabled && duration > 0 && kind != 8
+        let sharedSourceFrames = animated ? sharedElementFrames(in: outgoing) : [:]
         if animated {
             let animation = CATransition()
             animation.duration = min(max(duration, 0), 2)
@@ -622,8 +632,26 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             navigation.view.layer.add(animation, forKey: "pam.navigation.controller")
         }
         navigation.setViewControllers(finalControllers, animated: false)
+        navigation.view.layoutIfNeeded()
         if animated {
-            DispatchQueue.main.asyncAfter(deadline: .now() + min(max(duration, 0), 2)) { [weak self] in
+            prepareSharedElements(
+                incoming: incoming,
+                outgoing: outgoing,
+                sourceFrames: sharedSourceFrames
+            )
+            applySharedElementProgress(0)
+            let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
+            UIView.animate(
+                withDuration: min(max(max(duration, sharedDuration), 0), 2),
+                delay: 0,
+                options: [.curveLinear, .beginFromCurrentState]
+            ) { [weak self] in
+                self?.applySharedElementProgress(1)
+            }
+        }
+        if animated {
+            let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + min(max(max(duration, sharedDuration), 0), 2)) { [weak self] in
                 self?.finish(incoming: incoming, outgoing: outgoing)
             }
         } else {
@@ -637,6 +665,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     internal var activeSheetDetentCount: Int {
         presentedNavigationController?.sheetPresentationController?.detents.count ?? 0
     }
+    internal var activeSharedElementCount: Int { sharedElements.count }
 
     private func applyControllerChrome() {
         guard let navigation = presentedNavigationController ?? navigationController else { return }

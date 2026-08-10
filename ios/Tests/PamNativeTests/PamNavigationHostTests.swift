@@ -130,4 +130,58 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertFalse(host.subviews[0].isHidden)
         XCTAssertTrue(host.subviews[1].isHidden)
     }
+
+    func testNativeControllerAnimatesMultipleSharedElementsAndRestoresViews() throws {
+        if UIAccessibility.isReduceMotionEnabled {
+            throw XCTSkip("Reduced Motion intentionally disables shared-element movement")
+        }
+        let completed = expectation(description: "shared transition")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let root = UIViewController()
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        let host = PamNavigationHost(frame: root.view.bounds)
+        host.operation = 2
+        host.transition = 2
+        host.duration = 0.02
+        host.setGestureNavigation(
+            enabled: false,
+            edgeWidth: 24,
+            threshold: 0.35,
+            onPop: nil,
+            onTransitionEnd: { completed.fulfill() },
+            onGestureStart: nil,
+            onGestureEnd: nil,
+            onGestureCancel: nil
+        )
+        root.view.addSubview(host)
+
+        let first = UIView(frame: host.bounds)
+        let second = UIView(frame: host.bounds)
+        for index in 0..<2 {
+            let source = UIView(frame: CGRect(x: CGFloat(20 + index * 70), y: 80, width: 52, height: 52))
+            source.backgroundColor = .systemBlue
+            source.layer.setValue("item:\(index)", forKey: "pamSharedTransitionTag")
+            first.addSubview(source)
+            let destination = UIView(frame: CGRect(x: 180, y: CGFloat(180 + index * 90), width: 120, height: 72))
+            destination.backgroundColor = .systemOrange
+            destination.layer.cornerRadius = 18
+            destination.layer.setValue("item:\(index)", forKey: "pamSharedTransitionTag")
+            destination.layer.setValue(
+                #"{"durationMs":40,"easing":2,"resizeMode":2,"crossFade":true,"damping":0.82,"stiffness":220,"mass":1}"#,
+                forKey: "pamSharedTransitionConfig"
+            )
+            second.addSubview(destination)
+        }
+        host.insert(first, index: 0)
+        host.insert(second, index: 1)
+        host.navigate(1)
+
+        XCTAssertTrue(host.usesNativeNavigationController)
+        XCTAssertEqual(host.activeSharedElementCount, 2)
+        wait(for: [completed], timeout: 1)
+        XCTAssertEqual(host.activeSharedElementCount, 0)
+        XCTAssertTrue(first.subviews.allSatisfy { !$0.isHidden })
+        XCTAssertTrue(second.subviews.allSatisfy { !$0.isHidden })
+    }
 }

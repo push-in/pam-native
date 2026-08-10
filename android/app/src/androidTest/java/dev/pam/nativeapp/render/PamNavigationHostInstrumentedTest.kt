@@ -18,6 +18,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
@@ -353,6 +355,7 @@ class PamNavigationHostInstrumentedTest {
             ) > 0f,
         )
         val activity = launchActivity(instrumentation)
+        val cancelled = CountDownLatch(1)
         try {
             lateinit var navigation: PamNavigationHost
             lateinit var source: View
@@ -362,6 +365,16 @@ class PamNavigationHostInstrumentedTest {
                     layout(0, 0, 1_080, 1_920)
                     operation = OPERATION_PUSH
                     transition = TRANSITION_NONE
+                    setGestureNavigation(
+                        enabled = true,
+                        edgeWidth = 24f,
+                        threshold = 0.35f,
+                        onPop = null,
+                        onTransitionEnd = null,
+                        onGestureStart = null,
+                        onGestureEnd = null,
+                        onGestureCancel = { cancelled.countDown() },
+                    )
                 }
                 activity.host.addView(navigation)
                 val first = FrameLayout(activity).apply { layout(0, 0, 1_080, 1_920) }
@@ -397,6 +410,14 @@ class PamNavigationHostInstrumentedTest {
                 assertEquals(View.INVISIBLE, source.visibility)
                 assertEquals(View.INVISIBLE, destination.visibility)
                 navigation.updatePredictiveBack(0.5f)
+                navigation.cancelPredictiveBack()
+            }
+            assertTrue(cancelled.await(1, TimeUnit.SECONDS))
+            onMain(instrumentation) {
+                assertEquals(View.VISIBLE, source.visibility)
+                assertEquals(View.VISIBLE, destination.visibility)
+                assertTrue(navigation.startPredictiveBack())
+                navigation.updatePredictiveBack(0.65f)
                 navigation.commitPredictiveBack()
                 navigation.operation = OPERATION_POP
                 navigation.navigate(2)
