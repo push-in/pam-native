@@ -24,5 +24,7 @@ class PamRichRecyclerBindingTest {
         assertFalse(richHolderNeedsResumeRebind(41L, 1, 2))
         assertFalse(richHolderNeedsResumeRebind(RecyclerView.NO_ID, 0, 2))
         assertFalse(richHolderNeedsResumeRebind(41L, 0, -1))
+        assertFalse(richHolderNeedsResumeRebind(41L, 0, 2, 41L))
+        assertTrue(richHolderNeedsResumeRebind(41L, 0, 2, 40L))
     }
 }

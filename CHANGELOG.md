@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.64 - 2026-08-10
+
+- Bound Android rich-list empty-holder recovery to one attempt per holder and
+  item identity. Legitimately empty conditional rows no longer trigger an
+  endless RecyclerView rebind/layout loop at 60 FPS, while native subtrees
+  released from a previously populated holder still remount on route resume.
+
 ## 0.6.63 - 2026-08-10
 
 - Fix Android `KeyboardAvoidingView` instances mounted while the IME is closing

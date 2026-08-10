@@ -508,6 +508,7 @@ private class RichRecyclerAdapter(
     private val boundHolders: MutableSet<RichHolder> = Collections.newSetFromMap(
         IdentityHashMap(),
     )
+    private val emptyRemountAttempts = IdentityHashMap<RichHolder, Long>()
 
     init {
         setHasStableIds(true)
@@ -566,7 +567,14 @@ private class RichRecyclerAdapter(
                 val id = holder.boundId
                 val position = ids.indexOf(id)
                 position.takeIf {
-                    richHolderNeedsResumeRebind(id, holder.container.childCount, position)
+                    richHolderNeedsResumeRebind(
+                        id,
+                        holder.container.childCount,
+                        position,
+                        emptyRemountAttempts[holder],
+                    )
+                }?.also {
+                    emptyRemountAttempts[holder] = id
                 }
             }
             .distinct()
@@ -614,6 +622,7 @@ private class RichRecyclerAdapter(
 
     override fun onViewRecycled(holder: RichHolder) {
         boundHolders.remove(holder)
+        emptyRemountAttempts.remove(holder)
         holder.boundId.takeIf { it != RecyclerView.NO_ID }?.let {
             unmount(it, holder.container)
         }
@@ -625,6 +634,7 @@ private class RichRecyclerAdapter(
     private fun bind(holder: RichHolder, id: Long) {
         val previous = holder.boundId
         if (previous != RecyclerView.NO_ID && previous != id) {
+            emptyRemountAttempts.remove(holder)
             unmount(previous, holder.container)
             holder.container.removeAllViews()
         }
@@ -632,6 +642,9 @@ private class RichRecyclerAdapter(
         mount(id, holder.container)
         holder.boundId = id
         boundHolders += holder
+        if (holder.container.childCount > 0) {
+            emptyRemountAttempts.remove(holder)
+        }
     }
 
     private fun applyLayout(container: FrameLayout, id: Long) {
@@ -668,7 +681,11 @@ internal fun richHolderNeedsResumeRebind(
     boundId: Long,
     childCount: Int,
     position: Int,
-): Boolean = boundId != RecyclerView.NO_ID && childCount == 0 && position >= 0
+    lastAttemptedId: Long? = null,
+): Boolean = boundId != RecyclerView.NO_ID &&
+    childCount == 0 &&
+    position >= 0 &&
+    lastAttemptedId != boundId
 
 private abstract class PackedRowAdapter(
     private val context: Context,

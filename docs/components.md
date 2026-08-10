@@ -651,8 +651,10 @@ Layout-only updates also recover an empty recycled holder with a complete cell
 bind, so changing `rowHeight`, prefetch, or clipping during the first layout
 cannot leave visible rich cells blank. When a retained Android window returns
 from the background, PAM also remounts any visible holder whose native subtree
-was released; applications do not need to mutate list data or force a scroll
-to recover those cells.
+was released; applications do not need to mutate list data or force a scroll.
+The recovery attempt is bounded per holder and item identity, so intentionally
+empty conditional rows do not keep the renderer active after layout settles
+while released populated cells can still recover.
 
 `FlatList` remains source-compatible for lightweight string arrays.
 

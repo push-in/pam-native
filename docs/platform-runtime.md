@@ -94,8 +94,11 @@ return VirtualizedList::make(...$cells)
 
 Scrolling and recycling do not require a PHP callback per frame.
 When an Android route is retained off-screen, aggregate visibility restoration
-also repairs visible holders whose rich subtree was released. This covers route
-transitions that do not trigger a window-level visibility callback.
+also repairs visible holders whose rich subtree was released. Recovery is
+bounded to one attempt for each holder and item identity so a conditionally
+empty row remains idle instead of scheduling perpetual RecyclerView layouts.
+This covers route transitions that do not trigger a window-level visibility
+callback.
 
 ## Recoverable background jobs
 
