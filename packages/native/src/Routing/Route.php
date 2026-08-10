@@ -8,6 +8,8 @@ use Closure;
 use LogicException;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
+use Pam\Native\Navigation\ScreenOptions;
+use Pam\Native\Navigation\ScreenOptionsPatch;
 use Pam\Native\Navigation\TabNavigator;
 use Pam\Native\Renderable;
 
@@ -22,9 +24,10 @@ final class Route
 
     public static function tabs(string $name, string $initial, Closure $routes): TabNavigator
     {
-        if (self::$registrar !== null || self::$tabRegistrar !== null) {
+        if (self::$tabRegistrar !== null) {
             throw new LogicException('Named tab routes cannot be declared inside another route group.');
         }
+        $nested = self::$registrar !== null;
         $registrar = new TabRegistrar($name, $initial);
         self::$tabRegistrar = $registrar;
         try {
@@ -33,7 +36,7 @@ final class Route
             self::$tabRegistrar = null;
         }
         $navigator = $registrar->build();
-        Navigation::attach($navigator);
+        if (!$nested) Navigation::attach($navigator);
         return $navigator;
     }
 
@@ -64,24 +67,36 @@ final class Route
         NavigationTransition $transition = NavigationTransition::PlatformDefault,
         int $durationMs = 240,
         bool $restoreState = true,
+        ScreenOptions|Closure|null $options = null,
     ): Navigator {
-        if (self::$registrar !== null) {
-            throw new LogicException('Named route stacks cannot be declared inside another stack.');
-        }
-
+        $parentRegistrar = self::$registrar;
+        $nested = $parentRegistrar !== null || self::$tabRegistrar !== null;
         $registrar = new RouteRegistrar($name, $initial);
         self::$registrar = $registrar;
         try {
             $routes();
         } finally {
-            self::$registrar = null;
+            self::$registrar = $parentRegistrar;
         }
         $registrar->transitions($transition, $durationMs);
         $registrar->restoreState($restoreState);
+        $registrar->defaultOptions($options);
         $navigator = $registrar->build();
-        Navigation::attach($navigator);
+        if (!$nested) Navigation::attach($navigator);
 
         return $navigator;
+    }
+
+    public static function group(ScreenOptionsPatch|Closure $options, Closure $routes): void
+    {
+        $registrar = self::$registrar
+            ?? throw new LogicException('Route::group() must be declared inside Route::stack().');
+        $registrar->beginGroup($options);
+        try {
+            $routes();
+        } finally {
+            $registrar->endGroup();
+        }
     }
 
     /**
@@ -90,6 +105,12 @@ final class Route
     public static function screen(string $name, string|Renderable|Closure $screen): PendingRoute
     {
         return self::add($name, $screen);
+    }
+
+    /** Register a child stack, tab, drawer or custom navigator as a screen. */
+    public static function navigator(string $name, Renderable|Closure $navigator): PendingRoute
+    {
+        return self::add($name, $navigator);
     }
 
     /**

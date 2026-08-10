@@ -11,10 +11,14 @@ use Pam\Native\Navigation\ScreenOptionsPatch;
 /** @internal */
 final class RouteDefinition
 {
-    public ScreenOptions|ScreenOptionsPatch|Closure|null $options = null;
+    /** @var list<ScreenOptions|ScreenOptionsPatch|Closure> */
+    public array $groupOptions = [];
+    /** @var list<ScreenOptions|ScreenOptionsPatch|Closure> */
+    public array $options = [];
     public ?Closure $guard = null;
     public ?Closure $getId = null;
-    public ?string $deepLink = null;
+    /** @var list<string> */
+    public array $deepLinks = [];
 
     public function __construct(
         public readonly string $name,

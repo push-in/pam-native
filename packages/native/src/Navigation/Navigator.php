@@ -905,18 +905,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         array $entry,
         ScreenOptions $inherited,
     ): ScreenOptions {
-        if ($layer instanceof Closure) {
-            $reflection = new ReflectionFunction($layer);
-            $layer = match ($reflection->getNumberOfParameters()) {
-                0 => $layer(),
-                1 => $layer($this->contextFor($entry)),
-                default => $layer($this->contextFor($entry), $inherited),
-            };
-        }
-        if ($layer instanceof ScreenOptionsPatch) return $layer->apply($inherited);
-        if ($layer instanceof ScreenOptions) return $layer;
-        throw new InvalidArgumentException(
-            'Screen option resolvers must return ScreenOptions or ScreenOptionsPatch.',
+        return ScreenOptionLayer::apply(
+            $layer,
+            $this->contextFor($entry),
+            $inherited,
         );
     }
 

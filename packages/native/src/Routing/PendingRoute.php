@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Pam\Native\Routing;
 
 use Closure;
+use Pam\Native\Navigation\NavigationGestureDirection;
 use Pam\Native\Navigation\NavigationPresentation;
+use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
 
@@ -18,8 +20,35 @@ final class PendingRoute
 
     public function options(ScreenOptions|ScreenOptionsPatch|Closure $options): self
     {
-        $this->definition->options = $options;
+        $this->definition->options[] = $options;
         return $this;
+    }
+
+    public function transition(
+        NavigationTransition $animation,
+        ?int $durationMs = null,
+    ): self {
+        $options = ['animation' => $animation];
+        if ($durationMs !== null) $options['animationDurationMs'] = $durationMs;
+
+        return $this->options(ScreenOptionsPatch::from($options));
+    }
+
+    public function gesture(
+        bool $enabled = true,
+        NavigationGestureDirection $direction = NavigationGestureDirection::Horizontal,
+        bool $fullScreen = false,
+    ): self {
+        return $this->options(ScreenOptionsPatch::from([
+            'gestureEnabled' => $enabled,
+            'gestureDirection' => $direction,
+            'fullScreenGestureEnabled' => $fullScreen,
+        ]));
+    }
+
+    public function presentation(NavigationPresentation $presentation): self
+    {
+        return $this->options(ScreenOptionsPatch::one('presentation', $presentation));
     }
 
     public function guard(Closure $guard): self
@@ -36,25 +65,35 @@ final class PendingRoute
 
     public function deepLink(string $pattern): self
     {
-        $this->definition->deepLink = $pattern;
+        if (!in_array($pattern, $this->definition->deepLinks, true)) {
+            $this->definition->deepLinks[] = $pattern;
+        }
         return $this;
     }
 
-    public function sheet(): self
+    /** @param list<float>|null $detents */
+    public function sheet(
+        ?array $detents = null,
+        ?int $initialDetent = null,
+        ?bool $grabber = null,
+        ?float $cornerRadius = null,
+        ?bool $expandsWhenScrolledToEdge = null,
+    ): self
     {
-        $this->definition->options = ScreenOptionsPatch::one(
-            'presentation',
-            NavigationPresentation::FormSheet,
-        );
-        return $this;
+        $options = ['presentation' => NavigationPresentation::FormSheet];
+        if ($detents !== null) $options['sheetAllowedDetents'] = $detents;
+        if ($initialDetent !== null) $options['sheetInitialDetentIndex'] = $initialDetent;
+        if ($grabber !== null) $options['sheetGrabberVisible'] = $grabber;
+        if ($cornerRadius !== null) $options['sheetCornerRadius'] = $cornerRadius;
+        if ($expandsWhenScrolledToEdge !== null) {
+            $options['sheetExpandsWhenScrolledToEdge'] = $expandsWhenScrolledToEdge;
+        }
+
+        return $this->options(ScreenOptionsPatch::from($options));
     }
 
     public function fullScreen(): self
     {
-        $this->definition->options = ScreenOptionsPatch::one(
-            'presentation',
-            NavigationPresentation::FullScreenModal,
-        );
-        return $this;
+        return $this->presentation(NavigationPresentation::FullScreenModal);
     }
 }

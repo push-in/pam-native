@@ -96,6 +96,7 @@ use Pam\Native\Navigation\NavigationContainer;
 use Pam\Native\Navigation\NavigationDevTools;
 use Pam\Native\Navigation\NavigationEvent;
 use Pam\Native\Navigation\NavigationEventType;
+use Pam\Native\Navigation\NavigationGestureDirection;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\NavigationTraceKind;
 use Pam\Native\Navigation\Navigator;
@@ -4939,23 +4940,55 @@ $namedRouteNavigator = Route::stack(
     name: 'named-routes-test',
     initial: 'home',
     routes: static function (): void {
-        Route::screen('home', static fn () => Screen::make(Text::make('Home')));
-        Route::screen('product', TypedRouteTestScreen::class);
+        Route::screen('home', static fn () => Screen::make(Text::make('Home')))
+            ->deepLink('/home')
+            ->deepLink('/start');
+        Route::group(
+            ScreenOptionsPatch::from([
+                'headerShown' => true,
+                'gestureDirection' => NavigationGestureDirection::Vertical,
+            ]),
+            static function (): void {
+                Route::screen('product', TypedRouteTestScreen::class)
+                    ->transition(NavigationTransition::Fade, 175)
+                    ->gesture(fullScreen: true)
+                    ->options(ScreenOptionsPatch::one('title', 'Product'));
+            },
+        );
         Route::modal('filters', static fn () => Screen::make(Text::make('Filters')))
-            ->sheet();
+            ->transition(NavigationTransition::SlideFromBottom, 260)
+            ->sheet(detents: [0.4, 1.0], grabber: true, cornerRadius: 24.0);
     },
+);
+$assert(
+    $namedRouteNavigator->open('pam://app/home')
+        && $namedRouteNavigator->open('pam://app/start')
+        && $namedRouteNavigator->currentRoute() === 'home',
+    'Laravel-style named routes must preserve every chained deep-link alias.',
 );
 $namedRouteNavigator->push('product', ['productId' => 42, 'preview' => true]);
 $namedProduct = $namedRouteNavigator->render()->toElement()->children()[1];
+$namedProductOptions = $namedRouteNavigator->currentOptions();
 $assert(
     $namedRouteNavigator->currentRoute() === 'product'
-        && $namedProduct->children()[0]->properties()[PropKey::Text->value] === 'Product 42 preview',
-    'Laravel-style named routes must register screens and pass bounded parameters.',
+        && $namedProduct->children()[0]->properties()[PropKey::Text->value] === 'Product 42 preview'
+        && $namedProductOptions->headerShown
+        && $namedProductOptions->title === 'Product'
+        && $namedProductOptions->animation === NavigationTransition::Fade
+        && $namedProductOptions->animationDurationMs === 175
+        && $namedProductOptions->gestureDirection === NavigationGestureDirection::Horizontal
+        && $namedProductOptions->fullScreenGestureEnabled,
+    'Laravel-style named routes must compose group, transition, gesture and route option layers.',
 );
 $namedRouteNavigator->push('filters');
 $assert(
-    $namedRouteNavigator->currentOptions()->presentation === NavigationPresentation::FormSheet,
-    'Named modal routes must preserve native presentation options.',
+    $namedRouteNavigator->currentOptions()->presentation === NavigationPresentation::FormSheet
+        && $namedRouteNavigator->currentOptions()->animation === NavigationTransition::SlideFromBottom
+        && $namedRouteNavigator->currentOptions()->animationDurationMs === 260
+        && $namedRouteNavigator->currentOptions()->sheetAllowedDetents === [0.4, 1.0]
+        && $namedRouteNavigator->currentOptions()->sheetGrabberVisible
+        && $namedRouteNavigator->currentOptions()->sheetCornerRadius === 24.0,
+    'Named modal routes must compose native presentation, animation and sheet options.',
 );
 $namedTabs = Route::tabs('named-tabs-test', 'home', static function (): void {
     Route::tab('home', Screen::make(Text::make('Home')), label: 'Home');
@@ -4965,6 +4998,39 @@ $assert(
     NamedNavigation::navigate('settings')
         && $namedTabs->selectedTab() === 'settings',
     'Laravel-style named tabs must select destinations through the shared navigation scope.',
+);
+$declarativeNested = Route::stack(
+    name: 'declarative-root',
+    initial: 'main',
+    routes: static function (): void {
+        Route::navigator(
+            'main',
+            Route::tabs('declarative-tabs', 'feed', static function (): void {
+                Route::tab(
+                    'feed',
+                    Route::stack(
+                        name: 'declarative-feed-stack',
+                        initial: 'feed-index',
+                        routes: static function (): void {
+                            Route::screen('feed-index', static fn () => Screen::make(Text::make('Feed')));
+                            Route::screen('feed-details', static fn () => Screen::make(Text::make('Details')));
+                        },
+                    ),
+                    label: 'Feed',
+                );
+                Route::tab('account', Screen::make(Text::make('Account')), label: 'Account');
+            }),
+        );
+        Route::modal('global-modal', static fn () => Screen::make(Text::make('Modal')));
+    },
+);
+$declarativeNested->render();
+NamedNavigation::push('feed-details');
+$assert(
+    $declarativeNested->canGoBack()
+        && $declarativeNested->goBack()
+        && !$declarativeNested->canGoBack(),
+    'Declarative navigators must nest stacks inside tabs and bubble actions and Back through the focused child.',
 );
 $headerNavigator = Router::stack('home')
     ->route(

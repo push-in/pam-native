@@ -59,6 +59,92 @@ Route::screen('profile', ProfileScreen::class)
     ->deepLink('/profiles/{userId}');
 ```
 
+Routes may expose more than one external alias. Chain `deepLink()` calls and
+all unique patterns will resolve to the same named screen:
+
+```php
+Route::screen('profile', ProfileScreen::class)
+    ->deepLink('/u/{username}')
+    ->deepLink('/profile/{username}');
+```
+
+## Route groups and per-screen motion
+
+Route options are composable. Stack defaults are resolved first, followed by
+outer-to-inner groups, the screen's fluent option layers and finally options
+set dynamically by the mounted screen. A later sparse option changes only the
+properties it declares.
+
+```php
+use Pam\Native\Navigation\NavigationGestureDirection;
+use Pam\Native\Navigation\NavigationTransition;
+use Pam\Native\Navigation\ScreenOptions;
+use Pam\Native\Navigation\ScreenOptionsPatch;
+
+$navigator = Route::stack(
+    name: 'main',
+    initial: 'home',
+    options: new ScreenOptions(headerShown: false),
+    routes: function (): void {
+        Route::group(
+            ScreenOptionsPatch::one('headerShown', true),
+            routes: function (): void {
+                Route::screen('profile', ProfileScreen::class)
+                    ->transition(NavigationTransition::SlideFromRight, 240)
+                    ->gesture(
+                        direction: NavigationGestureDirection::Horizontal,
+                        fullScreen: true,
+                    );
+            },
+        );
+
+        Route::modal('filters', FiltersScreen::class)
+            ->transition(NavigationTransition::SlideFromBottom, 260)
+            ->sheet(
+                detents: [0.4, 1.0],
+                grabber: true,
+                cornerRadius: 24.0,
+            );
+    },
+);
+```
+
+`transition()` accepts every native `NavigationTransition` and a per-route
+duration from 0 through 2,000 ms. `gesture()` controls enablement, direction
+and full-screen recognition. `presentation()`, `fullScreen()` and `sheet()` are
+sparse layers and can safely be chained with `options()` in any order.
+
+## Nested navigators
+
+Stacks and tabs may be declared inline and registered as ordinary named route
+content. Only the outermost navigator becomes the application navigation
+scope; actions and Back bubble through the focused children.
+
+```php
+$root = Route::stack('root', 'main', static function (): void {
+    Route::navigator(
+        'main',
+        Route::tabs('main-tabs', 'feed', static function (): void {
+            Route::tab(
+                'feed',
+                Route::stack('feed-stack', 'feed-index', static function (): void {
+                    Route::screen('feed-index', FeedScreen::class);
+                    Route::screen('post', PostScreen::class);
+                }),
+                label: 'Feed',
+            );
+            Route::tab('account', AccountScreen::class, label: 'Account');
+        }),
+    );
+
+    Route::modal('create', CreateScreen::class)->fullScreen();
+});
+```
+
+Every child keeps independent state and history. A Back action is offered to
+the focused child first and reaches the parent only when that child is already
+at its root.
+
 The lower-level `Router`, `Navigator`, `NavigationContainer`, action, event,
 and `RouteContext` APIs remain available for custom navigation infrastructure
 and are source-compatible with existing applications.
