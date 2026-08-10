@@ -324,7 +324,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             guard let destination = destinations[tag],
                   source.bounds.width > 0, source.bounds.height > 0,
                   destination.bounds.width > 0, destination.bounds.height > 0,
-                  let snapshot = source.snapshotView(afterScreenUpdates: false) else { continue }
+                  let snapshot = sharedElementSnapshot(of: source, afterScreenUpdates: false) else { continue }
             let config = sharedElementConfig(for: destination)
                 ?? sharedElementConfig(for: source)
                 ?? SharedElementConfig(durationMs: Int(duration * 1000))
@@ -334,7 +334,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             snapshot.layer.masksToBounds = true
             snapshot.layer.cornerRadius = source.layer.cornerRadius
             let targetSnapshot = config.crossFade
-                ? destination.snapshotView(afterScreenUpdates: true)
+                ? sharedElementSnapshot(of: destination, afterScreenUpdates: true)
                 : nil
             source.isHidden = true
             destination.isHidden = true
@@ -371,6 +371,24 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         config.stiffness = min(max(config.stiffness, 1), 1_000)
         config.mass = min(max(config.mass, 0.1), 10)
         return config
+    }
+
+    private func sharedElementSnapshot(
+        of view: UIView,
+        afterScreenUpdates: Bool
+    ) -> UIView? {
+        if view.window != nil, !view.isHidden,
+           let snapshot = view.snapshotView(afterScreenUpdates: afterScreenUpdates) {
+            return snapshot
+        }
+        let size = view.bounds.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.opaque = view.isOpaque
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { context in
+            view.layer.render(in: context.cgContext)
+        }
+        return UIImageView(image: image)
     }
 
     private func sharedElementViews(in root: UIView) -> [String: UIView] {
