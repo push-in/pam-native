@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.62 - 2026-08-10
+
+- Fix Android `KeyboardAvoidingView` resize behavior to reduce its native
+  viewport and reflow flex descendants. Fixed composers and footer actions now
+  remain above the IME instead of staying at their pre-keyboard screen position.
+
 ## 0.6.61 - 2026-08-10
 
 - Fixed Android intrinsic text measurement for packaged fonts by reserving a

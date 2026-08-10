@@ -5,6 +5,30 @@ import org.junit.Test
 
 class PamKeyboardAvoidanceTest {
     @Test
+    fun resizeBehaviorReducesTheKeyboardAvoidingViewport() {
+        assertEquals(
+            1_280,
+            keyboardAvoidingViewportHeight(
+                baseHeight = 2_100,
+                keyboardOverlap = 820,
+                resize = true,
+            ),
+        )
+    }
+
+    @Test
+    fun nonResizeBehaviorPreservesTheKeyboardAvoidingViewport() {
+        assertEquals(
+            2_100,
+            keyboardAvoidingViewportHeight(
+                baseHeight = 2_100,
+                keyboardOverlap = 820,
+                resize = false,
+            ),
+        )
+    }
+
+    @Test
     fun interactiveSheetStopsBelowSafeTopChrome() {
         assertEquals(
             185,

@@ -118,6 +118,16 @@ internal fun interactiveKeyboardTranslation(
     (originalTop - minimumTop).coerceAtLeast(0),
 )
 
+internal fun keyboardAvoidingViewportHeight(
+    baseHeight: Int,
+    keyboardOverlap: Int,
+    resize: Boolean,
+): Int = if (resize) {
+    (baseHeight - keyboardOverlap.coerceAtLeast(0)).coerceAtLeast(0)
+} else {
+    baseHeight.coerceAtLeast(0)
+}
+
 internal fun safeAreaChildCrossAxisReduction(
     mainAxisHorizontal: Boolean,
     horizontalInsets: Int,
@@ -1202,6 +1212,12 @@ class PamRenderer(
         var height = (
             vertical.extent - safeTop - safeBottom - parentSafeHeightReduction
             ).coerceAtLeast(0)
+        height = keyboardAvoidingViewportHeight(
+            baseHeight = height,
+            keyboardOverlap = state.keyboardAvoidingViewportInset,
+            resize = state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW &&
+                state.keyboardBehavior == KEYBOARD_RESIZE,
+        )
         var leftPx = horizontal.offset + safeLeft
         var topPx = vertical.offset + safeTop
         compensateFlexParentViewportReduction(
@@ -1270,6 +1286,7 @@ class PamRenderer(
                 2, 4 -> Axis.HORIZONTAL
                 else -> Axis.VERTICAL
             }
+            NodeKind.KEYBOARD_AVOIDING_VIEW -> Axis.VERTICAL
             else -> return
         }
         val engineExtent = when (axis) {
@@ -4989,6 +5006,16 @@ class PamRenderer(
             state.keyboardFocusedInput = null
             if (lastFocusedInput?.hasFocus() != true) lastFocusedInput = null
         }
+        val viewportInset = if (state.keyboardBehavior == KEYBOARD_RESIZE) keyboard else 0
+        if (state.keyboardAvoidingViewportInset != viewportInset) {
+            state.keyboardAvoidingViewportInset = viewportInset
+            applyLayout(state.id)
+            view.postOnAnimation {
+                if (nodes[state.id] === state) {
+                    applyDescendantLayouts(state.id)
+                }
+            }
+        }
         when (state.keyboardBehavior) {
             KEYBOARD_PAN -> {
                 view.translationY = -keyboard.toFloat()
@@ -5091,6 +5118,13 @@ class PamRenderer(
             .coerceAtLeast(0)
         val keyboardTop = windowBottom - effectiveInset
         return max(0, (originalBottom - keyboardTop + offset).toInt())
+    }
+
+    private fun applyDescendantLayouts(parentId: Long) {
+        children[parentId]?.forEach { childId ->
+            applyLayout(childId)
+            applyDescendantLayouts(childId)
+        }
     }
 
     private fun updateTranslatedTouchTarget(
@@ -6179,6 +6213,7 @@ class PamRenderer(
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
         var keyboardAvoidingScrollId: Long = 0L,
+        var keyboardAvoidingViewportInset: Int = 0,
         var keyboardFocusedInput: EditText? = null,
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,

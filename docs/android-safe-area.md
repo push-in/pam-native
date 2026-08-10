@@ -19,6 +19,9 @@ their actual on-screen bounds.
 - `KeyboardAvoidingView` calculates overlap from window and view geometry. IME
   movement does not assume a fixed keyboard height or subtract a manufacturer
   navigation bar twice.
+- Resize-mode keyboard avoidance reduces the native viewport by the measured
+  overlap and relays out flex descendants. Fixed composer/footer siblings move
+  above the IME while the flexible list or content region absorbs the reduction.
 - Padding-mode keyboard avoidance gives a contained vertical `ScrollView` the
   overlap inset and automatically reveals its focused input with 16 dp of
   clearance. `keyboardVerticalOffset` can reserve additional space for a form
