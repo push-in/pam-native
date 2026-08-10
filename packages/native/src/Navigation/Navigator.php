@@ -11,7 +11,7 @@ use Pam\Native\Renderable;
 use Pam\Native\Restorable;
 use ReflectionFunction;
 
-final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler
+final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var array<string, Closure(): Renderable> */
     private array $routes;
@@ -658,6 +658,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             }
         }
 
+        $child = $this->activeChildLinkHandler();
+        if ($child !== null && $child->open($uri)) {
+            $this->revision++;
+            $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
+            return true;
+        }
+
         return false;
     }
 
@@ -669,7 +676,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
                 return $link->build($entry['params']);
             }
         }
-        return null;
+        return $this->activeChildLinkHandler()?->currentPath();
     }
 
     public function currentUrl(): ?string
@@ -1031,6 +1038,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $entry = $this->currentEntry();
         $instance = $this->routeInstances[$this->entryKey($entry)] ?? $this->renderRoute($entry);
         return $instance instanceof NavigationActionHandler ? $instance : null;
+    }
+
+    private function activeChildLinkHandler(): ?NavigationLinkHandler
+    {
+        $entry = $this->currentEntry();
+        $instance = $this->routeInstances[$this->entryKey($entry)] ?? $this->renderRoute($entry);
+        return $instance instanceof NavigationLinkHandler ? $instance : null;
     }
 
     private function notifyRouteFocused(array $entry, Renderable $instance): void

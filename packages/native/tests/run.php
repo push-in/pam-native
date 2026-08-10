@@ -252,6 +252,12 @@ final class TypedRouteTestScreen extends Component
     }
 }
 
+enum TypedRouteTestName: string
+{
+    case Home = 'home';
+    case Product = 'product';
+}
+
 if (!function_exists('pam_native_error')) {
     function pam_native_error(string $message): void
     {
@@ -4938,9 +4944,9 @@ $fluentNavigator = Router::stack('home')
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
 $namedRouteNavigator = Route::stack(
     name: 'named-routes-test',
-    initial: 'home',
+    initial: TypedRouteTestName::Home,
     routes: static function (): void {
-        Route::screen('home', static fn () => Screen::make(Text::make('Home')))
+        Route::screen(TypedRouteTestName::Home, static fn () => Screen::make(Text::make('Home')))
             ->deepLink('/home')
             ->deepLink('/start');
         Route::group(
@@ -4949,7 +4955,7 @@ $namedRouteNavigator = Route::stack(
                 'gestureDirection' => NavigationGestureDirection::Vertical,
             ]),
             static function (): void {
-                Route::screen('product', TypedRouteTestScreen::class)
+                Route::screen(TypedRouteTestName::Product, TypedRouteTestScreen::class)
                     ->transition(NavigationTransition::Fade, 175)
                     ->gesture(fullScreen: true)
                     ->options(ScreenOptionsPatch::one('title', 'Product'));
@@ -4966,7 +4972,7 @@ $assert(
         && $namedRouteNavigator->currentRoute() === 'home',
     'Laravel-style named routes must preserve every chained deep-link alias.',
 );
-$namedRouteNavigator->push('product', ['productId' => 42, 'preview' => true]);
+Route::to(TypedRouteTestName::Product, productId: 42, preview: true)->push();
 $namedProduct = $namedRouteNavigator->render()->toElement()->children()[1];
 $namedProductOptions = $namedRouteNavigator->currentOptions();
 $assert(
@@ -5013,12 +5019,25 @@ $declarativeNested = Route::stack(
                         initial: 'feed-index',
                         routes: static function (): void {
                             Route::screen('feed-index', static fn () => Screen::make(Text::make('Feed')));
-                            Route::screen('feed-details', static fn () => Screen::make(Text::make('Details')));
+                            Route::screen('feed-details', static fn () => Screen::make(Text::make('Details')))
+                                ->deepLink('/feed/post/{postId}');
                         },
                     ),
                     label: 'Feed',
                 );
-                Route::tab('account', Screen::make(Text::make('Account')), label: 'Account');
+                Route::tab(
+                    'account',
+                    Route::stack(
+                        name: 'declarative-account-stack',
+                        initial: 'account-index',
+                        routes: static function (): void {
+                            Route::screen('account-index', static fn () => Screen::make(Text::make('Account')));
+                            Route::screen('account-settings', static fn () => Screen::make(Text::make('Settings')))
+                                ->deepLink('/account/settings');
+                        },
+                    ),
+                    label: 'Account',
+                );
             }),
         );
         Route::modal('global-modal', static fn () => Screen::make(Text::make('Modal')));
@@ -5031,6 +5050,23 @@ $assert(
         && $declarativeNested->goBack()
         && !$declarativeNested->canGoBack(),
     'Declarative navigators must nest stacks inside tabs and bubble actions and Back through the focused child.',
+);
+$assert(
+    $declarativeNested->open('pam://app/account/settings')
+        && $declarativeNested->currentPath() === '/account/settings'
+        && $declarativeNested->goBack()
+        && $declarativeNested->open('pam://app/feed/post/42')
+        && $declarativeNested->currentPath() === '/feed/post/42',
+    'Nested linking must select an inactive navigator and preserve canonical child paths and Back history.',
+);
+$nestedSavedState = $declarativeNested->saveState();
+$declarativeNested->goBack();
+NamedNavigation::navigate('account');
+$declarativeNested->restoreState($nestedSavedState);
+$declarativeNested->render();
+$assert(
+    $declarativeNested->currentPath() === '/feed/post/42',
+    'Declarative nested navigators must restore the selected tab and child stack atomically.',
 );
 $headerNavigator = Router::stack('home')
     ->route(

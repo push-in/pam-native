@@ -38,6 +38,29 @@ $this->replaceRoute('login');
 $this->popRoute();
 ```
 
+String-backed enums can make route names refactor-safe, and `Route::to()`
+packages a validated destination for passing through application code:
+
+```php
+enum AppRoute: string
+{
+    case Home = 'home';
+    case Product = 'product';
+}
+
+Route::stack('main', AppRoute::Home, static function (): void {
+    Route::screen(AppRoute::Home, HomeScreen::class);
+    Route::screen(AppRoute::Product, ProductScreen::class);
+});
+
+Route::to(AppRoute::Product, productId: 42, preview: true)->push();
+```
+
+`pushRoute()`, `navigateRoute()`, `replaceRoute()`, `Route::screen()`,
+`Route::modal()` and `Route::to()` accept the same string-backed enum cases.
+Integer-backed enums are rejected as route names because route identity is
+persisted and linked by stable textual names.
+
 Named arguments are validated against the screen constructor when the route is
 mounted:
 

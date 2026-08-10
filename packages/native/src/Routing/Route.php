@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Routing;
 
+use BackedEnum;
 use Closure;
 use LogicException;
 use Pam\Native\Navigation\NavigationTransition;
@@ -22,13 +23,17 @@ final class Route
     {
     }
 
-    public static function tabs(string $name, string $initial, Closure $routes): TabNavigator
+    public static function tabs(
+        string $name,
+        string|BackedEnum $initial,
+        Closure $routes,
+    ): TabNavigator
     {
         if (self::$tabRegistrar !== null) {
             throw new LogicException('Named tab routes cannot be declared inside another route group.');
         }
         $nested = self::$registrar !== null;
-        $registrar = new TabRegistrar($name, $initial);
+        $registrar = new TabRegistrar($name, RouteName::value($initial));
         self::$tabRegistrar = $registrar;
         try {
             $routes();
@@ -42,7 +47,7 @@ final class Route
 
     /** @param class-string<Renderable>|Renderable|Closure $screen */
     public static function tab(
-        string $name,
+        string|BackedEnum $name,
         string|Renderable|Closure $screen,
         string $label,
         ?Renderable $icon = null,
@@ -57,12 +62,12 @@ final class Route
                 new \Pam\Native\Navigation\RouteContext($name),
             ),
         };
-        $registrar->add($name, $label, $content, $icon, $badge);
+        $registrar->add(RouteName::value($name), $label, $content, $icon, $badge);
     }
 
     public static function stack(
         string $name,
-        string $initial,
+        string|BackedEnum $initial,
         Closure $routes,
         NavigationTransition $transition = NavigationTransition::PlatformDefault,
         int $durationMs = 240,
@@ -71,7 +76,7 @@ final class Route
     ): Navigator {
         $parentRegistrar = self::$registrar;
         $nested = $parentRegistrar !== null || self::$tabRegistrar !== null;
-        $registrar = new RouteRegistrar($name, $initial);
+        $registrar = new RouteRegistrar($name, RouteName::value($initial));
         self::$registrar = $registrar;
         try {
             $routes();
@@ -102,13 +107,13 @@ final class Route
     /**
      * @param class-string<Renderable>|Renderable|Closure $screen
      */
-    public static function screen(string $name, string|Renderable|Closure $screen): PendingRoute
+    public static function screen(string|BackedEnum $name, string|Renderable|Closure $screen): PendingRoute
     {
         return self::add($name, $screen);
     }
 
     /** Register a child stack, tab, drawer or custom navigator as a screen. */
-    public static function navigator(string $name, Renderable|Closure $navigator): PendingRoute
+    public static function navigator(string|BackedEnum $name, Renderable|Closure $navigator): PendingRoute
     {
         return self::add($name, $navigator);
     }
@@ -116,7 +121,7 @@ final class Route
     /**
      * @param class-string<Renderable>|Renderable|Closure $screen
      */
-    public static function modal(string $name, string|Renderable|Closure $screen): PendingRoute
+    public static function modal(string|BackedEnum $name, string|Renderable|Closure $screen): PendingRoute
     {
         return self::add($name, $screen)->fullScreen();
     }
@@ -124,11 +129,12 @@ final class Route
     /**
      * @param class-string<Renderable>|Renderable|Closure $screen
      */
-    private static function add(string $name, string|Renderable|Closure $screen): PendingRoute
+    private static function add(string|BackedEnum $name, string|Renderable|Closure $screen): PendingRoute
     {
         $registrar = self::$registrar
             ?? throw new LogicException('Route::screen() must be declared inside Route::stack().');
 
+        $name = RouteName::value($name);
         $factory = match (true) {
             $screen instanceof Closure => $screen,
             $screen instanceof Renderable => static fn (): Renderable => $screen,
@@ -136,5 +142,11 @@ final class Route
         };
 
         return $registrar->add($name, $factory);
+    }
+
+    /** @param string|int|float|bool|null ...$params */
+    public static function to(string|BackedEnum $name, mixed ...$params): RouteTarget
+    {
+        return new RouteTarget($name, ...$params);
     }
 }
