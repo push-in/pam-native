@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.72 - 2026-08-10
+
+- Added per-action transition and duration overrides to imperative stack navigation.
+- Added documented support for instant peer navigation without changing route animations.
+
 ## 0.6.70 - 2026-08-10
 
 - Completed typed imperative navigation: `Navigator`, `NavigationAction`,
