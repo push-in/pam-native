@@ -293,3 +293,40 @@ be passed directly to `Route::navigator()` or used as the content of an item.
 Registrar contexts are restored after each nested declaration, so route modules
 can compose navigator trees without global bootstrap ordering or manual host
 attachment.
+
+## Generated typed destinations
+
+For larger applications, keep the public route contract in a small JSON
+manifest and generate both the string-backed destination enum and typed target
+helpers:
+
+```json
+{
+  "namespace": "App\\Navigation\\Generated",
+  "enum": "AppRoute",
+  "helper": "Routes",
+  "routes": [
+    { "name": "home" },
+    {
+      "name": "chat.thread",
+      "case": "ChatThread",
+      "method": "chatThread",
+      "params": [
+        { "name": "threadId", "type": "int" },
+        { "name": "preview", "type": "bool", "required": false, "default": false }
+      ]
+    }
+  ]
+}
+```
+
+```bash
+vendor/bin/pam-native-routes routes.json src/Navigation/Generated
+```
+
+The generated call `Routes::chatThread(threadId: 42)->push()` is checked by PHP
+and static analyzers before runtime, while `AppRoute::ChatThread` is accepted by
+all `Route` and navigation methods. Supported route parameter types are the
+wire-safe scalar types `string`, `int`, `float`, `bool`, with optional nullable
+parameters. Invalid identifiers, duplicate destinations, unsafe defaults and
+required parameters placed after optional ones fail generation atomically.

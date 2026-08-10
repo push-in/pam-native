@@ -111,6 +111,7 @@ use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
 use Pam\Native\Navigation\InteractsWithNavigationLifecycle;
 use Pam\Native\Routing\Route;
+use Pam\Native\Routing\RouteCodeGenerator;
 use Pam\Native\Routing\Navigation as NamedNavigation;
 use Pam\Native\Navigation\TabNavigator;
 use Pam\Native\Navigation\TabPresentation;
@@ -4944,6 +4945,30 @@ $fluentNavigator = Router::stack('home')
     ->transitions(NavigationTransition::Scale, 180)
     ->build();
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
+$generatedRoutes = RouteCodeGenerator::generate([
+    'namespace' => 'App\\Navigation\\Generated',
+    'enum' => 'AppRoute',
+    'helper' => 'Routes',
+    'routes' => [
+        ['name' => 'home'],
+        [
+            'name' => 'product.details',
+            'case' => 'ProductDetails',
+            'method' => 'productDetails',
+            'params' => [
+                ['name' => 'productId', 'type' => 'int'],
+                ['name' => 'preview', 'type' => 'bool', 'required' => false, 'default' => false],
+            ],
+        ],
+    ],
+]);
+$assert(
+    str_contains($generatedRoutes['AppRoute.php'], "case ProductDetails = 'product.details';")
+        && str_contains($generatedRoutes['Routes.php'], 'public static function productDetails(int $productId, bool $preview = false): RouteTarget')
+        && str_contains($generatedRoutes['Routes.php'], 'Route::to(AppRoute::ProductDetails, productId: $productId, preview: $preview)'),
+    'Route code generation must emit enum destinations and statically typed helper signatures.',
+);
+
 $namedRouteNavigator = Route::stack(
     name: 'named-routes-test',
     initial: TypedRouteTestName::Home,
