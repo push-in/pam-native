@@ -85,8 +85,11 @@ the affected route instance. Speculative preloads use a 16-entry LRU bound;
 
 Android and iOS both forward active, inactive/background, and critical-memory
 events into the PHP lifecycle. Native image work and memory caches are trimmed
-on the platform UI thread. Removed route trees release child subscriptions and
-dynamic option layers when their exit transition completes.
+on the platform UI thread. Android snapshots registered virtualized lists before
+critical trimming because releasing recycled child trees can mutate the renderer
+registry; every list present at the start of the trim is still visited exactly
+once without iterating a changing registry. Removed route trees release child
+subscriptions and dynamic option layers when their exit transition completes.
 
 ## Typed screen options
 

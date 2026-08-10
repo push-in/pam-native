@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.58 - 2026-08-09
+
+- Snapshot Android virtualized lists before critical memory trimming. Releasing
+  recycled child trees may mutate the renderer view registry, so iterating the
+  live `LongSparseArray` could crash a backgrounded application with
+  `ArrayIndexOutOfBoundsException`. Critical trim now visits the stable snapshot
+  exactly once while preserving the existing memory-release behavior.
+
 ## 0.6.57 - 2026-08-07
 
 - Add Android `KeyboardAvoidingView` behavior `interactive` for bottom sheets.

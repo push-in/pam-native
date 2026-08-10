@@ -86,6 +86,17 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import org.json.JSONArray
 
+internal inline fun <reified T> snapshotValues(
+    size: Int,
+    valueAt: (Int) -> Any?,
+): List<T> {
+    val snapshot = ArrayList<T>(size)
+    for (position in 0 until size) {
+        (valueAt(position) as? T)?.let(snapshot::add)
+    }
+    return snapshot
+}
+
 internal fun resolvedKeyboardInset(
     platformInset: Int,
     baselineHeight: Int,
@@ -514,8 +525,9 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper())
         imageLoader.trimMemory(critical)
         if (critical) {
-            for (position in 0 until views.size()) {
-                (views.valueAt(position) as? PamRecyclerList)?.trimMemory(true)
+            val recyclerLists = snapshotValues<PamRecyclerList>(views.size(), views::valueAt)
+            for (recyclerList in recyclerLists) {
+                recyclerList.trimMemory(true)
             }
         }
     }
