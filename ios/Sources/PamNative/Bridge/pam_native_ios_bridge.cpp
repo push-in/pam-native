@@ -529,10 +529,38 @@ void enqueue(RuntimeState* state, Event event, bool coalesce) {
         }
 
         if (state->events.size() >= kMaxQueuedEvents) {
-            return;
+            if (event.type == EventType::Ui) {
+                return;
+            }
+            // Results and reloads are completion/lifecycle signals, not
+            // disposable input. Reclaim an older UI slot under pressure and
+            // allow an all-critical queue to drain without losing callbacks.
+            auto disposable = state->events.begin();
+            while (
+                disposable != state->events.end()
+                && disposable->type != EventType::Ui
+            ) {
+                ++disposable;
+            }
+            if (disposable != state->events.end()) {
+                state->events.erase(disposable);
+            }
         }
 
-        state->events.push_back(std::move(event));
+        if (event.type == EventType::Ui) {
+            state->events.push_back(std::move(event));
+        } else {
+            // Retain FIFO order for critical results/reloads, ahead of input
+            // that can be safely delayed or coalesced.
+            auto insertion = state->events.begin();
+            while (
+                insertion != state->events.end()
+                && insertion->type != EventType::Ui
+            ) {
+                ++insertion;
+            }
+            state->events.insert(insertion, std::move(event));
+        }
     }
 
     state->queue_ready.notify_one();

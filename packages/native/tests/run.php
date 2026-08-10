@@ -1058,6 +1058,23 @@ $rustProtocol = file_get_contents(
 if ($kotlinProtocol === false || $rustProtocol === false) {
     throw new RuntimeException('Cross-language protocol sources must be readable.');
 }
+$androidBridge = file_get_contents(
+    $repositoryRoot.'/android/app/src/main/cpp/pam_android_bridge.cpp',
+);
+$iosBridge = file_get_contents(
+    $repositoryRoot.'/ios/Sources/PamNative/Bridge/pam_native_ios_bridge.cpp',
+);
+foreach (['Android' => $androidBridge, 'iOS' => $iosBridge] as $platform => $bridge) {
+    $assert(
+        is_string($bridge)
+            && str_contains($bridge, 'if (event.type == EventType::Ui)')
+            && str_contains($bridge, 'disposable->type != EventType::Ui')
+            && str_contains($bridge, 'state->events.erase(disposable);')
+            && str_contains($bridge, 'insertion->type != EventType::Ui')
+            && str_contains($bridge, 'state->events.insert(insertion, std::move(event));'),
+        $platform.' bridge must preserve module results and reloads when the event queue is full.',
+    );
+}
 if (
     preg_match(
         '/enum class PropKey\\(val value: Int\\) \\{(?<body>.*?)\\n\\}/s',
@@ -5590,8 +5607,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.59',
-    'The runtime SDK contract must match the 0.6.59 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.60',
+    'The runtime SDK contract must match the 0.6.60 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

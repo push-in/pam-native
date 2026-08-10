@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.60 - 2026-08-10
+
+- Preserve native module results and runtime reload signals when sustained UI
+  input fills the Android or iOS event queue. The bridge now evicts an older,
+  disposable UI event instead of silently dropping HTTP, SQLite, timer, or
+  other native completion callbacks, and prioritizes critical FIFO delivery
+  ahead of the UI backlog so promises and durable outboxes cannot starve.
+
 ## 0.6.59 - 2026-08-09
 
 - Decode Android inline `data:image/*` assets on an isolated image lane. Small

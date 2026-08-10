@@ -601,9 +601,39 @@ void enqueue(RuntimeState* state, Event event, bool coalesce) {
             }
         }
         if (state->events.size() >= kMaxQueuedEvents) {
-            return;
+            if (event.type == EventType::Ui) {
+                return;
+            }
+            // Module results complete PHP promises/callbacks exactly once and
+            // reload controls the runtime lifecycle. Never discard either when
+            // transient UI input fills the bounded queue: evict the oldest UI
+            // event instead. If every queued item is critical, permit the queue
+            // to grow until PHP drains those already-issued native operations.
+            auto disposable = state->events.begin();
+            while (
+                disposable != state->events.end()
+                && disposable->type != EventType::Ui
+            ) {
+                ++disposable;
+            }
+            if (disposable != state->events.end()) {
+                state->events.erase(disposable);
+            }
         }
-        state->events.push_back(std::move(event));
+        if (event.type == EventType::Ui) {
+            state->events.push_back(std::move(event));
+        } else {
+            // Preserve FIFO ordering among completion/lifecycle events while
+            // letting them bypass an arbitrarily large UI backlog.
+            auto insertion = state->events.begin();
+            while (
+                insertion != state->events.end()
+                && insertion->type != EventType::Ui
+            ) {
+                ++insertion;
+            }
+            state->events.insert(insertion, std::move(event));
+        }
     }
     state->queue_ready.notify_one();
 }
