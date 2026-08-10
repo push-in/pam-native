@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\AccessibilityRole;
@@ -13,6 +14,7 @@ use Pam\Native\GestureEvent;
 use Pam\Native\GestureType;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
+use Pam\Native\Routing\RouteName;
 use Pam\Native\State;
 use Pam\Native\Style;
 use Pam\Native\TextAlignment;
@@ -42,7 +44,7 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
 
     /** @param list<NavigationTab> $tabs */
     public function __construct(
-        string $initialTab,
+        string|BackedEnum $initialTab,
         array $tabs,
         private readonly string $persistenceKey = 'top-tabs',
         private readonly bool $swipeEnabled = true,
@@ -53,6 +55,7 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
         private readonly int $inactiveColor = 0xFF64748B,
         private readonly int $indicatorColor = 0xFF2563EB,
     ) {
+        $initialTab = RouteName::value($initialTab);
         if ($tabs === []) throw new InvalidArgumentException('Top tabs require at least one destination.');
         $names = array_map(static fn (NavigationTab $tab): string => $tab->name, $tabs);
         if (count(array_unique($names)) !== count($names)) throw new InvalidArgumentException('Top tab names must be unique.');
@@ -65,8 +68,9 @@ final class TopTabNavigator implements Renderable, Restorable, NavigationStatePr
         if (!$this->lazy) foreach ($this->tabs as $tab) $this->instance($tab);
     }
 
-    public function jumpTo(string $name): bool
+    public function jumpTo(string|BackedEnum $name): bool
     {
+        $name = RouteName::value($name);
         foreach ($this->tabs as $index => $tab) {
             if ($tab->name !== $name) continue;
             $next = $index + 1;

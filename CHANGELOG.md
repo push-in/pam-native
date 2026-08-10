@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.70 - 2026-08-10
+
+- Completed typed imperative navigation: `Navigator`, `NavigationAction`,
+  `NavigationRef`, legacy `Router`, bottom/top tabs and drawers now accept the
+  same string-backed route enums as `Route::screen()` and `Route::to()`. Route
+  names are normalized before lookup, persistence, events and native dispatch.
+
 ## 0.6.69 - 2026-08-10
 
 - Added typed `shared-transition` and `shared-transition-style` attributes to
