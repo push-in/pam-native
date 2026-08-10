@@ -409,6 +409,10 @@ preserving the element's authored transform:
 
 The equivalent fluent API is
 `Pressable::make($content)->pressedOpacity(0.9)->pressedScale(0.92)`.
+Decorative descendants such as `Image`, `Text`, and icon components do not
+become native touch targets merely because they render ripple styling. Unless
+they declare their own event handler, a pointer anywhere inside them continues
+to the enclosing `Pressable`.
 
 Rounded clipping uses the platform compositor rather than a browser mask:
 

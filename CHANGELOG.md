@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.67 - 2026-08-10
+
+- Fixed Android decorative children with ripple styling retaining clickable or
+  long-clickable state without an event handler. Images and icons nested in a
+  `Pressable` no longer intercept the parent's touch target, so tapping any
+  point inside an icon button dispatches its action consistently.
+
+## 0.6.66 - 2026-08-10
+
+- Fixed Android `KeyboardAvoidingView` padding behavior to reduce the flex
+  viewport above the IME. Bottom composer controls now reflow above the
+  keyboard even when the layout has no scroll descendant.
+
 ## 0.6.65 - 2026-08-10
 
 - Fixed Android `BottomSheet` interactive keyboard behavior to move its

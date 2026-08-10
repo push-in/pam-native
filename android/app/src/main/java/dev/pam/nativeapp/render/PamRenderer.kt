@@ -2783,20 +2783,18 @@ class PamRenderer(
             } else {
                 view.setOnLongClickListener(null)
             }
-            if (view is TextView && view !is EditText) {
+            if (
+                view !is EditText &&
+                view !is Switch &&
+                !state.nativeInteractionsInstalled &&
+                state.properties[PropKey.POINTER_EVENTS] == null
+            ) {
                 view.isClickable = state.properties[PropKey.ON_PRESS] != null
                 view.isLongClickable =
                     state.properties[PropKey.ON_LONG_PRESS] != null
             }
         }
         installPressFeedback(view, state)
-        if (
-            state.properties[PropKey.RIPPLE_COLOR] != null &&
-            state.properties[PropKey.ON_PRESS] == null &&
-            state.kind != NodeKind.CUSTOM_VIEW
-        ) {
-            view.isClickable = true
-        }
         installDirectiveEvents(view, state)
         if (view is EditText) installInputEvents(view, state)
         if (view is Switch) {

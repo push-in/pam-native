@@ -905,7 +905,7 @@ class PamRendererInstrumentedTest {
                     activity.host.findByTransitionName("ripple-target"),
                 )
                 assertTrue(target.background is RippleDrawable)
-                assertTrue(target.isClickable)
+                assertFalse(target.isClickable)
                 renderer.close()
             }
         } finally {
