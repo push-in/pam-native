@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.59 - 2026-08-09
+
+- Decode Android inline `data:image/*` assets on an isolated image lane. Small
+  bundled UI assets such as icon masks now reach the first interactive frame
+  without waiting behind remote photos, disk reads, or animated media decoding.
+
 ## 0.6.58 - 2026-08-09
 
 - Snapshot Android virtualized lists before critical memory trimming. Releasing

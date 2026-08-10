@@ -106,12 +106,21 @@ internal fun resolvePamImageFile(root: File, source: String): File {
     return candidate
 }
 
+internal fun isInlineImageSource(source: String): Boolean =
+    source.regionMatches(0, "data:image/", 0, "data:image/".length, ignoreCase = true)
+
 internal class NativeImageLoader(
     private val context: Context,
 ) : AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(3) { runnable ->
         Thread(runnable, "pam-image").apply { isDaemon = true }
+    }
+    // Tiny bundled/data-URI assets (for example icon masks) must never queue
+    // behind remote photos, animated WebP decoding or disk reads. They are
+    // part of the first interactive frame, so keep an isolated serial lane.
+    private val inlineExecutor = Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pam-image-inline").apply { isDaemon = true }
     }
     private val cache = object : LruCache<String, DecodedBitmap>(MEMORY_CACHE_BYTES) {
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
@@ -196,6 +205,7 @@ internal class NativeImageLoader(
         connections.clear()
         inFlight.values.forEach { future -> future.cancel(true) }
         executor.shutdownNow()
+        inlineExecutor.shutdownNow()
         inFlight.clear()
         synchronized(cache) { cache.evictAll() }
     }
@@ -307,7 +317,7 @@ internal class NativeImageLoader(
                             decoded.animatedBytes,
                         )
                     },
-                    executor,
+                    imageExecutor(source),
                 ).whenComplete { _, _ -> inFlight.remove(key) }
             }
         }.getOrElse { error ->
@@ -369,7 +379,7 @@ internal class NativeImageLoader(
                     ).bitmap
                 }.getOrNull()
             },
-            executor,
+            imageExecutor(source),
         ).whenComplete { bitmap, _ ->
             if (bitmap == null) return@whenComplete
             main.post {
@@ -380,6 +390,9 @@ internal class NativeImageLoader(
             }
         }
     }
+
+    private fun imageExecutor(source: String) =
+        if (isInlineImageSource(source)) inlineExecutor else executor
 
     private fun finishSuccess(
         view: PamImageView,
