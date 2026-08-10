@@ -168,7 +168,7 @@ void publish_typed_call(
 }
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_commit, 0, 1, _IS_BOOL, 0)
-    Z_PARAM_TYPE_INFO(0, frame, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, frame, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(pam_native_commit) {
@@ -235,10 +235,10 @@ PHP_FUNCTION(pam_native_commit) {
 }
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_call, 0, 4, _IS_BOOL, 0)
-    Z_PARAM_TYPE_INFO(0, request_id, IS_LONG, 0)
-    Z_PARAM_TYPE_INFO(0, module, IS_STRING, 0)
-    Z_PARAM_TYPE_INFO(0, method, IS_STRING, 0)
-    Z_PARAM_TYPE_INFO(0, payload, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, request_id, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, module, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, method, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(pam_native_call) {
@@ -273,9 +273,9 @@ PHP_FUNCTION(pam_native_call) {
 }
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_call_typed, 0, 3, _IS_BOOL, 0)
-    Z_PARAM_TYPE_INFO(0, request_id, IS_LONG, 0)
-    Z_PARAM_TYPE_INFO(0, operation, IS_LONG, 0)
-    Z_PARAM_TYPE_INFO(0, payload, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, request_id, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, operation, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, payload, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(pam_native_call_typed) {
@@ -305,7 +305,7 @@ PHP_FUNCTION(pam_native_call_typed) {
 }
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_error, 0, 1, IS_VOID, 0)
-    Z_PARAM_TYPE_INFO(0, message, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, message, IS_STRING, 0)
 ZEND_END_ARG_INFO()
 
 PHP_FUNCTION(pam_native_error) {
@@ -361,8 +361,7 @@ bool call_runtime(
         &callable,
         &result,
         static_cast<uint32_t>(argument_count),
-        arguments,
-        nullptr
+        arguments
     );
     zval_ptr_dtor(&callable);
     if (!Z_ISUNDEF(result)) {
@@ -414,7 +413,6 @@ bool initialize_php(RuntimeState* state) {
     }
 
     zend_unset_timeout();
-    SG(global_data).ptr = state;
     return true;
 }
 
