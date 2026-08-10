@@ -131,6 +131,9 @@ internal fun keyboardAvoidingViewportHeight(
     baseHeight.coerceAtLeast(0)
 }
 
+internal fun keyboardAvoidingBehaviorReducesViewport(behavior: Int): Boolean =
+    behavior == 1 || behavior == 3
+
 internal fun safeAreaChildCrossAxisReduction(
     mainAxisHorizontal: Boolean,
     horizontalInsets: Int,
@@ -1219,7 +1222,7 @@ class PamRenderer(
             baseHeight = height,
             keyboardOverlap = state.keyboardAvoidingViewportInset,
             resize = state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW &&
-                state.keyboardBehavior == KEYBOARD_RESIZE,
+                keyboardAvoidingBehaviorReducesViewport(state.keyboardBehavior),
         )
         var leftPx = horizontal.offset + safeLeft
         var topPx = vertical.offset + safeTop
@@ -5039,7 +5042,13 @@ class PamRenderer(
             state.keyboardFocusedInput = null
             if (lastFocusedInput?.hasFocus() != true) lastFocusedInput = null
         }
-        val viewportInset = if (state.keyboardBehavior == KEYBOARD_RESIZE) keyboard else 0
+        // Padding needs an IME-sized flex viewport even without a scroll descendant, so
+        // bottom controls reflow above the keyboard. Scroll descendants additionally receive
+        // their native avoidance inset below.
+        val viewportInset = if (
+            state.keyboardBehavior == KEYBOARD_RESIZE ||
+            state.keyboardBehavior == KEYBOARD_PADDING
+        ) keyboard else 0
         if (state.keyboardAvoidingViewportInset != viewportInset) {
             state.keyboardAvoidingViewportInset = viewportInset
             applyLayout(state.id)

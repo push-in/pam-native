@@ -79,7 +79,10 @@ options are available through `SafeAreaView::edges()->mode()` and
 Use `behavior="interactive"` for a bottom-anchored sheet: Android follows the
 IME while clamping the sheet below the safe top chrome instead of translating
 the entire sheet by the keyboard height. `resize`, `pan`, and `padding` remain
-available for ordinary forms, composers, and scroll containers.
+available for ordinary forms, composers, and scroll containers. `padding`
+reduces the flex viewport available to its children, so fixed controls at the
+bottom of a full-screen composer remain above the IME even when no scroll
+container is present.
 When custom chrome must size itself around those regions,
 `DeviceInfo::get()` exposes `safeAreaTop`, `safeAreaRight`, `safeAreaBottom`,
 and `safeAreaLeft` in logical points plus the device's IANA `timeZone` identifier

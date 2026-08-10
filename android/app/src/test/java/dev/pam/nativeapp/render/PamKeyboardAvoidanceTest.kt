@@ -86,6 +86,19 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun paddingBehaviorReducesTheChildViewportWithoutMovingTheContainer() {
+        assertEquals(true, keyboardAvoidingBehaviorReducesViewport(3))
+        assertEquals(
+            1_280,
+            keyboardAvoidingViewportHeight(
+                baseHeight = 2_100,
+                keyboardOverlap = 820,
+                resize = keyboardAvoidingBehaviorReducesViewport(3),
+            ),
+        )
+    }
+
+    @Test
     fun interactiveSheetStopsBelowSafeTopChrome() {
         assertEquals(
             185,
