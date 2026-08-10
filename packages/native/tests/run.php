@@ -5790,8 +5790,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.68',
-    'The runtime SDK contract must match the 0.6.68 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.69',
+    'The runtime SDK contract must match the 0.6.69 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -5991,6 +5991,23 @@ $assert(
         && $cachedTagImage->properties()[PropKey::MediaCacheMaxBytes->value] === 67_108_864
         && $cachedTagImage->properties()[PropKey::MediaResizeHeight->value] === 512,
     'Tag media-cache attributes must normalize kebab-case values and bounded units.',
+);
+$templateSharedStyle = SharedTransitionStyle::spring(durationMs: 360, damping: 0.8)
+    ->resize(SharedTransitionResizeMode::Clip)
+    ->crossFade();
+$sharedTagImage = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Image source="post.webp" shared-transition="post:42" '.
+        ':shared-transition-style="$sharedStyle" />',
+    ),
+    null,
+    ['sharedStyle' => $templateSharedStyle],
+);
+$assert(
+    $sharedTagImage->properties()[PropKey::SharedTransitionTag->value] === 'post:42'
+        && $sharedTagImage->properties()[PropKey::SharedTransitionConfig->value]
+            === $templateSharedStyle->toJson(),
+    'PAM templates must expose typed shared-element tags and motion styles.',
 );
 
 $hardenedWebView = WebView::make('https://example.com/app')

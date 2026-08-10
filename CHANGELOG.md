@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.69 - 2026-08-10
+
+- Added typed `shared-transition` and `shared-transition-style` attributes to
+  PAM `Image` and `MediaPlayer` templates. Feed, gallery and other declarative
+  media screens can now participate in Shared Elements 2 without dropping down
+  to programmatic element construction.
+
 ## 0.6.68 - 2026-08-10
 
 - Added the Laravel-inspired `Route::` navigation facade for composable native
