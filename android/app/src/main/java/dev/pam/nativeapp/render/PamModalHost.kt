@@ -26,9 +26,32 @@ import android.window.OnBackInvokedDispatcher
 import android.widget.EditText
 import android.widget.FrameLayout
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.PamActivity
 import java.lang.ref.WeakReference
+
+internal fun modalSoftInputAdjustMode(
+    focusKeyboard: Boolean,
+    presentation: Int,
+    bottomSheetKeyboardBehavior: Int,
+): Int = when {
+    focusKeyboard -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    presentation != 3 -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    bottomSheetKeyboardBehavior == 2 -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+    bottomSheetKeyboardBehavior == 3 -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    else -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+}
+
+internal fun interactiveBottomSheetLayout(
+    baseHeight: Int,
+    keyboardInset: Int,
+): Pair<Int, Float> {
+    val inset = keyboardInset.coerceAtLeast(0)
+    val translation = if (inset == 0) 0f else -inset.toFloat()
+    return baseHeight.coerceAtLeast(1) to translation
+}
 
 internal class PamModalHost(context: Context) : FrameLayout(context) {
     private val content = PamModalContent(context)
@@ -61,6 +84,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     private var bottomSheetDragEnabled = true
     private var bottomSheetCornerRadius = 20f
     private var bottomSheetKeyboardBehavior = KEYBOARD_INTERACTIVE
+    private var bottomSheetKeyboardInset = 0
     private var onBottomSheetChange: ((Int, Float) -> Unit)? = null
     private var onBottomSheetDismiss: (() -> Unit)? = null
     private var dragStartY = 0f
@@ -92,6 +116,20 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             handle,
             FrameLayout.LayoutParams(dp(36f).toInt(), dp(4f).toInt()),
         )
+        ViewCompat.setOnApplyWindowInsetsListener(content) { _, insets ->
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+            val navigation = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val nextInset = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
+                (ime - navigation).coerceAtLeast(0)
+            } else {
+                0
+            }
+            if (bottomSheetKeyboardInset != nextInset) {
+                bottomSheetKeyboardInset = nextInset
+                dialog?.let(::applyWindowLayout)
+            }
+            insets
+        }
         content.observeMotion = ::onBottomSheetMotion
     }
 
@@ -430,16 +468,11 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             decorView.setBackgroundColor(Color.TRANSPARENT)
             clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
             attributes = attributes.apply { dimAmount = 0f }
-            val adjustMode = when {
-                focusKeyboard -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                presentation != PRESENTATION_SHEET ->
-                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                bottomSheetKeyboardBehavior == KEYBOARD_EXTEND ->
-                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
-                bottomSheetKeyboardBehavior == KEYBOARD_FILL_PARENT ->
-                    WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
-                else -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
-            }
+            val adjustMode = modalSoftInputAdjustMode(
+                focusKeyboard = focusKeyboard,
+                presentation = presentation,
+                bottomSheetKeyboardBehavior = bottomSheetKeyboardBehavior,
+            )
             setSoftInputMode(
                 adjustMode or
                     if (focusKeyboard) {
@@ -489,14 +522,27 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
     private fun applyWindowLayout(modal: Dialog) {
         val availableHeight = resources.displayMetrics.heightPixels
-        val sheetHeight = (availableHeight * bottomSheetSnapPoints[bottomSheetIndex])
+        val baseSheetHeight = (availableHeight * bottomSheetSnapPoints[bottomSheetIndex])
             .toInt()
             .coerceAtLeast(1)
+        val (sheetHeight, keyboardTranslation) = if (
+            presentation == PRESENTATION_SHEET &&
+            bottomSheetKeyboardBehavior == KEYBOARD_INTERACTIVE
+        ) {
+            interactiveBottomSheetLayout(
+                baseHeight = baseSheetHeight,
+                keyboardInset = bottomSheetKeyboardInset,
+            )
+        } else {
+            baseSheetHeight to 0f
+        }
         repeat(content.childCount) { index ->
             val child = content.getChildAt(index)
             if (child === handle) return@repeat
             child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
+            child.translationY = keyboardTranslation
         }
+        handle.translationY = keyboardTranslation
         modal.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -582,10 +628,18 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun resetSheetTranslation() {
-        sheetChildren().forEach { child ->
-            child.animate().translationY(0f).setDuration(180L).start()
+        val keyboardTranslation = if (
+            presentation == PRESENTATION_SHEET &&
+            bottomSheetKeyboardBehavior == KEYBOARD_INTERACTIVE
+        ) {
+            -bottomSheetKeyboardInset.coerceAtLeast(0).toFloat()
+        } else {
+            0f
         }
-        handle.animate().translationY(0f).setDuration(180L).start()
+        sheetChildren().forEach { child ->
+            child.animate().translationY(keyboardTranslation).setDuration(180L).start()
+        }
+        handle.animate().translationY(keyboardTranslation).setDuration(180L).start()
     }
 
     private fun sheetChildren(): List<View> =

@@ -1,9 +1,56 @@
 package dev.pam.nativeapp.render
 
+import android.view.WindowManager
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class PamKeyboardAvoidanceTest {
+    @Test
+    fun interactiveBottomSheetKeepsAStableFullWindowForInsets() {
+        assertEquals(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING,
+            modalSoftInputAdjustMode(
+                focusKeyboard = false,
+                presentation = 3,
+                bottomSheetKeyboardBehavior = 1,
+            ),
+        )
+    }
+
+    @Test
+    fun interactiveBottomSheetPreservesDetentAndMovesAboveTheIme() {
+        assertEquals(
+            1_968 to -757f,
+            interactiveBottomSheetLayout(
+                baseHeight = 1_968,
+                keyboardInset = 757,
+            ),
+        )
+    }
+
+    @Test
+    fun hiddenImeRestoresTheConfiguredDetent() {
+        assertEquals(
+            1_968 to 0f,
+            interactiveBottomSheetLayout(
+                baseHeight = 1_968,
+                keyboardInset = 0,
+            ),
+        )
+    }
+
+    @Test
+    fun extendBottomSheetKeepsPanWindowSemantics() {
+        assertEquals(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN,
+            modalSoftInputAdjustMode(
+                focusKeyboard = false,
+                presentation = 3,
+                bottomSheetKeyboardBehavior = 2,
+            ),
+        )
+    }
+
     @Test
     fun hiddenImeDiscardsAStaleAnimatedInset() {
         assertEquals(0, visibleImeInset(rawInset = 820, visible = false))

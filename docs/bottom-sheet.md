@@ -46,3 +46,7 @@ Declarative templates can use the same native component:
 Keyboard behaviors are `Interactive` (1), `Extend` (2), and `FillParent` (3).
 Use `BottomSheetKeyboardBehavior` in application code rather than magic
 numbers.
+
+On Android, `Interactive` preserves the configured detent and moves it with the
+IME so bottom-anchored composers and actions remain visible. `Extend` keeps pan
+semantics, while `FillParent` uses a resized viewport for a full-height surface.

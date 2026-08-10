@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.65 - 2026-08-10
+
+- Fixed Android `BottomSheet` interactive keyboard behavior to move its
+  configured detent above the IME. Bottom-anchored composers no longer remain
+  clipped below the keyboard with inverted accessibility bounds.
+
 ## 0.6.64 - 2026-08-10
 
 - Bound Android rich-list empty-holder recovery to one attempt per holder and
