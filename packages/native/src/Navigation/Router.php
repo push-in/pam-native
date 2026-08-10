@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 use Closure;
 use InvalidArgumentException;
+use Pam\Native\Routing\RouteName;
 
 final class Router
 {
+    private readonly string $initialRoute;
     /** @var array<string, Closure> */
     private array $routes = [];
     private string $persistenceKey = 'main';
@@ -32,40 +35,42 @@ final class Router
     private array $linkingPrefixes = [];
     private ?Closure $linkFilter = null;
 
-    private function __construct(private readonly string $initialRoute)
+    private function __construct(string|BackedEnum $initialRoute)
     {
-        if ($initialRoute === '') {
+        $this->initialRoute = RouteName::value($initialRoute);
+        if ($this->initialRoute === '') {
             throw new InvalidArgumentException('The initial route cannot be empty.');
         }
     }
 
-    public static function stack(string $initialRoute): self
+    public static function stack(string|BackedEnum $initialRoute): self
     {
         return new self($initialRoute);
     }
 
-    public static function tabs(string $initialTab): TabRouter
+    public static function tabs(string|BackedEnum $initialTab): TabRouter
     {
-        return new TabRouter($initialTab);
+        return new TabRouter(RouteName::value($initialTab));
     }
 
-    public static function topTabs(string $initialTab): TopTabRouter
+    public static function topTabs(string|BackedEnum $initialTab): TopTabRouter
     {
-        return new TopTabRouter($initialTab);
+        return new TopTabRouter(RouteName::value($initialTab));
     }
 
-    public static function drawer(string $initialRoute): DrawerRouter
+    public static function drawer(string|BackedEnum $initialRoute): DrawerRouter
     {
-        return new DrawerRouter($initialRoute);
+        return new DrawerRouter(RouteName::value($initialRoute));
     }
 
     public function route(
-        string $name,
+        string|BackedEnum $name,
         Closure $screen,
         ScreenOptions|ScreenOptionsPatch|Closure|null $options = null,
         ?Closure $getId = null,
     ): self
     {
+        $name = RouteName::value($name);
         if ($name === '') {
             throw new InvalidArgumentException('Route names cannot be empty.');
         }
@@ -101,15 +106,17 @@ final class Router
     }
 
     /** @param Closure(RouteContext): bool $guard */
-    public function guard(string $route, Closure $guard): self
+    public function guard(string|BackedEnum $route, Closure $guard): self
     {
+        $route = RouteName::value($route);
         $copy = clone $this;
         $copy->routeGuards[$route] = $guard;
         return $copy;
     }
 
-    public function guardFallback(string $route): self
+    public function guardFallback(string|BackedEnum $route): self
     {
+        $route = RouteName::value($route);
         $copy = clone $this;
         $copy->guardFallback = $route;
         return $copy;
@@ -146,10 +153,10 @@ final class Router
         return $copy;
     }
 
-    public function deepLink(string $pattern, string $route): self
+    public function deepLink(string $pattern, string|BackedEnum $route): self
     {
         $copy = clone $this;
-        $copy->deepLinks[] = new DeepLink($pattern, $route);
+        $copy->deepLinks[] = new DeepLink($pattern, RouteName::value($route));
 
         return $copy;
     }

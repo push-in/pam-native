@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Component;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
+use Pam\Native\Routing\RouteName;
 use ReflectionFunction;
 
 final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
@@ -61,7 +63,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
      * @param array<array-key, mixed> $routes
      */
     public function __construct(
-        string $initialRoute,
+        string|BackedEnum $initialRoute,
         array $routes,
         string $persistenceKey = 'main',
         private NavigationTransition $transition = NavigationTransition::PlatformDefault,
@@ -79,6 +81,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         array $optionGroups = [],
     )
     {
+        $initialRoute = RouteName::value($initialRoute);
         $validated = [];
 
         foreach ($routes as $name => $route) {
@@ -198,8 +201,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function push(string $route, array $params = []): void
+    public function push(string|BackedEnum $route, array $params = []): void
     {
+        $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
@@ -424,8 +428,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function replace(string $route, array $params = []): void
+    public function replace(string|BackedEnum $route, array $params = []): void
     {
+        $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
@@ -448,8 +453,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function reset(string $route, array $params = []): void
+    public function reset(string|BackedEnum $route, array $params = []): void
     {
+        $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
@@ -472,8 +478,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function navigate(string $route, array $params = [], bool $merge = false): void
+    public function navigate(string|BackedEnum $route, array $params = [], bool $merge = false): void
     {
+        $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
             throw new InvalidArgumentException("Route {$route} is not registered.");
         }
@@ -566,8 +573,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function preload(string $route, array $params = []): bool
+    public function preload(string|BackedEnum $route, array $params = []): bool
     {
+        $route = RouteName::value($route);
         if (!isset($this->routes[$route])) return false;
         $validatedParams = self::validatedParams($params);
         $entry = [
@@ -591,8 +599,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->preloaded = [];
     }
 
-    public function popTo(string $route): bool
+    public function popTo(string|BackedEnum $route): bool
     {
+        $route = RouteName::value($route);
         if ($route === $this->currentRoute()) {
             return true;
         }
@@ -698,8 +707,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function routeAvailable(string $route, array $params = []): bool
+    public function routeAvailable(string|BackedEnum $route, array $params = []): bool
     {
+        $route = RouteName::value($route);
         if (!isset($this->routes[$route])) return false;
         $guard = $this->routeGuards[$route] ?? null;
         return $guard === null || $guard(new RouteContext($route, self::validatedParams($params))) === true;

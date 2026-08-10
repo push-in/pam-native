@@ -54,10 +54,19 @@ Route::stack('main', AppRoute::Home, static function (): void {
 });
 
 Route::to(AppRoute::Product, productId: 42, preview: true)->push();
+
+$navigator->push(AppRoute::Product, ['productId' => 42]);
+$navigator->navigate(AppRoute::Home);
+$navigator->replace(AppRoute::Product);
+$navigator->reset(AppRoute::Home);
+$navigator->preload(AppRoute::Product);
 ```
 
 `pushRoute()`, `navigateRoute()`, `replaceRoute()`, `Route::screen()`,
-`Route::modal()` and `Route::to()` accept the same string-backed enum cases.
+`Route::modal()`, `Route::to()`, lower-level `Navigator` operations,
+`NavigationAction`, tabs and drawer selectors accept the same string-backed
+enum cases. The persisted and native wire state always receives the normalized
+string value.
 Integer-backed enums are rejected as route names because route identity is
 persisted and linked by stable textual names.
 

@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\AccessibilityRole;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
+use Pam\Native\Routing\RouteName;
 use Pam\Native\State;
 use Pam\Native\Style;
 use Pam\Native\UI\Column;
@@ -46,7 +48,7 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
      * @param list<NavigationDrawerItem> $routes
      */
     public function __construct(
-        string $initialRoute,
+        string|BackedEnum $initialRoute,
         array $routes,
         private readonly DrawerType $type = DrawerType::Front,
         private readonly DrawerPosition $position = DrawerPosition::Automatic,
@@ -72,6 +74,7 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
         private readonly int $dividerColor = 0xFFE2E8F0,
         private readonly ?Closure $customContent = null,
     ) {
+        $initialRoute = RouteName::value($initialRoute);
         if ($routes === []) {
             throw new InvalidArgumentException(
                 'Drawer navigation requires at least one route.',
@@ -100,8 +103,9 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
         }
     }
 
-    public function navigate(string $name): bool
+    public function navigate(string|BackedEnum $name): bool
     {
+        $name = RouteName::value($name);
         foreach ($this->routes as $index => $route) {
             if ($route->name !== $name) {
                 continue;

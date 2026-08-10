@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 use InvalidArgumentException;
 use Pam\Native\AccessibilityRole;
 use Pam\Native\HapticFeedback;
@@ -11,6 +12,7 @@ use Pam\Native\Overflow;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
+use Pam\Native\Routing\RouteName;
 use Pam\Native\State;
 use Pam\Native\Style;
 use Pam\Native\System\Haptics;
@@ -47,7 +49,7 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
      * @param list<NavigationTab> $tabs
      */
     public function __construct(
-        string $initialTab,
+        string|BackedEnum $initialTab,
         array $tabs,
         private readonly TabPresentation $presentation = TabPresentation::Adaptive,
         private readonly string $persistenceKey = 'tabs',
@@ -58,6 +60,7 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
         private readonly TabBackBehavior $backBehavior = TabBackBehavior::FirstRoute,
         private readonly bool $popToTopOnBlur = false,
     ) {
+        $initialTab = RouteName::value($initialTab);
         if ($tabs === [] || count($tabs) > 5) {
             throw new InvalidArgumentException('Tab navigation requires between one and five destinations.');
         }
@@ -82,8 +85,9 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
         }
     }
 
-    public function select(string $name): bool
+    public function select(string|BackedEnum $name): bool
     {
+        $name = RouteName::value($name);
         foreach ($this->tabs as $index => $tab) {
             if ($tab->name !== $name) {
                 continue;
@@ -123,7 +127,7 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
         return $this->tabs[$this->selected - 1]->name;
     }
 
-    public function jumpTo(string $name): bool
+    public function jumpTo(string|BackedEnum $name): bool
     {
         return $this->select($name);
     }

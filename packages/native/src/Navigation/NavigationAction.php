@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 use InvalidArgumentException;
+use Pam\Native\Routing\RouteName;
 
 final readonly class NavigationAction
 {
@@ -23,15 +25,15 @@ final readonly class NavigationAction
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public static function navigate(string $route, array $params = [], bool $merge = false): self
+    public static function navigate(string|BackedEnum $route, array $params = [], bool $merge = false): self
     {
-        return new self(NavigationActionType::Navigate, $route, $params, merge: $merge);
+        return new self(NavigationActionType::Navigate, RouteName::value($route), $params, merge: $merge);
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public static function push(string $route, array $params = []): self
+    public static function push(string|BackedEnum $route, array $params = []): self
     {
-        return new self(NavigationActionType::Push, $route, $params);
+        return new self(NavigationActionType::Push, RouteName::value($route), $params);
     }
 
     public static function pop(): self
@@ -45,20 +47,20 @@ final readonly class NavigationAction
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public static function replace(string $route, array $params = []): self
+    public static function replace(string|BackedEnum $route, array $params = []): self
     {
-        return new self(NavigationActionType::Replace, $route, $params);
+        return new self(NavigationActionType::Replace, RouteName::value($route), $params);
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public static function reset(string $route, array $params = []): self
+    public static function reset(string|BackedEnum $route, array $params = []): self
     {
-        return new self(NavigationActionType::Reset, $route, $params);
+        return new self(NavigationActionType::Reset, RouteName::value($route), $params);
     }
 
-    public static function popTo(string $route): self
+    public static function popTo(string|BackedEnum $route): self
     {
-        return new self(NavigationActionType::PopTo, $route);
+        return new self(NavigationActionType::PopTo, RouteName::value($route));
     }
 
     public static function popToTop(): self
@@ -79,9 +81,9 @@ final readonly class NavigationAction
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public static function preload(string $route, array $params = []): self
+    public static function preload(string|BackedEnum $route, array $params = []): self
     {
-        return new self(NavigationActionType::Preload, $route, $params);
+        return new self(NavigationActionType::Preload, RouteName::value($route), $params);
     }
 
     public function source(string $key): self

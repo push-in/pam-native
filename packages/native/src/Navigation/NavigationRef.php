@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Navigation;
 
+use BackedEnum;
 /**
  * Stable imperative handle for notification handlers, deep-link adapters and
  * code which runs before the navigation tree mounts. Pre-mount actions are
@@ -42,7 +43,7 @@ final class NavigationRef
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function navigate(string $route, array $params = [], bool $merge = false): bool
+    public function navigate(string|BackedEnum $route, array $params = [], bool $merge = false): bool
     {
         return $this->dispatch(NavigationAction::navigate($route, $params, $merge));
     }

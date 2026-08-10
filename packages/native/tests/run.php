@@ -4888,16 +4888,16 @@ $assert(
 );
 
 $navigator = new Navigator(
-    initialRoute: 'home',
+    initialRoute: TypedRouteTestName::Home,
     routes: [
         'home' => static fn () => Screen::make(Text::make('Home')),
-        'details' => static fn () => Screen::make(Text::make('Details')),
+        'product' => static fn () => Screen::make(Text::make('Product')),
     ],
     transition: NavigationTransition::Fade,
     transitionDurationMs: 300,
 );
 $assert($navigator->render()->toElement()->kind() === NodeKind::NavigationHost, 'Navigator must render a native host.');
-$navigator->push('details');
+$navigator->push(TypedRouteTestName::Product);
 $pushed = $navigator->render()->toElement();
 $assert(count($pushed->children()) === 2, 'Push must retain both screens for the native transition.');
 $assert(
@@ -4920,6 +4920,24 @@ $assert(
     $settledPop->properties()[PropKey::NavigationOperation->value] === NavigationOperation::Idle->value,
     'Settled pop must restore the native host operation to idle.',
 );
+$navigator->preload(TypedRouteTestName::Product);
+$navigator->navigate(TypedRouteTestName::Product, ['id' => 7]);
+$assert($navigator->currentRoute() === 'product', 'Navigator::navigate must accept string-backed route enums.');
+$navigator->replace(TypedRouteTestName::Home);
+$assert($navigator->currentRoute() === 'home', 'Navigator::replace must accept string-backed route enums.');
+$navigator->reset(TypedRouteTestName::Product);
+$assert($navigator->currentRoute() === 'product', 'Navigator::reset must accept string-backed route enums.');
+$assert(
+    NavigationAction::push(TypedRouteTestName::Home)->route === 'home'
+        && NavigationAction::navigate(TypedRouteTestName::Product)->route === 'product'
+        && NavigationAction::replace(TypedRouteTestName::Home)->route === 'home'
+        && NavigationAction::reset(TypedRouteTestName::Product)->route === 'product'
+        && NavigationAction::preload(TypedRouteTestName::Home)->route === 'home',
+    'Imperative navigation actions must normalize string-backed route enums.',
+);
+$navigator->navigate(TypedRouteTestName::Home);
+$navigator->push(TypedRouteTestName::Product);
+$assert($navigator->popTo(TypedRouteTestName::Home), 'Navigator::popTo must accept string-backed route enums.');
 $systemBackConsumed = false;
 $navigator->interceptSystemBack(static function () use (&$systemBackConsumed): bool {
     $systemBackConsumed = true;
@@ -5790,8 +5808,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.69',
-    'The runtime SDK contract must match the 0.6.69 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.70',
+    'The runtime SDK contract must match the 0.6.70 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
