@@ -4,7 +4,7 @@ import UIKit
 
 @main
 final class PamAppDelegate: UIResponder, UIApplicationDelegate {
-    private var window: UIWindow?
+    var window: UIWindow?
     private var runtime: PamRuntime?
 
     func application(
