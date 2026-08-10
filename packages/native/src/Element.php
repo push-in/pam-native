@@ -7,6 +7,7 @@ namespace Pam\Native;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Internal\BinaryValue;
+use Pam\Native\Navigation\SharedTransitionStyle;
 
 abstract class Element implements Renderable
 {
@@ -137,13 +138,19 @@ abstract class Element implements Renderable
      * transition. Matching tags are measured and animated entirely by UIKit or
      * Android's UI thread; PHP is never involved per frame.
      */
-    final public function sharedTransition(string $tag): static
+    final public function sharedTransition(
+        string $tag,
+        ?SharedTransitionStyle $style = null,
+    ): static
     {
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/', $tag) !== 1) {
             throw new InvalidArgumentException('Shared transition tags must be bounded safe identifiers.');
         }
 
-        return $this->withProperty(PropKey::SharedTransitionTag, $tag);
+        $element = $this->withProperty(PropKey::SharedTransitionTag, $tag);
+        return $style === null
+            ? $element
+            : $element->withProperty(PropKey::SharedTransitionConfig, $style->toJson());
     }
 
     final public function enabled(bool $enabled): static

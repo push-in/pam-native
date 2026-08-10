@@ -96,6 +96,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.borderStyle, 446)
         XCTAssertEqual(PamConstants.scrollTargetAlignment, 447)
         XCTAssertEqual(PamConstants.pressScale, 448)
+        XCTAssertEqual(PamConstants.sharedTransitionConfig, 449)
         XCTAssertEqual(
             [
                 NativeOperation.httpGet,

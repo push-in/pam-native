@@ -454,4 +454,5 @@ enum PropKey: int
     case BorderStyle = 446;
     case ScrollTargetAlignment = 447;
     case PressScale = 448;
+    case SharedTransitionConfig = 449;
 }

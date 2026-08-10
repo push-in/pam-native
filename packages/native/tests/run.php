@@ -96,6 +96,7 @@ use Pam\Native\Navigation\NavigationContainer;
 use Pam\Native\Navigation\NavigationDevTools;
 use Pam\Native\Navigation\NavigationEvent;
 use Pam\Native\Navigation\NavigationEventType;
+use Pam\Native\Navigation\NavigationGestureDirection;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\NavigationTraceKind;
 use Pam\Native\Navigation\Navigator;
@@ -103,11 +104,14 @@ use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
+use Pam\Native\Navigation\SharedTransitionResizeMode;
+use Pam\Native\Navigation\SharedTransitionStyle;
 use Pam\Native\Navigation\NavigationPresentation;
 use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
 use Pam\Native\Navigation\InteractsWithNavigationLifecycle;
 use Pam\Native\Routing\Route;
+use Pam\Native\Routing\RouteCodeGenerator;
 use Pam\Native\Routing\Navigation as NamedNavigation;
 use Pam\Native\Navigation\TabNavigator;
 use Pam\Native\Navigation\TabPresentation;
@@ -249,6 +253,12 @@ final class TypedRouteTestScreen extends Component
             "Product {$this->productId}".($this->preview ? ' preview' : ''),
         ));
     }
+}
+
+enum TypedRouteTestName: string
+{
+    case Home = 'home';
+    case Product = 'product';
 }
 
 if (!function_exists('pam_native_error')) {
@@ -4935,27 +4945,107 @@ $fluentNavigator = Router::stack('home')
     ->transitions(NavigationTransition::Scale, 180)
     ->build();
 $assert($fluentNavigator->currentRoute() === 'home', 'Fluent Router must build its initial stack.');
+$generatedRoutes = RouteCodeGenerator::generate([
+    'namespace' => 'App\\Navigation\\Generated',
+    'enum' => 'AppRoute',
+    'helper' => 'Routes',
+    'routes' => [
+        ['name' => 'home'],
+        [
+            'name' => 'product.details',
+            'case' => 'ProductDetails',
+            'method' => 'productDetails',
+            'params' => [
+                ['name' => 'productId', 'type' => 'int'],
+                ['name' => 'preview', 'type' => 'bool', 'required' => false, 'default' => false],
+            ],
+        ],
+    ],
+]);
+$assert(
+    str_contains($generatedRoutes['AppRoute.php'], "case ProductDetails = 'product.details';")
+        && str_contains($generatedRoutes['Routes.php'], 'public static function productDetails(int $productId, bool $preview = false): RouteTarget')
+        && str_contains($generatedRoutes['Routes.php'], 'Route::to(AppRoute::ProductDetails, productId: $productId, preview: $preview)'),
+    'Route code generation must emit enum destinations and statically typed helper signatures.',
+);
+
+$editorPreset = Route::preset(ScreenOptionsPatch::from([
+    'headerShown' => true,
+    'gestureDirection' => NavigationGestureDirection::Vertical,
+    'animation' => NavigationTransition::FadeFromBottom,
+]));
+$testRouteModule = new class implements \Pam\Native\Routing\RouteModule {
+    public function register(): void
+    {
+        Route::screen('module-route', static fn () => Screen::make(Text::make('Module')))
+            ->deepLink('/module');
+    }
+};
 $namedRouteNavigator = Route::stack(
     name: 'named-routes-test',
-    initial: 'home',
-    routes: static function (): void {
-        Route::screen('home', static fn () => Screen::make(Text::make('Home')));
-        Route::screen('product', TypedRouteTestScreen::class);
+    initial: TypedRouteTestName::Home,
+    routes: static function () use ($editorPreset, $testRouteModule): void {
+        Route::module($testRouteModule);
+        Route::screen(TypedRouteTestName::Home, static fn () => Screen::make(Text::make('Home')))
+            ->deepLink('/home')
+            ->deepLink('/start');
+        Route::group(
+            $editorPreset,
+            static function (): void {
+                Route::screen(TypedRouteTestName::Product, TypedRouteTestScreen::class)
+                    ->transition(NavigationTransition::Fade, 175)
+                    ->gesture(fullScreen: true)
+                    ->options(ScreenOptionsPatch::one('title', 'Product'));
+            },
+        );
         Route::modal('filters', static fn () => Screen::make(Text::make('Filters')))
-            ->sheet();
+            ->transition(NavigationTransition::SlideFromBottom, 260)
+            ->sheet(detents: [0.4, 1.0], grabber: true, cornerRadius: 24.0);
+        Route::screen('preset-copy', static fn () => Screen::make(Text::make('Preset')))
+            ->preset($editorPreset);
     },
 );
-$namedRouteNavigator->push('product', ['productId' => 42, 'preview' => true]);
+$assert(
+    $namedRouteNavigator->open('pam://app/module')
+        && $namedRouteNavigator->currentRoute() === 'module-route',
+    'Route modules must register destinations in the active stack without bootstrap coupling.',
+);
+$assert(
+    $namedRouteNavigator->open('pam://app/home')
+        && $namedRouteNavigator->open('pam://app/start')
+        && $namedRouteNavigator->currentRoute() === 'home',
+    'Laravel-style named routes must preserve every chained deep-link alias.',
+);
+Route::to(TypedRouteTestName::Product, productId: 42, preview: true)->push();
 $namedProduct = $namedRouteNavigator->render()->toElement()->children()[1];
+$namedProductOptions = $namedRouteNavigator->currentOptions();
 $assert(
     $namedRouteNavigator->currentRoute() === 'product'
-        && $namedProduct->children()[0]->properties()[PropKey::Text->value] === 'Product 42 preview',
-    'Laravel-style named routes must register screens and pass bounded parameters.',
+        && $namedProduct->children()[0]->properties()[PropKey::Text->value] === 'Product 42 preview'
+        && $namedProductOptions->headerShown
+        && $namedProductOptions->title === 'Product'
+        && $namedProductOptions->animation === NavigationTransition::Fade
+        && $namedProductOptions->animationDurationMs === 175
+        && $namedProductOptions->gestureDirection === NavigationGestureDirection::Horizontal
+        && $namedProductOptions->fullScreenGestureEnabled,
+    'Laravel-style named routes must compose group, transition, gesture and route option layers.',
 );
 $namedRouteNavigator->push('filters');
 $assert(
-    $namedRouteNavigator->currentOptions()->presentation === NavigationPresentation::FormSheet,
-    'Named modal routes must preserve native presentation options.',
+    $namedRouteNavigator->currentOptions()->presentation === NavigationPresentation::FormSheet
+        && $namedRouteNavigator->currentOptions()->animation === NavigationTransition::SlideFromBottom
+        && $namedRouteNavigator->currentOptions()->animationDurationMs === 260
+        && $namedRouteNavigator->currentOptions()->sheetAllowedDetents === [0.4, 1.0]
+        && $namedRouteNavigator->currentOptions()->sheetGrabberVisible
+        && $namedRouteNavigator->currentOptions()->sheetCornerRadius === 24.0,
+    'Named modal routes must compose native presentation, animation and sheet options.',
+);
+$namedRouteNavigator->push('preset-copy');
+$assert(
+    $namedRouteNavigator->currentOptions()->headerShown
+        && $namedRouteNavigator->currentOptions()->gestureDirection === NavigationGestureDirection::Vertical
+        && $namedRouteNavigator->currentOptions()->animation === NavigationTransition::FadeFromBottom,
+    'Reusable route presets must compose identically in groups and individual destinations.',
 );
 $namedTabs = Route::tabs('named-tabs-test', 'home', static function (): void {
     Route::tab('home', Screen::make(Text::make('Home')), label: 'Home');
@@ -4965,6 +5055,99 @@ $assert(
     NamedNavigation::navigate('settings')
         && $namedTabs->selectedTab() === 'settings',
     'Laravel-style named tabs must select destinations through the shared navigation scope.',
+);
+$namedTopTabs = Route::topTabs(
+    'named-top-tabs-test',
+    'recent',
+    static function (): void {
+        Route::topTab('recent', Screen::make(Text::make('Recent')), label: 'Recent');
+        Route::topTab('following', Screen::make(Text::make('Following')), label: 'Following');
+    },
+    static fn (\Pam\Native\Navigation\TopTabRouter $tabs): \Pam\Native\Navigation\TopTabRouter =>
+        $tabs->behavior(swipeEnabled: true, scrollEnabled: true, lazy: false),
+);
+$assert(
+    NamedNavigation::navigate('following')
+        && $namedTopTabs->selectedTab() === 'following',
+    'Laravel-style top tabs must expose typed registration and the complete router configurator.',
+);
+$namedDrawer = Route::drawer(
+    'named-drawer-test',
+    'inbox',
+    static function (): void {
+        Route::drawerScreen('inbox', Screen::make(Text::make('Inbox')), label: 'Inbox', badge: '3');
+        Route::drawerScreen('archive', Screen::make(Text::make('Archive')), label: 'Archive', group: 'Library');
+    },
+    static fn (\Pam\Native\Navigation\DrawerRouter $drawer): \Pam\Native\Navigation\DrawerRouter =>
+        $drawer->responsive(720.0)->gestures(edgeWidth: 40.0),
+);
+$assert(
+    NamedNavigation::navigate('archive')
+        && $namedDrawer->selectedRoute() === 'archive',
+    'Laravel-style drawers must expose grouped destinations and the complete router configurator.',
+);
+$declarativeNested = Route::stack(
+    name: 'declarative-root',
+    initial: 'main',
+    routes: static function (): void {
+        Route::navigator(
+            'main',
+            Route::tabs('declarative-tabs', 'feed', static function (): void {
+                Route::tab(
+                    'feed',
+                    Route::stack(
+                        name: 'declarative-feed-stack',
+                        initial: 'feed-index',
+                        routes: static function (): void {
+                            Route::screen('feed-index', static fn () => Screen::make(Text::make('Feed')));
+                            Route::screen('feed-details', static fn () => Screen::make(Text::make('Details')))
+                                ->deepLink('/feed/post/{postId}');
+                        },
+                    ),
+                    label: 'Feed',
+                );
+                Route::tab(
+                    'account',
+                    Route::stack(
+                        name: 'declarative-account-stack',
+                        initial: 'account-index',
+                        routes: static function (): void {
+                            Route::screen('account-index', static fn () => Screen::make(Text::make('Account')));
+                            Route::screen('account-settings', static fn () => Screen::make(Text::make('Settings')))
+                                ->deepLink('/account/settings');
+                        },
+                    ),
+                    label: 'Account',
+                );
+            }),
+        );
+        Route::modal('global-modal', static fn () => Screen::make(Text::make('Modal')));
+    },
+);
+$declarativeNested->render();
+NamedNavigation::push('feed-details');
+$assert(
+    $declarativeNested->canGoBack()
+        && $declarativeNested->goBack()
+        && !$declarativeNested->canGoBack(),
+    'Declarative navigators must nest stacks inside tabs and bubble actions and Back through the focused child.',
+);
+$assert(
+    $declarativeNested->open('pam://app/account/settings')
+        && $declarativeNested->currentPath() === '/account/settings'
+        && $declarativeNested->goBack()
+        && $declarativeNested->open('pam://app/feed/post/42')
+        && $declarativeNested->currentPath() === '/feed/post/42',
+    'Nested linking must select an inactive navigator and preserve canonical child paths and Back history.',
+);
+$nestedSavedState = $declarativeNested->saveState();
+$declarativeNested->goBack();
+NamedNavigation::navigate('account');
+$declarativeNested->restoreState($nestedSavedState);
+$declarativeNested->render();
+$assert(
+    $declarativeNested->currentPath() === '/feed/post/42',
+    'Declarative nested navigators must restore the selected tab and child stack atomically.',
 );
 $headerNavigator = Router::stack('home')
     ->route(
@@ -5607,8 +5790,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.67',
-    'The runtime SDK contract must match the 0.6.67 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.6.68',
+    'The runtime SDK contract must match the 0.6.68 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -5748,15 +5931,30 @@ $cachedImage = Image::make('https://example.com/hero.webp')
     ->maxCacheSize(64 * 1024 * 1024)
     ->resize(720, 1280)
     ->thumbnail('https://example.com/hero-thumb.webp')
-    ->sharedTransition('feed.hero.42')
+    ->sharedTransition(
+        'feed.hero.42',
+        SharedTransitionStyle::spring(durationMs: 420, damping: 0.76)
+            ->resize(SharedTransitionResizeMode::Clip)
+            ->crossFade(),
+    )
     ->checksum(str_repeat('a', 64));
 $cachedImageProperties = $cachedImage->properties();
+$sharedTransitionConfig = json_decode(
+    $cachedImageProperties[PropKey::SharedTransitionConfig->value],
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
 $assert(
     $cachedImageProperties[PropKey::MediaCachePolicy->value]
         === MediaCachePolicy::StaleWhileRevalidate->value
         && $cachedImageProperties[PropKey::MediaCacheKey->value] === 'hero:v3'
         && $cachedImageProperties[PropKey::MediaCacheTags->value] === "feed\nhero"
         && $cachedImageProperties[PropKey::SharedTransitionTag->value] === 'feed.hero.42'
+        && $sharedTransitionConfig['durationMs'] === 420
+        && $sharedTransitionConfig['easing'] === 3
+        && $sharedTransitionConfig['resizeMode'] === 2
+        && $sharedTransitionConfig['crossFade'] === true
+        && $sharedTransitionConfig['damping'] === 0.76
         && $cachedImageProperties[PropKey::MediaCachePinOffline->value] === true
         && $cachedImageProperties[PropKey::MediaResizeWidth->value] === 720
         && $cachedImageProperties[PropKey::MediaCacheChecksum->value] === str_repeat('a', 64),

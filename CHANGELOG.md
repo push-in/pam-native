@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.68 - 2026-08-10
+
+- Added the Laravel-inspired `Route::` navigation facade for composable native
+  stacks, adaptive bottom tabs, swipeable top tabs and responsive drawers.
+  Navigator declarations may be nested without manually attaching hosts, and
+  actions, system Back, state restoration and deep links recurse through the
+  focused child graph.
+- Added composable stack defaults, nested option groups and route-local fluent
+  presentation, sheet, gesture and transition overrides. Deep-link aliases now
+  accumulate per destination instead of replacing earlier patterns. Reusable
+  immutable presets and `RouteModule` composition let feature packages own
+  their route declarations without global registration order.
+- Added string-backed enum destinations, typed `Route::to()` targets and the
+  `pam-native-routes` generator for enum cases and statically typed route helper
+  methods from a validated JSON contract.
+- Added Shared Elements 2 with route-element timing or spring motion, resize
+  strategy, snapshot cross-fade, corner interpolation, Android predictive Back
+  progress and UIKit controller-host support. Cancellation restores original
+  views and temporary native snapshots are bounded and released.
+- Fixed iOS application delegate compatibility by exposing the window contract
+  required by UIKit embedding hosts.
+- Fixed generated Xcode product-name quoting and compiled the iOS bridge
+  cleanly against both PHP 8.4 and PHP 8.5 headers.
+
 ## 0.6.67 - 2026-08-10
 
 - Fixed Android decorative children with ripple styling retaining clickable or

@@ -4,17 +4,22 @@ import android.app.Instrumentation
 import android.content.Intent
 import android.graphics.Color
 import android.os.Build
+import android.provider.Settings
 import android.view.View
 import android.view.WindowInsetsController
 import android.widget.FrameLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
+import dev.pam.nativeapp.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
@@ -333,6 +338,95 @@ class PamNavigationHostInstrumentedTest {
                 assertEquals(View.INVISIBLE, second.visibility)
                 assertEquals(0f, first.translationX, 0.001f)
                 assertEquals(0f, second.translationX, 0.001f)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun sharedElementsFollowPredictiveBackAndRestoreOriginalViews() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        assumeTrue(
+            Settings.Global.getFloat(
+                instrumentation.targetContext.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            ) > 0f,
+        )
+        val activity = launchActivity(instrumentation)
+        val cancelled = CountDownLatch(1)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var source: View
+            lateinit var destination: View
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    layout(0, 0, 1_080, 1_920)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                    setGestureNavigation(
+                        enabled = true,
+                        edgeWidth = 24f,
+                        threshold = 0.35f,
+                        onPop = null,
+                        onTransitionEnd = null,
+                        onGestureStart = null,
+                        onGestureEnd = null,
+                        onGestureCancel = { cancelled.countDown() },
+                    )
+                }
+                activity.host.addView(navigation)
+                val first = FrameLayout(activity).apply { layout(0, 0, 1_080, 1_920) }
+                val second = FrameLayout(activity).apply { layout(0, 0, 1_080, 1_920) }
+                destination = View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(312, 312).apply {
+                        leftMargin = 48
+                        topMargin = 96
+                    }
+                    setTag(R.id.pam_shared_transition_tag, "post:42")
+                    setTag(
+                        R.id.pam_shared_transition_config,
+                        """{"durationMs":420,"easing":3,"resizeMode":2,"crossFade":true,"damping":0.76,"stiffness":240,"mass":1}""",
+                    )
+                }
+                source = View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(300, 300).apply {
+                        leftMargin = 720
+                        topMargin = 1_220
+                    }
+                    setTag(R.id.pam_shared_transition_tag, "post:42")
+                }
+                first.addView(destination)
+                second.addView(source)
+                navigation.insert(first, 0)
+                navigation.insert(second, 1)
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                navigation.transition = TRANSITION_SLIDE_FROM_RIGHT
+                assertTrue(navigation.startPredictiveBack())
+                assertEquals(View.INVISIBLE, source.visibility)
+                assertEquals(View.INVISIBLE, destination.visibility)
+                navigation.updatePredictiveBack(0.5f)
+                navigation.cancelPredictiveBack()
+            }
+            assertTrue(cancelled.await(1, TimeUnit.SECONDS))
+            onMain(instrumentation) {
+                assertEquals(View.VISIBLE, source.visibility)
+                assertEquals(View.VISIBLE, destination.visibility)
+                assertTrue(navigation.startPredictiveBack())
+                navigation.updatePredictiveBack(0.65f)
+                navigation.commitPredictiveBack()
+                navigation.operation = OPERATION_POP
+                navigation.navigate(2)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(View.VISIBLE, source.visibility)
+                assertEquals(View.VISIBLE, destination.visibility)
+                assertTrue(navigation.isActiveRoute(navigation.getChildAt(0)))
             }
         } finally {
             activity.finish()

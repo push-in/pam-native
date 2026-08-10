@@ -38,6 +38,29 @@ $this->replaceRoute('login');
 $this->popRoute();
 ```
 
+String-backed enums can make route names refactor-safe, and `Route::to()`
+packages a validated destination for passing through application code:
+
+```php
+enum AppRoute: string
+{
+    case Home = 'home';
+    case Product = 'product';
+}
+
+Route::stack('main', AppRoute::Home, static function (): void {
+    Route::screen(AppRoute::Home, HomeScreen::class);
+    Route::screen(AppRoute::Product, ProductScreen::class);
+});
+
+Route::to(AppRoute::Product, productId: 42, preview: true)->push();
+```
+
+`pushRoute()`, `navigateRoute()`, `replaceRoute()`, `Route::screen()`,
+`Route::modal()` and `Route::to()` accept the same string-backed enum cases.
+Integer-backed enums are rejected as route names because route identity is
+persisted and linked by stable textual names.
+
 Named arguments are validated against the screen constructor when the route is
 mounted:
 
@@ -58,6 +81,138 @@ Deep links remain explicit and optional:
 Route::screen('profile', ProfileScreen::class)
     ->deepLink('/profiles/{userId}');
 ```
+
+Routes may expose more than one external alias. Chain `deepLink()` calls and
+all unique patterns will resolve to the same named screen:
+
+```php
+Route::screen('profile', ProfileScreen::class)
+    ->deepLink('/u/{username}')
+    ->deepLink('/profile/{username}');
+```
+
+## Route groups and per-screen motion
+
+Route options are composable. Stack defaults are resolved first, followed by
+outer-to-inner groups, the screen's fluent option layers and finally options
+set dynamically by the mounted screen. A later sparse option changes only the
+properties it declares.
+
+```php
+use Pam\Native\Navigation\NavigationGestureDirection;
+use Pam\Native\Navigation\NavigationTransition;
+use Pam\Native\Navigation\ScreenOptions;
+use Pam\Native\Navigation\ScreenOptionsPatch;
+
+$editor = Route::preset(ScreenOptionsPatch::from([
+    'headerShown' => true,
+    'animation' => NavigationTransition::FadeFromBottom,
+]));
+
+$navigator = Route::stack(
+    name: 'main',
+    initial: 'home',
+    options: new ScreenOptions(headerShown: false),
+    routes: function () use ($editor): void {
+        Route::group(
+            $editor,
+            routes: function (): void {
+                Route::screen('profile', ProfileScreen::class)
+                    ->transition(NavigationTransition::SlideFromRight, 240)
+                    ->gesture(
+                        direction: NavigationGestureDirection::Horizontal,
+                        fullScreen: true,
+                    );
+            },
+        );
+
+        Route::modal('filters', FiltersScreen::class)
+            ->transition(NavigationTransition::SlideFromBottom, 260)
+            ->sheet(
+                detents: [0.4, 1.0],
+                grabber: true,
+                cornerRadius: 24.0,
+            );
+    },
+);
+```
+
+`transition()` accepts every native `NavigationTransition` and a per-route
+duration from 0 through 2,000 ms. `gesture()` controls enablement, direction
+and full-screen recognition. `presentation()`, `fullScreen()` and `sheet()` are
+sparse layers and can safely be chained with `options()` in any order.
+`Route::preset()` creates a reusable, immutable option layer accepted by both
+`Route::group()` and a destination's `preset()` or `options()` method. Presets
+are ordinary PHP values, so feature route modules can export them without a
+global string registry or declaration-order coupling.
+
+Feature packages can implement `RouteModule` and compose their graph through
+`Route::module(new ChatRoutes($dependencies))` inside a stack. A module's
+`register()` method uses the same `Route::screen()`, `group()` and nested
+navigator declarations; it does not own or attach a native host. Stateless
+modules may be passed by class name, while modules with dependencies should be
+constructed explicitly. Closures remain supported for small inline modules.
+
+## Nested navigators
+
+Stacks and tabs may be declared inline and registered as ordinary named route
+content. Only the outermost navigator becomes the application navigation
+scope; actions and Back bubble through the focused children.
+
+```php
+$root = Route::stack('root', 'main', static function (): void {
+    Route::navigator(
+        'main',
+        Route::tabs('main-tabs', 'feed', static function (): void {
+            Route::tab(
+                'feed',
+                Route::stack('feed-stack', 'feed-index', static function (): void {
+                    Route::screen('feed-index', FeedScreen::class);
+                    Route::screen('post', PostScreen::class);
+                }),
+                label: 'Feed',
+            );
+            Route::tab('account', AccountScreen::class, label: 'Account');
+        }),
+    );
+
+    Route::modal('create', CreateScreen::class)->fullScreen();
+});
+```
+
+Every child keeps independent state and history. A Back action is offered to
+the focused child first and reaches the parent only when that child is already
+at its root.
+
+## Shared element transitions
+
+Give corresponding elements a stable tag on both screens. The native host
+captures bounded snapshots once, then owns geometry, easing and crossfade on
+the Android/iOS UI thread. PHP is not called for animation frames.
+
+```php
+use Pam\Native\Navigation\SharedTransitionResizeMode;
+use Pam\Native\Navigation\SharedTransitionStyle;
+
+$style = SharedTransitionStyle::spring(
+    durationMs: 420,
+    damping: 0.76,
+    stiffness: 240,
+)->resize(SharedTransitionResizeMode::Clip)->crossFade();
+
+Image::make($thumbnail)
+    ->sharedTransition("post-media:{$postId}", $style);
+```
+
+`timing()` uses native ease-in-out movement. `spring()` adds bounded damping,
+stiffness and mass. Resize modes are `Scale`, `Clip` and `None`; crossfade uses
+separate source and destination snapshots so asynchronous image changes do not
+flash during the handoff. The legacy one-argument `sharedTransition($tag)`
+remains valid and uses the route transition duration.
+
+At most 16 matching elements participate in one transition. Reduced Motion or
+disabled platform animations bypasses the effect, and cleanup always restores
+the original views and releases Android bitmaps after completion or cancel.
 
 The lower-level `Router`, `Navigator`, `NavigationContainer`, action, event,
 and `RouteContext` APIs remain available for custom navigation infrastructure
@@ -132,3 +287,62 @@ or above that width. Only the selected native screen is mounted to minimize
 cold-start work; PHP component instances and `State` preserve each
 destination's state. Selection exposes tab semantics and triggers native
 selection haptics.
+
+Top tabs and drawers use the same declarative route tree. The optional final
+configurator exposes every specialized native router option without expanding
+the common `Route` API:
+
+```php
+$topTabs = Route::topTabs('profile-tabs', 'posts', function (): void {
+    Route::topTab('posts', PostsScreen::class, label: 'Posts');
+    Route::topTab('media', MediaScreen::class, label: 'Media');
+}, fn (TopTabRouter $tabs) => $tabs->behavior(scrollEnabled: true));
+
+$drawer = Route::drawer('workspace', 'inbox', function (): void {
+    Route::drawerScreen('inbox', InboxScreen::class, label: 'Inbox');
+    Route::drawerScreen('archive', ArchiveScreen::class, label: 'Archive', group: 'Library');
+}, fn (DrawerRouter $drawer) => $drawer->responsive(720));
+```
+
+`Route::stack()`, `Route::tabs()`, `Route::topTabs()` and `Route::drawer()` may
+be passed directly to `Route::navigator()` or used as the content of an item.
+Registrar contexts are restored after each nested declaration, so route modules
+can compose navigator trees without global bootstrap ordering or manual host
+attachment.
+
+## Generated typed destinations
+
+For larger applications, keep the public route contract in a small JSON
+manifest and generate both the string-backed destination enum and typed target
+helpers:
+
+```json
+{
+  "namespace": "App\\Navigation\\Generated",
+  "enum": "AppRoute",
+  "helper": "Routes",
+  "routes": [
+    { "name": "home" },
+    {
+      "name": "chat.thread",
+      "case": "ChatThread",
+      "method": "chatThread",
+      "params": [
+        { "name": "threadId", "type": "int" },
+        { "name": "preview", "type": "bool", "required": false, "default": false }
+      ]
+    }
+  ]
+}
+```
+
+```bash
+vendor/bin/pam-native-routes routes.json src/Navigation/Generated
+```
+
+The generated call `Routes::chatThread(threadId: 42)->push()` is checked by PHP
+and static analyzers before runtime, while `AppRoute::ChatThread` is accepted by
+all `Route` and navigation methods. Supported route parameter types are the
+wire-safe scalar types `string`, `int`, `float`, `bool`, with optional nullable
+parameters. Invalid identifiers, duplicate destinations, unsafe defaults and
+required parameters placed after optional ones fail generation atomically.

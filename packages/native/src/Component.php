@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
+use BackedEnum;
 use Closure;
 use LogicException;
 use Pam\Native\Attributes\Computed;
@@ -167,19 +168,19 @@ abstract class Component implements Renderable
     }
 
     /** @param string|int|float|bool|null ...$params */
-    final protected function pushRoute(string $route, mixed ...$params): void
+    final protected function pushRoute(string|BackedEnum $route, mixed ...$params): void
     {
         Navigation::push($route, $params);
     }
 
     /** @param string|int|float|bool|null ...$params */
-    final protected function navigateRoute(string $route, mixed ...$params): bool
+    final protected function navigateRoute(string|BackedEnum $route, mixed ...$params): bool
     {
         return Navigation::navigate($route, $params);
     }
 
     /** @param string|int|float|bool|null ...$params */
-    final protected function replaceRoute(string $route, mixed ...$params): void
+    final protected function replaceRoute(string|BackedEnum $route, mixed ...$params): void
     {
         Navigation::replace($route, $params);
     }

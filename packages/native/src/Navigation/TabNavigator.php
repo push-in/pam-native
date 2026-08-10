@@ -23,7 +23,7 @@ use Pam\Native\UI\View;
 use Pam\Native\WindowMetrics;
 use Closure;
 
-final class TabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler
+final class TabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var list<NavigationTab> */
     private array $tabs;
@@ -126,6 +126,35 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
     public function jumpTo(string $name): bool
     {
         return $this->select($name);
+    }
+
+    public function open(string $uri): bool
+    {
+        $selected = $this->selected - 1;
+        $order = array_merge([$selected], array_values(array_filter(
+            array_keys($this->tabs),
+            static fn (int $index): bool => $index !== $selected,
+        )));
+        foreach ($order as $index) {
+            $child = $this->instance($this->tabs[$index]);
+            if (!$child instanceof NavigationLinkHandler || !$child->open($uri)) continue;
+            if ($index !== $selected) $this->select($this->tabs[$index]->name);
+            $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState()]);
+            return true;
+        }
+        return false;
+    }
+
+    public function currentPath(): ?string
+    {
+        $child = $this->instance($this->tabs[$this->selected - 1]);
+        return $child instanceof NavigationLinkHandler ? $child->currentPath() : null;
+    }
+
+    public function currentUrl(): ?string
+    {
+        $child = $this->instance($this->tabs[$this->selected - 1]);
+        return $child instanceof NavigationLinkHandler ? $child->currentUrl() : null;
     }
 
     public function dispatch(NavigationAction $action): bool
@@ -417,7 +446,12 @@ final class TabNavigator implements Renderable, Restorable, NavigationStateProvi
         if (is_array($state['children'] ?? null)) {
             foreach ($state['children'] as $name => $childState) {
                 if (is_string($name) && is_array($childState)) {
-                    $this->pendingChildState[$name] = $childState;
+                    $instance = $this->instances[$name] ?? null;
+                    if ($instance instanceof Restorable) {
+                        $instance->restoreState($childState);
+                    } else {
+                        $this->pendingChildState[$name] = $childState;
+                    }
                 }
             }
         }

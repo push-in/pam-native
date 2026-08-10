@@ -1,0 +1,38 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [dirname(__DIR__, 3).'/autoload.php', dirname(__DIR__).'/vendor/autoload.php'];
+foreach ($autoloadCandidates as $autoload) {
+    if (is_file($autoload)) { require $autoload; break; }
+}
+if (!class_exists(\Pam\Native\Routing\RouteCodeGenerator::class)) {
+    require dirname(__DIR__).'/src/Routing/RouteCodeGenerator.php';
+}
+
+if ($argc !== 3) {
+    fwrite(STDERR, "Usage: pam-native-routes <routes.json> <output-directory>\n");
+    exit(2);
+}
+
+try {
+    $json = file_get_contents($argv[1]);
+    if ($json === false) throw new RuntimeException("Cannot read route manifest: {$argv[1]}");
+    $files = \Pam\Native\Routing\RouteCodeGenerator::fromJson($json);
+    if (!is_dir($argv[2]) && !mkdir($argv[2], 0775, true) && !is_dir($argv[2])) {
+        throw new RuntimeException("Cannot create output directory: {$argv[2]}");
+    }
+    foreach ($files as $filename => $source) {
+        $target = rtrim($argv[2], DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.$filename;
+        $temporary = $target.'.tmp.'.getmypid();
+        if (file_put_contents($temporary, $source, LOCK_EX) === false || !rename($temporary, $target)) {
+            @unlink($temporary);
+            throw new RuntimeException("Cannot write generated route file: {$target}");
+        }
+        fwrite(STDOUT, "Generated {$target}\n");
+    }
+} catch (Throwable $error) {
+    fwrite(STDERR, $error->getMessage()."\n");
+    exit(1);
+}
