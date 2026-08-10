@@ -271,3 +271,25 @@ or above that width. Only the selected native screen is mounted to minimize
 cold-start work; PHP component instances and `State` preserve each
 destination's state. Selection exposes tab semantics and triggers native
 selection haptics.
+
+Top tabs and drawers use the same declarative route tree. The optional final
+configurator exposes every specialized native router option without expanding
+the common `Route` API:
+
+```php
+$topTabs = Route::topTabs('profile-tabs', 'posts', function (): void {
+    Route::topTab('posts', PostsScreen::class, label: 'Posts');
+    Route::topTab('media', MediaScreen::class, label: 'Media');
+}, fn (TopTabRouter $tabs) => $tabs->behavior(scrollEnabled: true));
+
+$drawer = Route::drawer('workspace', 'inbox', function (): void {
+    Route::drawerScreen('inbox', InboxScreen::class, label: 'Inbox');
+    Route::drawerScreen('archive', ArchiveScreen::class, label: 'Archive', group: 'Library');
+}, fn (DrawerRouter $drawer) => $drawer->responsive(720));
+```
+
+`Route::stack()`, `Route::tabs()`, `Route::topTabs()` and `Route::drawer()` may
+be passed directly to `Route::navigator()` or used as the content of an item.
+Registrar contexts are restored after each nested declaration, so route modules
+can compose navigator trees without global bootstrap ordering or manual host
+attachment.

@@ -5007,6 +5007,36 @@ $assert(
         && $namedTabs->selectedTab() === 'settings',
     'Laravel-style named tabs must select destinations through the shared navigation scope.',
 );
+$namedTopTabs = Route::topTabs(
+    'named-top-tabs-test',
+    'recent',
+    static function (): void {
+        Route::topTab('recent', Screen::make(Text::make('Recent')), label: 'Recent');
+        Route::topTab('following', Screen::make(Text::make('Following')), label: 'Following');
+    },
+    static fn (\Pam\Native\Navigation\TopTabRouter $tabs): \Pam\Native\Navigation\TopTabRouter =>
+        $tabs->behavior(swipeEnabled: true, scrollEnabled: true, lazy: false),
+);
+$assert(
+    NamedNavigation::navigate('following')
+        && $namedTopTabs->selectedTab() === 'following',
+    'Laravel-style top tabs must expose typed registration and the complete router configurator.',
+);
+$namedDrawer = Route::drawer(
+    'named-drawer-test',
+    'inbox',
+    static function (): void {
+        Route::drawerScreen('inbox', Screen::make(Text::make('Inbox')), label: 'Inbox', badge: '3');
+        Route::drawerScreen('archive', Screen::make(Text::make('Archive')), label: 'Archive', group: 'Library');
+    },
+    static fn (\Pam\Native\Navigation\DrawerRouter $drawer): \Pam\Native\Navigation\DrawerRouter =>
+        $drawer->responsive(720.0)->gestures(edgeWidth: 40.0),
+);
+$assert(
+    NamedNavigation::navigate('archive')
+        && $namedDrawer->selectedRoute() === 'archive',
+    'Laravel-style drawers must expose grouped destinations and the complete router configurator.',
+);
 $declarativeNested = Route::stack(
     name: 'declarative-root',
     initial: 'main',

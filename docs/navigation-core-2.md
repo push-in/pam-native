@@ -126,6 +126,13 @@ $tabs = Router::topTabs('feed')
     ->build();
 ```
 
+Applications using the Laravel-style route facade can declare the same native
+navigator with `Route::topTabs()` and `Route::topTab()`. Drawers have matching
+`Route::drawer()` and `Route::drawerScreen()` declarations. Their optional
+configurator closure receives the existing immutable `TopTabRouter` or
+`DrawerRouter`, preserving access to behavior, appearance, gesture, responsive,
+status-bar and custom-content options while keeping the route graph composable.
+
 Top-tab scenes mount lazily and are retained after first use. Swipe recognition
 runs natively; PHP receives only the semantic completion that changes the
 selected route.
