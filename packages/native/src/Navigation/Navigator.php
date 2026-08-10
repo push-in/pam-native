@@ -24,6 +24,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private int $nextId = 2;
     private int $revision = 0;
     private NavigationOperation $operation = NavigationOperation::Idle;
+    private ?NavigationTransition $actionTransition = null;
+    private ?int $actionTransitionDurationMs = null;
     private ?array $outgoing = null;
     private readonly string $navigationKey;
     /** @var array<int, array<int, Closure>> */
@@ -201,7 +203,12 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function push(string|BackedEnum $route, array $params = []): void
+    public function push(
+        string|BackedEnum $route,
+        array $params = [],
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+    ): void
     {
         $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
@@ -213,6 +220,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             throw new InvalidArgumentException("Route {$route} is not currently available.");
         }
         $previous = $this->currentEntry();
+        $this->setActionTransition($transition, $durationMs);
         $this->outgoing = null;
         $this->stack[] = [
             'name' => $route,
@@ -383,10 +391,14 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $activeOptions = $this->currentOptions();
         return NavigationHost::make(
             $this->operation,
-            $activeOptions->animation === NavigationTransition::PlatformDefault
-                ? $this->transition
-                : $activeOptions->animation,
-            $activeOptions->animationDurationMs ?? $this->transitionDurationMs,
+            $this->actionTransition ?? (
+                $activeOptions->animation === NavigationTransition::PlatformDefault
+                    ? $this->transition
+                    : $activeOptions->animation
+            ),
+            $this->actionTransitionDurationMs
+                ?? $activeOptions->animationDurationMs
+                ?? $this->transitionDurationMs,
             $this->revision,
             ...$screens,
         )->gestureNavigation(
@@ -478,7 +490,13 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array<string, string|int|float|bool|null> $params */
-    public function navigate(string|BackedEnum $route, array $params = [], bool $merge = false): void
+    public function navigate(
+        string|BackedEnum $route,
+        array $params = [],
+        bool $merge = false,
+        ?NavigationTransition $transition = null,
+        ?int $durationMs = null,
+    ): void
     {
         $route = RouteName::value($route);
         if (!isset($this->routes[$route])) {
@@ -499,7 +517,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             }
         }
         if ($target === null) {
-            $this->push($route, $params);
+            $this->push($route, $params, $transition, $durationMs);
             return;
         }
         if ($target === count($this->stack) - 1) {
@@ -520,6 +538,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             return;
         }
         if (!$this->mayRemove($previous, NavigationAction::navigate($route, $params, $merge))) return;
+        $this->setActionTransition($transition, $durationMs);
         $this->outgoing = $this->stack[count($this->stack) - 1];
         $this->stack = array_slice($this->stack, 0, $target + 1);
         if ($params !== []) {
@@ -1072,6 +1091,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $entry = $this->outgoing;
         if ($entry === null) {
             $this->operation = NavigationOperation::Idle;
+            $this->actionTransition = null;
+            $this->actionTransitionDurationMs = null;
 
             return;
         }
@@ -1090,6 +1111,18 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $this->outgoing = null;
         $this->operation = NavigationOperation::Idle;
+        $this->actionTransition = null;
+        $this->actionTransitionDurationMs = null;
+    }
+
+    private function setActionTransition(
+        ?NavigationTransition $transition,
+        ?int $durationMs,
+    ): void {
+        $this->actionTransition = $transition;
+        $this->actionTransitionDurationMs = $durationMs === null
+            ? null
+            : max(0, min(2_000, $durationMs));
     }
 
     private function observeChildNavigator(string $key, Renderable $instance): void

@@ -4938,6 +4938,25 @@ $assert(
 $navigator->navigate(TypedRouteTestName::Home);
 $navigator->push(TypedRouteTestName::Product);
 $assert($navigator->popTo(TypedRouteTestName::Home), 'Navigator::popTo must accept string-backed route enums.');
+$navigator->navigate(
+    TypedRouteTestName::Product,
+    transition: NavigationTransition::None,
+    durationMs: 0,
+);
+$instantNavigation = $navigator->render()->toElement();
+$assert(
+    $instantNavigation->properties()[PropKey::NavigationTransition->value] === NavigationTransition::None->value
+        && $instantNavigation->properties()[PropKey::NavigationDurationMs->value] === 0,
+    'Navigator actions must override route transitions without mutating route configuration.',
+);
+$instantTransitionEnd = $instantNavigation->events()[EventKind::AnimationComplete->value] ?? null;
+$assert($instantTransitionEnd instanceof Closure, 'Instant navigation must still settle its native operation.');
+$instantTransitionEnd('');
+$assert(
+    $navigator->render()->toElement()->properties()[PropKey::NavigationTransition->value]
+        === NavigationTransition::Fade->value,
+    'Action transition overrides must clear after the navigation settles.',
+);
 $systemBackConsumed = false;
 $navigator->interceptSystemBack(static function () use (&$systemBackConsumed): bool {
     $systemBackConsumed = true;

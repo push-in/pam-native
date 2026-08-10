@@ -62,6 +62,22 @@ $navigator->reset(AppRoute::Home);
 $navigator->preload(AppRoute::Product);
 ```
 
+An individual navigation can override the route or stack animation. This is
+useful for peer destinations such as a bottom navigation bar, without changing
+how the same screen animates when it is pushed from elsewhere:
+
+```php
+$navigator->navigate(
+    AppRoute::Home,
+    transition: NavigationTransition::None,
+    durationMs: 0,
+);
+```
+
+The override applies only to that action. After its native transition settles,
+the navigator resumes the animation configured by `Route::screen()`,
+`Route::group()` or `Route::stack()`.
+
 `pushRoute()`, `navigateRoute()`, `replaceRoute()`, `Route::screen()`,
 `Route::modal()`, `Route::to()`, lower-level `Navigator` operations,
 `NavigationAction`, tabs and drawer selectors accept the same string-backed
