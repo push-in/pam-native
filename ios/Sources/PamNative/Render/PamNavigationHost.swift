@@ -65,14 +65,25 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     private weak var containerController: UIViewController?
     private var navigationController: UINavigationController?
     private var presentedNavigationController: UINavigationController?
+    private struct SharedElementConfig: Decodable {
+        var durationMs = 500
+        var easing = 2
+        var resizeMode = 1
+        var crossFade = true
+        var damping = 0.82
+        var stiffness = 220.0
+        var mass = 1.0
+    }
     private struct SharedElementAnimation {
         let snapshot: UIView
+        let targetSnapshot: UIView?
         let source: UIView
         let destination: UIView
         let startFrame: CGRect
         let endFrame: CGRect
         let startRadius: CGFloat
         let endRadius: CGFloat
+        let config: SharedElementConfig
     }
     private var sharedElements: [SharedElementAnimation] = []
     private lazy var edgeGesture = UIPanGestureRecognizer(
@@ -191,10 +202,11 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             return
         }
         applyProgress(0, incoming: incoming, outgoing: outgoing, kind: kind)
+        let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
         UIView.animate(
-            withDuration: min(max(duration, 0), 2),
+            withDuration: min(max(max(duration, sharedDuration), 0), 2),
             delay: 0,
-            options: [.curveEaseOut, .beginFromCurrentState]
+            options: [.curveLinear, .beginFromCurrentState]
         ) {
             self.applyProgress(1, incoming: incoming, outgoing: outgoing, kind: kind)
         } completion: { _ in
@@ -309,24 +321,52 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                   source.bounds.width > 0, source.bounds.height > 0,
                   destination.bounds.width > 0, destination.bounds.height > 0,
                   let snapshot = source.snapshotView(afterScreenUpdates: false) else { continue }
+            let config = sharedElementConfig(for: destination)
+                ?? sharedElementConfig(for: source)
+                ?? SharedElementConfig(durationMs: Int(duration * 1000))
             let start = source.convert(source.bounds, to: self)
             let end = destination.convert(destination.bounds, to: self)
             snapshot.frame = start
             snapshot.layer.masksToBounds = true
             snapshot.layer.cornerRadius = source.layer.cornerRadius
+            let targetSnapshot = config.crossFade
+                ? destination.snapshotView(afterScreenUpdates: true)
+                : nil
             source.isHidden = true
             destination.isHidden = true
             addSubview(snapshot)
+            targetSnapshot?.frame = start
+            targetSnapshot?.alpha = 0
+            targetSnapshot?.layer.masksToBounds = true
+            targetSnapshot?.layer.cornerRadius = source.layer.cornerRadius
+            if let targetSnapshot { addSubview(targetSnapshot) }
             sharedElements.append(SharedElementAnimation(
                 snapshot: snapshot,
+                targetSnapshot: targetSnapshot,
                 source: source,
                 destination: destination,
                 startFrame: start,
                 endFrame: end,
                 startRadius: source.layer.cornerRadius,
-                endRadius: destination.layer.cornerRadius
+                endRadius: destination.layer.cornerRadius,
+                config: config
             ))
         }
+    }
+
+    private func sharedElementConfig(for view: UIView) -> SharedElementConfig? {
+        guard let encoded = view.layer.value(forKey: "pamSharedTransitionConfig") as? String,
+              let data = encoded.data(using: .utf8),
+              var config = try? JSONDecoder().decode(SharedElementConfig.self, from: data) else {
+            return nil
+        }
+        config.durationMs = min(max(config.durationMs, 0), 2_000)
+        config.easing = min(max(config.easing, 1), 3)
+        config.resizeMode = min(max(config.resizeMode, 1), 3)
+        config.damping = min(max(config.damping, 0.01), 1)
+        config.stiffness = min(max(config.stiffness, 1), 1_000)
+        config.mass = min(max(config.mass, 0.1), 10)
+        return config
     }
 
     private func sharedElementViews(in root: UIView) -> [String: UIView] {
@@ -344,13 +384,41 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
 
     private func applySharedElementProgress(_ progress: CGFloat) {
         for item in sharedElements {
-            item.snapshot.frame = CGRect(
-                x: item.startFrame.minX + (item.endFrame.minX - item.startFrame.minX) * progress,
-                y: item.startFrame.minY + (item.endFrame.minY - item.startFrame.minY) * progress,
-                width: item.startFrame.width + (item.endFrame.width - item.startFrame.width) * progress,
-                height: item.startFrame.height + (item.endFrame.height - item.startFrame.height) * progress
+            let adjusted = sharedElementProgress(progress, config: item.config)
+            let endFrame = item.config.resizeMode == 3
+                ? CGRect(origin: item.endFrame.origin, size: item.startFrame.size)
+                : item.endFrame
+            let frame = CGRect(
+                x: item.startFrame.minX + (endFrame.minX - item.startFrame.minX) * adjusted,
+                y: item.startFrame.minY + (endFrame.minY - item.startFrame.minY) * adjusted,
+                width: item.startFrame.width + (endFrame.width - item.startFrame.width) * adjusted,
+                height: item.startFrame.height + (endFrame.height - item.startFrame.height) * adjusted
             )
-            item.snapshot.layer.cornerRadius = item.startRadius + (item.endRadius - item.startRadius) * progress
+            item.snapshot.frame = frame
+            item.targetSnapshot?.frame = frame
+            let radius = item.startRadius + (item.endRadius - item.startRadius) * adjusted
+            item.snapshot.layer.cornerRadius = radius
+            item.targetSnapshot?.layer.cornerRadius = radius
+            if let target = item.targetSnapshot {
+                item.snapshot.alpha = 1 - adjusted
+                target.alpha = adjusted
+            }
+        }
+    }
+
+    private func sharedElementProgress(
+        _ progress: CGFloat,
+        config: SharedElementConfig
+    ) -> CGFloat {
+        switch config.easing {
+        case 1:
+            return progress
+        case 3:
+            let damping = CGFloat(config.damping)
+            let frequency = CGFloat(sqrt(config.stiffness / config.mass) * 0.12)
+            return min(max(1 - exp(-damping * 7 * progress) * cos(frequency * progress), 0), 1.08)
+        default:
+            return progress * progress * (3 - 2 * progress)
         }
     }
 
@@ -359,6 +427,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             item.source.isHidden = false
             item.destination.isHidden = false
             item.snapshot.removeFromSuperview()
+            item.targetSnapshot?.removeFromSuperview()
         }
         sharedElements.removeAll(keepingCapacity: true)
     }
@@ -379,6 +448,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             onGestureStart?()
             incoming.isHidden = false
             outgoing.isHidden = false
+            prepareSharedElements(incoming: incoming, outgoing: outgoing)
             fallthrough
         case .changed:
             incoming.isHidden = false
@@ -390,6 +460,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                 ? CGAffineTransform(translationX: 0, y: -bounds.height * 0.12 * (1 - progress))
                 : CGAffineTransform(translationX: -sign * bounds.width * 0.28 * (1 - progress), y: 0)
             incoming.alpha = 0.82 + 0.18 * progress
+            applySharedElementProgress(progress)
         case .ended, .cancelled:
             let rawVelocity = gestureDirection == 2 ? gesture.velocity(in: self).y : gesture.velocity(in: self).x
             let velocity = gestureDirection == 2 ? rawVelocity : rawVelocity * (rtl ? -1 : 1)
@@ -409,6 +480,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                     ? .identity
                     : CGAffineTransform(translationX: -sign * self.bounds.width * 0.28, y: 0)
                 incoming.alpha = complete ? 1 : 0.82
+                self.applySharedElementProgress(complete ? 1 : 0)
             } completion: { _ in
                 incoming.transform = .identity
                 outgoing.transform = .identity
@@ -419,6 +491,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                     self.onGestureEnd?()
                     self.onGesturePop?()
                 } else {
+                    self.clearSharedElements()
                     incoming.isHidden = true
                     self.onGestureCancel?()
                 }

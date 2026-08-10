@@ -168,6 +168,36 @@ Every child keeps independent state and history. A Back action is offered to
 the focused child first and reaches the parent only when that child is already
 at its root.
 
+## Shared element transitions
+
+Give corresponding elements a stable tag on both screens. The native host
+captures bounded snapshots once, then owns geometry, easing and crossfade on
+the Android/iOS UI thread. PHP is not called for animation frames.
+
+```php
+use Pam\Native\Navigation\SharedTransitionResizeMode;
+use Pam\Native\Navigation\SharedTransitionStyle;
+
+$style = SharedTransitionStyle::spring(
+    durationMs: 420,
+    damping: 0.76,
+    stiffness: 240,
+)->resize(SharedTransitionResizeMode::Clip)->crossFade();
+
+Image::make($thumbnail)
+    ->sharedTransition("post-media:{$postId}", $style);
+```
+
+`timing()` uses native ease-in-out movement. `spring()` adds bounded damping,
+stiffness and mass. Resize modes are `Scale`, `Clip` and `None`; crossfade uses
+separate source and destination snapshots so asynchronous image changes do not
+flash during the handoff. The legacy one-argument `sharedTransition($tag)`
+remains valid and uses the route transition duration.
+
+At most 16 matching elements participate in one transition. Reduced Motion or
+disabled platform animations bypasses the effect, and cleanup always restores
+the original views and releases Android bitmaps after completion or cancel.
+
 The lower-level `Router`, `Navigator`, `NavigationContainer`, action, event,
 and `RouteContext` APIs remain available for custom navigation infrastructure
 and are source-compatible with existing applications.

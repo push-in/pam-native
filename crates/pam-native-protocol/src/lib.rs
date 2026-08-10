@@ -539,6 +539,7 @@ pub enum PropKey {
     BorderStyle = 446,
     ScrollTargetAlignment = 447,
     PressScale = 448,
+    SharedTransitionConfig = 449,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -994,6 +995,7 @@ impl TryFrom<u16> for PropKey {
             446 => Ok(Self::BorderStyle),
             447 => Ok(Self::ScrollTargetAlignment),
             448 => Ok(Self::PressScale),
+            449 => Ok(Self::SharedTransitionConfig),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1858,10 +1860,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=448 {
+        for value in 1..=449 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(449).is_err());
+        assert!(PropKey::try_from(450).is_err());
     }
 
     #[test]

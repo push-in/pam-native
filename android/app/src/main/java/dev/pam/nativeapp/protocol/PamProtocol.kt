@@ -564,7 +564,8 @@ enum class PropKey(val value: Int) {
     NAVIGATION_BAR_HIDDEN(445),
     BORDER_STYLE(446),
     SCROLL_TARGET_ALIGNMENT(447),
-    PRESS_SCALE(448);
+    PRESS_SCALE(448),
+    SHARED_TRANSITION_CONFIG(449);
 
     companion object {
         fun from(value: Int): PropKey =

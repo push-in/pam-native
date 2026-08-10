@@ -1519,6 +1519,8 @@ public final class PamRenderer {
             view.accessibilityIdentifier = value.textOrNil()
         case PamConstants.sharedTransitionTag:
             view.layer.setValue(value.textOrNil(), forKey: "pamSharedTransitionTag")
+        case PamConstants.sharedTransitionConfig:
+            view.layer.setValue(value.textOrNil(), forKey: "pamSharedTransitionConfig")
         case PamConstants.textColor:
             if let color = value.integerOrNil() {
                 if let label = view as? UILabel {
@@ -1897,6 +1899,8 @@ public final class PamRenderer {
             }
         case PamConstants.sharedTransitionTag:
             view.layer.setValue(nil, forKey: "pamSharedTransitionTag")
+        case PamConstants.sharedTransitionConfig:
+            view.layer.setValue(nil, forKey: "pamSharedTransitionConfig")
         case PamConstants.navigationOperation:
             (view as? PamNavigationHost)?.operation = 1
         case PamConstants.navigationTransition:

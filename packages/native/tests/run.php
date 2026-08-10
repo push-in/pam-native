@@ -104,6 +104,8 @@ use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
+use Pam\Native\Navigation\SharedTransitionResizeMode;
+use Pam\Native\Navigation\SharedTransitionStyle;
 use Pam\Native\Navigation\NavigationPresentation;
 use Pam\Native\Navigation\NavigationRef;
 use Pam\Native\Navigation\NavigationLifecycleAware;
@@ -5850,15 +5852,30 @@ $cachedImage = Image::make('https://example.com/hero.webp')
     ->maxCacheSize(64 * 1024 * 1024)
     ->resize(720, 1280)
     ->thumbnail('https://example.com/hero-thumb.webp')
-    ->sharedTransition('feed.hero.42')
+    ->sharedTransition(
+        'feed.hero.42',
+        SharedTransitionStyle::spring(durationMs: 420, damping: 0.76)
+            ->resize(SharedTransitionResizeMode::Clip)
+            ->crossFade(),
+    )
     ->checksum(str_repeat('a', 64));
 $cachedImageProperties = $cachedImage->properties();
+$sharedTransitionConfig = json_decode(
+    $cachedImageProperties[PropKey::SharedTransitionConfig->value],
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
 $assert(
     $cachedImageProperties[PropKey::MediaCachePolicy->value]
         === MediaCachePolicy::StaleWhileRevalidate->value
         && $cachedImageProperties[PropKey::MediaCacheKey->value] === 'hero:v3'
         && $cachedImageProperties[PropKey::MediaCacheTags->value] === "feed\nhero"
         && $cachedImageProperties[PropKey::SharedTransitionTag->value] === 'feed.hero.42'
+        && $sharedTransitionConfig['durationMs'] === 420
+        && $sharedTransitionConfig['easing'] === 3
+        && $sharedTransitionConfig['resizeMode'] === 2
+        && $sharedTransitionConfig['crossFade'] === true
+        && $sharedTransitionConfig['damping'] === 0.76
         && $cachedImageProperties[PropKey::MediaCachePinOffline->value] === true
         && $cachedImageProperties[PropKey::MediaResizeWidth->value] === 720
         && $cachedImageProperties[PropKey::MediaCacheChecksum->value] === str_repeat('a', 64),

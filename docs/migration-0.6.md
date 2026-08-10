@@ -67,6 +67,7 @@ Protocol version remains `1` and all changes are append-only:
 - node kind `Canvas = 31`;
 - property `CanvasCommands = 440`.
 - property `PressScale = 448`.
+- property `SharedTransitionConfig = 449`.
 
 PHP, Rust, Android and iOS artifacts must be upgraded together when Canvas is
 used. Existing protocol frames remain valid.
