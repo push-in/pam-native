@@ -204,6 +204,17 @@ Image::make($thumbnail)
     ->sharedTransition("post-media:{$postId}", $style);
 ```
 
+The same contract is available in PAM templates. A bound style remains a typed
+PHP value and is encoded before it reaches the retained tree:
+
+```php
+<Image
+    :source="$thumbnail"
+    :shared-transition="'post-media:'.$postId"
+    :shared-transition-style="$sharedStyle"
+/>
+```
+
 `timing()` uses native ease-in-out movement. `spring()` adds bounded damping,
 stiffness and mass. Resize modes are `Scale`, `Clip` and `None`; crossfade uses
 separate source and destination snapshots so asynchronous image changes do not

@@ -51,6 +51,7 @@ use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\Navigation\SharedTransitionStyle;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\TemplateRegistry;
 use Pam\Native\TemplateException;
@@ -1292,6 +1293,18 @@ final class TemplateRenderer
         Image|MediaPlayer $element,
         array $values,
     ): Image|MediaPlayer {
+        if (isset($values['sharedTransition'])) {
+            $style = $values['sharedTransitionStyle'] ?? null;
+            if ($style !== null && !$style instanceof SharedTransitionStyle) {
+                throw new InvalidArgumentException(
+                    'Media sharedTransitionStyle must be a SharedTransitionStyle.',
+                );
+            }
+            $element = $element->sharedTransition(
+                self::stringValue($values['sharedTransition'], 'Media sharedTransition'),
+                $style,
+            );
+        }
         if (array_key_exists('cache', $values)) {
             $element = $element->cache(self::mediaCachePolicy($values['cache']));
         }
