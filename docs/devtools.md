@@ -9,11 +9,11 @@ runtime errors.
 Start the application and toggle the overlay from another terminal:
 
 ```bash
-pam mobile dev .
-pam mobile devtools .
+pam mobile dev
+pam mobile devtools
 ```
 
-Run `pam mobile devtools .` again to hide it. The receiver and overlay are not
+Run `pam mobile devtools` again to hide it. The receiver and overlay are not
 registered in release builds.
 
 The raw Android command is also available for integrations:
@@ -24,7 +24,7 @@ adb shell am broadcast \
   -p your.application.id.debug
 ```
 
-Use the overlay alongside `pam mobile benchmark .` and `pam mobile profile .`.
+Use the overlay alongside `pam mobile benchmark` and `pam mobile profile`.
 The overlay helps identify an expensive interactive path; the benchmark and
 baseline-profile commands provide repeatable evidence suitable for CI.
 

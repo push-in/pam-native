@@ -142,7 +142,7 @@ Wrap layered content in a `View`, or use a complete `p-if`/`p-else-if`/`p-else`
 chain when the child type changes. The compiler rejects zero-child and
 multi-child detector trees before they reach a device.
 
-`v-if`, `v-else-if`, `v-else`, and `v-for` remain accepted temporarily when
+Legacy Vue-prefixed condition/repetition directives remain accepted temporarily when
 migrating existing components. They are deprecated aliases; new code and
 editor metadata use the distinctive `p-*` PAM directives.
 

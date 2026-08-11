@@ -17,10 +17,10 @@ classpaths, load DEX files, or parse plugin JSON during a frame.
 
 ```bash
 composer require vendor/maps-plugin
-pam mobile plugin:doctor .
-pam mobile plugin:list .
-pam mobile codegen .
-pam mobile ios:prepare .
+pam mobile plugin:doctor
+pam mobile plugin:list
+pam mobile codegen
+pam mobile ios:prepare
 ```
 
 `prepare`, `build`, `run`, and `dev` also run codegen automatically. The

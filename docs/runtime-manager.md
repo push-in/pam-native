@@ -19,10 +19,10 @@ writes `.pam-native/runtime.lock.json`. Build, run, development and profiling
 all use that exact PAM-owned runtime directory.
 
 ```bash
-pam mobile runtime:list .
-pam mobile runtime:use 8.5 .
-pam mobile runtime:info .
-pam mobile runtime:update .
+pam mobile runtime:list
+pam mobile runtime:use 8.5
+pam mobile runtime:info
+pam mobile runtime:update
 ```
 
 Runtime IDs use `<php-version>-r<revision>`. A PHP security update changes the

@@ -440,8 +440,8 @@ For non-virtualized responsive screens, `Grid::make(...$children)` provides a
 `sm`/`md`/`lg`/`xl` breakpoints. See `docs/components.md` for fluent and tag
 examples.
 
-Run `pam mobile benchmark .` on a physical device for release-like AndroidX
-Macrobenchmarks, and `pam mobile profile .` to generate the Baseline Profile
+Run `pam mobile benchmark` on a physical device for release-like AndroidX
+Macrobenchmarks, and `pam mobile profile` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in
 `PROTOCOL.md`.
 
