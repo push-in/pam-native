@@ -262,7 +262,7 @@ installation is intended for custom hosts and framework contributors; most
 applications should start with `pam init` or `pam add`:
 
 ```bash
-composer require pushinbr/pam-native:^0.6
+pam composer require pushinbr/pam-native:^0.6
 ```
 
 ## Community
