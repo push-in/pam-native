@@ -2,9 +2,12 @@
 
 ## Unreleased
 
-- Add a bounded, redacted Android DevTools snapshot transport for contextual
-  `pam diagnostics`, protected by Android's privileged `DUMP` permission and
-  backed by one-use private-cache files available only in debug builds.
+- Add bounded, redacted Android and iOS Simulator DevTools snapshot transports
+  for contextual `pam diagnostics`, backed by one-use private-cache files
+  available only through debug hosts. Android is protected by the privileged
+  `DUMP` permission; iOS uses an application-scoped URL and simulator container.
+- Wire the generated iOS host to the UIKit DevTools overlay and runtime metrics
+  by default in debug builds.
 
 ## 0.6.73 - 2026-08-10
 

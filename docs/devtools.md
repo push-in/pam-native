@@ -16,13 +16,15 @@ pam mobile devtools
 Run `pam mobile devtools` again to hide it. The receiver and overlay are not
 registered in release builds.
 
-Capture the same live Android metrics as a machine-readable schema 1 snapshot
+Capture the same live metrics as a machine-readable schema 1 snapshot
 from the project root:
 
 ```bash
 pam diagnostics
 # Explicit form for automation:
 pam mobile diagnostics .
+# Explicit iOS simulator form:
+pam mobile ios:diagnostics .
 ```
 
 The receiver requires Android's privileged `DUMP` permission, which ADB's shell
@@ -33,8 +35,18 @@ reads the result from its private cache through Android `run-as`, enforces a
 one pending snapshot and performs file I/O on a dedicated executor. Timeline
 entries expose only integer kind, duration and failure state; diagnostic labels
 and application error messages are deliberately excluded. Release builds do
-not register the capture receiver. External iOS snapshot transport remains an
-open parity item; the UIKit overlay continues to provide the in-app view.
+not register the capture receiver.
+
+The generated iOS debug host now installs and wires the UIKit overlay
+automatically. `pam devtools` toggles it in an iOS-only project; the explicit
+form is `pam mobile ios:devtools .`. Simulator capture opens an
+application-scoped URL containing a
+one-use request identifier, writes the redacted snapshot to the app's private
+Caches directory on a utility queue, reads it through `simctl
+get_app_container`, enforces the same 64 KiB contract and removes it. Only one
+pending Native snapshot is retained. The URL handler is compiled out of release
+builds; physical-device export remains intentionally unavailable because it
+would require a broader trust and pairing protocol.
 
 The raw Android command is also available for integrations:
 
@@ -50,9 +62,9 @@ baseline-profile commands provide repeatable evidence suitable for CI.
 
 ## iOS
 
-UIKit hosts can install the reusable `PamDevToolsOverlay` over their PAM host
-view. Forward the existing runtime frame callback and toggle it from a debug
-gesture:
+Custom UIKit hosts can install the reusable `PamDevToolsOverlay` over their PAM
+host view. The generated host already does this. Forward the existing runtime
+frame callback and toggle it from a debug gesture:
 
 ```swift
 let devTools = PamDevToolsOverlay()

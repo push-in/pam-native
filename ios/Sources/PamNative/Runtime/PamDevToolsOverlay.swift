@@ -60,6 +60,43 @@ public final class PamDevToolsOverlay: UIView {
         if !isHidden { renderMetrics() }
     }
 
+    public func snapshotData(capturedAtUnixMs: Int64? = nil) throws -> Data {
+        let metrics = latestMetrics
+        let stats = metrics?.stats
+        let timeline = diagnostics.map { item in
+            [
+                "kindCode": item.kind.rawValue,
+                "durationMicros": item.durationNanos / 1_000,
+                "failed": item.failed,
+            ] as [String: Any]
+        }
+        let frame: [String: Any] = [
+            "batches": metrics?.batches ?? 0,
+            "decodeMicros": (metrics?.decodeNanos ?? 0) / 1_000,
+            "mountMicros": (metrics?.mountNanos ?? 0) / 1_000,
+            "nodes": stats?.nodes ?? 0,
+            "measuredFrames": stats?.measuredFrames ?? 0,
+            "deadlineMisses": stats?.deadlineMisses ?? 0,
+            "patchCommits": stats?.patchCommits ?? 0,
+            "fullCommits": stats?.fullCommits ?? 0,
+            "decodeP95Micros": stats?.decodeP95Micros ?? 0,
+            "reconcileP95Micros": stats?.reconcileP95Micros ?? 0,
+            "layoutP95Micros": stats?.layoutP95Micros ?? 0,
+            "encodeP95Micros": stats?.encodeP95Micros ?? 0,
+        ]
+        let snapshot: [String: Any] = [
+            "schemaVersion": 1,
+            "surfaceCode": 2,
+            "capturedAtUnixMs": capturedAtUnixMs ?? Int64(Date().timeIntervalSince1970 * 1_000),
+            "platformCode": 2,
+            "framesPerSecond": smoothedFps,
+            "retainedBytes": stats?.retainedBytes ?? 0,
+            "frame": frame,
+            "timeline": timeline,
+        ]
+        return try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])
+    }
+
     @discardableResult
     public func toggle() -> Bool {
         setVisible(isHidden)

@@ -79,6 +79,28 @@ final class CapabilityIntegrationTests: XCTestCase {
         XCTAssertTrue(overlay.accessibilityValue?.contains("permissions.request") == true)
     }
 
+    func testDevToolsExportsBoundedRedactedCrossHostSnapshot() throws {
+        let overlay = PamDevToolsOverlay(frame: .zero)
+        for index in 0..<12 {
+            overlay.record(RuntimeDiagnostic(
+                kind: .error,
+                label: "secret-\(index)",
+                failed: true
+            ))
+        }
+
+        let data = try overlay.snapshotData(capturedAtUnixMs: 1_234)
+        let snapshot = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(snapshot["schemaVersion"] as? Int, 1)
+        XCTAssertEqual(snapshot["surfaceCode"] as? Int, 2)
+        XCTAssertEqual(snapshot["platformCode"] as? Int, 2)
+        XCTAssertEqual(snapshot["capturedAtUnixMs"] as? Int, 1_234)
+        XCTAssertEqual((snapshot["timeline"] as? [[String: Any]])?.count, 8)
+        XCTAssertFalse(String(data: data, encoding: .utf8)?.contains("secret-") == true)
+    }
+
     func testWatchChannelDropsOldValuesAndKeepsLatestBackpressureWindow() {
         let channel = WatchChannel()
         for value in 1...8 {
