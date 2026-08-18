@@ -1,10 +1,13 @@
 name: Ecosystem iOS certification
 
 on:
+  workflow_call:
   push:
     branches: [main]
     paths:
       - Cargo.toml
+      - Cargo.lock
+      - ios/**
       - packages/native/**
       - certification/ios-ecosystem/**
       - .github/workflows/ecosystem-ios.yml

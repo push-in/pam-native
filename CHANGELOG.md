@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Make Native source CI and both aggregate plugin certifications reusable and
+  mandatory for every version tag. Android/iOS source changes now trigger their
+  ecosystem workflows automatically instead of relying on a manual dispatch.
 - Add bounded Android and iOS HTTP diagnostics to the redacted Native DevTools
   timeline. Exports include only integer method/status codes, byte counts,
   duration and failure state; URLs, headers and bodies remain excluded.

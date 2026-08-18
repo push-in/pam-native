@@ -18,9 +18,21 @@ defaults:
     shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
+  source-contracts:
+    name: Certify source contracts and device hosts
+    uses: ./.github/workflows/ci.yml
+
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
     uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main
+
+  ecosystem-android:
+    name: Certify official Android plugins
+    uses: ./.github/workflows/ecosystem-android.yml
+
+  ecosystem-ios:
+    name: Certify official iOS plugins
+    uses: ./.github/workflows/ecosystem-ios.yml
 
   ios:
     name: Package iOS renderer
@@ -161,7 +173,10 @@ jobs:
       - ios
       - android
       - php-sdk
+      - source-contracts
       - ecosystem-compatibility
+      - ecosystem-android
+      - ecosystem-ios
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8

@@ -1,11 +1,17 @@
 name: Ecosystem Android certification
 
 on:
+  workflow_call:
   push:
     branches: [main]
     paths:
       - Cargo.toml
+      - Cargo.lock
+      - android/**
+      - crates/**
+      - native/**
       - packages/native/**
+      - scripts/**
       - certification/android-ecosystem/**
       - .github/workflows/ecosystem-android.yml
   workflow_dispatch:

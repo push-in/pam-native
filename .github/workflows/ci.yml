@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches:
@@ -57,6 +58,7 @@ jobs:
           php packages/native/tests/performance.php
           php packages/native/tests/navigation_performance.php
           php packages/native/tests/fuzz.php
+          php scripts/test-release-workflows.php
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null
           python3 -m json.tool benchmarks/ios/budgets.json >/dev/null

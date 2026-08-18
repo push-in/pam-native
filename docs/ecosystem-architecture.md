@@ -55,3 +55,11 @@ Every repository must pass the following gates before its first stable tag:
 
 No package may advertise a certification gate as passed without retaining the
 corresponding CI run or external test evidence.
+
+PAM Native tag publication is fail-closed around these contracts. The release
+workflow calls the complete source CI plus the aggregate Android and iOS plugin
+builds from the exact tagged commit, and the GitHub Release job depends on all
+three as well as the central Composer ecosystem matrix. The same aggregate
+workflows run automatically on relevant `android/**`, `ios/**`, engine,
+protocol, PHP SDK and certification-source changes on `main`; manual dispatch
+is retained only for drift checks and incident recovery.
