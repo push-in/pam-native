@@ -16,6 +16,26 @@ pam mobile devtools
 Run `pam mobile devtools` again to hide it. The receiver and overlay are not
 registered in release builds.
 
+Capture the same live Android metrics as a machine-readable schema 1 snapshot
+from the project root:
+
+```bash
+pam diagnostics
+# Explicit form for automation:
+pam mobile diagnostics .
+```
+
+The receiver requires Android's privileged `DUMP` permission, which ADB's shell
+holds but ordinary applications cannot request. The CLI also sends a one-use
+128-bit request identifier to the running debug app,
+reads the result from its private cache through Android `run-as`, enforces a
+64 KiB response limit, and deletes the file immediately. The host keeps at most
+one pending snapshot and performs file I/O on a dedicated executor. Timeline
+entries expose only integer kind, duration and failure state; diagnostic labels
+and application error messages are deliberately excluded. Release builds do
+not register the capture receiver. External iOS snapshot transport remains an
+open parity item; the UIKit overlay continues to provide the in-app view.
+
 The raw Android command is also available for integrations:
 
 ```bash

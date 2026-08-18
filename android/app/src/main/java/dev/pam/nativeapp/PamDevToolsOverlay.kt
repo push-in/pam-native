@@ -10,6 +10,8 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import java.util.Locale
 import java.util.ArrayDeque
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class RuntimeDiagnosticKind(val value: Int) {
     MODULE_CALL(1),
@@ -106,6 +108,45 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         } else {
             post { appendDiagnostic(diagnostic) }
         }
+    }
+
+    fun snapshotJson(capturedAtUnixMs: Long = System.currentTimeMillis()): String {
+        val metrics = latestMetrics
+        val stats = metrics?.stats
+        val timeline = JSONArray()
+        diagnostics.forEach { item ->
+            timeline.put(
+                JSONObject()
+                    .put("kindCode", item.kind.value)
+                    .put("durationMicros", item.durationNanos / 1_000)
+                    .put("failed", item.failed),
+            )
+        }
+        return JSONObject()
+            .put("schemaVersion", 1)
+            .put("surfaceCode", 2)
+            .put("capturedAtUnixMs", capturedAtUnixMs)
+            .put("platformCode", 1)
+            .put("framesPerSecond", smoothedFps)
+            .put("nativeHeapBytes", Debug.getNativeHeapAllocatedSize())
+            .put(
+                "frame",
+                JSONObject()
+                    .put("batches", metrics?.batches ?: 0)
+                    .put("decodeMicros", (metrics?.decodeNanos ?: 0) / 1_000)
+                    .put("mountMicros", (metrics?.mountNanos ?: 0) / 1_000)
+                    .put("nodes", stats?.nodes ?: 0)
+                    .put("measuredFrames", stats?.measuredFrames ?: 0)
+                    .put("deadlineMisses", stats?.deadlineMisses ?: 0)
+                    .put("patchCommits", stats?.patchCommits ?: 0)
+                    .put("fullCommits", stats?.fullCommits ?: 0)
+                    .put("decodeP95Micros", stats?.decodeP95Micros ?: 0)
+                    .put("reconcileP95Micros", stats?.reconcileP95Micros ?: 0)
+                    .put("layoutP95Micros", stats?.layoutP95Micros ?: 0)
+                    .put("encodeP95Micros", stats?.encodeP95Micros ?: 0),
+            )
+            .put("timeline", timeline)
+            .toString()
     }
 
     override fun onDetachedFromWindow() {

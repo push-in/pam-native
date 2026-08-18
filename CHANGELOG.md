@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add a bounded, redacted Android DevTools snapshot transport for contextual
+  `pam diagnostics`, protected by Android's privileged `DUMP` permission and
+  backed by one-use private-cache files available only in debug builds.
+
 ## 0.6.73 - 2026-08-10
 
 - Added per-action transition and duration overrides to imperative stack navigation.

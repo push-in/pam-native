@@ -23,6 +23,9 @@ import android.window.OnBackInvokedDispatcher
 import android.window.BackEvent
 import android.window.OnBackAnimationCallback
 import android.widget.FrameLayout
+import java.io.File
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import androidx.core.view.WindowCompat
 import androidx.fragment.app.FragmentActivity
 import dev.pam.nativeapp.protocol.WireMap
@@ -52,6 +55,7 @@ class PamActivity : FragmentActivity() {
     private var recoveryRunnable: Runnable? = null
     private lateinit var devTools: PamDevToolsOverlay
     private var devToolsReceiver: BroadcastReceiver? = null
+    private val diagnosticsExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var viewportWidth = 0
     private var viewportHeight = 0
 
@@ -255,6 +259,7 @@ class PamActivity : FragmentActivity() {
         hotReload?.close()
         devToolsReceiver?.let(::unregisterReceiver)
         devToolsReceiver = null
+        diagnosticsExecutor.shutdownNow()
         runtimeStarted = false
         runtime.close()
         permissionCallbacks.clear()
@@ -291,15 +296,48 @@ class PamActivity : FragmentActivity() {
         if (!BuildConfig.DEBUG) return
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
-                if (intent?.action == DEVTOOLS_ACTION) {
-                    val shown = devTools.toggle()
-                    Log.i("PamNativeDevTools", if (shown) "shown" else "hidden")
+                when (intent?.action) {
+                    DEVTOOLS_ACTION -> {
+                        val shown = devTools.toggle()
+                        Log.i("PamNativeDevTools", if (shown) "shown" else "hidden")
+                    }
+                    DIAGNOSTICS_ACTION -> publishDiagnostics(intent)
                 }
             }
         }
-        val filter = IntentFilter(DEVTOOLS_ACTION)
-        registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        val filter = IntentFilter().apply {
+            addAction(DEVTOOLS_ACTION)
+            addAction(DIAGNOSTICS_ACTION)
+        }
+        registerReceiver(
+            receiver,
+            filter,
+            android.Manifest.permission.DUMP,
+            null,
+            Context.RECEIVER_EXPORTED,
+        )
         devToolsReceiver = receiver
+    }
+
+    private fun publishDiagnostics(intent: Intent) {
+        val requestId = intent.getStringExtra(DIAGNOSTICS_REQUEST_EXTRA).orEmpty()
+        if (!requestId.matches(DIAGNOSTICS_REQUEST_PATTERN)) return
+        val snapshot = devTools.snapshotJson()
+        val directory = cacheDir
+        diagnosticsExecutor.execute {
+            directory.listFiles { file ->
+                file.name.startsWith(DIAGNOSTICS_FILE_PREFIX)
+            }?.forEach(File::delete)
+            val temporary = File(directory, "$DIAGNOSTICS_FILE_PREFIX$requestId.tmp")
+            val destination = File(directory, "$DIAGNOSTICS_FILE_PREFIX$requestId.json")
+            runCatching {
+                temporary.writeText(snapshot, Charsets.UTF_8)
+                check(temporary.renameTo(destination)) { "cannot publish Native diagnostics" }
+            }.onFailure {
+                temporary.delete()
+                Log.w("PamNativeDevTools", "Cannot publish diagnostics", it)
+            }
+        }
     }
 
     fun requestPamPermission(permission: String, callback: (Boolean) -> Unit) {
@@ -490,6 +528,10 @@ class PamActivity : FragmentActivity() {
         const val APP_STATE_BACKGROUND = 3
         const val MEMORY_PRESSURE_MODERATE = 1
         const val DEVTOOLS_ACTION = "dev.pam.nativeapp.action.TOGGLE_DEVTOOLS"
+        const val DIAGNOSTICS_ACTION = "dev.pam.nativeapp.action.CAPTURE_DIAGNOSTICS"
+        const val DIAGNOSTICS_REQUEST_EXTRA = "requestId"
+        const val DIAGNOSTICS_FILE_PREFIX = "pam-diagnostics-"
+        val DIAGNOSTICS_REQUEST_PATTERN = Regex("[a-f0-9]{32}")
         const val MEMORY_PRESSURE_CRITICAL = 2
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L

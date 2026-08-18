@@ -13,6 +13,7 @@ import org.hamcrest.Matchers.containsString
 import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.json.JSONObject
 
 @RunWith(AndroidJUnit4::class)
 class CapabilityIntegrationTest {
@@ -73,5 +74,36 @@ class CapabilityIntegrationTest {
         onView(withContentDescription("Pam Native DevTools")).check(matches(isDisplayed()))
         onView(withText(containsString("FAIL"))).check(matches(isDisplayed()))
         onView(withText(containsString("permissions.request"))).check(matches(isDisplayed()))
+    }
+
+    @Test
+    fun devToolsExportsBoundedRedactedCrossHostSnapshot() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val launched = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, CapabilityTestActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as CapabilityTestActivity
+        activity = launched
+        lateinit var snapshot: JSONObject
+        instrumentation.runOnMainSync {
+            val overlay = PamDevToolsOverlay(launched)
+            repeat(12) { index ->
+                overlay.record(
+                    RuntimeDiagnostic(
+                        kind = RuntimeDiagnosticKind.ERROR,
+                        label = "secret-$index",
+                        failed = true,
+                    ),
+                )
+            }
+            snapshot = JSONObject(overlay.snapshotJson(capturedAtUnixMs = 1234))
+        }
+
+        assert(snapshot.getInt("schemaVersion") == 1)
+        assert(snapshot.getInt("surfaceCode") == 2)
+        assert(snapshot.getInt("platformCode") == 1)
+        assert(snapshot.getLong("capturedAtUnixMs") == 1234L)
+        assert(snapshot.getJSONArray("timeline").length() == 8)
+        assert(!snapshot.toString().contains("secret-"))
     }
 }
