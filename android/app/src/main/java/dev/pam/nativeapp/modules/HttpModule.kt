@@ -47,10 +47,12 @@ internal class HttpModule : NativeModule, AutoCloseable {
                     }
                     val headersJson = (values["headers"] as? WireValue.Text)?.value ?: "{}"
                     val body = (values["body"] as? WireValue.Text)?.value
+                    val traceparent = (values["traceparent"] as? WireValue.Text)?.value
+                    val traceOrigin = (values["traceOrigin"] as? WireValue.Text)?.value
                     val timeoutMs = ((values["timeoutMs"] as? WireValue.Integer)?.value ?: 30_000L)
                         .coerceIn(1_000L, 120_000L)
                         .toInt()
-                    fetch(url, requestMethod, headersJson, body, timeoutMs)
+                    fetch(url, requestMethod, headersJson, body, timeoutMs, traceparent, traceOrigin)
                 }.fold(
                     onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
                     onFailure = {
@@ -79,6 +81,8 @@ internal class HttpModule : NativeModule, AutoCloseable {
         headersJson: String,
         body: String?,
         timeoutMs: Int,
+        traceparent: String?,
+        traceOrigin: String?,
     ): ByteArray {
         val uri = URI(source)
         require(uri.scheme == "https" || (BuildConfig.DEBUG && uri.scheme == "http")) {
@@ -109,7 +113,18 @@ internal class HttpModule : NativeModule, AutoCloseable {
                 "Invalid HTTP header"
             }
             require(value.toByteArray(Charsets.UTF_8).size <= 8_192) { "HTTP header value is too large" }
+            require(name.lowercase() !in RESERVED_TRACE_HEADERS) {
+                "Trace headers require an origin-scoped context"
+            }
             connection.setRequestProperty(name, value)
+        }
+        if (traceparent != null || traceOrigin != null) {
+            require(traceparent != null && traceOrigin != null) { "Incomplete HTTP trace context" }
+            require(TRACEPARENT.matches(traceparent)) { "Invalid W3C version 00 traceparent" }
+            require(origin(uri) == traceOrigin && traceOrigin.startsWith("https://")) {
+                "Trace context origin does not match the HTTP request origin"
+            }
+            connection.setRequestProperty("traceparent", traceparent)
         }
         if (body != null) {
             connection.doOutput = true
@@ -144,7 +159,16 @@ internal class HttpModule : NativeModule, AutoCloseable {
     }
 
     private companion object {
+        fun origin(uri: URI): String {
+            val port = if (uri.port == -1 || uri.port == 443) "" else ":${uri.port}"
+            val rawHost = uri.host.lowercase()
+            val host = if (':' in rawHost) "[$rawHost]" else rawHost
+            return "${uri.scheme.lowercase()}://$host$port"
+        }
+
         val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "PATCH", "DELETE")
+        val RESERVED_TRACE_HEADERS = setOf("traceparent", "tracestate")
+        val TRACEPARENT = Regex("^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$")
         val SAFE_HEADER_NAME = Regex("^[A-Za-z0-9-]{1,64}$")
         const val MAX_REQUEST_BYTES = 1_048_576
         const val MAX_RESPONSE_BYTES = 900 * 1024

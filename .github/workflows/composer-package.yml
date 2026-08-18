@@ -25,6 +25,10 @@ defaults:
     shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
+  ecosystem-compatibility:
+    name: Certify the complete PAM Native ecosystem
+    uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main
+
   validate:
     name: Validate PHP SDK release
     runs-on: ubuntu-24.04
@@ -49,7 +53,7 @@ jobs:
   publish:
     name: Validate and publish PHP SDK
     if: inputs.publish
-    needs: validate
+    needs: [validate, ecosystem-compatibility]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

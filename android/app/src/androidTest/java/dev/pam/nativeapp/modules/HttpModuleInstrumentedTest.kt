@@ -17,6 +17,59 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class HttpModuleInstrumentedTest {
     @Test
+    fun rejectsGenericTraceHeaderBeforeSending() {
+        val completed = CountDownLatch(1)
+        var status: ModuleResultStatus? = null
+        val module = HttpModule()
+        module.invoke(
+            "request",
+            WireMap.encode(
+                mapOf(
+                    "url" to WireValue.Text("http://127.0.0.1:9/resource"),
+                    "method" to WireValue.Text("GET"),
+                    "headers" to WireValue.Text(
+                        """{"TraceParent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}""",
+                    ),
+                ),
+            ),
+        ) { resultStatus, _ ->
+            status = resultStatus
+            completed.countDown()
+        }
+
+        assertTrue("Unsafe trace header was not rejected", completed.await(5, TimeUnit.SECONDS))
+        assertEquals(ModuleResultStatus.FAILURE, status)
+        module.close()
+    }
+
+    @Test
+    fun rejectsCrossOriginDedicatedTraceContextBeforeSending() {
+        val completed = CountDownLatch(1)
+        var status: ModuleResultStatus? = null
+        val module = HttpModule()
+        module.invoke(
+            "request",
+            WireMap.encode(
+                mapOf(
+                    "url" to WireValue.Text("http://127.0.0.1:9/resource"),
+                    "method" to WireValue.Text("GET"),
+                    "traceparent" to WireValue.Text(
+                        "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01",
+                    ),
+                    "traceOrigin" to WireValue.Text("https://api.example.test"),
+                ),
+            ),
+        ) { resultStatus, _ ->
+            status = resultStatus
+            completed.countDown()
+        }
+
+        assertTrue("Cross-origin trace context was not rejected", completed.await(5, TimeUnit.SECONDS))
+        assertEquals(ModuleResultStatus.FAILURE, status)
+        module.close()
+    }
+
+    @Test
     fun genericRequestPreservesMethodBearerHeaderAndJsonBody() {
         ServerSocket(0, 1).use { server ->
             val received = mutableMapOf<String, String>()

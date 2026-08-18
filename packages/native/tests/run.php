@@ -80,6 +80,7 @@ use Pam\Native\MotionPreset;
 use Pam\Native\HapticFeedback;
 use Pam\Native\Http\Http;
 use Pam\Native\Http\HttpResponse;
+use Pam\Native\Http\OutboundTraceContext;
 use Pam\Native\Database\SQLite;
 use Pam\Native\NativeOperation;
 use Pam\Native\Forms\FormStatus;
@@ -3785,6 +3786,42 @@ $assert(
         && $httpResponse->body === '{"token":"access-token"}',
     'Generic HTTP request did not decode its response.',
 );
+
+$traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+$trace = new OutboundTraceContext($traceparent, 'https://api.example.test/');
+Http::get('https://api.example.test/orders', static function (HttpResponse $response): void {}, $trace);
+$tracedPayload = Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '');
+$assert(
+    ($tracedPayload['traceparent'] ?? null) === $traceparent
+        && ($tracedPayload['traceOrigin'] ?? null) === 'https://api.example.test',
+    'HTTP trace propagation must use a dedicated origin-scoped payload.',
+);
+
+foreach (
+    [
+        static fn () => Http::get(
+            'https://attacker.example.test/orders',
+            static function (HttpResponse $response): void {},
+            $trace,
+        ),
+        static fn () => Http::request(
+            'GET',
+            'https://api.example.test/orders',
+            static function (HttpResponse $response): void {},
+            ['TraceParent' => $traceparent],
+        ),
+    ] as $unsafeTraceRequest
+) {
+    try {
+        $unsafeTraceRequest();
+        throw new RuntimeException('Unsafe HTTP trace propagation was accepted.');
+    } catch (RuntimeException $error) {
+        $assert(
+            $error->getMessage() !== 'Unsafe HTTP trace propagation was accepted.',
+            'HTTP trace context escaped its declared origin or generic-header boundary.',
+        );
+    }
+}
 
 $transportFailure = null;
 $transportFailureId = Http::get(

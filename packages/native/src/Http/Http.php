@@ -20,9 +20,13 @@ final class Http
     }
 
     /** @param Closure(HttpResponse): void $callback */
-    public static function get(string $url, Closure $callback): int
+    public static function get(
+        string $url,
+        Closure $callback,
+        ?OutboundTraceContext $trace = null,
+    ): int
     {
-        return self::request('GET', $url, $callback);
+        return self::request('GET', $url, $callback, trace: $trace);
     }
 
     /**
@@ -35,8 +39,9 @@ final class Http
         array $headers = [],
         ?string $body = null,
         int $timeoutMs = 30_000,
+        ?OutboundTraceContext $trace = null,
     ): int {
-        return self::request('POST', $url, $callback, $headers, $body, $timeoutMs);
+        return self::request('POST', $url, $callback, $headers, $body, $timeoutMs, $trace);
     }
 
     /**
@@ -49,8 +54,9 @@ final class Http
         array $headers = [],
         ?string $body = null,
         int $timeoutMs = 30_000,
+        ?OutboundTraceContext $trace = null,
     ): int {
-        return self::request('PUT', $url, $callback, $headers, $body, $timeoutMs);
+        return self::request('PUT', $url, $callback, $headers, $body, $timeoutMs, $trace);
     }
 
     /**
@@ -63,8 +69,9 @@ final class Http
         array $headers = [],
         ?string $body = null,
         int $timeoutMs = 30_000,
+        ?OutboundTraceContext $trace = null,
     ): int {
-        return self::request('PATCH', $url, $callback, $headers, $body, $timeoutMs);
+        return self::request('PATCH', $url, $callback, $headers, $body, $timeoutMs, $trace);
     }
 
     /**
@@ -77,8 +84,9 @@ final class Http
         array $headers = [],
         ?string $body = null,
         int $timeoutMs = 30_000,
+        ?OutboundTraceContext $trace = null,
     ): int {
-        return self::request('DELETE', $url, $callback, $headers, $body, $timeoutMs);
+        return self::request('DELETE', $url, $callback, $headers, $body, $timeoutMs, $trace);
     }
 
     /**
@@ -92,6 +100,7 @@ final class Http
         array $headers = [],
         ?string $body = null,
         int $timeoutMs = 30_000,
+        ?OutboundTraceContext $trace = null,
     ): int {
         $method = strtoupper(trim($method));
         if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
@@ -116,7 +125,14 @@ final class Http
             ) {
                 throw new RuntimeException('HTTP headers must use safe names and bounded single-line values.');
             }
+            if (in_array(strtolower($name), ['traceparent', 'tracestate'], true)) {
+                throw new RuntimeException('Trace headers require an origin-scoped OutboundTraceContext.');
+            }
             $normalizedHeaders[$name] = $value;
+        }
+
+        if ($trace !== null && !$trace->allows($url)) {
+            throw new RuntimeException('Trace context origin does not match the HTTP request origin.');
         }
 
         $payload = [
@@ -127,6 +143,10 @@ final class Http
         ];
         if ($body !== null) {
             $payload['body'] = $body;
+        }
+        if ($trace !== null) {
+            $payload['traceparent'] = $trace->traceparent;
+            $payload['traceOrigin'] = $trace->origin;
         }
 
         return Runtime::call(
@@ -149,6 +169,7 @@ final class Http
         Closure $callback,
         array $headers = [],
         int $timeoutMs = 30_000,
+        ?OutboundTraceContext $trace = null,
     ): int {
         return self::request(
             method: $method,
@@ -161,6 +182,7 @@ final class Http
             ],
             body: json_encode($data, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             timeoutMs: $timeoutMs,
+            trace: $trace,
         );
     }
 

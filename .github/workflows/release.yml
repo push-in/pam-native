@@ -18,6 +18,10 @@ defaults:
     shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
+  ecosystem-compatibility:
+    name: Certify the complete PAM Native ecosystem
+    uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main
+
   ios:
     name: Package iOS renderer
     runs-on: macos-15
@@ -157,6 +161,7 @@ jobs:
       - ios
       - android
       - php-sdk
+      - ecosystem-compatibility
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8

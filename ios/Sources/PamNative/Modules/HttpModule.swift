@@ -88,8 +88,32 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                         else {
                             throw RuntimeError("Invalid HTTP header")
                         }
+                        guard !Self.reservedTraceHeaders.contains(name.lowercased()) else {
+                            throw RuntimeError("Trace headers require an origin-scoped context")
+                        }
                         request.setValue(value, forHTTPHeaderField: name)
                     }
+                }
+
+                var traceparent: String?
+                if case let .text(value)? = values["traceparent"] {
+                    traceparent = value
+                }
+                var traceOrigin: String?
+                if case let .text(value)? = values["traceOrigin"] {
+                    traceOrigin = value
+                }
+                if traceparent != nil || traceOrigin != nil {
+                    guard
+                        let traceparent,
+                        let traceOrigin,
+                        traceparent.range(of: Self.traceparentPattern, options: .regularExpression) != nil,
+                        Self.origin(of: url) == traceOrigin,
+                        traceOrigin.hasPrefix("https://")
+                    else {
+                        throw RuntimeError("Invalid or cross-origin HTTP trace context")
+                    }
+                    request.setValue(traceparent, forHTTPHeaderField: "traceparent")
                 }
 
                 if case let .text(body)? = values["body"] {
@@ -139,6 +163,17 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
     }
 
     private static let allowedMethods = Set(["GET", "POST", "PUT", "PATCH", "DELETE"])
+    private static let reservedTraceHeaders = Set(["traceparent", "tracestate"])
+    private static let traceparentPattern = "^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$"
     private static let safeHeaderName = "^[A-Za-z0-9-]{1,64}$"
     private static let maxRequestBytes = 1_048_576
+
+    private static func origin(of url: URL) -> String? {
+        guard let scheme = url.scheme?.lowercased(), let host = url.host?.lowercased() else {
+            return nil
+        }
+        let canonicalHost = host.contains(":") ? "[\(host)]" : host
+        let port = url.port.flatMap { $0 == 443 ? nil : ":\($0)" } ?? ""
+        return "\(scheme)://\(canonicalHost)\(port)"
+    }
 }

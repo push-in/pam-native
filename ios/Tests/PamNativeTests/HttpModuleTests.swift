@@ -17,6 +17,10 @@ final class HttpModuleTests: XCTestCase {
             XCTAssertEqual(request.httpMethod, "PATCH")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer access-token")
             XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+            XCTAssertEqual(
+                request.value(forHTTPHeaderField: "traceparent"),
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+            )
             XCTAssertEqual(try requestBody(request), Data(#"{"enabled":true}"#.utf8))
             XCTAssertEqual(request.timeoutInterval, 45, accuracy: 0.01)
 
@@ -39,6 +43,10 @@ final class HttpModuleTests: XCTestCase {
             ),
             "body": .text(#"{"enabled":true}"#),
             "timeoutMs": .integer(45_000),
+            "traceparent": .text(
+                "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+            ),
+            "traceOrigin": .text("https://api.example.test"),
         ])
 
         module.invoke(method: "request", payload: payload) { status, responsePayload in
@@ -54,6 +62,38 @@ final class HttpModuleTests: XCTestCase {
         }
 
         wait(for: [completed], timeout: 2)
+        module.close()
+    }
+
+    func testRejectsGenericAndCrossOriginTraceHeaders() throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPURLProtocol.self]
+        let module = HttpModule(configuration: configuration)
+
+        for payload in [
+            try WireMap.encode([
+                "url": .text("https://api.example.test/resource"),
+                "method": .text("GET"),
+                "headers": .text(
+                    #"{"TraceParent":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}"#
+                ),
+            ]),
+            try WireMap.encode([
+                "url": .text("https://api.example.test/resource"),
+                "method": .text("GET"),
+                "traceparent": .text(
+                    "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+                ),
+                "traceOrigin": .text("https://other.example.test"),
+            ]),
+        ] {
+            let completed = expectation(description: "Unsafe trace context rejected")
+            module.invoke(method: "request", payload: payload) { status, _ in
+                XCTAssertEqual(status, .failure)
+                completed.fulfill()
+            }
+            wait(for: [completed], timeout: 2)
+        }
         module.close()
     }
 }

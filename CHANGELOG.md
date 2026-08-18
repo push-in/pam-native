@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add strict, origin-scoped W3C `traceparent` propagation to the Native HTTP
+  client, with generic-header spoofing blocked in PHP, Android and iOS.
 - Add bounded, redacted Android and iOS Simulator DevTools snapshot transports
   for contextual `pam diagnostics`, backed by one-use private-cache files
   available only through debug hosts. Android is protected by the privileged

@@ -453,6 +453,7 @@ generic request API or the `post()`, `put()`, `patch()` and `delete()` helpers:
 ```php
 use Pam\Native\Http\Http;
 use Pam\Native\Http\HttpResponse;
+use Pam\Native\Http\OutboundTraceContext;
 
 Http::json(
     method: 'POST',
@@ -477,12 +478,25 @@ Http::request(
     ],
     body: json_encode(['name' => $name], JSON_THROW_ON_ERROR),
 );
+
+$trace = new OutboundTraceContext(
+    traceparent: $serverTraceparent,
+    origin: 'https://api.example.com',
+);
+Http::get(
+    'https://api.example.com/orders',
+    fn (HttpResponse $response) => $this->loaded($response),
+    trace: $trace,
+);
 ```
 
 Production builds require HTTPS. Requests support GET, POST, PUT, PATCH and
 DELETE, up to 32 bounded single-line headers, a one MiB request body and timeout
 values from one to 120 seconds. DNS, connectivity and timeout failures reach the
 same callback with status `0`; they never crash the component runtime.
+Distributed context uses a dedicated strict W3C version `00` value bound to one
+exact HTTPS origin. Generic headers cannot set `traceparent` or `tracestate`,
+and both native hosts revalidate the scope before transmitting the request.
 
 ## License
 
