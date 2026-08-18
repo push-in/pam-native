@@ -72,6 +72,12 @@ current route. JSON export version 2 contains the recursive state tree, metrics
 and timeline. Call `detach()` for deterministic teardown; destruction also
 detaches every observer.
 
+Exports also implement the cross-host PAM DevTools snapshot envelope:
+`schemaVersion: 1`, integer `surfaceCode: 2`, and `capturedAtUnixMs`. The legacy
+navigation payload `version: 2` remains present for compatibility. This lets one
+collector distinguish Native snapshots from Server (`1`) and Desktop (`3`)
+snapshots without inspecting application data.
+
 CI also runs `packages/native/tests/navigation_performance.php`, which gates
 the average PHP-side cost of 2,000 push/pop render decisions and 1,000 parsed
 deep links. Native frame pacing remains covered separately by the AndroidX

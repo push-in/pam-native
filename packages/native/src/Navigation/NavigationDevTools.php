@@ -53,7 +53,15 @@ final class NavigationDevTools
     public function exportJson(): string
     {
         return json_encode(
-            ['version' => 2, 'state' => $this->tree(), 'metrics' => $this->metrics(), 'timeline' => $this->timeline],
+            [
+                'schemaVersion' => 1,
+                'surfaceCode' => 2,
+                'capturedAtUnixMs' => (int) floor(microtime(true) * 1000),
+                'version' => 2,
+                'state' => $this->tree(),
+                'metrics' => $this->metrics(),
+                'timeline' => $this->timeline,
+            ],
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
         );
     }

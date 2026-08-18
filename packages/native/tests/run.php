@@ -5538,6 +5538,9 @@ $assert(
     $navigationTimeline !== []
         && $navigationTimeline[0]['kind'] === NavigationTraceKind::Action->value
         && ($navigationDevTools->tree()['routes'][0]['name'] ?? null) === 'home'
+        && ($navigationExport['schemaVersion'] ?? null) === 1
+        && ($navigationExport['surfaceCode'] ?? null) === 2
+        && is_int($navigationExport['capturedAtUnixMs'] ?? null)
         && ($navigationExport['version'] ?? null) === 2
         && ($navigationExport['metrics']['events'] ?? 0) === count($navigationTimeline)
         && ($navigationMetrics['currentRoute'] ?? null) === 'article',
