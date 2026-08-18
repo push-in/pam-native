@@ -87,7 +87,7 @@ class CapabilityIntegrationTest {
         lateinit var snapshot: JSONObject
         instrumentation.runOnMainSync {
             val overlay = PamDevToolsOverlay(launched)
-            repeat(12) { index ->
+            repeat(7) { index ->
                 overlay.record(
                     RuntimeDiagnostic(
                         kind = RuntimeDiagnosticKind.ERROR,
@@ -96,6 +96,18 @@ class CapabilityIntegrationTest {
                     ),
                 )
             }
+            overlay.record(
+                RuntimeDiagnostic(
+                    kind = RuntimeDiagnosticKind.NETWORK,
+                    label = "PATCH https://secret.example/private?token=secret",
+                    durationNanos = 12_345_000,
+                    failed = false,
+                    methodCode = RuntimeHttpMethod.PATCH.value,
+                    statusCode = 202,
+                    requestBytes = 17,
+                    responseBytes = 8,
+                ),
+            )
             snapshot = JSONObject(overlay.snapshotJson(capturedAtUnixMs = 1234))
         }
 
@@ -105,5 +117,12 @@ class CapabilityIntegrationTest {
         assert(snapshot.getLong("capturedAtUnixMs") == 1234L)
         assert(snapshot.getJSONArray("timeline").length() == 8)
         assert(!snapshot.toString().contains("secret-"))
+        assert(!snapshot.toString().contains("secret.example"))
+        val network = snapshot.getJSONArray("timeline").getJSONObject(7)
+        assert(network.getInt("kindCode") == RuntimeDiagnosticKind.NETWORK.value)
+        assert(network.getInt("methodCode") == RuntimeHttpMethod.PATCH.value)
+        assert(network.getInt("statusCode") == 202)
+        assert(network.getInt("requestBytes") == 17)
+        assert(network.getInt("responseBytes") == 8)
     }
 }

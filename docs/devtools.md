@@ -33,9 +33,18 @@ holds but ordinary applications cannot request. The CLI also sends a one-use
 reads the result from its private cache through Android `run-as`, enforces a
 64 KiB response limit, and deletes the file immediately. The host keeps at most
 one pending snapshot and performs file I/O on a dedicated executor. Timeline
-entries expose only integer kind, duration and failure state; diagnostic labels
-and application error messages are deliberately excluded. Release builds do
-not register the capture receiver.
+entries expose only integer kind, duration and failure state. HTTP diagnostics
+also expose an integer method code (`1` GET, `2` POST, `3` PUT, `4` PATCH, `5`
+DELETE), status code when available, and bounded request/response byte counts.
+URLs, origins, paths, query strings, headers, bodies, diagnostic labels and
+application error messages are deliberately excluded. The timeline remains
+bounded to its latest eight entries. Release builds do not register the capture
+receiver.
+
+`pam timeline <snapshot.json>` converts these fields into a bounded Chrome
+Trace Event named `native.network`. The CLI rejects unknown method codes,
+invalid HTTP status codes and byte counts above the Native transport limits,
+so malformed snapshots fail closed instead of becoming trusted evidence.
 
 The generated iOS debug host now installs and wires the UIKit overlay
 automatically. `pam devtools` toggles it in an iOS-only project; the explicit

@@ -81,13 +81,22 @@ final class CapabilityIntegrationTests: XCTestCase {
 
     func testDevToolsExportsBoundedRedactedCrossHostSnapshot() throws {
         let overlay = PamDevToolsOverlay(frame: .zero)
-        for index in 0..<12 {
+        for index in 0..<7 {
             overlay.record(RuntimeDiagnostic(
                 kind: .error,
                 label: "secret-\(index)",
                 failed: true
             ))
         }
+        overlay.record(RuntimeDiagnostic(
+            kind: .network,
+            label: "PATCH https://secret.example/private?token=secret",
+            durationNanos: 12_345_000,
+            methodCode: RuntimeHttpMethod.patch.rawValue,
+            statusCode: 202,
+            requestBytes: 17,
+            responseBytes: 8
+        ))
 
         let data = try overlay.snapshotData(capturedAtUnixMs: 1_234)
         let snapshot = try XCTUnwrap(
@@ -99,6 +108,13 @@ final class CapabilityIntegrationTests: XCTestCase {
         XCTAssertEqual(snapshot["capturedAtUnixMs"] as? Int, 1_234)
         XCTAssertEqual((snapshot["timeline"] as? [[String: Any]])?.count, 8)
         XCTAssertFalse(String(data: data, encoding: .utf8)?.contains("secret-") == true)
+        XCTAssertFalse(String(data: data, encoding: .utf8)?.contains("secret.example") == true)
+        let network = try XCTUnwrap((snapshot["timeline"] as? [[String: Any]])?.last)
+        XCTAssertEqual(network["kindCode"] as? Int, RuntimeDiagnosticKind.network.rawValue)
+        XCTAssertEqual(network["methodCode"] as? Int, RuntimeHttpMethod.patch.rawValue)
+        XCTAssertEqual(network["statusCode"] as? Int, 202)
+        XCTAssertEqual(network["requestBytes"] as? Int, 17)
+        XCTAssertEqual(network["responseBytes"] as? Int, 8)
     }
 
     func testWatchChannelDropsOldValuesAndKeepsLatestBackpressureWindow() {

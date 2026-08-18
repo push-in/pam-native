@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add bounded Android and iOS HTTP diagnostics to the redacted Native DevTools
+  timeline. Exports include only integer method/status codes, byte counts,
+  duration and failure state; URLs, headers and bodies remain excluded.
 - Add strict, origin-scoped W3C `traceparent` propagation to the Native HTTP
   client, with generic-header spoofing blocked in PHP, Android and iOS.
 - Add bounded, redacted Android and iOS Simulator DevTools snapshot transports

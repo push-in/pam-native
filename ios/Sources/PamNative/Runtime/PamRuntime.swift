@@ -601,11 +601,13 @@ public final class PamRuntime {
         let started = DispatchTime.now().uptimeNanoseconds
         modules.invoke(module: module, method: method, payload: payload) { [weak self] status, result in
             guard let self else { return }
-            self.reportDiagnostic(RuntimeDiagnostic(
-                kind: .moduleCall,
-                label: "\(module).\(method)",
-                durationNanos: Int64(DispatchTime.now().uptimeNanoseconds - started),
-                failed: status == .failure
+            self.reportDiagnostic(self.moduleDiagnostic(
+                module: module,
+                method: method,
+                requestPayload: payload,
+                responsePayload: result,
+                transportFailed: status == .failure,
+                durationNanos: Int64(DispatchTime.now().uptimeNanoseconds - started)
             ))
             let active = self.currentHandle()
             guard active != 0 && !self.closed else {
@@ -620,6 +622,68 @@ public final class PamRuntime {
                     bytes.count,
                 )
             }
+        }
+    }
+
+    private func moduleDiagnostic(
+        module: String,
+        method: String,
+        requestPayload: Data,
+        responsePayload: Data,
+        transportFailed: Bool,
+        durationNanos: Int64
+    ) -> RuntimeDiagnostic {
+        let fallback = RuntimeDiagnostic(
+            kind: .moduleCall,
+            label: "\(module).\(method)",
+            durationNanos: durationNanos,
+            failed: transportFailed
+        )
+        guard module == "http", method == "request" else { return fallback }
+
+        do {
+            let request = try WireMap.decode(requestPayload)
+            guard case let .text(methodName)? = request["method"] else { return fallback }
+            let methodCode: RuntimeHttpMethod
+            switch methodName {
+            case "GET": methodCode = .get
+            case "POST": methodCode = .post
+            case "PUT": methodCode = .put
+            case "PATCH": methodCode = .patch
+            case "DELETE": methodCode = .delete
+            default: return fallback
+            }
+            let requestBytes: Int
+            if case let .text(body)? = request["body"] {
+                requestBytes = body.utf8.count
+            } else {
+                requestBytes = 0
+            }
+            let response: [String: WireValue] = transportFailed ? [:] : try WireMap.decode(responsePayload)
+            let statusCode: Int?
+            if case let .integer(value)? = response["statusCode"] {
+                statusCode = Int(value)
+            } else {
+                statusCode = nil
+            }
+            let responseBytes: Int
+            if case let .text(body)? = response["body"] {
+                responseBytes = body.utf8.count
+            } else {
+                responseBytes = 0
+            }
+            return RuntimeDiagnostic(
+                kind: .network,
+                label: "HTTP \(methodName)",
+                durationNanos: durationNanos,
+                failed: transportFailed || (statusCode.map { $0 >= 400 } ?? false),
+                methodCode: methodCode.rawValue,
+                statusCode: statusCode,
+                requestBytes: requestBytes,
+                responseBytes: responseBytes
+            )
+        } catch {
+            return fallback
         }
     }
 

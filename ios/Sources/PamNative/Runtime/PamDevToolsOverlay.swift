@@ -6,6 +6,15 @@ public enum RuntimeDiagnosticKind: Int {
     case event = 2
     case error = 3
     case lifecycle = 4
+    case network = 5
+}
+
+public enum RuntimeHttpMethod: Int {
+    case get = 1
+    case post = 2
+    case put = 3
+    case patch = 4
+    case delete = 5
 }
 
 public struct RuntimeDiagnostic {
@@ -13,17 +22,29 @@ public struct RuntimeDiagnostic {
     public let label: String
     public let durationNanos: Int64
     public let failed: Bool
+    public let methodCode: Int?
+    public let statusCode: Int?
+    public let requestBytes: Int?
+    public let responseBytes: Int?
 
     public init(
         kind: RuntimeDiagnosticKind,
         label: String,
         durationNanos: Int64 = 0,
-        failed: Bool = false
+        failed: Bool = false,
+        methodCode: Int? = nil,
+        statusCode: Int? = nil,
+        requestBytes: Int? = nil,
+        responseBytes: Int? = nil
     ) {
         self.kind = kind
         self.label = label
         self.durationNanos = durationNanos
         self.failed = failed
+        self.methodCode = methodCode
+        self.statusCode = statusCode
+        self.requestBytes = requestBytes
+        self.responseBytes = responseBytes
     }
 }
 
@@ -64,11 +85,16 @@ public final class PamDevToolsOverlay: UIView {
         let metrics = latestMetrics
         let stats = metrics?.stats
         let timeline = diagnostics.map { item in
-            [
+            var encoded = [
                 "kindCode": item.kind.rawValue,
                 "durationMicros": item.durationNanos / 1_000,
                 "failed": item.failed,
             ] as [String: Any]
+            if let methodCode = item.methodCode { encoded["methodCode"] = methodCode }
+            if let statusCode = item.statusCode { encoded["statusCode"] = statusCode }
+            if let requestBytes = item.requestBytes { encoded["requestBytes"] = requestBytes }
+            if let responseBytes = item.responseBytes { encoded["responseBytes"] = responseBytes }
+            return encoded
         }
         let frame: [String: Any] = [
             "batches": metrics?.batches ?? 0,
@@ -196,6 +222,7 @@ public final class PamDevToolsOverlay: UIView {
                 case .event: prefix = "EVNT"
                 case .error: prefix = "ERR "
                 case .lifecycle: prefix = "LIFE"
+                case .network: prefix = "NET "
                 }
             }
             if item.durationNanos > 0 {

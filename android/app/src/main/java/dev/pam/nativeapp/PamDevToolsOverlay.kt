@@ -18,6 +18,15 @@ enum class RuntimeDiagnosticKind(val value: Int) {
     EVENT(2),
     ERROR(3),
     LIFECYCLE(4),
+    NETWORK(5),
+}
+
+enum class RuntimeHttpMethod(val value: Int) {
+    GET(1),
+    POST(2),
+    PUT(3),
+    PATCH(4),
+    DELETE(5),
 }
 
 data class RuntimeDiagnostic(
@@ -25,6 +34,10 @@ data class RuntimeDiagnostic(
     val label: String,
     val durationNanos: Long = 0,
     val failed: Boolean = false,
+    val methodCode: Int? = null,
+    val statusCode: Int? = null,
+    val requestBytes: Int? = null,
+    val responseBytes: Int? = null,
 )
 
 internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
@@ -115,12 +128,15 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         val stats = metrics?.stats
         val timeline = JSONArray()
         diagnostics.forEach { item ->
-            timeline.put(
-                JSONObject()
-                    .put("kindCode", item.kind.value)
-                    .put("durationMicros", item.durationNanos / 1_000)
-                    .put("failed", item.failed),
-            )
+            val encoded = JSONObject()
+                .put("kindCode", item.kind.value)
+                .put("durationMicros", item.durationNanos / 1_000)
+                .put("failed", item.failed)
+            item.methodCode?.let { encoded.put("methodCode", it) }
+            item.statusCode?.let { encoded.put("statusCode", it) }
+            item.requestBytes?.let { encoded.put("requestBytes", it) }
+            item.responseBytes?.let { encoded.put("responseBytes", it) }
+            timeline.put(encoded)
         }
         return JSONObject()
             .put("schemaVersion", 1)
@@ -185,6 +201,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
                 RuntimeDiagnosticKind.EVENT -> "EVNT"
                 RuntimeDiagnosticKind.ERROR -> "ERR "
                 RuntimeDiagnosticKind.LIFECYCLE -> "LIFE"
+                RuntimeDiagnosticKind.NETWORK -> "NET "
             }
             if (item.durationNanos > 0) {
                 String.format(Locale.US, "%s %6.1fms  %s", prefix, item.durationNanos / 1_000_000.0, item.label)

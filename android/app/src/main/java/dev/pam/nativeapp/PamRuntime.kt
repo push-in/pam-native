@@ -11,6 +11,8 @@ import dev.pam.nativeapp.modules.ModuleCompletion
 import dev.pam.nativeapp.modules.NativeModuleRegistry
 import dev.pam.nativeapp.protocol.BatchDecoder
 import dev.pam.nativeapp.protocol.Mutation
+import dev.pam.nativeapp.protocol.WireMap
+import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
 import java.io.File
 import java.nio.ByteBuffer
@@ -250,11 +252,13 @@ class PamRuntime(
             payload = payload,
             completion = ModuleCompletion { status, result ->
                 onDiagnostic(
-                    RuntimeDiagnostic(
-                        RuntimeDiagnosticKind.MODULE_CALL,
-                        "$module.$method",
-                        System.nanoTime() - started,
+                    moduleDiagnostic(
+                        module,
+                        method,
+                        payload,
+                        result,
                         status == dev.pam.nativeapp.modules.ModuleResultStatus.FAILURE,
+                        System.nanoTime() - started,
                     ),
                 )
                 synchronized(handleLock) {
@@ -265,6 +269,51 @@ class PamRuntime(
                 }
             },
         )
+    }
+
+    private fun moduleDiagnostic(
+        module: String,
+        method: String,
+        requestPayload: ByteArray,
+        responsePayload: ByteArray,
+        transportFailed: Boolean,
+        durationNanos: Long,
+    ): RuntimeDiagnostic {
+        val fallback = RuntimeDiagnostic(
+            RuntimeDiagnosticKind.MODULE_CALL,
+            "$module.$method",
+            durationNanos,
+            transportFailed,
+        )
+        if (module != "http" || method != "request") return fallback
+
+        return runCatching {
+            val request = WireMap.decode(requestPayload)
+            val methodName = (request["method"] as? WireValue.Text)?.value ?: return fallback
+            val methodCode = RuntimeHttpMethod.valueOf(methodName).value
+            val requestBytes = (request["body"] as? WireValue.Text)
+                ?.value
+                ?.toByteArray(Charsets.UTF_8)
+                ?.size
+                ?: 0
+            val response = if (transportFailed) emptyMap() else WireMap.decode(responsePayload)
+            val statusCode = (response["statusCode"] as? WireValue.Integer)?.value?.toInt()
+            val responseBytes = (response["body"] as? WireValue.Text)
+                ?.value
+                ?.toByteArray(Charsets.UTF_8)
+                ?.size
+                ?: 0
+            RuntimeDiagnostic(
+                kind = RuntimeDiagnosticKind.NETWORK,
+                label = "HTTP $methodName",
+                durationNanos = durationNanos,
+                failed = transportFailed || (statusCode != null && statusCode >= 400),
+                methodCode = methodCode,
+                statusCode = statusCode,
+                requestBytes = requestBytes,
+                responseBytes = responseBytes,
+            )
+        }.getOrElse { fallback }
     }
 
     @Suppress("unused")
