@@ -3799,6 +3799,25 @@ $assert(
 
 foreach (
     [
+        static fn () => new OutboundTraceContext('forged', 'https://api.example.test'),
+        static fn () => new OutboundTraceContext($traceparent, 'http://api.example.test'),
+        static fn () => new OutboundTraceContext($traceparent, 'https://user@api.example.test'),
+        static fn () => new OutboundTraceContext($traceparent, 'https://api.example.test/path'),
+    ] as $invalidTraceContext
+) {
+    try {
+        $invalidTraceContext();
+        throw new RuntimeException('Invalid outbound trace context was accepted.');
+    } catch (InvalidArgumentException $error) {
+        $assert(
+            $error->getMessage() !== 'Invalid outbound trace context was accepted.',
+            'Outbound trace validation did not fail closed.',
+        );
+    }
+}
+
+foreach (
+    [
         static fn () => Http::get(
             'https://attacker.example.test/orders',
             static function (HttpResponse $response): void {},
