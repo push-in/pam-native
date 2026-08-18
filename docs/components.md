@@ -8,6 +8,33 @@ Laravel, Vue, or React-style composition.
 Both styles become the same `Renderable -> Element -> PNT1/PNP1` render plan.
 There is no WebView, JavaScript runtime, virtual DOM, or second native bridge.
 
+## Adaptive design system
+
+PAM Native ships semantic light, dark, and high-contrast themes instead of
+requiring raw colors in every screen. Theme modes are sequential integer enums:
+`Light = 1`, `Dark = 2`, and `HighContrast = 3`.
+
+```php
+use Pam\Native\App;
+use Pam\Native\DesignTokens;
+use Pam\Native\Theme;
+use Pam\Native\ThemeMode;
+
+App::theme(Theme::adaptive(ThemeMode::Dark));
+```
+
+The theme registers `surface`, `surface-muted`, `card`, `text-primary`,
+`text-muted`, `heading`, `accent`, `danger`, `metric`, `label`,
+`button-primary`, `button-secondary`, `input`, and `focus-ring`. Semantic
+foreground/background pairs are checked against WCAG AA contrast when the theme
+is built. `Theme::pamLab()` remains a compatible alias for the dark palette.
+
+`DesignTokens` supplies a 4/8dp spacing rhythm, 8/12/20dp radii, a
+14/16/20/24sp type scale, 150/240ms motion, and a 48dp minimum touch target.
+Applications should combine semantic classes with native accessibility labels,
+roles, states, Dynamic Type/font scaling, safe areas, and reduced-motion support;
+color is never the only status indicator.
+
 ## Register components
 
 Register one or more source directories before running the root component:

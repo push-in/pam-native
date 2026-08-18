@@ -174,6 +174,8 @@ use Pam\Native\TextEllipsizeMode;
 use Pam\Native\TextHyphenationFrequency;
 use Pam\Native\TextTransform;
 use Pam\Native\Theme;
+use Pam\Native\ThemeMode;
+use Pam\Native\DesignTokens;
 use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\View;
 use Pam\Native\WindowMetrics;
@@ -4037,6 +4039,27 @@ App::component('Panel', 'panel');
 $assert(
     TemplateRegistry::classProperties('card') !== null,
     'Theme class tokens were not registered.',
+);
+$assert(
+    DesignTokens::TouchTarget === 48.0
+        && DesignTokens::MotionFastMs >= 150
+        && DesignTokens::MotionStandardMs <= 300,
+    'Design tokens must preserve accessible touch targets and responsive motion.',
+);
+foreach (ThemeMode::cases() as $themeMode) {
+    App::theme(Theme::adaptive($themeMode));
+    $buttonTokens = TemplateRegistry::classProperties('button-primary');
+    $assert(
+        ($buttonTokens[PropKey::MinHeight->value] ?? null) === DesignTokens::TouchTarget
+            && isset($buttonTokens[PropKey::BackgroundColor->value])
+            && isset($buttonTokens[PropKey::TextColor->value]),
+        "Adaptive theme {$themeMode->name} must expose semantic accessible button tokens.",
+    );
+}
+$assert(
+    Theme::contrastRatio(0xFF0F172A, 0xFFF8FAFC) >= 4.5
+        && Theme::contrastRatio(0xFF4ADE80, 0xFF052E16) >= 4.5,
+    'Theme contrast validation must enforce WCAG AA semantic pairs.',
 );
 
 $template = new class extends Component {
