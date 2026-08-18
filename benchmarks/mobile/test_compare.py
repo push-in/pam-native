@@ -6,10 +6,64 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import compare
+import evidence
 import gate
 
 
 class CompareReportsTest(unittest.TestCase):
+    def test_evidence_manifest_rejects_changed_results_and_contracts(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            benchmark_root = root / "benchmarks" / "mobile"
+            results = root / "results"
+            benchmark_root.mkdir(parents=True)
+            results.mkdir()
+            (benchmark_root / "contract.json").write_text('{"version":1}\n')
+            (benchmark_root / "budgets.json").write_text('{"version":1}\n')
+            (results / "startup.json").write_text('{"median":412}\n')
+
+            original_git_value = evidence.git_value
+            evidence.git_value = lambda repository, *arguments: (
+                "abc123" if arguments[-1] == "HEAD" else ""
+            )
+            try:
+                manifest = evidence.create(
+                    results,
+                    evidence.EvidenceSuite.PAM_BASELINE,
+                    benchmark_root,
+                )
+            finally:
+                evidence.git_value = original_git_value
+
+            self.assertEqual(manifest["schema_version"], 1)
+            self.assertEqual(manifest["suite_id"], 1)
+            self.assertEqual(len(manifest["inputs"]), 2)
+            self.assertEqual(len(manifest["artifacts"]), 1)
+            evidence.verify(
+                results,
+                evidence.EvidenceSuite.PAM_BASELINE,
+                benchmark_root,
+            )
+
+            (results / "startup.json").write_text('{"median":999}\n')
+            with self.assertRaisesRegex(ValueError, "artifacts do not match"):
+                evidence.verify(
+                    results,
+                    evidence.EvidenceSuite.PAM_BASELINE,
+                    benchmark_root,
+                )
+
+            (results / "startup.json").write_text('{"median":412}\n')
+            (benchmark_root / "budgets.json").write_text('{"version":2}\n')
+            with self.assertRaisesRegex(ValueError, "contract inputs do not match"):
+                evidence.verify(
+                    results,
+                    evidence.EvidenceSuite.PAM_BASELINE,
+                    benchmark_root,
+                )
+
     def test_reads_scalar_summary_and_sampled_p50_metrics(self) -> None:
         values = compare.metrics(
             [

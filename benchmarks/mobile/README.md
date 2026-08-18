@@ -61,3 +61,19 @@ than a runtime metric; the CI release gate reports it alongside these results.
 
 `REFERENCE.md` records the latest physical-device Pam Native baseline and its
 remaining tail-latency caveat.
+
+## Verifiable evidence
+
+Create and immediately verify an integrity manifest before publishing or
+uploading a result directory:
+
+```bash
+python3 benchmarks/mobile/evidence.py results/pam 1
+python3 benchmarks/mobile/evidence.py results/pam 1 --verify
+```
+
+The manifest hashes every AndroidX report, Perfetto trace, log, and other result
+artifact recursively. It separately hashes `contract.json` and `budgets.json`,
+so changing the benchmark scenario or its release limits invalidates existing
+evidence. Suite IDs are sequential integers: `1` for a PAM baseline and `2` for
+a framework comparison.
