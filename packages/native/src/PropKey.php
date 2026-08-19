@@ -455,4 +455,6 @@ enum PropKey: int
     case ScrollTargetAlignment = 447;
     case PressScale = 448;
     case SharedTransitionConfig = 449;
+    case AccessibilityActions = 450;
+    case OnAccessibilityAction = 451;
 }

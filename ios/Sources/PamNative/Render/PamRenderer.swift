@@ -1256,6 +1256,7 @@ public final class PamRenderer {
             PamConstants.onMenuAction,
             PamConstants.onNavigationGesturePop,
             PamConstants.onAnimationComplete,
+            PamConstants.onAccessibilityAction,
         ].reduce(into: Set<Int>()) { $0.insert($1) }
     }
 
@@ -1357,6 +1358,8 @@ public final class PamRenderer {
             return PamConstants.onNavigationGesturePop
         case EventKind.animationComplete.rawValue:
             return PamConstants.onAnimationComplete
+        case EventKind.accessibilityAction.rawValue:
+            return PamConstants.onAccessibilityAction
         case EventKind.clickOutside.rawValue:
             return PamConstants.onClickOutside
         case EventKind.intersect.rawValue:
@@ -1511,6 +1514,8 @@ public final class PamRenderer {
              PamConstants.accessibilityValueMax,
              PamConstants.accessibilityValueNow,
              PamConstants.accessibilityValueText,
+             PamConstants.accessibilityActions,
+             PamConstants.onAccessibilityAction,
              PamConstants.selected,
              PamConstants.checked,
              PamConstants.loading:
@@ -1883,6 +1888,8 @@ public final class PamRenderer {
              PamConstants.accessibilityValueMax,
              PamConstants.accessibilityValueNow,
              PamConstants.accessibilityValueText,
+             PamConstants.accessibilityActions,
+             PamConstants.onAccessibilityAction,
              PamConstants.selected,
              PamConstants.checked,
              PamConstants.loading:
@@ -2382,6 +2389,60 @@ public final class PamRenderer {
             values.append("Loading")
         }
         view.accessibilityValue = values.isEmpty ? nil : values.joined(separator: ", ")
+
+        let actions = accessibilityActions(
+            state.properties[PamConstants.accessibilityActions]?.textOrNil()
+        )
+        if !actions.isEmpty,
+           state.properties[PamConstants.onAccessibilityAction] != nil {
+            view.isAccessibilityElement = true
+            view.accessibilityCustomActions = actions.map { action in
+                UIAccessibilityCustomAction(name: action.label) { [weak self] _ in
+                    guard let self,
+                          self.nodes[state.id]?.properties[
+                            PamConstants.onAccessibilityAction
+                          ] != nil else {
+                        return false
+                    }
+                    self.dispatchEvent(
+                        state.id,
+                        EventKind.accessibilityAction.rawValue,
+                        Data(action.name.utf8)
+                    )
+                    return true
+                }
+            }
+        } else {
+            view.accessibilityCustomActions = nil
+        }
+    }
+
+    private func accessibilityActions(_ encoded: String?) -> [AccessibilityActionSpec] {
+        guard let encoded,
+              encoded.utf8.count <= 4_096,
+              let data = encoded.data(using: .utf8),
+              let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              (1...8).contains(values.count) else {
+            return []
+        }
+        var names = Set<String>()
+        var actions: [AccessibilityActionSpec] = []
+        for value in values {
+            guard value.count == 2,
+                  let name = value["name"] as? String,
+                  let label = value["label"] as? String,
+                  name.range(
+                    of: "^[a-z][a-z0-9._-]{0,63}$",
+                    options: .regularExpression
+                  ) != nil,
+                  !label.isEmpty,
+                  label.utf8.count <= 128,
+                  names.insert(name).inserted else {
+                return []
+            }
+            actions.append(AccessibilityActionSpec(name: name, label: label))
+        }
+        return actions
     }
 
     private func accessibilityNumber(_ value: Double) -> String {
@@ -4706,6 +4767,11 @@ private final class PamBorderLayers {
         right.removeFromSuperlayer()
         bottom.removeFromSuperlayer()
     }
+}
+
+private struct AccessibilityActionSpec {
+    let name: String
+    let label: String
 }
 
 private final class NodeState {

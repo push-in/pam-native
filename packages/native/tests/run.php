@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Pam\Native\App;
 use Pam\Native\AppState;
 use Pam\Native\AccessibilityRole;
+use Pam\Native\AccessibilityAction;
 use Pam\Native\AccessibilityCheckedState;
 use Pam\Native\AccessibilityImportance;
 use Pam\Native\AccessibilityLiveRegion;
@@ -1639,6 +1640,44 @@ $assert(
     'Accessibility state and range helpers must use fixed protocol properties.',
 );
 
+$accessibilityActionElement = Text::make('Message')
+    ->accessibilityActions(
+        new AccessibilityAction('archive', 'Archive message'),
+        new AccessibilityAction('reply', 'Reply to message'),
+    )
+    ->onAccessibilityAction(static fn (string $name): string => $name);
+$accessibilityActionDefinitions = json_decode(
+    $accessibilityActionElement->properties()[PropKey::AccessibilityActions->value],
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$assert(
+    $accessibilityActionElement->properties()[PropKey::Accessible->value] === true
+        && $accessibilityActionElement
+            ->properties()[PropKey::OnAccessibilityAction->value] === true
+        && $accessibilityActionElement->events()[EventKind::AccessibilityAction->value]('reply')
+            === 'reply'
+        && $accessibilityActionDefinitions === [
+            ['name' => 'archive', 'label' => 'Archive message'],
+            ['name' => 'reply', 'label' => 'Reply to message'],
+        ],
+    'Accessibility actions must stay bounded, typed and connected to event 65.',
+);
+foreach ([
+    static fn () => new AccessibilityAction('Not Safe', 'Label'),
+    static fn () => new AccessibilityAction('safe', ''),
+    static fn () => Text::make('Duplicate')->accessibilityActions(
+        new AccessibilityAction('open', 'Open'),
+        new AccessibilityAction('open', 'Open again'),
+    ),
+] as $invalidAccessibilityAction) {
+    try {
+        $invalidAccessibilityAction();
+        throw new RuntimeException('Invalid accessibility action should fail closed.');
+    } catch (InvalidArgumentException) {
+    }
+}
+
 $safeAreaElement = SafeAreaView::make(Text::make('Inset content'))
     ->edges(top: true, right: false, bottom: true, left: false)
     ->mode(SafeAreaMode::Margin);
@@ -2410,6 +2449,38 @@ $coreRoleElement = TemplateRenderer::render(
     ),
     null,
     [],
+);
+$accessibilityActionScope = new class {
+    /** @var list<array{name: string, label: string}> */
+    public array $actions = [
+        ['name' => 'archive', 'label' => 'Archive message'],
+    ];
+
+    public string $selectedAction = '';
+
+    public function selectAction(string $name): void
+    {
+        $this->selectedAction = $name;
+    }
+};
+$templateAccessibilityActionElement = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Text :accessibilityActions="$actions" on:accessibilityAction="selectAction">Message</Text>',
+    ),
+    $accessibilityActionScope,
+    [],
+);
+$templateAccessibilityActionElement
+    ->events()[EventKind::AccessibilityAction->value]('archive');
+$assert(
+    json_decode(
+        $templateAccessibilityActionElement
+            ->properties()[PropKey::AccessibilityActions->value],
+        true,
+        flags: JSON_THROW_ON_ERROR,
+    ) === [['name' => 'archive', 'label' => 'Archive message']]
+        && $accessibilityActionScope->selectedAction === 'archive',
+    'Templates must preserve typed custom accessibility actions and their event payload.',
 );
 $flexAliasElement = TemplateRenderer::render(
     TemplateCompiler::compile(

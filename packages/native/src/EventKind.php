@@ -70,4 +70,5 @@ enum EventKind: int
     case MediaCacheMiss = 62;
     case MediaCacheProgress = 63;
     case MediaCacheReady = 64;
+    case AccessibilityAction = 65;
 }

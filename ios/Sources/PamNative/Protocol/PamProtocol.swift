@@ -117,6 +117,7 @@ public enum EventKind: Int {
     case mediaCacheMiss = 62
     case mediaCacheProgress = 63
     case mediaCacheReady = 64
+    case accessibilityAction = 65
 }
 
 public enum PropValue {
@@ -410,6 +411,8 @@ public enum PamConstants {
     public static let scrollTargetAlignment = 447
     public static let pressScale = 448
     public static let sharedTransitionConfig = 449
+    public static let accessibilityActions = 450
+    public static let onAccessibilityAction = 451
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

@@ -8,6 +8,7 @@ use Closure;
 use InvalidArgumentException;
 use JsonException;
 use Pam\Native\Align;
+use Pam\Native\AccessibilityAction;
 use Pam\Native\AccessibilityRole;
 use Pam\Native\AccessibilityCheckedState;
 use Pam\Native\AccessibilityImportance;
@@ -276,6 +277,7 @@ final class TemplateRenderer
         'collapsable' => PropKey::Collapsable,
         'accessibilityRole' => PropKey::AccessibilityRole,
         'accessibilityHint' => PropKey::AccessibilityHint,
+        'accessibilityActions' => PropKey::AccessibilityActions,
         'translationX' => PropKey::TranslationX,
         'translationY' => PropKey::TranslationY,
         'scaleX' => PropKey::ScaleX,
@@ -497,6 +499,7 @@ final class TemplateRenderer
         'on:drop' => EventKind::Drop,
         'on:menuAction' => EventKind::MenuAction,
         'on:animationComplete' => EventKind::AnimationComplete,
+        'on:accessibilityAction' => EventKind::AccessibilityAction,
         'on:cacheHit' => EventKind::MediaCacheHit,
         'on:cacheMiss' => EventKind::MediaCacheMiss,
         'on:cacheProgress' => EventKind::MediaCacheProgress,
@@ -1458,6 +1461,34 @@ final class TemplateRenderer
             $element = $element->accessibilityLabel(self::stringValue(
                 $attributes['accessibilityLabel'],
                 'Accessibility label',
+            ));
+        }
+
+        if (isset($attributes['accessibilityActions'])) {
+            $actions = $attributes['accessibilityActions'];
+            if (!is_array($actions)) {
+                throw new InvalidArgumentException(
+                    'Element accessibilityActions must be an array.',
+                );
+            }
+            $element = $element->accessibilityActions(...array_map(
+                static function (mixed $action): AccessibilityAction {
+                    if ($action instanceof AccessibilityAction) {
+                        return $action;
+                    }
+                    if (
+                        !is_array($action)
+                        || !is_string($action['name'] ?? null)
+                        || !is_string($action['label'] ?? null)
+                    ) {
+                        throw new InvalidArgumentException(
+                            'Each accessibility action must contain string name and label values.',
+                        );
+                    }
+
+                    return new AccessibilityAction($action['name'], $action['label']);
+                },
+                $actions,
             ));
         }
 

@@ -19,8 +19,11 @@ New optional properties, node kinds, event kinds and native operations may only
 be appended. A change to an existing field's representation or meaning requires
 a new protocol version and an explicit compatibility adapter.
 
-Protocol v1 currently appends properties through ID `405` and events through
-ID `34`.
+Protocol v1 currently appends properties through ID `451` and events through
+ID `65`. Property `450` carries a bounded JSON list of custom accessibility
+actions, property `451` marks its event handler, and event `65` returns the
+selected stable action name. Android and iOS independently reject malformed,
+duplicate, oversized, or more than eight action definitions.
 
 ## Frames
 

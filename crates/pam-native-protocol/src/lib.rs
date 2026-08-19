@@ -540,6 +540,8 @@ pub enum PropKey {
     ScrollTargetAlignment = 447,
     PressScale = 448,
     SharedTransitionConfig = 449,
+    AccessibilityActions = 450,
+    OnAccessibilityAction = 451,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -996,6 +998,8 @@ impl TryFrom<u16> for PropKey {
             447 => Ok(Self::ScrollTargetAlignment),
             448 => Ok(Self::PressScale),
             449 => Ok(Self::SharedTransitionConfig),
+            450 => Ok(Self::AccessibilityActions),
+            451 => Ok(Self::OnAccessibilityAction),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1860,10 +1864,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=449 {
+        for value in 1..=451 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(450).is_err());
+        assert!(PropKey::try_from(452).is_err());
     }
 
     #[test]

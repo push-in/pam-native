@@ -19,6 +19,44 @@ private final class PluginFixtureViewFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testVoiceOverCustomActionDispatchesItsBoundedIdentifier() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        var events: [(Int64, Int, Data)] = []
+        let renderer = PamRenderer(hostView: host) { id, kind, payload in
+            events.append((id, kind, payload))
+        }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(
+                id: 2,
+                parent: 1,
+                index: 0,
+                kind: .text,
+                properties: [
+                    PamConstants.text: .text("Message"),
+                    PamConstants.accessibilityActions: .text(
+                        #"[{"name":"archive","label":"Archive message"}]"#
+                    ),
+                    PamConstants.onAccessibilityAction: .flag(true),
+                    PamConstants.testId: .text("message-actions"),
+                ]
+            )),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 390, height: 844)),
+            .layout(id: 2, frame: Frame(x: 16, y: 16, width: 200, height: 48)),
+            .setRoot(1),
+        ]])
+
+        let view = try XCTUnwrap(host.descendant(accessibilityIdentifier: "message-actions"))
+        let action = try XCTUnwrap(view.accessibilityCustomActions?.first)
+        XCTAssertEqual(action.name, "Archive message")
+        XCTAssertTrue(action.actionHandler?(action) == true)
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events[0].0, 2)
+        XCTAssertEqual(events[0].1, EventKind.accessibilityAction.rawValue)
+        XCTAssertEqual(String(data: events[0].2, encoding: .utf8), "archive")
+        renderer.close()
+    }
+
     func testPluginRegistriesInjectModulesAndViews() {
         let modules = NativeModuleRegistry(additionalModules: [
             "fixture.echo": PluginFixtureModule(),
@@ -130,5 +168,18 @@ final class CapabilityIntegrationTests: XCTestCase {
             }
         }
         XCTAssertEqual(received, [5, 6, 7, 8])
+    }
+}
+
+@MainActor
+private extension UIView {
+    func descendant(accessibilityIdentifier identifier: String) -> UIView? {
+        if accessibilityIdentifier == identifier { return self }
+        for child in subviews {
+            if let match = child.descendant(accessibilityIdentifier: identifier) {
+                return match
+            }
+        }
+        return nil
     }
 }

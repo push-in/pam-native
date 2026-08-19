@@ -255,6 +255,8 @@
         { "name": "testId", "description": "Automation identifier." },
         { "name": "accessibilityLabel", "description": "Spoken accessibility label." },
         { "name": "accessibilityHint", "description": "Spoken interaction hint." },
+        { "name": ":accessibilityActions", "description": "Array of localized custom screen-reader actions with name and label values." },
+        { "name": "on:accessibilityAction", "description": "Handles a custom screen-reader action and receives its stable name." },
         { "name": "enabled", "values": [{ "name": "true" }, { "name": "false" }] },
         { "name": "visible", "values": [{ "name": "true" }, { "name": "false" }] },
         { "name": "width" },

@@ -78,6 +78,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
+import org.json.JSONArray
 import java.nio.ByteOrder
 import java.util.LinkedHashSet
 import java.util.Locale
@@ -1964,19 +1965,8 @@ class PamRenderer(
                 configurePressable(view, state)
             }
             PropKey.ACCESSIBILITY_ROLE -> {
-                val role = value.integer().toInt()
-                val className = accessibilityClass(role)
                 (view as? PamActivityIndicator)?.setHostAccessibility(true)
-                view.accessibilityDelegate = object : View.AccessibilityDelegate() {
-                    override fun onInitializeAccessibilityNodeInfo(
-                        host: View,
-                        info: AccessibilityNodeInfo,
-                    ) {
-                        super.onInitializeAccessibilityNodeInfo(host, info)
-                        info.className = className
-                        applyAccessibilityRoleInfo(info, role, state)
-                    }
-                }
+                configureAccessibilityDelegate(view, state)
             }
             PropKey.ACCESSIBLE -> view.isFocusable = value.flag()
             PropKey.ACCESSIBILITY_LIVE_REGION -> view.accessibilityLiveRegion =
@@ -2000,6 +1990,9 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_VALUE_NOW,
             PropKey.ACCESSIBILITY_VALUE_TEXT,
             -> notifyAccessibilityChanged(view)
+            PropKey.ACCESSIBILITY_ACTIONS,
+            PropKey.ON_ACCESSIBILITY_ACTION,
+            -> configureAccessibilityDelegate(view, state)
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
             PropKey.SCALE_X,
@@ -2387,8 +2380,8 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
             PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
             PropKey.ACCESSIBILITY_ROLE -> {
-                view.accessibilityDelegate = null
                 (view as? PamActivityIndicator)?.setHostAccessibility(false)
+                configureAccessibilityDelegate(view, state)
             }
             PropKey.ACCESSIBLE -> view.isFocusable = false
             PropKey.ACCESSIBILITY_LIVE_REGION -> {
@@ -2405,6 +2398,9 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_VALUE_NOW,
             PropKey.ACCESSIBILITY_VALUE_TEXT,
             -> notifyAccessibilityChanged(view)
+            PropKey.ACCESSIBILITY_ACTIONS,
+            PropKey.ON_ACCESSIBILITY_ACTION,
+            -> configureAccessibilityDelegate(view, state)
             PropKey.KEYBOARD_BEHAVIOR -> {
                 state.keyboardBehavior = KEYBOARD_RESIZE
                 applyKeyboardAvoidance(view, state)
@@ -6007,6 +6003,76 @@ class PamRenderer(
             else -> View::class.java.name
         }
 
+    private fun configureAccessibilityDelegate(view: View, state: NodeState) {
+        val role = state.integer(PropKey.ACCESSIBILITY_ROLE, 1L).toInt()
+        val actions = if (state.properties[PropKey.ON_ACCESSIBILITY_ACTION] != null) {
+            accessibilityActions(state.textOrNull(PropKey.ACCESSIBILITY_ACTIONS))
+        } else {
+            emptyList()
+        }
+        if (role == 1 && actions.isEmpty()) {
+            view.accessibilityDelegate = null
+            return
+        }
+        if (actions.isNotEmpty()) {
+            view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
+        view.accessibilityDelegate = object : View.AccessibilityDelegate() {
+            override fun onInitializeAccessibilityNodeInfo(
+                host: View,
+                info: AccessibilityNodeInfo,
+            ) {
+                super.onInitializeAccessibilityNodeInfo(host, info)
+                info.className = accessibilityClass(role)
+                applyAccessibilityRoleInfo(info, role, state)
+                actions.forEachIndexed { index, action ->
+                    info.addAction(
+                        AccessibilityNodeInfo.AccessibilityAction(
+                            ACCESSIBILITY_ACTION_BASE + index,
+                            action.label,
+                        ),
+                    )
+                }
+            }
+
+            override fun performAccessibilityAction(
+                host: View,
+                actionId: Int,
+                arguments: android.os.Bundle?,
+            ): Boolean {
+                val index = actionId - ACCESSIBILITY_ACTION_BASE
+                if (index in actions.indices) {
+                    dispatch(
+                        state.id,
+                        EventKind.ACCESSIBILITY_ACTION.value,
+                        actions[index].name,
+                    )
+                    return true
+                }
+                return super.performAccessibilityAction(host, actionId, arguments)
+            }
+        }
+    }
+
+    private fun accessibilityActions(encoded: String?): List<AccessibilityActionSpec> {
+        if (encoded == null || encoded.toByteArray(Charsets.UTF_8).size > 4_096) return emptyList()
+        return runCatching {
+            val values = JSONArray(encoded)
+            require(values.length() in 1..8)
+            buildList {
+                repeat(values.length()) { index ->
+                    val value = values.getJSONObject(index)
+                    val name = value.getString("name")
+                    val label = value.getString("label")
+                    require(ACCESSIBILITY_ACTION_NAME.matches(name))
+                    require(label.isNotEmpty() && label.toByteArray(Charsets.UTF_8).size <= 128)
+                    require(none { it.name == name })
+                    add(AccessibilityActionSpec(name, label))
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     private fun applyAccessibilityRoleInfo(
         info: AccessibilityNodeInfo,
         role: Int,
@@ -6317,6 +6383,8 @@ class PamRenderer(
             callback.takeIf { properties[key] != null }
     }
 
+    private data class AccessibilityActionSpec(val name: String, val label: String)
+
     private companion object {
         const val AUTO_FOCUS_RETRIES = 20
         const val AUTO_FOCUS_RETRY_MS = 50L
@@ -6326,6 +6394,8 @@ class PamRenderer(
         const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"
         const val MODAL_CLOSE_MARKER = "pam:modal-close"
         const val MODAL_CLOSE_ACCESSIBILITY_LABEL = "Close modal"
+        const val ACCESSIBILITY_ACTION_BASE = 0x3F00_0000
+        val ACCESSIBILITY_ACTION_NAME = Regex("^[a-z][a-z0-9._-]{0,63}$")
         const val EVENT_PRESS = 1
         const val EVENT_CHANGE = 2
         const val EVENT_LONG_PRESS = 5
@@ -6526,6 +6596,8 @@ class PamRenderer(
             PropKey.ROTATION,
             PropKey.ANIMATE_CHANGES,
             PropKey.OVERFLOW,
+            PropKey.ACCESSIBILITY_ACTIONS,
+            PropKey.ON_ACCESSIBILITY_ACTION,
         )
 
         const val ROLE_DESCRIPTION_KEY = "AccessibilityNodeInfo.roleDescription"
@@ -6588,6 +6660,7 @@ class PamRenderer(
             PropKey.ON_MENU_ACTION,
             PropKey.ON_NAVIGATION_GESTURE_POP,
             PropKey.ON_ANIMATION_COMPLETE,
+            PropKey.ON_ACCESSIBILITY_ACTION,
         )
         val IMAGE_EVENT_PROPERTIES = setOf(
             PropKey.ON_IMAGE_LOAD_START,

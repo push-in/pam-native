@@ -113,7 +113,8 @@ enum class EventKind(val value: Int) {
     MEDIA_CACHE_HIT(61),
     MEDIA_CACHE_MISS(62),
     MEDIA_CACHE_PROGRESS(63),
-    MEDIA_CACHE_READY(64);
+    MEDIA_CACHE_READY(64),
+    ACCESSIBILITY_ACTION(65);
 }
 
 enum class PropKey(val value: Int) {
@@ -565,7 +566,9 @@ enum class PropKey(val value: Int) {
     BORDER_STYLE(446),
     SCROLL_TARGET_ALIGNMENT(447),
     PRESS_SCALE(448),
-    SHARED_TRANSITION_CONFIG(449);
+    SHARED_TRANSITION_CONFIG(449),
+    ACCESSIBILITY_ACTIONS(450),
+    ON_ACCESSIBILITY_ACTION(451);
 
     companion object {
         fun from(value: Int): PropKey =

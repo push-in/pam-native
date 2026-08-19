@@ -35,6 +35,43 @@ Applications should combine semantic classes with native accessibility labels,
 roles, states, Dynamic Type/font scaling, safe areas, and reduced-motion support;
 color is never the only status indicator.
 
+### Custom screen-reader actions
+
+Expose a short alternative to swipe, drag, context-menu, or another complex
+gesture with localized actions. TalkBack publishes them in its actions menu;
+VoiceOver publishes them through the actions rotor. The handler receives the
+stable action name as its event payload.
+
+```php
+use Pam\Native\AccessibilityAction;
+
+$message->accessibilityActions(
+    new AccessibilityAction('reply', 'Reply'),
+    new AccessibilityAction('archive', 'Archive'),
+)->onAccessibilityAction(function (string $action): void {
+    $this->performMessageAction($action);
+});
+```
+
+Single-file components accept the same contract through a bound array:
+
+```xml
+<MessageRow
+    :accessibilityActions="[
+        ['name' => 'reply', 'label' => 'Reply'],
+        ['name' => 'archive', 'label' => 'Archive'],
+    ]"
+    on:accessibilityAction="performMessageAction"
+/>
+```
+
+Names are stable lowercase identifiers; labels are localized user-facing text.
+Each element accepts at most eight unique actions. PAM validates the PHP input
+and independently bounds and validates the native payload before exposing it.
+See the official [Android custom accessibility action](https://developer.android.com/reference/android/view/accessibility/AccessibilityNodeInfo.AccessibilityAction)
+and [Apple `UIAccessibilityCustomAction`](https://developer.apple.com/documentation/uikit/uiaccessibilitycustomaction)
+contracts for platform behavior.
+
 ## Register components
 
 Register one or more source directories before running the root component:

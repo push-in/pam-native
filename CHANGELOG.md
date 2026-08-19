@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add bounded custom TalkBack and VoiceOver actions across the PHP fluent API,
+  `.pam` templates, binary protocol, Android renderer, and iOS renderer. Complex
+  gesture controls can now expose localized screen-reader alternatives and
+  receive one stable action-name event without sending UI data across bridges.
+
 - Make Native source CI and both aggregate plugin certifications reusable and
   mandatory for every version tag. Android/iOS source changes now trigger their
   ecosystem workflows automatically instead of relying on a manual dispatch.

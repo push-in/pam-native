@@ -64,8 +64,13 @@ final class PamProtocolTests: XCTestCase {
             .menuAction,
             .navigationGesturePop,
             .animationComplete,
+            .mediaCacheHit,
+            .mediaCacheMiss,
+            .mediaCacheProgress,
+            .mediaCacheReady,
+            .accessibilityAction,
         ]
-        XCTAssertEqual(events.map(\.rawValue), Array(1...60))
+        XCTAssertEqual(events.map(\.rawValue), Array(1...65))
         XCTAssertEqual(PamConstants.onClickOutside, 285)
         XCTAssertEqual(PamConstants.onIntersect, 286)
         XCTAssertEqual(PamConstants.onMutate, 287)
@@ -97,6 +102,8 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.scrollTargetAlignment, 447)
         XCTAssertEqual(PamConstants.pressScale, 448)
         XCTAssertEqual(PamConstants.sharedTransitionConfig, 449)
+        XCTAssertEqual(PamConstants.accessibilityActions, 450)
+        XCTAssertEqual(PamConstants.onAccessibilityAction, 451)
         XCTAssertEqual(
             [
                 NativeOperation.httpGet,

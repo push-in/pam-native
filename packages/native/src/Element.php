@@ -128,6 +128,30 @@ abstract class Element implements Renderable
             : $element->withProperty(PropKey::AccessibilityValueText, $text);
     }
 
+    final public function accessibilityActions(AccessibilityAction ...$actions): static
+    {
+        if ($actions === [] || count($actions) > 8) {
+            throw new InvalidArgumentException(
+                'Elements must expose between 1 and 8 accessibility actions.',
+            );
+        }
+        $names = array_map(static fn (AccessibilityAction $action): string => $action->name, $actions);
+        if (count(array_unique($names)) !== count($names)) {
+            throw new InvalidArgumentException('Accessibility action names must be unique per element.');
+        }
+        $encoded = json_encode(
+            array_map(static fn (AccessibilityAction $action): array => $action->toArray(), $actions),
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+        );
+
+        return $this->withProperty(PropKey::AccessibilityActions, $encoded)->accessible();
+    }
+
+    final public function onAccessibilityAction(Closure $handler): static
+    {
+        return $this->withEvent(EventKind::AccessibilityAction, $handler);
+    }
+
     final public function testId(string $id): static
     {
         return $this->withProperty(PropKey::TestId, $id);
@@ -332,6 +356,7 @@ abstract class Element implements Renderable
             EventKind::MediaCacheMiss => PropKey::OnMediaCacheMiss,
             EventKind::MediaCacheProgress => PropKey::OnMediaCacheProgress,
             EventKind::MediaCacheReady => PropKey::OnMediaCacheReady,
+            EventKind::AccessibilityAction => PropKey::OnAccessibilityAction,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,

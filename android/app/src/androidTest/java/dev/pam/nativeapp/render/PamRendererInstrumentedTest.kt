@@ -21,6 +21,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
 import dev.pam.nativeapp.protocol.Frame
+import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
 import dev.pam.nativeapp.protocol.NodeKind
 import dev.pam.nativeapp.protocol.NodeSpec
@@ -36,6 +37,59 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun exposesAndDispatchesBoundedTalkBackCustomActions() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val events = mutableListOf<Triple<Long, Int, ByteArray>>()
+                val renderer = PamRenderer(activity, activity.host) { id, kind, payload ->
+                    events += Triple(id, kind, payload)
+                }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Message"),
+                                        PropKey.ACCESSIBILITY_ACTIONS to PropValue.Text(
+                                            """[{"name":"archive","label":"Archive message"}]""",
+                                        ),
+                                        PropKey.ON_ACCESSIBILITY_ACTION to PropValue.Flag(true),
+                                        PropKey.TEST_ID to PropValue.Text("message-actions"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(16f, 16f, 200f, 48f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                val view = requireNotNull(activity.host.findByTransitionName("message-actions"))
+                val custom = requireNotNull(
+                    view.createAccessibilityNodeInfo().actionList.firstOrNull {
+                        it.label?.toString() == "Archive message"
+                    },
+                )
+                assertTrue(view.performAccessibilityAction(custom.id, null))
+                assertEquals(1, events.size)
+                assertEquals(2L, events.single().first)
+                assertEquals(EventKind.ACCESSIBILITY_ACTION.value, events.single().second)
+                assertEquals("archive", events.single().third.toString(Charsets.UTF_8))
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun autoFocusInputWaitsUntilItsReactiveScreenIsAttached() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

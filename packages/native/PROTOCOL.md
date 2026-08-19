@@ -28,7 +28,9 @@ oversized payloads before applying mutations.
 The canonical enums are `NodeKind`, `PropKey`, `EventKind` and
 `NativeOperation` in PHP, the `pam-native-protocol` Rust crate, and
 `PamProtocol.kt` plus the Android registries. Protocol v1 currently appends
-properties through ID `284` and events through ID `34`.
+properties through ID `451` and events through ID `65`. IDs `450` and `451`
+describe custom accessibility actions and their handler; event `65` returns
+the selected stable action name.
 
 ## Compatibility gates
 

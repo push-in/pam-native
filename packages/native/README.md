@@ -59,6 +59,11 @@ binding, conditional blocks, loops, utility classes and user-defined theme
 tokens. The fluent PHP element API and custom Kotlin views remain available as
 escape hatches, so the template/class convention is optional.
 
+Complex controls can expose localized TalkBack and VoiceOver alternatives to
+gesture-only interaction. Bind up to eight `{name, label}` entries through
+`:accessibilityActions` and handle `on:accessibilityAction`, or use
+`Element::accessibilityActions()` with typed `AccessibilityAction` values.
+
 Safe-area and keyboard avoidance remain native:
 
 ```xml
