@@ -85,7 +85,6 @@ import java.util.Locale
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import org.json.JSONArray
 
 internal inline fun <reified T> snapshotValues(
     size: Int,
@@ -6059,7 +6058,7 @@ class PamRenderer(
         return runCatching {
             val values = JSONArray(encoded)
             require(values.length() in 1..8)
-            buildList {
+            buildList<AccessibilityActionSpec> {
                 repeat(values.length()) { index ->
                     val value = values.getJSONObject(index)
                     val name = value.getString("name")
