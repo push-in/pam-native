@@ -31,6 +31,31 @@ function requireFragments(string $workflow, string $name, array $fragments): voi
     }
 }
 
+/** @param list<string> $names */
+function requireBoundedArtifactRetention(string $root, array $names): void
+{
+    foreach ($names as $name) {
+        $contents = workflow($root, $name);
+        preg_match_all(
+            '/^\s*- uses: actions\/upload-artifact@[^\n]+\n(?<body>(?:(?!^\s*- (?:uses|name):).*(?:\n|$))*)/m',
+            $contents,
+            $uploads,
+        );
+        foreach ($uploads['body'] as $body) {
+            if (preg_match('/^\s+retention-days: (\d+)$/m', $body, $retention) !== 1) {
+                fail("{$name} contains an artifact without explicit retention");
+            }
+            $days = (int) $retention[1];
+            if ($days < 1 || $days > 30) {
+                fail("{$name} artifact retention must be between 1 and 30 days");
+            }
+            if (str_contains($body, 'prerequisites') && $days !== 1) {
+                fail("{$name} transient prerequisites must retain for 1 day");
+            }
+        }
+    }
+}
+
 $ci = workflow($root, 'ci.yml');
 $android = workflow($root, 'ecosystem-android.yml');
 $ios = workflow($root, 'ecosystem-ios.yml');
@@ -61,5 +86,6 @@ requireFragments($release, 'release.yml', [
     "      - ecosystem-android\n",
     "      - ecosystem-ios\n",
 ]);
+requireBoundedArtifactRetention($root, ['ci.yml', 'release.yml']);
 
 echo "PAM Native release workflow contracts passed.\n";

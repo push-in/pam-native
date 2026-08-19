@@ -111,11 +111,13 @@ jobs:
             android/app/build/reports/lint-results-debug.html
             android/app/build/test-results/testDebugUnitTest/
           if-no-files-found: error
+          retention-days: 7
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-android-prerequisites
           path: dist/pam-native-android-prerequisites.tar.gz
           if-no-files-found: error
+          retention-days: 1
 
   android-instrumented:
     name: Android API ${{ matrix.api-level }} renderer contracts
@@ -165,6 +167,7 @@ jobs:
             android/app/build/reports/androidTests/connected/
             android/app/build/outputs/androidTest-results/connected/
           if-no-files-found: warn
+          retention-days: 7
 
   ios:
     name: Swift and UIKit contracts

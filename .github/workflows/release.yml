@@ -71,6 +71,7 @@ jobs:
           name: pam-native-ios
           path: dist/pam-native-ios-*
           if-no-files-found: error
+          retention-days: 7
 
   android:
     name: Package Android renderer and plugin API
@@ -132,6 +133,7 @@ jobs:
           name: pam-native-android
           path: dist/pam-native-android-*
           if-no-files-found: error
+          retention-days: 7
 
   php-sdk:
     name: Package PHP SDK
@@ -166,6 +168,7 @@ jobs:
           name: pam-native-php
           path: dist/pam-native-php-*
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     name: Publish GitHub release
