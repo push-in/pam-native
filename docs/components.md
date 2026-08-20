@@ -44,6 +44,11 @@ verify the semantic identifier returned to PHP. These tests prove renderer
 mapping and event parity; they do not replace a manual screen-reader journey on
 release hardware, which remains a release-evidence requirement.
 
+CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
+UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
+source-contract workflow, so a failed mapping test blocks publication while its
+native diagnostic bundle remains available for review.
+
 ### Custom screen-reader actions
 
 Expose a short alternative to swipe, drag, context-menu, or another complex

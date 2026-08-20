@@ -192,8 +192,16 @@ jobs:
           xcodebuild \
             -scheme PamNative \
             -destination "platform=iOS Simulator,id=${udid}" \
+            -resultBundlePath "${RUNNER_TEMP}/PamNative.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             test
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: pam-native-ios-tests
+          path: ${{ runner.temp }}/PamNative.xcresult
+          if-no-files-found: warn
+          retention-days: 7
       - name: Build PamNative for the iOS Simulator
         working-directory: ios
         run: >-
