@@ -11,7 +11,10 @@
 7. Exercise push foreground delivery, background opening and cold-start deep
    links with APNs and FCM.
 8. Validate recovery after rotation, backgrounding and process death.
-9. Run `git diff --check` and verify protocol values remain sequential.
+9. Run `python3 scripts/protocol-parity.py` and `git diff --check`. The parity
+   gate treats PHP as the identifier authority, requires exact Kotlin
+   NodeKind/EventKind/PropKey coverage, exact Swift NodeKind/EventKind coverage,
+   and rejects unknown or renamed numeric Swift property constants.
 10. Update changelog, versions and migration notes together.
 
 ## Compatibility contract
@@ -21,6 +24,10 @@
 - Status/type/kind values are sequential integer enums starting at one.
 - Optional host integrations fail with actionable errors.
 - PHP, Rust, Android and iOS artifacts ship matching protocol definitions.
+
+The Swift `PamConstants.imageProgressiveRendering` spelling remains as a
+deprecated source-compatible alias. New code uses the authority-aligned
+`imageProgressiveRenderingEnabled`; both resolve to property ID `200`.
 
 ## Publish artifacts
 

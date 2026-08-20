@@ -496,7 +496,9 @@ public enum PamConstants {
     public static let imageFadeDurationMs = 197
     public static let imageResizeMethod = 198
     public static let imageResizeMultiplier = 199
-    public static let imageProgressiveRendering = 200
+    public static let imageProgressiveRenderingEnabled = 200
+    @available(*, deprecated, renamed: "imageProgressiveRenderingEnabled")
+    public static let imageProgressiveRendering = imageProgressiveRenderingEnabled
     public static let imageCachePolicy = 201
     public static let imageOverlayColor = 202
     public static let imageSourceSet = 203

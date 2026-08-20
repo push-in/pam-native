@@ -3203,7 +3203,7 @@ public final class PamRenderer {
             source: resolvedSource,
             imageView: imageView,
             progressive:
-                state.properties[PamConstants.imageProgressiveRendering]?.boolOrNil() ?? false
+                state.properties[PamConstants.imageProgressiveRenderingEnabled]?.boolOrNil() ?? false
         )
         state.imageTask = task
 
