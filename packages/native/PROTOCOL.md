@@ -52,3 +52,7 @@ frame while retaining protocol v1 is a release blocker.
 | properties per node | 128 |
 | string/opaque property | 1 MiB |
 | queued event payload | 1 MiB |
+
+Rust, Android and iOS boundary tests accept the exact property/value ceilings,
+reject 129 properties or 1 MiB plus one byte, and check length before copying a
+declared payload.

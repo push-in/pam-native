@@ -77,4 +77,6 @@ is a release blocker, not a snapshot update.
 | queued native event payload | 1 MiB |
 
 These limits are part of protocol v1 and protect both memory use and decoder
-complexity.
+complexity. Rust, Android and iOS boundary tests accept exactly 128 properties
+and a 1 MiB value, reject the next unit, and validate the declared value length
+before copying its payload.

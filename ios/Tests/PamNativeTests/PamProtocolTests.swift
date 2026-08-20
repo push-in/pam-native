@@ -145,6 +145,24 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(root, 1)
     }
 
+    func testDecoderEnforcesSharedPropertyAndNodeLimits() throws {
+        let acceptedText = try BatchDecoder.decode(textBatch(length: 1024 * 1024))
+        guard case let .create(textNode)? = acceptedText.first,
+              case let .text(text)? = textNode.properties[PamConstants.text]
+        else {
+            return XCTFail("Expected a text property")
+        }
+        XCTAssertEqual(text.utf8.count, 1024 * 1024)
+        XCTAssertThrowsError(try BatchDecoder.decode(textBatch(length: 1024 * 1024 + 1)))
+
+        let acceptedProperties = try BatchDecoder.decode(propertyBatch(count: 128))
+        guard case let .create(propertyNode)? = acceptedProperties.first else {
+            return XCTFail("Expected a created node")
+        }
+        XCTAssertEqual(propertyNode.properties.count, 128)
+        XCTAssertThrowsError(try BatchDecoder.decode(propertyBatch(count: 129)))
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),
@@ -162,7 +180,45 @@ final class PamProtocolTests: XCTestCase {
     }
 }
 
+private func textBatch(length: Int) -> Data {
+    var data = batch(propertyCount: 1, payloadBytes: length)
+    data.appendLittleEndian(UInt16(PamConstants.text))
+    data.append(1)
+    data.appendLittleEndian(UInt32(length))
+    data.append(Data(repeating: 0x61, count: length))
+    return data
+}
+
+private func propertyBatch(count: Int) -> Data {
+    var data = batch(propertyCount: count, payloadBytes: count * 4)
+    for key in 1...count {
+        data.appendLittleEndian(UInt16(key))
+        data.append(4)
+        data.append(1)
+    }
+    return data
+}
+
+private func batch(propertyCount: Int, payloadBytes: Int) -> Data {
+    var data = Data(capacity: 32 + payloadBytes)
+    data.append(contentsOf: "PNB1".utf8)
+    data.appendLittleEndian(UInt16(1))
+    data.appendLittleEndian(UInt32(1))
+    data.append(1)
+    data.appendLittleEndian(UInt64(1))
+    data.appendLittleEndian(UInt64(0))
+    data.appendLittleEndian(UInt32(0))
+    data.append(UInt8(NodeKind.screen.rawValue))
+    data.appendLittleEndian(UInt16(propertyCount))
+    return data
+}
+
 private extension Data {
+    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
+    }
+
     init(hex: String) {
         self.init(
             stride(from: 0, to: hex.count, by: 2).compactMap { offset in

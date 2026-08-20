@@ -779,7 +779,7 @@ struct BinaryReader {
         let tag = try u8()
         switch tag {
         case 1:
-            return .text(String(data: try bytes(try u32()), encoding: .utf8) ?? "")
+            return .text(String(data: try sizedBytes(), encoding: .utf8) ?? "")
         case 2:
             return .integer(try i64())
         case 3:
@@ -791,7 +791,7 @@ struct BinaryReader {
             default: throw PamProtocolError.invalidPayload("Invalid boolean value")
             }
         case 5:
-            let value = try bytes(try u32())
+            let value = try sizedBytes()
             switch key {
             case PamConstants.items:
                 return .strings(try PackedStringList.decode(value))
@@ -813,6 +813,14 @@ struct BinaryReader {
             throw PamProtocolError.invalidPayload("Node ids must be positive")
         }
         return value
+    }
+
+    mutating func sizedBytes() throws -> Data {
+        let length = try u32()
+        guard length <= MAX_VALUE_BYTES else {
+            throw PamProtocolError.invalidPayload("Property exceeds one MiB")
+        }
+        return try bytes(length)
     }
 
     mutating func bytes(_ count: Int) throws -> Data {

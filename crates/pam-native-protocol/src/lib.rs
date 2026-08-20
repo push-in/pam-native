@@ -1954,6 +1954,17 @@ mod tests {
     }
 
     #[test]
+    fn producer_enforces_shared_property_byte_limit() {
+        tree(&"a".repeat(MAX_VALUE_BYTES))
+            .encode()
+            .expect("one MiB property");
+        assert_eq!(
+            tree(&"a".repeat(MAX_VALUE_BYTES + 1)).encode(),
+            Err(ProtocolError::LimitExceeded("property bytes")),
+        );
+    }
+
+    #[test]
     fn protocol_v1_golden_frames_are_stable() {
         let minimal_tree = Tree {
             root: 1,
