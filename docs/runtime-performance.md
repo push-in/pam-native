@@ -115,7 +115,7 @@ Android continues to publish decode/mount `Trace` sections, frame metrics,
 startup macrobenchmarks and Baseline Profile journeys. iOS renderer metrics are
 available to the existing runtime callback and Instruments.
 
-In Android development builds, every accepted hot-reload version also starts a
+In Android and iOS development builds, every accepted hot-reload version also starts a
 monotonic device-side measurement immediately before its bundle download. The
 measurement ends at the first committed native frame, or at the first native
 runtime failure. DevTools records it as integer diagnostic kind `6` (`LOAD`),
@@ -125,7 +125,11 @@ reported twice. A separate bounded 64-sample window exports successful count,
 failure count/rate, nearest-rank successful p95, its configured budget and the
 budget result in the diagnostics JSON. The overlay shows the same p95 and
 failure totals. Set `hotReloadP95BudgetMs` in `android/pam-native.properties`
-to change the default 1,000 ms development-device budget. This measures the
+to change Android's default 1,000 ms development-device budget; iOS uses the
+same 1,000 ms contract. The iOS debug host connects only to the loopback HTTP
+endpoint, streams each response under its protocol limit, refuses redirects,
+activates into `Library/Caches/pam/dev`, and retains only the active version.
+This measures the
 full device-visible reload path rather than only transport or PHP evaluation
 time; hosted device distributions remain a separate release-evidence gate.
 
@@ -136,7 +140,8 @@ gate it offline with:
 scripts/check-hot-reload-evidence.php pam-diagnostics.json 20 1000
 ```
 
-The verifier accepts only the Android diagnostics contract, checks internally
+The verifier accepts Android (`platformCode: 1`) and iOS (`platformCode: 2`)
+diagnostics contracts, checks internally
 consistent integer counts/rates and budget result, requires the requested
 sample floor, rejects every failed reload and rejects p95 above both the
 snapshot's configured budget and the independent CI ceiling. Inputs are

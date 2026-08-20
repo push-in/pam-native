@@ -28,7 +28,10 @@ function verifyHotReloadEvidence(
     }
     requireEvidenceInteger($document, 'schemaVersion', 1);
     requireEvidenceInteger($document, 'surfaceCode', 2);
-    requireEvidenceInteger($document, 'platformCode', 1);
+    $platformCode = requireNonNegativeInteger($document, 'platformCode');
+    if (!in_array($platformCode, [1, 2], true)) {
+        throw new InvalidArgumentException('platformCode must identify Android (1) or iOS (2)');
+    }
     $hotReload = $document['hotReload'] ?? null;
     if (!is_array($hotReload)) {
         throw new InvalidArgumentException('hotReload must be an object');

@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 require __DIR__.'/lib/hot-reload-evidence.php';
 
-function snapshot(array $overrides = []): string
+function snapshot(array $overrides = [], int $platformCode = 1): string
 {
     return json_encode([
         'schemaVersion' => 1,
         'surfaceCode' => 2,
-        'platformCode' => 1,
+        'platformCode' => $platformCode,
         'hotReload' => array_replace([
             'sampleCount' => 20,
             'successfulCount' => 20,
@@ -39,6 +39,11 @@ $result = verifyHotReloadEvidence(snapshot(), 20);
 if ($result['p95DurationMicros'] !== 750_000) {
     throw new RuntimeException('valid p95 was not preserved');
 }
+$iosResult = verifyHotReloadEvidence(snapshot([], 2), 20);
+if ($iosResult['sampleCount'] !== 20) {
+    throw new RuntimeException('valid iOS sample count was not preserved');
+}
+expectFailure(snapshot([], 3), 'platformCode must identify Android (1) or iOS (2)');
 expectFailure(snapshot(['sampleCount' => 19, 'successfulCount' => 19]), 'at least 20');
 expectFailure(snapshot([
     'successfulCount' => 19,

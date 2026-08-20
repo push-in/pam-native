@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Replace iOS development's rebuild/reinstall loop with bounded loopback hot
+  reload. Debug hosts now poll the CLI, stream-validate and transactionally
+  activate `PNA1` bundles from cache, reload the embedded PHP runtime, and
+  measure accepted-version-to-first-frame latency with the same integer kind
+  `6`, 64-sample p95/failure evidence contract used by Android.
 - Add the bounded iOS `PNA1` development-bundle parser and transactional
   activator. It matches Android's file/count/size/path contract, rejects
   malformed or duplicate input before activation, preserves the live PHP app

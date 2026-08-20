@@ -72,6 +72,9 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
             textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
             darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
         )
+#if DEBUG
+        runtime.startHotReload()
+#endif
         return true
     }
 
