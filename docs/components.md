@@ -88,7 +88,10 @@ targets do not compete for the same gesture.
 The Android evidence sends a complete down/up gesture outside two compact
 buttons' visual bounds but inside their overlapping 48dp targets. The grouped
 delegate must activate exactly the higher-z sibling, proving dispatch and
-ambiguity resolution in addition to the target-size calculation.
+ambiguity resolution in addition to the target-size calculation. Disabled,
+hidden or effectively transparent entries are filtered when a gesture starts;
+the same point immediately falls through to an eligible sibling without
+waiting for another layout pass.
 
 The UIKit evidence resolves a point outside two compact buttons' visual bounds
 but inside both expanded 44pt targets through the parent view. The frontmost

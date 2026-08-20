@@ -52,8 +52,11 @@ internal class PamTouchDelegateGroup(private val parent: View) : TouchDelegate(R
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN) {
             active = entries
-                .filter { (_, entry) ->
-                    entry.bounds.contains(event.x.toInt(), event.y.toInt())
+                .filter { (target, entry) ->
+                    target.isEnabled
+                        && target.visibility == View.VISIBLE
+                        && target.alpha > 0.01f
+                        && entry.bounds.contains(event.x.toInt(), event.y.toInt())
                 }
                 .maxWithOrNull(
                     compareBy<Map.Entry<View, Entry>> { (target, _) ->

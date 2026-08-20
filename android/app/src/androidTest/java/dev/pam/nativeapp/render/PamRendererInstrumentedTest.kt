@@ -106,6 +106,30 @@ class PamRendererInstrumentedTest {
                 up.recycle()
                 assertEquals(0, lowerActivations)
                 assertEquals(1, upperActivations)
+
+                upper.isEnabled = false
+                val fallbackDown = MotionEvent.obtain(
+                    3,
+                    3,
+                    MotionEvent.ACTION_DOWN,
+                    60f,
+                    50f,
+                    0,
+                )
+                val fallbackUp = MotionEvent.obtain(
+                    3,
+                    4,
+                    MotionEvent.ACTION_UP,
+                    60f,
+                    50f,
+                    0,
+                )
+                assertTrue(delegates.onTouchEvent(fallbackDown))
+                assertTrue(delegates.onTouchEvent(fallbackUp))
+                fallbackDown.recycle()
+                fallbackUp.recycle()
+                assertEquals(1, lowerActivations)
+                assertEquals(1, upperActivations)
             }
         } finally {
             activity.finish()
