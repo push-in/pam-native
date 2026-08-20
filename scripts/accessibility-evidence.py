@@ -38,6 +38,10 @@ TARGETS = {
         "android": "compactInteractiveControlsKeepPlatformMinimumTouchTargets",
         "ios": "testCompactInteractiveControlsKeepPlatformMinimumTouchTargets",
     },
+    7: {
+        "android": "keyboardFocusUsesVisibleSystemHighlightAndSkipsDisabledControls",
+        "ios": "testKeyboardFocusUsesVisibleSystemHaloAndSkipsDisabledControls",
+    },
 }
 
 

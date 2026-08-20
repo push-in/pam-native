@@ -41,6 +41,25 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun keyboardFocusUsesVisibleSystemHighlightAndSkipsDisabledControls() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val pressable = PamPressable(activity)
+                assertTrue(pressable.isFocusable)
+                assertFalse(pressable.isFocusableInTouchMode)
+                assertTrue(pressable.defaultFocusHighlightEnabled)
+
+                pressable.isEnabled = false
+                assertFalse(pressable.isEnabled)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun compactInteractiveControlsKeepPlatformMinimumTouchTargets() {
         val compact = minimumTouchTargetInsets(20, 30, 48)
         assertEquals(48, 20 + compact.left + compact.right)

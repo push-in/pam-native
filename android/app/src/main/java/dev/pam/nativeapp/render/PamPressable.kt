@@ -93,6 +93,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     init {
         isClickable = true
         isLongClickable = true
+        isFocusable = true
+        isFocusableInTouchMode = false
+        defaultFocusHighlightEnabled = true
     }
 
     fun configure(

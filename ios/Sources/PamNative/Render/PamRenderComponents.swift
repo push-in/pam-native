@@ -10,6 +10,20 @@ final class PamPressButton: UIButton {
     private var restingAlpha: CGFloat?
     private var restingTransform: CGAffineTransform?
 
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        focusEffect = UIFocusHaloEffect()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        focusEffect = UIFocusHaloEffect()
+    }
+
+    override var canBecomeFocused: Bool {
+        isEnabled && !isHidden && alpha > 0.01
+    }
+
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return false }
         let horizontal = max(0, Self.minimumTouchTarget - bounds.width) / 2

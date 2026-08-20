@@ -83,6 +83,12 @@ iOS expands `PamPressButton` hit testing symmetrically. Disabled or hidden
 controls do not become actionable. Keep sufficient spacing between adjacent
 controls so expanded targets do not compete for the same gesture.
 
+Hardware-keyboard and switch navigation use the platform focus engine.
+`Pressable` participates in directional focus on Android without stealing touch
+focus and renders the system default focus highlight. `PamPressButton` uses the
+adaptive UIKit focus halo. Disabled controls are removed from both focus paths,
+so the visible indicator and operability remain synchronized.
+
 CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
 UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
 source-contract workflow, so a failed mapping test blocks publication while its
@@ -98,7 +104,8 @@ each source report, plus these sequential integer enums:
 - platform: Android = `1`, iOS = `2`;
 - check: semantic role/state/value = `1`, bounded custom action = `2`,
   reduced-motion navigation commit = `3`, bounded system text scaling = `4`,
-  semantic text-color transport = `5`, platform-minimum touch target = `6`;
+  semantic text-color transport = `5`, platform-minimum touch target = `6`,
+  visible keyboard focus = `7`;
 - result: passed = `1`, failed = `2` (failed input never produces evidence).
 
 The producer rejects missing, duplicated, skipped, or failed Android checks,
