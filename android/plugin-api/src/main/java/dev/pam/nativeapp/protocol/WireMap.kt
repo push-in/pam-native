@@ -66,7 +66,7 @@ object WireMap {
         require(values.size <= 65_535) { "Too many native module values" }
         val output = ByteArrayOutputStream()
         output.write(u16(values.size))
-        values.forEach { (key, value) ->
+        values.toSortedMap().forEach { (key, value) ->
             val keyBytes = key.toByteArray(Charsets.UTF_8)
             require(
                 keyBytes.size in 1..255 && key.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,254}")),

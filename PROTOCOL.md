@@ -44,6 +44,10 @@ Rust, Android and iOS decoders reject malformed sequences instead of replacing
 bytes or silently producing empty strings. Opaque tag-`5` values remain binary.
 Floating-point properties and module-map decimals must be finite; `NaN` and
 positive/negative infinity are rejected by producers and consumers.
+Wire maps encode portable ASCII keys in ascending byte order. PHP, Kotlin and
+Swift pin the same all-value-type golden bytes, so insertion order cannot alter
+payload hashes or snapshots; decoders remain compatible with valid legacy maps
+in any order.
 
 Patch application is transactional. A rejected `PNP1` frame leaves the
 retained tree untouched; the PHP encoder then resynchronizes with a complete

@@ -222,6 +222,27 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertThrowsError(try WireMap.decode(wire))
     }
 
+    func testWireMapEncodingIsCanonicalAcrossInsertionOrders() throws {
+        let expected = Data(hex:
+            "04000500616c706861010300000050616d0700656e61626c65640401" +
+            "0500726174696f03000000000000f83f04007a657461022a00000000000000"
+        )
+        let first = try WireMap.encode([
+            "zeta": .integer(42),
+            "ratio": .decimal(1.5),
+            "enabled": .flag(true),
+            "alpha": .text("Pam"),
+        ])
+        let second = try WireMap.encode([
+            "alpha": .text("Pam"),
+            "enabled": .flag(true),
+            "ratio": .decimal(1.5),
+            "zeta": .integer(42),
+        ])
+        XCTAssertEqual(expected, first)
+        XCTAssertEqual(first, second)
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),

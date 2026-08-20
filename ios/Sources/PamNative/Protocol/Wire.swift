@@ -130,7 +130,7 @@ public enum WireMap {
         var output = Data()
         output.append(contentsOf: withUnsafeBytes(of: UInt16(values.count).littleEndian, Array.init))
 
-        for (key, value) in values {
+        for (key, value) in values.sorted(by: { $0.key < $1.key }) {
             let keyBytes = key.data(using: .utf8) ?? Data()
             guard (1...255).contains(keyBytes.count), validWireKey(key) else {
                 throw PamProtocolError.invalidPayload("Invalid module key")

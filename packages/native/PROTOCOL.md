@@ -28,6 +28,9 @@ list/section entries and module-map strings must be valid UTF-8; malformed input
 is rejected rather than normalized. Opaque tag-`5` properties remain binary.
 Floating-point properties and module-map decimals reject `NaN` and infinity at
 both encode and decode boundaries.
+Module maps canonically encode their portable ASCII keys in ascending byte
+order. PHP, Kotlin and Swift share a golden fixture, while decoders continue to
+accept valid pre-existing maps in any key order.
 
 The canonical enums are `NodeKind`, `PropKey`, `EventKind` and
 `NativeOperation` in PHP, the `pam-native-protocol` Rust crate, and

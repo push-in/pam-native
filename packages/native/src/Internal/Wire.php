@@ -50,6 +50,7 @@ final class Wire
     public static function map(array $values): string
     {
         $output = self::u16(count($values));
+        ksort($values, SORT_STRING);
 
         foreach ($values as $key => $value) {
             if (preg_match('/^[A-Za-z][A-Za-z0-9_]{0,254}$/D', $key) !== 1) {

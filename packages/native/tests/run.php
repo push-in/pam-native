@@ -2433,6 +2433,24 @@ try {
 }
 $assert($invalidWireFloatDecodeRejected, 'Wire map decoding must reject non-finite decimals.');
 
+$canonicalWire = Wire::map([
+    'zeta' => 42,
+    'ratio' => 1.5,
+    'enabled' => true,
+    'alpha' => 'Pam',
+]);
+$assert(
+    $canonicalWire === Wire::map([
+        'alpha' => 'Pam',
+        'enabled' => true,
+        'ratio' => 1.5,
+        'zeta' => 42,
+    ])
+        && bin2hex($canonicalWire)
+            === '04000500616c706861010300000050616d0700656e61626c656404010500726174696f03000000000000f83f04007a657461022a00000000000000',
+    'Wire maps must use the shared canonical key order and golden bytes.',
+);
+
 $nativeContainer = CustomView::make(
     'community.container',
     ['axis' => 1],
@@ -2948,11 +2966,11 @@ $wire = Wire::map([
     'ratio' => 1.5,
     'enabled' => true,
 ]);
-$assert(Wire::decodeMap($wire) === [
-    'name' => 'Pam',
+$assert(Wire::decodeMap($wire) == [
     'count' => 42,
-    'ratio' => 1.5,
     'enabled' => true,
+    'name' => 'Pam',
+    'ratio' => 1.5,
 ], 'Wire map round-trip failed.');
 
 $counter = new class extends Component {
@@ -2986,7 +3004,7 @@ $assert(
     TestDiagnostics::$moduleCall !== null
         && TestDiagnostics::$moduleCall['requestId'] === $requestId
         && TestDiagnostics::$moduleCall['module'] === 'community.echo'
-        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload']) === ['message' => 'fast'],
+        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload']) == ['message' => 'fast'],
     'Public native module facade did not emit a typed bridge call.',
 );
 Runtime::dispatchModuleResult(
@@ -3303,7 +3321,7 @@ $assert(
         && $copyAssetCall['requestId'] === $copyAssetRequest
         && $copyAssetCall['module'] === 'files'
         && $copyAssetCall['method'] === 'copyAsset'
-        && Wire::decodeMap($copyAssetCall['payload']) === [
+        && Wire::decodeMap($copyAssetCall['payload']) == [
             'assetPath' => 'assets/templates/story.webp',
             'path' => 'drafts/story.webp',
         ],
@@ -3348,7 +3366,7 @@ $assert(
         && $downloadCall['requestId'] === $downloadRequest
         && $downloadCall['module'] === 'files'
         && $downloadCall['method'] === 'download'
-        && Wire::decodeMap($downloadCall['payload']) === [
+        && Wire::decodeMap($downloadCall['payload']) == [
             'url' => 'https://cdn.example.test/media/story.webp',
             'path' => 'drafts/remote-story.webp',
             'maximumBytes' => 8_388_608,
@@ -3418,7 +3436,7 @@ Runtime::dispatchModuleResult(
 $downloadNextRequest = TestDiagnostics::$moduleCall['requestId'] ?? 0;
 $assert(
     (TestDiagnostics::$moduleCall['method'] ?? '') === 'downloadNext'
-        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '') === ['subscription' => 77],
+        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '') == ['subscription' => 77],
     'Progress downloads must consume the native observation channel.',
 );
 Runtime::dispatchModuleResult(
@@ -3462,7 +3480,7 @@ $openRequest = Files::open(
 );
 $assert(
     (TestDiagnostics::$moduleCall['method'] ?? '') === 'open'
-        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '') === [
+        && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '') == [
             'path' => 'documents/report.pdf',
             'mimeType' => 'application/pdf',
         ],
@@ -3484,7 +3502,7 @@ $assert(
         && $importUriCall['requestId'] === $importUriRequest
         && $importUriCall['module'] === 'files'
         && $importUriCall['method'] === 'importUri'
-        && Wire::decodeMap($importUriCall['payload']) === [
+        && Wire::decodeMap($importUriCall['payload']) == [
             'uri' => 'content://media/external/images/media/42',
         ],
     'Files importUri must emit a typed content URI import.',
@@ -3608,7 +3626,7 @@ $assert(
         && $contactsCall['requestId'] === $contactsRequestId
         && $contactsCall['module'] === 'contacts'
         && $contactsCall['method'] === 'list'
-        && Wire::decodeMap($contactsCall['payload']) === ['offset' => 0, 'limit' => 250],
+        && Wire::decodeMap($contactsCall['payload']) == ['offset' => 0, 'limit' => 250],
     'Contacts facade did not request the first bounded native page.',
 );
 Runtime::dispatchModuleResult(
@@ -3643,7 +3661,7 @@ $assert(
         && $mediaCall['requestId'] === $mediaRequestId
         && $mediaCall['module'] === 'media-library'
         && $mediaCall['method'] === 'assets'
-        && Wire::decodeMap($mediaCall['payload']) === [
+        && Wire::decodeMap($mediaCall['payload']) == [
             'albumId' => 'camera',
             'limit' => 80,
             'offset' => 160,
@@ -3699,7 +3717,7 @@ $assert(
         && $albumCall['requestId'] === $albumRequestId
         && $albumCall['module'] === 'media-library'
         && $albumCall['method'] === 'albums'
-        && Wire::decodeMap($albumCall['payload']) === [
+        && Wire::decodeMap($albumCall['payload']) == [
             'type' => MediaPickerType::Image->value,
         ],
     'MediaLibrary albums must emit its typed media filter.',
@@ -3760,7 +3778,7 @@ $assert(
         && $smsComposeCall['requestId'] === $smsComposeRequest
         && $smsComposeCall['module'] === 'sms'
         && $smsComposeCall['method'] === 'compose'
-        && Wire::decodeMap($smsComposeCall['payload']) === [
+        && Wire::decodeMap($smsComposeCall['payload']) == [
             'recipients' => '+55 11 99999-0000',
             'body' => 'Convite do Zé Chat',
         ],
@@ -3873,7 +3891,7 @@ $assert(
     $cacheClearCall !== null
         && $cacheClearCall['module'] === 'cache'
         && $cacheClearCall['method'] === 'clear'
-        && Wire::decodeMap($cacheClearCall['payload']) === ['preserveOffline' => true],
+        && Wire::decodeMap($cacheClearCall['payload']) == ['preserveOffline' => true],
     'Caches clear must preserve pinned offline media by default.',
 );
 Runtime::dispatchModuleResult(

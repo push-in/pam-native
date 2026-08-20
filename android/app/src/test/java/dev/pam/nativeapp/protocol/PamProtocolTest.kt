@@ -140,6 +140,26 @@ class PamProtocolTest {
         assertThrows(IllegalArgumentException::class.java) { WireMap.decode(wire) }
     }
 
+    @Test
+    fun wireMapEncodingIsCanonicalAcrossInsertionOrders() {
+        val expected = "04000500616c706861010300000050616d0700656e61626c65640401" +
+            "0500726174696f03000000000000f83f04007a657461022a00000000000000"
+        val first = linkedMapOf(
+            "zeta" to WireValue.Integer(42),
+            "ratio" to WireValue.Decimal(1.5),
+            "enabled" to WireValue.Flag(true),
+            "alpha" to WireValue.Text("Pam"),
+        )
+        val second = linkedMapOf(
+            "alpha" to WireValue.Text("Pam"),
+            "enabled" to WireValue.Flag(true),
+            "ratio" to WireValue.Decimal(1.5),
+            "zeta" to WireValue.Integer(42),
+        )
+        assertEquals(expected, WireMap.encode(first).hex())
+        assertEquals(WireMap.encode(first).toList(), WireMap.encode(second).toList())
+    }
+
     private fun textBatch(length: Int): ByteBuffer =
         textBatch(ByteArray(length) { 'a'.code.toByte() })
 
@@ -189,4 +209,7 @@ class PamProtocolTest {
         chunked(2)
             .map { byte -> byte.toInt(16).toByte() }
             .toByteArray()
+
+    private fun ByteArray.hex(): String =
+        joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 }
