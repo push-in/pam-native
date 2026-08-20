@@ -2641,22 +2641,6 @@ public final class PamRenderer {
             resolved["translationX"] = percent * Double(translationReferenceWidth) / 100
             return resolved
         }
-        if UIAccessibility.isReduceMotionEnabled {
-            view.layer.removeAnimation(forKey: "pam.keyframes")
-            animationDelegates[nodeId] = nil
-            if let last = resolvedFrames.last {
-                view.alpha = CGFloat((last["opacity"] as? NSNumber)?.doubleValue ?? 1)
-                let x = CGFloat((last["translationX"] as? NSNumber)?.doubleValue ?? 0)
-                let y = CGFloat((last["translationY"] as? NSNumber)?.doubleValue ?? 0)
-                let scaleX = CGFloat((last["scaleX"] as? NSNumber)?.doubleValue ?? 1)
-                let scaleY = CGFloat((last["scaleY"] as? NSNumber)?.doubleValue ?? 1)
-                let rotation = CGFloat((last["rotation"] as? NSNumber)?.doubleValue ?? 0)
-                view.transform = CGAffineTransform(translationX: x, y: y)
-                    .scaledBy(x: scaleX, y: scaleY)
-                    .rotated(by: rotation * .pi / 180)
-            }
-            return
-        }
         let playState = Int(
             state.properties[PamConstants.animationPlayState]?.integerOrNil() ?? 1
         )
@@ -2676,6 +2660,18 @@ public final class PamRenderer {
         view.layer.removeAnimation(forKey: "pam.keyframes")
         animationDelegates[nodeId] = nil
         guard playState == 1 else { return }
+
+        let iterations = state.properties[PamConstants.animationIterations]?.integerOrNil() ?? 1
+        if PamMotionPolicy.isReduced {
+            if let last = resolvedFrames.last {
+                PamMotionPolicy.applyTerminalKeyframe(last, to: view)
+            }
+            if iterations != 0,
+               state.properties[PamConstants.onAnimationComplete] != nil {
+                dispatchEvent(nodeId, EventKind.animationComplete.rawValue, Data())
+            }
+            return
+        }
 
         let offsets = resolvedFrames.compactMap { ($0["offset"] as? NSNumber)?.doubleValue }
         guard offsets.count == resolvedFrames.count else { return }
@@ -2703,7 +2699,6 @@ public final class PamRenderer {
         }
         guard !animations.isEmpty else { return }
         let durationMs = state.properties[PamConstants.animationDurationMs]?.integerOrNil() ?? 300
-        let iterations = state.properties[PamConstants.animationIterations]?.integerOrNil() ?? 1
         let fill = Int(state.properties[PamConstants.animationFillMode]?.integerOrNil() ?? 2)
         let group = CAAnimationGroup()
         group.animations = animations
@@ -2778,7 +2773,7 @@ public final class PamRenderer {
 
     private func applyMotion(view: UIView, state: NodeState?, kind: Int) {
         view.layer.removeAllAnimations()
-        guard !UIAccessibility.isReduceMotionEnabled, kind != 1 else {
+        guard !PamMotionPolicy.isReduced, kind != 1 else {
             view.alpha = targetAlpha(state)
             return
         }
@@ -3295,7 +3290,7 @@ public final class PamRenderer {
                           state.imageGeneration == context.generation,
                           let imageView else { return }
                     let fade = state.properties[PamConstants.imageFadeDurationMs]?.integerOrNil() ?? 300
-                    if fade > 0 && !UIAccessibility.isReduceMotionEnabled {
+                    if fade > 0 && !PamMotionPolicy.isReduced {
                         UIView.transition(
                             with: imageView,
                             duration: min(Double(fade) / 1_000, 10),
@@ -4307,7 +4302,7 @@ public final class PamRenderer {
 
         @objc private func onRipple(_ sender: UILongPressGestureRecognizer) {
             guard let overlay = rippleOverlay else { return }
-            if UIAccessibility.isReduceMotionEnabled {
+            if PamMotionPolicy.isReduced {
                 overlay.alpha = sender.state == .began ? 1 : 0
                 return
             }

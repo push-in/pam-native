@@ -44,6 +44,16 @@ verify the semantic identifier returned to PHP. These tests prove renderer
 mapping and event parity; they do not replace a manual screen-reader journey on
 release hardware, which remains a release-evidence requirement.
 
+Motion follows one host policy rather than component-specific guesses. Android
+honors the system animator-duration setting; iOS honors Reduce Motion. Native
+navigation, shared elements, modals, drawers, bottom sheets, keyframes,
+worklets, property changes, ripple/press feedback and indefinite indicators
+either commit their terminal semantic state immediately or retain a static
+progress affordance. Reduced motion never delays navigation completion and a
+finite authored animation still emits its completion event exactly once. The
+host policy has an internal test-only override so both suites prove the reduced
+path without changing a developer or CI runner's global accessibility setting.
+
 CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
 UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
 source-contract workflow, so a failed mapping test blocks publication while its
@@ -57,7 +67,8 @@ each source report, plus these sequential integer enums:
 
 - environment: Android API 26 = `1`, Android API 36 = `2`, iOS Simulator = `3`;
 - platform: Android = `1`, iOS = `2`;
-- check: semantic role/state/value = `1`, bounded custom action = `2`;
+- check: semantic role/state/value = `1`, bounded custom action = `2`,
+  reduced-motion navigation commit = `3`;
 - result: passed = `1`, failed = `2` (failed input never produces evidence).
 
 The producer rejects missing, duplicated, skipped, or failed Android checks,

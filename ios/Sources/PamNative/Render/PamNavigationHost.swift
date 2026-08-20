@@ -197,7 +197,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         layoutIfNeeded()
         prepareSharedElements(incoming: incoming, outgoing: outgoing)
         let kind = transition == 1 ? 2 : transition
-        if UIAccessibility.isReduceMotionEnabled || duration == 0 || kind == 8 {
+        if PamMotionPolicy.isReduced || duration == 0 || kind == 8 {
             finish(incoming: incoming, outgoing: outgoing)
             return
         }
@@ -316,7 +316,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         sourceFrames: [String: CGRect] = [:]
     ) {
         clearSharedElements()
-        guard !UIAccessibility.isReduceMotionEnabled, duration > 0,
+        guard !PamMotionPolicy.isReduced, duration > 0,
               let outgoing else { return }
         let sources = sharedElementViews(in: outgoing)
         let destinations = sharedElementViews(in: incoming)
@@ -598,7 +598,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             return
         }
         if operation == 3, let presented = presentedNavigationController {
-            presented.dismiss(animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+            presented.dismiss(animated: !PamMotionPolicy.isReduced) { [weak self] in
                 self?.presentedNavigationController = nil
                 self?.finish(incoming: incoming, outgoing: outgoing)
                 self?.applyControllerChrome()
@@ -613,7 +613,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             configurePresentation(modal)
             presentedNavigationController = modal
             applyControllerChrome()
-            navigation.present(modal, animated: !UIAccessibility.isReduceMotionEnabled) { [weak self] in
+            navigation.present(modal, animated: !PamMotionPolicy.isReduced) { [weak self] in
                 self?.finish(incoming: incoming, outgoing: outgoing)
             }
             return
@@ -622,7 +622,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             ? Array(allControllers.dropLast())
             : allControllers
         let kind = transition == 1 ? 2 : transition
-        let animated = !UIAccessibility.isReduceMotionEnabled && duration > 0 && kind != 8
+        let animated = !PamMotionPolicy.isReduced && duration > 0 && kind != 8
         let sharedSourceFrames = animated ? sharedElementFrames(in: outgoing) : [:]
         if animated {
             let animation = CATransition()

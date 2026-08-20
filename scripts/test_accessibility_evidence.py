@@ -48,7 +48,7 @@ class AccessibilityEvidenceTests(unittest.TestCase):
         document = self.produce()
         self.assertEqual(1, document["resultCode"])
         self.assertEqual([1, 2, 3], [item["environmentCode"] for item in document["environments"]])
-        self.assertTrue(all([1, 2] == [check["checkCode"] for check in item["checks"]] for item in document["environments"]))
+        self.assertTrue(all([1, 2, 3] == [check["checkCode"] for check in item["checks"]] for item in document["environments"]))
 
     def test_rejects_missing_failed_and_skipped_android_checks(self):
         report = self.android26 / "TEST-accessibility.xml"

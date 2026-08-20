@@ -3247,9 +3247,10 @@ class PamRenderer(
         state.keyframeAnimator = null
         if (playState == 3) return
 
-        if (!ValueAnimator.areAnimatorsEnabled()) {
+        val iterations = state.integer(PropKey.ANIMATION_ITERATIONS, 1L).coerceIn(0L, 10_000L)
+        if (PamMotionPolicy.isReduced(view.context)) {
             applyKeyframe(view, frames, 1f)
-            if (state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+            if (iterations != 0L && state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
                 dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
             }
             return
@@ -3257,7 +3258,6 @@ class PamRenderer(
         state.keyframeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = state.integer(PropKey.ANIMATION_DURATION_MS, 300L).coerceIn(1L, 60_000L)
             startDelay = state.integer(PropKey.ANIMATION_DELAY_MS, 0L).coerceIn(0L, 60_000L)
-            val iterations = state.integer(PropKey.ANIMATION_ITERATIONS, 1L).coerceIn(0L, 10_000L)
             repeatCount = if (iterations == 0L) ValueAnimator.INFINITE else iterations.toInt() - 1
             repeatMode = if (state.flag(PropKey.ANIMATION_AUTO_REVERSE, false)) {
                 ValueAnimator.REVERSE
@@ -3319,7 +3319,7 @@ class PamRenderer(
                 }
             }
         }
-        if (!ValueAnimator.areAnimatorsEnabled()) {
+        if (PamMotionPolicy.isReduced(view.context)) {
             apply(durationMs.toDouble())
             if (iterations != 0L && state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
                 dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
@@ -3427,12 +3427,19 @@ class PamRenderer(
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    view.animate()
-                        .alpha(state.pressOpacity)
-                        .scaleX(state.targetScaleX() * state.pressScale)
-                        .scaleY(state.targetScaleY() * state.pressScale)
-                        .setDuration(70)
-                        .start()
+                    if (PamMotionPolicy.isReduced(view.context)) {
+                        view.animate().cancel()
+                        view.alpha = state.pressOpacity
+                        view.scaleX = state.targetScaleX() * state.pressScale
+                        view.scaleY = state.targetScaleY() * state.pressScale
+                    } else {
+                        view.animate()
+                            .alpha(state.pressOpacity)
+                            .scaleX(state.targetScaleX() * state.pressScale)
+                            .scaleY(state.targetScaleY() * state.pressScale)
+                            .setDuration(70)
+                            .start()
+                    }
                     dispatchDirectiveTouch(state, EventKind.TOUCH_START.value, event)
                 }
                 MotionEvent.ACTION_MOVE ->
@@ -3440,12 +3447,19 @@ class PamRenderer(
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL,
                 -> {
-                    view.animate()
-                        .alpha(state.targetAlpha())
-                        .scaleX(state.targetScaleX())
-                        .scaleY(state.targetScaleY())
-                        .setDuration(110)
-                        .start()
+                    if (PamMotionPolicy.isReduced(view.context)) {
+                        view.animate().cancel()
+                        view.alpha = state.targetAlpha()
+                        view.scaleX = state.targetScaleX()
+                        view.scaleY = state.targetScaleY()
+                    } else {
+                        view.animate()
+                            .alpha(state.targetAlpha())
+                            .scaleX(state.targetScaleX())
+                            .scaleY(state.targetScaleY())
+                            .setDuration(110)
+                            .start()
+                    }
                     dispatchDirectiveTouch(state, EventKind.TOUCH_END.value, event)
                 }
             }
@@ -4099,7 +4113,7 @@ class PamRenderer(
         if (loading) {
             val color = button.currentTextColor
             val indicator = state.loadingDrawable
-                ?: PamButtonLoadingDrawable(dp(20f), color).also {
+                ?: PamButtonLoadingDrawable(view.context, dp(20f), color).also {
                     state.loadingDrawable = it
                 }
             indicator.setColor(color)
@@ -4618,7 +4632,7 @@ class PamRenderer(
         state.propertyAnimator?.cancel()
         state.propertyAnimator = null
         view.animate().cancel()
-        if (!ValueAnimator.areAnimatorsEnabled() || kind == 1) {
+        if (PamMotionPolicy.isReduced(view.context) || kind == 1) {
             view.alpha = state.targetAlpha()
             view.translationX =
                 dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
@@ -4721,7 +4735,11 @@ class PamRenderer(
             -> dp(value).toFloat()
             else -> value
         }
-        if (!state.flag(PropKey.ANIMATE_CHANGES, false) || !view.isLaidOut) {
+        if (
+            !state.flag(PropKey.ANIMATE_CHANGES, false) ||
+            !view.isLaidOut ||
+            PamMotionPolicy.isReduced(view.context)
+        ) {
             setAnimatedProperty(view, key, target)
             return
         }

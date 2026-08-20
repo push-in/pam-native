@@ -689,7 +689,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
     private fun animateEntrance() {
         content.animate().cancel()
-        if (animationType == ANIMATION_NONE || !ValueAnimator.areAnimatorsEnabled()) {
+        if (animationType == ANIMATION_NONE || PamMotionPolicy.isReduced(context)) {
             content.alpha = 1f
             content.translationY = 0f
             return
@@ -716,7 +716,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         if (
             animated &&
             animationType != ANIMATION_NONE &&
-            ValueAnimator.areAnimatorsEnabled()
+            !PamMotionPolicy.isReduced(context)
         ) {
             val generation = ++dialogGeneration
             content.animate().cancel()

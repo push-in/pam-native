@@ -22,6 +22,10 @@ TARGETS = {
         "android": "exposesAndDispatchesBoundedTalkBackCustomActions",
         "ios": "testVoiceOverCustomActionDispatchesItsBoundedIdentifier",
     },
+    3: {
+        "android": "reducedMotionCommitsNavigationWithoutWaitingForAuthoredDuration",
+        "ios": "testReducedMotionCommitsNavigationWithoutWaitingForAuthoredDuration",
+    },
 }
 
 

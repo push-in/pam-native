@@ -3,6 +3,41 @@ import UIKit
 @testable import PamNative
 
 final class PamNavigationHostTests: XCTestCase {
+    override func tearDown() {
+        PamMotionPolicy.reduceMotionOverride = nil
+        super.tearDown()
+    }
+
+    func testReducedMotionCommitsNavigationWithoutWaitingForAuthoredDuration() {
+        PamMotionPolicy.reduceMotionOverride = true
+        let completed = expectation(description: "reduced-motion transition")
+        let host = PamNavigationHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        host.operation = 2
+        host.transition = 2
+        host.duration = 2
+        host.setGestureNavigation(
+            enabled: false,
+            edgeWidth: 24,
+            threshold: 0.35,
+            onPop: nil,
+            onTransitionEnd: { completed.fulfill() },
+            onGestureStart: nil,
+            onGestureEnd: nil,
+            onGestureCancel: nil
+        )
+        let first = UIView()
+        let second = UIView()
+        host.insert(first, index: 0)
+        host.insert(second, index: 1)
+        host.navigate(1)
+
+        wait(for: [completed], timeout: 0.5)
+        XCTAssertTrue(first.isHidden)
+        XCTAssertFalse(second.isHidden)
+        XCTAssertEqual(second.alpha, 1)
+        XCTAssertEqual(second.transform, .identity)
+    }
+
     func testNativeTabHostRetainsScenesAndSelectsWithoutRemounting() {
         let host = PamTabHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let first = UIView()

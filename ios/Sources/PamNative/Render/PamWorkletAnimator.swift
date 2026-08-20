@@ -112,7 +112,7 @@ final class PamWorkletAnimator: NSObject {
 
     func start() {
         stop()
-        if UIAccessibility.isReduceMotionEnabled {
+        if PamMotionPolicy.isReduced {
             apply(inputMs: durationMs)
             if iterations != 0 { completion() }
             return

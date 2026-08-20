@@ -1,6 +1,7 @@
 package dev.pam.nativeapp.render
 
 import android.animation.ValueAnimator
+import android.content.Context
 import android.graphics.Canvas
 import android.graphics.ColorFilter
 import android.graphics.Paint
@@ -11,6 +12,7 @@ import android.graphics.drawable.Drawable
 import android.view.animation.LinearInterpolator
 
 internal class PamButtonLoadingDrawable(
+    private val context: Context,
     sizePx: Int,
     color: Int,
 ) : Drawable(), Animatable {
@@ -22,6 +24,7 @@ internal class PamButtonLoadingDrawable(
         this.color = color
     }
     private var rotation = 0f
+    private var running = false
     private val animator = ValueAnimator.ofFloat(0f, 360f).apply {
         duration = 800L
         interpolator = LinearInterpolator()
@@ -58,15 +61,23 @@ internal class PamButtonLoadingDrawable(
     }
 
     override fun start() {
-        if (!animator.isStarted) animator.start()
+        if (running) return
+        running = true
+        if (PamMotionPolicy.isReduced(context)) {
+            rotation = 0f
+            invalidateSelf()
+            return
+        }
+        animator.start()
     }
 
     override fun stop() {
         animator.cancel()
+        running = false
         rotation = 0f
     }
 
-    override fun isRunning(): Boolean = animator.isRunning
+    override fun isRunning(): Boolean = running
 
     override fun setAlpha(alpha: Int) {
         paint.alpha = alpha
