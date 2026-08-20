@@ -40,11 +40,18 @@ class PackageBudgetGateTests(unittest.TestCase):
             artifact = root / "sdk.tar.gz"
             artifact.write_bytes(b"package")
             result = self.run_gate(
-                "--budgets", str(budgets), "--artifact", f"4={artifact}"
+                "--budgets",
+                str(budgets),
+                "--artifact",
+                f"4={artifact}",
+                "--output",
+                str(root / "report.json"),
             )
+            persisted = json.loads((root / "report.json").read_text(encoding="utf-8"))
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(report["resultCode"], 1)
+        self.assertEqual(persisted, report)
         self.assertEqual(report["artifacts"][0]["artifactCode"], 4)
         self.assertEqual(report["artifacts"][0]["resultCode"], 1)
         self.assertEqual(len(report["artifacts"][0]["sha256"]), 64)
@@ -89,6 +96,23 @@ class PackageBudgetGateTests(unittest.TestCase):
         self.assertNotEqual(duplicate.returncode, 0)
         self.assertIn("must not be duplicated", duplicate.stderr)
 
+    def test_report_output_does_not_follow_a_symlink(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "artifact"
+            artifact.write_bytes(b"package")
+            protected = root / "protected"
+            protected.write_text("preserve", encoding="utf-8")
+            output = root / "report.json"
+            output.symlink_to(protected)
+            result = self.run_gate(
+                "--artifact", f"4={artifact}", "--output", str(output)
+            )
+            protected_contents = protected.read_text(encoding="utf-8")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("output must be a regular path", result.stderr)
+        self.assertEqual(protected_contents, "preserve")
+
     def test_release_workflow_gates_all_four_artifact_codes_before_upload(self) -> None:
         workflow = (ROOT.parents[1] / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
@@ -96,6 +120,8 @@ class PackageBudgetGateTests(unittest.TestCase):
         for code in range(1, 5):
             self.assertIn(f'--artifact "{code}=', workflow)
         self.assertEqual(workflow.count("python3 benchmarks/package/gate.py"), 3)
+        self.assertEqual(workflow.count("--output \"dist/pam-native-"), 3)
+        self.assertEqual(workflow.count("dist/*.package-budget.json"), 3)
         self.assertLess(
             workflow.index("Enforce the iOS package budget"),
             workflow.index("actions/attest-build-provenance@v4"),

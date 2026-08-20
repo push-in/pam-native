@@ -67,9 +67,12 @@ jobs:
         run: >-
           python3 benchmarks/package/gate.py
           --artifact "1=dist/pam-native-ios-${GITHUB_REF_NAME#v}.zip"
+          --output "dist/pam-native-ios-${GITHUB_REF_NAME#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/*.zip
+          subject-path: |
+            dist/*.zip
+            dist/*.package-budget.json
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-ios
@@ -132,11 +135,13 @@ jobs:
           python3 benchmarks/package/gate.py
           --artifact "2=dist/pam-native-android-renderer-${GITHUB_REF_NAME#v}.tar.gz"
           --artifact "3=dist/pam-native-android-plugin-api-${GITHUB_REF_NAME#v}.aar"
+          --output "dist/pam-native-android-${GITHUB_REF_NAME#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             dist/*.aar
             dist/*.tar.gz
+            dist/*.package-budget.json
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-android
@@ -173,9 +178,12 @@ jobs:
         run: >-
           python3 benchmarks/package/gate.py
           --artifact "4=dist/pam-native-php-${GITHUB_REF_NAME#v}.tar.gz"
+          --output "dist/pam-native-php-${GITHUB_REF_NAME#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
-          subject-path: dist/*.tar.gz
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.package-budget.json
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-php

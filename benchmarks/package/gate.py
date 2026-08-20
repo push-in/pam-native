@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import stat
+import tempfile
 from enum import IntEnum
 from pathlib import Path
 
@@ -133,6 +134,27 @@ def evaluate(
     }
 
 
+def write_report(path: Path, report: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink() or (path.exists() and not path.is_file()):
+        raise ValueError("package budget report output must be a regular path")
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = -1
+            handle.write(json.dumps(report, indent=2) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Enforce PAM Native release package size budgets.")
     parser.add_argument(
@@ -141,8 +163,11 @@ def main() -> int:
         default=Path(__file__).with_name("budgets.json"),
     )
     parser.add_argument("--artifact", action="append", type=parse_artifact, default=[])
+    parser.add_argument("--output", type=Path)
     options = parser.parse_args()
     report = evaluate(options.artifact, load_budgets(options.budgets))
+    if options.output is not None:
+        write_report(options.output, report)
     print(json.dumps(report, indent=2))
     return 0 if report["resultCode"] == ResultCode.PASSED else 1
 
