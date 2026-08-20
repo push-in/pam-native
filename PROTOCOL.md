@@ -84,6 +84,8 @@ is a release blocker, not a snapshot update.
 | properties per node | 128 |
 | string/opaque property | 1 MiB |
 | complete packed list or section collection | 1 MiB |
+| packed list items / section entries | 100,000 |
+| packed sections | 10,000 |
 | complete native module WireMap | 1 MiB |
 | queued native event payload | 1 MiB |
 
@@ -93,4 +95,6 @@ reject the next unit, and validate declared lengths before copying payloads.
 WireMap's one-MiB limit covers the complete encoded envelope rather than each
 field independently, so the SDK cannot produce a call that only fails at the
 platform host. Packed list titles and items use strict UTF-8, and their limit
-likewise covers the complete collection envelope.
+likewise covers the complete collection envelope. Section headers count toward
+the 100,000-entry aggregate; the SDK and both hosts reject oversized declared
+counts before allocating their index tables.

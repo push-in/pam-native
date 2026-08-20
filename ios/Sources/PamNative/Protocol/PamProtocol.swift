@@ -10,6 +10,9 @@ private let MAX_FRAME_BYTES = 16 * 1024 * 1024
 private let MAX_MUTATIONS = 800_000
 private let MAX_PROPERTIES = 128
 private let MAX_VALUE_BYTES = 1024 * 1024
+private let MAX_PACKED_LIST_ITEMS = 100_000
+private let MAX_PACKED_SECTIONS = 10_000
+private let MAX_PACKED_SECTION_ENTRIES = 100_000
 
 private func strictUTF8(_ value: Data, label: String) throws -> String {
     guard let decoded = String(data: value, encoding: .utf8) else {
@@ -185,7 +188,7 @@ public struct PackedStringList {
         var reader = BinaryReader(source: source)
         let count = try reader.u32()
         let safeCount = Int(count)
-        guard safeCount <= 100_000 else {
+        guard safeCount <= MAX_PACKED_LIST_ITEMS else {
             throw PamProtocolError.invalidPayload("List contains too many items")
         }
         var offsets = [Int]()
@@ -255,7 +258,7 @@ public struct PackedSectionList {
         var reader = BinaryReader(source: source)
         let sections = try reader.u32()
         let safeSections = Int(sections)
-        guard safeSections <= 10_000 else {
+        guard safeSections <= MAX_PACKED_SECTIONS else {
             throw PamProtocolError.invalidPayload("Section list contains too many sections")
         }
 
@@ -266,7 +269,8 @@ public struct PackedSectionList {
             )
             let itemCount = try reader.u32()
             let safeItemCount = Int(itemCount)
-            guard safeItemCount <= 100_000 else {
+            guard safeItemCount <= MAX_PACKED_LIST_ITEMS,
+                  entries.count + safeItemCount <= MAX_PACKED_SECTION_ENTRIES else {
                 throw PamProtocolError.invalidPayload("Section list contains too many items")
             }
             for _ in 0..<safeItemCount {

@@ -232,6 +232,32 @@ def verify(root: Path = ROOT) -> None:
         raise ValueError("Kotlin WireMap byte limit differs from the protocol")
     if swift_wire_bytes != expected["MAX_VALUE_BYTES"]:
         raise ValueError("Swift WireMap byte limit differs from the protocol")
+    collection_limits = {
+        "MAX_PACKED_LIST_ITEMS": "MAX_LIST_ITEMS",
+        "MAX_PACKED_SECTIONS": "MAX_SECTIONS",
+        "MAX_PACKED_SECTION_ENTRIES": "MAX_SECTION_ENTRIES",
+    }
+    for host_name, php_name in collection_limits.items():
+        php_limit = constant(
+            wire_source,
+            rf"^\s*public const {php_name} = ([0-9_ *]+);$",
+            f"PHP {php_name}",
+        )
+        kotlin_limit = constant(
+            kotlin_source,
+            rf"^private const val {host_name} = ([0-9_ *]+)$",
+            f"Kotlin {host_name}",
+        )
+        swift_limit = constant(
+            swift_source,
+            rf"^private let {host_name} = ([0-9_ *]+)$",
+            f"Swift {host_name}",
+        )
+        if kotlin_limit != php_limit or swift_limit != php_limit:
+            raise ValueError(
+                f"Packed collection limit {php_name} differs: "
+                f"PHP {php_limit}, Kotlin {kotlin_limit}, Swift {swift_limit}"
+            )
 
 
 def main() -> int:

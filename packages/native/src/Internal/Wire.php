@@ -9,10 +9,17 @@ use InvalidArgumentException;
 final class Wire
 {
     public const MAX_VALUE_BYTES = 1_048_576;
+    public const MAX_LIST_ITEMS = 100_000;
+    public const MAX_SECTIONS = 10_000;
+    public const MAX_SECTION_ENTRIES = 100_000;
 
     /** @param list<string> $items */
     public static function stringList(array $items): string
     {
+        if (count($items) > self::MAX_LIST_ITEMS) {
+            throw new InvalidArgumentException('String lists cannot contain more than 100,000 items.');
+        }
+
         $output = self::u32(count($items));
 
         foreach ($items as $item) {
@@ -30,9 +37,18 @@ final class Wire
      */
     public static function stringSections(array $sections): string
     {
+        if (count($sections) > self::MAX_SECTIONS) {
+            throw new InvalidArgumentException('Section lists cannot contain more than 10,000 sections.');
+        }
+
         $output = self::u32(count($sections));
+        $entries = count($sections);
 
         foreach ($sections as $title => $items) {
+            $entries += count($items);
+            if ($entries > self::MAX_SECTION_ENTRIES) {
+                throw new InvalidArgumentException('Section lists cannot contain more than 100,000 entries.');
+            }
             $output .= self::sized(self::validatedText($title)).self::u32(count($items));
             if (strlen($output) > self::MAX_VALUE_BYTES) {
                 throw new InvalidArgumentException('Section data cannot exceed one megabyte.');

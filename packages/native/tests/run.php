@@ -2411,6 +2411,48 @@ try {
 }
 $assert($oversizedSectionListRejected, 'Packed sections must reject one megabyte plus one byte.');
 
+$maximumPackedItems = array_fill(0, Wire::MAX_LIST_ITEMS, '');
+$assert(
+    strlen(Wire::stringList($maximumPackedItems)) === 4 + (Wire::MAX_LIST_ITEMS * 4),
+    'Packed string lists must accept exactly 100,000 items.',
+);
+$tooManyPackedItemsRejected = false;
+try {
+    Wire::stringList([...$maximumPackedItems, '']);
+} catch (InvalidArgumentException) {
+    $tooManyPackedItemsRejected = true;
+}
+$assert($tooManyPackedItemsRejected, 'Packed string lists must reject item 100,001.');
+unset($maximumPackedItems);
+
+$maximumSections = [];
+for ($index = 0; $index < Wire::MAX_SECTIONS; $index++) {
+    $maximumSections["s{$index}"] = [];
+}
+$assert(Wire::stringSections($maximumSections) !== '', 'Packed sections must accept 10,000 sections.');
+$tooManySectionsRejected = false;
+try {
+    Wire::stringSections([...$maximumSections, 'overflow' => []]);
+} catch (InvalidArgumentException) {
+    $tooManySectionsRejected = true;
+}
+$assert($tooManySectionsRejected, 'Packed sections must reject section 10,001.');
+unset($maximumSections);
+
+$maximumSectionItems = array_fill(0, Wire::MAX_SECTION_ENTRIES - 1, '');
+$assert(
+    Wire::stringSections(['section' => $maximumSectionItems]) !== '',
+    'Packed sections must accept exactly 100,000 total entries.',
+);
+$tooManySectionEntriesRejected = false;
+try {
+    Wire::stringSections(['section' => [...$maximumSectionItems, '']]);
+} catch (InvalidArgumentException) {
+    $tooManySectionEntriesRejected = true;
+}
+$assert($tooManySectionEntriesRejected, 'Packed sections must reject total entry 100,001.');
+unset($maximumSectionItems);
+
 $invalidWireDecodeRejected = false;
 try {
     Wire::decodeMap(

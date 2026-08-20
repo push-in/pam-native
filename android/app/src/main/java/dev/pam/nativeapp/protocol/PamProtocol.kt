@@ -10,6 +10,9 @@ private const val MAX_FRAME_BYTES = 16 * 1024 * 1024
 private const val MAX_MUTATIONS = 800_000
 private const val MAX_PROPERTIES = 128
 private const val MAX_VALUE_BYTES = 1024 * 1024
+private const val MAX_PACKED_LIST_ITEMS = 100_000
+private const val MAX_PACKED_SECTIONS = 10_000
+private const val MAX_PACKED_SECTION_ENTRIES = 100_000
 
 private fun strictUtf8(value: ByteBuffer, label: String): String =
     try {
@@ -626,7 +629,7 @@ class PackedStringList private constructor(
             val bytes = source.slice().asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN)
             require(bytes.remaining() >= Int.SIZE_BYTES) { "List payload is truncated" }
             val count = bytes.int.toLong() and 0xffff_ffffL
-            require(count <= 100_000) { "List contains too many items" }
+            require(count <= MAX_PACKED_LIST_ITEMS) { "List contains too many items" }
             val offsets = IntArray(count.toInt())
             val lengths = IntArray(count.toInt())
             repeat(count.toInt()) { index ->
@@ -678,13 +681,16 @@ class PackedSectionList private constructor(
             val bytes = source.slice().asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN)
             require(bytes.remaining() >= Int.SIZE_BYTES) { "Section payload is truncated" }
             val count = bytes.int.toLong() and 0xffff_ffffL
-            require(count <= 10_000) { "Section list contains too many sections" }
+            require(count <= MAX_PACKED_SECTIONS) { "Section list contains too many sections" }
             val entries = ArrayList<Entry>()
             repeat(count.toInt()) {
                 entries += bytes.entry(ENTRY_HEADER)
                 require(bytes.remaining() >= Int.SIZE_BYTES) { "Section payload is truncated" }
                 val items = bytes.int.toLong() and 0xffff_ffffL
-                require(items <= 100_000 && entries.size + items <= 100_000) {
+                require(
+                    items <= MAX_PACKED_LIST_ITEMS &&
+                        entries.size + items <= MAX_PACKED_SECTION_ENTRIES,
+                ) {
                     "Section list contains too many items"
                 }
                 repeat(items.toInt()) {

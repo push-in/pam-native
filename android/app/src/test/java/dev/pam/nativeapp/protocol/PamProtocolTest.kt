@@ -180,6 +180,29 @@ class PamProtocolTest {
         assertThrows(IllegalArgumentException::class.java) { WireMap.decode(oversized) }
     }
 
+    @Test
+    fun packedCollectionsRejectExcessiveCardinalityBeforeAllocation() {
+        val list = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(100_001)
+            flip()
+        }
+        assertThrows(IllegalArgumentException::class.java) { PackedStringList.decode(list) }
+
+        val sections = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(10_001)
+            flip()
+        }
+        assertThrows(IllegalArgumentException::class.java) { PackedSectionList.decode(sections) }
+
+        val aggregate = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(1)
+            putInt(0)
+            putInt(100_000)
+            flip()
+        }
+        assertThrows(IllegalArgumentException::class.java) { PackedSectionList.decode(aggregate) }
+    }
+
     private fun textBatch(length: Int): ByteBuffer =
         textBatch(ByteArray(length) { 'a'.code.toByte() })
 

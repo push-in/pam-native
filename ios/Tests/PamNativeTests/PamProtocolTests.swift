@@ -263,6 +263,22 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertThrowsError(try WireMap.decode(oversized))
     }
 
+    func testPackedCollectionsRejectExcessiveCardinalityBeforeAllocation() {
+        var list = Data()
+        list.appendLittleEndian(UInt32(100_001))
+        XCTAssertThrowsError(try PackedStringList.decode(list))
+
+        var sections = Data()
+        sections.appendLittleEndian(UInt32(10_001))
+        XCTAssertThrowsError(try PackedSectionList.decode(sections))
+
+        var aggregate = Data()
+        aggregate.appendLittleEndian(UInt32(1))
+        aggregate.appendLittleEndian(UInt32(0))
+        aggregate.appendLittleEndian(UInt32(100_000))
+        XCTAssertThrowsError(try PackedSectionList.decode(aggregate))
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),
