@@ -83,6 +83,7 @@ is a release blocker, not a snapshot update.
 | tree depth | 512 |
 | properties per node | 128 |
 | string/opaque property | 1 MiB |
+| complete packed list or section collection | 1 MiB |
 | complete native module WireMap | 1 MiB |
 | queued native event payload | 1 MiB |
 
@@ -91,4 +92,5 @@ complexity. Rust, PHP, Android and iOS boundary tests accept their exact limits,
 reject the next unit, and validate declared lengths before copying payloads.
 WireMap's one-MiB limit covers the complete encoded envelope rather than each
 field independently, so the SDK cannot produce a call that only fails at the
-platform host.
+platform host. Packed list titles and items use strict UTF-8, and their limit
+likewise covers the complete collection envelope.

@@ -16,7 +16,10 @@ final class Wire
         $output = self::u32(count($items));
 
         foreach ($items as $item) {
-            $output .= self::sized($item);
+            $output .= self::sized(self::validatedText($item));
+            if (strlen($output) > self::MAX_VALUE_BYTES) {
+                throw new InvalidArgumentException('String lists cannot exceed one megabyte.');
+            }
         }
 
         return $output;
@@ -30,15 +33,17 @@ final class Wire
         $output = self::u32(count($sections));
 
         foreach ($sections as $title => $items) {
-            $output .= self::sized($title).self::u32(count($items));
+            $output .= self::sized(self::validatedText($title)).self::u32(count($items));
+            if (strlen($output) > self::MAX_VALUE_BYTES) {
+                throw new InvalidArgumentException('Section data cannot exceed one megabyte.');
+            }
 
             foreach ($items as $item) {
-                $output .= self::sized($item);
+                $output .= self::sized(self::validatedText($item));
+                if (strlen($output) > self::MAX_VALUE_BYTES) {
+                    throw new InvalidArgumentException('Section data cannot exceed one megabyte.');
+                }
             }
-        }
-
-        if (strlen($output) > self::MAX_VALUE_BYTES) {
-            throw new InvalidArgumentException('Section data cannot exceed one megabyte.');
         }
 
         return $output;

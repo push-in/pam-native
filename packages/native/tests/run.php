@@ -2369,6 +2369,48 @@ try {
 }
 $assert($invalidWireTextRejected, 'Wire maps must reject malformed UTF-8 text.');
 
+$invalidPackedListTextRejected = false;
+try {
+    Wire::stringList(["\xc3\x28"]);
+} catch (InvalidArgumentException) {
+    $invalidPackedListTextRejected = true;
+}
+$assert($invalidPackedListTextRejected, 'Packed string lists must reject malformed UTF-8 text.');
+
+$invalidPackedSectionTextRejected = false;
+try {
+    Wire::stringSections(['section' => ["\xc3\x28"]]);
+} catch (InvalidArgumentException) {
+    $invalidPackedSectionTextRejected = true;
+}
+$assert($invalidPackedSectionTextRejected, 'Packed sections must reject malformed UTF-8 text.');
+
+$listBoundaryText = str_repeat('x', Wire::MAX_VALUE_BYTES - 8);
+$assert(
+    strlen(Wire::stringList([$listBoundaryText])) === Wire::MAX_VALUE_BYTES,
+    'Packed string lists must accept the exact one-megabyte boundary.',
+);
+$oversizedStringListRejected = false;
+try {
+    Wire::stringList([$listBoundaryText.'x']);
+} catch (InvalidArgumentException) {
+    $oversizedStringListRejected = true;
+}
+$assert($oversizedStringListRejected, 'Packed string lists must reject one megabyte plus one byte.');
+
+$sectionBoundaryText = str_repeat('x', Wire::MAX_VALUE_BYTES - 17);
+$assert(
+    strlen(Wire::stringSections(['a' => [$sectionBoundaryText]])) === Wire::MAX_VALUE_BYTES,
+    'Packed sections must accept the exact one-megabyte boundary.',
+);
+$oversizedSectionListRejected = false;
+try {
+    Wire::stringSections(['a' => [$sectionBoundaryText.'x']]);
+} catch (InvalidArgumentException) {
+    $oversizedSectionListRejected = true;
+}
+$assert($oversizedSectionListRejected, 'Packed sections must reject one megabyte plus one byte.');
+
 $invalidWireDecodeRejected = false;
 try {
     Wire::decodeMap(
