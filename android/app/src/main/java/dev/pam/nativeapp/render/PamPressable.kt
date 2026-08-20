@@ -98,6 +98,12 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         defaultFocusHighlightEnabled = true
     }
 
+    override fun setEnabled(enabled: Boolean) {
+        super.setEnabled(enabled)
+        isFocusable = enabled
+        if (!enabled && hasFocus()) clearFocus()
+    }
+
     fun configure(
         pressOpacity: Float,
         pressScale: Float,

@@ -47,12 +47,24 @@ class PamRendererInstrumentedTest {
         try {
             onMain(instrumentation) {
                 val pressable = PamPressable(activity)
+                var activated = false
+                pressable.setOnClickListener { activated = true }
                 assertTrue(pressable.isFocusable)
                 assertFalse(pressable.isFocusableInTouchMode)
                 assertTrue(pressable.defaultFocusHighlightEnabled)
+                assertTrue(pressable.onKeyDown(KeyEvent.KEYCODE_ENTER, KeyEvent(
+                    KeyEvent.ACTION_DOWN,
+                    KeyEvent.KEYCODE_ENTER,
+                )))
+                assertTrue(pressable.onKeyUp(KeyEvent.KEYCODE_ENTER, KeyEvent(
+                    KeyEvent.ACTION_UP,
+                    KeyEvent.KEYCODE_ENTER,
+                )))
+                assertTrue(activated)
 
                 pressable.isEnabled = false
                 assertFalse(pressable.isEnabled)
+                assertFalse(pressable.isFocusable)
             }
         } finally {
             activity.finish()
