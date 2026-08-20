@@ -90,6 +90,11 @@ buttons' visual bounds but inside their overlapping 48dp targets. The grouped
 delegate must activate exactly the higher-z sibling, proving dispatch and
 ambiguity resolution in addition to the target-size calculation.
 
+The UIKit evidence resolves a point outside two compact buttons' visual bounds
+but inside both expanded 44pt targets through the parent view. The frontmost
+sibling must be returned by `hitTest` and dispatch exactly one control action,
+proving container routing and overlap resolution in addition to geometry.
+
 Hardware-keyboard and switch navigation use the platform focus engine.
 `Pressable` participates in directional focus on Android without stealing touch
 focus and renders the system default focus highlight. `PamPressButton` uses the

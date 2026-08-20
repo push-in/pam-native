@@ -13,5 +13,31 @@ final class PamTouchTargetPolicyTests: XCTestCase {
 
         button.isUserInteractionEnabled = false
         XCTAssertFalse(button.point(inside: CGPoint(x: 10, y: 15), with: nil))
+
+        let parent = UIView(frame: CGRect(x: 0, y: 0, width: 120, height: 100))
+        let lower = PamPressButton(
+            frame: CGRect(x: 40, y: 40, width: 20, height: 20)
+        )
+        let upper = PamPressButton(
+            frame: CGRect(x: 70, y: 40, width: 20, height: 20)
+        )
+        var lowerActivations = 0
+        var upperActivations = 0
+        lower.addAction(
+            UIAction { _ in lowerActivations += 1 },
+            for: .touchUpInside
+        )
+        upper.addAction(
+            UIAction { _ in upperActivations += 1 },
+            for: .touchUpInside
+        )
+        parent.addSubview(lower)
+        parent.addSubview(upper)
+
+        let target = parent.hitTest(CGPoint(x: 60, y: 50), with: nil)
+        XCTAssertTrue(target === upper)
+        (target as? UIControl)?.sendActions(for: .touchUpInside)
+        XCTAssertEqual(lowerActivations, 0)
+        XCTAssertEqual(upperActivations, 1)
     }
 }
