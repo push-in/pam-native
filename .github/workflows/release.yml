@@ -63,6 +63,10 @@ jobs:
             shasum -a 256 "pam-native-ios-${version}.zip" \
               > "pam-native-ios-${version}.zip.sha256"
           )
+      - name: Enforce the iOS package budget
+        run: >-
+          python3 benchmarks/package/gate.py
+          --artifact "1=dist/pam-native-ios-${GITHUB_REF_NAME#v}.zip"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.zip
@@ -123,6 +127,11 @@ jobs:
             sha256sum "pam-native-android-renderer-${version}.tar.gz" \
               > "pam-native-android-renderer-${version}.tar.gz.sha256"
           )
+      - name: Enforce Android package budgets
+        run: >-
+          python3 benchmarks/package/gate.py
+          --artifact "2=dist/pam-native-android-renderer-${GITHUB_REF_NAME#v}.tar.gz"
+          --artifact "3=dist/pam-native-android-plugin-api-${GITHUB_REF_NAME#v}.aar"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -160,6 +169,10 @@ jobs:
             sha256sum "pam-native-php-${version}.tar.gz" \
               > "pam-native-php-${version}.tar.gz.sha256"
           )
+      - name: Enforce the PHP SDK package budget
+        run: >-
+          python3 benchmarks/package/gate.py
+          --artifact "4=dist/pam-native-php-${GITHUB_REF_NAME#v}.tar.gz"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/*.tar.gz

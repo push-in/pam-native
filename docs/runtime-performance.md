@@ -8,7 +8,7 @@ copyable scheduled-work example with priority, coalescing and cancellation.
 
 ## Performance architecture
 
-Pam treats performance as fifteen cooperating contracts rather than one
+Pam treats performance as sixteen cooperating contracts rather than one
 benchmark number:
 
 | Pillar | Production path |
@@ -28,6 +28,7 @@ benchmark number:
 | Memory control | Every queue/cache is bounded; pooled buffers, view dematerialization and platform pressure signals reclaim retained resources. |
 | Performance Observatory | Bounded histograms export P95 stages, deadlines, retained bytes, buffer reuse, nodes and frame misses to both overlays. |
 | Performance Contract | PHP/Rust budgets, 100,000-item iOS coverage, Android renderer tests, release builds and device macrobenchmarks gate regressions. |
+| Package Footprint | Release archives are streamed through explicit iOS, Android renderer, plugin API and PHP SDK byte ceilings before attestation or upload. |
 
 The worklet API and its safety limits are documented in
 [Platform runtime](platform-runtime.md#worklet-bytecode); image pipeline policies
@@ -153,7 +154,9 @@ CI runs:
 - Rust tests, Clippy and a release-mode engine performance gate;
 - Android unit, instrumented API 26/36 and macrobenchmark projects;
 - iOS simulator tests, including the 100,000-item bounded-window performance
-  contract, followed by an optimized Release build.
+  contract, followed by an optimized Release build;
+- sequential integer-coded package-size budgets for every published Native
+  archive, enforced before provenance attestation and artifact upload.
 
 Override local performance thresholds with `PAM_PERF_FIRST_FRAME_MS` and
 `PAM_PERF_STEADY_FRAME_MS`. The native engine gate can be reproduced with
