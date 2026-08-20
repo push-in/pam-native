@@ -311,6 +311,10 @@ jobs:
           python3 benchmarks/package/reproducibility.py \
             --artifact "4=dist/pam-native-php-${version}.tar.gz" \
             --verify-report "dist/pam-native-php-${version}.reproducibility.json"
+      - name: Attest cross-platform accessibility evidence
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/pam-native-accessibility-evidence.json
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

@@ -49,6 +49,23 @@ UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
 source-contract workflow, so a failed mapping test blocks publication while its
 native diagnostic bundle remains available for review.
 
+After both native jobs pass, CI produces
+`pam-native-accessibility-evidence.json`, verifies it again from the downloaded
+reports, and retains it for 30 days. Tagged releases publish and attest that
+compact evidence file. It records the tested Git SHA, byte count and SHA-256 of
+each source report, plus these sequential integer enums:
+
+- environment: Android API 26 = `1`, Android API 36 = `2`, iOS Simulator = `3`;
+- platform: Android = `1`, iOS = `2`;
+- check: semantic role/state/value = `1`, bounded custom action = `2`;
+- result: passed = `1`, failed = `2` (failed input never produces evidence).
+
+The producer rejects missing, duplicated, skipped, or failed Android checks,
+missing or failed UIKit checks, duplicate/missing environments, symlink inputs,
+oversized reports, invalid revisions, and stale evidence. Its public JSON
+contract is `scripts/accessibility-evidence.schema.json`; the raw seven-day
+artifacts remain the detailed diagnostic source behind the 30-day summary.
+
 ### Custom screen-reader actions
 
 Expose a short alternative to swipe, drag, context-menu, or another complex

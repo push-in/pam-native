@@ -60,6 +60,7 @@ jobs:
           php packages/native/tests/fuzz.php
           php scripts/test-release-workflows.php
           php scripts/test-hot-reload-evidence.php
+          python3 -m unittest scripts/test_accessibility_evidence.py
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m unittest benchmarks/package/test_gate.py
           python3 -m unittest benchmarks/package/test_reproducibility.py
@@ -68,6 +69,7 @@ jobs:
           python3 -m json.tool benchmarks/package/budgets.json >/dev/null
           python3 -m json.tool benchmarks/package/report.schema.json >/dev/null
           python3 -m json.tool benchmarks/package/reproducibility.schema.json >/dev/null
+          python3 -m json.tool scripts/accessibility-evidence.schema.json >/dev/null
           node --check editors/vscode/extension.js
           node editors/vscode/test.js
 
@@ -213,3 +215,48 @@ jobs:
           SWIFT_COMPILATION_MODE=wholemodule
           DEAD_CODE_STRIPPING=YES
           build
+
+  accessibility-evidence:
+    name: Cross-platform accessibility evidence
+    needs:
+      - android-instrumented
+      - ios
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: pam-native-android-api-26-tests
+          path: evidence/android-api-26
+      - uses: actions/download-artifact@v8
+        with:
+          name: pam-native-android-api-36-tests
+          path: evidence/android-api-36
+      - uses: actions/download-artifact@v8
+        with:
+          name: pam-native-ios-tests
+          path: evidence/ios
+      - name: Export and aggregate accessibility results
+        run: |
+          xcrun xcresulttool get test-results tests \
+            --path evidence/ios/PamNative.xcresult \
+            --format json > evidence/ios-tests.json
+          python3 scripts/accessibility-evidence.py \
+            --android 1=evidence/android-api-26 \
+            --android 2=evidence/android-api-36 \
+            --ios evidence/ios-tests.json \
+            --revision "$GITHUB_SHA" \
+            --output evidence/pam-native-accessibility-evidence.json
+          python3 scripts/accessibility-evidence.py \
+            --android 1=evidence/android-api-26 \
+            --android 2=evidence/android-api-36 \
+            --ios evidence/ios-tests.json \
+            --revision "$GITHUB_SHA" \
+            --verify-report evidence/pam-native-accessibility-evidence.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pam-native-accessibility-evidence
+          path: evidence/pam-native-accessibility-evidence.json
+          if-no-files-found: error
+          retention-days: 30
