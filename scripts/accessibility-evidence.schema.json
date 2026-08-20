@@ -24,14 +24,14 @@
           "sourceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
           "checks": {
             "type": "array",
-            "minItems": 4,
-            "maxItems": 4,
+            "minItems": 5,
+            "maxItems": 5,
             "items": {
               "type": "object",
               "additionalProperties": false,
               "required": ["checkCode", "resultCode"],
               "properties": {
-                "checkCode": {"type": "integer", "enum": [1, 2, 3, 4]},
+                "checkCode": {"type": "integer", "enum": [1, 2, 3, 4, 5]},
                 "resultCode": {"const": 1}
               }
             }

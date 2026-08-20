@@ -276,6 +276,10 @@ internal fun resolvedFontScale(
     else -> deviceScale.coerceAtLeast(0.01f)
 }
 
+internal fun applySemanticTextColor(view: TextView, color: Int) {
+    view.setTextColor(color)
+}
+
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -1516,7 +1520,7 @@ class PamRenderer(
             PropKey.TEXT_COLOR -> when (view) {
                 is TextView -> {
                     val color = value.integer().toInt()
-                    view.setTextColor(color)
+                    applySemanticTextColor(view, color)
                     if (view is Button && state.flag(PropKey.LOADING, false)) {
                         state.loadingDrawable?.setColor(color)
                     }

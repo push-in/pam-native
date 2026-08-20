@@ -1528,9 +1528,7 @@ public final class PamRenderer {
             view.layer.setValue(value.textOrNil(), forKey: "pamSharedTransitionConfig")
         case PamConstants.textColor:
             if let color = value.integerOrNil() {
-                if let label = view as? UILabel {
-                    label.textColor = UIColor(argb: color)
-                }
+                PamTextColorPolicy.apply(argb: color, to: view)
             }
         case PamConstants.textAlign:
             applyTextAlignment(view: view, nodeId: nodeId)

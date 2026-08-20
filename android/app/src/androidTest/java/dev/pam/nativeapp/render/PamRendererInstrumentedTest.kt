@@ -16,6 +16,7 @@ import android.view.TextureView
 import android.view.WindowInsetsController
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -39,6 +40,28 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun semanticTextColorsReachLabelsButtonsAndInputsWithoutLoss() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val color = 0xFF4ADE80.toInt()
+        try {
+            onMain(instrumentation) {
+                val controls = listOf(
+                    TextView(activity),
+                    Button(activity),
+                    EditText(activity),
+                )
+                controls.forEach { control ->
+                    applySemanticTextColor(control, color)
+                    assertEquals(color, control.currentTextColor)
+                }
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun largeAccessibilityScaleHonorsOptOutAndMaximumMultiplier() {
         assertEquals(1f, resolvedFontScale(false, 3f, 1.5f), 0.0001f)

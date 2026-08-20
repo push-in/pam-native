@@ -30,6 +30,10 @@ TARGETS = {
         "android": "largeAccessibilityScaleHonorsOptOutAndMaximumMultiplier",
         "ios": "testLargeAccessibilityScaleHonorsOptOutAndMaximumMultiplier",
     },
+    5: {
+        "android": "semanticTextColorsReachLabelsButtonsAndInputsWithoutLoss",
+        "ios": "testSemanticTextColorsReachLabelsButtonsAndInputsWithoutLoss",
+    },
 }
 
 

@@ -27,7 +27,10 @@ The theme registers `surface`, `surface-muted`, `card`, `text-primary`,
 `text-muted`, `heading`, `accent`, `danger`, `metric`, `label`,
 `button-primary`, `button-secondary`, `input`, and `focus-ring`. Semantic
 foreground/background pairs are checked against WCAG AA contrast when the theme
-is built. `Theme::pamLab()` remains a compatible alias for the dark palette.
+is built. This includes normal/muted text on both surfaces, text on accent and
+danger actions, accent metrics on the main surface, and a 3:1 focus indicator
+against both surface levels. `Theme::pamLab()` remains a compatible alias for
+the dark palette.
 
 `DesignTokens` supplies a 4/8dp spacing rhythm, 8/12/20dp radii, a
 14/16/20/24sp type scale, 150/240ms motion, and a 48dp minimum touch target.
@@ -66,6 +69,13 @@ shrink-to-fit behavior and does not replace wrapping or responsive layout.
 Android API 26/36 and UIKit tests exercise unbounded growth, a `1.5` cap, the
 opt-out path and invalid positive caps before the evidence check is emitted.
 
+Semantic `textColor` reaches Android `TextView`-based labels, buttons and inputs
+and UIKit `UILabel`, `UIButton`, `UITextField` and `UITextView` without changing
+ARGB channels. The cross-platform evidence tests that transport using the dark
+theme accent color. This proves protocol/host fidelity and the PHP contrast
+gate; it does not replace screenshot inspection, system high-contrast mode or
+manual checks on composited imagery and user-authored colors.
+
 CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
 UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
 source-contract workflow, so a failed mapping test blocks publication while its
@@ -80,7 +90,8 @@ each source report, plus these sequential integer enums:
 - environment: Android API 26 = `1`, Android API 36 = `2`, iOS Simulator = `3`;
 - platform: Android = `1`, iOS = `2`;
 - check: semantic role/state/value = `1`, bounded custom action = `2`,
-  reduced-motion navigation commit = `3`, bounded system text scaling = `4`;
+  reduced-motion navigation commit = `3`, bounded system text scaling = `4`,
+  semantic text-color transport = `5`;
 - result: passed = `1`, failed = `2` (failed input never produces evidence).
 
 The producer rejects missing, duplicated, skipped, or failed Android checks,

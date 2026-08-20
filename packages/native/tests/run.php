@@ -4185,11 +4185,30 @@ $assert(
 foreach (ThemeMode::cases() as $themeMode) {
     App::theme(Theme::adaptive($themeMode));
     $buttonTokens = TemplateRegistry::classProperties('button-primary');
+    $surfaceTokens = TemplateRegistry::classProperties('surface');
+    $surfaceMutedTokens = TemplateRegistry::classProperties('surface-muted');
+    $metricTokens = TemplateRegistry::classProperties('metric');
+    $focusTokens = TemplateRegistry::classProperties('focus-ring');
     $assert(
         ($buttonTokens[PropKey::MinHeight->value] ?? null) === DesignTokens::TouchTarget
             && isset($buttonTokens[PropKey::BackgroundColor->value])
             && isset($buttonTokens[PropKey::TextColor->value]),
         "Adaptive theme {$themeMode->name} must expose semantic accessible button tokens.",
+    );
+    $assert(
+        Theme::contrastRatio(
+            $metricTokens[PropKey::TextColor->value],
+            $surfaceTokens[PropKey::BackgroundColor->value],
+        ) >= 4.5
+            && Theme::contrastRatio(
+                $focusTokens[PropKey::BorderColor->value],
+                $surfaceTokens[PropKey::BackgroundColor->value],
+            ) >= 3.0
+            && Theme::contrastRatio(
+                $focusTokens[PropKey::BorderColor->value],
+                $surfaceMutedTokens[PropKey::BackgroundColor->value],
+            ) >= 3.0,
+        "Adaptive theme {$themeMode->name} must preserve text and focus contrast.",
     );
 }
 $assert(

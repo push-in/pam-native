@@ -161,12 +161,22 @@ final readonly class Theme
         foreach ([
             [$palette['text'], $palette['surface']],
             [$palette['mutedText'], $palette['surface']],
+            [$palette['mutedText'], $palette['surfaceMuted']],
             [$palette['text'], $palette['surfaceMuted']],
             [$palette['onAccent'], $palette['accent']],
             [$palette['onDanger'], $palette['danger']],
+            [$palette['accent'], $palette['surface']],
         ] as [$foreground, $background]) {
             if (self::contrastRatio($foreground, $background) < 4.5) {
                 throw new \LogicException('PAM Native theme contains a text pair below WCAG AA contrast.');
+            }
+        }
+        foreach ([
+            [$palette['focus'], $palette['surface']],
+            [$palette['focus'], $palette['surfaceMuted']],
+        ] as [$foreground, $background]) {
+            if (self::contrastRatio($foreground, $background) < 3.0) {
+                throw new \LogicException('PAM Native theme contains a focus indicator below WCAG non-text contrast.');
             }
         }
     }
