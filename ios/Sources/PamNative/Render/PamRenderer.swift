@@ -2262,18 +2262,12 @@ public final class PamRenderer {
             state.properties[PamConstants.textAllowFontScaling]?.boolOrNil() ?? true
         let maximumMultiplier =
             state.properties[PamConstants.textMaxFontSizeMultiplier]?.decimalOrNil() ?? 0
-        let font: UIFont
-        if allowsScaling {
-            let metrics = UIFontMetrics(forTextStyle: .body)
-            font = maximumMultiplier > 0
-                ? metrics.scaledFont(
-                    for: baseFont,
-                    maximumPointSize: baseSize * CGFloat(maximumMultiplier)
-                )
-                : metrics.scaledFont(for: baseFont)
-        } else {
-            font = baseFont
-        }
+        let font = PamTextScalePolicy.font(
+            baseFont: baseFont,
+            allowsScaling: allowsScaling,
+            maximumMultiplier: maximumMultiplier,
+            compatibleWith: view.traitCollection
+        )
 
         let adjustsToFit =
             state.properties[PamConstants.textAdjustsFontSizeToFit]?.boolOrNil() ?? false

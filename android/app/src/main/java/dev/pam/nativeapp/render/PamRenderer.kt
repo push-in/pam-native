@@ -263,6 +263,19 @@ internal fun resolvedImageScaleType(imageFit: Int): ImageView.ScaleType =
         else -> ImageView.ScaleType.CENTER_CROP
     }
 
+internal fun resolvedFontScale(
+    allowScaling: Boolean,
+    deviceScale: Float,
+    maximumMultiplier: Float,
+): Float = when {
+    !allowScaling -> 1f
+    maximumMultiplier > 0f -> min(
+        deviceScale.coerceAtLeast(0.01f),
+        maximumMultiplier.coerceAtLeast(1f),
+    )
+    else -> deviceScale.coerceAtLeast(0.01f)
+}
+
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -4452,13 +4465,7 @@ class PamRenderer(
         val maximumMultiplier = state
             .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
             .toFloat()
-        val effectiveScale = if (!allowScaling) {
-            1f
-        } else if (maximumMultiplier > 0f) {
-            min(deviceScale, maximumMultiplier.coerceAtLeast(1f))
-        } else {
-            deviceScale
-        }
+        val effectiveScale = resolvedFontScale(allowScaling, deviceScale, maximumMultiplier)
         val maximumPx = max(1f, baseSize * metrics.density * effectiveScale)
         view.setTextSize(TypedValue.COMPLEX_UNIT_PX, maximumPx)
 

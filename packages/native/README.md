@@ -102,6 +102,10 @@ PHP.
 `allowFontScaling()`, `maxFontSizeMultiplier()`, `adjustsFontSizeToFit()`,
 `breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
 selection, fitting, line breaking and link detection inside `TextView`.
+Font scaling is enabled by default. A maximum multiplier of `0` is unbounded;
+positive caps are normalized to at least `1` so a cap never shrinks text below
+its authored size. Android uses the active configuration scale and iOS uses the
+mounted view's Dynamic Type trait collection.
 
 Android project fonts can be bundled in the application source and loaded
 through an asset family:

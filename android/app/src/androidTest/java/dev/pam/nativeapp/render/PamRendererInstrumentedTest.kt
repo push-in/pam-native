@@ -40,6 +40,15 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun largeAccessibilityScaleHonorsOptOutAndMaximumMultiplier() {
+        assertEquals(1f, resolvedFontScale(false, 3f, 1.5f), 0.0001f)
+        assertEquals(1.5f, resolvedFontScale(true, 3f, 1.5f), 0.0001f)
+        assertEquals(3f, resolvedFontScale(true, 3f, 0f), 0.0001f)
+        assertEquals(1f, resolvedFontScale(true, 3f, 0.5f), 0.0001f)
+        assertEquals(0.85f, resolvedFontScale(true, 0.85f, 1.5f), 0.0001f)
+    }
+
+    @Test
     fun exposesSemanticTalkBackRoleStateRangeAndImportance() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

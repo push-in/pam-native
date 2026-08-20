@@ -54,6 +54,18 @@ finite authored animation still emits its completion event exactly once. The
 host policy has an internal test-only override so both suites prove the reduced
 path without changing a developer or CI runner's global accessibility setting.
 
+System text scaling is enabled by default for labels, button titles and text
+fields. Android resolves the active configuration `fontScale`; iOS resolves
+`UIFontMetrics` against the mounted view's own trait collection, including
+per-window accessibility categories. `maxFontSizeMultiplier(0)` means no PAM
+cap. A positive value is normalized to at least `1`; for example `1.5` permits
+growth through 150% of the authored size without ever turning a large-text
+preference into an accidental shrink cap. `allowFontScaling(false)` is an
+explicit product opt-out. `adjustsFontSizeToFit()` only controls bounded
+shrink-to-fit behavior and does not replace wrapping or responsive layout.
+Android API 26/36 and UIKit tests exercise unbounded growth, a `1.5` cap, the
+opt-out path and invalid positive caps before the evidence check is emitted.
+
 CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
 UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
 source-contract workflow, so a failed mapping test blocks publication while its
@@ -68,7 +80,7 @@ each source report, plus these sequential integer enums:
 - environment: Android API 26 = `1`, Android API 36 = `2`, iOS Simulator = `3`;
 - platform: Android = `1`, iOS = `2`;
 - check: semantic role/state/value = `1`, bounded custom action = `2`,
-  reduced-motion navigation commit = `3`;
+  reduced-motion navigation commit = `3`, bounded system text scaling = `4`;
 - result: passed = `1`, failed = `2` (failed input never produces evidence).
 
 The producer rejects missing, duplicated, skipped, or failed Android checks,

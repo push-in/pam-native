@@ -26,6 +26,10 @@ TARGETS = {
         "android": "reducedMotionCommitsNavigationWithoutWaitingForAuthoredDuration",
         "ios": "testReducedMotionCommitsNavigationWithoutWaitingForAuthoredDuration",
     },
+    4: {
+        "android": "largeAccessibilityScaleHonorsOptOutAndMaximumMultiplier",
+        "ios": "testLargeAccessibilityScaleHonorsOptOutAndMaximumMultiplier",
+    },
 }
 
 

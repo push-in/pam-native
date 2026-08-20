@@ -1769,6 +1769,15 @@ $assert(
             === TextDataDetectorType::Link->value,
     'Text helpers must preserve selection, fitting, breaking and detector properties.',
 );
+$assert(
+    Text::make('Bounded')
+        ->maxFontSizeMultiplier(0.5)
+        ->properties()[PropKey::TextMaxFontSizeMultiplier->value] === 1.0
+        && Text::make('Unbounded')
+            ->maxFontSizeMultiplier(0.0)
+            ->properties()[PropKey::TextMaxFontSizeMultiplier->value] === 0.0,
+    'Text font scaling must encode zero as unbounded and clamp positive caps to at least one.',
+);
 
 $statusBarElement = StatusBar::make(
     0x80112233,
