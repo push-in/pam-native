@@ -14,12 +14,14 @@ import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.TextureView
 import android.view.WindowInsetsController
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
+import dev.pam.nativeapp.R
 import dev.pam.nativeapp.protocol.Frame
 import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
@@ -37,6 +39,102 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun exposesSemanticTalkBackRoleStateRangeAndImportance() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Upload"),
+                                        PropKey.ACCESSIBILITY_LABEL to PropValue.Text("Upload progress"),
+                                        PropKey.ACCESSIBILITY_ROLE to PropValue.Integer(8),
+                                        PropKey.ACCESSIBILITY_IMPORTANCE to PropValue.Integer(2),
+                                        PropKey.ACCESSIBILITY_LIVE_REGION to PropValue.Integer(3),
+                                        PropKey.ACCESSIBILITY_CHECKED_STATE to PropValue.Integer(3),
+                                        PropKey.ACCESSIBILITY_EXPANDED to PropValue.Flag(false),
+                                        PropKey.ACCESSIBILITY_BUSY to PropValue.Flag(true),
+                                        PropKey.ACCESSIBILITY_VALUE_MIN to PropValue.Decimal(0.0),
+                                        PropKey.ACCESSIBILITY_VALUE_MAX to PropValue.Decimal(100.0),
+                                        PropKey.ACCESSIBILITY_VALUE_NOW to PropValue.Decimal(40.0),
+                                        PropKey.ACCESSIBILITY_VALUE_TEXT to PropValue.Text("40 percent"),
+                                        PropKey.SELECTED to PropValue.Flag(true),
+                                        PropKey.ENABLED to PropValue.Flag(false),
+                                        PropKey.TEST_ID to PropValue.Text("accessible-state"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Decorative"),
+                                        PropKey.ACCESSIBILITY_IMPORTANCE to PropValue.Integer(4),
+                                        PropKey.TEST_ID to PropValue.Text("hidden-state"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(16f, 16f, 200f, 48f)),
+                            Mutation.Layout(3, Frame(16f, 72f, 200f, 48f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+
+                val view = requireNotNull(activity.host.findByTransitionName("accessible-state"))
+                val info = view.createAccessibilityNodeInfo()
+                assertEquals("Upload progress", view.contentDescription)
+                assertEquals("android.widget.CheckBox", info.className.toString())
+                assertTrue(info.isCheckable)
+                assertTrue(info.isSelected)
+                assertFalse(info.isEnabled)
+                assertEquals(0f, info.rangeInfo?.min)
+                assertEquals(100f, info.rangeInfo?.max)
+                assertEquals(40f, info.rangeInfo?.current)
+                assertEquals(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE, view.accessibilityLiveRegion)
+                assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_YES, view.importantForAccessibility)
+                assertTrue(
+                    info.actionList.any {
+                        it.id == AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND.id
+                    },
+                )
+                val stateDescription = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    info.stateDescription
+                } else {
+                    info.extras.getCharSequence(
+                        "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY",
+                    )
+                }
+                assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_mixed)) == true)
+                assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_busy)) == true)
+                assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_collapsed)) == true)
+                assertTrue(stateDescription?.contains("40 percent") == true)
+
+                val hidden = requireNotNull(activity.host.findByTransitionName("hidden-state"))
+                assertEquals(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                    hidden.importantForAccessibility,
+                )
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun exposesAndDispatchesBoundedTalkBackCustomActions() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

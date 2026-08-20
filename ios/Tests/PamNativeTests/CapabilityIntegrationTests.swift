@@ -19,6 +19,83 @@ private final class PluginFixtureViewFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testVoiceOverExposesSemanticRoleStateValueAndImportance() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(
+                id: 2,
+                parent: 1,
+                index: 0,
+                kind: .text,
+                properties: [
+                    PamConstants.text: .text("Upload"),
+                    PamConstants.accessibilityLabel: .text("Upload progress"),
+                    PamConstants.accessibilityRole: .integer(8),
+                    PamConstants.accessibilityImportance: .integer(2),
+                    PamConstants.accessibilityLiveRegion: .integer(3),
+                    PamConstants.accessibilityCheckedState: .integer(3),
+                    PamConstants.accessibilityExpanded: .flag(false),
+                    PamConstants.accessibilityBusy: .flag(true),
+                    PamConstants.accessibilityValueMin: .decimal(0),
+                    PamConstants.accessibilityValueMax: .decimal(100),
+                    PamConstants.accessibilityValueNow: .decimal(40),
+                    PamConstants.accessibilityValueText: .text("40 percent"),
+                    PamConstants.selected: .flag(true),
+                    PamConstants.enabled: .flag(false),
+                    PamConstants.testId: .text("accessible-state"),
+                ]
+            )),
+            .create(NodeSpec(
+                id: 3,
+                parent: 1,
+                index: 1,
+                kind: .text,
+                properties: [
+                    PamConstants.text: .text("Decorative"),
+                    PamConstants.accessibilityImportance: .integer(4),
+                    PamConstants.testId: .text("hidden-state"),
+                ]
+            )),
+            .create(NodeSpec(
+                id: 4,
+                parent: 1,
+                index: 2,
+                kind: .text,
+                properties: [
+                    PamConstants.text: .text("Upload range"),
+                    PamConstants.accessibilityRole: .integer(6),
+                    PamConstants.accessibilityValueMin: .decimal(0),
+                    PamConstants.accessibilityValueMax: .decimal(100),
+                    PamConstants.accessibilityValueNow: .decimal(40),
+                    PamConstants.testId: .text("accessible-range"),
+                ]
+            )),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 390, height: 844)),
+            .layout(id: 2, frame: Frame(x: 16, y: 16, width: 200, height: 48)),
+            .layout(id: 3, frame: Frame(x: 16, y: 72, width: 200, height: 48)),
+            .layout(id: 4, frame: Frame(x: 16, y: 128, width: 200, height: 48)),
+            .setRoot(1),
+        ]])
+
+        let view = try XCTUnwrap(host.descendant(accessibilityIdentifier: "accessible-state"))
+        XCTAssertEqual(view.accessibilityLabel, "Upload progress")
+        XCTAssertTrue(view.isAccessibilityElement)
+        XCTAssertTrue(view.accessibilityTraits.contains(.button))
+        XCTAssertTrue(view.accessibilityTraits.contains(.selected))
+        XCTAssertTrue(view.accessibilityTraits.contains(.notEnabled))
+        XCTAssertTrue(view.accessibilityTraits.contains(.updatesFrequently))
+        XCTAssertEqual(view.accessibilityValue, "40 percent, Mixed, Collapsed, Loading")
+
+        let hidden = try XCTUnwrap(host.descendant(accessibilityIdentifier: "hidden-state"))
+        XCTAssertTrue(hidden.accessibilityElementsHidden)
+        let range = try XCTUnwrap(host.descendant(accessibilityIdentifier: "accessible-range"))
+        XCTAssertTrue(range.accessibilityTraits.contains(.adjustable))
+        XCTAssertEqual(range.accessibilityValue, "40 / 100")
+        renderer.close()
+    }
+
     func testVoiceOverCustomActionDispatchesItsBoundedIdentifier() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         var events: [(Int64, Int, Data)] = []

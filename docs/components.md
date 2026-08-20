@@ -35,6 +35,15 @@ Applications should combine semantic classes with native accessibility labels,
 roles, states, Dynamic Type/font scaling, safe areas, and reduced-motion support;
 color is never the only status indicator.
 
+The Android API 26/36 instrumentation suite and UIKit simulator suite render
+the same state fixture and assert the host-native result: checkbox role,
+assertive/live updates, mixed checked state, collapsed state, busy state,
+explicit value, numeric range, and hidden decorative content. Separate paired
+tests execute a bounded custom TalkBack action and VoiceOver rotor action and
+verify the semantic identifier returned to PHP. These tests prove renderer
+mapping and event parity; they do not replace a manual screen-reader journey on
+release hardware, which remains a release-evidence requirement.
+
 ### Custom screen-reader actions
 
 Expose a short alternative to swipe, drag, context-menu, or another complex
