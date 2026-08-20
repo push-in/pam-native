@@ -76,12 +76,14 @@ theme accent color. This proves protocol/host fidelity and the PHP contrast
 gate; it does not replace screenshot inspection, system high-contrast mode or
 manual checks on composited imagery and user-authored colors.
 
-Compact pressables keep their authored visual dimensions while their native hit
-area expands to at least 48dp on Android and 44pt on iOS. Android composes the
-automatic expansion with explicit `hitSlop` in a sibling-aware touch delegate;
-iOS expands `PamPressButton` hit testing symmetrically. Disabled or hidden
-controls do not become actionable. Keep sufficient spacing between adjacent
-controls so expanded targets do not compete for the same gesture.
+Compact buttons and pressables keep their authored visual dimensions while
+their native hit area expands to at least 48dp on Android and 44pt on iOS.
+Android classifies both the custom `PamPressable` and the actual platform
+`Button`, then composes automatic expansion with explicit `hitSlop` in a
+sibling-aware touch delegate. iOS uses `PamPressButton` for both node kinds and
+expands its hit testing symmetrically. Disabled or hidden controls do not become
+actionable. Keep sufficient spacing between adjacent controls so expanded
+targets do not compete for the same gesture.
 
 Hardware-keyboard and switch navigation use the platform focus engine.
 `Pressable` participates in directional focus on Android without stealing touch

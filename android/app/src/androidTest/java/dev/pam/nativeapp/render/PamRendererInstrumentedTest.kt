@@ -73,6 +73,18 @@ class PamRendererInstrumentedTest {
 
     @Test
     fun compactInteractiveControlsKeepPlatformMinimumTouchTargets() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                assertTrue(requiresMinimumTouchTarget(PamPressable(activity)))
+                assertTrue(requiresMinimumTouchTarget(Button(activity)))
+                assertFalse(requiresMinimumTouchTarget(TextView(activity)))
+            }
+        } finally {
+            activity.finish()
+        }
+
         val compact = minimumTouchTargetInsets(20, 30, 48)
         assertEquals(48, 20 + compact.left + compact.right)
         assertEquals(48, 30 + compact.top + compact.bottom)

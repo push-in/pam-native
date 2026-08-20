@@ -2732,7 +2732,7 @@ class PamRenderer(
         val bottom = dp(
             state.number(PropKey.HIT_SLOP_BOTTOM, all.toDouble()).toFloat().coerceAtLeast(0f),
         )
-        val maintainsMinimumTarget = view is PamPressable
+        val maintainsMinimumTarget = requiresMinimumTouchTarget(view)
         if (!maintainsMinimumTarget && left <= 0 && top <= 0 && right <= 0 && bottom <= 0) {
             clearHitSlop(view)
             return
