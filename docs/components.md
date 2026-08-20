@@ -85,6 +85,11 @@ expands its hit testing symmetrically. Disabled or hidden controls do not become
 actionable. Keep sufficient spacing between adjacent controls so expanded
 targets do not compete for the same gesture.
 
+The Android evidence sends a complete down/up gesture outside two compact
+buttons' visual bounds but inside their overlapping 48dp targets. The grouped
+delegate must activate exactly the higher-z sibling, proving dispatch and
+ambiguity resolution in addition to the target-size calculation.
+
 Hardware-keyboard and switch navigation use the platform focus engine.
 `Pressable` participates in directional focus on Android without stealing touch
 focus and renders the system default focus highlight. `PamPressButton` uses the

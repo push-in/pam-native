@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
@@ -80,6 +81,31 @@ class PamRendererInstrumentedTest {
                 assertTrue(requiresMinimumTouchTarget(PamPressable(activity)))
                 assertTrue(requiresMinimumTouchTarget(Button(activity)))
                 assertFalse(requiresMinimumTouchTarget(TextView(activity)))
+
+                val parent = FrameLayout(activity)
+                val lower = Button(activity)
+                val upper = Button(activity).apply { z = 1f }
+                parent.addView(lower)
+                parent.addView(upper)
+                parent.layout(0, 0, 120, 100)
+                lower.layout(40, 40, 60, 60)
+                upper.layout(70, 40, 90, 60)
+                var lowerActivations = 0
+                var upperActivations = 0
+                lower.setOnClickListener { lowerActivations++ }
+                upper.setOnClickListener { upperActivations++ }
+                val delegates = PamTouchDelegateGroup(parent).apply {
+                    update(lower, Rect(26, 26, 74, 74))
+                    update(upper, Rect(56, 26, 104, 74))
+                }
+                val down = MotionEvent.obtain(1, 1, MotionEvent.ACTION_DOWN, 60f, 50f, 0)
+                val up = MotionEvent.obtain(1, 2, MotionEvent.ACTION_UP, 60f, 50f, 0)
+                assertTrue(delegates.onTouchEvent(down))
+                assertTrue(delegates.onTouchEvent(up))
+                down.recycle()
+                up.recycle()
+                assertEquals(0, lowerActivations)
+                assertEquals(1, upperActivations)
             }
         } finally {
             activity.finish()
