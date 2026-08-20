@@ -61,7 +61,11 @@ public enum WireMap {
 
         func readDouble() throws -> Double {
             let raw = try read(8)
-            return Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+            let value = Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+            guard value.isFinite else {
+                throw PamProtocolError.invalidPayload("Native decimal must be finite")
+            }
+            return value
         }
 
         let count = try readU16()
@@ -147,6 +151,9 @@ public enum WireMap {
                 output.append(2)
                 output.append(contentsOf: withUnsafeBytes(of: Int64(int).littleEndian, Array.init))
             case let .decimal(double):
+                guard double.isFinite else {
+                    throw PamProtocolError.invalidPayload("Native decimal must be finite")
+                }
                 output.append(3)
                 output.append(contentsOf: withUnsafeBytes(of: double.bitPattern.littleEndian, Array.init))
             case let .flag(flag):

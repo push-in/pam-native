@@ -2407,6 +2407,32 @@ try {
 }
 $assert($duplicateWireKeyRejected, 'Wire map decoding must reject duplicate keys.');
 
+$invalidTreeFloatRejected = false;
+try {
+    (new TreeEncoder())->encode(\Pam\Native\UI\Spacer::make(NAN));
+} catch (InvalidArgumentException) {
+    $invalidTreeFloatRejected = true;
+}
+$assert($invalidTreeFloatRejected, 'Tree encoding must reject non-finite floats.');
+
+$invalidWireFloatRejected = false;
+try {
+    Wire::map(['value' => INF]);
+} catch (InvalidArgumentException) {
+    $invalidWireFloatRejected = true;
+}
+$assert($invalidWireFloatRejected, 'Wire map encoding must reject non-finite decimals.');
+
+$invalidWireFloatDecodeRejected = false;
+try {
+    Wire::decodeMap(
+        pack('v', 1).pack('v', 5).'value'."\x03".pack('e', NAN),
+    );
+} catch (InvalidArgumentException) {
+    $invalidWireFloatDecodeRejected = true;
+}
+$assert($invalidWireFloatDecodeRejected, 'Wire map decoding must reject non-finite decimals.');
+
 $nativeContainer = CustomView::make(
     'community.container',
     ['axis' => 1],

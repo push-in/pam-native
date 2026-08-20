@@ -26,6 +26,8 @@ duplicates, cycles, disconnected trees, invalid enum values, trailing bytes and
 oversized payloads before applying mutations. Text properties, packed
 list/section entries and module-map strings must be valid UTF-8; malformed input
 is rejected rather than normalized. Opaque tag-`5` properties remain binary.
+Floating-point properties and module-map decimals reject `NaN` and infinity at
+both encode and decode boundaries.
 
 The canonical enums are `NodeKind`, `PropKey`, `EventKind` and
 `NativeOperation` in PHP, the `pam-native-protocol` Rust crate, and

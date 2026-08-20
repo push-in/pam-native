@@ -60,7 +60,7 @@ final class Wire
             $output .= match (true) {
                 is_string($value) => "\x01".self::sized(self::validatedText($value)),
                 is_int($value) => "\x02".pack('P', $value),
-                is_float($value) => "\x03".pack('e', $value),
+                is_float($value) => "\x03".pack('e', self::validatedFloat($value)),
                 is_bool($value) => "\x04".($value ? "\x01" : "\x00"),
                 default => throw new InvalidArgumentException(
                     "Wire map value for {$key} must be a string, integer, float, or boolean.",
@@ -151,6 +151,15 @@ final class Wire
         return $value;
     }
 
+    private static function validatedFloat(float $value): float
+    {
+        if (!is_finite($value)) {
+            throw new InvalidArgumentException('Wire decimals must be finite.');
+        }
+
+        return $value;
+    }
+
     private static function readU16(string $payload, int &$offset): int
     {
         $result = unpack('vvalue', self::readBytes($payload, $offset, 2));
@@ -192,7 +201,7 @@ final class Wire
             throw new InvalidArgumentException('Cannot decode a floating-point value.');
         }
 
-        return $result['value'];
+        return self::validatedFloat($result['value']);
     }
 
     private static function readBoolean(string $payload, int &$offset): bool

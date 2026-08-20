@@ -121,6 +121,25 @@ class PamProtocolTest {
         assertThrows(IllegalArgumentException::class.java) { WireMap.decode(duplicate) }
     }
 
+    @Test
+    fun wireProtocolsRejectNonFiniteDecimals() {
+        assertThrows(ProtocolException::class.java) {
+            BatchDecoder.decode(decimalBatch(Double.NaN))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            WireMap.encode(mapOf("value" to WireValue.Decimal(Double.POSITIVE_INFINITY)))
+        }
+
+        val wire = ByteBuffer.allocate(18).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(1.toShort())
+            putShort(5.toShort())
+            put("value".toByteArray())
+            put(3.toByte())
+            putDouble(Double.NEGATIVE_INFINITY)
+        }.array()
+        assertThrows(IllegalArgumentException::class.java) { WireMap.decode(wire) }
+    }
+
     private fun textBatch(length: Int): ByteBuffer =
         textBatch(ByteArray(length) { 'a'.code.toByte() })
 
@@ -140,6 +159,14 @@ class PamProtocolTest {
                 put(4.toByte())
                 put(1.toByte())
             }
+            flip()
+        }
+
+    private fun decimalBatch(value: Double): ByteBuffer =
+        batch(propertyCount = 1, payloadBytes = 11).apply {
+            putShort(PropKey.WIDTH.value.toShort())
+            put(3.toByte())
+            putDouble(value)
             flip()
         }
 

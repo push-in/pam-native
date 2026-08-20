@@ -847,7 +847,13 @@ private class BinaryReader(bytes: ByteBuffer) {
         when (val tag = u8()) {
             1 -> PropValue.Text(strictUtf8(sizedBytes(), "Text property"))
             2 -> PropValue.Integer(take(Long.SIZE_BYTES).long)
-            3 -> PropValue.Decimal(take(Double.SIZE_BYTES).double)
+            3 -> PropValue.Decimal(
+                take(Double.SIZE_BYTES).double.also { value ->
+                    if (!value.isFinite()) {
+                        throw ProtocolException("Floating property must be finite")
+                    }
+                },
+            )
             4 -> when (val value = u8()) {
                 0 -> PropValue.Flag(false)
                 1 -> PropValue.Flag(true)

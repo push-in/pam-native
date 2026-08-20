@@ -44,7 +44,11 @@ object WireMap {
                     )
                 }
                 2 -> WireValue.Integer(take(buffer, Long.SIZE_BYTES).long)
-                3 -> WireValue.Decimal(take(buffer, Double.SIZE_BYTES).double)
+                3 -> WireValue.Decimal(
+                    take(buffer, Double.SIZE_BYTES).double.also { value ->
+                        require(value.isFinite()) { "Native module decimal must be finite" }
+                    },
+                )
                 4 -> when (readU8(buffer)) {
                     0 -> WireValue.Flag(false)
                     1 -> WireValue.Flag(true)
@@ -82,6 +86,7 @@ object WireMap {
                     output.write(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value.value).array())
                 }
                 is WireValue.Decimal -> {
+                    require(value.value.isFinite()) { "Native module decimal must be finite" }
                     output.write(3)
                     output.write(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putDouble(value.value).array())
                 }

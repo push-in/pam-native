@@ -209,6 +209,19 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertThrowsError(try WireMap.decode(duplicate))
     }
 
+    func testWireProtocolsRejectNonFiniteDecimals() {
+        XCTAssertThrowsError(try BatchDecoder.decode(decimalBatch(value: .nan)))
+        XCTAssertThrowsError(try WireMap.encode(["value": .decimal(.infinity)]))
+
+        var wire = Data()
+        wire.appendLittleEndian(UInt16(1))
+        wire.appendLittleEndian(UInt16(5))
+        wire.append(contentsOf: "value".utf8)
+        wire.append(3)
+        wire.appendLittleEndian((-Double.infinity).bitPattern)
+        XCTAssertThrowsError(try WireMap.decode(wire))
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),
@@ -246,6 +259,14 @@ private func propertyBatch(count: Int) -> Data {
         data.append(4)
         data.append(1)
     }
+    return data
+}
+
+private func decimalBatch(value: Double) -> Data {
+    var data = batch(propertyCount: 1, payloadBytes: 11)
+    data.appendLittleEndian(UInt16(PamConstants.width))
+    data.append(3)
+    data.appendLittleEndian(value.bitPattern)
     return data
 }
 

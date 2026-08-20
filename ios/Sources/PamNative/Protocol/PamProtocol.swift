@@ -855,7 +855,11 @@ struct BinaryReader {
 
     mutating func d64() throws -> Double {
         let raw = try bytes(8)
-        return Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        let value = Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        guard value.isFinite else {
+            throw PamProtocolError.invalidPayload("Floating property must be finite")
+        }
+        return value
     }
 
     func finish() throws {

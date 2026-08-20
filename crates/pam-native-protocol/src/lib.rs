@@ -1546,6 +1546,9 @@ fn encode_value(writer: &mut Writer, value: &PropValue) -> Result<(), ProtocolEr
             writer.i64(*value);
         }
         PropValue::Float(value) => {
+            if !value.is_finite() {
+                return Err(ProtocolError::InvalidFloat);
+            }
             writer.u8(3);
             writer.f64(*value);
         }
@@ -1569,7 +1572,13 @@ fn decode_value(reader: &mut Reader<'_>) -> Result<PropValue, ProtocolError> {
             Ok(PropValue::String(value.to_owned()))
         }
         2 => Ok(PropValue::Integer(reader.i64()?)),
-        3 => Ok(PropValue::Float(reader.f64()?)),
+        3 => {
+            let value = reader.f64()?;
+            if !value.is_finite() {
+                return Err(ProtocolError::InvalidFloat);
+            }
+            Ok(PropValue::Float(value))
+        }
         4 => match reader.u8()? {
             0 => Ok(PropValue::Boolean(false)),
             1 => Ok(PropValue::Boolean(true)),
@@ -1588,6 +1597,7 @@ pub enum ProtocolError {
     TrailingBytes,
     InvalidUtf8,
     InvalidBoolean,
+    InvalidFloat,
     UnknownNodeKind(u8),
     UnknownProperty(u16),
     UnknownValueTag(u8),
@@ -1621,6 +1631,7 @@ impl fmt::Display for ProtocolError {
             Self::TrailingBytes => formatter.write_str("trailing bytes in Pam Native frame"),
             Self::InvalidUtf8 => formatter.write_str("string property is not valid UTF-8"),
             Self::InvalidBoolean => formatter.write_str("boolean property is neither 0 nor 1"),
+            Self::InvalidFloat => formatter.write_str("floating property must be finite"),
             Self::UnknownNodeKind(kind) => write!(formatter, "unknown node kind {kind}"),
             Self::UnknownProperty(property) => write!(formatter, "unknown property {property}"),
             Self::UnknownValueTag(tag) => write!(formatter, "unknown property value tag {tag}"),
@@ -1969,6 +1980,33 @@ mod tests {
         let mut encoded = tree("x").encode().expect("valid text tree");
         *encoded.last_mut().expect("text byte") = 0xff;
         assert_eq!(Tree::decode(&encoded), Err(ProtocolError::InvalidUtf8));
+    }
+
+    #[test]
+    fn protocol_rejects_non_finite_properties() {
+        let numeric_tree = |value: f64| Tree {
+            root: 1,
+            nodes: BTreeMap::from([(
+                1,
+                Node {
+                    id: 1,
+                    parent: 0,
+                    index: 0,
+                    kind: NodeKind::Screen,
+                    properties: BTreeMap::from([(PropKey::Width, PropValue::Float(value))]),
+                },
+            )]),
+        };
+        assert_eq!(
+            numeric_tree(f64::NAN).encode(),
+            Err(ProtocolError::InvalidFloat),
+        );
+        let mut encoded = numeric_tree(1.0).encode().expect("finite property");
+        encoded
+            .last_chunk_mut::<8>()
+            .expect("floating bytes")
+            .copy_from_slice(&f64::INFINITY.to_le_bytes());
+        assert_eq!(Tree::decode(&encoded), Err(ProtocolError::InvalidFloat));
     }
 
     #[test]
