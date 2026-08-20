@@ -44,6 +44,21 @@ class ProtocolParityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "duplicates protocol name"):
             subject.php_entries("case FirstValue = 1;\ncase first_value = 2;", "fixture")
 
+    def test_numeric_limits_accept_literal_products_and_reject_code(self):
+        self.assertEqual(
+            16_777_216,
+            subject.numeric_expression("16 * 1024 * 1024", "limit"),
+        )
+        self.assertEqual(1_048_576, subject.numeric_expression("1_048_576", "limit"))
+        with self.assertRaisesRegex(ValueError, "literal integer product"):
+            subject.numeric_expression("1024 + 1024", "limit")
+        with self.assertRaisesRegex(ValueError, "exactly once"):
+            subject.constant(
+                "const val LIMIT = 1\nconst val LIMIT = 2",
+                r"LIMIT = (\d+)",
+                "limit",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

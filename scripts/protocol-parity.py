@@ -21,8 +21,28 @@ def normalized(name: str) -> str:
     return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
+def numeric_expression(value: str, label: str) -> int:
+    factors = [factor.strip().replace("_", "") for factor in value.split("*")]
+    if not factors or any(not factor.isdigit() for factor in factors):
+        raise ValueError(f"{label} must be a literal integer product")
+    result = 1
+    for factor in factors:
+        result *= int(factor)
+    return result
+
+
+def constant(source: str, pattern: str, label: str) -> int:
+    matches = re.findall(pattern, source, re.MULTILINE)
+    if len(matches) != 1:
+        raise ValueError(f"{label} must be declared exactly once")
+    return numeric_expression(matches[0], label)
+
+
 def entries(pattern: str, source: str, label: str) -> dict[int, Entry]:
-    parsed = [Entry(name, int(value)) for name, value in re.findall(pattern, source, re.MULTILINE)]
+    parsed = [
+        Entry(name, int(value))
+        for name, value in re.findall(pattern, source, re.MULTILINE)
+    ]
     if not parsed:
         raise ValueError(f"{label} did not contain protocol entries")
     by_value: dict[int, Entry] = {}
@@ -119,6 +139,83 @@ def verify(root: Path = ROOT) -> None:
     properties = php_entries((php / "PropKey.php").read_text(encoding="utf-8"), "PHP PropKey")
     compare(properties, kotlin_entries(kotlin_source, "PropKey"), "Kotlin PropKey", exact=True)
     compare(properties, swift_properties(swift_source), "Swift PamConstants", exact=False)
+
+    rust_source = (root / "crates/pam-native-protocol/src/lib.rs").read_text(
+        encoding="utf-8"
+    )
+    protocol_source = (php / "Protocol.php").read_text(encoding="utf-8")
+    wire_source = (php / "Internal/Wire.php").read_text(encoding="utf-8")
+    rust = {
+        name: constant(
+            rust_source,
+            rf"^pub const {name}: [^=]+ = ([0-9_ *]+);$",
+            f"Rust {name}",
+        )
+        for name in (
+            "PROTOCOL_VERSION",
+            "MAX_FRAME_BYTES",
+            "MAX_NODES",
+            "MAX_PROPERTIES_PER_NODE",
+            "MAX_VALUE_BYTES",
+        )
+    }
+    kotlin = {
+        name: constant(
+            kotlin_source,
+            rf"^(?:internal |private )?const val {name} = ([0-9_ *]+)$",
+            f"Kotlin {name}",
+        )
+        for name in (
+            "PAM_PROTOCOL_VERSION",
+            "MAX_FRAME_BYTES",
+            "MAX_MUTATIONS",
+            "MAX_PROPERTIES",
+            "MAX_VALUE_BYTES",
+        )
+    }
+    swift = {
+        name: constant(
+            swift_source,
+            rf"^(?:public |private )let {name} = ([0-9_ *]+)$",
+            f"Swift {name}",
+        )
+        for name in (
+            "PAM_PROTOCOL_VERSION",
+            "MAX_FRAME_BYTES",
+            "MAX_MUTATIONS",
+            "MAX_PROPERTIES",
+            "MAX_VALUE_BYTES",
+        )
+    }
+    expected = {
+        "PAM_PROTOCOL_VERSION": rust["PROTOCOL_VERSION"],
+        "MAX_FRAME_BYTES": rust["MAX_FRAME_BYTES"],
+        "MAX_MUTATIONS": rust["MAX_NODES"] * 8,
+        "MAX_PROPERTIES": rust["MAX_PROPERTIES_PER_NODE"],
+        "MAX_VALUE_BYTES": rust["MAX_VALUE_BYTES"],
+    }
+    if kotlin != expected:
+        raise ValueError(
+            f"Kotlin protocol limits differ: expected {expected}, received {kotlin}"
+        )
+    if swift != expected:
+        raise ValueError(
+            f"Swift protocol limits differ: expected {expected}, received {swift}"
+        )
+    php_version = constant(
+        protocol_source,
+        r"^\s*public const int VERSION = ([0-9_ *]+);$",
+        "PHP protocol version",
+    )
+    php_value_bytes = constant(
+        wire_source,
+        r"^\s*public const MAX_VALUE_BYTES = ([0-9_ *]+);$",
+        "PHP MAX_VALUE_BYTES",
+    )
+    if php_version != expected["PAM_PROTOCOL_VERSION"]:
+        raise ValueError("PHP protocol version differs from the native hosts")
+    if php_value_bytes != expected["MAX_VALUE_BYTES"]:
+        raise ValueError("PHP MAX_VALUE_BYTES differs from the native hosts")
 
 
 def main() -> int:

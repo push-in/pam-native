@@ -9,7 +9,7 @@ public let PAM_PROTOCOL_VERSION = 1
 private let MAX_FRAME_BYTES = 16 * 1024 * 1024
 private let MAX_MUTATIONS = 800_000
 private let MAX_PROPERTIES = 128
-private let MAX_VALUE_BYTES = 1_000_000
+private let MAX_VALUE_BYTES = 1024 * 1024
 
 public enum NodeKind: Int {
     case screen = 1

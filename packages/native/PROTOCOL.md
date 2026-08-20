@@ -1,11 +1,11 @@
 # Pam Native protocol v1
 
 Pam Native uses one bounded, little-endian binary protocol between persistent
-PHP, the Rust layout/diff engine and the Android renderer.
+PHP, the Rust layout/diff engine and the Android/iOS renderers.
 
-| SDK | Protocol | PHP | Android |
-| --- | ---: | --- | --- |
-| `pushinbr/pam-native 0.5.x` | `1` | `8.4.x`, `8.5.x` | API 26–36 |
+| SDK | Protocol | PHP | Android | iOS |
+| --- | ---: | --- | --- | --- |
+| `pushinbr/pam-native 0.6.x` | `1` | `8.4.x`, `8.5.x` | API 26–36 | current supported Xcode/iOS toolchain |
 
 All peers must support the exact protocol version. Existing sequential integer
 identifiers are never renamed, reused or renumbered. Optional node kinds,
@@ -18,7 +18,7 @@ field requires a new protocol version.
 | --- | --- | --- | --- |
 | complete tree | `PNT1` | PHP | Rust |
 | incremental patch | `PNP1` | PHP | Rust |
-| UI mutation batch | `PNB1` | Rust | Android |
+| UI mutation batch | `PNB1` | Rust | Android / iOS |
 
 Each frame starts with its four-byte magic and a `u16` version. Counts and byte
 lengths are bounded. Node IDs are non-zero `u64` values. Decoders reject
@@ -37,8 +37,10 @@ the selected stable action name.
 Rust tests pin exact v1 tree, patch and batch bytes. PHP tests parse the PHP,
 Rust and Kotlin property enums and the PHP/Kotlin event enums, requiring
 identical names, values and append-only order in addition to deterministic
-full/patch encoding. Android checks the protocol version before decoding.
-Changing a golden frame while retaining protocol v1 is a release blocker.
+full/patch encoding. The repository parity gate also compares protocol version,
+frame/mutation/property/value ceilings across PHP, Rust, Kotlin and Swift.
+Android and iOS check the protocol version before decoding. Changing a golden
+frame while retaining protocol v1 is a release blocker.
 
 ## Limits
 

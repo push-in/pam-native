@@ -8,7 +8,7 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_NODES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 512;
-pub const MAX_PROPERTIES_PER_NODE: usize = 256;
+pub const MAX_PROPERTIES_PER_NODE: usize = 128;
 pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1919,6 +1919,38 @@ mod tests {
         let original = tree("Pam Native");
         let encoded = original.encode().expect("encode");
         assert_eq!(Tree::decode(&encoded).expect("decode"), original);
+    }
+
+    #[test]
+    fn producer_never_exceeds_native_host_property_limit() {
+        let node = |count: u16| Node {
+            id: 1,
+            parent: 0,
+            index: 0,
+            kind: NodeKind::Screen,
+            properties: (1..=count)
+                .map(|value| {
+                    (
+                        PropKey::try_from(value).expect("known property"),
+                        PropValue::Boolean(true),
+                    )
+                })
+                .collect(),
+        };
+        let accepted = Tree {
+            root: 1,
+            nodes: BTreeMap::from([(1, node(MAX_PROPERTIES_PER_NODE as u16))]),
+        };
+        accepted.encode().expect("host-compatible property count");
+
+        let rejected = Tree {
+            root: 1,
+            nodes: BTreeMap::from([(1, node(MAX_PROPERTIES_PER_NODE as u16 + 1))]),
+        };
+        assert_eq!(
+            rejected.encode(),
+            Err(ProtocolError::LimitExceeded("properties per node")),
+        );
     }
 
     #[test]
