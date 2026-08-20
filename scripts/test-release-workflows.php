@@ -61,7 +61,10 @@ $android = workflow($root, 'ecosystem-android.yml');
 $ios = workflow($root, 'ecosystem-ios.yml');
 $release = workflow($root, 'release.yml');
 
-requireFragments($ci, 'ci.yml', ["  workflow_call:\n"]);
+requireFragments($ci, 'ci.yml', [
+    "  workflow_call:\n",
+    "php scripts/test-hot-reload-evidence.php\n",
+]);
 requireFragments($android, 'ecosystem-android.yml', [
     "  workflow_call:\n",
     "      - android/**\n",

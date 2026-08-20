@@ -59,6 +59,7 @@ jobs:
           php packages/native/tests/navigation_performance.php
           php packages/native/tests/fuzz.php
           php scripts/test-release-workflows.php
+          php scripts/test-hot-reload-evidence.php
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m unittest benchmarks/package/test_gate.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null

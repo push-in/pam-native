@@ -129,6 +129,19 @@ to change the default 1,000 ms development-device budget. This measures the
 full device-visible reload path rather than only transport or PHP evaluation
 time; hosted device distributions remain a separate release-evidence gate.
 
+Export a physical-device snapshot with `pam mobile android:diagnostics`, then
+gate it offline with:
+
+```bash
+scripts/check-hot-reload-evidence.php pam-diagnostics.json 20 1000
+```
+
+The verifier accepts only the Android diagnostics contract, checks internally
+consistent integer counts/rates and budget result, requires the requested
+sample floor, rejects every failed reload and rejects p95 above both the
+snapshot's configured budget and the independent CI ceiling. Inputs are
+limited to 1 MiB before reading and symbolic links are refused.
+
 The Rust engine also receives the physical display refresh rate from
 `DisplayManager` on Android and `UIScreen.maximumFramesPerSecond` on iOS. Every
 successful commit is evaluated against the corresponding 60/90/120 Hz budget.
