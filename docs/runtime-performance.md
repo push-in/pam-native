@@ -28,7 +28,7 @@ benchmark number:
 | Memory control | Every queue/cache is bounded; pooled buffers, view dematerialization and platform pressure signals reclaim retained resources. |
 | Performance Observatory | Bounded histograms export P95 stages, deadlines, retained bytes, buffer reuse, nodes and frame misses to both overlays. |
 | Performance Contract | PHP/Rust budgets, 100,000-item iOS coverage, Android renderer tests, release builds and device macrobenchmarks gate regressions. |
-| Package Footprint | Release archives are streamed through explicit iOS, Android renderer, plugin API and PHP SDK byte ceilings; schema-valid size/digest reports are persisted, independently rehashed, and provenance-attested beside them before upload. |
+| Package Footprint | Release archives are streamed through explicit iOS, Android renderer, plugin API and PHP SDK byte ceilings; schema-valid size/digest reports are persisted, independently rehashed, provenance-attested beside them, and reverified after artifact download before publication. |
 
 The worklet API and its safety limits are documented in
 [Platform runtime](platform-runtime.md#worklet-bytecode); image pipeline policies

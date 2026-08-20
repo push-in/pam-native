@@ -219,11 +219,25 @@ jobs:
       - ecosystem-ios
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: pam-native-*
           path: dist
           merge-multiple: true
+      - name: Reverify downloaded package budget evidence
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          python3 benchmarks/package/gate.py \
+            --artifact "1=dist/pam-native-ios-${version}.zip" \
+            --verify-report "dist/pam-native-ios-${version}.package-budget.json"
+          python3 benchmarks/package/gate.py \
+            --artifact "2=dist/pam-native-android-renderer-${version}.tar.gz" \
+            --artifact "3=dist/pam-native-android-plugin-api-${version}.aar" \
+            --verify-report "dist/pam-native-android-${version}.package-budget.json"
+          python3 benchmarks/package/gate.py \
+            --artifact "4=dist/pam-native-php-${version}.tar.gz" \
+            --verify-report "dist/pam-native-php-${version}.package-budget.json"
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

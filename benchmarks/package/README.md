@@ -31,6 +31,9 @@ Draft 2020-12 report contract. Release jobs persist and provenance-attest each
 report beside the package before both enter the downloadable artifact and
 GitHub Release. The paired verifier rehashes the exact package bytes and
 requires the report to match the current budget contract before attestation.
+After all platform artifacts are downloaded into the release job, the same
+consumer verifies all three reports and all four packages again; publication
+cannot rely only on the producer job's pre-upload filesystem.
 These are release safety ceilings, not device performance
 baselines; startup, frame pacing and memory remain governed by the mobile and
 iOS benchmark contracts.
