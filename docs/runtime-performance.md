@@ -178,6 +178,14 @@ version. A preserved sibling backup is restored if activation fails or a prior
 activation was interrupted; malformed or truncated bundles remove staging
 without deleting the active PHP application.
 
+iOS now consumes the identical `PNA1` file/count/size/path contract through a
+Foundation-only parser. It additionally rejects invalid UTF-8, symbolic-link
+destinations and trailing bytes, writes files atomically inside a sibling
+staging directory, and applies the same active/previous rollback protocol.
+This is the transport-safety prerequisite for the iOS development client; the
+client polling lifecycle and accepted-version-to-first-frame evidence remain
+explicitly open rather than being inferred from parser tests.
+
 ## Gates
 
 CI runs:

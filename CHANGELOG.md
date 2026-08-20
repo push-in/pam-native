@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add the bounded iOS `PNA1` development-bundle parser and transactional
+  activator. It matches Android's file/count/size/path contract, rejects
+  malformed or duplicate input before activation, preserves the live PHP app
+  on failure and recovers an interrupted previous-directory swap.
 - Measure Android development hot reload from accepted version through the
   first committed native frame or runtime failure. DevTools now retains a
   bounded 64-sample window, exports success/failure counts and nearest-rank
