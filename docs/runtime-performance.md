@@ -144,6 +144,13 @@ Stores, navigation and component-restorable state keep their existing atomic
 checkpoints. The checkpoint intentionally stores only frame identity, not the
 binary tree, because the native renderer already owns the last committed tree.
 
+Android development bundles use the same last-known-good rule. The host parses
+and bounds the complete `PNA1` payload in a sibling staging directory, rejects
+duplicate or unsafe paths, requires `index.php`, and only then swaps the active
+version. A preserved sibling backup is restored if activation fails or a prior
+activation was interrupted; malformed or truncated bundles remove staging
+without deleting the active PHP application.
+
 ## Gates
 
 CI runs:
