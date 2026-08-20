@@ -76,6 +76,13 @@ theme accent color. This proves protocol/host fidelity and the PHP contrast
 gate; it does not replace screenshot inspection, system high-contrast mode or
 manual checks on composited imagery and user-authored colors.
 
+Compact pressables keep their authored visual dimensions while their native hit
+area expands to at least 48dp on Android and 44pt on iOS. Android composes the
+automatic expansion with explicit `hitSlop` in a sibling-aware touch delegate;
+iOS expands `PamPressButton` hit testing symmetrically. Disabled or hidden
+controls do not become actionable. Keep sufficient spacing between adjacent
+controls so expanded targets do not compete for the same gesture.
+
 CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
 UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
 source-contract workflow, so a failed mapping test blocks publication while its
@@ -91,7 +98,7 @@ each source report, plus these sequential integer enums:
 - platform: Android = `1`, iOS = `2`;
 - check: semantic role/state/value = `1`, bounded custom action = `2`,
   reduced-motion navigation commit = `3`, bounded system text scaling = `4`,
-  semantic text-color transport = `5`;
+  semantic text-color transport = `5`, platform-minimum touch target = `6`;
 - result: passed = `1`, failed = `2` (failed input never produces evidence).
 
 The producer rejects missing, duplicated, skipped, or failed Android checks,

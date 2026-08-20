@@ -2732,7 +2732,8 @@ class PamRenderer(
         val bottom = dp(
             state.number(PropKey.HIT_SLOP_BOTTOM, all.toDouble()).toFloat().coerceAtLeast(0f),
         )
-        if (left <= 0 && top <= 0 && right <= 0 && bottom <= 0) {
+        val maintainsMinimumTarget = view is PamPressable
+        if (!maintainsMinimumTarget && left <= 0 && top <= 0 && right <= 0 && bottom <= 0) {
             clearHitSlop(view)
             return
         }
@@ -2740,10 +2741,15 @@ class PamRenderer(
             if (view.parent !== parent || !view.isAttachedToWindow) return@post
             val bounds = Rect()
             view.getHitRect(bounds)
-            bounds.left -= left
-            bounds.top -= top
-            bounds.right += right
-            bounds.bottom += bottom
+            val minimumInsets = minimumTouchTargetInsets(
+                bounds.width(),
+                bounds.height(),
+                dp(48f),
+            )
+            bounds.left -= maxOf(left, minimumInsets.left)
+            bounds.top -= maxOf(top, minimumInsets.top)
+            bounds.right += maxOf(right, minimumInsets.right)
+            bounds.bottom += maxOf(bottom, minimumInsets.bottom)
             val group = parent.touchDelegate as? PamTouchDelegateGroup
                 ?: PamTouchDelegateGroup(parent).also { parent.touchDelegate = it }
             group.update(view, bounds)

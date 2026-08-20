@@ -2,11 +2,20 @@ import Foundation
 import UIKit
 
 final class PamPressButton: UIButton {
+    static let minimumTouchTarget: CGFloat = 44
+
     var pamPressedOpacity: CGFloat = 0.72
     var pamPressedScale: CGFloat = 1
 
     private var restingAlpha: CGFloat?
     private var restingTransform: CGAffineTransform?
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return false }
+        let horizontal = max(0, Self.minimumTouchTarget - bounds.width) / 2
+        let vertical = max(0, Self.minimumTouchTarget - bounds.height) / 2
+        return bounds.insetBy(dx: -horizontal, dy: -vertical).contains(point)
+    }
 
     override var isHighlighted: Bool {
         didSet {

@@ -34,6 +34,10 @@ TARGETS = {
         "android": "semanticTextColorsReachLabelsButtonsAndInputsWithoutLoss",
         "ios": "testSemanticTextColorsReachLabelsButtonsAndInputsWithoutLoss",
     },
+    6: {
+        "android": "compactInteractiveControlsKeepPlatformMinimumTouchTargets",
+        "ios": "testCompactInteractiveControlsKeepPlatformMinimumTouchTargets",
+    },
 }
 
 

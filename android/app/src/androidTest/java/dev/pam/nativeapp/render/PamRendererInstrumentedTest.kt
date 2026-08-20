@@ -41,6 +41,17 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun compactInteractiveControlsKeepPlatformMinimumTouchTargets() {
+        val compact = minimumTouchTargetInsets(20, 30, 48)
+        assertEquals(48, 20 + compact.left + compact.right)
+        assertEquals(48, 30 + compact.top + compact.bottom)
+
+        val alreadyLarge = minimumTouchTargetInsets(64, 52, 48)
+        assertEquals(0, alreadyLarge.left + alreadyLarge.right)
+        assertEquals(0, alreadyLarge.top + alreadyLarge.bottom)
+    }
+
+    @Test
     fun semanticTextColorsReachLabelsButtonsAndInputsWithoutLoss() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
