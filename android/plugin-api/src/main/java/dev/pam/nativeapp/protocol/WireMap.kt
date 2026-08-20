@@ -95,6 +95,9 @@ object WireMap {
                     output.write(if (value.value) 1 else 0)
                 }
             }
+            require(output.size() <= MAX_WIRE_BYTES) {
+                "Native module payload exceeds one MiB"
+            }
         }
         return output.toByteArray().also {
             require(it.size <= MAX_WIRE_BYTES) { "Native module payload exceeds one MiB" }

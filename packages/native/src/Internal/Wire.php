@@ -67,6 +67,10 @@ final class Wire
                     "Wire map value for {$key} must be a string, integer, float, or boolean.",
                 ),
             };
+
+            if (strlen($output) > self::MAX_VALUE_BYTES) {
+                throw new InvalidArgumentException('Wire maps cannot exceed one megabyte.');
+            }
         }
 
         return $output;
@@ -75,6 +79,10 @@ final class Wire
     /** @return array<string, string|int|float|bool> */
     public static function decodeMap(string $payload): array
     {
+        if (strlen($payload) > self::MAX_VALUE_BYTES) {
+            throw new InvalidArgumentException('Wire maps cannot exceed one megabyte.');
+        }
+
         $offset = 0;
         $count = self::readU16($payload, $offset);
         $values = [];

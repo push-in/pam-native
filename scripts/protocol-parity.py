@@ -126,7 +126,9 @@ def compare(authority: dict[int, Entry], candidate: dict[int, Entry], label: str
 def verify(root: Path = ROOT) -> None:
     php = root / "packages/native/src"
     kotlin_source = (root / "android/app/src/main/java/dev/pam/nativeapp/protocol/PamProtocol.kt").read_text(encoding="utf-8")
+    kotlin_wire_source = (root / "android/plugin-api/src/main/java/dev/pam/nativeapp/protocol/WireMap.kt").read_text(encoding="utf-8")
     swift_source = (root / "ios/Sources/PamNative/Protocol/PamProtocol.swift").read_text(encoding="utf-8")
+    swift_wire_source = (root / "ios/Sources/PamNative/Protocol/Wire.swift").read_text(encoding="utf-8")
 
     for enum_name in ("NodeKind", "EventKind"):
         authority = php_entries((php / f"{enum_name}.php").read_text(encoding="utf-8"), f"PHP {enum_name}")
@@ -216,6 +218,20 @@ def verify(root: Path = ROOT) -> None:
         raise ValueError("PHP protocol version differs from the native hosts")
     if php_value_bytes != expected["MAX_VALUE_BYTES"]:
         raise ValueError("PHP MAX_VALUE_BYTES differs from the native hosts")
+    kotlin_wire_bytes = constant(
+        kotlin_wire_source,
+        r"^private const val MAX_WIRE_BYTES = ([0-9_ *]+)$",
+        "Kotlin WireMap byte limit",
+    )
+    swift_wire_bytes = constant(
+        swift_wire_source,
+        r"^\s*public static let maxBytes = ([0-9_ *]+)$",
+        "Swift WireMap byte limit",
+    )
+    if kotlin_wire_bytes != expected["MAX_VALUE_BYTES"]:
+        raise ValueError("Kotlin WireMap byte limit differs from the protocol")
+    if swift_wire_bytes != expected["MAX_VALUE_BYTES"]:
+        raise ValueError("Swift WireMap byte limit differs from the protocol")
 
 
 def main() -> int:

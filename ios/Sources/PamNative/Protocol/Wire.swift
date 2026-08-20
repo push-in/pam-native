@@ -160,6 +160,10 @@ public enum WireMap {
                 output.append(4)
                 output.append(flag ? 1 : 0)
             }
+
+            guard output.count <= maxBytes else {
+                throw PamProtocolError.invalidPayload("Native payload exceeds one MiB")
+            }
         }
 
         guard output.count <= maxBytes else {

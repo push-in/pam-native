@@ -160,6 +160,26 @@ class PamProtocolTest {
         assertEquals(WireMap.encode(first).toList(), WireMap.encode(second).toList())
     }
 
+    @Test
+    fun wireMapsEnforceTheExactTotalPayloadBoundary() {
+        val boundary = "x".repeat(1024 * 1024 - 10)
+        assertEquals(1024 * 1024, WireMap.encode(mapOf("a" to WireValue.Text(boundary))).size)
+        assertThrows(IllegalArgumentException::class.java) {
+            WireMap.encode(mapOf("a" to WireValue.Text(boundary + "x")))
+        }
+
+        val oversized = ByteBuffer.allocate(1024 * 1024 + 1).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(1.toShort())
+            putShort(1.toShort())
+            put('a'.code.toByte())
+            put(1.toByte())
+            putInt(boundary.length + 1)
+            put(boundary.toByteArray())
+            put('x'.code.toByte())
+        }.array()
+        assertThrows(IllegalArgumentException::class.java) { WireMap.decode(oversized) }
+    }
+
     private fun textBatch(length: Int): ByteBuffer =
         textBatch(ByteArray(length) { 'a'.code.toByte() })
 

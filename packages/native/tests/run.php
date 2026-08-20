@@ -2451,6 +2451,31 @@ $assert(
     'Wire maps must use the shared canonical key order and golden bytes.',
 );
 
+$wireBoundaryText = str_repeat('x', Wire::MAX_VALUE_BYTES - 10);
+$assert(
+    strlen(Wire::map(['a' => $wireBoundaryText])) === Wire::MAX_VALUE_BYTES,
+    'Wire maps must accept the exact one-megabyte boundary.',
+);
+
+$oversizedWireEncodeRejected = false;
+try {
+    Wire::map(['a' => $wireBoundaryText.'x']);
+} catch (InvalidArgumentException) {
+    $oversizedWireEncodeRejected = true;
+}
+$assert($oversizedWireEncodeRejected, 'Wire map encoding must reject one megabyte plus one byte.');
+
+$oversizedWireDecodeRejected = false;
+try {
+    Wire::decodeMap(
+        pack('v', 1).pack('v', 1).'a'."\x01".pack('V', strlen($wireBoundaryText) + 1)
+        .$wireBoundaryText.'x',
+    );
+} catch (InvalidArgumentException) {
+    $oversizedWireDecodeRejected = true;
+}
+$assert($oversizedWireDecodeRejected, 'Wire map decoding must reject one megabyte plus one byte.');
+
 $nativeContainer = CustomView::make(
     'community.container',
     ['axis' => 1],

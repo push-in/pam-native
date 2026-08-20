@@ -67,8 +67,9 @@ Rust tests pin byte-for-byte v1 tree, patch and batch frames. PHP tests pin
 sequential integer enums and deterministic full/patch encoding. Android and iOS
 always check `PAM_PROTOCOL_VERSION` before decoding a mutation batch.
 `python3 scripts/protocol-parity.py` additionally proves PHP/Rust/Kotlin/Swift
-version and safety-limit equality, exact host enum coverage where required, and
-rejects duplicate, unknown or renamed numeric identifiers.
+version and safety-limit equality, including the one-MiB total WireMap envelope,
+exact host enum coverage where required, and rejects duplicate, unknown or
+renamed numeric identifiers.
 
 Release CI must run all three gates. Changing a golden frame under protocol v1
 is a release blocker, not a snapshot update.
@@ -82,9 +83,12 @@ is a release blocker, not a snapshot update.
 | tree depth | 512 |
 | properties per node | 128 |
 | string/opaque property | 1 MiB |
+| complete native module WireMap | 1 MiB |
 | queued native event payload | 1 MiB |
 
 These limits are part of protocol v1 and protect both memory use and decoder
-complexity. Rust, Android and iOS boundary tests accept exactly 128 properties
-and a 1 MiB value, reject the next unit, and validate the declared value length
-before copying its payload.
+complexity. Rust, PHP, Android and iOS boundary tests accept their exact limits,
+reject the next unit, and validate declared lengths before copying payloads.
+WireMap's one-MiB limit covers the complete encoded envelope rather than each
+field independently, so the SDK cannot produce a call that only fails at the
+platform host.

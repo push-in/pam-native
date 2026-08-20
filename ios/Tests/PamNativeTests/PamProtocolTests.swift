@@ -243,6 +243,26 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(first, second)
     }
 
+    func testWireMapsEnforceTheExactTotalPayloadBoundary() throws {
+        let boundary = String(repeating: "x", count: 1024 * 1024 - 10)
+        XCTAssertEqual(
+            try WireMap.encode(["a": .text(boundary)]).count,
+            1024 * 1024
+        )
+        XCTAssertThrowsError(try WireMap.encode(["a": .text(boundary + "x")]))
+
+        var oversized = Data()
+        oversized.appendLittleEndian(UInt16(1))
+        oversized.appendLittleEndian(UInt16(1))
+        oversized.append(0x61)
+        oversized.append(1)
+        oversized.appendLittleEndian(UInt32(boundary.utf8.count + 1))
+        oversized.append(contentsOf: boundary.utf8)
+        oversized.append(0x78)
+        XCTAssertEqual(oversized.count, 1024 * 1024 + 1)
+        XCTAssertThrowsError(try WireMap.decode(oversized))
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),
