@@ -155,6 +155,18 @@ jobs:
           create_renderer_archive "${RUNNER_TEMP}/${artifact}"
           cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
           rm "${RUNNER_TEMP}/${artifact}"
+      - name: Rebuild and verify the Android plugin API reproducibly
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          artifact="dist/pam-native-android-plugin-api-${version}.aar"
+          ./android/gradlew -p android \
+            -PpamNativeRoot="$GITHUB_WORKSPACE" \
+            :plugin-api:clean \
+            :plugin-api:assembleRelease
+          cmp "${artifact}" android/plugin-api/build/outputs/aar/plugin-api-release.aar
+      - name: Write Android checksums
+        run: |
+          version=${GITHUB_REF_NAME#v}
           (
             cd dist
             sha256sum "pam-native-android-plugin-api-${version}.aar" \

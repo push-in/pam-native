@@ -1,6 +1,15 @@
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
+
 plugins {
     id("com.android.application") version "9.2.0" apply false
     id("com.android.library") version "9.2.0" apply false
     id("com.android.test") version "9.2.0" apply false
     id("com.google.gms.google-services") version "4.5.0" apply false
+}
+
+subprojects {
+    tasks.withType<AbstractArchiveTask>().configureEach {
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
+    }
 }

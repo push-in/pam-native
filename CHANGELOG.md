@@ -2,10 +2,11 @@
 
 ## Unreleased
 
-- Make iOS, Android renderer and PHP SDK release archives reproducible from the
-  tagged commit. The release gate now constructs each archive twice, requires
-  byte-for-byte equality, and only then emits checksums, package-budget evidence
-  and provenance attestations.
+- Make all four iOS, Android renderer, Android plugin API and PHP SDK release
+  artifacts reproducible from the tagged commit. The release gate constructs
+  each artifact twice, including an isolated clean Gradle rebuild of the AAR,
+  requires byte-for-byte equality, and only then emits checksums,
+  package-budget evidence and provenance attestations.
 - Replace iOS development's rebuild/reinstall loop with bounded loopback hot
   reload. Debug hosts now poll the CLI, stream-validate and transactionally
   activate `PNA1` bundles from cache, reload the embedded PHP runtime, and

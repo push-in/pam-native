@@ -60,6 +60,10 @@ $ci = workflow($root, 'ci.yml');
 $android = workflow($root, 'ecosystem-android.yml');
 $ios = workflow($root, 'ecosystem-ios.yml');
 $release = workflow($root, 'release.yml');
+$androidBuild = file_get_contents("{$root}/android/build.gradle.kts");
+if ($androidBuild === false) {
+    fail('cannot read android/build.gradle.kts');
+}
 
 requireFragments($ci, 'ci.yml', [
     "  workflow_call:\n",
@@ -92,10 +96,22 @@ requireFragments($release, 'release.yml', [
     "              --mtime=\"@\${source_date_epoch}\" \\\n",
     "            gzip -n \"\${output%.gz}\"\n",
     "          cmp \"dist/\${artifact}\" \"\${RUNNER_TEMP}/\${artifact}\"\n",
+    "            :plugin-api:clean \\\n",
+    "          cmp \"\${artifact}\" android/plugin-api/build/outputs/aar/plugin-api-release.aar\n",
 ]);
 if (substr_count($release, 'cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"') !== 3) {
     fail('release.yml must verify iOS, Android renderer, and PHP SDK archives byte for byte');
 }
+$pluginRebuild = strpos($release, ':plugin-api:clean');
+$pluginChecksum = strpos($release, 'sha256sum "pam-native-android-plugin-api');
+if ($pluginRebuild === false || $pluginChecksum === false || $pluginRebuild > $pluginChecksum) {
+    fail('release.yml must prove plugin API reproducibility before writing its checksum');
+}
+requireFragments($androidBuild, 'android/build.gradle.kts', [
+    "tasks.withType<AbstractArchiveTask>().configureEach {\n",
+    "        isPreserveFileTimestamps = false\n",
+    "        isReproducibleFileOrder = true\n",
+]);
 requireBoundedArtifactRetention($root, ['ci.yml', 'release.yml']);
 
 echo "PAM Native release workflow contracts passed.\n";
