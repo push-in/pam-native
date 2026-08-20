@@ -164,10 +164,23 @@ def main() -> int:
     )
     parser.add_argument("--artifact", action="append", type=parse_artifact, default=[])
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--verify-report", type=Path)
     options = parser.parse_args()
+    if options.output is not None and options.verify_report is not None:
+        raise ValueError("--output and --verify-report are mutually exclusive")
     report = evaluate(options.artifact, load_budgets(options.budgets))
     if options.output is not None:
         write_report(options.output, report)
+    if options.verify_report is not None:
+        recorded = json.loads(
+            regular_bytes(
+                options.verify_report,
+                MAX_DOCUMENT_BYTES,
+                "package budget report",
+            )
+        )
+        if not isinstance(recorded, dict) or recorded != report:
+            raise ValueError("package budget report is stale or does not match the artifacts")
     print(json.dumps(report, indent=2))
     return 0 if report["resultCode"] == ResultCode.PASSED else 1
 

@@ -48,10 +48,19 @@ class PackageBudgetGateTests(unittest.TestCase):
                 str(root / "report.json"),
             )
             persisted = json.loads((root / "report.json").read_text(encoding="utf-8"))
+            verified = self.run_gate(
+                "--budgets",
+                str(budgets),
+                "--artifact",
+                f"4={artifact}",
+                "--verify-report",
+                str(root / "report.json"),
+            )
         self.assertEqual(result.returncode, 0, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(report["resultCode"], 1)
         self.assertEqual(persisted, report)
+        self.assertEqual(verified.returncode, 0, verified.stderr)
         self.assertEqual(report["artifacts"][0]["artifactCode"], 4)
         self.assertEqual(report["artifacts"][0]["resultCode"], 1)
         self.assertEqual(len(report["artifacts"][0]["sha256"]), 64)
@@ -113,14 +122,41 @@ class PackageBudgetGateTests(unittest.TestCase):
         self.assertIn("output must be a regular path", result.stderr)
         self.assertEqual(protected_contents, "preserve")
 
+    def test_verifier_rejects_tampered_and_symlinked_reports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            artifact = root / "artifact"
+            artifact.write_bytes(b"package")
+            report = root / "report.json"
+            created = self.run_gate(
+                "--artifact", f"4={artifact}", "--output", str(report)
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+            document = json.loads(report.read_text(encoding="utf-8"))
+            document["artifacts"][0]["actualBytes"] += 1
+            report.write_text(json.dumps(document), encoding="utf-8")
+            tampered = self.run_gate(
+                "--artifact", f"4={artifact}", "--verify-report", str(report)
+            )
+            linked = root / "linked.json"
+            linked.symlink_to(report)
+            symlinked = self.run_gate(
+                "--artifact", f"4={artifact}", "--verify-report", str(linked)
+            )
+        self.assertNotEqual(tampered.returncode, 0)
+        self.assertIn("stale or does not match", tampered.stderr)
+        self.assertNotEqual(symlinked.returncode, 0)
+        self.assertIn("must be a non-empty regular file", symlinked.stderr)
+
     def test_release_workflow_gates_all_four_artifact_codes_before_upload(self) -> None:
         workflow = (ROOT.parents[1] / ".github/workflows/release.yml").read_text(
             encoding="utf-8"
         )
         for code in range(1, 5):
             self.assertIn(f'--artifact "{code}=', workflow)
-        self.assertEqual(workflow.count("python3 benchmarks/package/gate.py"), 3)
+        self.assertEqual(workflow.count("python3 benchmarks/package/gate.py"), 6)
         self.assertEqual(workflow.count("--output \"dist/pam-native-"), 3)
+        self.assertEqual(workflow.count("--verify-report \"dist/pam-native-"), 3)
         self.assertEqual(workflow.count("dist/*.package-budget.json"), 3)
         self.assertLess(
             workflow.index("Enforce the iOS package budget"),

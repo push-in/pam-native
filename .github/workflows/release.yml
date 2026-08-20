@@ -68,6 +68,11 @@ jobs:
           python3 benchmarks/package/gate.py
           --artifact "1=dist/pam-native-ios-${GITHUB_REF_NAME#v}.zip"
           --output "dist/pam-native-ios-${GITHUB_REF_NAME#v}.package-budget.json"
+      - name: Verify the iOS package budget evidence
+        run: >-
+          python3 benchmarks/package/gate.py
+          --artifact "1=dist/pam-native-ios-${GITHUB_REF_NAME#v}.zip"
+          --verify-report "dist/pam-native-ios-${GITHUB_REF_NAME#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -136,6 +141,12 @@ jobs:
           --artifact "2=dist/pam-native-android-renderer-${GITHUB_REF_NAME#v}.tar.gz"
           --artifact "3=dist/pam-native-android-plugin-api-${GITHUB_REF_NAME#v}.aar"
           --output "dist/pam-native-android-${GITHUB_REF_NAME#v}.package-budget.json"
+      - name: Verify Android package budget evidence
+        run: >-
+          python3 benchmarks/package/gate.py
+          --artifact "2=dist/pam-native-android-renderer-${GITHUB_REF_NAME#v}.tar.gz"
+          --artifact "3=dist/pam-native-android-plugin-api-${GITHUB_REF_NAME#v}.aar"
+          --verify-report "dist/pam-native-android-${GITHUB_REF_NAME#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -179,6 +190,11 @@ jobs:
           python3 benchmarks/package/gate.py
           --artifact "4=dist/pam-native-php-${GITHUB_REF_NAME#v}.tar.gz"
           --output "dist/pam-native-php-${GITHUB_REF_NAME#v}.package-budget.json"
+      - name: Verify the PHP SDK package budget evidence
+        run: >-
+          python3 benchmarks/package/gate.py
+          --artifact "4=dist/pam-native-php-${GITHUB_REF_NAME#v}.tar.gz"
+          --verify-report "dist/pam-native-php-${GITHUB_REF_NAME#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
