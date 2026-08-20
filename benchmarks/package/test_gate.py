@@ -155,8 +155,14 @@ class PackageBudgetGateTests(unittest.TestCase):
         for code in range(1, 5):
             self.assertIn(f'--artifact "{code}=', workflow)
         self.assertEqual(workflow.count("python3 benchmarks/package/gate.py"), 9)
-        self.assertEqual(workflow.count("--output \"dist/pam-native-"), 3)
-        self.assertEqual(workflow.count("--verify-report \"dist/pam-native-"), 6)
+        for surface in ("ios", "android", "php"):
+            self.assertEqual(
+                workflow.count(
+                    f'--output "dist/pam-native-{surface}-${{GITHUB_REF_NAME#v}}.package-budget.json"'
+                ),
+                1,
+            )
+        self.assertEqual(workflow.count(".package-budget.json\""), 9)
         self.assertEqual(workflow.count("dist/*.package-budget.json"), 3)
         self.assertLess(
             workflow.index("Enforce the iOS package budget"),
@@ -165,7 +171,7 @@ class PackageBudgetGateTests(unittest.TestCase):
         publish = workflow.split("  publish:\n", 1)[1]
         self.assertIn("actions/checkout@v7", publish)
         self.assertIn("Reverify downloaded package budget evidence", publish)
-        self.assertEqual(publish.count("--verify-report"), 3)
+        self.assertEqual(publish.count(".package-budget.json\""), 3)
         self.assertLess(
             publish.index("actions/download-artifact@v8"),
             publish.index("Reverify downloaded package budget evidence"),

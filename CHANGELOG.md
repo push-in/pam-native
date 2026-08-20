@@ -6,7 +6,9 @@
   artifacts reproducible from the tagged commit. The release gate constructs
   each artifact twice, including an isolated clean Gradle rebuild of the AAR,
   requires byte-for-byte equality, and only then emits checksums,
-  package-budget evidence and provenance attestations.
+  package-budget evidence and provenance attestations. A strict, bounded
+  reproducibility report records integer artifact/result codes, size and digest;
+  the final release job re-hashes every downloaded package against it.
 - Replace iOS development's rebuild/reinstall loop with bounded loopback hot
   reload. Debug hosts now poll the CLI, stream-validate and transactionally
   activate `PNA1` bundles from cache, reload the embedded PHP runtime, and

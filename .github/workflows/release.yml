@@ -68,6 +68,9 @@ jobs:
             --output="${RUNNER_TEMP}/${artifact}" \
             HEAD:ios
           cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
+          python3 benchmarks/package/reproducibility.py \
+            --pair "1=dist/${artifact}=${RUNNER_TEMP}/${artifact}" \
+            --output "dist/pam-native-ios-${version}.reproducibility.json"
           rm "${RUNNER_TEMP}/${artifact}"
           (
             cd dist
@@ -88,6 +91,7 @@ jobs:
           subject-path: |
             dist/*.zip
             dist/*.package-budget.json
+            dist/*.reproducibility.json
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-ios
@@ -154,7 +158,6 @@ jobs:
           create_renderer_archive "dist/${artifact}"
           create_renderer_archive "${RUNNER_TEMP}/${artifact}"
           cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
-          rm "${RUNNER_TEMP}/${artifact}"
       - name: Rebuild and verify the Android plugin API reproducibly
         run: |
           version=${GITHUB_REF_NAME#v}
@@ -164,6 +167,12 @@ jobs:
             :plugin-api:clean \
             :plugin-api:assembleRelease
           cmp "${artifact}" android/plugin-api/build/outputs/aar/plugin-api-release.aar
+          renderer="pam-native-android-renderer-${version}.tar.gz"
+          python3 benchmarks/package/reproducibility.py \
+            --pair "2=dist/${renderer}=${RUNNER_TEMP}/${renderer}" \
+            --pair "3=${artifact}=android/plugin-api/build/outputs/aar/plugin-api-release.aar" \
+            --output "dist/pam-native-android-${version}.reproducibility.json"
+          rm "${RUNNER_TEMP}/${renderer}"
       - name: Write Android checksums
         run: |
           version=${GITHUB_REF_NAME#v}
@@ -192,6 +201,7 @@ jobs:
             dist/*.aar
             dist/*.tar.gz
             dist/*.package-budget.json
+            dist/*.reproducibility.json
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-android
@@ -226,6 +236,9 @@ jobs:
           create_php_archive "dist/${artifact}"
           create_php_archive "${RUNNER_TEMP}/${artifact}"
           cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
+          python3 benchmarks/package/reproducibility.py \
+            --pair "4=dist/${artifact}=${RUNNER_TEMP}/${artifact}" \
+            --output "dist/pam-native-php-${version}.reproducibility.json"
           rm "${RUNNER_TEMP}/${artifact}"
           (
             cd dist
@@ -246,6 +259,7 @@ jobs:
           subject-path: |
             dist/*.tar.gz
             dist/*.package-budget.json
+            dist/*.reproducibility.json
       - uses: actions/upload-artifact@v7
         with:
           name: pam-native-php
@@ -284,6 +298,19 @@ jobs:
           python3 benchmarks/package/gate.py \
             --artifact "4=dist/pam-native-php-${version}.tar.gz" \
             --verify-report "dist/pam-native-php-${version}.package-budget.json"
+      - name: Reverify downloaded reproducibility evidence
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          python3 benchmarks/package/reproducibility.py \
+            --artifact "1=dist/pam-native-ios-${version}.zip" \
+            --verify-report "dist/pam-native-ios-${version}.reproducibility.json"
+          python3 benchmarks/package/reproducibility.py \
+            --artifact "2=dist/pam-native-android-renderer-${version}.tar.gz" \
+            --artifact "3=dist/pam-native-android-plugin-api-${version}.aar" \
+            --verify-report "dist/pam-native-android-${version}.reproducibility.json"
+          python3 benchmarks/package/reproducibility.py \
+            --artifact "4=dist/pam-native-php-${version}.tar.gz" \
+            --verify-report "dist/pam-native-php-${version}.reproducibility.json"
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

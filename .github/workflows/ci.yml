@@ -62,10 +62,12 @@ jobs:
           php scripts/test-hot-reload-evidence.php
           python3 -m unittest benchmarks/mobile/test_compare.py
           python3 -m unittest benchmarks/package/test_gate.py
+          python3 -m unittest benchmarks/package/test_reproducibility.py
           python3 -m json.tool benchmarks/mobile/budgets.json >/dev/null
           python3 -m json.tool benchmarks/ios/budgets.json >/dev/null
           python3 -m json.tool benchmarks/package/budgets.json >/dev/null
           python3 -m json.tool benchmarks/package/report.schema.json >/dev/null
+          python3 -m json.tool benchmarks/package/reproducibility.schema.json >/dev/null
           node --check editors/vscode/extension.js
           node editors/vscode/test.js
 

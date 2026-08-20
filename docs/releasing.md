@@ -39,5 +39,12 @@ cleaned and rebuilt, and the resulting AAR must match the preserved bytes. A
 mismatch stops publication before checksums, package budgets or release upload
 can bless nondeterministic bytes.
 
+Each successful comparison also emits a bounded schema 1 reproducibility report
+with sequential integer artifact/result codes, exact byte count and SHA-256.
+The report is provenance-attested beside the artifact. After all jobs upload and
+the release job downloads them, the offline verifier re-hashes all four
+artifacts and rejects missing, stale, altered, mismatched or wrong-platform
+evidence before GitHub Release creation.
+
 The distributable production bootstrap is available at
 `packages/native/resources/templates/production-capabilities.php.stub`.

@@ -68,6 +68,8 @@ if ($androidBuild === false) {
 requireFragments($ci, 'ci.yml', [
     "  workflow_call:\n",
     "php scripts/test-hot-reload-evidence.php\n",
+    "python3 -m unittest benchmarks/package/test_reproducibility.py\n",
+    "python3 -m json.tool benchmarks/package/reproducibility.schema.json >/dev/null\n",
 ]);
 requireFragments($android, 'ecosystem-android.yml', [
     "  workflow_call:\n",
@@ -98,6 +100,10 @@ requireFragments($release, 'release.yml', [
     "          cmp \"dist/\${artifact}\" \"\${RUNNER_TEMP}/\${artifact}\"\n",
     "            :plugin-api:clean \\\n",
     "          cmp \"\${artifact}\" android/plugin-api/build/outputs/aar/plugin-api-release.aar\n",
+    "            --output \"dist/pam-native-ios-\${version}.reproducibility.json\"\n",
+    "            --output \"dist/pam-native-android-\${version}.reproducibility.json\"\n",
+    "            --output \"dist/pam-native-php-\${version}.reproducibility.json\"\n",
+    "      - name: Reverify downloaded reproducibility evidence\n",
 ]);
 if (substr_count($release, 'cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"') !== 3) {
     fail('release.yml must verify iOS, Android renderer, and PHP SDK archives byte for byte');

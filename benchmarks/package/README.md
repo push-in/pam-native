@@ -37,3 +37,26 @@ cannot rely only on the producer job's pre-upload filesystem.
 These are release safety ceilings, not device performance
 baselines; startup, frame pacing and memory remain governed by the mobile and
 iOS benchmark contracts.
+
+## Reproducibility evidence
+
+The paired reproducibility gate compares two independently created artifacts
+while streaming both files, records the published artifact's size and SHA-256,
+and uses integer result code `1` for identical bytes or `2` for a mismatch:
+
+```bash
+python3 benchmarks/package/reproducibility.py \
+  --pair 3=dist/plugin-api-first.aar=build/plugin-api-second.aar \
+  --output dist/plugin-api.reproducibility.json
+
+python3 benchmarks/package/reproducibility.py \
+  --artifact 3=dist/plugin-api-first.aar \
+  --verify-report dist/plugin-api.reproducibility.json
+```
+
+`reproducibility.schema.json` defines the strict schema 1 contract. Artifact
+codes share the sequential `1`–`4` package-budget enum. Reports and artifacts
+must be regular non-symlink files; reports are limited to 1 MiB and artifacts
+to 512 MiB. Every platform report is provenance-attested beside its package,
+downloaded by the final release job and reverified against the exact bytes
+before publication.
