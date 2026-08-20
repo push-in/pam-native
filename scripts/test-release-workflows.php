@@ -88,7 +88,14 @@ requireFragments($release, 'release.yml', [
     "      - ecosystem-compatibility\n",
     "      - ecosystem-android\n",
     "      - ecosystem-ios\n",
+    "          git archive \\\n",
+    "              --mtime=\"@\${source_date_epoch}\" \\\n",
+    "            gzip -n \"\${output%.gz}\"\n",
+    "          cmp \"dist/\${artifact}\" \"\${RUNNER_TEMP}/\${artifact}\"\n",
 ]);
+if (substr_count($release, 'cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"') !== 3) {
+    fail('release.yml must verify iOS, Android renderer, and PHP SDK archives byte for byte');
+}
 requireBoundedArtifactRetention($root, ['ci.yml', 'release.yml']);
 
 echo "PAM Native release workflow contracts passed.\n";

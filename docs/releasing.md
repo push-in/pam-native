@@ -30,5 +30,12 @@
 - Swift package/XCFramework.
 - Checksums, changelog, migration notes and platform support matrix.
 
+The tag workflow builds every source archive twice before provenance
+attestation and requires byte-for-byte equality. iOS is archived directly from
+the tagged Git tree with a stable prefix. Android renderer and PHP SDK tarballs
+use sorted paths, the tag commit epoch, numeric root ownership and header-free
+gzip output. A mismatch stops publication before checksums, package budgets or
+release upload can bless nondeterministic bytes.
+
 The distributable production bootstrap is available at
 `packages/native/resources/templates/production-capabilities.php.stub`.

@@ -56,12 +56,22 @@ jobs:
         run: |
           version=${GITHUB_REF_NAME#v}
           mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent ios \
-            "dist/pam-native-ios-${version}.zip"
+          artifact="pam-native-ios-${version}.zip"
+          git archive \
+            --format=zip \
+            --prefix="pam-native-ios-${version}/" \
+            --output="dist/${artifact}" \
+            HEAD:ios
+          git archive \
+            --format=zip \
+            --prefix="pam-native-ios-${version}/" \
+            --output="${RUNNER_TEMP}/${artifact}" \
+            HEAD:ios
+          cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
+          rm "${RUNNER_TEMP}/${artifact}"
           (
             cd dist
-            shasum -a 256 "pam-native-ios-${version}.zip" \
-              > "pam-native-ios-${version}.zip.sha256"
+            shasum -a 256 "${artifact}" > "${artifact}.sha256"
           )
       - name: Enforce the iOS package budget
         run: >-
@@ -112,22 +122,39 @@ jobs:
       - name: Create versioned artifacts
         run: |
           version=${GITHUB_REF_NAME#v}
+          source_date_epoch=$(git log -1 --format=%ct)
           mkdir -p dist
           cp android/plugin-api/build/outputs/aar/plugin-api-release.aar \
             "dist/pam-native-android-plugin-api-${version}.aar"
-          tar -czf "dist/pam-native-android-renderer-${version}.tar.gz" \
-            Cargo.toml \
-            Cargo.lock \
-            crates/pam-native-engine \
-            crates/pam-native-protocol \
-            android/build.gradle.kts \
-            android/app/proguard-rules.pro \
-            android/app/src/firebase \
-            android/app/src/main \
-            android/app/build.gradle.kts \
-            native/pam_native_engine.h \
-            target/aarch64-linux-android/release/libpam_native_engine.a \
-            target/x86_64-linux-android/release/libpam_native_engine.a
+          create_renderer_archive() {
+            output=$1
+            tar \
+              --sort=name \
+              --mtime="@${source_date_epoch}" \
+              --owner=0 \
+              --group=0 \
+              --numeric-owner \
+              --transform="s,^,pam-native-android-renderer-${version}/," \
+              -cf "${output%.gz}" \
+              Cargo.toml \
+              Cargo.lock \
+              crates/pam-native-engine \
+              crates/pam-native-protocol \
+              android/build.gradle.kts \
+              android/app/proguard-rules.pro \
+              android/app/src/firebase \
+              android/app/src/main \
+              android/app/build.gradle.kts \
+              native/pam_native_engine.h \
+              target/aarch64-linux-android/release/libpam_native_engine.a \
+              target/x86_64-linux-android/release/libpam_native_engine.a
+            gzip -n "${output%.gz}"
+          }
+          artifact="pam-native-android-renderer-${version}.tar.gz"
+          create_renderer_archive "dist/${artifact}"
+          create_renderer_archive "${RUNNER_TEMP}/${artifact}"
+          cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
+          rm "${RUNNER_TEMP}/${artifact}"
           (
             cd dist
             sha256sum "pam-native-android-plugin-api-${version}.aar" \
@@ -170,20 +197,27 @@ jobs:
           version=${GITHUB_REF_NAME#v}
           source_date_epoch=$(git log -1 --format=%ct)
           mkdir -p dist
-          tar \
-            --sort=name \
-            --mtime="@${source_date_epoch}" \
-            --owner=0 \
-            --group=0 \
-            --numeric-owner \
-            --transform="s,^,pam-native-php-${version}/," \
-            -cf "dist/pam-native-php-${version}.tar" \
-            -C packages/native .
-          gzip -n "dist/pam-native-php-${version}.tar"
+          create_php_archive() {
+            output=$1
+            tar \
+              --sort=name \
+              --mtime="@${source_date_epoch}" \
+              --owner=0 \
+              --group=0 \
+              --numeric-owner \
+              --transform="s,^,pam-native-php-${version}/," \
+              -cf "${output%.gz}" \
+              -C packages/native .
+            gzip -n "${output%.gz}"
+          }
+          artifact="pam-native-php-${version}.tar.gz"
+          create_php_archive "dist/${artifact}"
+          create_php_archive "${RUNNER_TEMP}/${artifact}"
+          cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
+          rm "${RUNNER_TEMP}/${artifact}"
           (
             cd dist
-            sha256sum "pam-native-php-${version}.tar.gz" \
-              > "pam-native-php-${version}.tar.gz.sha256"
+            sha256sum "${artifact}" > "${artifact}.sha256"
           )
       - name: Enforce the PHP SDK package budget
         run: >-
