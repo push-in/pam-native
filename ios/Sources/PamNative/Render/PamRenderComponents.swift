@@ -25,7 +25,9 @@ final class PamPressButton: UIButton {
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        guard isUserInteractionEnabled, !isHidden, alpha > 0.01 else { return false }
+        guard isEnabled, isUserInteractionEnabled, !isHidden, alpha > 0.01 else {
+            return false
+        }
         let horizontal = max(0, Self.minimumTouchTarget - bounds.width) / 2
         let vertical = max(0, Self.minimumTouchTarget - bounds.height) / 2
         return bounds.insetBy(dx: -horizontal, dy: -vertical).contains(point)

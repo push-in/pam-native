@@ -93,7 +93,9 @@ ambiguity resolution in addition to the target-size calculation.
 The UIKit evidence resolves a point outside two compact buttons' visual bounds
 but inside both expanded 44pt targets through the parent view. The frontmost
 sibling must be returned by `hitTest` and dispatch exactly one control action,
-proving container routing and overlap resolution in addition to geometry.
+proving container routing and overlap resolution in addition to geometry. When
+that front sibling becomes disabled, it leaves hit testing and the same point
+routes to the enabled sibling behind it instead of becoming a dead touch zone.
 
 Hardware-keyboard and switch navigation use the platform focus engine.
 `Pressable` participates in directional focus on Android without stealing touch
