@@ -1965,6 +1965,13 @@ mod tests {
     }
 
     #[test]
+    fn decoder_rejects_malformed_utf8_text() {
+        let mut encoded = tree("x").encode().expect("valid text tree");
+        *encoded.last_mut().expect("text byte") = 0xff;
+        assert_eq!(Tree::decode(&encoded), Err(ProtocolError::InvalidUtf8));
+    }
+
+    #[test]
     fn protocol_v1_golden_frames_are_stable() {
         let minimal_tree = Tree {
             root: 1,

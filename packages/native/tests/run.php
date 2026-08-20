@@ -2353,6 +2353,60 @@ $assert($firstFrame === $secondFrame, 'Tree encoding must be deterministic.');
 $assert(str_starts_with($firstFrame, 'PNT1'), 'Tree frame magic is missing.');
 $assert(count($first['callbacks']) === 1, 'Event callback was not registered.');
 
+$invalidTreeTextRejected = false;
+try {
+    (new TreeEncoder())->encode(Text::make("\xc3\x28"));
+} catch (InvalidArgumentException) {
+    $invalidTreeTextRejected = true;
+}
+$assert($invalidTreeTextRejected, 'Tree encoding must reject malformed UTF-8 text.');
+
+$invalidWireTextRejected = false;
+try {
+    Wire::map(['text' => "\xc3\x28"]);
+} catch (InvalidArgumentException) {
+    $invalidWireTextRejected = true;
+}
+$assert($invalidWireTextRejected, 'Wire maps must reject malformed UTF-8 text.');
+
+$invalidWireDecodeRejected = false;
+try {
+    Wire::decodeMap(
+        pack('v', 1).pack('v', 4).'text'."\x01".pack('V', 2)."\xc3\x28",
+    );
+} catch (InvalidArgumentException) {
+    $invalidWireDecodeRejected = true;
+}
+$assert($invalidWireDecodeRejected, 'Wire map decoding must reject malformed UTF-8 text.');
+
+$invalidWireKeyRejected = false;
+try {
+    Wire::map(['1invalid' => 'value']);
+} catch (InvalidArgumentException) {
+    $invalidWireKeyRejected = true;
+}
+$assert($invalidWireKeyRejected, 'Wire map encoding must reject non-portable keys.');
+
+$invalidWireBooleanRejected = false;
+try {
+    Wire::decodeMap(pack('v', 1).pack('v', 4).'flag'."\x04\x02");
+} catch (InvalidArgumentException) {
+    $invalidWireBooleanRejected = true;
+}
+$assert($invalidWireBooleanRejected, 'Wire map decoding must reject invalid booleans.');
+
+$duplicateWireKeyRejected = false;
+try {
+    Wire::decodeMap(
+        pack('v', 2)
+        .pack('v', 3).'key'."\x04\x00"
+        .pack('v', 3).'key'."\x04\x01",
+    );
+} catch (InvalidArgumentException) {
+    $duplicateWireKeyRejected = true;
+}
+$assert($duplicateWireKeyRejected, 'Wire map decoding must reject duplicate keys.');
+
 $nativeContainer = CustomView::make(
     'community.container',
     ['axis' => 1],

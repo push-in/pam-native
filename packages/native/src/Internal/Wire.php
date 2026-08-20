@@ -52,13 +52,13 @@ final class Wire
         $output = self::u16(count($values));
 
         foreach ($values as $key => $value) {
-            if ($key === '' || strlen($key) > 255) {
-                throw new InvalidArgumentException('Wire map keys must contain between 1 and 255 bytes.');
+            if (preg_match('/^[A-Za-z][A-Za-z0-9_]{0,254}$/D', $key) !== 1) {
+                throw new InvalidArgumentException('Wire map keys must use the portable identifier format.');
             }
 
             $output .= self::u16(strlen($key)).$key;
             $output .= match (true) {
-                is_string($value) => "\x01".self::sized($value),
+                is_string($value) => "\x01".self::sized(self::validatedText($value)),
                 is_int($value) => "\x02".pack('P', $value),
                 is_float($value) => "\x03".pack('e', $value),
                 is_bool($value) => "\x04".($value ? "\x01" : "\x00"),
@@ -81,12 +81,20 @@ final class Wire
         for ($index = 0; $index < $count; $index++) {
             $keyLength = self::readU16($payload, $offset);
             $key = self::readBytes($payload, $offset, $keyLength);
+            if (preg_match('/^[A-Za-z][A-Za-z0-9_]{0,254}$/D', $key) !== 1) {
+                throw new InvalidArgumentException('Wire map contains an invalid key.');
+            }
+            if (array_key_exists($key, $values)) {
+                throw new InvalidArgumentException('Wire map contains a duplicate key.');
+            }
             $tag = ord(self::readBytes($payload, $offset, 1));
             $values[$key] = match ($tag) {
-                1 => self::readBytes($payload, $offset, self::readU32($payload, $offset)),
+                1 => self::validatedText(
+                    self::readBytes($payload, $offset, self::readU32($payload, $offset)),
+                ),
                 2 => self::readInteger($payload, $offset),
                 3 => self::readFloat($payload, $offset),
-                4 => ord(self::readBytes($payload, $offset, 1)) === 1,
+                4 => self::readBoolean($payload, $offset),
                 default => throw new InvalidArgumentException("Unknown wire value tag {$tag}."),
             };
         }
@@ -134,6 +142,15 @@ final class Wire
         return self::u32(strlen($value)).$value;
     }
 
+    private static function validatedText(string $value): string
+    {
+        if (preg_match('//u', $value) !== 1) {
+            throw new InvalidArgumentException('Wire text must contain valid UTF-8.');
+        }
+
+        return $value;
+    }
+
     private static function readU16(string $payload, int &$offset): int
     {
         $result = unpack('vvalue', self::readBytes($payload, $offset, 2));
@@ -176,6 +193,15 @@ final class Wire
         }
 
         return $result['value'];
+    }
+
+    private static function readBoolean(string $payload, int &$offset): bool
+    {
+        return match (ord(self::readBytes($payload, $offset, 1))) {
+            0 => false,
+            1 => true,
+            default => throw new InvalidArgumentException('Wire map contains an invalid boolean.'),
+        };
     }
 
     private static function readBytes(string $payload, int &$offset, int $length): string

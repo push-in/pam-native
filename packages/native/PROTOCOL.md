@@ -23,7 +23,9 @@ field requires a new protocol version.
 Each frame starts with its four-byte magic and a `u16` version. Counts and byte
 lengths are bounded. Node IDs are non-zero `u64` values. Decoders reject
 duplicates, cycles, disconnected trees, invalid enum values, trailing bytes and
-oversized payloads before applying mutations.
+oversized payloads before applying mutations. Text properties, packed
+list/section entries and module-map strings must be valid UTF-8; malformed input
+is rejected rather than normalized. Opaque tag-`5` properties remain binary.
 
 The canonical enums are `NodeKind`, `PropKey`, `EventKind` and
 `NativeOperation` in PHP, the `pam-native-protocol` Rust crate, and

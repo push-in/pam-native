@@ -63,12 +63,73 @@ class PamProtocolTest {
         }
     }
 
+    @Test
+    fun decoderRejectsMalformedUtf8AcrossTextContainers() {
+        val invalid = byteArrayOf(0xc3.toByte(), 0x28)
+        assertThrows(ProtocolException::class.java) {
+            BatchDecoder.decode(textBatch(invalid))
+        }
+
+        val list = ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(1)
+            putInt(invalid.size)
+            put(invalid)
+            flip()
+        }
+        assertThrows(ProtocolException::class.java) { PackedStringList.decode(list) }
+
+        val sections = ByteBuffer.allocate(14).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putInt(1)
+            putInt(invalid.size)
+            put(invalid)
+            putInt(0)
+            flip()
+        }
+        assertThrows(ProtocolException::class.java) { PackedSectionList.decode(sections) }
+
+        val wire = ByteBuffer.allocate(12).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(1.toShort())
+            putShort(1.toShort())
+            put('a'.code.toByte())
+            put(1.toByte())
+            putInt(invalid.size)
+            put(invalid)
+        }.array()
+        assertThrows(IllegalArgumentException::class.java) { WireMap.decode(wire) }
+        assertThrows(IllegalArgumentException::class.java) {
+            WireMap.encode(mapOf("1invalid" to WireValue.Text("value")))
+        }
+
+        val invalidBoolean = ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(1.toShort())
+            putShort(4.toShort())
+            put("flag".toByteArray())
+            put(4.toByte())
+            put(2.toByte())
+        }.array()
+        assertThrows(IllegalStateException::class.java) { WireMap.decode(invalidBoolean) }
+
+        val duplicate = ByteBuffer.allocate(16).order(ByteOrder.LITTLE_ENDIAN).apply {
+            putShort(2.toShort())
+            repeat(2) { index ->
+                putShort(3.toShort())
+                put("key".toByteArray())
+                put(4.toByte())
+                put(index.toByte())
+            }
+        }.array()
+        assertThrows(IllegalArgumentException::class.java) { WireMap.decode(duplicate) }
+    }
+
     private fun textBatch(length: Int): ByteBuffer =
-        batch(propertyCount = 1, payloadBytes = length).apply {
+        textBatch(ByteArray(length) { 'a'.code.toByte() })
+
+    private fun textBatch(payload: ByteArray): ByteBuffer =
+        batch(propertyCount = 1, payloadBytes = payload.size).apply {
             putShort(PropKey.TEXT.value.toShort())
             put(1.toByte())
-            putInt(length)
-            repeat(length) { put('a'.code.toByte()) }
+            putInt(payload.size)
+            put(payload)
             flip()
         }
 

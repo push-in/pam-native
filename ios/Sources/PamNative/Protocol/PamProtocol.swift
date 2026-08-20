@@ -11,6 +11,13 @@ private let MAX_MUTATIONS = 800_000
 private let MAX_PROPERTIES = 128
 private let MAX_VALUE_BYTES = 1024 * 1024
 
+private func strictUTF8(_ value: Data, label: String) throws -> String {
+    guard let decoded = String(data: value, encoding: .utf8) else {
+        throw PamProtocolError.invalidPayload("\(label) is not valid UTF-8")
+    }
+    return decoded
+}
+
 public enum NodeKind: Int {
     case screen = 1
     case column = 2
@@ -171,7 +178,7 @@ public struct PackedStringList {
         let start = offsets[index]
         let length = lengths[index]
         let value = bytes.subdata(in: start ..< start + length)
-        return String(data: value, encoding: .utf8) ?? ""
+        return String(decoding: value, as: UTF8.self)
     }
 
     public static func decode(_ source: Data) throws -> PackedStringList {
@@ -192,7 +199,8 @@ public struct PackedStringList {
                 throw PamProtocolError.invalidPayload("List item is too large")
             }
             let offset = reader.offset
-            try reader.skip(Int(length))
+            let value = try reader.bytes(Int(length))
+            _ = try strictUTF8(value, label: "List item")
             offsets.append(offset)
             lengths.append(Int(length))
         }
@@ -214,7 +222,8 @@ public struct PackedSectionList {
                 throw PamProtocolError.invalidPayload("Section value too large")
             }
             let value = source.offset
-            try source.skip(Int(length))
+            let bytes = try source.bytes(Int(length))
+            _ = try strictUTF8(bytes, label: "Section value")
             return Entry(kind: kind, offset: value, length: Int(length))
         }
     }
@@ -239,7 +248,7 @@ public struct PackedSectionList {
     public subscript(index: Int) -> String {
         let entry = entries[index]
         let value = bytes.subdata(in: entry.offset ..< (entry.offset + entry.length))
-        return String(data: value, encoding: .utf8) ?? ""
+        return String(decoding: value, as: UTF8.self)
     }
 
     public static func decode(_ source: Data) throws -> PackedSectionList {
@@ -779,7 +788,7 @@ struct BinaryReader {
         let tag = try u8()
         switch tag {
         case 1:
-            return .text(String(data: try sizedBytes(), encoding: .utf8) ?? "")
+            return .text(try strictUTF8(sizedBytes(), label: "Text property"))
         case 2:
             return .integer(try i64())
         case 3:

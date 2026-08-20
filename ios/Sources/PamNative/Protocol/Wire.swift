@@ -1,5 +1,21 @@
 import Foundation
 
+private func strictWireUTF8(_ value: Data, label: String) throws -> String {
+    guard let decoded = String(data: value, encoding: .utf8) else {
+        throw PamProtocolError.invalidPayload("\(label) is not valid UTF-8")
+    }
+    return decoded
+}
+
+private func validWireKey(_ key: String) -> Bool {
+    guard let first = key.utf8.first, key.utf8.allSatisfy({
+        $0 == 95 || ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122)
+    }) else {
+        return false
+    }
+    return (first >= 65 && first <= 90) || (first >= 97 && first <= 122)
+}
+
 public enum WireValue: Equatable {
     case text(String)
     case integer(Int64)
@@ -48,16 +64,6 @@ public enum WireMap {
             return Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
         }
 
-        func validKey(_ key: String) -> Bool {
-            guard let first = key.utf8.first, key.utf8.allSatisfy({
-                $0 == 95 || ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122)
-            }) else {
-                return false
-            }
-            let firstIsAlpha = (first >= 65 && first <= 90) || (first >= 97 && first <= 122)
-            return firstIsAlpha
-        }
-
         let count = try readU16()
         var result: [String: WireValue] = [:]
         result.reserveCapacity(count)
@@ -68,9 +74,12 @@ public enum WireMap {
                 throw PamProtocolError.invalidPayload("Invalid native map key length")
             }
             let keyData = try read(keyLength)
-            let key = String(data: keyData, encoding: .utf8) ?? ""
-            guard validKey(key) else {
+            let key = try strictWireUTF8(keyData, label: "Native module key")
+            guard validWireKey(key) else {
                 throw PamProtocolError.invalidPayload("Invalid native module key")
+            }
+            guard result[key] == nil else {
+                throw PamProtocolError.invalidPayload("Duplicate native module key")
             }
 
             let tag = try readU8()
@@ -80,14 +89,18 @@ public enum WireMap {
                     let size = try readU32()
                     guard size <= maxBytes else { throw PamProtocolError.invalidPayload("Native value too large") }
                     let payload = try read(size)
-                    return .text(String(data: payload, encoding: .utf8) ?? "")
+                    return .text(try strictWireUTF8(payload, label: "Native module value"))
                 case 2:
                     return .integer(try readInt64())
                 case 3:
                     return .decimal(try readDouble())
                 case 4:
                     let flag = try readU8()
-                    return .flag(flag == 1)
+                    switch flag {
+                    case 0: return .flag(false)
+                    case 1: return .flag(true)
+                    default: throw PamProtocolError.invalidPayload("Invalid native boolean")
+                    }
                 default:
                     throw PamProtocolError.invalidPayload("Unknown native value type")
                 }
@@ -115,7 +128,7 @@ public enum WireMap {
 
         for (key, value) in values {
             let keyBytes = key.data(using: .utf8) ?? Data()
-            guard (1...255).contains(keyBytes.count) else {
+            guard (1...255).contains(keyBytes.count), validWireKey(key) else {
                 throw PamProtocolError.invalidPayload("Invalid module key")
             }
             output.append(contentsOf: withUnsafeBytes(of: UInt16(keyBytes.count).littleEndian, Array.init))

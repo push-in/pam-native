@@ -163,6 +163,52 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertThrowsError(try BatchDecoder.decode(propertyBatch(count: 129)))
     }
 
+    func testDecoderRejectsMalformedUTF8AcrossTextContainers() {
+        let invalid = Data([0xc3, 0x28])
+        XCTAssertThrowsError(try BatchDecoder.decode(textBatch(payload: invalid)))
+
+        var list = Data()
+        list.appendLittleEndian(UInt32(1))
+        list.appendLittleEndian(UInt32(invalid.count))
+        list.append(invalid)
+        XCTAssertThrowsError(try PackedStringList.decode(list))
+
+        var sections = Data()
+        sections.appendLittleEndian(UInt32(1))
+        sections.appendLittleEndian(UInt32(invalid.count))
+        sections.append(invalid)
+        sections.appendLittleEndian(UInt32(0))
+        XCTAssertThrowsError(try PackedSectionList.decode(sections))
+
+        var wire = Data()
+        wire.appendLittleEndian(UInt16(1))
+        wire.appendLittleEndian(UInt16(1))
+        wire.append(0x61)
+        wire.append(1)
+        wire.appendLittleEndian(UInt32(invalid.count))
+        wire.append(invalid)
+        XCTAssertThrowsError(try WireMap.decode(wire))
+        XCTAssertThrowsError(try WireMap.encode(["1invalid": .text("value")]))
+
+        var invalidBoolean = Data()
+        invalidBoolean.appendLittleEndian(UInt16(1))
+        invalidBoolean.appendLittleEndian(UInt16(4))
+        invalidBoolean.append(contentsOf: "flag".utf8)
+        invalidBoolean.append(4)
+        invalidBoolean.append(2)
+        XCTAssertThrowsError(try WireMap.decode(invalidBoolean))
+
+        var duplicate = Data()
+        duplicate.appendLittleEndian(UInt16(2))
+        for flag in [UInt8(0), UInt8(1)] {
+            duplicate.appendLittleEndian(UInt16(3))
+            duplicate.append(contentsOf: "key".utf8)
+            duplicate.append(4)
+            duplicate.append(flag)
+        }
+        XCTAssertThrowsError(try WireMap.decode(duplicate))
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),
@@ -181,11 +227,15 @@ final class PamProtocolTests: XCTestCase {
 }
 
 private func textBatch(length: Int) -> Data {
-    var data = batch(propertyCount: 1, payloadBytes: length)
+    textBatch(payload: Data(repeating: 0x61, count: length))
+}
+
+private func textBatch(payload: Data) -> Data {
+    var data = batch(propertyCount: 1, payloadBytes: payload.count)
     data.appendLittleEndian(UInt16(PamConstants.text))
     data.append(1)
-    data.appendLittleEndian(UInt32(length))
-    data.append(Data(repeating: 0x61, count: length))
+    data.appendLittleEndian(UInt32(payload.count))
+    data.append(payload)
     return data
 }
 

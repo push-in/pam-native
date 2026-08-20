@@ -39,7 +39,9 @@ Each frame starts with its four-byte magic, a `u16` protocol version and bounded
 payload counts. Strings and opaque values use a `u32` byte length. Node IDs are
 non-zero `u64` values. The implementation rejects duplicate IDs/properties,
 cycles, disconnected trees, invalid enum values, trailing bytes and payloads
-over their published limits.
+over their published limits. Text is strict UTF-8: the PHP producer and the
+Rust, Android and iOS decoders reject malformed sequences instead of replacing
+bytes or silently producing empty strings. Opaque tag-`5` values remain binary.
 
 Patch application is transactional. A rejected `PNP1` frame leaves the
 retained tree untouched; the PHP encoder then resynchronizes with a complete
