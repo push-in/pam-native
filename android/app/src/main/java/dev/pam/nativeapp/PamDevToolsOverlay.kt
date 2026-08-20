@@ -19,6 +19,7 @@ enum class RuntimeDiagnosticKind(val value: Int) {
     ERROR(3),
     LIFECYCLE(4),
     NETWORK(5),
+    HOT_RELOAD(6),
 }
 
 enum class RuntimeHttpMethod(val value: Int) {
@@ -202,6 +203,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
                 RuntimeDiagnosticKind.ERROR -> "ERR "
                 RuntimeDiagnosticKind.LIFECYCLE -> "LIFE"
                 RuntimeDiagnosticKind.NETWORK -> "NET "
+                RuntimeDiagnosticKind.HOT_RELOAD -> "LOAD"
             }
             if (item.durationNanos > 0) {
                 String.format(Locale.US, "%s %6.1fms  %s", prefix, item.durationNanos / 1_000_000.0, item.label)

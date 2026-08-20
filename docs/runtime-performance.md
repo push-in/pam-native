@@ -115,6 +115,16 @@ Android continues to publish decode/mount `Trace` sections, frame metrics,
 startup macrobenchmarks and Baseline Profile journeys. iOS renderer metrics are
 available to the existing runtime callback and Instruments.
 
+In Android development builds, every accepted hot-reload version also starts a
+monotonic device-side measurement immediately before its bundle download. The
+measurement ends at the first committed native frame, or at the first native
+runtime failure. DevTools records it as integer diagnostic kind `6` (`LOAD`),
+including duration, failure outcome and downloaded bundle bytes. A newer
+version supersedes an unfinished sample and a completed sample cannot be
+reported twice. This measures the full device-visible reload path rather than
+only transport or PHP evaluation time; hosted percentile budgets remain a
+separate release-evidence gate.
+
 The Rust engine also receives the physical display refresh rate from
 `DisplayManager` on Android and `UIScreen.maximumFramesPerSecond` on iOS. Every
 successful commit is evaluated against the corresponding 60/90/120 Hz budget.
