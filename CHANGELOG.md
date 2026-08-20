@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Measure Android development hot reload from accepted version through the
+  first committed native frame or runtime failure. DevTools now retains a
+  bounded 64-sample window, exports success/failure counts and nearest-rank
+  p95, and evaluates it against a configurable device budget.
 - Add bounded custom TalkBack and VoiceOver actions across the PHP fluent API,
   `.pam` templates, binary protocol, Android renderer, and iOS renderer. Complex
   gesture controls can now expose localized screen-reader alternatives and

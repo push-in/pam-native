@@ -121,9 +121,13 @@ measurement ends at the first committed native frame, or at the first native
 runtime failure. DevTools records it as integer diagnostic kind `6` (`LOAD`),
 including duration, failure outcome and downloaded bundle bytes. A newer
 version supersedes an unfinished sample and a completed sample cannot be
-reported twice. This measures the full device-visible reload path rather than
-only transport or PHP evaluation time; hosted percentile budgets remain a
-separate release-evidence gate.
+reported twice. A separate bounded 64-sample window exports successful count,
+failure count/rate, nearest-rank successful p95, its configured budget and the
+budget result in the diagnostics JSON. The overlay shows the same p95 and
+failure totals. Set `hotReloadP95BudgetMs` in `android/pam-native.properties`
+to change the default 1,000 ms development-device budget. This measures the
+full device-visible reload path rather than only transport or PHP evaluation
+time; hosted device distributions remain a separate release-evidence gate.
 
 The Rust engine also receives the physical display refresh rate from
 `DisplayManager` on Android and `UIScreen.maximumFramesPerSecond` on iOS. Every
