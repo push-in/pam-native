@@ -1387,6 +1387,17 @@ public final class PamRenderer {
         }
     }
 
+    private func configureHitSlop(_ button: PamPressButton?, state: NodeState?) {
+        guard let button, let state else { return }
+        let all = max(0, CGFloat(state.properties[PamConstants.hitSlop]?.decimalOrNil() ?? 0))
+        button.pamHitSlop = UIEdgeInsets(
+            top: max(0, CGFloat(state.properties[PamConstants.hitSlopTop]?.decimalOrNil() ?? Double(all))),
+            left: max(0, CGFloat(state.properties[PamConstants.hitSlopLeft]?.decimalOrNil() ?? Double(all))),
+            bottom: max(0, CGFloat(state.properties[PamConstants.hitSlopBottom]?.decimalOrNil() ?? Double(all))),
+            right: max(0, CGFloat(state.properties[PamConstants.hitSlopRight]?.decimalOrNil() ?? Double(all)))
+        )
+    }
+
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
         switch key {
         case PamConstants.text:
@@ -1761,6 +1772,12 @@ public final class PamRenderer {
         case PamConstants.pressScale:
             (view as? PamPressButton)?.pamPressedScale =
                 min(4, max(0.01, CGFloat(value.decimalOrZero())))
+        case PamConstants.hitSlop,
+             PamConstants.hitSlopLeft,
+             PamConstants.hitSlopTop,
+             PamConstants.hitSlopRight,
+             PamConstants.hitSlopBottom:
+            configureHitSlop(view as? PamPressButton, state: nodes[nodeId])
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(value.integerOrNil() ?? Int64(UInt32.max))
         case PamConstants.drawingWidth:
@@ -2044,6 +2061,12 @@ public final class PamRenderer {
             (view as? PamPressButton)?.pamPressedOpacity = 0.72
         case PamConstants.pressScale:
             (view as? PamPressButton)?.pamPressedScale = 1
+        case PamConstants.hitSlop,
+             PamConstants.hitSlopLeft,
+             PamConstants.hitSlopTop,
+             PamConstants.hitSlopRight,
+             PamConstants.hitSlopBottom:
+            configureHitSlop(view as? PamPressButton, state: state)
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(Int64(UInt32.max))
         case PamConstants.drawingWidth:

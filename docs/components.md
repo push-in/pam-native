@@ -81,9 +81,11 @@ their native hit area expands to at least 48dp on Android and 44pt on iOS.
 Android classifies both the custom `PamPressable` and the actual platform
 `Button`, then composes automatic expansion with explicit `hitSlop` in a
 sibling-aware touch delegate. iOS uses `PamPressButton` for both node kinds and
-expands its hit testing symmetrically. Disabled or hidden controls do not become
-actionable. Keep sufficient spacing between adjacent controls so expanded
-targets do not compete for the same gesture.
+composes the same per-edge `hitSlop` values with its expanded hit testing.
+Explicit values cannot shrink the platform minimum, and negative values are
+clamped to zero. Disabled or hidden controls do not become actionable. Keep
+sufficient spacing between adjacent controls so expanded targets do not compete
+for the same gesture.
 
 The Android evidence sends a complete down/up gesture outside two compact
 buttons' visual bounds but inside their overlapping 48dp targets. The grouped

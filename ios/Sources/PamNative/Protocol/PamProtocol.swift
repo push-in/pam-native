@@ -417,6 +417,11 @@ public enum PamConstants {
     public static let hostProperties = 100
     public static let opacity = 38
     public static let pressOpacity = 68
+    public static let hitSlop = 96
+    public static let hitSlopLeft = 233
+    public static let hitSlopTop = 234
+    public static let hitSlopRight = 235
+    public static let hitSlopBottom = 236
     public static let alignItems = 39
     public static let alignSelf = 40
     public static let justifyContent = 41

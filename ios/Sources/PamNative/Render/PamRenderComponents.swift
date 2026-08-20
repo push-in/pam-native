@@ -6,6 +6,7 @@ final class PamPressButton: UIButton {
 
     var pamPressedOpacity: CGFloat = 0.72
     var pamPressedScale: CGFloat = 1
+    var pamHitSlop = UIEdgeInsets.zero
 
     private var restingAlpha: CGFloat?
     private var restingTransform: CGAffineTransform?
@@ -30,7 +31,13 @@ final class PamPressButton: UIButton {
         }
         let horizontal = max(0, Self.minimumTouchTarget - bounds.width) / 2
         let vertical = max(0, Self.minimumTouchTarget - bounds.height) / 2
-        return bounds.insetBy(dx: -horizontal, dy: -vertical).contains(point)
+        let insets = UIEdgeInsets(
+            top: -max(vertical, pamHitSlop.top),
+            left: -max(horizontal, pamHitSlop.left),
+            bottom: -max(vertical, pamHitSlop.bottom),
+            right: -max(horizontal, pamHitSlop.right)
+        )
+        return bounds.inset(by: insets).contains(point)
     }
 
     override var isHighlighted: Bool {
