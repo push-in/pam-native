@@ -187,9 +187,12 @@ iOS now consumes the identical `PNA1` file/count/size/path contract through a
 Foundation-only parser. It additionally rejects invalid UTF-8, symbolic-link
 destinations and trailing bytes, writes files atomically inside a sibling
 staging directory, and applies the same active/previous rollback protocol.
-This is the transport-safety prerequisite for the iOS development client; the
-client polling lifecycle and accepted-version-to-first-frame evidence remain
-explicitly open rather than being inferred from parser tests.
+The generated debug host polls only an explicit loopback endpoint with bounded
+timeouts, refuses redirects, streams responses under their status/bundle
+limits, cancels the session during runtime shutdown and retains only the active
+cache version. Its accepted-version timestamp spans bundle transfer,
+transactional activation, PHP reload and the first committed native frame; the
+same bounded p95/failure evidence contract is exported on Android and iOS.
 
 ## Gates
 
