@@ -30,6 +30,26 @@
         "bin/pam-native-routes"
     ],
     "extra": {
+        "pam": {
+            "commands": {
+                "native:format": {
+                    "script": "bin/pam-native-format",
+                    "description": "Format PAM Native components"
+                },
+                "native:language-server": {
+                    "script": "bin/pam-native-language-server",
+                    "description": "Start the PAM Native language server"
+                },
+                "native:optimize": {
+                    "script": "bin/pam-native-optimize",
+                    "description": "Optimize a PAM Native application"
+                },
+                "native:routes": {
+                    "script": "bin/pam-native-routes",
+                    "description": "Inspect PAM Native routes"
+                }
+            }
+        },
         "pam-native": {
             "manifest-schema": "resources/pam-native.schema.json",
             "plugin-schema": "resources/pam-native.plugin.schema.json",
