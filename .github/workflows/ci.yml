@@ -240,8 +240,9 @@ jobs:
           path: evidence/ios
       - name: Export and aggregate accessibility results
         run: |
+          test -f evidence/ios/Info.plist
           xcrun xcresulttool get test-results tests \
-            --path evidence/ios/PamNative.xcresult \
+            --path evidence/ios \
             --format json > evidence/ios-tests.json
           python3 scripts/accessibility-evidence.py \
             --android 1=evidence/android-api-26 \
