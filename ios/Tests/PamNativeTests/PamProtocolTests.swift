@@ -101,6 +101,11 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.borderStyle, 446)
         XCTAssertEqual(PamConstants.scrollTargetAlignment, 447)
         XCTAssertEqual(PamConstants.pressScale, 448)
+        XCTAssertEqual(PamConstants.hitSlop, 96)
+        XCTAssertEqual(PamConstants.hitSlopLeft, 233)
+        XCTAssertEqual(PamConstants.hitSlopTop, 234)
+        XCTAssertEqual(PamConstants.hitSlopRight, 235)
+        XCTAssertEqual(PamConstants.hitSlopBottom, 236)
         XCTAssertEqual(PamConstants.sharedTransitionConfig, 449)
         XCTAssertEqual(PamConstants.accessibilityActions, 450)
         XCTAssertEqual(PamConstants.onAccessibilityAction, 451)
@@ -140,6 +145,140 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(root, 1)
     }
 
+    func testDecoderEnforcesSharedPropertyAndNodeLimits() throws {
+        let acceptedText = try BatchDecoder.decode(textBatch(length: 1024 * 1024))
+        guard case let .create(textNode)? = acceptedText.first,
+              case let .text(text)? = textNode.properties[PamConstants.text]
+        else {
+            return XCTFail("Expected a text property")
+        }
+        XCTAssertEqual(text.utf8.count, 1024 * 1024)
+        XCTAssertThrowsError(try BatchDecoder.decode(textBatch(length: 1024 * 1024 + 1)))
+
+        let acceptedProperties = try BatchDecoder.decode(propertyBatch(count: 128))
+        guard case let .create(propertyNode)? = acceptedProperties.first else {
+            return XCTFail("Expected a created node")
+        }
+        XCTAssertEqual(propertyNode.properties.count, 128)
+        XCTAssertThrowsError(try BatchDecoder.decode(propertyBatch(count: 129)))
+    }
+
+    func testDecoderRejectsMalformedUTF8AcrossTextContainers() {
+        let invalid = Data([0xc3, 0x28])
+        XCTAssertThrowsError(try BatchDecoder.decode(textBatch(payload: invalid)))
+
+        var list = Data()
+        list.appendLittleEndian(UInt32(1))
+        list.appendLittleEndian(UInt32(invalid.count))
+        list.append(invalid)
+        XCTAssertThrowsError(try PackedStringList.decode(list))
+
+        var sections = Data()
+        sections.appendLittleEndian(UInt32(1))
+        sections.appendLittleEndian(UInt32(invalid.count))
+        sections.append(invalid)
+        sections.appendLittleEndian(UInt32(0))
+        XCTAssertThrowsError(try PackedSectionList.decode(sections))
+
+        var wire = Data()
+        wire.appendLittleEndian(UInt16(1))
+        wire.appendLittleEndian(UInt16(1))
+        wire.append(0x61)
+        wire.append(1)
+        wire.appendLittleEndian(UInt32(invalid.count))
+        wire.append(invalid)
+        XCTAssertThrowsError(try WireMap.decode(wire))
+        XCTAssertThrowsError(try WireMap.encode(["1invalid": .text("value")]))
+
+        var invalidBoolean = Data()
+        invalidBoolean.appendLittleEndian(UInt16(1))
+        invalidBoolean.appendLittleEndian(UInt16(4))
+        invalidBoolean.append(contentsOf: "flag".utf8)
+        invalidBoolean.append(4)
+        invalidBoolean.append(2)
+        XCTAssertThrowsError(try WireMap.decode(invalidBoolean))
+
+        var duplicate = Data()
+        duplicate.appendLittleEndian(UInt16(2))
+        for flag in [UInt8(0), UInt8(1)] {
+            duplicate.appendLittleEndian(UInt16(3))
+            duplicate.append(contentsOf: "key".utf8)
+            duplicate.append(4)
+            duplicate.append(flag)
+        }
+        XCTAssertThrowsError(try WireMap.decode(duplicate))
+    }
+
+    func testWireProtocolsRejectNonFiniteDecimals() {
+        XCTAssertThrowsError(try BatchDecoder.decode(decimalBatch(value: .nan)))
+        XCTAssertThrowsError(try WireMap.encode(["value": .decimal(.infinity)]))
+
+        var wire = Data()
+        wire.appendLittleEndian(UInt16(1))
+        wire.appendLittleEndian(UInt16(5))
+        wire.append(contentsOf: "value".utf8)
+        wire.append(3)
+        wire.appendLittleEndian((-Double.infinity).bitPattern)
+        XCTAssertThrowsError(try WireMap.decode(wire))
+    }
+
+    func testWireMapEncodingIsCanonicalAcrossInsertionOrders() throws {
+        let expected = Data(hex:
+            "04000500616c706861010300000050616d0700656e61626c65640401" +
+            "0500726174696f03000000000000f83f04007a657461022a00000000000000"
+        )
+        let first = try WireMap.encode([
+            "zeta": .integer(42),
+            "ratio": .decimal(1.5),
+            "enabled": .flag(true),
+            "alpha": .text("Pam"),
+        ])
+        let second = try WireMap.encode([
+            "alpha": .text("Pam"),
+            "enabled": .flag(true),
+            "ratio": .decimal(1.5),
+            "zeta": .integer(42),
+        ])
+        XCTAssertEqual(expected, first)
+        XCTAssertEqual(first, second)
+    }
+
+    func testWireMapsEnforceTheExactTotalPayloadBoundary() throws {
+        let boundary = String(repeating: "x", count: 1024 * 1024 - 10)
+        XCTAssertEqual(
+            try WireMap.encode(["a": .text(boundary)]).count,
+            1024 * 1024
+        )
+        XCTAssertThrowsError(try WireMap.encode(["a": .text(boundary + "x")]))
+
+        var oversized = Data()
+        oversized.appendLittleEndian(UInt16(1))
+        oversized.appendLittleEndian(UInt16(1))
+        oversized.append(0x61)
+        oversized.append(1)
+        oversized.appendLittleEndian(UInt32(boundary.utf8.count + 1))
+        oversized.append(contentsOf: boundary.utf8)
+        oversized.append(0x78)
+        XCTAssertEqual(oversized.count, 1024 * 1024 + 1)
+        XCTAssertThrowsError(try WireMap.decode(oversized))
+    }
+
+    func testPackedCollectionsRejectExcessiveCardinalityBeforeAllocation() {
+        var list = Data()
+        list.appendLittleEndian(UInt32(100_001))
+        XCTAssertThrowsError(try PackedStringList.decode(list))
+
+        var sections = Data()
+        sections.appendLittleEndian(UInt32(10_001))
+        XCTAssertThrowsError(try PackedSectionList.decode(sections))
+
+        var aggregate = Data()
+        aggregate.appendLittleEndian(UInt32(1))
+        aggregate.appendLittleEndian(UInt32(0))
+        aggregate.appendLittleEndian(UInt32(100_000))
+        XCTAssertThrowsError(try PackedSectionList.decode(aggregate))
+    }
+
     func testDirectiveGeometryPayloadRoundTrips() throws {
         let encoded = try WireMap.encode([
             "x": .decimal(12.5),
@@ -157,7 +296,57 @@ final class PamProtocolTests: XCTestCase {
     }
 }
 
+private func textBatch(length: Int) -> Data {
+    textBatch(payload: Data(repeating: 0x61, count: length))
+}
+
+private func textBatch(payload: Data) -> Data {
+    var data = batch(propertyCount: 1, payloadBytes: payload.count)
+    data.appendLittleEndian(UInt16(PamConstants.text))
+    data.append(1)
+    data.appendLittleEndian(UInt32(payload.count))
+    data.append(payload)
+    return data
+}
+
+private func propertyBatch(count: Int) -> Data {
+    var data = batch(propertyCount: count, payloadBytes: count * 4)
+    for key in 1...count {
+        data.appendLittleEndian(UInt16(key))
+        data.append(4)
+        data.append(1)
+    }
+    return data
+}
+
+private func decimalBatch(value: Double) -> Data {
+    var data = batch(propertyCount: 1, payloadBytes: 11)
+    data.appendLittleEndian(UInt16(PamConstants.width))
+    data.append(3)
+    data.appendLittleEndian(value.bitPattern)
+    return data
+}
+
+private func batch(propertyCount: Int, payloadBytes: Int) -> Data {
+    var data = Data(capacity: 32 + payloadBytes)
+    data.append(contentsOf: "PNB1".utf8)
+    data.appendLittleEndian(UInt16(1))
+    data.appendLittleEndian(UInt32(1))
+    data.append(1)
+    data.appendLittleEndian(UInt64(1))
+    data.appendLittleEndian(UInt64(0))
+    data.appendLittleEndian(UInt32(0))
+    data.append(UInt8(NodeKind.screen.rawValue))
+    data.appendLittleEndian(UInt16(propertyCount))
+    return data
+}
+
 private extension Data {
+    mutating func appendLittleEndian<T: FixedWidthInteger>(_ value: T) {
+        var littleEndian = value.littleEndian
+        Swift.withUnsafeBytes(of: &littleEndian) { append(contentsOf: $0) }
+    }
+
     init(hex: String) {
         self.init(
             stride(from: 0, to: hex.count, by: 2).compactMap { offset in

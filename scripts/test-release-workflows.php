@@ -60,8 +60,17 @@ $ci = workflow($root, 'ci.yml');
 $android = workflow($root, 'ecosystem-android.yml');
 $ios = workflow($root, 'ecosystem-ios.yml');
 $release = workflow($root, 'release.yml');
+$androidBuild = file_get_contents("{$root}/android/build.gradle.kts");
+if ($androidBuild === false) {
+    fail('cannot read android/build.gradle.kts');
+}
 
-requireFragments($ci, 'ci.yml', ["  workflow_call:\n"]);
+requireFragments($ci, 'ci.yml', [
+    "  workflow_call:\n",
+    "php scripts/test-hot-reload-evidence.php\n",
+    "python3 -m unittest benchmarks/package/test_reproducibility.py\n",
+    "python3 -m json.tool benchmarks/package/reproducibility.schema.json >/dev/null\n",
+]);
 requireFragments($android, 'ecosystem-android.yml', [
     "  workflow_call:\n",
     "      - android/**\n",
@@ -85,6 +94,29 @@ requireFragments($release, 'release.yml', [
     "      - ecosystem-compatibility\n",
     "      - ecosystem-android\n",
     "      - ecosystem-ios\n",
+    "          git archive \\\n",
+    "              --mtime=\"@\${source_date_epoch}\" \\\n",
+    "            gzip -n \"\${output%.gz}\"\n",
+    "          cmp \"dist/\${artifact}\" \"\${RUNNER_TEMP}/\${artifact}\"\n",
+    "            :plugin-api:clean \\\n",
+    "          cmp \"\${artifact}\" android/plugin-api/build/outputs/aar/plugin-api-release.aar\n",
+    "            --output \"dist/pam-native-ios-\${version}.reproducibility.json\"\n",
+    "            --output \"dist/pam-native-android-\${version}.reproducibility.json\"\n",
+    "            --output \"dist/pam-native-php-\${version}.reproducibility.json\"\n",
+    "      - name: Reverify downloaded reproducibility evidence\n",
+]);
+if (substr_count($release, 'cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"') !== 3) {
+    fail('release.yml must verify iOS, Android renderer, and PHP SDK archives byte for byte');
+}
+$pluginRebuild = strpos($release, ':plugin-api:clean');
+$pluginChecksum = strpos($release, 'sha256sum "pam-native-android-plugin-api');
+if ($pluginRebuild === false || $pluginChecksum === false || $pluginRebuild > $pluginChecksum) {
+    fail('release.yml must prove plugin API reproducibility before writing its checksum');
+}
+requireFragments($androidBuild, 'android/build.gradle.kts', [
+    "tasks.withType<AbstractArchiveTask>().configureEach {\n",
+    "        isPreserveFileTimestamps = false\n",
+    "        isReproducibleFileOrder = true\n",
 ]);
 requireBoundedArtifactRetention($root, ['ci.yml', 'release.yml']);
 

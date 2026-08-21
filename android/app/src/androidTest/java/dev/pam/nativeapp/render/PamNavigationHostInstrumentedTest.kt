@@ -24,6 +24,47 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamNavigationHostInstrumentedTest {
     @Test
+    fun reducedMotionCommitsNavigationWithoutWaitingForAuthoredDuration() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val completed = CountDownLatch(1)
+        try {
+            onMain(instrumentation) {
+                PamMotionPolicy.reduceMotionOverride = true
+                val navigation = PamNavigationHost(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(390, 800)
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_SLIDE_FROM_RIGHT
+                    durationMs = 2_000
+                    setGestureNavigation(
+                        enabled = false,
+                        edgeWidth = 24f,
+                        threshold = 0.35f,
+                        onPop = null,
+                        onTransitionEnd = { completed.countDown() },
+                        onGestureStart = null,
+                        onGestureEnd = null,
+                        onGestureCancel = null,
+                    )
+                }
+                activity.host.addView(navigation)
+                navigation.layout(0, 0, 390, 800)
+                navigation.insert(View(activity), 0)
+                navigation.insert(View(activity), 1)
+                navigation.navigate(1)
+            }
+
+            assertTrue(
+                "Reduced motion must not wait for the authored two-second transition",
+                completed.await(1, TimeUnit.SECONDS),
+            )
+        } finally {
+            onMain(instrumentation) { PamMotionPolicy.reduceMotionOverride = null }
+            activity.finish()
+        }
+    }
+
+    @Test
     fun replacingTheActiveRoutePromotesTheRemainingReplacement() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

@@ -9,14 +9,24 @@ use InvalidArgumentException;
 final class Wire
 {
     public const MAX_VALUE_BYTES = 1_048_576;
+    public const MAX_LIST_ITEMS = 100_000;
+    public const MAX_SECTIONS = 10_000;
+    public const MAX_SECTION_ENTRIES = 100_000;
 
     /** @param list<string> $items */
     public static function stringList(array $items): string
     {
+        if (count($items) > self::MAX_LIST_ITEMS) {
+            throw new InvalidArgumentException('String lists cannot contain more than 100,000 items.');
+        }
+
         $output = self::u32(count($items));
 
         foreach ($items as $item) {
-            $output .= self::sized($item);
+            $output .= self::sized(self::validatedText($item));
+            if (strlen($output) > self::MAX_VALUE_BYTES) {
+                throw new InvalidArgumentException('String lists cannot exceed one megabyte.');
+            }
         }
 
         return $output;
@@ -27,18 +37,29 @@ final class Wire
      */
     public static function stringSections(array $sections): string
     {
-        $output = self::u32(count($sections));
-
-        foreach ($sections as $title => $items) {
-            $output .= self::sized($title).self::u32(count($items));
-
-            foreach ($items as $item) {
-                $output .= self::sized($item);
-            }
+        if (count($sections) > self::MAX_SECTIONS) {
+            throw new InvalidArgumentException('Section lists cannot contain more than 10,000 sections.');
         }
 
-        if (strlen($output) > self::MAX_VALUE_BYTES) {
-            throw new InvalidArgumentException('Section data cannot exceed one megabyte.');
+        $output = self::u32(count($sections));
+        $entries = count($sections);
+
+        foreach ($sections as $title => $items) {
+            $entries += count($items);
+            if ($entries > self::MAX_SECTION_ENTRIES) {
+                throw new InvalidArgumentException('Section lists cannot contain more than 100,000 entries.');
+            }
+            $output .= self::sized(self::validatedText($title)).self::u32(count($items));
+            if (strlen($output) > self::MAX_VALUE_BYTES) {
+                throw new InvalidArgumentException('Section data cannot exceed one megabyte.');
+            }
+
+            foreach ($items as $item) {
+                $output .= self::sized(self::validatedText($item));
+                if (strlen($output) > self::MAX_VALUE_BYTES) {
+                    throw new InvalidArgumentException('Section data cannot exceed one megabyte.');
+                }
+            }
         }
 
         return $output;
@@ -50,22 +71,27 @@ final class Wire
     public static function map(array $values): string
     {
         $output = self::u16(count($values));
+        ksort($values, SORT_STRING);
 
         foreach ($values as $key => $value) {
-            if ($key === '' || strlen($key) > 255) {
-                throw new InvalidArgumentException('Wire map keys must contain between 1 and 255 bytes.');
+            if (preg_match('/^[A-Za-z][A-Za-z0-9_]{0,254}$/D', $key) !== 1) {
+                throw new InvalidArgumentException('Wire map keys must use the portable identifier format.');
             }
 
             $output .= self::u16(strlen($key)).$key;
             $output .= match (true) {
-                is_string($value) => "\x01".self::sized($value),
+                is_string($value) => "\x01".self::sized(self::validatedText($value)),
                 is_int($value) => "\x02".pack('P', $value),
-                is_float($value) => "\x03".pack('e', $value),
+                is_float($value) => "\x03".pack('e', self::validatedFloat($value)),
                 is_bool($value) => "\x04".($value ? "\x01" : "\x00"),
                 default => throw new InvalidArgumentException(
                     "Wire map value for {$key} must be a string, integer, float, or boolean.",
                 ),
             };
+
+            if (strlen($output) > self::MAX_VALUE_BYTES) {
+                throw new InvalidArgumentException('Wire maps cannot exceed one megabyte.');
+            }
         }
 
         return $output;
@@ -74,6 +100,10 @@ final class Wire
     /** @return array<string, string|int|float|bool> */
     public static function decodeMap(string $payload): array
     {
+        if (strlen($payload) > self::MAX_VALUE_BYTES) {
+            throw new InvalidArgumentException('Wire maps cannot exceed one megabyte.');
+        }
+
         $offset = 0;
         $count = self::readU16($payload, $offset);
         $values = [];
@@ -81,12 +111,20 @@ final class Wire
         for ($index = 0; $index < $count; $index++) {
             $keyLength = self::readU16($payload, $offset);
             $key = self::readBytes($payload, $offset, $keyLength);
+            if (preg_match('/^[A-Za-z][A-Za-z0-9_]{0,254}$/D', $key) !== 1) {
+                throw new InvalidArgumentException('Wire map contains an invalid key.');
+            }
+            if (array_key_exists($key, $values)) {
+                throw new InvalidArgumentException('Wire map contains a duplicate key.');
+            }
             $tag = ord(self::readBytes($payload, $offset, 1));
             $values[$key] = match ($tag) {
-                1 => self::readBytes($payload, $offset, self::readU32($payload, $offset)),
+                1 => self::validatedText(
+                    self::readBytes($payload, $offset, self::readU32($payload, $offset)),
+                ),
                 2 => self::readInteger($payload, $offset),
                 3 => self::readFloat($payload, $offset),
-                4 => ord(self::readBytes($payload, $offset, 1)) === 1,
+                4 => self::readBoolean($payload, $offset),
                 default => throw new InvalidArgumentException("Unknown wire value tag {$tag}."),
             };
         }
@@ -134,6 +172,24 @@ final class Wire
         return self::u32(strlen($value)).$value;
     }
 
+    private static function validatedText(string $value): string
+    {
+        if (preg_match('//u', $value) !== 1) {
+            throw new InvalidArgumentException('Wire text must contain valid UTF-8.');
+        }
+
+        return $value;
+    }
+
+    private static function validatedFloat(float $value): float
+    {
+        if (!is_finite($value)) {
+            throw new InvalidArgumentException('Wire decimals must be finite.');
+        }
+
+        return $value;
+    }
+
     private static function readU16(string $payload, int &$offset): int
     {
         $result = unpack('vvalue', self::readBytes($payload, $offset, 2));
@@ -175,7 +231,16 @@ final class Wire
             throw new InvalidArgumentException('Cannot decode a floating-point value.');
         }
 
-        return $result['value'];
+        return self::validatedFloat($result['value']);
+    }
+
+    private static function readBoolean(string $payload, int &$offset): bool
+    {
+        return match (ord(self::readBytes($payload, $offset, 1))) {
+            0 => false,
+            1 => true,
+            default => throw new InvalidArgumentException('Wire map contains an invalid boolean.'),
+        };
     }
 
     private static function readBytes(string $payload, int &$offset, int $length): string

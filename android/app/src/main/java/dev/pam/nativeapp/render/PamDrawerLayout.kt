@@ -307,7 +307,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             else -> 0f
         }
         val targetProgress = if (open && type != TYPE_PERMANENT) 1f else 0f
-        if (!animated || !ValueAnimator.areAnimatorsEnabled()) {
+        if (!animated || PamMotionPolicy.isReduced(context)) {
             drawer.translationX = drawerTarget
             content.translationX = contentTarget
             progress = targetProgress

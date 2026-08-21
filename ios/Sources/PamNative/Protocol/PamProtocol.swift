@@ -9,7 +9,17 @@ public let PAM_PROTOCOL_VERSION = 1
 private let MAX_FRAME_BYTES = 16 * 1024 * 1024
 private let MAX_MUTATIONS = 800_000
 private let MAX_PROPERTIES = 128
-private let MAX_VALUE_BYTES = 1_000_000
+private let MAX_VALUE_BYTES = 1024 * 1024
+private let MAX_PACKED_LIST_ITEMS = 100_000
+private let MAX_PACKED_SECTIONS = 10_000
+private let MAX_PACKED_SECTION_ENTRIES = 100_000
+
+private func strictUTF8(_ value: Data, label: String) throws -> String {
+    guard let decoded = String(data: value, encoding: .utf8) else {
+        throw PamProtocolError.invalidPayload("\(label) is not valid UTF-8")
+    }
+    return decoded
+}
 
 public enum NodeKind: Int {
     case screen = 1
@@ -171,14 +181,14 @@ public struct PackedStringList {
         let start = offsets[index]
         let length = lengths[index]
         let value = bytes.subdata(in: start ..< start + length)
-        return String(data: value, encoding: .utf8) ?? ""
+        return String(decoding: value, as: UTF8.self)
     }
 
     public static func decode(_ source: Data) throws -> PackedStringList {
         var reader = BinaryReader(source: source)
         let count = try reader.u32()
         let safeCount = Int(count)
-        guard safeCount <= 100_000 else {
+        guard safeCount <= MAX_PACKED_LIST_ITEMS else {
             throw PamProtocolError.invalidPayload("List contains too many items")
         }
         var offsets = [Int]()
@@ -192,7 +202,8 @@ public struct PackedStringList {
                 throw PamProtocolError.invalidPayload("List item is too large")
             }
             let offset = reader.offset
-            try reader.skip(Int(length))
+            let value = try reader.bytes(Int(length))
+            _ = try strictUTF8(value, label: "List item")
             offsets.append(offset)
             lengths.append(Int(length))
         }
@@ -214,7 +225,8 @@ public struct PackedSectionList {
                 throw PamProtocolError.invalidPayload("Section value too large")
             }
             let value = source.offset
-            try source.skip(Int(length))
+            let bytes = try source.bytes(Int(length))
+            _ = try strictUTF8(bytes, label: "Section value")
             return Entry(kind: kind, offset: value, length: Int(length))
         }
     }
@@ -239,14 +251,14 @@ public struct PackedSectionList {
     public subscript(index: Int) -> String {
         let entry = entries[index]
         let value = bytes.subdata(in: entry.offset ..< (entry.offset + entry.length))
-        return String(data: value, encoding: .utf8) ?? ""
+        return String(decoding: value, as: UTF8.self)
     }
 
     public static func decode(_ source: Data) throws -> PackedSectionList {
         var reader = BinaryReader(source: source)
         let sections = try reader.u32()
         let safeSections = Int(sections)
-        guard safeSections <= 10_000 else {
+        guard safeSections <= MAX_PACKED_SECTIONS else {
             throw PamProtocolError.invalidPayload("Section list contains too many sections")
         }
 
@@ -257,7 +269,8 @@ public struct PackedSectionList {
             )
             let itemCount = try reader.u32()
             let safeItemCount = Int(itemCount)
-            guard safeItemCount <= 100_000 else {
+            guard safeItemCount <= MAX_PACKED_LIST_ITEMS,
+                  entries.count + safeItemCount <= MAX_PACKED_SECTION_ENTRIES else {
                 throw PamProtocolError.invalidPayload("Section list contains too many items")
             }
             for _ in 0..<safeItemCount {
@@ -417,6 +430,11 @@ public enum PamConstants {
     public static let hostProperties = 100
     public static let opacity = 38
     public static let pressOpacity = 68
+    public static let hitSlop = 96
+    public static let hitSlopLeft = 233
+    public static let hitSlopTop = 234
+    public static let hitSlopRight = 235
+    public static let hitSlopBottom = 236
     public static let alignItems = 39
     public static let alignSelf = 40
     public static let justifyContent = 41
@@ -491,7 +509,9 @@ public enum PamConstants {
     public static let imageFadeDurationMs = 197
     public static let imageResizeMethod = 198
     public static let imageResizeMultiplier = 199
-    public static let imageProgressiveRendering = 200
+    public static let imageProgressiveRenderingEnabled = 200
+    @available(*, deprecated, renamed: "imageProgressiveRenderingEnabled")
+    public static let imageProgressiveRendering = imageProgressiveRenderingEnabled
     public static let imageCachePolicy = 201
     public static let imageOverlayColor = 202
     public static let imageSourceSet = 203
@@ -772,7 +792,7 @@ struct BinaryReader {
         let tag = try u8()
         switch tag {
         case 1:
-            return .text(String(data: try bytes(try u32()), encoding: .utf8) ?? "")
+            return .text(try strictUTF8(sizedBytes(), label: "Text property"))
         case 2:
             return .integer(try i64())
         case 3:
@@ -784,7 +804,7 @@ struct BinaryReader {
             default: throw PamProtocolError.invalidPayload("Invalid boolean value")
             }
         case 5:
-            let value = try bytes(try u32())
+            let value = try sizedBytes()
             switch key {
             case PamConstants.items:
                 return .strings(try PackedStringList.decode(value))
@@ -806,6 +826,14 @@ struct BinaryReader {
             throw PamProtocolError.invalidPayload("Node ids must be positive")
         }
         return value
+    }
+
+    mutating func sizedBytes() throws -> Data {
+        let length = try u32()
+        guard length <= MAX_VALUE_BYTES else {
+            throw PamProtocolError.invalidPayload("Property exceeds one MiB")
+        }
+        return try bytes(length)
     }
 
     mutating func bytes(_ count: Int) throws -> Data {
@@ -831,7 +859,11 @@ struct BinaryReader {
 
     mutating func d64() throws -> Double {
         let raw = try bytes(8)
-        return Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        let value = Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        guard value.isFinite else {
+            throw PamProtocolError.invalidPayload("Floating property must be finite")
+        }
+        return value
     }
 
     func finish() throws {

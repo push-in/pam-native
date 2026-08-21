@@ -231,6 +231,10 @@ internal class PamRefreshContainer(context: Context) : FrameLayout(context) {
             updateIndicatorColor(colors.first())
             return
         }
+        if (PamMotionPolicy.isReduced(context)) {
+            updateIndicatorColor(colors.first())
+            return
+        }
         colorAnimator = ValueAnimator.ofObject(
             ArgbEvaluator(),
             *colors.toTypedArray(),

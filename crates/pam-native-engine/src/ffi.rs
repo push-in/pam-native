@@ -428,7 +428,7 @@ fn acquire_buffer() -> Vec<u8> {
 }
 
 fn recycle_buffer(buffer: Vec<u8>) {
-    if buffer.capacity() > MAX_POOLED_CAPACITY {
+    if buffer.capacity() == 0 || buffer.capacity() > MAX_POOLED_CAPACITY {
         return;
     }
     let mut pool = buffer_pool()
@@ -461,13 +461,22 @@ fn _opaque_pointer(_: *mut c_void) {}
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::sync::{Mutex, MutexGuard};
 
     use pam_native_protocol::{Node, NodeKind, Tree};
 
     use super::*;
 
+    fn lock_shared_buffer_pool() -> MutexGuard<'static, ()> {
+        static TEST_LOCK: Mutex<()> = Mutex::new(());
+        TEST_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     #[test]
     fn released_abi_buffers_return_their_allocation_to_the_bounded_pool() {
+        let _pool_guard = lock_shared_buffer_pool();
         let mut bytes = Vec::with_capacity(32_768);
         bytes.extend_from_slice(b"reusable-command-buffer");
         let allocation = bytes.as_ptr();
@@ -485,6 +494,7 @@ mod tests {
 
     #[test]
     fn ffi_owns_and_releases_every_output() {
+        let _pool_guard = lock_shared_buffer_pool();
         let frame = Tree {
             root: 1,
             nodes: BTreeMap::from([(
@@ -524,6 +534,7 @@ mod tests {
 
     #[test]
     fn ffi_exposes_the_last_commit_error() {
+        let _pool_guard = lock_shared_buffer_pool();
         let handle = pam_native_engine_new();
         let invalid = b"NOPE";
         let mut mutations = PamNativeBuffer::default();

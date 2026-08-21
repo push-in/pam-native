@@ -19,6 +19,7 @@ enum class RuntimeDiagnosticKind(val value: Int) {
     ERROR(3),
     LIFECYCLE(4),
     NETWORK(5),
+    HOT_RELOAD(6),
 }
 
 enum class RuntimeHttpMethod(val value: Int) {
@@ -55,6 +56,9 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     private var frameCount = 0
     private var latestMetrics: RuntimeFrameMetrics? = null
     private val diagnostics = ArrayDeque<RuntimeDiagnostic>()
+    private val hotReloadStatistics = HotReloadStatistics(
+        p95BudgetNanos = BuildConfig.PAM_HOT_RELOAD_P95_BUDGET_MS * 1_000_000L,
+    )
     private val choreographer = Choreographer.getInstance()
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
@@ -126,6 +130,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     fun snapshotJson(capturedAtUnixMs: Long = System.currentTimeMillis()): String {
         val metrics = latestMetrics
         val stats = metrics?.stats
+        val hotReload = hotReloadStatistics.snapshot()
         val timeline = JSONArray()
         diagnostics.forEach { item ->
             val encoded = JSONObject()
@@ -161,6 +166,17 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
                     .put("layoutP95Micros", stats?.layoutP95Micros ?: 0)
                     .put("encodeP95Micros", stats?.encodeP95Micros ?: 0),
             )
+            .put(
+                "hotReload",
+                JSONObject()
+                    .put("sampleCount", hotReload.sampleCount)
+                    .put("successfulCount", hotReload.successfulCount)
+                    .put("failureCount", hotReload.failureCount)
+                    .put("failureRateBasisPoints", hotReload.failureRateBasisPoints)
+                    .put("p95DurationMicros", hotReload.p95DurationNanos?.div(1_000) ?: JSONObject.NULL)
+                    .put("p95BudgetMicros", hotReload.p95BudgetNanos / 1_000)
+                    .put("p95WithinBudget", hotReload.p95WithinBudget ?: JSONObject.NULL),
+            )
             .put("timeline", timeline)
             .toString()
     }
@@ -173,10 +189,11 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     private fun renderMetrics() {
         val metrics = latestMetrics ?: return
         val stats = metrics.stats
+        val hotReload = hotReloadStatistics.snapshot()
         val heapMiB = Debug.getNativeHeapAllocatedSize() / (1024.0 * 1024.0)
         val summary = String.format(
             Locale.US,
-            "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nengine p95 d/r/l/e %d/%d/%d/%d µs\nframes %d  deadline misses %d\nnodes %d  batches %d\npatch %d  full %d  coalesced %d\nbuffer reuse %d · %.1f MiB\nnative heap %.1f MiB",
+            "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nengine p95 d/r/l/e %d/%d/%d/%d µs\nreload p95 %s · %d samples · %d failures\nframes %d  deadline misses %d\nnodes %d  batches %d\npatch %d  full %d  coalesced %d\nbuffer reuse %d · %.1f MiB\nnative heap %.1f MiB",
             smoothedFps,
             metrics.mountNanos / 1_000_000.0,
             metrics.decodeNanos / 1_000_000.0,
@@ -184,6 +201,9 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
             stats.reconcileP95Micros,
             stats.layoutP95Micros,
             stats.encodeP95Micros,
+            hotReload.p95DurationNanos?.let { String.format(Locale.US, "%.1f ms", it / 1_000_000.0) } ?: "—",
+            hotReload.sampleCount,
+            hotReload.failureCount,
             stats.measuredFrames,
             stats.deadlineMisses,
             stats.nodes,
@@ -202,6 +222,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
                 RuntimeDiagnosticKind.ERROR -> "ERR "
                 RuntimeDiagnosticKind.LIFECYCLE -> "LIFE"
                 RuntimeDiagnosticKind.NETWORK -> "NET "
+                RuntimeDiagnosticKind.HOT_RELOAD -> "LOAD"
             }
             if (item.durationNanos > 0) {
                 String.format(Locale.US, "%s %6.1fms  %s", prefix, item.durationNanos / 1_000_000.0, item.label)
@@ -213,6 +234,15 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     }
 
     private fun appendDiagnostic(diagnostic: RuntimeDiagnostic) {
+        if (diagnostic.kind == RuntimeDiagnosticKind.HOT_RELOAD) {
+            hotReloadStatistics.record(
+                HotReloadTiming(
+                    durationNanos = diagnostic.durationNanos,
+                    bundleBytes = diagnostic.requestBytes ?: 0,
+                    failed = diagnostic.failed,
+                ),
+            )
+        }
         if (diagnostics.size >= MAX_DIAGNOSTICS) diagnostics.removeFirst()
         diagnostics.addLast(diagnostic)
         if (visible) renderMetrics()

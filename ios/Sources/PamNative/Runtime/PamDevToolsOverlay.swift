@@ -7,6 +7,7 @@ public enum RuntimeDiagnosticKind: Int {
     case error = 3
     case lifecycle = 4
     case network = 5
+    case hotReload = 6
 }
 
 public enum RuntimeHttpMethod: Int {
@@ -57,6 +58,7 @@ public final class PamDevToolsOverlay: UIView {
     private var frameCount = 0
     private var smoothedFps = 0.0
     private var diagnostics: [RuntimeDiagnostic] = []
+    private let hotReloadStatistics = try! PamHotReloadStatistics(p95BudgetNanos: 1_000_000_000)
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -76,6 +78,13 @@ public final class PamDevToolsOverlay: UIView {
     }
 
     public func record(_ diagnostic: RuntimeDiagnostic) {
+        if diagnostic.kind == .hotReload, diagnostic.durationNanos > 0 {
+            try? hotReloadStatistics.record(PamHotReloadTiming(
+                durationNanos: diagnostic.durationNanos,
+                bundleBytes: diagnostic.responseBytes ?? 0,
+                failed: diagnostic.failed
+            ))
+        }
         if diagnostics.count >= 8 { diagnostics.removeFirst() }
         diagnostics.append(diagnostic)
         if !isHidden { renderMetrics() }
@@ -110,6 +119,18 @@ public final class PamDevToolsOverlay: UIView {
             "layoutP95Micros": stats?.layoutP95Micros ?? 0,
             "encodeP95Micros": stats?.encodeP95Micros ?? 0,
         ]
+        let reload = hotReloadStatistics.snapshot()
+        let reloadP95 = reload.p95DurationNanos.map { value -> Any in value / 1_000 } ?? NSNull()
+        let reloadBudgetResult = reload.p95WithinBudget.map { value -> Any in value } ?? NSNull()
+        let hotReload: [String: Any] = [
+            "sampleCount": reload.sampleCount,
+            "successfulCount": reload.successfulCount,
+            "failureCount": reload.failureCount,
+            "failureRateBasisPoints": reload.failureRateBasisPoints,
+            "p95DurationMicros": reloadP95,
+            "p95BudgetMicros": reload.p95BudgetNanos / 1_000,
+            "p95WithinBudget": reloadBudgetResult,
+        ]
         let snapshot: [String: Any] = [
             "schemaVersion": 1,
             "surfaceCode": 2,
@@ -118,6 +139,7 @@ public final class PamDevToolsOverlay: UIView {
             "framesPerSecond": smoothedFps,
             "retainedBytes": stats?.retainedBytes ?? 0,
             "frame": frame,
+            "hotReload": hotReload,
             "timeline": timeline,
         ]
         return try JSONSerialization.data(withJSONObject: snapshot, options: [.sortedKeys])
@@ -192,11 +214,18 @@ public final class PamDevToolsOverlay: UIView {
             accessibilityValue = label.text
             return
         }
+        let reload = hotReloadStatistics.snapshot()
+        let reloadP95 = reload.p95DurationNanos.map {
+            String(format: "%.1f ms", Double($0) / 1_000_000)
+        } ?? "—"
         let summary = String(
-            format: "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nengine p95 d/r/l/e %lld/%lld/%lld/%lld µs\nframes %lld  deadline misses %lld\nnodes %lld  batches %d\npatch %lld  full %lld  coalesced %lld\nbuffer reuse %lld · %.2f MiB\nretained %.2f MiB",
+            format: "PAM  %.0f fps\nmount %.2f ms  host decode %.2f ms\nreload p95 %@  samples %d  failures %d\nengine p95 d/r/l/e %lld/%lld/%lld/%lld µs\nframes %lld  deadline misses %lld\nnodes %lld  batches %d\npatch %lld  full %lld  coalesced %lld\nbuffer reuse %lld · %.2f MiB\nretained %.2f MiB",
             smoothedFps,
             Double(metrics.mountNanos) / 1_000_000,
             Double(metrics.decodeNanos) / 1_000_000,
+            reloadP95,
+            reload.sampleCount,
+            reload.failureCount,
             metrics.stats.decodeP95Micros,
             metrics.stats.reconcileP95Micros,
             metrics.stats.layoutP95Micros,
@@ -223,6 +252,7 @@ public final class PamDevToolsOverlay: UIView {
                 case .error: prefix = "ERR "
                 case .lifecycle: prefix = "LIFE"
                 case .network: prefix = "NET "
+                case .hotReload: prefix = "LOAD"
                 }
             }
             if item.durationNanos > 0 {

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+- Make all four iOS, Android renderer, Android plugin API and PHP SDK release
+  artifacts reproducible from the tagged commit. The release gate constructs
+  each artifact twice, including an isolated clean Gradle rebuild of the AAR,
+  requires byte-for-byte equality, and only then emits checksums,
+  package-budget evidence and provenance attestations. A strict, bounded
+  reproducibility report records integer artifact/result codes, size and digest;
+  the final release job re-hashes every downloaded package against it.
+- Replace iOS development's rebuild/reinstall loop with bounded loopback hot
+  reload. Debug hosts now poll the CLI, stream-validate and transactionally
+  activate `PNA1` bundles from cache, reload the embedded PHP runtime, and
+  measure accepted-version-to-first-frame latency with the same integer kind
+  `6`, 64-sample p95/failure evidence contract used by Android.
+- Add the bounded iOS `PNA1` development-bundle parser and transactional
+  activator. It matches Android's file/count/size/path contract, rejects
+  malformed or duplicate input before activation, preserves the live PHP app
+  on failure and recovers an interrupted previous-directory swap.
+- Measure Android development hot reload from accepted version through the
+  first committed native frame or runtime failure. DevTools now retains a
+  bounded 64-sample window, exports success/failure counts and nearest-rank
+  p95, and evaluates it against a configurable device budget. An offline,
+  size-bounded verifier turns exported physical-device snapshots into a CI
+  gate for sample count, failures and p95.
 - Add bounded custom TalkBack and VoiceOver actions across the PHP fluent API,
   `.pam` templates, binary protocol, Android renderer, and iOS renderer. Complex
   gesture controls can now expose localized screen-reader alternatives and

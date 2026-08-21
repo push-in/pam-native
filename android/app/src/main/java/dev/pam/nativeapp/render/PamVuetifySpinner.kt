@@ -22,7 +22,7 @@ internal class PamVuetifySpinner(context: Context) : ProgressBar(context) {
 }
 
 private class PamVuetifySpinnerDrawable(
-    context: Context,
+    private val context: Context,
 ) : Drawable(), Animatable {
     private val density = context.resources.displayMetrics.density
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -79,6 +79,11 @@ private class PamVuetifySpinnerDrawable(
     override fun start() {
         if (running) return
         running = true
+        if (PamMotionPolicy.isReduced(context)) {
+            phase = 0.2f
+            invalidateSelf()
+            return
+        }
         animator.start()
     }
 

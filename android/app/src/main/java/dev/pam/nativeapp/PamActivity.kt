@@ -146,9 +146,13 @@ class PamActivity : FragmentActivity() {
             if (BuildConfig.DEBUG) {
                 hotReload = HotReloadClient(
                     context = this,
-                    onReload = { path -> runOnUiThread {
+                    onReload = { receipt -> runOnUiThread {
                         errors.clearError()
-                        runtime.reload(path)
+                        runtime.reload(
+                            receipt.entryPath,
+                            receipt.confirmedAtNanos,
+                            receipt.bundleBytes,
+                        )
                     } },
                     onError = { message -> runOnUiThread { errors.showError(message) } },
                 ).also { it.start() }

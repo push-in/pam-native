@@ -11,31 +11,69 @@ internal object DevBundle {
 
     fun extract(bytes: ByteArray, destination: File): File {
         require(bytes.size <= MAX_BUNDLE_BYTES) { "Hot reload bundle exceeds 16 MiB" }
+        val parent = destination.parentFile ?: error("Hot reload destination has no parent")
+        check(parent.isDirectory || parent.mkdirs()) { "Cannot create hot reload parent directory" }
+        val staging = File(parent, ".${destination.name}.incoming")
+        val backup = File(parent, ".${destination.name}.previous")
+        if (!destination.exists() && backup.exists()) {
+            check(backup.renameTo(destination)) { "Cannot recover previous hot reload directory" }
+        }
+        staging.deleteRecursively()
+        check(staging.mkdir()) { "Cannot create hot reload staging directory" }
+
+        try {
+            extractInto(bytes, staging)
+            activate(staging, destination, backup)
+        } catch (error: Throwable) {
+            staging.deleteRecursively()
+            throw error
+        }
+        return File(destination, "index.php")
+    }
+
+    private fun extractInto(bytes: ByteArray, staging: File) {
         val reader = Reader(bytes)
         require(reader.text(4) == "PNA1") { "Invalid hot reload bundle" }
         val count = reader.u32()
         require(count in 1..MAX_FILES) { "Invalid hot reload file count" }
-        destination.deleteRecursively()
-        check(destination.mkdirs()) { "Cannot create hot reload directory" }
+        val paths = HashSet<String>(count)
         repeat(count) {
             val path = reader.text(reader.u16())
             require(isSafePath(path)) { "Unsafe hot reload path" }
+            require(paths.add(path)) { "Duplicate hot reload path" }
             val contents = reader.bytes(reader.u32().also {
                 require(it <= MAX_FILE_BYTES) { "Hot reload file is too large" }
             })
-            val target = File(destination, path)
-            require(target.canonicalPath.startsWith(destination.canonicalPath + File.separator)) {
+            val target = File(staging, path)
+            require(target.canonicalPath.startsWith(staging.canonicalPath + File.separator)) {
                 "Hot reload path escapes destination"
             }
-            target.parentFile?.mkdirs()
+            check(target.parentFile?.let { it.isDirectory || it.mkdirs() } == true) {
+                "Cannot create hot reload file directory"
+            }
             val temporary = File(target.parentFile, "${target.name}.tmp")
             temporary.writeBytes(contents)
             check(temporary.renameTo(target)) { "Cannot activate hot reload file" }
         }
         reader.finish()
-        return File(destination, "index.php").also {
-            require(it.isFile) { "Hot reload bundle does not contain index.php" }
+        require(File(staging, "index.php").isFile) {
+            "Hot reload bundle does not contain index.php"
         }
+    }
+
+    private fun activate(staging: File, destination: File, backup: File) {
+        backup.deleteRecursively()
+        val hadActive = destination.exists()
+        if (hadActive) {
+            check(destination.renameTo(backup)) { "Cannot preserve active hot reload directory" }
+        }
+        if (!staging.renameTo(destination)) {
+            if (hadActive) {
+                check(backup.renameTo(destination)) { "Cannot restore active hot reload directory" }
+            }
+            error("Cannot activate hot reload directory")
+        }
+        backup.deleteRecursively()
     }
 
     private fun isSafePath(path: String): Boolean =
@@ -76,4 +114,3 @@ internal object DevBundle {
         }
     }
 }
-

@@ -36,6 +36,7 @@ class PamRuntime(
     private val pendingBatches = ArrayDeque<PendingBatch>()
     private val pendingImmediateEvents = ArrayDeque<PendingEvent>()
     private val pendingEvents = LinkedHashMap<EventIdentity, ByteArray>()
+    private val hotReloadLatency = HotReloadLatency()
     private var frameScheduled = false
     private var readyForEvents = false
     private val frameCallback = Choreographer.FrameCallback {
@@ -142,10 +143,17 @@ class PamRuntime(
         dispatchEvent(0, EVENT_BACK)
     }
 
-    fun reload(entryPath: String) {
+    fun reload(
+        entryPath: String,
+        confirmedAtNanos: Long? = null,
+        bundleBytes: Int = 0,
+    ) {
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
+                if (confirmedAtNanos != null) {
+                    hotReloadLatency.begin(confirmedAtNanos, bundleBytes)
+                }
                 readyForEvents = false
                 modules.prepareReload()
                 nativeReload(active, entryPath)
@@ -347,6 +355,7 @@ class PamRuntime(
 
     @Suppress("unused")
     private fun onNativeError(message: String) {
+        completeHotReload(failed = true)
         onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, message.take(120), failed = true))
         main.post {
             if (!closed.get()) {
@@ -480,6 +489,7 @@ class PamRuntime(
             )
         }
         if (committed) {
+            completeHotReload(failed = false)
             onFrameCommitted(metrics)
         }
         scheduleFrame()
@@ -489,6 +499,19 @@ class PamRuntime(
         if (ownedBatchHandles.remove(batchHandle)) {
             nativeReleaseBatch(batchHandle)
         }
+    }
+
+    private fun completeHotReload(failed: Boolean) {
+        val timing = hotReloadLatency.complete(System.nanoTime(), failed) ?: return
+        onDiagnostic(
+            RuntimeDiagnostic(
+                kind = RuntimeDiagnosticKind.HOT_RELOAD,
+                label = if (failed) "confirmed version to failure" else "confirmed version to first frame",
+                durationNanos = timing.durationNanos,
+                failed = timing.failed,
+                requestBytes = timing.bundleBytes,
+            )
+        )
     }
 
     companion object {

@@ -8,7 +8,7 @@ copyable scheduled-work example with priority, coalescing and cancellation.
 
 ## Performance architecture
 
-Pam treats performance as fifteen cooperating contracts rather than one
+Pam treats performance as sixteen cooperating contracts rather than one
 benchmark number:
 
 | Pillar | Production path |
@@ -28,6 +28,7 @@ benchmark number:
 | Memory control | Every queue/cache is bounded; pooled buffers, view dematerialization and platform pressure signals reclaim retained resources. |
 | Performance Observatory | Bounded histograms export P95 stages, deadlines, retained bytes, buffer reuse, nodes and frame misses to both overlays. |
 | Performance Contract | PHP/Rust budgets, 100,000-item iOS coverage, Android renderer tests, release builds and device macrobenchmarks gate regressions. |
+| Package Footprint | Every release artifact, including an isolated clean rebuild of the Android plugin API AAR, is built twice and compared byte-for-byte; strict reproducibility and size/digest reports are persisted, independently rehashed, provenance-attested beside explicit iOS, Android renderer, plugin API and PHP SDK byte ceilings, and reverified after artifact download before publication. |
 
 The worklet API and its safety limits are documented in
 [Platform runtime](platform-runtime.md#worklet-bytecode); image pipeline policies
@@ -114,6 +115,38 @@ Android continues to publish decode/mount `Trace` sections, frame metrics,
 startup macrobenchmarks and Baseline Profile journeys. iOS renderer metrics are
 available to the existing runtime callback and Instruments.
 
+In Android and iOS development builds, every accepted hot-reload version also starts a
+monotonic device-side measurement immediately before its bundle download. The
+measurement ends at the first committed native frame, or at the first native
+runtime failure. DevTools records it as integer diagnostic kind `6` (`LOAD`),
+including duration, failure outcome and downloaded bundle bytes. A newer
+version supersedes an unfinished sample and a completed sample cannot be
+reported twice. A separate bounded 64-sample window exports successful count,
+failure count/rate, nearest-rank successful p95, its configured budget and the
+budget result in the diagnostics JSON. The overlay shows the same p95 and
+failure totals. Set `hotReloadP95BudgetMs` in `android/pam-native.properties`
+to change Android's default 1,000 ms development-device budget; iOS uses the
+same 1,000 ms contract. The iOS debug host connects only to the loopback HTTP
+endpoint, streams each response under its protocol limit, refuses redirects,
+activates into `Library/Caches/pam/dev`, and retains only the active version.
+This measures the
+full device-visible reload path rather than only transport or PHP evaluation
+time; hosted device distributions remain a separate release-evidence gate.
+
+Export a physical-device snapshot with `pam mobile android:diagnostics`, then
+gate it offline with:
+
+```bash
+scripts/check-hot-reload-evidence.php pam-diagnostics.json 20 1000
+```
+
+The verifier accepts Android (`platformCode: 1`) and iOS (`platformCode: 2`)
+diagnostics contracts, checks internally
+consistent integer counts/rates and budget result, requires the requested
+sample floor, rejects every failed reload and rejects p95 above both the
+snapshot's configured budget and the independent CI ceiling. Inputs are
+limited to 1 MiB before reading and symbolic links are refused.
+
 The Rust engine also receives the physical display refresh rate from
 `DisplayManager` on Android and `UIScreen.maximumFramesPerSecond` on iOS. Every
 successful commit is evaluated against the corresponding 60/90/120 Hz budget.
@@ -143,6 +176,24 @@ Stores, navigation and component-restorable state keep their existing atomic
 checkpoints. The checkpoint intentionally stores only frame identity, not the
 binary tree, because the native renderer already owns the last committed tree.
 
+Android development bundles use the same last-known-good rule. The host parses
+and bounds the complete `PNA1` payload in a sibling staging directory, rejects
+duplicate or unsafe paths, requires `index.php`, and only then swaps the active
+version. A preserved sibling backup is restored if activation fails or a prior
+activation was interrupted; malformed or truncated bundles remove staging
+without deleting the active PHP application.
+
+iOS now consumes the identical `PNA1` file/count/size/path contract through a
+Foundation-only parser. It additionally rejects invalid UTF-8, symbolic-link
+destinations and trailing bytes, writes files atomically inside a sibling
+staging directory, and applies the same active/previous rollback protocol.
+The generated debug host polls only an explicit loopback endpoint with bounded
+timeouts, refuses redirects, streams responses under their status/bundle
+limits, cancels the session during runtime shutdown and retains only the active
+cache version. Its accepted-version timestamp spans bundle transfer,
+transactional activation, PHP reload and the first committed native frame; the
+same bounded p95/failure evidence contract is exported on Android and iOS.
+
 ## Gates
 
 CI runs:
@@ -153,7 +204,9 @@ CI runs:
 - Rust tests, Clippy and a release-mode engine performance gate;
 - Android unit, instrumented API 26/36 and macrobenchmark projects;
 - iOS simulator tests, including the 100,000-item bounded-window performance
-  contract, followed by an optimized Release build.
+  contract, followed by an optimized Release build;
+- sequential integer-coded package-size budgets for every published Native
+  archive, enforced before provenance attestation and artifact upload.
 
 Override local performance thresholds with `PAM_PERF_FIRST_FRAME_MS` and
 `PAM_PERF_STEADY_FRAME_MS`. The native engine gate can be reproduced with

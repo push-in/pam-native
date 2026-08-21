@@ -2,12 +2,31 @@ package dev.pam.nativeapp.protocol
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 
 internal const val PAM_PROTOCOL_VERSION = 1
 private const val MAX_FRAME_BYTES = 16 * 1024 * 1024
 private const val MAX_MUTATIONS = 800_000
 private const val MAX_PROPERTIES = 128
 private const val MAX_VALUE_BYTES = 1024 * 1024
+private const val MAX_PACKED_LIST_ITEMS = 100_000
+private const val MAX_PACKED_SECTIONS = 10_000
+private const val MAX_PACKED_SECTION_ENTRIES = 100_000
+
+private fun strictUtf8(value: ByteBuffer, label: String): String =
+    try {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(value)
+            .toString()
+    } catch (error: CharacterCodingException) {
+        throw ProtocolException("$label is not valid UTF-8")
+    }
+
+private fun strictUtf8(value: ByteArray, label: String): String =
+    strictUtf8(ByteBuffer.wrap(value), label)
 
 enum class NodeKind(val value: Int) {
     SCREEN(1),
@@ -602,7 +621,7 @@ class PackedStringList private constructor(
         item.position(offsets[index])
         val value = ByteArray(lengths[index])
         item.get(value)
-        return value.toString(Charsets.UTF_8)
+        return strictUtf8(value, "List item")
     }
 
     companion object {
@@ -610,7 +629,7 @@ class PackedStringList private constructor(
             val bytes = source.slice().asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN)
             require(bytes.remaining() >= Int.SIZE_BYTES) { "List payload is truncated" }
             val count = bytes.int.toLong() and 0xffff_ffffL
-            require(count <= 100_000) { "List contains too many items" }
+            require(count <= MAX_PACKED_LIST_ITEMS) { "List contains too many items" }
             val offsets = IntArray(count.toInt())
             val lengths = IntArray(count.toInt())
             repeat(count.toInt()) { index ->
@@ -621,6 +640,7 @@ class PackedStringList private constructor(
                 }
                 offsets[index] = bytes.position()
                 lengths[index] = length.toInt()
+                strictUtf8(bytes.slice().apply { limit(length.toInt()) }, "List item")
                 bytes.position(bytes.position() + length.toInt())
             }
             require(!bytes.hasRemaining()) { "List payload contains trailing bytes" }
@@ -650,7 +670,7 @@ class PackedSectionList private constructor(
         item.position(entry.offset)
         val value = ByteArray(entry.length)
         item.get(value)
-        return value.toString(Charsets.UTF_8)
+        return strictUtf8(value, "Section value")
     }
 
     companion object {
@@ -661,13 +681,16 @@ class PackedSectionList private constructor(
             val bytes = source.slice().asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN)
             require(bytes.remaining() >= Int.SIZE_BYTES) { "Section payload is truncated" }
             val count = bytes.int.toLong() and 0xffff_ffffL
-            require(count <= 10_000) { "Section list contains too many sections" }
+            require(count <= MAX_PACKED_SECTIONS) { "Section list contains too many sections" }
             val entries = ArrayList<Entry>()
             repeat(count.toInt()) {
                 entries += bytes.entry(ENTRY_HEADER)
                 require(bytes.remaining() >= Int.SIZE_BYTES) { "Section payload is truncated" }
                 val items = bytes.int.toLong() and 0xffff_ffffL
-                require(items <= 100_000 && entries.size + items <= 100_000) {
+                require(
+                    items <= MAX_PACKED_LIST_ITEMS &&
+                        entries.size + items <= MAX_PACKED_SECTION_ENTRIES,
+                ) {
                     "Section list contains too many items"
                 }
                 repeat(items.toInt()) {
@@ -685,6 +708,7 @@ class PackedSectionList private constructor(
                 "Section value is too large or truncated"
             }
             val entry = Entry(kind, position(), length.toInt())
+            strictUtf8(slice().apply { limit(length.toInt()) }, "Section value")
             position(position() + length.toInt())
             return entry
         }
@@ -827,9 +851,15 @@ private class BinaryReader(bytes: ByteBuffer) {
 
     fun value(key: PropKey? = null): PropValue =
         when (val tag = u8()) {
-            1 -> PropValue.Text(sizedBytes().toString(Charsets.UTF_8))
+            1 -> PropValue.Text(strictUtf8(sizedBytes(), "Text property"))
             2 -> PropValue.Integer(take(Long.SIZE_BYTES).long)
-            3 -> PropValue.Decimal(take(Double.SIZE_BYTES).double)
+            3 -> PropValue.Decimal(
+                take(Double.SIZE_BYTES).double.also { value ->
+                    if (!value.isFinite()) {
+                        throw ProtocolException("Floating property must be finite")
+                    }
+                },
+            )
             4 -> when (val value = u8()) {
                 0 -> PropValue.Flag(false)
                 1 -> PropValue.Flag(true)

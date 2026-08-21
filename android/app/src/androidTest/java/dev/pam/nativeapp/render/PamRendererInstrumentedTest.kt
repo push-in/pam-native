@@ -5,21 +5,27 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.os.SystemClock
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.TextureView
 import android.view.WindowInsetsController
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
+import dev.pam.nativeapp.R
 import dev.pam.nativeapp.protocol.Frame
 import dev.pam.nativeapp.protocol.EventKind
 import dev.pam.nativeapp.protocol.Mutation
@@ -37,6 +43,259 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun keyboardFocusUsesVisibleSystemHighlightAndSkipsDisabledControls() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val pressable = PamPressable(activity)
+                var activated = false
+                pressable.setOnClickListener { activated = true }
+                assertTrue(pressable.isFocusable)
+                assertFalse(pressable.isFocusableInTouchMode)
+                assertTrue(pressable.defaultFocusHighlightEnabled)
+                assertTrue(pressable.onKeyDown(KeyEvent.KEYCODE_ENTER, KeyEvent(
+                    KeyEvent.ACTION_DOWN,
+                    KeyEvent.KEYCODE_ENTER,
+                )))
+                assertTrue(pressable.onKeyUp(KeyEvent.KEYCODE_ENTER, KeyEvent(
+                    KeyEvent.ACTION_UP,
+                    KeyEvent.KEYCODE_ENTER,
+                )))
+                assertTrue(activated)
+
+                pressable.isEnabled = false
+                assertFalse(pressable.isEnabled)
+                assertFalse(pressable.isFocusable)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun compactInteractiveControlsKeepPlatformMinimumTouchTargets() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                assertTrue(requiresMinimumTouchTarget(PamPressable(activity)))
+                assertTrue(requiresMinimumTouchTarget(Button(activity)))
+                assertFalse(requiresMinimumTouchTarget(TextView(activity)))
+
+                val parent = FrameLayout(activity)
+                var lowerActivations = 0
+                var upperActivations = 0
+                val lower = recordingButton(activity) { lowerActivations++ }
+                val upper = recordingButton(activity) { upperActivations++ }.apply { z = 1f }
+                parent.addView(lower)
+                parent.addView(upper)
+                activity.host.addView(parent, FrameLayout.LayoutParams(120, 100))
+                parent.layout(0, 0, 120, 100)
+                lower.layout(40, 40, 60, 60)
+                upper.layout(70, 40, 90, 60)
+                val delegates = PamTouchDelegateGroup(parent).apply {
+                    update(lower, Rect(26, 26, 74, 74))
+                    update(upper, Rect(56, 26, 104, 74))
+                }
+                val firstDownAt = SystemClock.uptimeMillis()
+                val down = MotionEvent.obtain(
+                    firstDownAt,
+                    firstDownAt,
+                    MotionEvent.ACTION_DOWN,
+                    60f,
+                    50f,
+                    0,
+                )
+                val up = MotionEvent.obtain(
+                    firstDownAt,
+                    firstDownAt + 1,
+                    MotionEvent.ACTION_UP,
+                    60f,
+                    50f,
+                    0,
+                )
+                assertTrue(delegates.onTouchEvent(down))
+                assertTrue(delegates.onTouchEvent(up))
+                down.recycle()
+                up.recycle()
+                assertEquals(0, lowerActivations)
+                assertEquals(1, upperActivations)
+
+                upper.isEnabled = false
+                val fallbackDownAt = SystemClock.uptimeMillis()
+                val fallbackDown = MotionEvent.obtain(
+                    fallbackDownAt,
+                    fallbackDownAt,
+                    MotionEvent.ACTION_DOWN,
+                    60f,
+                    50f,
+                    0,
+                )
+                val fallbackUp = MotionEvent.obtain(
+                    fallbackDownAt,
+                    fallbackDownAt + 1,
+                    MotionEvent.ACTION_UP,
+                    60f,
+                    50f,
+                    0,
+                )
+                assertTrue(delegates.onTouchEvent(fallbackDown))
+                assertTrue(delegates.onTouchEvent(fallbackUp))
+                fallbackDown.recycle()
+                fallbackUp.recycle()
+                assertEquals(1, lowerActivations)
+                assertEquals(1, upperActivations)
+            }
+        } finally {
+            activity.finish()
+        }
+
+        val compact = minimumTouchTargetInsets(20, 30, 48)
+        assertEquals(48, 20 + compact.left + compact.right)
+        assertEquals(48, 30 + compact.top + compact.bottom)
+
+        val alreadyLarge = minimumTouchTargetInsets(64, 52, 48)
+        assertEquals(0, alreadyLarge.left + alreadyLarge.right)
+        assertEquals(0, alreadyLarge.top + alreadyLarge.bottom)
+    }
+
+    private fun recordingButton(activity: PamTestActivity, onUp: () -> Unit): Button =
+        object : Button(activity) {
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_UP) onUp()
+                return true
+            }
+        }
+
+    @Test
+    fun semanticTextColorsReachLabelsButtonsAndInputsWithoutLoss() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val color = 0xFF4ADE80.toInt()
+        try {
+            onMain(instrumentation) {
+                val controls = listOf(
+                    TextView(activity),
+                    Button(activity),
+                    EditText(activity),
+                )
+                controls.forEach { control ->
+                    applySemanticTextColor(control, color)
+                    assertEquals(color, control.currentTextColor)
+                }
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun largeAccessibilityScaleHonorsOptOutAndMaximumMultiplier() {
+        assertEquals(1f, resolvedFontScale(false, 3f, 1.5f), 0.0001f)
+        assertEquals(1.5f, resolvedFontScale(true, 3f, 1.5f), 0.0001f)
+        assertEquals(3f, resolvedFontScale(true, 3f, 0f), 0.0001f)
+        assertEquals(1f, resolvedFontScale(true, 3f, 0.5f), 0.0001f)
+        assertEquals(0.85f, resolvedFontScale(true, 0.85f, 1.5f), 0.0001f)
+    }
+
+    @Test
+    fun exposesSemanticTalkBackRoleStateRangeAndImportance() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(
+                                node(
+                                    2,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Upload"),
+                                        PropKey.ACCESSIBILITY_LABEL to PropValue.Text("Upload progress"),
+                                        PropKey.ACCESSIBILITY_ROLE to PropValue.Integer(8),
+                                        PropKey.ACCESSIBILITY_IMPORTANCE to PropValue.Integer(2),
+                                        PropKey.ACCESSIBILITY_LIVE_REGION to PropValue.Integer(3),
+                                        PropKey.ACCESSIBILITY_CHECKED_STATE to PropValue.Integer(3),
+                                        PropKey.ACCESSIBILITY_EXPANDED to PropValue.Flag(false),
+                                        PropKey.ACCESSIBILITY_BUSY to PropValue.Flag(true),
+                                        PropKey.ACCESSIBILITY_VALUE_MIN to PropValue.Decimal(0.0),
+                                        PropKey.ACCESSIBILITY_VALUE_MAX to PropValue.Decimal(100.0),
+                                        PropKey.ACCESSIBILITY_VALUE_NOW to PropValue.Decimal(40.0),
+                                        PropKey.ACCESSIBILITY_VALUE_TEXT to PropValue.Text("40 percent"),
+                                        PropKey.SELECTED to PropValue.Flag(true),
+                                        PropKey.ENABLED to PropValue.Flag(false),
+                                        PropKey.TEST_ID to PropValue.Text("accessible-state"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Decorative"),
+                                        PropKey.ACCESSIBILITY_IMPORTANCE to PropValue.Integer(4),
+                                        PropKey.TEST_ID to PropValue.Text("hidden-state"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(16f, 16f, 200f, 48f)),
+                            Mutation.Layout(3, Frame(16f, 72f, 200f, 48f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+
+                val view = requireNotNull(activity.host.findByTransitionName("accessible-state"))
+                val info = view.createAccessibilityNodeInfo()
+                assertEquals("Upload progress", view.contentDescription)
+                assertEquals("android.widget.CheckBox", info.className.toString())
+                assertTrue(info.isCheckable)
+                assertTrue(info.isSelected)
+                assertFalse(info.isEnabled)
+                assertEquals(0f, info.rangeInfo?.min)
+                assertEquals(100f, info.rangeInfo?.max)
+                assertEquals(40f, info.rangeInfo?.current)
+                assertEquals(View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE, view.accessibilityLiveRegion)
+                assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_YES, view.importantForAccessibility)
+                assertTrue(
+                    info.actionList.any {
+                        it.id == AccessibilityNodeInfo.AccessibilityAction.ACTION_EXPAND.id
+                    },
+                )
+                val stateDescription = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    info.stateDescription
+                } else {
+                    info.extras.getCharSequence(
+                        "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY",
+                    )
+                }
+                assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_mixed)) == true)
+                assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_busy)) == true)
+                assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_collapsed)) == true)
+                assertTrue(stateDescription?.contains("40 percent") == true)
+
+                val hidden = requireNotNull(activity.host.findByTransitionName("hidden-state"))
+                assertEquals(
+                    View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS,
+                    hidden.importantForAccessibility,
+                )
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun exposesAndDispatchesBoundedTalkBackCustomActions() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

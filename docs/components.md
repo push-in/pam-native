@@ -27,13 +27,111 @@ The theme registers `surface`, `surface-muted`, `card`, `text-primary`,
 `text-muted`, `heading`, `accent`, `danger`, `metric`, `label`,
 `button-primary`, `button-secondary`, `input`, and `focus-ring`. Semantic
 foreground/background pairs are checked against WCAG AA contrast when the theme
-is built. `Theme::pamLab()` remains a compatible alias for the dark palette.
+is built. This includes normal/muted text on both surfaces, text on accent and
+danger actions, accent metrics on the main surface, and a 3:1 focus indicator
+against both surface levels. `Theme::pamLab()` remains a compatible alias for
+the dark palette.
 
 `DesignTokens` supplies a 4/8dp spacing rhythm, 8/12/20dp radii, a
 14/16/20/24sp type scale, 150/240ms motion, and a 48dp minimum touch target.
 Applications should combine semantic classes with native accessibility labels,
 roles, states, Dynamic Type/font scaling, safe areas, and reduced-motion support;
 color is never the only status indicator.
+
+The Android API 26/36 instrumentation suite and UIKit simulator suite render
+the same state fixture and assert the host-native result: checkbox role,
+assertive/live updates, mixed checked state, collapsed state, busy state,
+explicit value, numeric range, and hidden decorative content. Separate paired
+tests execute a bounded custom TalkBack action and VoiceOver rotor action and
+verify the semantic identifier returned to PHP. These tests prove renderer
+mapping and event parity; they do not replace a manual screen-reader journey on
+release hardware, which remains a release-evidence requirement.
+
+Motion follows one host policy rather than component-specific guesses. Android
+honors the system animator-duration setting; iOS honors Reduce Motion. Native
+navigation, shared elements, modals, drawers, bottom sheets, keyframes,
+worklets, property changes, ripple/press feedback and indefinite indicators
+either commit their terminal semantic state immediately or retain a static
+progress affordance. Reduced motion never delays navigation completion and a
+finite authored animation still emits its completion event exactly once. The
+host policy has an internal test-only override so both suites prove the reduced
+path without changing a developer or CI runner's global accessibility setting.
+
+System text scaling is enabled by default for labels, button titles and text
+fields. Android resolves the active configuration `fontScale`; iOS resolves
+`UIFontMetrics` against the mounted view's own trait collection, including
+per-window accessibility categories. `maxFontSizeMultiplier(0)` means no PAM
+cap. A positive value is normalized to at least `1`; for example `1.5` permits
+growth through 150% of the authored size without ever turning a large-text
+preference into an accidental shrink cap. `allowFontScaling(false)` is an
+explicit product opt-out. `adjustsFontSizeToFit()` only controls bounded
+shrink-to-fit behavior and does not replace wrapping or responsive layout.
+Android API 26/36 and UIKit tests exercise unbounded growth, a `1.5` cap, the
+opt-out path and invalid positive caps before the evidence check is emitted.
+
+Semantic `textColor` reaches Android `TextView`-based labels, buttons and inputs
+and UIKit `UILabel`, `UIButton`, `UITextField` and `UITextView` without changing
+ARGB channels. The cross-platform evidence tests that transport using the dark
+theme accent color. This proves protocol/host fidelity and the PHP contrast
+gate; it does not replace screenshot inspection, system high-contrast mode or
+manual checks on composited imagery and user-authored colors.
+
+Compact buttons and pressables keep their authored visual dimensions while
+their native hit area expands to at least 48dp on Android and 44pt on iOS.
+Android classifies both the custom `PamPressable` and the actual platform
+`Button`, then composes automatic expansion with explicit `hitSlop` in a
+sibling-aware touch delegate. iOS uses `PamPressButton` for both node kinds and
+composes the same per-edge `hitSlop` values with its expanded hit testing.
+Explicit values cannot shrink the platform minimum, and negative values are
+clamped to zero. Disabled or hidden controls do not become actionable. Keep
+sufficient spacing between adjacent controls so expanded targets do not compete
+for the same gesture.
+
+The Android evidence sends a complete down/up gesture outside two compact
+buttons' visual bounds but inside their overlapping 48dp targets. The grouped
+delegate must activate exactly the higher-z sibling, proving dispatch and
+ambiguity resolution in addition to the target-size calculation. Disabled,
+hidden or effectively transparent entries are filtered when a gesture starts;
+the same point immediately falls through to an eligible sibling without
+waiting for another layout pass.
+
+The UIKit evidence resolves a point outside two compact buttons' visual bounds
+but inside both expanded 44pt targets through the parent view. The frontmost
+sibling must be returned by `hitTest` and dispatch exactly one control action,
+proving container routing and overlap resolution in addition to geometry. When
+that front sibling becomes disabled, it leaves hit testing and the same point
+routes to the enabled sibling behind it instead of becoming a dead touch zone.
+
+Hardware-keyboard and switch navigation use the platform focus engine.
+`Pressable` participates in directional focus on Android without stealing touch
+focus and renders the system default focus highlight. `PamPressButton` uses the
+adaptive UIKit focus halo. Disabled controls are removed from both focus paths,
+so the visible indicator and operability remain synchronized.
+
+CI preserves Android connected-test XML/HTML for API 26 and 36 and the complete
+UIKit simulator `.xcresult` for seven days. PAM Native releases depend on that
+source-contract workflow, so a failed mapping test blocks publication while its
+native diagnostic bundle remains available for review.
+
+After both native jobs pass, CI produces
+`pam-native-accessibility-evidence.json`, verifies it again from the downloaded
+reports, and retains it for 30 days. Tagged releases publish and attest that
+compact evidence file. It records the tested Git SHA, byte count and SHA-256 of
+each source report, plus these sequential integer enums:
+
+- environment: Android API 26 = `1`, Android API 36 = `2`, iOS Simulator = `3`;
+- platform: Android = `1`, iOS = `2`;
+- check: semantic role/state/value = `1`, bounded custom action = `2`,
+  reduced-motion navigation commit = `3`, bounded system text scaling = `4`,
+  semantic text-color transport = `5`, platform-minimum touch target = `6`,
+  visible keyboard focus = `7`;
+- result: passed = `1`, failed = `2` (failed input never produces evidence).
+
+The producer rejects missing, duplicated, skipped, or failed Android checks,
+missing or failed UIKit checks, duplicate/missing environments, symlink inputs,
+oversized reports, invalid revisions, and stale evidence. Its public JSON
+contract is `scripts/accessibility-evidence.schema.json`; the raw seven-day
+artifacts remain the detailed diagnostic source behind the 30-day summary.
 
 ### Custom screen-reader actions
 

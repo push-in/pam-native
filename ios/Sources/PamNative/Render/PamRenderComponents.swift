@@ -2,11 +2,43 @@ import Foundation
 import UIKit
 
 final class PamPressButton: UIButton {
+    static let minimumTouchTarget: CGFloat = 44
+
     var pamPressedOpacity: CGFloat = 0.72
     var pamPressedScale: CGFloat = 1
+    var pamHitSlop = UIEdgeInsets.zero
 
     private var restingAlpha: CGFloat?
     private var restingTransform: CGAffineTransform?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        focusEffect = UIFocusHaloEffect()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        focusEffect = UIFocusHaloEffect()
+    }
+
+    override var canBecomeFocused: Bool {
+        isEnabled && !isHidden && alpha > 0.01
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        guard isEnabled, isUserInteractionEnabled, !isHidden, alpha > 0.01 else {
+            return false
+        }
+        let horizontal = max(0, Self.minimumTouchTarget - bounds.width) / 2
+        let vertical = max(0, Self.minimumTouchTarget - bounds.height) / 2
+        let insets = UIEdgeInsets(
+            top: -max(vertical, pamHitSlop.top),
+            left: -max(horizontal, pamHitSlop.left),
+            bottom: -max(vertical, pamHitSlop.bottom),
+            right: -max(horizontal, pamHitSlop.right)
+        )
+        return bounds.inset(by: insets).contains(point)
+    }
 
     override var isHighlighted: Bool {
         didSet {
@@ -14,6 +46,13 @@ final class PamPressButton: UIButton {
             if isHighlighted {
                 restingAlpha = alpha
                 restingTransform = transform
+                if PamMotionPolicy.isReduced {
+                    layer.removeAllAnimations()
+                    alpha = pamPressedOpacity
+                    transform = (restingTransform ?? .identity)
+                        .scaledBy(x: pamPressedScale, y: pamPressedScale)
+                    return
+                }
                 UIView.animate(
                     withDuration: 0.07,
                     delay: 0,
@@ -26,6 +65,14 @@ final class PamPressButton: UIButton {
             } else {
                 let alpha = restingAlpha ?? self.alpha
                 let transform = restingTransform ?? self.transform
+                if PamMotionPolicy.isReduced {
+                    layer.removeAllAnimations()
+                    self.alpha = alpha
+                    self.transform = transform
+                    restingAlpha = nil
+                    restingTransform = nil
+                    return
+                }
                 UIView.animate(
                     withDuration: 0.11,
                     delay: 0,
@@ -451,7 +498,7 @@ final class PamVuetifySpinner: UIView {
     private func installAnimations() {
         guard window != nil else { return }
         arcLayer.removeAllAnimations()
-        if UIAccessibility.isReduceMotionEnabled {
+        if PamMotionPolicy.isReduced {
             arcLayer.strokeStart = 0.08
             arcLayer.strokeEnd = 0.82
             return
@@ -911,7 +958,7 @@ final class PamDrawerLayout: UIView, UIGestureRecognizerDelegate {
         if resolvedType() == 4 {
             open = true
         }
-        guard animated else {
+        guard animated, !PamMotionPolicy.isReduced else {
             setNeedsLayout()
             layoutIfNeeded()
             return
@@ -1427,7 +1474,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         applyBackdropColor()
         let animationDuration: TimeInterval = 0.225
 
-        switch UIAccessibility.isReduceMotionEnabled ? Animation.none : animationType {
+        switch PamMotionPolicy.isReduced ? Animation.none : animationType {
         case Animation.slide:
             if presentation == Presentation.sheet {
                 contentClip.transform = CGAffineTransform(translationX: 0, y: bounds.height * 0.35)
@@ -1499,7 +1546,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             self.previousFocus = nil
         }
 
-        switch UIAccessibility.isReduceMotionEnabled ? Animation.none : animationType {
+        switch PamMotionPolicy.isReduced ? Animation.none : animationType {
         case Animation.slide:
             UIView.animate(withDuration: animationDuration, animations: {
                 self.backdropView.alpha = 0
@@ -1609,6 +1656,13 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func resetBottomSheetTransform() {
+        guard !PamMotionPolicy.isReduced else {
+            contentHost.layer.removeAllAnimations()
+            sheetHandle.layer.removeAllAnimations()
+            contentHost.transform = .identity
+            sheetHandle.transform = .identity
+            return
+        }
         UIView.animate(withDuration: 0.18) {
             self.contentHost.transform = .identity
             self.sheetHandle.transform = .identity

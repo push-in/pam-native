@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pam.dev/schemas/native-accessibility-evidence-v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "resultCode", "revision", "environments"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "resultCode": {"const": 1},
+    "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "environments": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["environmentCode", "platformCode", "resultCode", "sourceBytes", "sourceSha256", "checks"],
+        "properties": {
+          "environmentCode": {"type": "integer", "enum": [1, 2, 3]},
+          "platformCode": {"type": "integer", "enum": [1, 2]},
+          "resultCode": {"const": 1},
+          "sourceBytes": {"type": "integer", "minimum": 1, "maximum": 67108864},
+          "sourceSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "checks": {
+            "type": "array",
+            "minItems": 7,
+            "maxItems": 7,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["checkCode", "resultCode"],
+              "properties": {
+                "checkCode": {"type": "integer", "enum": [1, 2, 3, 4, 5, 6, 7]},
+                "resultCode": {"const": 1}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

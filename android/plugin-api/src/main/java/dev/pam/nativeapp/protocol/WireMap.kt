@@ -3,8 +3,21 @@ package dev.pam.nativeapp.protocol
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.nio.charset.CharacterCodingException
+import java.nio.charset.CodingErrorAction
 
 private const val MAX_WIRE_BYTES = 1024 * 1024
+
+private fun strictWireUtf8(bytes: ByteArray, label: String): String =
+    try {
+        Charsets.UTF_8.newDecoder()
+            .onMalformedInput(CodingErrorAction.REPORT)
+            .onUnmappableCharacter(CodingErrorAction.REPORT)
+            .decode(ByteBuffer.wrap(bytes))
+            .toString()
+    } catch (error: CharacterCodingException) {
+        throw IllegalArgumentException("$label is not valid UTF-8", error)
+    }
 
 object WireMap {
     fun decode(bytes: ByteArray): Map<String, WireValue> =
@@ -18,7 +31,7 @@ object WireMap {
         repeat(count) {
             val keyLength = readU16(buffer)
             require(keyLength in 1..255) { "Invalid native module key length" }
-            val key = readBytes(buffer, keyLength).toString(Charsets.UTF_8)
+            val key = strictWireUtf8(readBytes(buffer, keyLength), "Native module key")
             require(key.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,254}"))) {
                 "Invalid native module key"
             }
@@ -26,10 +39,16 @@ object WireMap {
                 1 -> {
                     val length = readU32(buffer)
                     require(length <= MAX_WIRE_BYTES) { "Native module value is too large" }
-                    WireValue.Text(readBytes(buffer, length).toString(Charsets.UTF_8))
+                    WireValue.Text(
+                        strictWireUtf8(readBytes(buffer, length), "Native module value"),
+                    )
                 }
                 2 -> WireValue.Integer(take(buffer, Long.SIZE_BYTES).long)
-                3 -> WireValue.Decimal(take(buffer, Double.SIZE_BYTES).double)
+                3 -> WireValue.Decimal(
+                    take(buffer, Double.SIZE_BYTES).double.also { value ->
+                        require(value.isFinite()) { "Native module decimal must be finite" }
+                    },
+                )
                 4 -> when (readU8(buffer)) {
                     0 -> WireValue.Flag(false)
                     1 -> WireValue.Flag(true)
@@ -47,9 +66,11 @@ object WireMap {
         require(values.size <= 65_535) { "Too many native module values" }
         val output = ByteArrayOutputStream()
         output.write(u16(values.size))
-        values.forEach { (key, value) ->
+        values.toSortedMap().forEach { (key, value) ->
             val keyBytes = key.toByteArray(Charsets.UTF_8)
-            require(keyBytes.size in 1..255) { "Invalid native module key" }
+            require(
+                keyBytes.size in 1..255 && key.matches(Regex("[A-Za-z][A-Za-z0-9_]{0,254}")),
+            ) { "Invalid native module key" }
             output.write(u16(keyBytes.size))
             output.write(keyBytes)
             when (value) {
@@ -65,6 +86,7 @@ object WireMap {
                     output.write(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(value.value).array())
                 }
                 is WireValue.Decimal -> {
+                    require(value.value.isFinite()) { "Native module decimal must be finite" }
                     output.write(3)
                     output.write(ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putDouble(value.value).array())
                 }
@@ -72,6 +94,9 @@ object WireMap {
                     output.write(4)
                     output.write(if (value.value) 1 else 0)
                 }
+            }
+            require(output.size() <= MAX_WIRE_BYTES) {
+                "Native module payload exceeds one MiB"
             }
         }
         return output.toByteArray().also {

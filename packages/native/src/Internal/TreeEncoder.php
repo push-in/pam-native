@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\Internal;
 
 use Closure;
+use InvalidArgumentException;
 use LogicException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -419,11 +420,29 @@ final class TreeEncoder
     private function encodeValue(string|int|float|bool|BinaryValue $value): string
     {
         return match (true) {
-            is_string($value) => "\x01".Wire::sized($value),
+            is_string($value) => "\x01".Wire::sized($this->validatedText($value)),
             is_int($value) => "\x02".pack('P', $value),
-            is_float($value) => "\x03".pack('e', $value),
+            is_float($value) => "\x03".pack('e', $this->validatedFloat($value)),
             is_bool($value) => "\x04".($value ? "\x01" : "\x00"),
             $value instanceof BinaryValue => "\x05".Wire::sized($value->bytes),
         };
+    }
+
+    private function validatedText(string $value): string
+    {
+        if (preg_match('//u', $value) !== 1) {
+            throw new InvalidArgumentException('Text properties must contain valid UTF-8.');
+        }
+
+        return $value;
+    }
+
+    private function validatedFloat(float $value): float
+    {
+        if (!is_finite($value)) {
+            throw new InvalidArgumentException('Floating properties must be finite.');
+        }
+
+        return $value;
     }
 }

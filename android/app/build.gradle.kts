@@ -49,6 +49,14 @@ val pamMinSdk = pamProperties.getProperty("minSdk", "26").toInt()
 val pamTargetSdk = pamProperties.getProperty("targetSdk", "36").toInt()
 val pamVersionCode = pamProperties.getProperty("versionCode", "1").toInt()
 val pamVersionName = pamProperties.getProperty("versionName", "0.2.1")
+val pamHotReloadP95BudgetMs = requireNotNull(
+    pamProperties.getProperty("hotReloadP95BudgetMs", "1000").toLongOrNull(),
+) {
+    "hotReloadP95BudgetMs must be an integer from 1 through 60000"
+}
+require(pamHotReloadP95BudgetMs in 1L..60_000L) {
+    "hotReloadP95BudgetMs must be an integer from 1 through 60000"
+}
 val pamAbis = pamProperties.getProperty("abis", "arm64-v8a,x86_64")
     .split(',')
     .filter(String::isNotBlank)
@@ -85,6 +93,7 @@ android {
         targetSdk = pamTargetSdk
         versionCode = pamVersionCode
         versionName = pamVersionName
+        buildConfigField("long", "PAM_HOT_RELOAD_P95_BUDGET_MS", "${pamHotReloadP95BudgetMs}L")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         manifestPlaceholders["pamApplicationName"] = pamApplicationName
         manifestPlaceholders["pamFirebaseMessagingEnabled"] =

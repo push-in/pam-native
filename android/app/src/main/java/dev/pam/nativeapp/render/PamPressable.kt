@@ -93,6 +93,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     init {
         isClickable = true
         isLongClickable = true
+        isFocusable = true
+        isFocusableInTouchMode = false
+        defaultFocusHighlightEnabled = true
+    }
+
+    override fun setEnabled(enabled: Boolean) {
+        super.setEnabled(enabled)
+        isFocusable = enabled
+        if (!enabled && hasFocus()) clearFocus()
     }
 
     fun configure(
@@ -283,10 +292,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     override fun performClick(): Boolean {
-        super.performClick()
+        val platformHandled = super.performClick()
         localOnPress?.invoke()
         onPress?.invoke()
-        return localOnPress != null || onPress != null
+        return platformHandled || localOnPress != null || onPress != null
     }
 
     override fun performLongClick(): Boolean {

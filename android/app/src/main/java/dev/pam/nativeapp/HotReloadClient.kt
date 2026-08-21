@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 internal class HotReloadClient(
     private val context: Context,
-    private val onReload: (String) -> Unit,
+    private val onReload: (HotReloadReceipt) -> Unit,
     private val onError: (String) -> Unit,
 ) : AutoCloseable {
     private val closed = AtomicBoolean()
@@ -40,11 +40,12 @@ internal class HotReloadClient(
                 .trim()
             if (next.isEmpty() || next == version) return
             require(next.matches(Regex("[a-f0-9]{16,64}"))) { "Invalid hot reload version" }
+            val confirmedAtNanos = System.nanoTime()
             val bundle = request("$BASE_URL/bundle?version=$next", MAX_BUNDLE_BYTES)
             val destination = context.filesDir.resolve("pam/dev/$next")
             val entry = DevBundle.extract(bundle, destination)
             version = next
-            onReload(entry.absolutePath)
+            onReload(HotReloadReceipt(entry.absolutePath, confirmedAtNanos, bundle.size))
             cleanupExcept(next)
         }.onFailure {
             if (it !is HotReloadTransportException) {
@@ -101,3 +102,9 @@ internal class HotReloadClient(
         const val MAX_BUNDLE_BYTES = 16 * 1024 * 1024
     }
 }
+
+internal data class HotReloadReceipt(
+    val entryPath: String,
+    val confirmedAtNanos: Long,
+    val bundleBytes: Int,
+)

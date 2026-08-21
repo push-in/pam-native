@@ -263,6 +263,23 @@ internal fun resolvedImageScaleType(imageFit: Int): ImageView.ScaleType =
         else -> ImageView.ScaleType.CENTER_CROP
     }
 
+internal fun resolvedFontScale(
+    allowScaling: Boolean,
+    deviceScale: Float,
+    maximumMultiplier: Float,
+): Float = when {
+    !allowScaling -> 1f
+    maximumMultiplier > 0f -> min(
+        deviceScale.coerceAtLeast(0.01f),
+        maximumMultiplier.coerceAtLeast(1f),
+    )
+    else -> deviceScale.coerceAtLeast(0.01f)
+}
+
+internal fun applySemanticTextColor(view: TextView, color: Int) {
+    view.setTextColor(color)
+}
+
 private enum class Axis {
     HORIZONTAL,
     VERTICAL,
@@ -1503,7 +1520,7 @@ class PamRenderer(
             PropKey.TEXT_COLOR -> when (view) {
                 is TextView -> {
                     val color = value.integer().toInt()
-                    view.setTextColor(color)
+                    applySemanticTextColor(view, color)
                     if (view is Button && state.flag(PropKey.LOADING, false)) {
                         state.loadingDrawable?.setColor(color)
                     }
@@ -2715,7 +2732,8 @@ class PamRenderer(
         val bottom = dp(
             state.number(PropKey.HIT_SLOP_BOTTOM, all.toDouble()).toFloat().coerceAtLeast(0f),
         )
-        if (left <= 0 && top <= 0 && right <= 0 && bottom <= 0) {
+        val maintainsMinimumTarget = requiresMinimumTouchTarget(view)
+        if (!maintainsMinimumTarget && left <= 0 && top <= 0 && right <= 0 && bottom <= 0) {
             clearHitSlop(view)
             return
         }
@@ -2723,10 +2741,15 @@ class PamRenderer(
             if (view.parent !== parent || !view.isAttachedToWindow) return@post
             val bounds = Rect()
             view.getHitRect(bounds)
-            bounds.left -= left
-            bounds.top -= top
-            bounds.right += right
-            bounds.bottom += bottom
+            val minimumInsets = minimumTouchTargetInsets(
+                bounds.width(),
+                bounds.height(),
+                dp(48f),
+            )
+            bounds.left -= maxOf(left, minimumInsets.left)
+            bounds.top -= maxOf(top, minimumInsets.top)
+            bounds.right += maxOf(right, minimumInsets.right)
+            bounds.bottom += maxOf(bottom, minimumInsets.bottom)
             val group = parent.touchDelegate as? PamTouchDelegateGroup
                 ?: PamTouchDelegateGroup(parent).also { parent.touchDelegate = it }
             group.update(view, bounds)
@@ -3247,9 +3270,10 @@ class PamRenderer(
         state.keyframeAnimator = null
         if (playState == 3) return
 
-        if (!ValueAnimator.areAnimatorsEnabled()) {
+        val iterations = state.integer(PropKey.ANIMATION_ITERATIONS, 1L).coerceIn(0L, 10_000L)
+        if (PamMotionPolicy.isReduced(view.context)) {
             applyKeyframe(view, frames, 1f)
-            if (state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+            if (iterations != 0L && state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
                 dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
             }
             return
@@ -3257,7 +3281,6 @@ class PamRenderer(
         state.keyframeAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = state.integer(PropKey.ANIMATION_DURATION_MS, 300L).coerceIn(1L, 60_000L)
             startDelay = state.integer(PropKey.ANIMATION_DELAY_MS, 0L).coerceIn(0L, 60_000L)
-            val iterations = state.integer(PropKey.ANIMATION_ITERATIONS, 1L).coerceIn(0L, 10_000L)
             repeatCount = if (iterations == 0L) ValueAnimator.INFINITE else iterations.toInt() - 1
             repeatMode = if (state.flag(PropKey.ANIMATION_AUTO_REVERSE, false)) {
                 ValueAnimator.REVERSE
@@ -3319,7 +3342,7 @@ class PamRenderer(
                 }
             }
         }
-        if (!ValueAnimator.areAnimatorsEnabled()) {
+        if (PamMotionPolicy.isReduced(view.context)) {
             apply(durationMs.toDouble())
             if (iterations != 0L && state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
                 dispatch(state.id, EventKind.ANIMATION_COMPLETE.value)
@@ -3427,12 +3450,19 @@ class PamRenderer(
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    view.animate()
-                        .alpha(state.pressOpacity)
-                        .scaleX(state.targetScaleX() * state.pressScale)
-                        .scaleY(state.targetScaleY() * state.pressScale)
-                        .setDuration(70)
-                        .start()
+                    if (PamMotionPolicy.isReduced(view.context)) {
+                        view.animate().cancel()
+                        view.alpha = state.pressOpacity
+                        view.scaleX = state.targetScaleX() * state.pressScale
+                        view.scaleY = state.targetScaleY() * state.pressScale
+                    } else {
+                        view.animate()
+                            .alpha(state.pressOpacity)
+                            .scaleX(state.targetScaleX() * state.pressScale)
+                            .scaleY(state.targetScaleY() * state.pressScale)
+                            .setDuration(70)
+                            .start()
+                    }
                     dispatchDirectiveTouch(state, EventKind.TOUCH_START.value, event)
                 }
                 MotionEvent.ACTION_MOVE ->
@@ -3440,12 +3470,19 @@ class PamRenderer(
                 MotionEvent.ACTION_UP,
                 MotionEvent.ACTION_CANCEL,
                 -> {
-                    view.animate()
-                        .alpha(state.targetAlpha())
-                        .scaleX(state.targetScaleX())
-                        .scaleY(state.targetScaleY())
-                        .setDuration(110)
-                        .start()
+                    if (PamMotionPolicy.isReduced(view.context)) {
+                        view.animate().cancel()
+                        view.alpha = state.targetAlpha()
+                        view.scaleX = state.targetScaleX()
+                        view.scaleY = state.targetScaleY()
+                    } else {
+                        view.animate()
+                            .alpha(state.targetAlpha())
+                            .scaleX(state.targetScaleX())
+                            .scaleY(state.targetScaleY())
+                            .setDuration(110)
+                            .start()
+                    }
                     dispatchDirectiveTouch(state, EventKind.TOUCH_END.value, event)
                 }
             }
@@ -4099,7 +4136,7 @@ class PamRenderer(
         if (loading) {
             val color = button.currentTextColor
             val indicator = state.loadingDrawable
-                ?: PamButtonLoadingDrawable(dp(20f), color).also {
+                ?: PamButtonLoadingDrawable(view.context, dp(20f), color).also {
                     state.loadingDrawable = it
                 }
             indicator.setColor(color)
@@ -4438,13 +4475,7 @@ class PamRenderer(
         val maximumMultiplier = state
             .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
             .toFloat()
-        val effectiveScale = if (!allowScaling) {
-            1f
-        } else if (maximumMultiplier > 0f) {
-            min(deviceScale, maximumMultiplier.coerceAtLeast(1f))
-        } else {
-            deviceScale
-        }
+        val effectiveScale = resolvedFontScale(allowScaling, deviceScale, maximumMultiplier)
         val maximumPx = max(1f, baseSize * metrics.density * effectiveScale)
         view.setTextSize(TypedValue.COMPLEX_UNIT_PX, maximumPx)
 
@@ -4618,7 +4649,7 @@ class PamRenderer(
         state.propertyAnimator?.cancel()
         state.propertyAnimator = null
         view.animate().cancel()
-        if (!ValueAnimator.areAnimatorsEnabled() || kind == 1) {
+        if (PamMotionPolicy.isReduced(view.context) || kind == 1) {
             view.alpha = state.targetAlpha()
             view.translationX =
                 dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
@@ -4721,7 +4752,11 @@ class PamRenderer(
             -> dp(value).toFloat()
             else -> value
         }
-        if (!state.flag(PropKey.ANIMATE_CHANGES, false) || !view.isLaidOut) {
+        if (
+            !state.flag(PropKey.ANIMATE_CHANGES, false) ||
+            !view.isLaidOut ||
+            PamMotionPolicy.isReduced(view.context)
+        ) {
             setAnimatedProperty(view, key, target)
             return
         }

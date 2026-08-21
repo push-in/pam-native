@@ -48,7 +48,7 @@ final class Text extends Element
     {
         return $this->withProperty(
             PropKey::TextMaxFontSizeMultiplier,
-            max(0.0, $multiplier),
+            $multiplier <= 0.0 ? 0.0 : max(1.0, $multiplier),
         );
     }
 

@@ -11,7 +11,6 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.Outline
-import android.provider.Settings
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.Gravity
@@ -823,10 +822,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         view.rotationY = 0f
     }
 
-    private fun animationsDisabled(): Boolean =
-        runCatching {
-            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
-        }.getOrDefault(false)
+    private fun animationsDisabled(): Boolean = PamMotionPolicy.isReduced(context)
 
     private fun applyOrientation() {
         val activity = context as? Activity ?: return

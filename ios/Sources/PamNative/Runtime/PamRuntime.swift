@@ -265,6 +265,10 @@ public final class PamRuntime {
     private var runtimeEntry: String?
     private var recoveryAttempts = 0
     private var recoveryWorkItem: DispatchWorkItem?
+#if DEBUG
+    private var hotReloadClient: PamHotReloadClient?
+    private let hotReloadLatency = PamHotReloadLatency()
+#endif
 
     public init(
         hostView: UIView,
@@ -438,6 +442,48 @@ public final class PamRuntime {
         stateLock.unlock()
     }
 
+#if DEBUG
+    public func startHotReload(baseURL: URL = URL(string: "http://127.0.0.1:39100")!) {
+        guard baseURL.scheme == "http", baseURL.host == "127.0.0.1" || baseURL.host == "localhost" else {
+            reportError("Pam Native hot reload only accepts a loopback HTTP endpoint")
+            return
+        }
+        let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let destination = cache.appendingPathComponent("pam/dev", isDirectory: true)
+        let client = PamHotReloadClient(
+            baseURL: baseURL,
+            destination: destination,
+            onReload: { [weak self] receipt in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    do {
+                        try self.hotReloadLatency.begin(
+                            confirmedAtNanos: receipt.confirmedAtNanos,
+                            bundleBytes: receipt.bundleBytes
+                        )
+                        self.reload(entry: receipt.entryPath)
+                    } catch {
+                        self.reportHotReload(failed: true, message: "invalid hot reload measurement")
+                    }
+                }
+            },
+            onError: { [weak self] message in
+                self?.reportDiagnostic(RuntimeDiagnostic(kind: .hotReload, label: String(message.prefix(120)), failed: true))
+            }
+        )
+        stateLock.lock()
+        guard !closed, handle != 0, hotReloadClient == nil else {
+            stateLock.unlock()
+            client.close()
+            return
+        }
+        hotReloadClient = client
+        stateLock.unlock()
+        client.start()
+    }
+#endif
+
     public func stats() -> RuntimeStats {
         var values = [UInt64](repeating: 0, count: 19)
         let currentHandle = currentHandle()
@@ -471,6 +517,13 @@ public final class PamRuntime {
     }
 
     public func close() {
+#if DEBUG
+        stateLock.lock()
+        let client = hotReloadClient
+        hotReloadClient = nil
+        stateLock.unlock()
+        client?.close()
+#endif
         recoveryWorkItem?.cancel()
         recoveryWorkItem = nil
         stateLock.lock()
@@ -721,6 +774,9 @@ public final class PamRuntime {
     }
 
     fileprivate func onNativeError(_ message: String) {
+#if DEBUG
+        reportHotReload(failed: true, message: "first frame failed")
+#endif
         reportDiagnostic(RuntimeDiagnostic(
             kind: .error,
             label: String(message.prefix(120)),
@@ -889,6 +945,9 @@ public final class PamRuntime {
         )
 
         onFrameCommitted(metrics)
+#if DEBUG
+        reportHotReload(failed: false, message: "first frame committed")
+#endif
         recoveryAttempts = 0
         recoveryWorkItem?.cancel()
         recoveryWorkItem = nil
@@ -962,4 +1021,20 @@ public final class PamRuntime {
             pam_native_runtime_release_batch(handle)
         }
     }
+
+#if DEBUG
+    private func reportHotReload(failed: Bool, message: String) {
+        guard let timing = hotReloadLatency.complete(
+            completedAtNanos: DispatchTime.now().uptimeNanoseconds,
+            failed: failed
+        ) else { return }
+        reportDiagnostic(RuntimeDiagnostic(
+            kind: .hotReload,
+            label: message,
+            durationNanos: timing.durationNanos,
+            failed: timing.failed,
+            responseBytes: timing.bundleBytes
+        ))
+    }
+#endif
 }

@@ -1,16 +1,16 @@
 # Pam Native protocol v1
 
 Pam Native uses one versioned, bounded, little-endian binary protocol between
-the persistent PHP runtime, the Rust layout/diff engine and the Android UI
-renderer.
+the persistent PHP runtime, the Rust layout/diff engine and the Android/iOS UI
+renderers.
 
 ## Compatibility
 
-| SDK | Protocol | PHP | Android |
-| --- | ---: | --- | --- |
-| `pushinbr/pam-native 0.5.x` | `1` | `8.4.x`, `8.5.x` | API 26–36 |
+| SDK | Protocol | PHP | Android | iOS |
+| --- | ---: | --- | --- | --- |
+| `pushinbr/pam-native 0.6.x` | `1` | `8.4.x`, `8.5.x` | API 26–36 | current supported Xcode/iOS toolchain |
 
-All three peers must support the exact protocol version. A mismatched version is
+All four peers must support the exact protocol version. A mismatched version is
 rejected before any node or mutation is applied. Protocol identifiers are
 sequential integers beginning at `1`; existing identifiers are never renamed,
 reused or renumbered.
@@ -33,13 +33,21 @@ Every integer and floating-point value is little-endian.
 | --- | --- | --- | --- |
 | complete tree | `PNT1` | PHP | Rust |
 | incremental patch | `PNP1` | PHP | Rust |
-| UI mutation batch | `PNB1` | Rust | Android |
+| UI mutation batch | `PNB1` | Rust | Android / iOS |
 
 Each frame starts with its four-byte magic, a `u16` protocol version and bounded
 payload counts. Strings and opaque values use a `u32` byte length. Node IDs are
 non-zero `u64` values. The implementation rejects duplicate IDs/properties,
 cycles, disconnected trees, invalid enum values, trailing bytes and payloads
-over their published limits.
+over their published limits. Text is strict UTF-8: the PHP producer and the
+Rust, Android and iOS decoders reject malformed sequences instead of replacing
+bytes or silently producing empty strings. Opaque tag-`5` values remain binary.
+Floating-point properties and module-map decimals must be finite; `NaN` and
+positive/negative infinity are rejected by producers and consumers.
+Wire maps encode portable ASCII keys in ascending byte order. PHP, Kotlin and
+Swift pin the same all-value-type golden bytes, so insertion order cannot alter
+payload hashes or snapshots; decoders remain compatible with valid legacy maps
+in any order.
 
 Patch application is transactional. A rejected `PNP1` frame leaves the
 retained tree untouched; the PHP encoder then resynchronizes with a complete
@@ -51,12 +59,17 @@ The canonical enum tables live in:
 - PHP: `NodeKind`, `PropKey`, `EventKind`, `NativeOperation`;
 - Rust: `pam-native-protocol/src/lib.rs`;
 - Android: `PamProtocol.kt`, `PamRenderer.kt`, `NativeModuleRegistry.kt`.
+- iOS: `PamProtocol.swift`, `PamRenderer.swift`, `PamModuleRegistry.swift`.
 
 ## Golden compatibility gates
 
 Rust tests pin byte-for-byte v1 tree, patch and batch frames. PHP tests pin
-sequential integer enums and deterministic full/patch encoding. Android always
-checks `PAM_PROTOCOL_VERSION` before decoding a mutation batch.
+sequential integer enums and deterministic full/patch encoding. Android and iOS
+always check `PAM_PROTOCOL_VERSION` before decoding a mutation batch.
+`python3 scripts/protocol-parity.py` additionally proves PHP/Rust/Kotlin/Swift
+version and safety-limit equality, including the one-MiB total WireMap envelope,
+exact host enum coverage where required, and rejects duplicate, unknown or
+renamed numeric identifiers.
 
 Release CI must run all three gates. Changing a golden frame under protocol v1
 is a release blocker, not a snapshot update.
@@ -70,7 +83,18 @@ is a release blocker, not a snapshot update.
 | tree depth | 512 |
 | properties per node | 128 |
 | string/opaque property | 1 MiB |
+| complete packed list or section collection | 1 MiB |
+| packed list items / section entries | 100,000 |
+| packed sections | 10,000 |
+| complete native module WireMap | 1 MiB |
 | queued native event payload | 1 MiB |
 
 These limits are part of protocol v1 and protect both memory use and decoder
-complexity.
+complexity. Rust, PHP, Android and iOS boundary tests accept their exact limits,
+reject the next unit, and validate declared lengths before copying payloads.
+WireMap's one-MiB limit covers the complete encoded envelope rather than each
+field independently, so the SDK cannot produce a call that only fails at the
+platform host. Packed list titles and items use strict UTF-8, and their limit
+likewise covers the complete collection envelope. Section headers count toward
+the 100,000-entry aggregate; the SDK and both hosts reject oversized declared
+counts before allocating their index tables.

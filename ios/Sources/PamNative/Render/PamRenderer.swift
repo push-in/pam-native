@@ -1387,6 +1387,17 @@ public final class PamRenderer {
         }
     }
 
+    private func configureHitSlop(_ button: PamPressButton?, state: NodeState?) {
+        guard let button, let state else { return }
+        let all = max(0, CGFloat(state.properties[PamConstants.hitSlop]?.decimalOrNil() ?? 0))
+        button.pamHitSlop = UIEdgeInsets(
+            top: max(0, CGFloat(state.properties[PamConstants.hitSlopTop]?.decimalOrNil() ?? Double(all))),
+            left: max(0, CGFloat(state.properties[PamConstants.hitSlopLeft]?.decimalOrNil() ?? Double(all))),
+            bottom: max(0, CGFloat(state.properties[PamConstants.hitSlopBottom]?.decimalOrNil() ?? Double(all))),
+            right: max(0, CGFloat(state.properties[PamConstants.hitSlopRight]?.decimalOrNil() ?? Double(all)))
+        )
+    }
+
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
         switch key {
         case PamConstants.text:
@@ -1528,9 +1539,7 @@ public final class PamRenderer {
             view.layer.setValue(value.textOrNil(), forKey: "pamSharedTransitionConfig")
         case PamConstants.textColor:
             if let color = value.integerOrNil() {
-                if let label = view as? UILabel {
-                    label.textColor = UIColor(argb: color)
-                }
+                PamTextColorPolicy.apply(argb: color, to: view)
             }
         case PamConstants.textAlign:
             applyTextAlignment(view: view, nodeId: nodeId)
@@ -1763,6 +1772,12 @@ public final class PamRenderer {
         case PamConstants.pressScale:
             (view as? PamPressButton)?.pamPressedScale =
                 min(4, max(0.01, CGFloat(value.decimalOrZero())))
+        case PamConstants.hitSlop,
+             PamConstants.hitSlopLeft,
+             PamConstants.hitSlopTop,
+             PamConstants.hitSlopRight,
+             PamConstants.hitSlopBottom:
+            configureHitSlop(view as? PamPressButton, state: nodes[nodeId])
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(value.integerOrNil() ?? Int64(UInt32.max))
         case PamConstants.drawingWidth:
@@ -2046,6 +2061,12 @@ public final class PamRenderer {
             (view as? PamPressButton)?.pamPressedOpacity = 0.72
         case PamConstants.pressScale:
             (view as? PamPressButton)?.pamPressedScale = 1
+        case PamConstants.hitSlop,
+             PamConstants.hitSlopLeft,
+             PamConstants.hitSlopTop,
+             PamConstants.hitSlopRight,
+             PamConstants.hitSlopBottom:
+            configureHitSlop(view as? PamPressButton, state: state)
         case PamConstants.drawingColor:
             (view as? PamDrawingCanvas)?.setBrushColor(Int64(UInt32.max))
         case PamConstants.drawingWidth:
@@ -2262,18 +2283,12 @@ public final class PamRenderer {
             state.properties[PamConstants.textAllowFontScaling]?.boolOrNil() ?? true
         let maximumMultiplier =
             state.properties[PamConstants.textMaxFontSizeMultiplier]?.decimalOrNil() ?? 0
-        let font: UIFont
-        if allowsScaling {
-            let metrics = UIFontMetrics(forTextStyle: .body)
-            font = maximumMultiplier > 0
-                ? metrics.scaledFont(
-                    for: baseFont,
-                    maximumPointSize: baseSize * CGFloat(maximumMultiplier)
-                )
-                : metrics.scaledFont(for: baseFont)
-        } else {
-            font = baseFont
-        }
+        let font = PamTextScalePolicy.font(
+            baseFont: baseFont,
+            allowsScaling: allowsScaling,
+            maximumMultiplier: maximumMultiplier,
+            compatibleWith: view.traitCollection
+        )
 
         let adjustsToFit =
             state.properties[PamConstants.textAdjustsFontSizeToFit]?.boolOrNil() ?? false
@@ -2641,22 +2656,6 @@ public final class PamRenderer {
             resolved["translationX"] = percent * Double(translationReferenceWidth) / 100
             return resolved
         }
-        if UIAccessibility.isReduceMotionEnabled {
-            view.layer.removeAnimation(forKey: "pam.keyframes")
-            animationDelegates[nodeId] = nil
-            if let last = resolvedFrames.last {
-                view.alpha = CGFloat((last["opacity"] as? NSNumber)?.doubleValue ?? 1)
-                let x = CGFloat((last["translationX"] as? NSNumber)?.doubleValue ?? 0)
-                let y = CGFloat((last["translationY"] as? NSNumber)?.doubleValue ?? 0)
-                let scaleX = CGFloat((last["scaleX"] as? NSNumber)?.doubleValue ?? 1)
-                let scaleY = CGFloat((last["scaleY"] as? NSNumber)?.doubleValue ?? 1)
-                let rotation = CGFloat((last["rotation"] as? NSNumber)?.doubleValue ?? 0)
-                view.transform = CGAffineTransform(translationX: x, y: y)
-                    .scaledBy(x: scaleX, y: scaleY)
-                    .rotated(by: rotation * .pi / 180)
-            }
-            return
-        }
         let playState = Int(
             state.properties[PamConstants.animationPlayState]?.integerOrNil() ?? 1
         )
@@ -2676,6 +2675,18 @@ public final class PamRenderer {
         view.layer.removeAnimation(forKey: "pam.keyframes")
         animationDelegates[nodeId] = nil
         guard playState == 1 else { return }
+
+        let iterations = state.properties[PamConstants.animationIterations]?.integerOrNil() ?? 1
+        if PamMotionPolicy.isReduced {
+            if let last = resolvedFrames.last {
+                PamMotionPolicy.applyTerminalKeyframe(last, to: view)
+            }
+            if iterations != 0,
+               state.properties[PamConstants.onAnimationComplete] != nil {
+                dispatchEvent(nodeId, EventKind.animationComplete.rawValue, Data())
+            }
+            return
+        }
 
         let offsets = resolvedFrames.compactMap { ($0["offset"] as? NSNumber)?.doubleValue }
         guard offsets.count == resolvedFrames.count else { return }
@@ -2703,7 +2714,6 @@ public final class PamRenderer {
         }
         guard !animations.isEmpty else { return }
         let durationMs = state.properties[PamConstants.animationDurationMs]?.integerOrNil() ?? 300
-        let iterations = state.properties[PamConstants.animationIterations]?.integerOrNil() ?? 1
         let fill = Int(state.properties[PamConstants.animationFillMode]?.integerOrNil() ?? 2)
         let group = CAAnimationGroup()
         group.animations = animations
@@ -2778,7 +2788,7 @@ public final class PamRenderer {
 
     private func applyMotion(view: UIView, state: NodeState?, kind: Int) {
         view.layer.removeAllAnimations()
-        guard !UIAccessibility.isReduceMotionEnabled, kind != 1 else {
+        guard !PamMotionPolicy.isReduced, kind != 1 else {
             view.alpha = targetAlpha(state)
             return
         }
@@ -3193,7 +3203,7 @@ public final class PamRenderer {
             source: resolvedSource,
             imageView: imageView,
             progressive:
-                state.properties[PamConstants.imageProgressiveRendering]?.boolOrNil() ?? false
+                state.properties[PamConstants.imageProgressiveRenderingEnabled]?.boolOrNil() ?? false
         )
         state.imageTask = task
 
@@ -3295,7 +3305,7 @@ public final class PamRenderer {
                           state.imageGeneration == context.generation,
                           let imageView else { return }
                     let fade = state.properties[PamConstants.imageFadeDurationMs]?.integerOrNil() ?? 300
-                    if fade > 0 && !UIAccessibility.isReduceMotionEnabled {
+                    if fade > 0 && !PamMotionPolicy.isReduced {
                         UIView.transition(
                             with: imageView,
                             duration: min(Double(fade) / 1_000, 10),
@@ -4307,7 +4317,7 @@ public final class PamRenderer {
 
         @objc private func onRipple(_ sender: UILongPressGestureRecognizer) {
             guard let overlay = rippleOverlay else { return }
-            if UIAccessibility.isReduceMotionEnabled {
+            if PamMotionPolicy.isReduced {
                 overlay.alpha = sender.state == .began ? 1 : 0
                 return
             }
