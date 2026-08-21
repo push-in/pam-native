@@ -21,7 +21,7 @@ class HotReloadStatisticsTest {
         assertEquals(21, snapshot.sampleCount)
         assertEquals(20, snapshot.successfulCount)
         assertEquals(1, snapshot.failureCount)
-        assertEquals(19_000, snapshot.p95DurationNanos)
+        assertEquals(19_000L, snapshot.p95DurationNanos)
         assertEquals(476, snapshot.failureRateBasisPoints)
         assertTrue(snapshot.p95WithinBudget ?: false)
     }
@@ -37,7 +37,7 @@ class HotReloadStatisticsTest {
 
         assertEquals(2, snapshot.sampleCount)
         assertEquals(0, snapshot.failureCount)
-        assertEquals(101, snapshot.p95DurationNanos)
+        assertEquals(101L, snapshot.p95DurationNanos)
         assertFalse(snapshot.p95WithinBudget ?: true)
     }
 

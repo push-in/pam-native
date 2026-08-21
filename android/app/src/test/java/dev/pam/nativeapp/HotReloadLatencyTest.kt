@@ -15,7 +15,7 @@ class HotReloadLatencyTest {
 
         val timing = latency.complete(3_500, failed = false)
 
-        assertEquals(2_500, timing?.durationNanos)
+        assertEquals(2_500L, timing?.durationNanos)
         assertEquals(4_096, timing?.bundleBytes)
         assertFalse(timing?.failed ?: true)
         assertNull(latency.complete(4_000, failed = false))
@@ -29,7 +29,7 @@ class HotReloadLatencyTest {
 
         val timing = latency.complete(2_500, failed = true)
 
-        assertEquals(500, timing?.durationNanos)
+        assertEquals(500L, timing?.durationNanos)
         assertEquals(200, timing?.bundleBytes)
         assertTrue(timing?.failed ?: false)
     }
