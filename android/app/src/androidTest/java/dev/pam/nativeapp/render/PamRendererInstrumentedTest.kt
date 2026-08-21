@@ -9,6 +9,7 @@ import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -99,8 +100,23 @@ class PamRendererInstrumentedTest {
                     update(lower, Rect(26, 26, 74, 74))
                     update(upper, Rect(56, 26, 104, 74))
                 }
-                val down = MotionEvent.obtain(1, 1, MotionEvent.ACTION_DOWN, 60f, 50f, 0)
-                val up = MotionEvent.obtain(1, 2, MotionEvent.ACTION_UP, 60f, 50f, 0)
+                val firstDownAt = SystemClock.uptimeMillis()
+                val down = MotionEvent.obtain(
+                    firstDownAt,
+                    firstDownAt,
+                    MotionEvent.ACTION_DOWN,
+                    60f,
+                    50f,
+                    0,
+                )
+                val up = MotionEvent.obtain(
+                    firstDownAt,
+                    firstDownAt + 1,
+                    MotionEvent.ACTION_UP,
+                    60f,
+                    50f,
+                    0,
+                )
                 assertTrue(delegates.onTouchEvent(down))
                 assertTrue(delegates.onTouchEvent(up))
                 down.recycle()
@@ -109,17 +125,18 @@ class PamRendererInstrumentedTest {
                 assertEquals(1, upperActivations)
 
                 upper.isEnabled = false
+                val fallbackDownAt = SystemClock.uptimeMillis()
                 val fallbackDown = MotionEvent.obtain(
-                    3,
-                    3,
+                    fallbackDownAt,
+                    fallbackDownAt,
                     MotionEvent.ACTION_DOWN,
                     60f,
                     50f,
                     0,
                 )
                 val fallbackUp = MotionEvent.obtain(
-                    3,
-                    4,
+                    fallbackDownAt,
+                    fallbackDownAt + 1,
                     MotionEvent.ACTION_UP,
                     60f,
                     50f,

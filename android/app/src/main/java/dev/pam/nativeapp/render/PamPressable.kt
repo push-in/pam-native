@@ -292,10 +292,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     override fun performClick(): Boolean {
-        super.performClick()
+        val platformHandled = super.performClick()
         localOnPress?.invoke()
         onPress?.invoke()
-        return localOnPress != null || onPress != null
+        return platformHandled || localOnPress != null || onPress != null
     }
 
     override fun performLongClick(): Boolean {
