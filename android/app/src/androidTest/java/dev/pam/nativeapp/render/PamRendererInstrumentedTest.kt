@@ -85,18 +85,16 @@ class PamRendererInstrumentedTest {
                 assertFalse(requiresMinimumTouchTarget(TextView(activity)))
 
                 val parent = FrameLayout(activity)
-                val lower = Button(activity)
-                val upper = Button(activity).apply { z = 1f }
+                var lowerActivations = 0
+                var upperActivations = 0
+                val lower = recordingButton(activity) { lowerActivations++ }
+                val upper = recordingButton(activity) { upperActivations++ }.apply { z = 1f }
                 parent.addView(lower)
                 parent.addView(upper)
                 activity.host.addView(parent, FrameLayout.LayoutParams(120, 100))
                 parent.layout(0, 0, 120, 100)
                 lower.layout(40, 40, 60, 60)
                 upper.layout(70, 40, 90, 60)
-                var lowerActivations = 0
-                var upperActivations = 0
-                lower.setOnClickListener { lowerActivations++ }
-                upper.setOnClickListener { upperActivations++ }
                 val delegates = PamTouchDelegateGroup(parent).apply {
                     update(lower, Rect(26, 26, 74, 74))
                     update(upper, Rect(56, 26, 104, 74))
@@ -162,6 +160,14 @@ class PamRendererInstrumentedTest {
         assertEquals(0, alreadyLarge.left + alreadyLarge.right)
         assertEquals(0, alreadyLarge.top + alreadyLarge.bottom)
     }
+
+    private fun recordingButton(activity: PamTestActivity, onUp: () -> Unit): Button =
+        object : Button(activity) {
+            override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                if (event.actionMasked == MotionEvent.ACTION_UP) onUp()
+                return true
+            }
+        }
 
     @Test
     fun semanticTextColorsReachLabelsButtonsAndInputsWithoutLoss() {
