@@ -89,6 +89,7 @@ class PamRendererInstrumentedTest {
                 val upper = Button(activity).apply { z = 1f }
                 parent.addView(lower)
                 parent.addView(upper)
+                activity.host.addView(parent, FrameLayout.LayoutParams(120, 100))
                 parent.layout(0, 0, 120, 100)
                 lower.layout(40, 40, 60, 60)
                 upper.layout(70, 40, 90, 60)
