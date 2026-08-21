@@ -27,6 +27,19 @@ pam mobile diagnostics .
 pam mobile ios:diagnostics .
 ```
 
+When more than one Android target is connected—or when certifying a physical
+device—select it explicitly using the serial printed by `adb devices -l`:
+
+```bash
+pam mobile android:diagnostics . --device R58M1234
+```
+
+PAM validates the serial as bounded ASCII and prefixes every ADB operation with
+the same `-s SERIAL` selector. The running-app check, one-use broadcast, private
+`run-as` read, and immediate deletion therefore cannot drift to different
+connected devices. USB and wireless targets still rely on Android's existing
+ADB authorization/pairing boundary; PAM does not expose a network listener.
+
 The receiver requires Android's privileged `DUMP` permission, which ADB's shell
 holds but ordinary applications cannot request. The CLI also sends a one-use
 128-bit request identifier to the running debug app,
@@ -54,8 +67,10 @@ one-use request identifier, writes the redacted snapshot to the app's private
 Caches directory on a utility queue, reads it through `simctl
 get_app_container`, enforces the same 64 KiB contract and removes it. Only one
 pending Native snapshot is retained. The URL handler is compiled out of release
-builds; physical-device export remains intentionally unavailable because it
-would require a broader trust and pairing protocol.
+builds. Physical-device iOS export remains intentionally unavailable because
+Apple's public command-line documentation does not establish a portable,
+bounded app-container extraction contract; PAM does not replace that gap with
+an unauthenticated custom-URL or LAN listener.
 
 The raw Android command is also available for integrations:
 

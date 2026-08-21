@@ -33,7 +33,7 @@ matrix, changelog, CI, and signed release evidence.
 | 21 | `pushinbr/pam-native-testing` | Fake bridge, deterministic scheduler, fixtures, assertions and native harnesses | PHP + Kotlin + Swift | None; entirely certifiable in CI |
 | 22 | `pushinbr/pam-native-devtools` | Event timeline, state snapshots, network diagnostics, performance marks, redaction and JSON export | PHP | None; entirely certifiable in CI |
 | 23 | `pushinbr/pam-native-plugin-kit` | Scaffolding, manifest validation, IDL codegen and compatibility certification | PHP + CLI templates | None; entirely certifiable in CI |
-| 24 | `pushinbr/pam-native-laravel-sync` | Laravel delta API, mutation ingestion, auth, conflicts and retention | Laravel package | Supported Laravel/database matrix |
+| 24 | `pushinbr/pam-native-sync-laravel` | Laravel delta API, mutation ingestion, auth, conflicts and retention | Laravel package | Supported Laravel/database matrix |
 
 ## Mandatory release gates
 

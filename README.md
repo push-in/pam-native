@@ -26,6 +26,28 @@ Write familiar PHP components, state, actions, and Laravel-inspired named
 routes. PAM keeps your PHP application alive, reconciles its interface in Rust,
 and renders real UIKit and Android controls.
 
+## Start here
+
+PAM Native is a Composer product built on the PAM Runtime. Install PAM first,
+then create the native project and let PAM use its verified Composer toolchain:
+
+```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
+pam init my-app --template native
+cd my-app
+pam composer require pushinbr/pam-native
+pam doctor --fix
+pam dev
+```
+
+The project remains a normal Composer application with `composer.json`,
+`composer.lock`, and `vendor`; PAM supplies the persistent PHP runtime and native
+host workflow.
+
 ```php
 <?php
 
