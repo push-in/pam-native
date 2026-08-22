@@ -1,0 +1,10 @@
+#!/bin/sh
+
+set -eu
+
+if [ -z "${PAM_BINARY:-}" ]; then
+    printf 'pam-native: PAM_BINARY is required; run this command through PAM\n' >&2
+    exit 64
+fi
+
+exec "$PAM_BINARY" __native "$@"

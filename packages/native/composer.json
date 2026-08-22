@@ -24,6 +24,7 @@
         }
     },
     "bin": [
+        "bin/pam-native",
         "bin/pam-native-format",
         "bin/pam-native-language-server",
         "bin/pam-native-optimize",
@@ -32,6 +33,14 @@
     "extra": {
         "pam": {
             "commands": {
+                "mobile": {
+                    "bin": "bin/pam-native",
+                    "description": "Legacy alias for PAM Native tooling"
+                },
+                "native": {
+                    "bin": "bin/pam-native",
+                    "description": "Build, run and diagnose PAM Native applications"
+                },
                 "native:format": {
                     "script": "bin/pam-native-format",
                     "description": "Format PAM Native components"
