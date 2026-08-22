@@ -13,6 +13,7 @@ static SESSION_ID: LazyLock<String> =
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
+#[allow(dead_code)]
 pub enum EventCode {
     SessionStarting = 1,
     SessionReady = 2,
