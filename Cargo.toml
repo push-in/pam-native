@@ -1,12 +1,13 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/pam-native-cli",
     "crates/pam-native-engine",
     "crates/pam-native-protocol",
 ]
 
 [workspace.package]
-version = "0.6.75"
+version = "0.6.76"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"

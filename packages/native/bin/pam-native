@@ -1,10 +1,120 @@
-#!/bin/sh
+#!/usr/bin/env php
+<?php
 
-set -eu
+declare(strict_types=1);
 
-if [ -z "${PAM_BINARY:-}" ]; then
-    printf 'pam-native: PAM_BINARY is required; run this command through PAM\n' >&2
-    exit 64
-fi
+require_once dirname(__DIR__) . '/src/Protocol.php';
 
-exec "$PAM_BINARY" __native "$@"
+use Pam\Native\Protocol;
+
+$platform = match (PHP_OS_FAMILY) {
+    'Linux' => php_uname('m') === 'x86_64' ? 'linux-x86_64' : null,
+    'Darwin' => in_array(php_uname('m'), ['arm64', 'aarch64'], true) ? 'macos-aarch64' : null,
+    'Windows' => php_uname('m') === 'AMD64' ? 'windows-x86_64' : null,
+    default => null,
+};
+
+if ($platform === null) {
+    fwrite(STDERR, sprintf("pam-native: unsupported host %s/%s\n", PHP_OS_FAMILY, php_uname('m')));
+    exit(69);
+}
+
+$extension = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
+$version = Protocol::SDK_VERSION;
+$artifact = "pam-native-cli-{$version}-{$platform}{$extension}";
+$override = getenv('PAM_NATIVE_CLI');
+
+if (is_string($override) && $override !== '') {
+    $binary = $override;
+} else {
+    $home = getenv('PAM_HOME');
+    if (!is_string($home) || $home === '') {
+        $userHome = getenv(PHP_OS_FAMILY === 'Windows' ? 'USERPROFILE' : 'HOME');
+        if (!is_string($userHome) || $userHome === '') {
+            fwrite(STDERR, "pam-native: HOME, USERPROFILE, or PAM_HOME is required\n");
+            exit(78);
+        }
+        $home = $userHome . DIRECTORY_SEPARATOR . '.pam';
+    }
+
+    $directory = $home . DIRECTORY_SEPARATOR . 'native' . DIRECTORY_SEPARATOR . $version;
+    $binary = $directory . DIRECTORY_SEPARATOR . $artifact;
+    $checksumPath = $binary . '.sha256';
+
+    if (!is_file($binary) || !is_file($checksumPath)) {
+        if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
+            fwrite(STDERR, "pam-native: cannot create the Native CLI cache\n");
+            exit(73);
+        }
+
+        $base = "https://github.com/push-in/pam-native/releases/download/v{$version}";
+        $temporary = $binary . '.tmp-' . getmypid();
+        $temporaryChecksum = $checksumPath . '.tmp-' . getmypid();
+        download("{$base}/{$artifact}", $temporary);
+        download("{$base}/{$artifact}.sha256", $temporaryChecksum);
+
+        $checksum = trim((string) file_get_contents($temporaryChecksum));
+        $expected = strtolower((string) strtok($checksum, " \t"));
+        $actual = hash_file('sha256', $temporary);
+        if (!is_string($actual) || !preg_match('/^[a-f0-9]{64}$/', $expected) || !hash_equals($expected, $actual)) {
+            @unlink($temporary);
+            @unlink($temporaryChecksum);
+            fwrite(STDERR, "pam-native: downloaded Native CLI checksum mismatch\n");
+            exit(65);
+        }
+
+        chmod($temporary, 0700);
+        if (!rename($temporary, $binary) || !rename($temporaryChecksum, $checksumPath)) {
+            @unlink($temporary);
+            @unlink($temporaryChecksum);
+            fwrite(STDERR, "pam-native: cannot activate the Native CLI\n");
+            exit(74);
+        }
+    }
+}
+
+$process = proc_open(
+    array_merge([$binary], array_slice($argv, 1)),
+    [0 => STDIN, 1 => STDOUT, 2 => STDERR],
+    $pipes,
+    getcwd(),
+    null,
+    ['bypass_shell' => true],
+);
+
+if (!is_resource($process)) {
+    fwrite(STDERR, "pam-native: cannot start the Native CLI\n");
+    exit(70);
+}
+
+exit(proc_close($process));
+
+function download(string $url, string $destination): void
+{
+    $context = stream_context_create([
+        'http' => ['follow_location' => 1, 'max_redirects' => 5, 'timeout' => 120],
+        'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+    ]);
+    $input = @fopen($url, 'rb', false, $context);
+    $output = @fopen($destination, 'xb');
+    if (!is_resource($input) || !is_resource($output)) {
+        if (is_resource($input)) {
+            fclose($input);
+        }
+        if (is_resource($output)) {
+            fclose($output);
+        }
+        @unlink($destination);
+        fwrite(STDERR, "pam-native: cannot download {$url}\n");
+        exit(69);
+    }
+    $copied = stream_copy_to_stream($input, $output, 128 * 1024 * 1024 + 1);
+    fclose($input);
+    fflush($output);
+    fclose($output);
+    if (!is_int($copied) || $copied < 1 || $copied > 128 * 1024 * 1024) {
+        @unlink($destination);
+        fwrite(STDERR, "pam-native: invalid Native CLI download size\n");
+        exit(65);
+    }
+}
