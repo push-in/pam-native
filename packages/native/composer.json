@@ -33,6 +33,45 @@
     "extra": {
         "pam": {
             "commands": {
+                "benchmark": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["benchmark"],
+                    "description": "Benchmark the PAM Native application"
+                },
+                "build": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["build"],
+                    "description": "Build the PAM Native application"
+                },
+                "dev": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["dev"],
+                    "description": "Start PAM Native development"
+                },
+                "devices": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["devices"],
+                    "description": "List native development targets"
+                },
+                "devtools": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["devtools"],
+                    "description": "Open PAM Native development tools"
+                },
+                "doctor": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["doctor"],
+                    "description": "Diagnose the PAM Native project"
+                },
+                "format": {
+                    "script": "bin/pam-native-format",
+                    "description": "Format PAM Native components"
+                },
+                "logs": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["logs"],
+                    "description": "Inspect PAM Native application logs"
+                },
                 "mobile": {
                     "bin": "bin/pam-native",
                     "description": "Legacy alias for PAM Native tooling"
@@ -56,6 +95,26 @@
                 "native:routes": {
                     "script": "bin/pam-native-routes",
                     "description": "Inspect PAM Native routes"
+                },
+                "package": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["package"],
+                    "description": "Package the PAM Native application"
+                },
+                "profile": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["profile"],
+                    "description": "Profile the PAM Native application"
+                },
+                "run": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["run"],
+                    "description": "Run the PAM Native application"
+                },
+                "sign": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["sign"],
+                    "description": "Validate PAM Native release signing"
                 }
             }
         },
