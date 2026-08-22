@@ -126,7 +126,7 @@ global Composer or a separate PHP installation for the normal workflow.
 ### 2. Create a native application
 
 ```bash
-pam init hello-native --template mobile
+pam init hello-native --template native
 cd hello-native
 pam doctor
 pam dev
@@ -141,14 +141,13 @@ the primary interface.
 
 ```bash
 pam make:screen Products
-pam add maps
+pam composer require pushinbr/pam-native-maps
 pam test
 pam build
 ```
 
-Use `pam packages` to explore official capabilities. Package installation,
-compatibility preflight, native code generation, and project validation stay
-behind the PAM CLI.
+Use Packagist to explore official and community capabilities. Composer remains
+the package authority; PAM supplies the runtime and discovers package commands.
 
 Edit PHP and save. PAM refreshes the mounted native tree while preserving the
 state that can safely survive the change—including navigation, scroll, and
