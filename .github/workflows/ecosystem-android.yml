@@ -53,6 +53,8 @@ jobs:
           pam_distribution=$(cd "$(dirname "${pam_binary}")/.." && pwd)
           echo "PAM_HOME=${pam_distribution}/share/pam" >> "$GITHUB_ENV"
           echo "PAM_NATIVE_HOME=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Prepare verified PHP 8.5 runtime and candidate Native engine
+        run: scripts/prepare-android-runtime.sh
       - name: Install exact public Composer packages
         working-directory: certification/android-ecosystem
         run: composer install --no-interaction --prefer-dist --no-progress
