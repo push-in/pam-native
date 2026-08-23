@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "5783f3f4f18546072eec0bc42be4b058",
+    "content-hash": "fb787cf08a7b733ffc7e2ea6c27bbf47",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -838,6 +838,55 @@
             "time": "2026-08-23T18:12:48+00:00"
         },
         {
+            "name": "pushinbr/pam-native-media-editor",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-media-editor.git",
+                "reference": "5668c81f1d95412b9f8f3ff150a87bd550ce610b"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-media-editor/zipball/5668c81f1d95412b9f8f3ff150a87bd550ce610b",
+                "reference": "5668c81f1d95412b9f8f3ff150a87bd550ce610b",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "default-branch": true,
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\MediaEditor\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Non-destructive native media timelines, effects and export for PAM Native.",
+            "support": {
+                "source": "https://github.com/push-in/pam-native-media-editor/tree/main",
+                "issues": "https://github.com/push-in/pam-native-media-editor/issues"
+            },
+            "time": "2026-08-23T18:47:52+00:00"
+        },
+        {
             "name": "pushinbr/pam-native-nfc",
             "version": "v0.2.0",
             "source": {
@@ -1172,6 +1221,12 @@
     "packages-dev": [],
     "aliases": [
         {
+            "package": "pushinbr/pam-native-media-editor",
+            "version": "dev-main",
+            "alias": "0.1.0",
+            "alias_normalized": "0.1.0.0"
+        },
+        {
             "package": "pushinbr/pam-native-video",
             "version": "dev-feat/protected-playback",
             "alias": "0.3.0",
@@ -1180,6 +1235,7 @@
     ],
     "minimum-stability": "stable",
     "stability-flags": {
+        "pushinbr/pam-native-media-editor": 20,
         "pushinbr/pam-native-video": 20
     },
     "prefer-stable": false,

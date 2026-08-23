@@ -7,6 +7,10 @@
         {
             "type": "vcs",
             "url": "https://github.com/push-in/pam-native-video.git"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/push-in/pam-native-media-editor.git"
         }
     ],
     "require": {
@@ -23,6 +27,7 @@
     "pushinbr/pam-native-live-activities": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-maps": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-media": ">=0.1.0 <1.0.0",
+    "pushinbr/pam-native-media-editor": "dev-main as 0.1.0",
     "pushinbr/pam-native-nfc": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-payments": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-realtime": ">=0.1.0 <1.0.0",
