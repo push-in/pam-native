@@ -51,10 +51,10 @@ public enum PamNativePluginRegistry {
             "payments.sheet": PamPaymentSheetFactory(),
             "scanner.camera": ScannerViewFactory(),
             "video.player": VideoPlayerFactory(),
-            "camera.preview": CameraViewFactory(),
-            "canvas.view": CanvasViewFactory(),
-            "gpu.surface": GpuViewFactory(),
-            "three-d.scene": SceneViewFactory(),
+            "camera.preview": PamPlugin19PushinbrPamNativeCamera.CameraViewFactory(),
+            "canvas.view": PamPlugin20PushinbrPamNativeCanvas.CanvasViewFactory(),
+            "gpu.surface": PamPlugin21PushinbrPamNativeGpu.GpuViewFactory(),
+            "three-d.scene": PamPlugin22PushinbrPamNative3d.SceneViewFactory(),
         ]
     }
 }
