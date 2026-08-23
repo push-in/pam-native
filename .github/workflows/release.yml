@@ -302,7 +302,10 @@ jobs:
           cargo build --locked --release --package pam-native-cli --target '${{ matrix.target }}'
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/pam-native${{ matrix.extension }}" "dist/${artifact}"
-          sha256sum "dist/${artifact}" > "dist/${artifact}.sha256"
+          (
+            cd dist
+            sha256sum "${artifact}" > "${artifact}.sha256"
+          )
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/pam-native-cli-*
