@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "e4da2f672717f4d96fde4c151444c087",
+    "content-hash": "d84ed597f6894ca8cd6631188f4e49a5",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -546,6 +546,55 @@
                 "source": "https://github.com/push-in/pam-native-camera/tree/v0.1.1"
             },
             "time": "2026-08-23T18:46:12+00:00"
+        },
+        {
+            "name": "pushinbr/pam-native-canvas",
+            "version": "dev-main",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-canvas.git",
+                "reference": "07d98cf3dd1380d54a3619106318acb64f63aa1e"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-canvas/zipball/07d98cf3dd1380d54a3619106318acb64f63aa1e",
+                "reference": "07d98cf3dd1380d54a3619106318acb64f63aa1e",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "default-branch": true,
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Canvas\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Retained-mode native 2D canvas for PAM Native.",
+            "support": {
+                "source": "https://github.com/push-in/pam-native-canvas/tree/main",
+                "issues": "https://github.com/push-in/pam-native-canvas/issues"
+            },
+            "time": "2026-08-23T18:55:40+00:00"
         },
         {
             "name": "pushinbr/pam-native-feature-flags",
@@ -1217,6 +1266,12 @@
     "packages-dev": [],
     "aliases": [
         {
+            "package": "pushinbr/pam-native-canvas",
+            "version": "dev-main",
+            "alias": "0.1.0",
+            "alias_normalized": "0.1.0.0"
+        },
+        {
             "package": "pushinbr/pam-native-media-editor",
             "version": "dev-main",
             "alias": "0.1.0",
@@ -1225,6 +1280,7 @@
     ],
     "minimum-stability": "stable",
     "stability-flags": {
+        "pushinbr/pam-native-canvas": 20,
         "pushinbr/pam-native-media-editor": 20
     },
     "prefer-stable": false,

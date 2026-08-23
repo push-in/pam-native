@@ -7,6 +7,10 @@
         {
             "type": "vcs",
             "url": "https://github.com/push-in/pam-native-media-editor.git"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/push-in/pam-native-canvas.git"
         }
     ],
     "require": {
@@ -16,6 +20,7 @@
     "pushinbr/pam-native-background-transfer": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-bluetooth": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-camera": "^0.1.0",
+    "pushinbr/pam-native-canvas": "dev-main as 0.1.0",
     "pushinbr/pam-native-feature-flags": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-firebase": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-health": ">=0.1.0 <1.0.0",
