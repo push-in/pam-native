@@ -273,7 +273,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: ubuntu-24.04
+          # Build on the oldest supported glibc baseline so the published CLI
+          # runs on Ubuntu 22.04/Pop!_OS-era distributions as well as newer ones.
+          - runner: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             platform: linux-x86_64
             extension: ''
