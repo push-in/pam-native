@@ -36,6 +36,7 @@ jobs:
             pam-native-payments pam-native-realtime pam-native-scanner
             pam-native-share-extension pam-native-subscriptions pam-native-video
             pam-native-widgets pam-native-firebase pam-native-laravel-sync
+            pam-native-camera
           )
           if [[ "${SELECTED_PACKAGE}" != all ]]; then
             valid=false
