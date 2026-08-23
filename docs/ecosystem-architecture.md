@@ -39,7 +39,7 @@ matrix, changelog, CI, and signed release evidence.
 
 Every repository must pass the following gates before its first stable tag:
 
-1. Strict Composer metadata, PHP 8.4+, PHPStan level 9, formatting and unit tests.
+1. Strict Composer metadata, PHP 8.5+, PHPStan level 9, formatting and unit tests.
 2. Generated binary-wire contracts with sequential integer enums for every
    status, type, state, kind, category or discriminator.
 3. Android lint, unit tests, instrumentation tests and release assembly on the

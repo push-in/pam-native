@@ -16,7 +16,7 @@
         "source": "https://github.com/push-in/pam-native"
     },
     "require": {
-        "php": "^8.4"
+        "php": "^8.5"
     },
     "autoload": {
         "psr-4": {

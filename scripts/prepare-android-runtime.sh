@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-runtime_tag=${PAM_RUNTIME_RELEASE_TAG:-v0.1.32}
+runtime_tag=${PAM_RUNTIME_RELEASE_TAG:-v2.0.7}
 runtime_repository=${PAM_RUNTIME_REPOSITORY:-push-in/pam}
 
 if [[ ! ${runtime_tag} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

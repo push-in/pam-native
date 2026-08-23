@@ -8,7 +8,7 @@
 
 [![Documentation](https://img.shields.io/badge/docs-push--in.github.io-5b50d6?style=flat-square)](https://push-in.github.io/pam-docs/native/overview/)
 [![CI](https://img.shields.io/github/actions/workflow/status/push-in/pam-native/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/push-in/pam-native/actions/workflows/ci.yml)
-![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
+![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=flat-square&logo=php&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-API%2026–36-3DDC84?style=flat-square&logo=android&logoColor=white)
 ![iOS](https://img.shields.io/badge/iOS-15%2B-000000?style=flat-square&logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache--2.0-22c55e?style=flat-square)
@@ -99,45 +99,7 @@ final class ProductScreen extends Component
 }
 ```
 
-## Start here
-
-PAM Native is installed, built, run, and updated through the **PAM CLI**. You
-install PAM once; PAM then manages its private PHP runtime, Composer, the PAM
-Native SDK, native hosts, plugins, code generation, development sessions, and
-release builds for every project.
-
-### 1. Install PAM
-
-```bash
-curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-  https://github.com/push-in/pam/releases/latest/download/install.sh | sh
-```
-
-Restart your terminal if requested, then verify the installation:
-
-```bash
-pam --version
-pam doctor
-```
-
-PAM includes and verifies Composer when it is first needed. You do not need a
-global Composer or a separate PHP installation for the normal workflow.
-
-### 2. Create a native application
-
-```bash
-pam init hello-native --template native
-cd hello-native
-pam doctor
-pam dev
-```
-
-Run `pam` without arguments for the guided project launcher. The explicit
-`pam mobile ...` commands remain available for CI and advanced multi-project
-automation, but inside a PAM Native project the short contextual commands are
-the primary interface.
-
-### 3. Grow and ship it
+### Grow and ship it
 
 ```bash
 pam make:screen Products

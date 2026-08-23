@@ -134,7 +134,7 @@
                     </Row>
                 </Pressable>
 
-                <Text height="42" textColor="#FF71859D" textAlign="center" fontSize="12">Android API 26–36 · iOS UIKit · PHP 8.4 · Rust</Text>
+                <Text height="42" textColor="#FF71859D" textAlign="center" fontSize="12">Android API 26–36 · iOS UIKit · PHP 8.5 · Rust</Text>
             </Column>
         </ScrollView>
     </SafeAreaView>

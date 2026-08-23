@@ -6721,7 +6721,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands: init, dev, build, run, doctor, package, devices, logs, codegen, and ios:*"
+        "PAM Native commands:\n  doctor, audit, dev, build, run, package, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
     );
 }
 

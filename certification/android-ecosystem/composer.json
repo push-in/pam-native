@@ -4,8 +4,8 @@
     "type": "project",
     "license": "Apache-2.0",
     "require": {
-        "php": "^8.4",
-    "pushinbr/pam-native": ">=0.6.1 <1.0.0",
+        "php": "^8.5",
+        "pushinbr/pam-native": ">=0.6.1 <1.0.0",
     "pushinbr/pam-native-auth": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-background-transfer": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-bluetooth": ">=0.1.0 <1.0.0",
