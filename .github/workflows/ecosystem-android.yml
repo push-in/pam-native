@@ -54,7 +54,12 @@ jobs:
           echo "PAM_HOME=${pam_distribution}/share/pam" >> "$GITHUB_ENV"
           echo "PAM_NATIVE_HOME=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Prepare verified PHP 8.5 runtime and candidate Native engine
-        run: scripts/prepare-android-runtime.sh
+        run: |
+          scripts/prepare-android-runtime.sh
+          # The candidate preparer verifies and normalizes the release runtime
+          # under this checkout. Point host generation at that exact tree so
+          # CMake consumes the same immutable PHP 8.5 payload we certified.
+          echo "PAM_HOME=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Install exact public Composer packages
         working-directory: certification/android-ecosystem
         run: composer install --no-interaction --prefer-dist --no-progress
