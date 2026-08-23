@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.2 - 2026-08-23
+
+- Resolve Android runtime bundles from the latest PAM runtime release instead
+  of incorrectly treating the independently versioned Native SDK as a PAM tag.
+- Preserve explicit `PAM_RELEASE_BASE_URL` mirrors while normalizing trailing
+  slashes before resolving verified runtime assets.
+
 ## 0.8.1 - 2026-08-23
 
 - Added production-grade camera, media editing, retained canvas, GPU shader and

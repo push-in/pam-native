@@ -2277,10 +2277,8 @@ fn install_android_runtime_bundle(
     native_home: &Path,
 ) -> Result<(), String> {
     let asset = "pam-android-runtime.tar.gz";
-    let release_tag = format!("v{}", env!("CARGO_PKG_VERSION"));
-    let base = std::env::var("PAM_RELEASE_BASE_URL").unwrap_or_else(|_| {
-        format!("https://github.com/push-in/pam/releases/download/{release_tag}")
-    });
+    let configured_base = std::env::var("PAM_RELEASE_BASE_URL").ok();
+    let base = android_runtime_release_base(configured_base.as_deref());
     if !base.starts_with("https://") && std::env::var_os("PAM_RELEASE_BASE_URL").is_none() {
         return Err("refusing a non-HTTPS Android runtime release URL".to_owned());
     }
@@ -2375,6 +2373,13 @@ fn install_android_runtime_bundle(
         )),
         (Ok(()), Ok(())) => Ok(()),
     }
+}
+
+fn android_runtime_release_base(configured: Option<&str>) -> String {
+    configured
+        .unwrap_or("https://github.com/push-in/pam/releases/latest/download")
+        .trim_end_matches('/')
+        .to_owned()
 }
 
 fn download_release_asset(url: &str, destination: &Path, maximum_bytes: u64) -> Result<(), String> {
@@ -7596,6 +7601,19 @@ mod tests {
         assert!(!safe_android_runtime_archive_path(Path::new(
             "native/Cargo.toml"
         )));
+    }
+
+    #[test]
+    fn android_runtime_download_uses_the_pam_release_channel_not_the_sdk_version() {
+        assert_eq!(
+            android_runtime_release_base(None),
+            "https://github.com/push-in/pam/releases/latest/download"
+        );
+        assert_eq!(
+            android_runtime_release_base(Some("https://mirror.example/pam/v2.0.10/")),
+            "https://mirror.example/pam/v2.0.10"
+        );
+        assert!(!android_runtime_release_base(None).contains(env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
