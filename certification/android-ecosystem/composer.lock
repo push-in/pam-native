@@ -4,20 +4,20 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "94334afeb7fd25ed4e43823268a43aa1",
+    "content-hash": "c63d56470094715f1cff952d36b118b7",
     "packages": [
         {
             "name": "pushinbr/pam-native",
-            "version": "v0.6.78",
+            "version": "v0.8.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-php.git",
-                "reference": "749f07974ae419826fc619005c7e88bb68d73b6d"
+                "reference": "19c8bd57064c62d776dd6e3a672b56c36405ce66"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-php/zipball/749f07974ae419826fc619005c7e88bb68d73b6d",
-                "reference": "749f07974ae419826fc619005c7e88bb68d73b6d",
+                "url": "https://api.github.com/repos/push-in/pam-native-php/zipball/19c8bd57064c62d776dd6e3a672b56c36405ce66",
+                "reference": "19c8bd57064c62d776dd6e3a672b56c36405ce66",
                 "shasum": ""
             },
             "require": {
@@ -25,6 +25,7 @@
             },
             "bin": [
                 "bin/pam-native",
+                "bin/pam-native-contracts",
                 "bin/pam-native-format",
                 "bin/pam-native-language-server",
                 "bin/pam-native-optimize",
@@ -144,6 +145,13 @@
                             ],
                             "description": "Profile the PAM Native application"
                         },
+                        "release": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "release"
+                            ],
+                            "description": "Certify, sign and package a PAM Native release"
+                        },
                         "devtools": {
                             "bin": "bin/pam-native",
                             "arguments": [
@@ -171,6 +179,10 @@
                                 "benchmark"
                             ],
                             "description": "Benchmark the PAM Native application"
+                        },
+                        "contracts": {
+                            "script": "bin/pam-native-contracts",
+                            "description": "Generate typed PHP, Kotlin and Swift contracts"
                         },
                         "ios:build": {
                             "bin": "bin/pam-native",
@@ -366,25 +378,25 @@
                 "issues": "https://github.com/push-in/pam-native/issues",
                 "source": "https://github.com/push-in/pam-native"
             },
-            "time": "2026-08-23T02:45:09+00:00"
+            "time": "2026-08-23T16:32:04+00:00"
         },
         {
             "name": "pushinbr/pam-native-auth",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-auth.git",
-                "reference": "c569ae91bbd8f546cd62e4f4c2d5ea80a9e3c0ab"
+                "reference": "55f8b8919a09673f29a9607b54dc3f216f84f331"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-auth/zipball/c569ae91bbd8f546cd62e4f4c2d5ea80a9e3c0ab",
-                "reference": "c569ae91bbd8f546cd62e4f4c2d5ea80a9e3c0ab",
+                "url": "https://api.github.com/repos/push-in/pam-native-auth/zipball/55f8b8919a09673f29a9607b54dc3f216f84f331",
+                "reference": "55f8b8919a09673f29a9607b54dc3f216f84f331",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -399,35 +411,35 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Secure sessions, encrypted credential vaults and OAuth 2.1/PKCE primitives for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-auth/issues",
-                "source": "https://github.com/push-in/pam-native-auth/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-auth/tree/v0.2.0"
             },
-            "time": "2026-08-01T03:52:45+00:00"
+            "time": "2026-08-23T18:02:25+00:00"
         },
         {
             "name": "pushinbr/pam-native-background-transfer",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-background-transfer.git",
-                "reference": "903610a65e3f0bc4525794499e6066b3b04b7abf"
+                "reference": "e4e3c03096354e709301466ee7cf4a4fc2687f2e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-background-transfer/zipball/903610a65e3f0bc4525794499e6066b3b04b7abf",
-                "reference": "903610a65e3f0bc4525794499e6066b3b04b7abf",
+                "url": "https://api.github.com/repos/push-in/pam-native-background-transfer/zipball/e4e3c03096354e709301466ee7cf4a4fc2687f2e",
+                "reference": "e4e3c03096354e709301466ee7cf4a4fc2687f2e",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "require-dev": {
-                "pushinbr/pam-native-testing": "^0.1.0"
+                "pushinbr/pam-native-testing": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -442,32 +454,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Durable background uploads and downloads for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-background-transfer/issues",
-                "source": "https://github.com/push-in/pam-native-background-transfer/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-background-transfer/tree/v0.2.0"
             },
-            "time": "2026-08-01T03:52:45+00:00"
+            "time": "2026-08-23T18:12:43+00:00"
         },
         {
             "name": "pushinbr/pam-native-bluetooth",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-bluetooth.git",
-                "reference": "ee880294979f59f9e1941ab9b47bd50b849df37c"
+                "reference": "21e0581e990218daa6332548f91fb2827491bf89"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-bluetooth/zipball/ee880294979f59f9e1941ab9b47bd50b849df37c",
-                "reference": "ee880294979f59f9e1941ab9b47bd50b849df37c",
+                "url": "https://api.github.com/repos/push-in/pam-native-bluetooth/zipball/21e0581e990218daa6332548f91fb2827491bf89",
+                "reference": "21e0581e990218daa6332548f91fb2827491bf89",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -482,35 +494,79 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Lifecycle-safe Bluetooth LE scanning, GATT and notifications for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-bluetooth/issues",
-                "source": "https://github.com/push-in/pam-native-bluetooth/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-bluetooth/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:31:40+00:00"
+            "time": "2026-08-23T18:02:29+00:00"
         },
         {
-            "name": "pushinbr/pam-native-feature-flags",
-            "version": "v0.1.1",
+            "name": "pushinbr/pam-native-camera",
+            "version": "v0.1.0",
             "source": {
                 "type": "git",
-                "url": "https://github.com/push-in/pam-native-feature-flags.git",
-                "reference": "3c9eddafca19d016f4e2996a7ebbc833e05e760c"
+                "url": "https://github.com/push-in/pam-native-camera.git",
+                "reference": "71600689ac1057387d2c16900f859291a7e6c1ba"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-feature-flags/zipball/3c9eddafca19d016f4e2996a7ebbc833e05e760c",
-                "reference": "3c9eddafca19d016f4e2996a7ebbc833e05e760c",
+                "url": "https://api.github.com/repos/push-in/pam-native-camera/zipball/71600689ac1057387d2c16900f859291a7e6c1ba",
+                "reference": "71600689ac1057387d2c16900f859291a7e6c1ba",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "require-dev": {
-                "pushinbr/pam-native-testing": "^0.1.0"
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Camera\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Professional zero-copy camera, capture and native frame processors for PAM Native.",
+            "support": {
+                "issues": "https://github.com/push-in/pam-native-camera/issues",
+                "source": "https://github.com/push-in/pam-native-camera/tree/v0.1.0"
+            },
+            "time": "2026-08-23T17:41:22+00:00"
+        },
+        {
+            "name": "pushinbr/pam-native-feature-flags",
+            "version": "v0.2.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-feature-flags.git",
+                "reference": "d24ced8639f4a7339a918fffc7ee147fe0a56e22"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-feature-flags/zipball/d24ced8639f4a7339a918fffc7ee147fe0a56e22",
+                "reference": "d24ced8639f4a7339a918fffc7ee147fe0a56e22",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "pushinbr/pam-native-testing": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -525,36 +581,36 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Typed targeting, deterministic rollouts and offline feature-flag snapshots for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-feature-flags/issues",
-                "source": "https://github.com/push-in/pam-native-feature-flags/tree/v0.1.1"
+                "source": "https://github.com/push-in/pam-native-feature-flags/tree/v0.2.0"
             },
-            "time": "2026-08-01T04:08:55+00:00"
+            "time": "2026-08-23T18:12:44+00:00"
         },
         {
             "name": "pushinbr/pam-native-firebase",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-firebase.git",
-                "reference": "f8894429568022a50900b8ff271b997259a7f607"
+                "reference": "01db373be2e81986c4a9ecf4804c7ed29b342f61"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-firebase/zipball/f8894429568022a50900b8ff271b997259a7f607",
-                "reference": "f8894429568022a50900b8ff271b997259a7f607",
+                "url": "https://api.github.com/repos/push-in/pam-native-firebase/zipball/01db373be2e81986c4a9ecf4804c7ed29b342f61",
+                "reference": "01db373be2e81986c4a9ecf4804c7ed29b342f61",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1",
-                "pushinbr/pam-native-feature-flags": "^0.1.0"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0",
+                "pushinbr/pam-native-feature-flags": "^0.2.0"
             },
             "require-dev": {
-                "pushinbr/pam-native-testing": "^0.1.0"
+                "pushinbr/pam-native-testing": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -569,32 +625,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Production Firebase Analytics, Remote Config, Messaging, Crashlytics and multi-app integration for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-firebase/issues",
-                "source": "https://github.com/push-in/pam-native-firebase/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-firebase/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:54:23+00:00"
+            "time": "2026-08-23T18:12:46+00:00"
         },
         {
             "name": "pushinbr/pam-native-health",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-health.git",
-                "reference": "65f57a70799b7ea7c3e5d58827d52bfc7e204ab4"
+                "reference": "4f93f2d06ba27b949bb031700ed5e94c59281a9e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-health/zipball/65f57a70799b7ea7c3e5d58827d52bfc7e204ab4",
-                "reference": "65f57a70799b7ea7c3e5d58827d52bfc7e204ab4",
+                "url": "https://api.github.com/repos/push-in/pam-native-health/zipball/4f93f2d06ba27b949bb031700ed5e94c59281a9e",
+                "reference": "4f93f2d06ba27b949bb031700ed5e94c59281a9e",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -609,32 +665,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Health Connect and HealthKit authorization, reads and writes for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-health/issues",
-                "source": "https://github.com/push-in/pam-native-health/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-health/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:17:58+00:00"
+            "time": "2026-08-23T18:02:35+00:00"
         },
         {
             "name": "pushinbr/pam-native-intents",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-intents.git",
-                "reference": "67e05c9e1d9097548f498feb37a88c1f55ec8a23"
+                "reference": "c4712fe103437c3244f72859724fe9b6db3d3459"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-intents/zipball/67e05c9e1d9097548f498feb37a88c1f55ec8a23",
-                "reference": "67e05c9e1d9097548f498feb37a88c1f55ec8a23",
+                "url": "https://api.github.com/repos/push-in/pam-native-intents/zipball/c4712fe103437c3244f72859724fe9b6db3d3459",
+                "reference": "c4712fe103437c3244f72859724fe9b6db3d3459",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -649,32 +705,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Android dynamic shortcuts and Apple App Intents for PAM Native routes.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-intents/issues",
-                "source": "https://github.com/push-in/pam-native-intents/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-intents/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:10:48+00:00"
+            "time": "2026-08-23T18:02:37+00:00"
         },
         {
             "name": "pushinbr/pam-native-live-activities",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-live-activities.git",
-                "reference": "61e8b93f419c734cb23b20fd23904263ac3e9057"
+                "reference": "dee003b1906b9df77b0b510b5b87922d298c488a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-live-activities/zipball/61e8b93f419c734cb23b20fd23904263ac3e9057",
-                "reference": "61e8b93f419c734cb23b20fd23904263ac3e9057",
+                "url": "https://api.github.com/repos/push-in/pam-native-live-activities/zipball/dee003b1906b9df77b0b510b5b87922d298c488a",
+                "reference": "dee003b1906b9df77b0b510b5b87922d298c488a",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -689,32 +745,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "ActivityKit Live Activities and Android ongoing live notifications for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-live-activities/issues",
-                "source": "https://github.com/push-in/pam-native-live-activities/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-live-activities/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:03:34+00:00"
+            "time": "2026-08-23T18:02:38+00:00"
         },
         {
             "name": "pushinbr/pam-native-maps",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-maps.git",
-                "reference": "6b931aca2b2b653c03f39b2a388e11cd21f1ea56"
+                "reference": "e2a65f29d809e13bf77e1216df49e2e5aac39fe9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-maps/zipball/6b931aca2b2b653c03f39b2a388e11cd21f1ea56",
-                "reference": "6b931aca2b2b653c03f39b2a388e11cd21f1ea56",
+                "url": "https://api.github.com/repos/push-in/pam-native-maps/zipball/e2a65f29d809e13bf77e1216df49e2e5aac39fe9",
+                "reference": "e2a65f29d809e13bf77e1216df49e2e5aac39fe9",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -729,35 +785,35 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Declarative native maps, cameras, markers and overlays for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-maps/issues",
-                "source": "https://github.com/push-in/pam-native-maps/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-maps/tree/v0.2.0"
             },
-            "time": "2026-08-01T04:21:58+00:00"
+            "time": "2026-08-23T18:02:40+00:00"
         },
         {
             "name": "pushinbr/pam-native-media",
-            "version": "v0.2.3",
+            "version": "v0.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-media.git",
-                "reference": "8e08f77e90f9b6f91c04697546bf233011c1bf85"
+                "reference": "35d9e16514969c1352977a9af767e59e449608f0"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-media/zipball/8e08f77e90f9b6f91c04697546bf233011c1bf85",
-                "reference": "8e08f77e90f9b6f91c04697546bf233011c1bf85",
+                "url": "https://api.github.com/repos/push-in/pam-native-media/zipball/35d9e16514969c1352977a9af767e59e449608f0",
+                "reference": "35d9e16514969c1352977a9af767e59e449608f0",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "require-dev": {
-                "pushinbr/pam-native-testing": "^0.1.0"
+                "pushinbr/pam-native-testing": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -777,27 +833,27 @@
             "description": "Native media inspection, thumbnails and embedded camera capture for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-media/issues",
-                "source": "https://github.com/push-in/pam-native-media/tree/v0.2.3"
+                "source": "https://github.com/push-in/pam-native-media/tree/v0.3.0"
             },
-            "time": "2026-08-07T11:53:19+00:00"
+            "time": "2026-08-23T18:12:48+00:00"
         },
         {
             "name": "pushinbr/pam-native-nfc",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-nfc.git",
-                "reference": "ca02141265a755a352ad88fc6447cd23249a69d2"
+                "reference": "fe9ec73cd1272ced3d6c8b92b8d7fcac5d7c509d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-nfc/zipball/ca02141265a755a352ad88fc6447cd23249a69d2",
-                "reference": "ca02141265a755a352ad88fc6447cd23249a69d2",
+                "url": "https://api.github.com/repos/push-in/pam-native-nfc/zipball/fe9ec73cd1272ced3d6c8b92b8d7fcac5d7c509d",
+                "reference": "fe9ec73cd1272ced3d6c8b92b8d7fcac5d7c509d",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -812,32 +868,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Lifecycle-safe NDEF reading and writing for PAM Native on Android and iOS.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-nfc/issues",
-                "source": "https://github.com/push-in/pam-native-nfc/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-nfc/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:24:38+00:00"
+            "time": "2026-08-23T18:02:43+00:00"
         },
         {
             "name": "pushinbr/pam-native-payments",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-payments.git",
-                "reference": "ec20893ae5bf607a6e6f3ecc4b5b8c8ea499f562"
+                "reference": "25a58a66c50d4c00e5a4ad626f15b0930c2785a9"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-payments/zipball/ec20893ae5bf607a6e6f3ecc4b5b8c8ea499f562",
-                "reference": "ec20893ae5bf607a6e6f3ecc4b5b8c8ea499f562",
+                "url": "https://api.github.com/repos/push-in/pam-native-payments/zipball/25a58a66c50d4c00e5a4ad626f15b0930c2785a9",
+                "reference": "25a58a66c50d4c00e5a4ad626f15b0930c2785a9",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -852,35 +908,35 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "PCI-conscious Stripe PaymentSheet payments for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-payments/issues",
-                "source": "https://github.com/push-in/pam-native-payments/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-payments/tree/v0.2.0"
             },
-            "time": "2026-08-01T04:49:51+00:00"
+            "time": "2026-08-23T18:02:46+00:00"
         },
         {
             "name": "pushinbr/pam-native-realtime",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-realtime.git",
-                "reference": "ce38847b10e35fa530341242f8f37b99de6e63aa"
+                "reference": "2727b1dd64f898f04ceede3dcb557b84eee35aac"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-realtime/zipball/ce38847b10e35fa530341242f8f37b99de6e63aa",
-                "reference": "ce38847b10e35fa530341242f8f37b99de6e63aa",
+                "url": "https://api.github.com/repos/push-in/pam-native-realtime/zipball/2727b1dd64f898f04ceede3dcb557b84eee35aac",
+                "reference": "2727b1dd64f898f04ceede3dcb557b84eee35aac",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "require-dev": {
-                "pushinbr/pam-native-testing": "^0.1.0"
+                "pushinbr/pam-native-testing": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -895,32 +951,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Persistent native WebSocket connections with bounded event queues for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-realtime/issues",
-                "source": "https://github.com/push-in/pam-native-realtime/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-realtime/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:46:09+00:00"
+            "time": "2026-08-23T18:12:49+00:00"
         },
         {
             "name": "pushinbr/pam-native-scanner",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-scanner.git",
-                "reference": "d487f1af484f7203f210d3733e6952e19def6288"
+                "reference": "1789bf3cbc22bd1ad63d11878e494a86c87a995d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-scanner/zipball/d487f1af484f7203f210d3733e6952e19def6288",
-                "reference": "d487f1af484f7203f210d3733e6952e19def6288",
+                "url": "https://api.github.com/repos/push-in/pam-native-scanner/zipball/1789bf3cbc22bd1ad63d11878e494a86c87a995d",
+                "reference": "1789bf3cbc22bd1ad63d11878e494a86c87a995d",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -935,32 +991,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Real-time QR and barcode scanning with native camera previews for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-scanner/issues",
-                "source": "https://github.com/push-in/pam-native-scanner/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-scanner/tree/v0.2.0"
             },
-            "time": "2026-08-01T04:27:48+00:00"
+            "time": "2026-08-23T18:02:49+00:00"
         },
         {
             "name": "pushinbr/pam-native-share-extension",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-share-extension.git",
-                "reference": "192823dad7594af056a0a22ebbc5434ed741c4d5"
+                "reference": "e3098097196ba2cfa3c47654ef5b69bfd9be3180"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-share-extension/zipball/192823dad7594af056a0a22ebbc5434ed741c4d5",
-                "reference": "192823dad7594af056a0a22ebbc5434ed741c4d5",
+                "url": "https://api.github.com/repos/push-in/pam-native-share-extension/zipball/e3098097196ba2cfa3c47654ef5b69bfd9be3180",
+                "reference": "e3098097196ba2cfa3c47654ef5b69bfd9be3180",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -975,32 +1031,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Receive text, URLs and files through native Android shares and an iOS Share Extension.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-share-extension/issues",
-                "source": "https://github.com/push-in/pam-native-share-extension/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-share-extension/tree/v0.2.0"
             },
-            "time": "2026-08-01T03:52:47+00:00"
+            "time": "2026-08-23T18:02:51+00:00"
         },
         {
             "name": "pushinbr/pam-native-subscriptions",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-subscriptions.git",
-                "reference": "395eae6df2345b7ce823a5e8813a5d0024fb2c0a"
+                "reference": "cb970b9c62d5c8a199c2ba24b49242d4130f266b"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-subscriptions/zipball/395eae6df2345b7ce823a5e8813a5d0024fb2c0a",
-                "reference": "395eae6df2345b7ce823a5e8813a5d0024fb2c0a",
+                "url": "https://api.github.com/repos/push-in/pam-native-subscriptions/zipball/cb970b9c62d5c8a199c2ba24b49242d4130f266b",
+                "reference": "cb970b9c62d5c8a199c2ba24b49242d4130f266b",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -1015,32 +1071,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "StoreKit 2 and Google Play Billing subscriptions for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-subscriptions/issues",
-                "source": "https://github.com/push-in/pam-native-subscriptions/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-subscriptions/tree/v0.2.0"
             },
-            "time": "2026-08-01T05:38:29+00:00"
+            "time": "2026-08-23T18:02:52+00:00"
         },
         {
             "name": "pushinbr/pam-native-video",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-video.git",
-                "reference": "3f1c3d9ffaacd20c5bc97704c7b3107cce36c9d2"
+                "reference": "589f934215b15ba4be175192964fc73f9d68b734"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-video/zipball/3f1c3d9ffaacd20c5bc97704c7b3107cce36c9d2",
-                "reference": "3f1c3d9ffaacd20c5bc97704c7b3107cce36c9d2",
+                "url": "https://api.github.com/repos/push-in/pam-native-video/zipball/589f934215b15ba4be175192964fc73f9d68b734",
+                "reference": "589f934215b15ba4be175192964fc73f9d68b734",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -1055,32 +1111,32 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Adaptive streaming, subtitles and native Media3/AVPlayer playback for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-video/issues",
-                "source": "https://github.com/push-in/pam-native-video/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-video/tree/v0.2.0"
             },
-            "time": "2026-08-01T03:52:48+00:00"
+            "time": "2026-08-23T18:04:21+00:00"
         },
         {
             "name": "pushinbr/pam-native-widgets",
-            "version": "v0.1.0",
+            "version": "v0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-widgets.git",
-                "reference": "d59e5a563838ad344ebc67005eb165dd9753c078"
+                "reference": "3df0454e083b0d3591c960b423ea657a6dd547e7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-widgets/zipball/d59e5a563838ad344ebc67005eb165dd9753c078",
-                "reference": "d59e5a563838ad344ebc67005eb165dd9753c078",
+                "url": "https://api.github.com/repos/push-in/pam-native-widgets/zipball/3df0454e083b0d3591c960b423ea657a6dd547e7",
+                "reference": "3df0454e083b0d3591c960b423ea657a6dd547e7",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -1095,14 +1151,14 @@
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
-                "BUSL-1.1"
+                "Apache-2.0"
             ],
             "description": "Android App Widgets and iOS WidgetKit timelines for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-widgets/issues",
-                "source": "https://github.com/push-in/pam-native-widgets/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-widgets/tree/v0.2.0"
             },
-            "time": "2026-08-01T03:52:48+00:00"
+            "time": "2026-08-23T18:04:23+00:00"
         }
     ],
     "packages-dev": [],
