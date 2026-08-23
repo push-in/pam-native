@@ -105,6 +105,8 @@ requireFragments($release, 'release.yml', [
     "            --output \"dist/pam-native-php-\${version}.reproducibility.json\"\n",
     "      - name: Reverify downloaded reproducibility evidence\n",
     "      - name: Generate SPDX 2.3 software bill of materials\n",
+    "        run: rm -f dist/Info.plist dist/pam-native-android-prerequisites.tar.gz\n",
+    "            sha256sum \"\${artifact}\" > \"\${artifact}.sha256\"\n",
     "            --created-epoch \"$(git log -1 --format=%ct)\" \\\n",
     "        uses: actions/attest-sbom@v4\n",
 ]);
