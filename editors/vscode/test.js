@@ -53,6 +53,9 @@ function request(method, params) {
     const initialized = await request("initialize", {capabilities: {}, rootUri});
     assert.strictEqual(initialized.capabilities.documentFormattingProvider, true);
     assert.strictEqual(initialized.capabilities.definitionProvider, true);
+    assert.strictEqual(initialized.capabilities.referencesProvider, true);
+    assert.strictEqual(initialized.capabilities.documentSymbolProvider, true);
+    assert.strictEqual(initialized.capabilities.semanticTokensProvider.full, true);
     assert.deepStrictEqual(initialized.capabilities.completionProvider.triggerCharacters, ["<", ":", "@"]);
     const uri = "file:///Demo.pam";
     send({method: "textDocument/didOpen", params: {textDocument: {uri, languageId: "pam", version: 1, text: "<?php public string $title = ''; ?>\n<template><Text>{{ $title }}</Text></template>"}}});
@@ -60,10 +63,18 @@ function request(method, params) {
     assert(completions.some(item => item.label === "$title"));
     assert(completions.some(item => item.label === "p-if"));
     assert(completions.some(item => item.label === "ProfileCard"));
+    assert(completions.some(item => item.label === "Await"));
+    assert(completions.some(item => item.label === "recipe"));
     const usage = "<?php final class Demo {} ?>\n<template><ProfileCard /></template>";
     send({method: "textDocument/didChange", params: {textDocument: {uri, version: 2}, contentChanges: [{text: usage}]}});
     const definition = await request("textDocument/definition", {textDocument: {uri}, position: {line: 1, character: 13}});
     assert(definition.uri.endsWith("ProfileCard.pam"));
+    const references = await request("textDocument/references", {textDocument: {uri}, position: {line: 1, character: 13}, context: {includeDeclaration: true}});
+    assert(Array.isArray(references));
+    const symbols = await request("textDocument/documentSymbol", {textDocument: {uri}});
+    assert(symbols.some(symbol => symbol.name === "Demo"));
+    const semantic = await request("textDocument/semanticTokens/full", {textDocument: {uri}});
+    assert(Array.isArray(semantic.data));
     await request("shutdown", null);
     send({method: "exit"});
     server.stdin.end();

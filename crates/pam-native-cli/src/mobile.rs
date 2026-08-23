@@ -7393,7 +7393,7 @@ mod tests {
                 "protocol": 1,
                 "pamNative": {
                     "minimum": "0.6.0",
-                    "maximumExclusive": "0.7.0"
+                    "maximumExclusive": "0.9.0"
                 },
                 "php": {"provider": "Community\\Example\\PluginProvider"},
                 "android": {

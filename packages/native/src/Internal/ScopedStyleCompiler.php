@@ -97,6 +97,8 @@ final class ScopedStyleCompiler
     public static function compile(string $source, string $name): array
     {
         $source = self::resolveImports($source, $name);
+        $language2 = Language2StyleCompiler::extract($source, $name);
+        $source = $language2['source'];
         $clean = preg_replace('/\/\*[\s\S]*?\*\//', '', $source);
         if (!is_string($clean)) {
             throw new RuntimeException("Cannot parse styles in {$name}.");
@@ -192,7 +194,24 @@ final class ScopedStyleCompiler
             'tags' => $tags,
             'classCascade' => $classCascade,
             'fonts' => $fonts,
+            'tokens' => $language2['tokens'],
+            'states' => $language2['states'],
+            'recipes' => $language2['recipes'],
+            'queries' => $language2['queries'],
+            'keyframes' => $language2['keyframes'],
         ];
+    }
+
+    /**
+     * @param array<string, string> $variables
+     * @return array<string, string|int|bool>
+     */
+    public static function compileDeclarations(
+        string $source,
+        array $variables,
+        string $name,
+    ): array {
+        return self::declarations($source, $variables, $name);
     }
 
     public static function resolveImports(string $source, string $name): string

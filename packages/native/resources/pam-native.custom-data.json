@@ -1,11 +1,22 @@
 {
-    "version": 1.1,
+    "version": 2,
     "tags": [
         { "name": "Screen", "description": "Top-level native screen." },
         { "name": "SafeAreaView", "description": "Container inset from Android system bars." },
         { "name": "Column", "description": "Vertical flex container." },
         { "name": "Row", "description": "Horizontal flex container." },
         { "name": "View", "description": "Generic native container." },
+        { "name": "Show", "description": "Language 2 conditional flow with a typed when expression.", "attributes": [{ "name": "when" }] },
+        { "name": "Match", "description": "Language 2 strict value matching.", "attributes": [{ "name": "value" }] },
+        { "name": "Case", "description": "A strict Match branch.", "attributes": [{ "name": "value" }] },
+        { "name": "Default", "description": "Fallback branch for Match or Await." },
+        { "name": "Await", "description": "Typed AsyncResource or AsyncValue branching.", "attributes": [{ "name": "value" }] },
+        { "name": "Pending", "description": "Await loading branch." },
+        { "name": "Content", "description": "Await content branch; exposes $data." },
+        { "name": "Empty", "description": "Await empty branch." },
+        { "name": "Error", "description": "Await error branch; exposes $message and $retryable." },
+        { "name": "Offline", "description": "Await offline branch." },
+        { "name": "Stale", "description": "Await stale-content branch." },
         { "name": "Text", "description": "Native Android text." },
         { "name": "Button", "description": "Accessible native Android button." },
         {

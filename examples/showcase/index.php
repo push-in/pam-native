@@ -19,6 +19,10 @@ App::views(
     __DIR__.'/resources/native',
     __DIR__.'/.pam-native/views',
 );
+App::components(
+    __DIR__.'/resources/components',
+    __DIR__.'/.pam-native/components',
+);
 App::theme(\Pam\Native\Theme::pamLab());
 $showcase = new Showcase();
 $template = new TemplateShowcase();

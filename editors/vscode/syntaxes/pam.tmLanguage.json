@@ -21,11 +21,11 @@
             "contentName": "source.css"
         },
         "template": {
-            "begin": "<template>",
+            "begin": "<template(?:\\s+language=\\\"2\\\")?>",
             "end": "</template>",
             "contentName": "text.html.pam",
             "patterns": [
-                {"match": "\\b(p-if|p-else-if|p-else|p-for|p-key|p-index)\\b", "name": "keyword.control.pam"},
+                {"match": "\\b(p-if|p-else-if|p-else|p-for|p-key|p-index|recipe|variant:[A-Za-z][A-Za-z0-9_-]*)\\b", "name": "keyword.control.pam"},
                 {"match": "(@[A-Za-z][A-Za-z0-9:-]*|:[A-Za-z][A-Za-z0-9:-]*|bind:[A-Za-z][A-Za-z0-9:-]*)", "name": "entity.other.attribute-name.pam"},
                 {"begin": "\\{\\{", "end": "\\}\\}", "contentName": "source.pam-expression"},
                 {"include": "text.html.basic"}

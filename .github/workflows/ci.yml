@@ -72,6 +72,7 @@ jobs:
           python3 -m json.tool benchmarks/package/report.schema.json >/dev/null
           python3 -m json.tool benchmarks/package/reproducibility.schema.json >/dev/null
           python3 -m json.tool scripts/accessibility-evidence.schema.json >/dev/null
+          python3 -m json.tool packages/native/resources/pam-native-ui-ir.schema.json >/dev/null
           node --check editors/vscode/extension.js
           node editors/vscode/test.js
 

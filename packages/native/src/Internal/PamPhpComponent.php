@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\LanguageVersion;
+
 final readonly class PamPhpComponent
 {
     public function __construct(
@@ -12,6 +14,7 @@ final readonly class PamPhpComponent
         public string $source,
         public string $classFile,
         public CompiledTemplateNode $template,
+        public LanguageVersion $language = LanguageVersion::Language1,
     ) {
     }
 }

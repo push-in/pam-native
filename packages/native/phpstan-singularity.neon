@@ -14,6 +14,15 @@ parameters:
         - src/Scheduling/DeadlineExceededException.php
         - src/Scheduling/Deferred.php
         - src/Scheduling/TaskGroup.php
+        - src/Attributes/Action.php
+        - src/Attributes/Event.php
+        - src/Attributes/Slot.php
+        - src/Attributes/Tag.php
+        - src/Internal/Language2StyleCompiler.php
+        - src/Internal/TemplateContractValidator.php
+        - src/LanguageVersion.php
+        - src/UI/Contract
+        - src/UI/Ir
     tmpDir: ../../../.pam-native/phpstan-singularity
     treatPhpDocTypesAsCertain: true
     reportUnmatchedIgnoredErrors: true
@@ -23,3 +32,10 @@ parameters:
         - src/Scheduling/CancellationToken.php
         - src/Scheduling/Scheduler.php
         - src/Scheduling/TaskPriority.php
+        - src/Attributes/Expose.php
+        - src/Attributes/Prop.php
+        - src/Component.php
+        - src/Internal/CompiledTemplateNode.php
+        - src/Internal/ScopedStyleCompiler.php
+        - src/Renderable.php
+        - src/TemplateRegistry.php

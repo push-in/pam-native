@@ -6,6 +6,7 @@ namespace Pam\Native\Tooling;
 
 use Pam\Native\Internal\CompiledTemplateNode;
 use Pam\Native\Internal\TemplateCompiler;
+use Pam\Native\LanguageVersion;
 use RuntimeException;
 
 /**
@@ -32,7 +33,7 @@ final class PamFormatter
             );
         }
 
-        [$php, $template, $style, $hasStyle] = self::split($source, $name);
+        [$php, $template, $style, $hasStyle, $language] = self::split($source, $name);
         $protectedTemplate = preg_replace_callback(
             '/<!--[\s\S]*?-->/',
             static fn (array $match): string =>
@@ -45,8 +46,10 @@ final class PamFormatter
                 "Cannot preserve template comments in {$name}.",
             );
         }
-        $tree = TemplateCompiler::compile($protectedTemplate, $name);
-        $lines = ['<template>'];
+        $tree = TemplateCompiler::compile($protectedTemplate, $name, $language);
+        $lines = [$language === LanguageVersion::Language2
+            ? '<template language="2">'
+            : '<template>'];
         foreach ($tree->children as $child) {
             array_push($lines, ...self::node($child, 1));
         }
@@ -82,7 +85,7 @@ final class PamFormatter
         return true;
     }
 
-    /** @return array{string, string, string, bool} */
+    /** @return array{string, string, string, bool, LanguageVersion} */
     private static function split(string $source, string $name): array
     {
         $tokens = token_get_all($source);
@@ -107,7 +110,7 @@ final class PamFormatter
         $markup = substr($source, $closeOffset + $closeLength);
         $match = [];
         if (preg_match(
-            '/\A\s*<template(?:\s[^>]*)?>([\s\S]*?)<\/template>'
+            '/\A\s*<template(?:\s+([^>]*))?>([\s\S]*?)<\/template>'
                 .'\s*(?:<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
             $markup,
             $match,
@@ -117,11 +120,22 @@ final class PamFormatter
             );
         }
 
+        $attributes = trim((string) ($match[1] ?? ''));
+        $language = LanguageVersion::Language1;
+        if (preg_match('/(?:language|version)\s*=\s*(["\'])2\1/D', $attributes) === 1) {
+            $language = LanguageVersion::Language2;
+        } elseif ($attributes !== '') {
+            throw new RuntimeException(
+                "PAM component {$name} has unsupported template attributes; use language=\"2\".",
+            );
+        }
+
         return [
             $php,
-            (string) $match[1],
-            (string) ($match[2] ?? ''),
-            array_key_exists(2, $match),
+            (string) $match[2],
+            (string) ($match[3] ?? ''),
+            array_key_exists(3, $match),
+            $language,
         ];
     }
 
@@ -272,37 +286,62 @@ final class PamFormatter
         foreach ($imports as $import) {
             $lines[] = '    '.$import;
         }
-        preg_match_all(
-            '/([^{}]+)\{([^{}]*)\}/',
-            $clean,
-            $blocks,
-            PREG_SET_ORDER | PREG_OFFSET_CAPTURE,
-        );
-        $matchedBytes = 0;
-        foreach ($blocks as $block) {
-            $offset = $block[0][1];
-            if (trim(substr($clean, $matchedBytes, $offset - $matchedBytes)) !== '') {
-                throw new RuntimeException(
-                    'PAM formatter cannot format nested or invalid scoped CSS.',
-                );
-            }
-            $matchedBytes = $offset + strlen($block[0][0]);
-            if ($lines !== []) {
-                $lines[] = '';
-            }
-            $lines[] = '    '.trim($block[1][0]).' {';
-            foreach (explode(';', $block[2][0]) as $declaration) {
-                $declaration = trim($declaration);
-                if ($declaration !== '') {
-                    $lines[] = '        '.$declaration.';';
+        $depth = 1;
+        $buffer = '';
+        $quote = null;
+        $length = strlen($clean);
+        for ($index = 0; $index < $length; $index++) {
+            $character = $clean[$index];
+            if ($quote !== null) {
+                $buffer .= $character;
+                if ($character === $quote && ($index === 0 || $clean[$index - 1] !== '\\')) {
+                    $quote = null;
                 }
+                continue;
             }
-            $lines[] = '    }';
+            if ($character === '"' || $character === "'") {
+                $quote = $character;
+                $buffer .= $character;
+                continue;
+            }
+            if ($character === '{') {
+                $header = trim($buffer);
+                if ($header === '') {
+                    throw new RuntimeException('PAM formatter found an empty CSS selector.');
+                }
+                if ($lines !== [] && end($lines) !== '') {
+                    $lines[] = '';
+                }
+                $lines[] = str_repeat('    ', $depth).$header.' {';
+                $depth++;
+                $buffer = '';
+                continue;
+            }
+            if ($character === ';') {
+                $declaration = trim($buffer);
+                if ($declaration !== '') {
+                    $lines[] = str_repeat('    ', $depth).$declaration.';';
+                }
+                $buffer = '';
+                continue;
+            }
+            if ($character === '}') {
+                $declaration = trim($buffer);
+                if ($declaration !== '') {
+                    throw new RuntimeException('PAM formatter requires semicolons in CSS declarations.');
+                }
+                if ($depth <= 1) {
+                    throw new RuntimeException('PAM formatter found an unexpected CSS closing brace.');
+                }
+                $depth--;
+                $lines[] = str_repeat('    ', $depth).'}';
+                $buffer = '';
+                continue;
+            }
+            $buffer .= $character;
         }
-        if (trim(substr($clean, $matchedBytes)) !== '') {
-            throw new RuntimeException(
-                'PAM formatter cannot format invalid scoped CSS.',
-            );
+        if ($quote !== null || $depth !== 1 || trim($buffer) !== '') {
+            throw new RuntimeException('PAM formatter cannot format invalid scoped CSS.');
         }
 
         return implode("\n", $lines);

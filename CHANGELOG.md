@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 - 2026-08-23
+
+- Added opt-in PAM Native UI Language 2 with a stable, integer-capability UI IR.
+- Added attribute-backed typed contracts for props, actions, events, slots and
+  Composer-provided tags while retaining Language 1 and `#[Expose]` compatibility.
+- Added compiled interaction states, design tokens, recipes, viewport/container
+  queries and compositor-only keyframes without a runtime CSS engine.
+- Added `Show`, strict `Match` and typed `Await` flow primitives.
+- Added compile-time stable-key and accessibility diagnostics for virtual lists
+  and meaningful images.
+- Expanded the Composer-installed language server with references, rename,
+  symbols, signatures, semantic tokens and Language 2 quick fixes.
 
 ## 0.7.0 - 2026-08-23
 

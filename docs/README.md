@@ -2,6 +2,8 @@
 
 - [PHP Runtime Manager](runtime-manager.md)
 - [Singularity architecture](singularity.md)
+- [UI Language 2](ui-language-2.md)
+- [Migrating to UI Language 2](migration-ui-language-2.md)
 
 Every public feature added to Pam Native must include a copyable example. Start
 with the focused guide below or use the [capability cookbook](examples.md) for

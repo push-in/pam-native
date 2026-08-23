@@ -7,6 +7,7 @@
             </Row>
 
             <Text class="text-primary" height="36" fontSize="18">Hello, {{ $name }}.</Text>
+            <LanguageTwoCard title="PAM Native UI Language 2" />
             <Input
                 key="name"
                 model="name"

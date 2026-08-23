@@ -1,0 +1,77 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Components;
+
+use Pam\Native\Attributes\Action;
+use Pam\Native\Attributes\Prop;
+use Pam\Native\Attributes\State;
+use Pam\Native\Attributes\Tag;
+use Pam\Native\Component;
+
+#[Tag('LanguageTwoCard')]
+final class LanguageTwoCard extends Component
+{
+    public function __construct(
+        #[Prop(required: true)]
+        public readonly string $title,
+    ) {
+    }
+
+    #[State]
+    public bool $selected = false;
+
+    #[Action]
+    public function toggle(): void
+    {
+        $this->selected = !$this->selected;
+    }
+}
+?>
+
+<template language="2">
+    <Pressable
+        class="language-two-card"
+        recipe="language-card"
+        variant:tone="brand"
+        accessibilityLabel="Toggle Language 2 showcase card"
+        @press="toggle"
+    >
+        <Column gap="8">
+            <Text fontSize="18" fontWeight="700">{{ $title }}</Text>
+            <Match value="$selected">
+                <Case value="true"><Text>Selected</Text></Case>
+                <Default><Text>Ready</Text></Default>
+            </Match>
+        </Column>
+    </Pressable>
+</template>
+
+<style scoped>
+    @tokens {
+        color.language: #4F46E5;
+        space.language: 16px;
+    }
+
+    @recipe language-card {
+        base {
+            padding: var(--space-language);
+            border-radius: 16px;
+        }
+
+        variant tone=brand {
+            background: var(--color-language);
+            color: #FFFFFF;
+        }
+    }
+
+    .language-two-card {
+        opacity: 1;
+    }
+
+    .language-two-card:pressed {
+        opacity: 0.76;
+        transform: scale(0.98);
+    }
+</style>

@@ -11,6 +11,7 @@ use Pam\Native\Attributes\Prop;
 use Pam\Native\Component;
 use Pam\Native\Renderable;
 use Pam\Native\TemplateRegistry;
+use Pam\Native\UI\Contract\ComponentContractFactory;
 use ReflectionClass;
 use RuntimeException;
 use WeakMap;
@@ -84,6 +85,27 @@ final class PamPhpRegistry
         }
 
         self::registerAutoload();
+
+        foreach ($components as $component) {
+            if ($component->language !== \Pam\Native\LanguageVersion::Language2) {
+                continue;
+            }
+            /** @var class-string<Component> $className */
+            $className = $component->className;
+            self::autoload($className);
+            TemplateRegistry::contract(
+                ComponentContractFactory::fromClass($className, $component->tag),
+            );
+        }
+
+        foreach ($components as $component) {
+            if ($component->language !== \Pam\Native\LanguageVersion::Language2) {
+                continue;
+            }
+            /** @var class-string<Component> $className */
+            $className = $component->className;
+            TemplateContractValidator::validate($className, $component->template);
+        }
     }
 
     public static function beginRender(): void

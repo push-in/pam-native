@@ -143,6 +143,7 @@ final class Counter extends Component
     #[State]
     public int $count = 0;
 
+    #[\Pam\Native\Attributes\Action]
     public function increment(): void
     {
         $this->count++;
@@ -150,7 +151,7 @@ final class Counter extends Component
 }
 ?>
 
-<template>
+<template language="2">
     <Column class="card">
         <Text class="title">Count: {{ $count }}</Text>
         <Button label="Increment" @press="increment" />
@@ -165,6 +166,13 @@ final class Counter extends Component
 
 Both styles compile to the same typed retained tree. Scoped styles become
 native properties; they are not browser CSS.
+
+Language 2 adds typed tag/event/slot contracts, native interaction states,
+compiled tokens and recipes, viewport/container queries, declarative flow and
+async branches, stable virtual-list identity, compositor keyframes,
+accessibility diagnostics, Composer-extensible tags and a full editor-neutral
+LSP. Attributes such as `#[Prop]` and `#[Action]` remain the canonical PHP API.
+Read the [UI Language 2 guide](docs/ui-language-2.md).
 
 ## Native where it matters
 
