@@ -18,6 +18,10 @@
   declared PHP 8.5 default and expose the selected immutable runtime to Gradle.
 - Accept Composer's canonical `vMAJOR.MINOR.PATCH` installed-package version
   while retaining strict SemVer validation for Native plugin compatibility.
+- Certify public Android plugins with the candidate Native CLI and the verified
+  public PAM runtime, removing the pre-release dependency on an older SDK CLI.
+- Build the candidate Rust engine for both supported Android ABIs inside the
+  aggregate plugin job instead of relying on artifacts from another workflow.
 
 - Make all four iOS, Android renderer, Android plugin API and PHP SDK release
   artifacts reproducible from the tagged commit. The release gate constructs
