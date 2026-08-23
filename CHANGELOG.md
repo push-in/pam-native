@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 0.6.78 - 2026-08-22
+
+- Make PHP 8.5 the SDK, showcase, certification and release-pipeline baseline,
+  and consume the verified PAM v2.0.7 mobile runtime by default.
+- Replace the incomplete Native CLI help summary with the complete contextual,
+  plugin, runtime, generator, Android and iOS command surface.
+- Collapse the duplicated onboarding section into one canonical Start Here flow
+  built around PAM, Composer and contextual project commands.
+- Remove the PHP SDK's implicit ctype dependency so templates and scoped styles
+  run on PAM's minimal verified PHP 8.5 extension profile.
+- Avoid PHP 8.5's null array-offset deprecation when reactive state is read
+  outside an active component render.
+- Resolve PAM 2 runtime catalogs during Android source builds, require their
+  declared PHP 8.5 default and expose the selected immutable runtime to Gradle.
+
 - Make all four iOS, Android renderer, Android plugin API and PHP SDK release
   artifacts reproducible from the tagged commit. The release gate constructs
   each artifact twice, including an isolated clean Gradle rebuild of the AAR,

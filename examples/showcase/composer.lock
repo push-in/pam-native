@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "10030698802571b62d9286e7ae7b97df",
+    "content-hash": "dc29c0a7d767ffa501ecc767dfb693d2",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -12,11 +12,11 @@
             "dist": {
                 "type": "path",
                 "url": "../community-plugin",
-                "reference": "433a28baadb065973e814630a93d78543cfc5404"
+                "reference": "9103e15f712efe20c50a25c0b11a36db6f2001b7"
             },
             "require": {
-                "php": "^8.4",
-                "pushinbr/pam-native": "^0.6.1"
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.6.78"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -40,21 +40,329 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.6.45",
+            "version": "0.6.78",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "65536b0232ba6472544d46d6b8e8d6dd048d6e28"
+                "reference": "dfc304277d158945b2d7dca3a493b075f68b01fa"
             },
             "require": {
-                "php": "^8.4"
+                "php": "^8.5"
             },
             "bin": [
+                "bin/pam-native",
                 "bin/pam-native-format",
-                "bin/pam-native-optimize"
+                "bin/pam-native-language-server",
+                "bin/pam-native-optimize",
+                "bin/pam-native-routes"
             ],
             "type": "library",
             "extra": {
+                "pam": {
+                    "commands": {
+                        "benchmark": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "benchmark"
+                            ],
+                            "description": "Benchmark the PAM Native application"
+                        },
+                        "build": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "build"
+                            ],
+                            "description": "Build the PAM Native application"
+                        },
+                        "dev": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "dev"
+                            ],
+                            "description": "Start PAM Native development"
+                        },
+                        "devices": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "devices"
+                            ],
+                            "description": "List native development targets"
+                        },
+                        "devtools": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "devtools"
+                            ],
+                            "description": "Open PAM Native development tools"
+                        },
+                        "doctor": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "doctor"
+                            ],
+                            "description": "Diagnose the PAM Native project"
+                        },
+                        "audit": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "audit"
+                            ],
+                            "description": "Audit native capabilities and platform authority"
+                        },
+                        "codegen": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "codegen"
+                            ],
+                            "description": "Generate native bindings"
+                        },
+                        "diagnostics": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "diagnostics"
+                            ],
+                            "description": "Capture PAM Native diagnostics"
+                        },
+                        "android:diagnostics": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "android:diagnostics"
+                            ],
+                            "description": "Capture Android diagnostics"
+                        },
+                        "ios:prepare": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:prepare"
+                            ],
+                            "description": "Prepare the PAM Native iOS host"
+                        },
+                        "ios:doctor": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:doctor"
+                            ],
+                            "description": "Diagnose the PAM Native iOS host"
+                        },
+                        "ios:build": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:build"
+                            ],
+                            "description": "Build the PAM Native iOS application"
+                        },
+                        "ios:run": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:run"
+                            ],
+                            "description": "Run the PAM Native iOS application"
+                        },
+                        "ios:dev": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:dev"
+                            ],
+                            "description": "Start PAM Native iOS development"
+                        },
+                        "ios:sign": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:sign"
+                            ],
+                            "description": "Inspect PAM Native iOS signing"
+                        },
+                        "ios:package": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:package"
+                            ],
+                            "description": "Package the PAM Native iOS application"
+                        },
+                        "ios:logs": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:logs"
+                            ],
+                            "description": "Stream PAM Native iOS logs"
+                        },
+                        "ios:devices": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:devices"
+                            ],
+                            "description": "List iOS development targets"
+                        },
+                        "ios:screenshot": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:screenshot"
+                            ],
+                            "description": "Capture an iOS screenshot"
+                        },
+                        "ios:devtools": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:devtools"
+                            ],
+                            "description": "Open PAM Native iOS development tools"
+                        },
+                        "ios:diagnostics": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "ios:diagnostics"
+                            ],
+                            "description": "Capture PAM Native iOS diagnostics"
+                        },
+                        "format": {
+                            "script": "bin/pam-native-format",
+                            "description": "Format PAM Native components"
+                        },
+                        "logs": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "logs"
+                            ],
+                            "description": "Inspect PAM Native application logs"
+                        },
+                        "mobile": {
+                            "bin": "bin/pam-native",
+                            "description": "Legacy alias for PAM Native tooling"
+                        },
+                        "native": {
+                            "bin": "bin/pam-native",
+                            "description": "Build, run and diagnose PAM Native applications"
+                        },
+                        "native:format": {
+                            "script": "bin/pam-native-format",
+                            "description": "Format PAM Native components"
+                        },
+                        "native:language-server": {
+                            "script": "bin/pam-native-language-server",
+                            "description": "Start the PAM Native language server"
+                        },
+                        "native:optimize": {
+                            "script": "bin/pam-native-optimize",
+                            "description": "Optimize a PAM Native application"
+                        },
+                        "native:routes": {
+                            "script": "bin/pam-native-routes",
+                            "description": "Inspect PAM Native routes"
+                        },
+                        "make:component": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "make:component"
+                            ],
+                            "description": "Generate a PAM Native component"
+                        },
+                        "make:native-view": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "make:native-view"
+                            ],
+                            "description": "Generate a PAM Native platform view"
+                        },
+                        "make:screen": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "make:screen"
+                            ],
+                            "description": "Generate a PAM Native screen"
+                        },
+                        "package": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "package"
+                            ],
+                            "description": "Package the PAM Native application"
+                        },
+                        "prepare": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "prepare"
+                            ],
+                            "description": "Prepare the PAM Native Android host"
+                        },
+                        "profile": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "profile"
+                            ],
+                            "description": "Profile the PAM Native application"
+                        },
+                        "run": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "run"
+                            ],
+                            "description": "Run the PAM Native application"
+                        },
+                        "sign": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "sign"
+                            ],
+                            "description": "Validate PAM Native release signing"
+                        },
+                        "screenshot": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "screenshot"
+                            ],
+                            "description": "Capture a native device screenshot"
+                        },
+                        "plugin:list": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "plugin:list"
+                            ],
+                            "description": "List installed PAM Native plugins"
+                        },
+                        "plugin:doctor": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "plugin:doctor"
+                            ],
+                            "description": "Diagnose installed PAM Native plugins"
+                        },
+                        "runtime:list": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "runtime:list"
+                            ],
+                            "description": "List installed native runtimes"
+                        },
+                        "runtime:info": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "runtime:info"
+                            ],
+                            "description": "Inspect the selected native runtime"
+                        },
+                        "runtime:use": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "runtime:use"
+                            ],
+                            "description": "Select a native runtime"
+                        },
+                        "runtime:install": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "runtime:install"
+                            ],
+                            "description": "Install the selected native runtime"
+                        },
+                        "runtime:update": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "runtime:update"
+                            ],
+                            "description": "Update the selected native runtime"
+                        }
+                    }
+                },
                 "pam-native": {
                     "manifest-schema": "resources/pam-native.schema.json",
                     "plugin-schema": "resources/pam-native.plugin.schema.json",
@@ -96,7 +404,7 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": "^8.4"
+        "php": "^8.5"
     },
     "platform-dev": {},
     "plugin-api-version": "2.6.0"

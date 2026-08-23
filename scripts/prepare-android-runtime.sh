@@ -3,7 +3,7 @@
 set -euo pipefail
 
 repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
-runtime_tag=${PAM_RUNTIME_RELEASE_TAG:-v0.1.32}
+runtime_tag=${PAM_RUNTIME_RELEASE_TAG:-v2.0.7}
 runtime_repository=${PAM_RUNTIME_REPOSITORY:-push-in/pam}
 
 if [[ ! ${runtime_tag} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -11,7 +11,7 @@ if [[ ! ${runtime_tag} =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
-for command in cargo curl rustup sha256sum tar; do
+for command in cargo curl python3 rustup sha256sum tar; do
     if ! command -v "${command}" >/dev/null 2>&1; then
         echo "Missing required command: ${command}" >&2
         exit 1
@@ -67,6 +67,29 @@ done < <(tar -tzf "${temporary_directory}/${asset}")
 
 tar -xzf "${temporary_directory}/${asset}" -C "${repository_root}"
 
+catalog="${repository_root}/runtime/catalog.json"
+runtime_id=$(python3 - "${catalog}" <<'PY'
+import json
+import pathlib
+import sys
+
+catalog = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+if catalog.get("schemaVersion") != 1:
+    raise SystemExit("Unsupported PAM runtime catalog schema")
+series = catalog.get("default")
+runtime_id = catalog.get("channels", {}).get(series)
+release = catalog.get("releases", {}).get(runtime_id, {})
+if series != "8.5" or not str(release.get("phpVersion", "")).startswith("8.5."):
+    raise SystemExit("The PAM Android runtime default must be PHP 8.5")
+print(runtime_id)
+PY
+)
+runtime_root="${repository_root}/runtime/android/${runtime_id}"
+for abi in arm64-v8a x86_64; do
+    test -f "${runtime_root}/${abi}/lib/libphp.a"
+    cp -a "${runtime_root}/${abi}" "${repository_root}/runtime/android/${abi}"
+done
+
 rustup target add aarch64-linux-android x86_64-linux-android
 
 ndk_bin="${ndk_root}/toolchains/llvm/prebuilt/${ndk_host}/bin"
@@ -91,4 +114,4 @@ test -f "${repository_root}/runtime/android/x86_64/lib/libphp.a"
 test -f "${repository_root}/target/aarch64-linux-android/release/libpam_native_engine.a"
 test -f "${repository_root}/target/x86_64-linux-android/release/libpam_native_engine.a"
 
-echo "Android runtime ${runtime_tag} and native engine are ready."
+echo "Android runtime ${runtime_tag}/${runtime_id} and native engine are ready."

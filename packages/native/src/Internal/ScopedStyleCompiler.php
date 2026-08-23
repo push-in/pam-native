@@ -903,7 +903,7 @@ final class ScopedStyleCompiler
                     throw new RuntimeException("Invalid CSS value in {$name}.");
                 }
             }
-            if (ctype_space($character) && $depth === 0) {
+            if (self::isAsciiWhitespace($character) && $depth === 0) {
                 if ($start !== null) {
                     $parts[] = substr($value, $start, $index - $start);
                     $start = null;
@@ -920,6 +920,16 @@ final class ScopedStyleCompiler
         }
 
         return $parts;
+    }
+
+    private static function isAsciiWhitespace(string $character): bool
+    {
+        return $character === ' '
+            || $character === "\t"
+            || $character === "\n"
+            || $character === "\r"
+            || $character === "\f"
+            || $character === "\v";
     }
 
     private static function containsTopLevelComma(string $value): bool

@@ -41,7 +41,8 @@ final class DependencyTracker
 
     public static function read(object $source, string $key): void
     {
-        $component = self::$stack[array_key_last(self::$stack)] ?? null;
+        $last = array_key_last(self::$stack);
+        $component = $last === null ? null : self::$stack[$last];
         if (!$component instanceof Component) {
             return;
         }

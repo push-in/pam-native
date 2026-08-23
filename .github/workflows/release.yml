@@ -11,7 +11,7 @@ permissions:
   attestations: write
 
 env:
-  PAM_RUNTIME_RELEASE_TAG: v0.1.32
+  PAM_RUNTIME_RELEASE_TAG: v2.0.7
 
 defaults:
   run:

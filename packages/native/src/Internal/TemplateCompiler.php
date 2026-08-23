@@ -378,7 +378,7 @@ final class TemplateCompiler
             }
             if (
                 $nameOffset >= $length
-                || !ctype_alpha($source[$nameOffset])
+                || !self::isAsciiLetter($source[$nameOffset])
             ) {
                 continue;
             }
@@ -424,6 +424,12 @@ final class TemplateCompiler
         }
 
         return $tokens;
+    }
+
+    private static function isAsciiLetter(string $character): bool
+    {
+        return ($character >= 'A' && $character <= 'Z')
+            || ($character >= 'a' && $character <= 'z');
     }
 
     /** @param list<CompiledTemplateNode> $stack */

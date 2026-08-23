@@ -5,7 +5,7 @@
     "name": "PAM Native Ecosystem Certification",
     "entry": "index.php",
     "runtime": {
-        "php": "8.4",
+        "php": "8.5",
         "channel": "stable"
     },
     "android": {

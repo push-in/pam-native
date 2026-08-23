@@ -4,8 +4,8 @@
     "type": "project",
     "license": "Apache-2.0",
     "require": {
-        "php": "^8.4",
-    "pushinbr/pam-native": "^0.6.1",
+        "php": "^8.5",
+        "pushinbr/pam-native": "^0.6.78",
         "pam-community/example-plugin": "^0.1"
     },
     "repositories": [
@@ -15,7 +15,7 @@
             "options": {
                 "symlink": false,
                 "versions": {
-          "pushinbr/pam-native": "0.6.45"
+                    "pushinbr/pam-native": "0.6.78"
                 }
             }
         },
