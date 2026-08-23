@@ -8,20 +8,20 @@
     "packages": [
         {
             "name": "pushinbr/pam-native",
-            "version": "v0.6.77",
+            "version": "v0.6.78",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-php.git",
-                "reference": "1ed215809cdc52db75460d9c63d4627ea6bb2007"
+                "reference": "749f07974ae419826fc619005c7e88bb68d73b6d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-php/zipball/1ed215809cdc52db75460d9c63d4627ea6bb2007",
-                "reference": "1ed215809cdc52db75460d9c63d4627ea6bb2007",
+                "url": "https://api.github.com/repos/push-in/pam-native-php/zipball/749f07974ae419826fc619005c7e88bb68d73b6d",
+                "reference": "749f07974ae419826fc619005c7e88bb68d73b6d",
                 "shasum": ""
             },
             "require": {
-                "php": "^8.4"
+                "php": "^8.5"
             },
             "bin": [
                 "bin/pam-native",
@@ -366,7 +366,7 @@
                 "issues": "https://github.com/push-in/pam-native/issues",
                 "source": "https://github.com/push-in/pam-native"
             },
-            "time": "2026-08-22T01:05:32+00:00"
+            "time": "2026-08-23T02:45:09+00:00"
         },
         {
             "name": "pushinbr/pam-native-auth",
