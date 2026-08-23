@@ -11,6 +11,14 @@
         {
             "type": "vcs",
             "url": "https://github.com/push-in/pam-native-canvas.git"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/push-in/pam-native-gpu.git"
+        },
+        {
+            "type": "vcs",
+            "url": "https://github.com/push-in/pam-native-3d.git"
         }
     ],
     "require": {
@@ -21,6 +29,8 @@
     "pushinbr/pam-native-bluetooth": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-camera": "^0.1.0",
     "pushinbr/pam-native-canvas": "dev-main as 0.1.0",
+    "pushinbr/pam-native-gpu": "dev-main as 0.1.0",
+    "pushinbr/pam-native-3d": "dev-main as 0.1.0",
     "pushinbr/pam-native-feature-flags": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-firebase": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-health": ">=0.1.0 <1.0.0",
