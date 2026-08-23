@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "d72e0efefa06e0ea3046750b7592ab33",
+    "content-hash": "f00002c32ae1585d26e9ee067bf758b9",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -382,16 +382,16 @@
         },
         {
             "name": "pushinbr/pam-native-3d",
-            "version": "dev-main",
+            "version": "v0.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-3d.git",
-                "reference": "784b6c10525084be60a21e6257b83a0794f689dd"
+                "reference": "b55d3cf5abdea571c56cd2e33c04823315e922ab"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-3d/zipball/784b6c10525084be60a21e6257b83a0794f689dd",
-                "reference": "784b6c10525084be60a21e6257b83a0794f689dd",
+                "url": "https://api.github.com/repos/push-in/pam-native-3d/zipball/b55d3cf5abdea571c56cd2e33c04823315e922ab",
+                "reference": "b55d3cf5abdea571c56cd2e33c04823315e922ab",
                 "shasum": ""
             },
             "require": {
@@ -402,7 +402,6 @@
                 "phpstan/phpstan": "^2.1",
                 "pushinbr/pam-native-plugin-kit": "^0.2.0"
             },
-            "default-branch": true,
             "type": "pam-native-plugin",
             "extra": {
                 "pam-native": {
@@ -414,20 +413,16 @@
                     "Pam\\Native\\ThreeD\\": "src/"
                 }
             },
-            "scripts": {
-                "test": [
-                    "php tests/run.php"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "Apache-2.0"
             ],
             "description": "Native Filament and RealityKit real-time 3D scenes for PAM Native.",
             "support": {
-                "source": "https://github.com/push-in/pam-native-3d/tree/main",
-                "issues": "https://github.com/push-in/pam-native-3d/issues"
+                "issues": "https://github.com/push-in/pam-native-3d/issues",
+                "source": "https://github.com/push-in/pam-native-3d/tree/v0.1.0"
             },
-            "time": "2026-08-23T19:17:04+00:00"
+            "time": "2026-08-23T19:28:23+00:00"
         },
         {
             "name": "pushinbr/pam-native-auth",
@@ -598,7 +593,7 @@
         },
         {
             "name": "pushinbr/pam-native-canvas",
-            "version": "dev-main",
+            "version": "v0.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-canvas.git",
@@ -618,7 +613,6 @@
                 "phpstan/phpstan": "^2.1",
                 "pushinbr/pam-native-plugin-kit": "^0.2.0"
             },
-            "default-branch": true,
             "type": "pam-native-plugin",
             "extra": {
                 "pam-native": {
@@ -630,18 +624,14 @@
                     "Pam\\Native\\Canvas\\": "src/"
                 }
             },
-            "scripts": {
-                "test": [
-                    "php tests/run.php"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "Apache-2.0"
             ],
             "description": "Retained-mode native 2D canvas for PAM Native.",
             "support": {
-                "source": "https://github.com/push-in/pam-native-canvas/tree/main",
-                "issues": "https://github.com/push-in/pam-native-canvas/issues"
+                "issues": "https://github.com/push-in/pam-native-canvas/issues",
+                "source": "https://github.com/push-in/pam-native-canvas/tree/v0.1.0"
             },
             "time": "2026-08-23T19:08:37+00:00"
         },
@@ -734,7 +724,7 @@
         },
         {
             "name": "pushinbr/pam-native-gpu",
-            "version": "dev-main",
+            "version": "v0.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-gpu.git",
@@ -754,7 +744,6 @@
                 "phpstan/phpstan": "^2.1",
                 "pushinbr/pam-native-plugin-kit": "^0.2.0"
             },
-            "default-branch": true,
             "type": "pam-native-plugin",
             "extra": {
                 "pam-native": {
@@ -766,18 +755,14 @@
                     "Pam\\Native\\Gpu\\": "src/"
                 }
             },
-            "scripts": {
-                "test": [
-                    "php tests/run.php"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "Apache-2.0"
             ],
             "description": "Native Metal and OpenGL ES GPU surfaces for PAM Native.",
             "support": {
-                "source": "https://github.com/push-in/pam-native-gpu/tree/main",
-                "issues": "https://github.com/push-in/pam-native-gpu/issues"
+                "issues": "https://github.com/push-in/pam-native-gpu/issues",
+                "source": "https://github.com/push-in/pam-native-gpu/tree/v0.1.0"
             },
             "time": "2026-08-23T19:02:18+00:00"
         },
@@ -986,7 +971,7 @@
         },
         {
             "name": "pushinbr/pam-native-media-editor",
-            "version": "dev-main",
+            "version": "v0.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-media-editor.git",
@@ -1006,7 +991,6 @@
                 "phpstan/phpstan": "^2.1",
                 "pushinbr/pam-native-plugin-kit": "^0.2.0"
             },
-            "default-branch": true,
             "type": "pam-native-plugin",
             "extra": {
                 "pam-native": {
@@ -1018,18 +1002,14 @@
                     "Pam\\Native\\MediaEditor\\": "src/"
                 }
             },
-            "scripts": {
-                "test": [
-                    "php tests/run.php"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "Apache-2.0"
             ],
             "description": "Non-destructive native media timelines, effects and export for PAM Native.",
             "support": {
-                "source": "https://github.com/push-in/pam-native-media-editor/tree/main",
-                "issues": "https://github.com/push-in/pam-native-media-editor/issues"
+                "issues": "https://github.com/push-in/pam-native-media-editor/issues",
+                "source": "https://github.com/push-in/pam-native-media-editor/tree/v0.1.0"
             },
             "time": "2026-08-23T18:56:08+00:00"
         },
@@ -1362,39 +1342,9 @@
         }
     ],
     "packages-dev": [],
-    "aliases": [
-        {
-            "package": "pushinbr/pam-native-3d",
-            "version": "dev-main",
-            "alias": "0.1.0",
-            "alias_normalized": "0.1.0.0"
-        },
-        {
-            "package": "pushinbr/pam-native-canvas",
-            "version": "dev-main",
-            "alias": "0.1.0",
-            "alias_normalized": "0.1.0.0"
-        },
-        {
-            "package": "pushinbr/pam-native-gpu",
-            "version": "dev-main",
-            "alias": "0.1.0",
-            "alias_normalized": "0.1.0.0"
-        },
-        {
-            "package": "pushinbr/pam-native-media-editor",
-            "version": "dev-main",
-            "alias": "0.1.0",
-            "alias_normalized": "0.1.0.0"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {
-        "pushinbr/pam-native-3d": 20,
-        "pushinbr/pam-native-canvas": 20,
-        "pushinbr/pam-native-gpu": 20,
-        "pushinbr/pam-native-media-editor": 20
-    },
+    "stability-flags": {},
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {

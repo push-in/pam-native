@@ -3,24 +3,6 @@
     "description": "Public aggregate Android build for the official PAM Native plugins.",
     "type": "project",
     "license": "Apache-2.0",
-    "repositories": [
-        {
-            "type": "vcs",
-            "url": "https://github.com/push-in/pam-native-media-editor.git"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/push-in/pam-native-canvas.git"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/push-in/pam-native-gpu.git"
-        },
-        {
-            "type": "vcs",
-            "url": "https://github.com/push-in/pam-native-3d.git"
-        }
-    ],
     "require": {
         "php": "^8.5",
         "pushinbr/pam-native": ">=0.6.1 <1.0.0",
@@ -28,9 +10,9 @@
     "pushinbr/pam-native-background-transfer": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-bluetooth": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-camera": "^0.1.0",
-    "pushinbr/pam-native-canvas": "dev-main as 0.1.0",
-    "pushinbr/pam-native-gpu": "dev-main as 0.1.0",
-    "pushinbr/pam-native-3d": "dev-main as 0.1.0",
+    "pushinbr/pam-native-canvas": "^0.1.0",
+    "pushinbr/pam-native-gpu": "^0.1.0",
+    "pushinbr/pam-native-3d": "^0.1.0",
     "pushinbr/pam-native-feature-flags": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-firebase": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-health": ">=0.1.0 <1.0.0",
@@ -38,7 +20,7 @@
     "pushinbr/pam-native-live-activities": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-maps": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-media": ">=0.1.0 <1.0.0",
-    "pushinbr/pam-native-media-editor": "dev-main as 0.1.0",
+    "pushinbr/pam-native-media-editor": "^0.1.0",
     "pushinbr/pam-native-nfc": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-payments": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-realtime": ">=0.1.0 <1.0.0",
