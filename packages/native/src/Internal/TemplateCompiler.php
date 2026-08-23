@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\LanguageVersion;
 use RuntimeException;
 
 final class TemplateCompiler
@@ -63,6 +64,7 @@ final class TemplateCompiler
     public static function compile(
         string $source,
         string $name = '<memory>',
+        LanguageVersion $language = LanguageVersion::Language1,
     ): CompiledTemplateNode
     {
         if (strlen($source) > self::MAX_TEMPLATE_BYTES) {
@@ -152,12 +154,15 @@ final class TemplateCompiler
             );
         }
 
-        self::validateContracts($root);
+        self::validateContracts($root, $language);
 
         return $root;
     }
 
-    private static function validateContracts(CompiledTemplateNode $node): void
+    private static function validateContracts(
+        CompiledTemplateNode $node,
+        LanguageVersion $language,
+    ): void
     {
         $forAttribute = self::directiveAttribute($node, 'p-for', 'v-for');
         if ($forAttribute !== null) {
@@ -184,9 +189,91 @@ final class TemplateCompiler
             }
         }
 
-        foreach ($node->children as $child) {
-            self::validateContracts($child);
+        if ($language === LanguageVersion::Language2) {
+            self::validateLanguage2($node);
         }
+
+        foreach ($node->children as $child) {
+            self::validateContracts($child, $language);
+        }
+    }
+
+    private static function validateLanguage2(CompiledTemplateNode $node): void
+    {
+        if (
+            in_array($node->name, ['VirtualizedList', 'VirtualGrid'], true)
+            && self::containsLoop($node)
+            && !self::loopHasStableKey($node)
+        ) {
+            throw new RuntimeException(
+                "PAM2201 virtualized loops require p-key at {$node->source}:{$node->line}:{$node->column}.",
+            );
+        }
+
+        if ($node->name === 'Image') {
+            $decorative = ($node->attributes['decorative'] ?? false) === true
+                || ($node->attributes['decorative'] ?? '') === 'true';
+            if (!$decorative && !isset($node->attributes['accessibilityLabel'])) {
+                throw new RuntimeException(
+                    "PAM2301 Image requires accessibilityLabel or decorative=\"true\" at {$node->source}:{$node->line}:{$node->column}.",
+                );
+            }
+        }
+
+        if ($node->name === 'Match') {
+            $defaults = 0;
+            foreach ($node->children as $child) {
+                if ($child->kind !== 1 || !in_array($child->name, ['Case', 'Default'], true)) {
+                    throw new RuntimeException('PAM2202 Match accepts only Case and Default children.');
+                }
+                $defaults += $child->name === 'Default' ? 1 : 0;
+            }
+            if ($defaults > 1) {
+                throw new RuntimeException('PAM2203 Match accepts at most one Default child.');
+            }
+        }
+
+        if ($node->name === 'Await') {
+            $allowed = ['Pending', 'Content', 'Empty', 'Error', 'Offline', 'Stale', 'Default'];
+            $seen = [];
+            foreach ($node->children as $child) {
+                if ($child->kind !== 1 || !in_array($child->name, $allowed, true)) {
+                    throw new RuntimeException('PAM2204 Await contains an unsupported state branch.');
+                }
+                if (isset($seen[$child->name])) {
+                    throw new RuntimeException("PAM2205 Await state {$child->name} is declared twice.");
+                }
+                $seen[$child->name] = true;
+            }
+        }
+    }
+
+    private static function containsLoop(CompiledTemplateNode $node): bool
+    {
+        foreach ($node->children as $child) {
+            if (self::hasDirective($child, 'p-for', 'v-for') || self::containsLoop($child)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static function loopHasStableKey(CompiledTemplateNode $node): bool
+    {
+        foreach ($node->children as $child) {
+            if (
+                self::hasDirective($child, 'p-for', 'v-for')
+                && isset($child->attributes['p-key'])
+            ) {
+                return true;
+            }
+            if (self::loopHasStableKey($child)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

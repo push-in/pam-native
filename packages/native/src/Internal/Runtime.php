@@ -50,6 +50,7 @@ final class Runtime
     private static ?TreeEncoder $encoder = null;
     private static bool $rendering = false;
     private static bool $renderRequested = false;
+    private static WindowMetrics $windowMetrics;
 
     private function __construct()
     {
@@ -69,6 +70,11 @@ final class Runtime
         } catch (Throwable $error) {
             self::reportError($error);
         }
+    }
+
+    public static function windowMetrics(): WindowMetrics
+    {
+        return self::$windowMetrics ??= new WindowMetrics(0.0, 0.0, 1.0);
     }
 
     public static function render(): void
@@ -184,14 +190,15 @@ final class Runtime
             }
             if ($eventKind === EventKind::Dimensions->value) {
                 $values = Wire::decodeMap($payload);
-                self::$dimensionsHandler?->__invoke(new WindowMetrics(
+                self::$windowMetrics = new WindowMetrics(
                     width: (float) ($values['width'] ?? 0.0),
                     height: (float) ($values['height'] ?? 0.0),
                     density: (float) ($values['density'] ?? 1.0),
                     appearance: UserInterfaceAppearance::tryFrom(
                         (int) ($values['appearance'] ?? UserInterfaceAppearance::Light->value),
                     ) ?? UserInterfaceAppearance::Light,
-                ));
+                );
+                self::$dimensionsHandler?->__invoke(self::$windowMetrics);
                 self::render();
 
                 return;
@@ -338,6 +345,7 @@ final class Runtime
         self::$encoder = null;
         self::$rendering = false;
         self::$renderRequested = false;
+        self::$windowMetrics = new WindowMetrics(0.0, 0.0, 1.0);
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();
         Stores::resetRuntime();

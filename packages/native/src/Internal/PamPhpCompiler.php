@@ -11,6 +11,8 @@ use RecursiveIteratorIterator;
 use RuntimeException;
 use SplFileInfo;
 use Pam\Native\BuildConfiguration;
+use Pam\Native\LanguageVersion;
+use Pam\Native\UI\Ir\UiIr;
 
 final class PamPhpCompiler
 {
@@ -110,7 +112,7 @@ final class PamPhpCompiler
             );
         }
 
-        [$php, $template, $templateLine, $style] = self::split($contents, $source);
+        [$php, $template, $templateLine, $style, $language] = self::split($contents, $source);
         $style = self::resolvedStyleSheet($style, $source);
         self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
@@ -134,6 +136,7 @@ final class PamPhpCompiler
             $tree = TemplateCompiler::compile(
                 str_repeat("\n", max(0, $templateLine - 1)).$template,
                 $source,
+                $language,
             );
             if ($style !== '') {
                 $tree = self::withStyleSheet(
@@ -148,7 +151,9 @@ final class PamPhpCompiler
                     JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
                 );
                 $encodedMetadata = json_encode([
-                    'version' => 3,
+                    'version' => 4,
+                    'language' => $language->value,
+                    'uiIr' => UiIr::manifest($language),
                     'hash' => $hash,
                     'class' => $className,
                     'tag' => $tag,
@@ -170,6 +175,7 @@ final class PamPhpCompiler
             source: $source,
             classFile: $classFile,
             template: $tree,
+            language: $language,
         );
     }
 
@@ -243,7 +249,7 @@ final class PamPhpCompiler
         }
     }
 
-    /** @return array{string, string, int, string} */
+    /** @return array{string, string, int, string, LanguageVersion} */
     private static function split(string $source, string $name): array
     {
         $tokens = token_get_all($source);
@@ -276,7 +282,7 @@ final class PamPhpCompiler
         $match = [];
 
         if (preg_match(
-            '/\A\s*<template(?:\s[^>]*)?>([\s\S]*?)<\/template>'
+            '/\A\s*<template(?:\s+([^>]*))?>([\s\S]*?)<\/template>'
             .'\s*(?:<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
             $markup,
             $match,
@@ -286,15 +292,27 @@ final class PamPhpCompiler
                 "PAM component {$name} must contain exactly one root <template> block.",
             );
         }
-        $capture = $match[1];
-        $style = is_array($match[2] ?? null)
-            ? (string) ($match[2][0] ?? '')
+        $templateAttributes = is_array($match[1] ?? null)
+            ? (string) ($match[1][0] ?? '')
             : '';
+        $capture = $match[2];
+        $style = is_array($match[3] ?? null)
+            ? (string) ($match[3][0] ?? '')
+            : '';
+
+        $language = LanguageVersion::Language1;
+        if (preg_match('/(?:language|version)\s*=\s*(["\'])2\1/D', trim($templateAttributes)) === 1) {
+            $language = LanguageVersion::Language2;
+        } elseif (trim($templateAttributes) !== '') {
+            throw new RuntimeException(
+                "PAM component {$name} has unsupported template attributes; use language=\"2\".",
+            );
+        }
 
         $templateOffset = $closeOffset + $closeLength + $capture[1];
         $templateLine = substr_count(substr($source, 0, $templateOffset), "\n") + 1;
 
-        return [$php, $capture[0], $templateLine, $style];
+        return [$php, $capture[0], $templateLine, $style, $language];
     }
 
     /**
@@ -400,9 +418,18 @@ final class PamPhpCompiler
             );
         }
 
+        $tag = $class;
+        if (preg_match(
+            '/#\[\s*(?:(?:[A-Za-z_][A-Za-z0-9_]*\\\\)*)Tag\s*\(\s*(?:name\s*:\s*)?(["\'])([A-Za-z][A-Za-z0-9_.-]{0,127})\1\s*\)\s*\]/D',
+            $php,
+            $tagMatch,
+        ) === 1) {
+            $tag = $tagMatch[2];
+        }
+
         return [
             $namespace === '' ? $class : $namespace.'\\'.$class,
-            $class,
+            $tag,
         ];
     }
 
@@ -461,7 +488,7 @@ final class PamPhpCompiler
 
         if (
             !is_array($metadata)
-            || ($metadata['version'] ?? null) !== 3
+            || ($metadata['version'] ?? null) !== 4
             || ($metadata['hash'] ?? null) !== $hash
             || ($metadata['class'] ?? null) !== $className
         ) {

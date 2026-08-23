@@ -19,6 +19,9 @@ use Pam\Native\AnimationEasing;
 use Pam\Native\AnimationFillMode;
 use Pam\Native\AnimationKeyframe;
 use Pam\Native\AnimationPlayState;
+use Pam\Native\AsyncResource;
+use Pam\Native\AsyncStatus;
+use Pam\Native\AsyncValue;
 use Pam\Native\BottomSheetKeyboardBehavior;
 use Pam\Native\Component;
 use Pam\Native\DrawingMode;
@@ -66,6 +69,7 @@ use Pam\Native\UI\Animated;
 use Pam\Native\UI\Button;
 use Pam\Native\UI\BottomSheet;
 use Pam\Native\UI\Column;
+use Pam\Native\UI\Contract\ContractValidator;
 use Pam\Native\UI\CustomView;
 use Pam\Native\UI\DrawerLayoutAndroid;
 use Pam\Native\UI\DrawingCanvas;
@@ -585,18 +589,40 @@ final class TemplateRenderer
                         'p-for source must resolve to an integer, array, or Traversable.',
                     );
                 }
-                $loopNode = self::withoutAttributes($node, ['p-for']);
+                $keyExpression = $attributes['p-key'] ?? null;
+                $indexName = $attributes['p-index'] ?? $match[1].'Index';
+                if (!is_string($indexName) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', ltrim($indexName, '$')) !== 1) {
+                    throw new RuntimeException('p-index must be a safe variable name.');
+                }
+                $indexName = ltrim($indexName, '$');
+                $loopNode = self::withoutAttributes($node, ['p-for', 'p-key', 'p-index']);
+                $seenKeys = [];
                 foreach ($items as $itemIndex => $item) {
+                    $iterationData = [
+                        ...$nodeData,
+                        $match[1] => $item,
+                        $indexName => $itemIndex,
+                    ];
+                    $identity = $itemIndex;
+                    if ($keyExpression !== null) {
+                        $identity = self::dynamicValue($keyExpression, $scope, $iterationData);
+                        if (!is_string($identity) && !is_int($identity)) {
+                            throw new RuntimeException('p-key must resolve to a string or integer.');
+                        }
+                        $fingerprint = get_debug_type($identity).':'.(string) $identity;
+                        if (isset($seenKeys[$fingerprint])) {
+                            throw new RuntimeException("Duplicate p-key {$identity} in loop.");
+                        }
+                        $seenKeys[$fingerprint] = true;
+                    }
                     array_push(
                         $output,
                         ...self::nodes([$loopNode], $scope, [
-                            ...$nodeData,
-                            $match[1] => $item,
-                            $match[1].'Index' => $itemIndex,
+                            ...$iterationData,
                             '__pamNodePath' =>
                                 self::pathValue(
                                     $nodeData['__pamNodePath'] ?? 'root',
-                                ).'.'.(string) $itemIndex,
+                                ).'.'.(string) $identity,
                         ]),
                     );
                 }
@@ -653,6 +679,83 @@ final class TemplateRenderer
                     array_push($output, ...self::nodes($children, $scope, $nodeData));
                 }
 
+                continue;
+            }
+
+            if ($tag === 'Show') {
+                $condition = self::value(
+                    $attributes['when'] ?? $attributes['condition'] ?? false,
+                    $scope,
+                    $nodeData,
+                );
+                if ((bool) $condition) {
+                    array_push($output, ...self::nodes($children, $scope, $nodeData));
+                }
+                continue;
+            }
+
+            if ($tag === 'Match') {
+                $subject = self::value($attributes['value'] ?? null, $scope, $nodeData);
+                $fallback = null;
+                foreach ($children as $candidate) {
+                    if ($candidate->kind !== 1) {
+                        continue;
+                    }
+                    if ($candidate->name === 'Default') {
+                        $fallback = $candidate;
+                        continue;
+                    }
+                    if ($candidate->name !== 'Case') {
+                        throw new RuntimeException('Match accepts only Case and Default children.');
+                    }
+                    $case = self::value($candidate->attributes['value'] ?? null, $scope, $nodeData);
+                    if ($subject === $case) {
+                        array_push($output, ...self::nodes($candidate->children, $scope, $nodeData));
+                        continue 2;
+                    }
+                }
+                if ($fallback !== null) {
+                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData));
+                }
+                continue;
+            }
+
+            if ($tag === 'Await') {
+                $resource = self::value($attributes['value'] ?? null, $scope, $nodeData);
+                $async = $resource instanceof AsyncResource ? $resource->value() : $resource;
+                if (!$async instanceof AsyncValue) {
+                    throw new RuntimeException('Await value must resolve to AsyncResource or AsyncValue.');
+                }
+                $branch = match ($async->status) {
+                    AsyncStatus::Loading => 'Pending',
+                    AsyncStatus::Content => 'Content',
+                    AsyncStatus::Empty => 'Empty',
+                    AsyncStatus::Error => 'Error',
+                    AsyncStatus::Offline => 'Offline',
+                    AsyncStatus::Stale => 'Stale',
+                };
+                $fallback = null;
+                foreach ($children as $candidate) {
+                    if ($candidate->kind !== 1) {
+                        continue;
+                    }
+                    if ($candidate->name === 'Default') {
+                        $fallback = $candidate;
+                    }
+                    if ($candidate->name !== $branch) {
+                        continue;
+                    }
+                    array_push($output, ...self::nodes($candidate->children, $scope, [
+                        ...$nodeData,
+                        'data' => $async->data,
+                        'message' => $async->message,
+                        'retryable' => $async->retryable,
+                    ]));
+                    continue 2;
+                }
+                if ($fallback !== null) {
+                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData));
+                }
                 continue;
             }
 
@@ -794,7 +897,13 @@ final class TemplateRenderer
         }
         $attributes = [
             ...$inheritedStyles,
-            ...self::scopedStyleAttributes($tag, $resolvedClass, $data),
+            ...self::scopedStyleAttributes(
+                $tag,
+                $resolvedClass,
+                $data,
+                $attributes,
+                $scope,
+            ),
             ...$attributes,
         ];
         $unresolvedStyleAttributes = $attributes;
@@ -829,6 +938,8 @@ final class TemplateRenderer
                 isset(self::EVENTS[$name])
                 || $name === 'class'
                 || $name === ':class'
+                || $name === 'recipe'
+                || str_starts_with($name, 'variant:')
                 || $name === 'p-ripple'
                 || $name === ':p-ripple'
                 || str_starts_with($name, '@')
@@ -944,6 +1055,12 @@ final class TemplateRenderer
         }
         $childData = [
             ...$data,
+            '__pamContainerWidth' => is_numeric($values['width'] ?? null)
+                ? (float) $values['width']
+                : ($data['__pamContainerWidth'] ?? null),
+            '__pamContainerHeight' => is_numeric($values['height'] ?? null)
+                ? (float) $values['height']
+                : ($data['__pamContainerHeight'] ?? null),
             '__pamInheritedStyles' => self::inheritedStyleAttributes(
                 $values,
                 $unresolvedStyleAttributes,
@@ -992,6 +1109,35 @@ final class TemplateRenderer
         }
         if ($text !== '') {
             $values['text'] ??= $text;
+        }
+        if ($tag === 'Animated' && isset($values['animation'])) {
+            $animation = self::stringValue($values['animation'], 'Animated animation');
+            $keyframes = $data['__pamStyles']['keyframes'][$animation] ?? null;
+            if (!is_array($keyframes)) {
+                throw new RuntimeException("Unknown PAM keyframes {$animation}.");
+            }
+            $values['keyframes'] = array_map(
+                static fn (array $frame): array => [
+                    'offset' => $frame['offset'] ?? 0.0,
+                    ...(is_array($frame['styles'] ?? null) ? $frame['styles'] : []),
+                ],
+                $keyframes,
+            );
+            unset($values['animation']);
+        }
+        $contract = $factory !== null ? TemplateRegistry::tagContract($tag) : null;
+        if ($contract !== null) {
+            ContractValidator::validate(
+                $contract,
+                array_filter(
+                    $componentValues,
+                    static fn (string $name): bool =>
+                        !str_starts_with($name, '__pam') && $name !== 'className',
+                    ARRAY_FILTER_USE_KEY,
+                ),
+                $slots,
+                $componentEvents,
+            );
         }
         if ($factory !== null && $inheritedVariants !== []) {
             $componentValues['__parentVariants'] = $inheritedVariants;
@@ -2317,7 +2463,33 @@ final class TemplateRenderer
             'tags' => $tags,
             'classCascade' => $classCascade,
             'fonts' => $fonts,
+            'tokens' => self::safeStyleMetadata($decoded['tokens'] ?? [], $tree->source),
+            'states' => self::safeStyleMetadata($decoded['states'] ?? [], $tree->source),
+            'recipes' => self::safeStyleMetadata($decoded['recipes'] ?? [], $tree->source),
+            'queries' => self::safeStyleMetadata($decoded['queries'] ?? [], $tree->source),
+            'keyframes' => self::safeStyleMetadata($decoded['keyframes'] ?? [], $tree->source),
         ];
+    }
+
+    private static function safeStyleMetadata(mixed $value, string $source, int $depth = 0): array
+    {
+        if (!is_array($value) || $depth > 12 || count($value) > 10_000) {
+            throw new RuntimeException("Invalid Language 2 style IR in {$source}.");
+        }
+        $safe = [];
+        foreach ($value as $key => $entry) {
+            if (!is_string($key) && !is_int($key)) {
+                throw new RuntimeException("Invalid Language 2 style IR key in {$source}.");
+            }
+            if (is_array($entry)) {
+                $safe[$key] = self::safeStyleMetadata($entry, $source, $depth + 1);
+            } elseif (is_string($entry) || is_int($entry) || is_float($entry) || is_bool($entry) || $entry === null) {
+                $safe[$key] = $entry;
+            } else {
+                throw new RuntimeException("Invalid Language 2 style IR value in {$source}.");
+            }
+        }
+        return $safe;
     }
 
     /**
@@ -2340,11 +2512,14 @@ final class TemplateRenderer
         string $tag,
         ?string $classes,
         array $data,
+        array $rawAttributes,
+        ?object $scope,
     ): array {
         $sheet = $data['__pamStyles'] ?? null;
         if (!is_array($sheet)) {
             return [];
         }
+        $sheet = self::responsiveStyleSheet($sheet, $data);
         $classCascade = is_array($sheet['classCascade'] ?? null)
             ? $sheet['classCascade']
             : [];
@@ -2390,7 +2565,119 @@ final class TemplateRenderer
             }
         }
 
+        $recipeName = $rawAttributes['recipe'] ?? null;
+        if ($recipeName !== null) {
+            $recipeName = self::stringValue(
+                self::value($recipeName, $scope, $data),
+                'recipe',
+            );
+            $recipes = is_array($sheet['recipes'] ?? null) ? $sheet['recipes'] : [];
+            $recipe = $recipes[$recipeName] ?? null;
+            if (!is_array($recipe)) {
+                throw new RuntimeException("Unknown PAM recipe {$recipeName}.");
+            }
+            if (is_array($recipe['base'] ?? null)) {
+                $attributes = [...$attributes, ...$recipe['base']];
+            }
+            foreach ($rawAttributes as $name => $rawValue) {
+                if (!str_starts_with($name, 'variant:')) {
+                    continue;
+                }
+                $variant = substr($name, 8);
+                $choice = self::stringValue(
+                    self::value($rawValue, $scope, $data),
+                    "recipe variant {$variant}",
+                );
+                $styles = $recipe['variants'][$variant][$choice] ?? null;
+                if (!is_array($styles)) {
+                    throw new RuntimeException(
+                        "Unknown PAM recipe variant {$recipeName}.{$variant}={$choice}.",
+                    );
+                }
+                $attributes = [...$attributes, ...$styles];
+            }
+        }
+
+        $stateRules = is_array($sheet['states'] ?? null) ? $sheet['states'] : [];
+        $selectors = [$tag];
+        foreach (array_keys($classNames) as $class) {
+            $selectors[] = '.'.$class;
+        }
+        foreach ($selectors as $selector) {
+            $pressed = $stateRules[$selector]['pressed'] ?? null;
+            if (!is_array($pressed)) {
+                continue;
+            }
+            if (isset($pressed['opacity'])) {
+                $attributes['pressedOpacity'] = $pressed['opacity'];
+            }
+            if (
+                isset($pressed['scaleX'], $pressed['scaleY'])
+                && $pressed['scaleX'] === $pressed['scaleY']
+            ) {
+                $attributes['pressedScale'] = $pressed['scaleX'];
+            }
+        }
+
         return $attributes;
+    }
+
+    /** @param array<string, mixed> $sheet @param array<string, mixed> $data */
+    private static function responsiveStyleSheet(array $sheet, array $data): array
+    {
+        $queries = $sheet['queries'] ?? [];
+        if (!is_array($queries)) {
+            return $sheet;
+        }
+        foreach ($queries as $query) {
+            if (!is_array($query) || !is_array($query['styles'] ?? null)) {
+                continue;
+            }
+            $kind = $query['kind'] ?? null;
+            $condition = $query['condition'] ?? null;
+            if (!is_int($kind) || !is_string($condition)) {
+                continue;
+            }
+            $metrics = Runtime::windowMetrics();
+            $width = $kind === 1 ? $metrics->width : ($data['__pamContainerWidth'] ?? null);
+            $height = $kind === 1 ? $metrics->height : ($data['__pamContainerHeight'] ?? null);
+            if (!self::queryMatches($condition, $width, $height)) {
+                continue;
+            }
+            foreach (['classes', 'tags'] as $group) {
+                $incoming = $query['styles'][$group] ?? [];
+                if (!is_array($incoming)) {
+                    continue;
+                }
+                foreach ($incoming as $selector => $styles) {
+                    if (is_string($selector) && is_array($styles)) {
+                        $sheet[$group][$selector] = [
+                            ...($sheet[$group][$selector] ?? []),
+                            ...$styles,
+                        ];
+                    }
+                }
+            }
+            // Query rules are later than base rules by definition.
+            $sheet['classCascade'] = [];
+        }
+        return $sheet;
+    }
+
+    private static function queryMatches(
+        string $condition,
+        mixed $width,
+        mixed $height,
+    ): bool {
+        if (preg_match('/\((min|max)-(width|height):\s*([0-9]+(?:\.[0-9]+)?)(?:dp|px)\)/D', $condition, $match) !== 1) {
+            return false;
+        }
+        $actual = $match[2] === 'width' ? $width : $height;
+        if (!is_int($actual) && !is_float($actual)) {
+            return false;
+        }
+        $threshold = (float) $match[3];
+        return $match[1] === 'min' ? $actual >= $threshold : $actual <= $threshold;
     }
 
     /**

@@ -4,17 +4,21 @@ Pam Native renders real Android views from persistent PHP. PHP owns application
 state and events, Rust performs retained layout and incremental diffing, and
 Kotlin mounts bounded mutation batches on the Android UI thread.
 
-```bash
-pam composer require pushinbr/pam-native
-```
+## Start here
 
-For a complete project:
+PAM Native is a Composer product and requires the PAM Runtime. Install PAM
+first, then create the project and run Composer through PAM:
 
 ```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+  https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
 pam init hello-native --template native
 cd hello-native
-pam composer install
-pam doctor
+pam composer require pushinbr/pam-native
+pam doctor --fix
 pam dev
 ```
 

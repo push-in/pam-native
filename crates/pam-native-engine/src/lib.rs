@@ -6,6 +6,7 @@ pub mod performance;
 pub mod reactive;
 pub mod scheduler;
 pub mod transaction;
+pub mod ui_language;
 pub mod virtualization;
 
 use std::collections::{BTreeMap, BTreeSet};

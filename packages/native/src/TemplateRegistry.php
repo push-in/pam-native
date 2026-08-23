@@ -6,6 +6,7 @@ namespace Pam\Native;
 
 use Closure;
 use InvalidArgumentException;
+use Pam\Native\UI\Contract\TagContract;
 
 final class TemplateRegistry
 {
@@ -26,6 +27,9 @@ final class TemplateRegistry
     /** @var list<Closure(string): (array<int, mixed>|null)> */
     private static array $styleResolvers = [];
 
+    /** @var array<string, TagContract> */
+    private static array $contracts = [];
+
     private function __construct()
     {
     }
@@ -37,6 +41,24 @@ final class TemplateRegistry
     {
         self::assertName($tag);
         self::$components[$tag] = $factory;
+    }
+
+    /** Registers the machine-readable contract used by compiler, LSP and runtime. */
+    public static function contract(TagContract $contract): void
+    {
+        self::assertName($contract->name);
+        self::$contracts[$contract->name] = $contract;
+    }
+
+    public static function tagContract(string $tag): ?TagContract
+    {
+        return self::$contracts[$tag] ?? null;
+    }
+
+    /** @return array<string, TagContract> */
+    public static function contracts(): array
+    {
+        return self::$contracts;
     }
 
     public static function view(string $tag, string $view): void
@@ -131,6 +153,7 @@ final class TemplateRegistry
         self::$eventAdapters = [];
         self::$classes = [];
         self::$styleResolvers = [];
+        self::$contracts = [];
     }
 
     /**
