@@ -1333,7 +1333,10 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
         .find(|package| package.name == "pushinbr/pam-native")
         .map(|package| package.version.clone())
         .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
-    let current_version = parse_release_version(&current_version_text)?;
+    let composer_release = current_version_text
+        .strip_prefix('v')
+        .unwrap_or(&current_version_text);
+    let current_version = parse_release_version(composer_release)?;
     let mut plugins = Vec::new();
 
     for package in packages {
@@ -7264,7 +7267,7 @@ mod tests {
             r#"{
                 "packages": [{
                     "name": "pushinbr/pam-native",
-                    "version": "0.6.0"
+                    "version": "v0.6.0"
                 }, {
                     "name": "community/example",
                     "version": "1.2.3",
