@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.1 - 2026-08-23
+
+- Added production-grade camera, media editing, retained canvas, GPU shader and
+  3D scene plugins to the independently installable official ecosystem.
+- Certified every public plugin together in aggregate Android and iOS hosts.
+- Build the Linux Native CLI on the Ubuntu 22.04 glibc baseline so published
+  binaries run on supported LTS and Pop!_OS-era distributions.
+
 ## 0.8.0 - 2026-08-23
 
 - Added opt-in PAM Native UI Language 2 with a stable, integer-capability UI IR.
