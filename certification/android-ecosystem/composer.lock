@@ -505,16 +505,16 @@
         },
         {
             "name": "pushinbr/pam-native-camera",
-            "version": "v0.1.0",
+            "version": "v0.1.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-camera.git",
-                "reference": "71600689ac1057387d2c16900f859291a7e6c1ba"
+                "reference": "3a3da84c994457895164049798458374aaf49de6"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-camera/zipball/71600689ac1057387d2c16900f859291a7e6c1ba",
-                "reference": "71600689ac1057387d2c16900f859291a7e6c1ba",
+                "url": "https://api.github.com/repos/push-in/pam-native-camera/zipball/3a3da84c994457895164049798458374aaf49de6",
+                "reference": "3a3da84c994457895164049798458374aaf49de6",
                 "shasum": ""
             },
             "require": {
@@ -543,9 +543,9 @@
             "description": "Professional zero-copy camera, capture and native frame processors for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-camera/issues",
-                "source": "https://github.com/push-in/pam-native-camera/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-camera/tree/v0.1.1"
             },
-            "time": "2026-08-23T17:41:22+00:00"
+            "time": "2026-08-23T18:46:12+00:00"
         },
         {
             "name": "pushinbr/pam-native-feature-flags",
