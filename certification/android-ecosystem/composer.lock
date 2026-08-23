@@ -843,12 +843,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-media-editor.git",
-                "reference": "5668c81f1d95412b9f8f3ff150a87bd550ce610b"
+                "reference": "b978afc7cedfb9ea3587ca69112c08e6f81c0273"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-media-editor/zipball/5668c81f1d95412b9f8f3ff150a87bd550ce610b",
-                "reference": "5668c81f1d95412b9f8f3ff150a87bd550ce610b",
+                "url": "https://api.github.com/repos/push-in/pam-native-media-editor/zipball/b978afc7cedfb9ea3587ca69112c08e6f81c0273",
+                "reference": "b978afc7cedfb9ea3587ca69112c08e6f81c0273",
                 "shasum": ""
             },
             "require": {
@@ -884,7 +884,7 @@
                 "source": "https://github.com/push-in/pam-native-media-editor/tree/main",
                 "issues": "https://github.com/push-in/pam-native-media-editor/issues"
             },
-            "time": "2026-08-23T18:47:52+00:00"
+            "time": "2026-08-23T18:56:08+00:00"
         },
         {
             "name": "pushinbr/pam-native-nfc",
