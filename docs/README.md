@@ -1,6 +1,7 @@
 # Pam Native documentation
 
 - [PHP Runtime Manager](runtime-manager.md)
+- [Singularity architecture](singularity.md)
 
 Every public feature added to Pam Native must include a copyable example. Start
 with the focused guide below or use the [capability cookbook](examples.md) for

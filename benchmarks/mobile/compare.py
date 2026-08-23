@@ -15,6 +15,8 @@ def arguments() -> argparse.Namespace:
     )
     parser.add_argument("--pam", required=True, type=Path)
     parser.add_argument("--react-native", required=True, type=Path)
+    parser.add_argument("--flutter", type=Path)
+    parser.add_argument("--native", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
         "--contract",
@@ -138,13 +140,47 @@ def render(
     return "\n".join(lines)
 
 
+def render_matrix(
+    frameworks: dict[str, dict[tuple[str, str, str], float]],
+) -> str:
+    """Render only measurements shared by every certified framework."""
+    if "PAM Native" not in frameworks or len(frameworks) < 2:
+        raise ValueError("A framework matrix requires PAM Native and at least one baseline")
+    shared = set.intersection(*(set(values) for values in frameworks.values()))
+    if not shared:
+        raise ValueError("Framework reports do not share any measurements")
+    names = list(frameworks)
+    lines = [
+        "# PAM Native framework matrix",
+        "",
+        "Lower is better. Every value must come from the same physical-device contract.",
+        "",
+        "| Scenario | Metric | Statistic | " + " | ".join(names) + " |",
+        "| --- | --- | --- | " + " | ".join("---:" for _ in names) + " |",
+    ]
+    for scenario, metric, summary in sorted(shared):
+        values = [frameworks[name][(scenario, metric, summary)] for name in names]
+        lines.append(
+            f"| `{scenario}` | `{metric}` | `{summary}` | "
+            + " | ".join(f"{value:.3f}" for value in values)
+            + " |",
+        )
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     options = arguments()
     pam = metrics(reports(options.pam))
     react = metrics(reports(options.react_native))
     contract = json.loads(options.contract.read_text(encoding="utf-8"))
+    frameworks = {"PAM Native": pam, "React Native": react}
+    for label, path in (("Flutter", options.flutter), ("Platform native", options.native)):
+        if path is not None:
+            values = metrics(reports(path))
+            validate_contract(pam, values, contract)
+            frameworks[label] = values
     validate_contract(pam, react, contract)
-    output = render(pam, react)
+    output = render(pam, react) if len(frameworks) == 2 else render_matrix(frameworks)
     options.output.parent.mkdir(parents=True, exist_ok=True)
     options.output.write_text(output, encoding="utf-8")
     print(options.output)

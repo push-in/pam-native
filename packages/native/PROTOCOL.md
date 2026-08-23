@@ -5,7 +5,7 @@ PHP, the Rust layout/diff engine and the Android/iOS renderers.
 
 | SDK | Protocol | PHP | Android | iOS |
 | --- | ---: | --- | --- | --- |
-| `pushinbr/pam-native 0.6.x` | `1` | `8.4.x`, `8.5.x` | API 26–36 | current supported Xcode/iOS toolchain |
+| `pushinbr/pam-native 0.7.x` | `1` | `8.5.x` | API 26–36 | current supported Xcode/iOS toolchain |
 
 All peers must support the exact protocol version. Existing sequential integer
 identifiers are never renamed, reused or renumbered. Optional node kinds,

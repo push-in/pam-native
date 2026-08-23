@@ -4563,7 +4563,7 @@ file_put_contents(
     "protocol": 1,
     "pamNative": {
         "minimum": "0.3.0",
-        "maximumExclusive": "0.7.0"
+        "maximumExclusive": "0.8.0"
     },
     "php": {
         "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
@@ -6215,8 +6215,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.6.78',
-    'The runtime SDK contract must match the 0.6.78 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.7.0',
+    'The runtime SDK contract must match the 0.7.0 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
@@ -6921,5 +6921,7 @@ $assert(
         && end($componentLog) === 'cleanup',
     'Component shutdown must guarantee effect and component cleanup.',
 );
+
+require __DIR__.'/singularity.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

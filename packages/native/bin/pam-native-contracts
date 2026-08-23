@@ -1,0 +1,53 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Pam\Native\Bridge\ContractCompiler;
+
+$project = getcwd();
+if (!is_string($project)) {
+    fwrite(STDERR, "pam-native-contracts: cannot resolve the project directory\n");
+    exit(74);
+}
+$autoload = $project.DIRECTORY_SEPARATOR.'vendor'.DIRECTORY_SEPARATOR.'autoload.php';
+$configuration = $project.DIRECTORY_SEPARATOR.'pam-native.contracts.php';
+if (!is_file($autoload) || !is_file($configuration)) {
+    fwrite(STDERR, "pam-native-contracts: vendor/autoload.php and pam-native.contracts.php are required\n");
+    exit(78);
+}
+require $autoload;
+$contracts = require $configuration;
+if (!is_array($contracts) || !array_is_list($contracts)) {
+    fwrite(STDERR, "pam-native-contracts: configuration must return a list of interface class names\n");
+    exit(65);
+}
+$namespace = getenv('PAM_NATIVE_CONTRACT_NAMESPACE');
+$artifacts = ContractCompiler::compile(
+    $contracts,
+    is_string($namespace) && $namespace !== '' ? $namespace : 'Pam.Generated',
+);
+$directory = $project.DIRECTORY_SEPARATOR.'.pam-native'.DIRECTORY_SEPARATOR.'contracts';
+if (!is_dir($directory) && !mkdir($directory, 0700, true) && !is_dir($directory)) {
+    fwrite(STDERR, "pam-native-contracts: cannot create the generated contract directory\n");
+    exit(73);
+}
+$manifest = json_encode($artifacts->manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n";
+foreach ([
+    'manifest.json' => $manifest,
+    'Contracts.php' => $artifacts->php,
+    'Contracts.kt' => $artifacts->kotlin,
+    'Contracts.swift' => $artifacts->swift,
+    'fingerprint.sha256' => $artifacts->fingerprint."\n",
+] as $name => $contents) {
+    $target = $directory.DIRECTORY_SEPARATOR.$name;
+    $temporary = tempnam($directory, '.contract-');
+    if ($temporary === false || file_put_contents($temporary, $contents, LOCK_EX) === false || !rename($temporary, $target)) {
+        if (is_string($temporary)) {
+            @unlink($temporary);
+        }
+        fwrite(STDERR, "pam-native-contracts: cannot atomically write {$target}\n");
+        exit(74);
+    }
+}
+fwrite(STDOUT, "Generated contract {$artifacts->fingerprint}\n");

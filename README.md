@@ -106,6 +106,7 @@ pam make:screen Products
 pam composer require pushinbr/pam-native-maps
 pam test
 pam build
+pam release --platform android
 ```
 
 Use Packagist to explore official and community capabilities. Composer remains
@@ -245,7 +246,7 @@ installation is intended for custom hosts and framework contributors; most
 applications should start with `pam init` or `pam add`:
 
 ```bash
-pam composer require pushinbr/pam-native:^0.6
+pam composer require pushinbr/pam-native:^0.7
 ```
 
 ## Community

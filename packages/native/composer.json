@@ -25,6 +25,7 @@
     },
     "bin": [
         "bin/pam-native",
+        "bin/pam-native-contracts",
         "bin/pam-native-format",
         "bin/pam-native-language-server",
         "bin/pam-native-optimize",
@@ -72,6 +73,10 @@
                     "bin": "bin/pam-native",
                     "arguments": ["codegen"],
                     "description": "Generate native bindings"
+                },
+                "contracts": {
+                    "script": "bin/pam-native-contracts",
+                    "description": "Generate typed PHP, Kotlin and Swift contracts"
                 },
                 "diagnostics": {
                     "bin": "bin/pam-native",
@@ -210,6 +215,11 @@
                     "bin": "bin/pam-native",
                     "arguments": ["run"],
                     "description": "Run the PAM Native application"
+                },
+                "release": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["release"],
+                    "description": "Certify, sign and package a PAM Native release"
                 },
                 "sign": {
                     "bin": "bin/pam-native",

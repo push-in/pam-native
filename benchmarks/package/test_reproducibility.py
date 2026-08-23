@@ -93,6 +93,10 @@ class ReproducibilityEvidenceTests(unittest.TestCase):
             publish.index("Reverify downloaded reproducibility evidence"),
             publish.index("softprops/action-gh-release@v3"),
         )
+        self.assertLess(
+            publish.index("actions/attest-sbom@v4"),
+            publish.index("softprops/action-gh-release@v3"),
+        )
 
 
 if __name__ == "__main__":
