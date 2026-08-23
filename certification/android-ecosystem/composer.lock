@@ -386,12 +386,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-3d.git",
-                "reference": "71f3e51703d3b7426c58a402c097ea99008ce7eb"
+                "reference": "784b6c10525084be60a21e6257b83a0794f689dd"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-3d/zipball/71f3e51703d3b7426c58a402c097ea99008ce7eb",
-                "reference": "71f3e51703d3b7426c58a402c097ea99008ce7eb",
+                "url": "https://api.github.com/repos/push-in/pam-native-3d/zipball/784b6c10525084be60a21e6257b83a0794f689dd",
+                "reference": "784b6c10525084be60a21e6257b83a0794f689dd",
                 "shasum": ""
             },
             "require": {
@@ -427,7 +427,7 @@
                 "source": "https://github.com/push-in/pam-native-3d/tree/main",
                 "issues": "https://github.com/push-in/pam-native-3d/issues"
             },
-            "time": "2026-08-23T19:05:43+00:00"
+            "time": "2026-08-23T19:17:04+00:00"
         },
         {
             "name": "pushinbr/pam-native-auth",
