@@ -42,11 +42,7 @@ jobs:
             pam-native-camera
           )
           for repo in "${repos[@]}"; do
-            branch=main
-            if [[ "${repo}" == pam-native-video ]]; then
-              branch=feat/protected-playback
-            fi
-            git clone --depth 1 --branch "${branch}" \
+            git clone --depth 1 --branch main \
               "https://github.com/push-in/${repo}.git" \
               "${RUNNER_TEMP}/${repo}"
           done

@@ -6,10 +6,6 @@
     "repositories": [
         {
             "type": "vcs",
-            "url": "https://github.com/push-in/pam-native-video.git"
-        },
-        {
-            "type": "vcs",
             "url": "https://github.com/push-in/pam-native-media-editor.git"
         }
     ],
@@ -34,7 +30,7 @@
     "pushinbr/pam-native-scanner": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-share-extension": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-subscriptions": ">=0.1.0 <1.0.0",
-    "pushinbr/pam-native-video": "dev-feat/protected-playback as 0.3.0",
+    "pushinbr/pam-native-video": "^0.3.0",
     "pushinbr/pam-native-widgets": ">=0.1.0 <1.0.0"
     },
     "config": {
