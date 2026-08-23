@@ -3,6 +3,12 @@
     "description": "Public aggregate Android build for the official PAM Native plugins.",
     "type": "project",
     "license": "Apache-2.0",
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "https://github.com/push-in/pam-native-video.git"
+        }
+    ],
     "require": {
         "php": "^8.5",
         "pushinbr/pam-native": ">=0.6.1 <1.0.0",
@@ -23,7 +29,7 @@
     "pushinbr/pam-native-scanner": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-share-extension": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-subscriptions": ">=0.1.0 <1.0.0",
-    "pushinbr/pam-native-video": ">=0.1.0 <1.0.0",
+    "pushinbr/pam-native-video": "dev-feat/protected-playback as 0.3.0",
     "pushinbr/pam-native-widgets": ">=0.1.0 <1.0.0"
     },
     "config": {

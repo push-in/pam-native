@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c63d56470094715f1cff952d36b118b7",
+    "content-hash": "5783f3f4f18546072eec0bc42be4b058",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -1082,21 +1082,25 @@
         },
         {
             "name": "pushinbr/pam-native-video",
-            "version": "v0.2.0",
+            "version": "dev-feat/protected-playback",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-video.git",
-                "reference": "589f934215b15ba4be175192964fc73f9d68b734"
+                "reference": "f5bf7e021c37745efe0933791efbf29fd2b5ad53"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-video/zipball/589f934215b15ba4be175192964fc73f9d68b734",
-                "reference": "589f934215b15ba4be175192964fc73f9d68b734",
+                "url": "https://api.github.com/repos/push-in/pam-native-video/zipball/f5bf7e021c37745efe0933791efbf29fd2b5ad53",
+                "reference": "f5bf7e021c37745efe0933791efbf29fd2b5ad53",
                 "shasum": ""
             },
             "require": {
                 "php": "^8.5",
                 "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -1109,16 +1113,20 @@
                     "Pam\\Native\\Video\\": "src/"
                 }
             },
-            "notification-url": "https://packagist.org/downloads/",
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
             "license": [
                 "Apache-2.0"
             ],
             "description": "Adaptive streaming, subtitles and native Media3/AVPlayer playback for PAM Native.",
             "support": {
-                "issues": "https://github.com/push-in/pam-native-video/issues",
-                "source": "https://github.com/push-in/pam-native-video/tree/v0.2.0"
+                "source": "https://github.com/push-in/pam-native-video/tree/feat/protected-playback",
+                "issues": "https://github.com/push-in/pam-native-video/issues"
             },
-            "time": "2026-08-23T18:04:21+00:00"
+            "time": "2026-08-23T18:36:13+00:00"
         },
         {
             "name": "pushinbr/pam-native-widgets",
@@ -1162,9 +1170,18 @@
         }
     ],
     "packages-dev": [],
-    "aliases": [],
+    "aliases": [
+        {
+            "package": "pushinbr/pam-native-video",
+            "version": "dev-feat/protected-playback",
+            "alias": "0.3.0",
+            "alias_normalized": "0.3.0.0"
+        }
+    ],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "pushinbr/pam-native-video": 20
+    },
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
