@@ -16,6 +16,8 @@
   outside an active component render.
 - Resolve PAM 2 runtime catalogs during Android source builds, require their
   declared PHP 8.5 default and expose the selected immutable runtime to Gradle.
+- Accept Composer's canonical `vMAJOR.MINOR.PATCH` installed-package version
+  while retaining strict SemVer validation for Native plugin compatibility.
 
 - Make all four iOS, Android renderer, Android plugin API and PHP SDK release
   artifacts reproducible from the tagged commit. The release gate constructs
