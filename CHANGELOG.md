@@ -14,6 +14,8 @@
   run on PAM's minimal verified PHP 8.5 extension profile.
 - Avoid PHP 8.5's null array-offset deprecation when reactive state is read
   outside an active component render.
+- Resolve PAM 2 runtime catalogs during Android source builds, require their
+  declared PHP 8.5 default and expose the selected immutable runtime to Gradle.
 
 - Make all four iOS, Android renderer, Android plugin API and PHP SDK release
   artifacts reproducible from the tagged commit. The release gate constructs
