@@ -6,6 +6,11 @@ namespace App;
 
 use Pam\Native\Element;
 use Pam\Native\Http\Http;
+use Pam\Native\InternalHttp\LocalTransport;
+use Pam\Native\InternalHttp\Request as LocalRequest;
+use Pam\Native\InternalHttp\Response as LocalResponse;
+use Pam\Native\InternalHttp\Router as LocalRouter;
+use Pam\Native\LocalFirst\LocalStore;
 use Pam\Native\Routing\Navigation;
 use Pam\Native\StatusBarAppearance;
 use Pam\Native\Storage\Storage;
@@ -27,6 +32,22 @@ final class Showcase
     private string $name = 'PHP';
     private string $networkStatus = 'HTTP has not run yet.';
     private string $storageStatus = 'Storage has not run yet.';
+    private string $singularityStatus = 'Local-first and in-process HTTP are ready.';
+    private readonly LocalStore $localStore;
+    private readonly LocalTransport $localTransport;
+
+    public function __construct()
+    {
+        $this->localStore = new LocalStore();
+        $router = (new LocalRouter())->route(
+            'POST',
+            '/todos',
+            static fn (LocalRequest $request): LocalResponse => LocalResponse::json([
+                'accepted' => strlen($request->body) > 0,
+            ]),
+        );
+        $this->localTransport = new LocalTransport($router);
+    }
 
     public function home(): Element
     {
@@ -176,6 +197,21 @@ final class Showcase
                     Text::make($this->storageStatus)
                         ->key('storage-status')
                         ->style(new Style(height: 28, textColor: 0xFFCBD5E1, fontSize: 13)),
+                    Button::make('Run Singularity local flow')
+                        ->key('singularity')
+                        ->style(new Style(height: 48))
+                        ->onPress(function (): void {
+                            $record = $this->localStore->put('showcase', 'welcome', ['count' => $this->count]);
+                            $response = $this->localTransport->send(new LocalRequest(
+                                'POST',
+                                '/todos',
+                                body: json_encode($record->attributes, JSON_THROW_ON_ERROR),
+                            ));
+                            $this->singularityStatus = "Local v{$record->version}, internal HTTP {$response->status}, sockets: 0";
+                        }),
+                    Text::make($this->singularityStatus)
+                        ->key('singularity-status')
+                        ->style(new Style(height: 36, textColor: 0xFF86EFAC, fontSize: 13)),
                 )->style(new Style(
                     padding: 20,
                     gap: 10,

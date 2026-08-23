@@ -362,6 +362,22 @@ jobs:
         uses: actions/attest-build-provenance@v4
         with:
           subject-path: dist/pam-native-accessibility-evidence.json
+      - name: Generate SPDX 2.3 software bill of materials
+        id: sbom
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          sbom="dist/pam-native-${version}.spdx.json"
+          python3 scripts/sbom.py \
+            --version "${version}" \
+            --commit "${GITHUB_SHA}" \
+            --created-epoch "$(git log -1 --format=%ct)" \
+            --output "${sbom}"
+          echo "path=${sbom}" >> "$GITHUB_OUTPUT"
+      - name: Attest software bill of materials
+        uses: actions/attest-sbom@v4
+        with:
+          subject-path: dist/pam-native-php-*.tar.gz
+          sbom-path: ${{ steps.sbom.outputs.path }}
       - uses: softprops/action-gh-release@v3
         with:
           files: dist/*

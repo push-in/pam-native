@@ -38,6 +38,7 @@ tree and is executed by Kotlin/UIKit without a per-frame PHP callback.
 - Accessibility traversal exposes the active route; disabled animations and
   iOS Reduced Motion bypass decorative movement.
 
-The CI contract runs PHP 8.4/8.5, Rust formatting/tests/clippy, protocol tests,
+The CI contract runs PHP 8.5, PHPStan level 9 for new Singularity boundaries,
+Rust formatting/tests/clippy, protocol tests,
 Android unit/lint/build checks, API 26/API 36 instrumented navigation tests,
 UIKit simulator tests, deterministic fuzzing and navigation performance gates.

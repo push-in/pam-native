@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "dc29c0a7d767ffa501ecc767dfb693d2",
+    "content-hash": "51f5ec5a075fe836ff086ea23a4ac5be",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -12,11 +12,11 @@
             "dist": {
                 "type": "path",
                 "url": "../community-plugin",
-                "reference": "9103e15f712efe20c50a25c0b11a36db6f2001b7"
+                "reference": "621b3fbed576ac726cb1c572bb04a511d0f66dac"
             },
             "require": {
                 "php": "^8.5",
-                "pushinbr/pam-native": "^0.6.78"
+                "pushinbr/pam-native": "^0.7.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -40,17 +40,18 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.6.78",
+            "version": "0.7.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "dfc304277d158945b2d7dca3a493b075f68b01fa"
+                "reference": "598e85fbd1067fa9e903f49e91fd63983b263776"
             },
             "require": {
                 "php": "^8.5"
             },
             "bin": [
                 "bin/pam-native",
+                "bin/pam-native-contracts",
                 "bin/pam-native-format",
                 "bin/pam-native-language-server",
                 "bin/pam-native-optimize",
@@ -115,6 +116,10 @@
                                 "codegen"
                             ],
                             "description": "Generate native bindings"
+                        },
+                        "contracts": {
+                            "script": "bin/pam-native-contracts",
+                            "description": "Generate typed PHP, Kotlin and Swift contracts"
                         },
                         "diagnostics": {
                             "bin": "bin/pam-native",
@@ -297,6 +302,13 @@
                                 "run"
                             ],
                             "description": "Run the PAM Native application"
+                        },
+                        "release": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "release"
+                            ],
+                            "description": "Certify, sign and package a PAM Native release"
                         },
                         "sign": {
                             "bin": "bin/pam-native",

@@ -652,6 +652,19 @@ struct NativeDiagnosticsOptions {
     device: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum ReleasePlatform {
+    Android = 1,
+    Ios = 2,
+    All = 3,
+}
+
+struct ReleaseOptions {
+    project: PathBuf,
+    platform: ReleasePlatform,
+}
+
 pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut arguments = arguments.into_iter();
     let Some(command) = arguments.next() else {
@@ -679,6 +692,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         }
         "codegen" => {
             let project = load_project(&parse_project_only(arguments)?)?;
+            generate_typed_contracts(&project)?;
             let native_home = native_home()?;
             let runtime = resolve_runtime(&project, &pam_home()?)?;
             let workspace = sync_android_host(&project, &native_home)?;
@@ -723,6 +737,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             options.mode = BuildMode::Release;
             package_android(options)
         }
+        "release" => release(parse_release_options(arguments)?),
         "sign" => signing_status(parse_project_only(arguments)?),
         "run" => {
             let mut options = parse_options(arguments, true)?;
@@ -1097,6 +1112,44 @@ fn parse_options(
         mode,
         abis,
     })
+}
+
+fn parse_release_options(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<ReleaseOptions, String> {
+    let mut project = PathBuf::from(".");
+    let mut positional = false;
+    let mut platform = if cfg!(target_os = "macos") {
+        ReleasePlatform::All
+    } else {
+        ReleasePlatform::Android
+    };
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--platform" => {
+                platform = match arguments
+                    .next()
+                    .ok_or_else(|| "--platform requires android, ios, or all".to_owned())?
+                    .to_string_lossy()
+                    .as_ref()
+                {
+                    "android" => ReleasePlatform::Android,
+                    "ios" => ReleasePlatform::Ios,
+                    "all" => ReleasePlatform::All,
+                    _ => return Err("--platform requires android, ios, or all".to_owned()),
+                };
+            }
+            option if option.starts_with('-') => {
+                return Err(format!("unknown release option {option}"));
+            }
+            _ if !positional => {
+                project = PathBuf::from(argument);
+                positional = true;
+            }
+            _ => return Err("release accepts at most one project directory".to_owned()),
+        }
+    }
+    Ok(ReleaseOptions { project, platform })
 }
 
 fn default_abis() -> Vec<AndroidAbi> {
@@ -5230,6 +5283,30 @@ fn swift_string(value: &str) -> String {
     )
 }
 
+fn generate_typed_contracts(project: &Project) -> Result<(), String> {
+    let configuration = project.root.join("pam-native.contracts.php");
+    if !configuration.is_file() {
+        return Ok(());
+    }
+    let generator = project.root.join("vendor/bin/pam-native-contracts");
+    if !generator.is_file() {
+        return Err(format!(
+            "{} exists but {} is missing; run `pam composer install`",
+            configuration.display(),
+            generator.display()
+        ));
+    }
+    let status = Command::new("php")
+        .arg(&generator)
+        .current_dir(&project.root)
+        .status()
+        .map_err(|error| format!("cannot start typed contract generator: {error}"))?;
+    if !status.success() {
+        return Err(format!("typed contract generator exited with {status}"));
+    }
+    Ok(())
+}
+
 fn generate_modules(project: &Project, workspace: &Path) -> Result<(), String> {
     let target =
         workspace.join("app/src/main/java/dev/pam/nativeapp/modules/GeneratedPamModules.kt");
@@ -5605,6 +5682,36 @@ fn package_android(options: MobileOptions) -> Result<u8, String> {
     println!("Packaged {}", apk_destination.display());
     println!("Metadata {}", metadata_path.display());
     Ok(0)
+}
+
+fn release(options: ReleaseOptions) -> Result<u8, String> {
+    if doctor(options.project.clone())? != 0 {
+        return Err("release stopped because PAM Native doctor failed".to_owned());
+    }
+    if doctor_plugins(options.project.clone())? != 0 {
+        return Err("release stopped because plugin certification failed".to_owned());
+    }
+    match options.platform {
+        ReleasePlatform::Android => package_android(MobileOptions {
+            project: options.project,
+            mode: BuildMode::Release,
+            abis: default_abis(),
+        }),
+        ReleasePlatform::Ios => package_ios(options.project),
+        ReleasePlatform::All => {
+            if !cfg!(target_os = "macos") {
+                return Err(
+                    "--platform all requires macOS because iOS packaging uses Xcode".to_owned(),
+                );
+            }
+            package_android(MobileOptions {
+                project: options.project.clone(),
+                mode: BuildMode::Release,
+                abis: default_abis(),
+            })?;
+            package_ios(options.project)
+        }
+    }
 }
 
 fn write_artifact_checksum(path: &Path) -> Result<(), String> {
@@ -6724,7 +6831,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, build, run, package, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
     );
 }
 
@@ -7585,5 +7692,20 @@ mod tests {
         assert!(source.is_file());
         assert!(neighboring_artifact.is_file());
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn release_options_are_explicit_and_platform_safe() {
+        let options = parse_release_options(
+            ["application", "--platform", "android"]
+                .into_iter()
+                .map(OsString::from),
+        )
+        .expect("release options");
+        assert_eq!(options.project, PathBuf::from("application"));
+        assert_eq!(options.platform, ReleasePlatform::Android);
+        assert!(
+            parse_release_options(["--platform", "web"].into_iter().map(OsString::from)).is_err()
+        );
     }
 }

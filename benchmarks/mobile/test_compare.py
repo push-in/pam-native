@@ -170,6 +170,19 @@ class CompareReportsTest(unittest.TestCase):
         )
         self.assertIn("missing coldStartup.timeToFullDisplayMs.median", failures)
 
+    def test_renders_a_shared_four_framework_matrix(self) -> None:
+        key = ("coldStartup", "timeToFullDisplayMs", "median")
+        report = compare.render_matrix(
+            {
+                "PAM Native": {key: 300.0},
+                "React Native": {key: 600.0},
+                "Flutter": {key: 450.0},
+                "Platform native": {key: 250.0},
+            },
+        )
+        self.assertIn("PAM Native framework matrix", report)
+        self.assertIn("300.000 | 600.000 | 450.000 | 250.000", report)
+
 
 if __name__ == "__main__":
     unittest.main()

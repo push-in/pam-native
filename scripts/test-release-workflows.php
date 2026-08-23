@@ -104,6 +104,9 @@ requireFragments($release, 'release.yml', [
     "            --output \"dist/pam-native-android-\${version}.reproducibility.json\"\n",
     "            --output \"dist/pam-native-php-\${version}.reproducibility.json\"\n",
     "      - name: Reverify downloaded reproducibility evidence\n",
+    "      - name: Generate SPDX 2.3 software bill of materials\n",
+    "            --created-epoch \"$(git log -1 --format=%ct)\" \\\n",
+    "        uses: actions/attest-sbom@v4\n",
 ]);
 if (substr_count($release, 'cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"') !== 3) {
     fail('release.yml must verify iOS, Android renderer, and PHP SDK archives byte for byte');

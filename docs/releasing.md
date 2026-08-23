@@ -1,5 +1,19 @@
 # Releasing Pam Native
 
+Application releases use one fail-closed entry point:
+
+```bash
+pam release --platform android
+pam release --platform ios
+# macOS only; produces both platform packages:
+pam release --platform all
+```
+
+The command runs Native doctor and plugin certification before validating
+signing and producing checksummed release artifacts. It never creates signing
+credentials or uploads to a store. CI/store adapters consume the resulting
+`dist` metadata and retain rollout authority.
+
 ## Release gate
 
 1. Run PHP SDK tests and lint.

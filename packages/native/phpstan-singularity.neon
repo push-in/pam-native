@@ -1,0 +1,25 @@
+parameters:
+    level: 9
+    paths:
+        - src/Bridge
+        - src/Diagnostics/ReplayTimeline.php
+        - src/HotReload
+        - src/InternalHttp
+        - src/LocalFirst
+        - src/Plugin/PluginRegistry.php
+        - src/Plugin/RegistryEntry.php
+        - src/Plugin/TrustTier.php
+        - src/Scheduling/AsyncStream.php
+        - src/Scheduling/BackpressureException.php
+        - src/Scheduling/DeadlineExceededException.php
+        - src/Scheduling/Deferred.php
+        - src/Scheduling/TaskGroup.php
+    tmpDir: ../../../.pam-native/phpstan-singularity
+    treatPhpDocTypesAsCertain: true
+    reportUnmatchedIgnoredErrors: true
+    scanFiles:
+        - src/State.php
+        - src/Plugin/PluginException.php
+        - src/Scheduling/CancellationToken.php
+        - src/Scheduling/Scheduler.php
+        - src/Scheduling/TaskPriority.php

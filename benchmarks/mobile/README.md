@@ -1,5 +1,16 @@
 # Mobile benchmark contract
 
+The comparison harness accepts React Native as the required public baseline and
+optional Flutter and platform-native reports. A matrix is emitted only for
+measurements present in every report, preventing selective claims:
+
+```bash
+python3 benchmarks/mobile/compare.py \
+  --pam evidence/pam --react-native evidence/react-native \
+  --flutter evidence/flutter --native evidence/platform-native \
+  --output evidence/framework-matrix.md
+```
+
 The Android host contains a `:macrobenchmark` module with three identical,
 automation-friendly scenarios:
 

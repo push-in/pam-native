@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-08-23
+
+- Added schema-2 reflection contracts with generated PHP, Kotlin and Swift bindings.
+- Added structured task groups, deadlines, cancellation and bounded async streams.
+- Added transactional Rust render generations for atomic 60/90/120 Hz scheduling.
+- Added encrypted local-first records, outbox batching and deterministic conflict policies.
+- Added stateful hot reload snapshots and deterministic DevTools replay timelines.
+- Added capability-governed plugin registry entries with trust tiers and quality scores.
+- Added in-process HTTP routing and middleware through a socket-free local transport.
+- Added `pam release` and four-framework physical-device comparison evidence.
+- Added the Singularity showcase and architecture documentation.
+
 ## 0.6.78 - 2026-08-22
 
 - Make PHP 8.5 the SDK, showcase, certification and release-pipeline baseline,
