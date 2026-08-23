@@ -36,10 +36,10 @@ jobs:
             pam-native-auth pam-native-background-transfer pam-native-bluetooth
             pam-native-feature-flags pam-native-firebase pam-native-health
             pam-native-intents pam-native-live-activities pam-native-maps
-            pam-native-media pam-native-nfc pam-native-payments
+            pam-native-media pam-native-media-editor pam-native-nfc pam-native-payments
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
-            pam-native-camera
+            pam-native-camera pam-native-canvas pam-native-gpu pam-native-3d
           )
           for repo in "${repos[@]}"; do
             git clone --depth 1 --branch main \
@@ -54,10 +54,10 @@ jobs:
             pam-native-auth pam-native-background-transfer pam-native-bluetooth
             pam-native-feature-flags pam-native-firebase pam-native-health
             pam-native-intents pam-native-live-activities pam-native-maps
-            pam-native-media pam-native-nfc pam-native-payments
+            pam-native-media pam-native-media-editor pam-native-nfc pam-native-payments
             pam-native-realtime pam-native-scanner pam-native-share-extension
             pam-native-subscriptions pam-native-video pam-native-widgets
-            pam-native-camera
+            pam-native-camera pam-native-canvas pam-native-gpu pam-native-3d
           )
           targets=(
             PamPlugin0PushinbrPamNativeAuth
@@ -70,15 +70,19 @@ jobs:
             PamPlugin7PushinbrPamNativeLiveActivities
             PamPlugin8PushinbrPamNativeMaps
             PamPlugin9PushinbrPamNativeMedia
-            PamPlugin10PushinbrPamNativeNfc
-            PamPlugin11PushinbrPamNativePayments
-            PamPlugin12PushinbrPamNativeRealtime
-            PamPlugin13PushinbrPamNativeScanner
-            PamPlugin14PushinbrPamNativeShareExtension
-            PamPlugin15PushinbrPamNativeSubscriptions
-            PamPlugin16PushinbrPamNativeVideo
-            PamPlugin17PushinbrPamNativeWidgets
-            PamPlugin18PushinbrPamNativeCamera
+            PamPlugin10PushinbrPamNativeMediaEditor
+            PamPlugin11PushinbrPamNativeNfc
+            PamPlugin12PushinbrPamNativePayments
+            PamPlugin13PushinbrPamNativeRealtime
+            PamPlugin14PushinbrPamNativeScanner
+            PamPlugin15PushinbrPamNativeShareExtension
+            PamPlugin16PushinbrPamNativeSubscriptions
+            PamPlugin17PushinbrPamNativeVideo
+            PamPlugin18PushinbrPamNativeWidgets
+            PamPlugin19PushinbrPamNativeCamera
+            PamPlugin20PushinbrPamNativeCanvas
+            PamPlugin21PushinbrPamNativeGpu
+            PamPlugin22PushinbrPamNative3d
           )
           for index in "${!repos[@]}"; do
             source="${RUNNER_TEMP}/${repos[$index]}/ios/Sources"

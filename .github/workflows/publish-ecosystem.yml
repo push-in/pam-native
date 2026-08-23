@@ -37,7 +37,8 @@ jobs:
             pam-native-share-extension pam-native-subscriptions pam-native-video
             pam-native-widgets pam-native-firebase pam-native-laravel-sync
             pam-native-sync-laravel
-            pam-native-camera
+            pam-native-camera pam-native-media-editor pam-native-canvas
+            pam-native-gpu pam-native-3d
           )
           if [[ "${SELECTED_PACKAGE}" != all ]]; then
             valid=false

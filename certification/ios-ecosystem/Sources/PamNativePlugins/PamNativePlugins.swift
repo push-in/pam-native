@@ -9,14 +9,19 @@ import PamPlugin6PushinbrPamNativeIntents
 import PamPlugin7PushinbrPamNativeLiveActivities
 import PamPlugin8PushinbrPamNativeMaps
 import PamPlugin9PushinbrPamNativeMedia
-import PamPlugin10PushinbrPamNativeNfc
-import PamPlugin11PushinbrPamNativePayments
-import PamPlugin12PushinbrPamNativeRealtime
-import PamPlugin13PushinbrPamNativeScanner
-import PamPlugin14PushinbrPamNativeShareExtension
-import PamPlugin15PushinbrPamNativeSubscriptions
-import PamPlugin16PushinbrPamNativeVideo
-import PamPlugin17PushinbrPamNativeWidgets
+import PamPlugin10PushinbrPamNativeMediaEditor
+import PamPlugin11PushinbrPamNativeNfc
+import PamPlugin12PushinbrPamNativePayments
+import PamPlugin13PushinbrPamNativeRealtime
+import PamPlugin14PushinbrPamNativeScanner
+import PamPlugin15PushinbrPamNativeShareExtension
+import PamPlugin16PushinbrPamNativeSubscriptions
+import PamPlugin17PushinbrPamNativeVideo
+import PamPlugin18PushinbrPamNativeWidgets
+import PamPlugin19PushinbrPamNativeCamera
+import PamPlugin20PushinbrPamNativeCanvas
+import PamPlugin21PushinbrPamNativeGpu
+import PamPlugin22PushinbrPamNative3d
 
 public enum PamNativePluginRegistry {
     public static func modules() -> [String: NativeModule] {
@@ -30,11 +35,13 @@ public enum PamNativePluginRegistry {
             "intents": IntentsModule(),
             "live-activities": LiveActivitiesModule(),
             "media": MediaModule(),
+            "media-editor": MediaEditorModule(),
             "nfc": NfcModule(),
             "realtime": RealtimeModule(),
             "share-extension": ShareExtensionModule(),
             "subscriptions": SubscriptionsModule(),
             "widgets": WidgetsModule(),
+            "camera": CameraModule(),
         ]
     }
 
@@ -44,6 +51,10 @@ public enum PamNativePluginRegistry {
             "payments.sheet": PamPaymentSheetFactory(),
             "scanner.camera": ScannerViewFactory(),
             "video.player": VideoPlayerFactory(),
+            "camera.preview": PamPlugin19PushinbrPamNativeCamera.CameraViewFactory(),
+            "canvas.view": PamPlugin20PushinbrPamNativeCanvas.CanvasViewFactory(),
+            "gpu.surface": PamPlugin21PushinbrPamNativeGpu.GpuViewFactory(),
+            "three-d.scene": PamPlugin22PushinbrPamNative3d.SceneViewFactory(),
         ]
     }
 }

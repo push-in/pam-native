@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c63d56470094715f1cff952d36b118b7",
+    "content-hash": "f00002c32ae1585d26e9ee067bf758b9",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -381,6 +381,50 @@
             "time": "2026-08-23T16:32:04+00:00"
         },
         {
+            "name": "pushinbr/pam-native-3d",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-3d.git",
+                "reference": "b55d3cf5abdea571c56cd2e33c04823315e922ab"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-3d/zipball/b55d3cf5abdea571c56cd2e33c04823315e922ab",
+                "reference": "b55d3cf5abdea571c56cd2e33c04823315e922ab",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\ThreeD\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Native Filament and RealityKit real-time 3D scenes for PAM Native.",
+            "support": {
+                "issues": "https://github.com/push-in/pam-native-3d/issues",
+                "source": "https://github.com/push-in/pam-native-3d/tree/v0.1.0"
+            },
+            "time": "2026-08-23T19:28:23+00:00"
+        },
+        {
             "name": "pushinbr/pam-native-auth",
             "version": "v0.2.0",
             "source": {
@@ -505,16 +549,16 @@
         },
         {
             "name": "pushinbr/pam-native-camera",
-            "version": "v0.1.0",
+            "version": "v0.1.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-camera.git",
-                "reference": "71600689ac1057387d2c16900f859291a7e6c1ba"
+                "reference": "3a3da84c994457895164049798458374aaf49de6"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-camera/zipball/71600689ac1057387d2c16900f859291a7e6c1ba",
-                "reference": "71600689ac1057387d2c16900f859291a7e6c1ba",
+                "url": "https://api.github.com/repos/push-in/pam-native-camera/zipball/3a3da84c994457895164049798458374aaf49de6",
+                "reference": "3a3da84c994457895164049798458374aaf49de6",
                 "shasum": ""
             },
             "require": {
@@ -543,9 +587,53 @@
             "description": "Professional zero-copy camera, capture and native frame processors for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-camera/issues",
-                "source": "https://github.com/push-in/pam-native-camera/tree/v0.1.0"
+                "source": "https://github.com/push-in/pam-native-camera/tree/v0.1.1"
             },
-            "time": "2026-08-23T17:41:22+00:00"
+            "time": "2026-08-23T18:46:12+00:00"
+        },
+        {
+            "name": "pushinbr/pam-native-canvas",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-canvas.git",
+                "reference": "b6dea0a4c35f941fb2345382d9df0bf916f93c94"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-canvas/zipball/b6dea0a4c35f941fb2345382d9df0bf916f93c94",
+                "reference": "b6dea0a4c35f941fb2345382d9df0bf916f93c94",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Canvas\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Retained-mode native 2D canvas for PAM Native.",
+            "support": {
+                "issues": "https://github.com/push-in/pam-native-canvas/issues",
+                "source": "https://github.com/push-in/pam-native-canvas/tree/v0.1.0"
+            },
+            "time": "2026-08-23T19:08:37+00:00"
         },
         {
             "name": "pushinbr/pam-native-feature-flags",
@@ -633,6 +721,50 @@
                 "source": "https://github.com/push-in/pam-native-firebase/tree/v0.2.0"
             },
             "time": "2026-08-23T18:12:46+00:00"
+        },
+        {
+            "name": "pushinbr/pam-native-gpu",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-gpu.git",
+                "reference": "0ef89c17ed125ccf7335751322450d9a90ca6410"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-gpu/zipball/0ef89c17ed125ccf7335751322450d9a90ca6410",
+                "reference": "0ef89c17ed125ccf7335751322450d9a90ca6410",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Gpu\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Native Metal and OpenGL ES GPU surfaces for PAM Native.",
+            "support": {
+                "issues": "https://github.com/push-in/pam-native-gpu/issues",
+                "source": "https://github.com/push-in/pam-native-gpu/tree/v0.1.0"
+            },
+            "time": "2026-08-23T19:02:18+00:00"
         },
         {
             "name": "pushinbr/pam-native-health",
@@ -836,6 +968,50 @@
                 "source": "https://github.com/push-in/pam-native-media/tree/v0.3.0"
             },
             "time": "2026-08-23T18:12:48+00:00"
+        },
+        {
+            "name": "pushinbr/pam-native-media-editor",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-media-editor.git",
+                "reference": "b978afc7cedfb9ea3587ca69112c08e6f81c0273"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-media-editor/zipball/b978afc7cedfb9ea3587ca69112c08e6f81c0273",
+                "reference": "b978afc7cedfb9ea3587ca69112c08e6f81c0273",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\MediaEditor\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Non-destructive native media timelines, effects and export for PAM Native.",
+            "support": {
+                "issues": "https://github.com/push-in/pam-native-media-editor/issues",
+                "source": "https://github.com/push-in/pam-native-media-editor/tree/v0.1.0"
+            },
+            "time": "2026-08-23T18:56:08+00:00"
         },
         {
             "name": "pushinbr/pam-native-nfc",
@@ -1082,21 +1258,25 @@
         },
         {
             "name": "pushinbr/pam-native-video",
-            "version": "v0.2.0",
+            "version": "v0.3.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-video.git",
-                "reference": "589f934215b15ba4be175192964fc73f9d68b734"
+                "reference": "2ef0ef111dc5bada87c96b83cf9b3b40d7d6ed42"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-video/zipball/589f934215b15ba4be175192964fc73f9d68b734",
-                "reference": "589f934215b15ba4be175192964fc73f9d68b734",
+                "url": "https://api.github.com/repos/push-in/pam-native-video/zipball/2ef0ef111dc5bada87c96b83cf9b3b40d7d6ed42",
+                "reference": "2ef0ef111dc5bada87c96b83cf9b3b40d7d6ed42",
                 "shasum": ""
             },
             "require": {
                 "php": "^8.5",
                 "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "pushinbr/pam-native-plugin-kit": "^0.2.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -1116,9 +1296,9 @@
             "description": "Adaptive streaming, subtitles and native Media3/AVPlayer playback for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-video/issues",
-                "source": "https://github.com/push-in/pam-native-video/tree/v0.2.0"
+                "source": "https://github.com/push-in/pam-native-video/tree/v0.3.0"
             },
-            "time": "2026-08-23T18:04:21+00:00"
+            "time": "2026-08-23T18:52:35+00:00"
         },
         {
             "name": "pushinbr/pam-native-widgets",

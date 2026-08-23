@@ -34,6 +34,11 @@ matrix, changelog, CI, and signed release evidence.
 | 22 | `pushinbr/pam-native-devtools` | Event timeline, state snapshots, network diagnostics, performance marks, redaction and JSON export | PHP | None; entirely certifiable in CI |
 | 23 | `pushinbr/pam-native-plugin-kit` | Scaffolding, manifest validation, IDL codegen and compatibility certification | PHP + CLI templates | None; entirely certifiable in CI |
 | 24 | `pushinbr/pam-native-sync-laravel` | Laravel delta API, mutation ingestion, auth, conflicts and retention | Laravel package | Supported Laravel/database matrix |
+| 25 | `pushinbr/pam-native-camera` | Low-latency photo/video capture, device/format selection, focus, zoom, torch and frame processors | PHP + Kotlin + Swift | Camera, thermal and interruption matrix on physical devices |
+| 26 | `pushinbr/pam-native-media-editor` | Immutable media timelines, trim, composition, filters, audio mix, HDR and export | PHP + Kotlin + Swift | Codec/export matrix and long-running device jobs |
+| 27 | `pushinbr/pam-native-canvas` | Retained 2D paths, text, images, transforms and pointer input | PHP + Kotlin + Swift views | Golden images and touch latency on devices |
+| 28 | `pushinbr/pam-native-gpu` | Bounded programmable OpenGL ES 3 and Metal fragment rendering | PHP + Kotlin + Swift views | GPU/thermal matrix and shader golden images |
+| 29 | `pushinbr/pam-native-3d` | Sandboxed GLB/USDZ scenes, animation, transforms and orbit controls | PHP + Filament + RealityKit views | Asset, memory, GPU and thermal matrix on devices |
 
 ## Mandatory release gates
 
