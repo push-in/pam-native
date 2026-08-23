@@ -332,6 +332,8 @@ jobs:
           pattern: pam-native-*
           path: dist
           merge-multiple: true
+      - name: Remove CI-only prerequisite payloads
+        run: rm -f dist/Info.plist dist/pam-native-android-prerequisites.tar.gz
       - name: Reverify downloaded package budget evidence
         run: |
           version=${GITHUB_REF_NAME#v}
