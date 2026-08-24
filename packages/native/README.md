@@ -1,46 +1,28 @@
-<!-- pam:distribution-page:start -->
-<div align="center">
-
-# PAM Native — Composer Distribution
-
-**The public Composer source for the typed PAM Native PHP SDK.**
-
-This repository is an immutable subtree split of the canonical PAM Native release. Applications install from here through Packagist; architecture, native hosts, issues, and contributions live in the canonical repository.
-
-[![Packagist](https://img.shields.io/packagist/v/pushinbr/pam-native?style=flat-square&label=stable)](https://packagist.org/packages/pushinbr/pam-native)
-![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=flat-square&logo=php&logoColor=white)
-![Status](https://img.shields.io/badge/repository-release%20mirror-64748b?style=flat-square)
-
-**[Canonical source](https://github.com/push-in/pam-native) · [Documentation](https://push-in.github.io/pam-docs/native/overview/) · [Packagist](https://packagist.org/packages/pushinbr/pam-native) · [Issues](https://github.com/push-in/pam-native/issues)**
-
-</div>
-
----
-
-## Install the product
-
-```bash
-pam composer require pushinbr/pam-native
-pam doctor --fix
-```
-
-Composer records this mirror's immutable tag and commit in your lockfile. Do not add this Git repository manually and do not open implementation pull requests here.
-
-## Repository ownership
-
-| | |
-| --- | --- |
-| **Use this repository for** | Reproducible Composer downloads and release provenance |
-| **Use the canonical repository for** | Source, roadmap, architecture, issues, security reports, and contributions |
-| **Publication rule** | Generated only from a completed, matching canonical release |
-| **Application workflow** | Normal `composer.json`, `composer.lock`, and `vendor` managed through `pam composer` |
-<!-- pam:distribution-page:end -->
+# pushinbr/pam-native
 
 Pam Native renders real Android views from persistent PHP. PHP owns application
 state and events, Rust performs retained layout and incremental diffing, and
 Kotlin mounts bounded mutation batches on the Android UI thread.
 
-## First component
+## Start here
+
+PAM Native is a Composer product and requires the PAM Runtime. Install PAM
+first, then create the project and run Composer through PAM:
+
+```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+  --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+  https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
+pam init hello-native --template native
+cd hello-native
+pam composer require pushinbr/pam-native
+pam doctor --fix
+pam dev
+```
+
+A screen can be a compact `.pam.php` single-file component:
 
 ```php
 final class Home extends \Pam\Native\Component
@@ -68,6 +50,413 @@ final class Home extends \Pam\Native\Component
 </Screen>
 </template>
 ```
+
+Call `App::components(__DIR__.'/src')` before `App::run(...)`. Constructor
+properties become typed props; named/default slots, `p-if`, `p-for`, dynamic
+bindings, component events, two-way bindings, and lifecycle hooks all compile
+to the existing `Element` tree and binary protocol. The fluent tree API remains
+the default and can be mixed with single-file components freely.
+
+Use `pam mobile make:screen`, `make:component`, and `make:native-view` for
+non-destructive scaffolding. Templates support props, slots, events, model
+binding, conditional blocks, loops, utility classes and user-defined theme
+tokens. The fluent PHP element API and custom Kotlin views remain available as
+escape hatches, so the template/class convention is optional.
+
+Complex controls can expose localized TalkBack and VoiceOver alternatives to
+gesture-only interaction. Bind up to eight `{name, label}` entries through
+`:accessibilityActions` and handle `on:accessibilityAction`, or use
+`Element::accessibilityActions()` with typed `AccessibilityAction` values.
+
+Safe-area and keyboard avoidance remain native:
+
+```xml
+<SafeAreaView edges="top,bottom" mode="margin">
+    <KeyboardAvoidingView
+        behavior="padding"
+        keyboardVerticalOffset="24"
+        enabled="true"
+    >
+        <Input placeholder="Message" />
+    </KeyboardAvoidingView>
+</SafeAreaView>
+```
+
+Android applies system-bar and IME insets directly on the UI thread. The same
+options are available through `SafeAreaView::edges()->mode()` and
+`KeyboardAvoidingView::verticalOffset()->avoidingEnabled()`.
+Use `behavior="interactive"` for a bottom-anchored sheet: Android follows the
+IME while clamping the sheet below the safe top chrome instead of translating
+the entire sheet by the keyboard height. `resize`, `pan`, and `padding` remain
+available for ordinary forms, composers, and scroll containers. `padding`
+reduces the flex viewport available to its children, so fixed controls at the
+bottom of a full-screen composer remain above the IME even when no scroll
+container is present.
+When custom chrome must size itself around those regions,
+`DeviceInfo::get()` exposes `safeAreaTop`, `safeAreaRight`, `safeAreaBottom`,
+and `safeAreaLeft` in logical points plus the device's IANA `timeZone` identifier
+on Android and iOS.
+
+Pull-to-refresh is configured with `RefreshControl::colors()`,
+`progressBackgroundColor()`, `progressViewOffset()`, `enabled()` and `size()`.
+The Android gesture and indicator run locally; only `onRefresh` crosses into
+PHP.
+
+`Text` exposes `selectable()`, `selectionColor()`, `ellipsize()`,
+`allowFontScaling()`, `maxFontSizeMultiplier()`, `adjustsFontSizeToFit()`,
+`breakStrategy()`, `hyphenation()` and `dataDetector()`. Android performs
+selection, fitting, line breaking and link detection inside `TextView`.
+Font scaling is enabled by default. A maximum multiplier of `0` is unbounded;
+positive caps are normalized to at least `1` so a cap never shrinks text below
+its authored size. Android uses the active configuration scale and iOS uses the
+mounted view's Dynamic Type trait collection.
+
+Android project fonts can be bundled in the application source and loaded
+through an asset family:
+
+```css
+/* src/app.css */
+@font-face {
+    font-family: "Brand";
+    src: url("asset://assets/fonts/Brand-Bold.ttf");
+    font-weight: 700;
+}
+
+Text {
+    font-family: "Brand";
+}
+```
+
+```php
+<template>
+    <Text class="brand-title">Brand title</Text>
+</template>
+
+<style scoped>
+    .brand-title {
+        font-weight: 700;
+        font-size: 20px;
+    }
+</style>
+```
+
+The path resolves below the packaged `pam/` asset root. Declare another
+`@font-face` for each weight or italic variant, then author ordinary
+`font-family`, `font-weight`, and `font-style` rules. PAM preserves the logical
+family through inherited text styles and selects the closest face for each
+element, so there is no font registry, CSS parser, or selector work in the
+native application runtime. PAM accepts TTF and OTF files, rejects traversal,
+caches decoded native typefaces, and keeps ordinary installed family names such
+as `sans-serif` working unchanged. The Rust layout engine also reads and caches
+the selected asset face before the first mount, so intrinsic width and wrapping
+use its real glyph advances without a UI-thread measurement or corrective
+second render.
+The conventional `src/app.css` sheet is prepended automatically to every PAM
+component. Use it for fonts, design tokens, tag defaults, and reusable classes;
+local `<style scoped>` rules win the cascade. Relative `.css` imports are
+expanded recursively from the file that declares them at compile time and
+invalidate compiled component caches when a dependency changes. Imports cannot
+leave the Composer project or load network resources.
+Scoped styles are compiled into typed native properties and add no CSS runtime
+or selector pass. Tag rules form the base, matching classes follow stylesheet
+source order regardless of class order in markup, and authored PAM attributes
+win last. Text color, typography, spacing, alignment, and case inherit through
+native layout containers and nested `.pam.php` components. PAM carries that
+inheritance as private render context instead of public component props, so
+strict constructors receive only attributes authored on their component tag.
+Auto-width text uses the parent's relevant flex axis to align visible glyphs:
+cross-axis alignment in columns and main-axis justification in rows. Since
+0.5.84, packaged fonts use their own cached advances instead of the generic
+sans-serif estimator, so labels neither clip nor shift a centered text-and-icon
+control under platform font scaling. Explicit widths and growing text preserve
+normal start alignment unless `text-align` is authored.
+On Android 0.5.85+, native frames round their absolute start and end edges
+before deriving pixel width or height. This keeps centered labels and icons on
+one physical center at fractional densities and gives adjacent siblings one
+shared edge instead of independently rounded geometry.
+On Android 0.5.89+, `SafeAreaView` intersects stable system-bar and
+display-cutout insets with each view's real window bounds. It therefore uses
+zero duplicate padding in decor-fitted or nested views, full protection
+edge-to-edge, and only the physically overlapping edges in bottom-bar,
+mixed/translucent and rotated layouts.
+
+Colors follow CSS syntax inside stylesheets: all named colors, `transparent`,
+short and long hex (including CSS `#RGBA`/`#RRGGBBAA` alpha order),
+`rgb()`/`rgba()`, and `hsl()`/`hsla()`. Custom properties support nested
+references and `var(--name, fallback)`. PAM also compiles percentages, `rem`
+(16 logical points), physical and logical box shorthands, `inset`,
+`transform`, `object-fit`, `visibility`, `box-sizing: border-box`,
+`aspect-ratio`, native `flex-wrap`, percentage opacity, `border: none`, and
+native text decoration. `border` and its directional forms accept
+`<width> solid <color>`; directional colors currently resolve to the shared
+native border color. Absolute position edges accept percentages and
+`border-radius` accepts one to four circular corner values. Unknown web-only
+CSS fails compilation with the component path.
+Uniform borders additionally accept `border-style: solid`, `dashed`, or
+`dotted`; Android and iOS render the pattern natively around rounded corners.
+`box-shadow` accepts one native shadow as
+`x-offset y-offset [blur-radius] [spread-radius] [color]` and `none`.
+Android and iOS render the typed shadow directly; inset and multiple shadows
+remain intentionally unsupported.
+Template `StatusBar` accepts `backgroundColor`/`barStyle` as aliases for
+`color`/`appearance`, plus `animated` and `translucent`.
+On Android, retained stack routes contribute status-bar configuration only
+while active, so a hidden or previously mounted screen cannot override the
+visible route.
+
+Direct PAM color attributes retain the original `#AARRGGBB` eight-digit format
+for source compatibility. Prefer stylesheet colors when authoring CSS-style
+`#RRGGBBAA`; direct attributes also accept named colors, `transparent`, short
+hex, and CSS color functions.
+
+Template bindings support safe numeric `+`, `-`, `*`, `/`, integer `%`, and
+parentheses with ordinary precedence. PHP `.` concatenation accepts scalar,
+null, and `Stringable` operands while rejecting arrays. PHP `??` supplies a
+right-associative fallback for null or missing nested paths; the restricted
+interpreter does not use `eval`.
+Conditional component roots may use `p-if`; a false root becomes an inert
+invisible placeholder with no layout footprint.
+
+For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
+image/video metadata and `System\MediaLibrary::albums()` reads album summaries
+on a native worker. Recent assets use descending added time and then descending
+modified time, matching Android CameraRoll ordering when captures share the
+same added timestamp. Thumbnail `content://` sources are not copied. After the
+user selects one, `System\Files::importUri()` materializes only that asset as a
+sandboxed `FileReference`. Request `PermissionKind::Photos` first and accept
+both granted and limited access; use `Files::pick()` as the portable fallback.
+
+`UI\DrawingCanvas` captures freehand brush and eraser strokes directly in the
+native view. Pointer moves never enter PHP; one bounded, normalized drawing
+document is emitted after each completed stroke. Increment request tokens to
+undo or clear without making either command controlled state:
+
+```xml
+<DrawingCanvas
+    :source="$previewSource"
+    :value="$drawing"
+    brushColor="#FFFFFFFF"
+    brushWidth="6"
+    drawingMode="brush"
+    :undoRequest="$undoRequest"
+    :clearRequest="$clearRequest"
+    on:change="updateDrawing"
+/>
+```
+
+`System\ImageEditor::render()` crops, rotates, flips, filters, adjusts, and
+composes imported images and native drawings on a dedicated native worker. Set `maxWidth` and
+`maxHeight` to bound the encoded dimensions and `outputQuality` from 1 to 100.
+Android reads image bounds first and chooses a decode sample before allocating
+the bitmap, then performs one final high-quality resize. This keeps profile
+photos and message attachments off the UI thread without decoding their full
+camera resolution unnecessarily:
+
+```php
+ImageEditor::render(
+    source: $selected,
+    cropRatio: ImageCropRatio::Square,
+    filter: ImageFilterType::Original,
+    quarterTurns: 0,
+    flipHorizontal: false,
+    overlayText: '',
+    callback: fn (?FileReference $image, string $error) => $this->upload($image),
+    maxWidth: 1080,
+    maxHeight: 1080,
+    outputQuality: 92,
+    drawing: $drawing,
+);
+```
+
+Format and migrate a component tree with the package binary:
+
+```bash
+vendor/bin/pam-native-format src
+vendor/bin/pam-native-format --check src
+```
+
+The formatter removes empty scoped-style blocks and makes `p-if`,
+`p-else-if`, `p-else`, and `p-for` canonical. Legacy `v-*` directives remain
+deprecated compatibility aliases.
+
+`Input` and its `TextInput` alias keep composition, selection and the editable
+buffer inside a dedicated Android `EditText`. They support React
+Native-compatible capitalization, correction, input mode, autofill,
+controlled selection, cursor/underline colors, read-only behavior, return-key
+labels, multiline sizing and submit behavior. `onSelectionChange` is
+coalesced once per frame; `onContentSizeChange`, `onKeyPress` and
+`onEndEditing` cross into PHP only when registered.
+
+`Modal` exposes `animationType`, backdrop/transparency, hardware acceleration,
+system-bar translucency and typed request-close/show/dismiss/orientation
+callbacks. Android owns its window lifecycle and animation and restores the
+previously focused view after a controlled close.
+
+Images use one cancelable loader for `Image` and `ImageBackground`. Remote
+originals are coalesced and cached on disk, decoded bitmaps are cached in RAM
+by measured-size bucket, and Android downsamples before allocating pixels:
+
+```php
+Image::make($url)
+    ->defaultSource('asset://avatar-placeholder.png')
+    ->fit(ImageFit::Cover)
+    ->resizeMethod(ImageResizeMethod::Auto)
+    ->resizeMultiplier(2)
+    ->cache(ImageCachePolicy::ForceCache)
+    ->fadeDuration(180)
+    ->onProgress($updateProgress)
+    ->onLoad($rememberNaturalSize)
+    ->onError($showFallback);
+```
+
+PAM templates accept `cachePolicy="memory-disk"` (and `memoryDisk`) as familiar
+aliases for the same native memory-plus-disk behavior as `force-cache`. This
+keeps ports from Expo Image explicit without introducing a JavaScript image
+pipeline.
+
+Use `cachePolicy="none"` (or `ImageCachePolicy::None`) for a one-shot network
+request that bypasses decoded-memory, HTTP and PAM media-disk caches and does
+not write the response back to them. This is intended for explicit recovery
+after a cached remote image fails; ordinary images should keep a cache-enabled
+policy.
+
+`asset://` always starts at the PAM project root. For example,
+`asset://assets/logos/brand.png` loads
+`assets/logos/brand.png` on both Android and iOS. Keep the internal `pam/`
+bundle directory out of application code; the runtime adds it consistently
+for images, image backgrounds, placeholders, and packaged fonts.
+
+HTTPS, debug HTTP, `asset:`, `file:`, `content:`, `android.resource:` and
+bounded image `data:` URIs are supported. Redirects cannot downgrade HTTPS;
+responses, headers, redirects, input bytes and decoded pixels are bounded.
+`srcSet`, request headers, loading indicators, repeat mode and typed
+load-start/progress/load/error/load-end callbacks share the same path.
+Callbacks are opt-in, and download progress is coalesced to one event per
+display frame before crossing into PHP.
+
+`StatusBar::animated()`, `StatusBar::translucent()` and Android
+`StatusBar::navigationBarHidden()` complement color, icon
+appearance and visibility. Multiple mounted bars merge in order and restore
+the previous native window state when removed. Android 15+ follows mandatory
+edge-to-edge semantics. Active Android modal windows receive the same resolved
+configuration, including full-screen modal dialogs.
+
+Both scroll directions use the same core host:
+
+```php
+Scroll::make($content)
+    ->horizontal()
+    ->contentOffset(x: 120)
+    ->pagingEnabled()
+    ->snapToInterval(320)
+    ->nestedScrollEnabled()
+    ->overScrollMode(ScrollOverScrollMode::Never)
+    ->keyboardDismissMode(ScrollKeyboardDismissMode::OnDrag)
+    ->onScroll($rememberOffset);
+```
+
+Declarative components use `ScrollView` with direct children. PAM inserts the
+correct native content container, so compact horizontal items keep their
+authored widths and loops may render any number of children:
+
+```xml
+<ScrollView horizontal="true" showsHorizontalScrollIndicator="false">
+    <Pressable
+        p-for="$story in $stories"
+        :key="$story->id"
+        width="66"
+    >
+        <Image :source="$story->avatar" width="66" height="66" />
+    </Pressable>
+</ScrollView>
+```
+
+Horizontal `ScrollView` content is a native `Row`; vertical content is a native
+`Column`. The lower-level `Scroll::make($content)` API deliberately retains its
+single explicit content element contract.
+
+For chat timelines, use native end anchoring instead of a guessed content
+offset:
+
+```php
+Scroll::make($messages)
+    ->anchorToEnd()
+    ->maintainVisibleContentPosition()
+    ->autoScrollToEndThreshold(32);
+```
+
+Persisted readers can restore a previously observed logical offset through the
+same tokenized request path. The request runs once when its token changes and
+does not turn the scroll into a continuously controlled component:
+
+```php
+Scroll::make($messages)
+    ->anchorToEnd()
+    ->scrollRequest(
+        request: $restoreGeneration,
+        targetOffset: $savedOffset,
+    );
+```
+
+In a `.pam.php` template use `scrollTargetOffset` beside `scrollRequest`.
+`scrollTargetTestId` wins when both targets are present; a negative offset with
+an empty target keeps the original scroll-to-end behavior. These tokenized
+requests also apply to `VirtualizedList`, `VirtualGrid`, and `SectionList`,
+including variable-height cells and targets outside the mounted window.
+Set `scrollTargetAlignment="center"` or `"end"` to position an identified target
+within the viewport; `"start"` remains the backward-compatible default.
+
+Android owns drag, fling, snapping, fading edges, scrollbars and IME dismissal.
+When `onScroll` is present PAM sends only the active-axis offset, coalesced once
+per display frame. `ActivityIndicator` exposes `animating()`,
+`hidesWhenStopped()`, `size()` and `color()`; `Toggle` exposes native off/on
+track and thumb colors.
+
+Virtualized lists and grids are real AndroidX `RecyclerView` hosts. Rich cells
+accept complete PAM component trees, including images, pressables, inputs and
+custom native views:
+
+```php
+use Pam\Native\UI\{Column, Image, Pressable, Text, VirtualGrid};
+
+$cells = array_map(
+    fn (Photo $photo) => Pressable::make(
+        Column::make(
+            Image::make($photo->url),
+            Text::make($photo->title),
+        ),
+    )
+        ->key((string) $photo->id)
+        ->onPress(fn () => $this->open($photo->id)),
+    $this->photos,
+);
+
+VirtualGrid::make(2, ...$cells)
+    ->rowHeight(224)
+    ->prefetch(8)
+    ->onEndReached($loadMore);
+
+SectionList::make($groups)
+    ->rowHeight(48)
+    ->inverted()
+    ->onScroll($rememberOffset);
+```
+
+`horizontal()`, `columns()`, `inverted()`, `initialScrollIndex()`,
+`removeClippedSubviews()`, `scrollEnabled()` and `showsIndicator()` map directly
+to the native host. Packed scalar and section payloads remain outside PHP while
+scrolling; Android mounts only visible/prefetched rich cells, preserves keyed
+identity and event routing, and limits `onScroll` to one event per VSYNC.
+
+For non-virtualized responsive screens, `Grid::make(...$children)` provides a
+12-column retained grid with gutters, spans, offsets, ordering and mobile-first
+`sm`/`md`/`lg`/`xl` breakpoints. See `docs/components.md` for fluent and tag
+examples.
+
+Run `pam mobile benchmark` on a physical device for release-like AndroidX
+Macrobenchmarks, and `pam mobile profile` to generate the Baseline Profile
+independently. Protocol v1 compatibility and limits are documented in
+`PROTOCOL.md`.
 
 ## HTTP
 
