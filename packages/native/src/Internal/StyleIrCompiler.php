@@ -47,12 +47,15 @@ final class StyleIrCompiler
                 'selectors' => $sheet['cascadeRules'] ?? [],
             ],
             'tokens' => $sheet['tokens'] ?? [],
+            'variables' => $sheet['variables'] ?? [],
+            'variableRules' => $sheet['variableRules'] ?? [],
             'states' => $sheet['states'] ?? [],
             'stateRules' => $sheet['stateRules'] ?? [],
             'recipes' => $sheet['recipes'] ?? [],
             'queries' => $sheet['queries'] ?? [],
             'keyframes' => $sheet['keyframes'] ?? [],
             'fonts' => $sheet['fonts'] ?? [],
+            'utilities' => StyleUtilityCompiler::manifest(),
             'dependencies' => $dependencies,
         ];
         try {

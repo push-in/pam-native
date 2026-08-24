@@ -23,6 +23,9 @@ final class ScopedStyleCompiler
         'aspect-ratio' => 'aspectRatio',
         'background' => 'backgroundColor',
         'background-color' => 'backgroundColor',
+        '-pam-native-background-color' => 'nativeBackgroundColorResource',
+        '-pam-native-text-color' => 'nativeTextColorResource',
+        '-pam-native-border-color' => 'nativeBorderColorResource',
         'border-bottom-left-radius' => 'borderBottomLeftRadius',
         'border-bottom-right-radius' => 'borderBottomRightRadius',
         'border-bottom-width' => 'borderBottomWidth',
@@ -116,6 +119,7 @@ final class ScopedStyleCompiler
         $classCascade = [];
         $cascadeRules = [];
         $rules = [];
+        $variableRules = [];
         $matchedBytes = 0;
         preg_match_all(
             '/([^{}]+)\{([^{}]*)\}/',
@@ -183,6 +187,13 @@ final class ScopedStyleCompiler
                     'declarations' => $cascadeDeclarations,
                     'order' => $sourceOrder,
                 ];
+                if (str_contains($body, 'var(')) {
+                    $variableRules[] = [
+                        'selector' => $selector,
+                        'order' => $sourceOrder,
+                        'body' => $body,
+                    ];
+                }
                 if (preg_match('/^\.([A-Za-z_][A-Za-z0-9_-]*)$/D', $selector, $match) === 1) {
                     $classes[$match[1]] = [
                         ...($classes[$match[1]] ?? []),
@@ -226,6 +237,8 @@ final class ScopedStyleCompiler
             'classCascade' => $classCascade,
             'cascadeRules' => $cascadeRules,
             'fonts' => $fonts,
+            'variables' => $variables,
+            'variableRules' => $variableRules,
             'tokens' => $language2['tokens'],
             'states' => $language2['states'],
             'stateRules' => $stateRules,
@@ -1058,6 +1071,17 @@ final class ScopedStyleCompiler
         string $value,
         string $name,
     ): string|int|bool {
+        if (in_array($property, [
+            '-pam-native-background-color',
+            '-pam-native-text-color',
+            '-pam-native-border-color',
+        ], true)) {
+            $resource = self::unquote(trim($value));
+            if (preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/D', $resource) !== 1) {
+                throw new RuntimeException("Invalid native color resource in {$name}.");
+            }
+            return $resource;
+        }
         if ($property === 'display') {
             return match (strtolower($value)) {
                 'none' => false,

@@ -41,11 +41,13 @@ parameters:
         - src/Internal/StyleQueryCompiler.php
         - src/Internal/StyleSelectorCompiler.php
         - src/Internal/StyleTokenGenerator.php
+        - src/Internal/StyleUtilityCompiler.php
         - src/Internal/StyleValueCompiler.php
         - src/Renderable.php
         - src/Style/StyleCompatibility.php
         - src/Style/StyleExpressionKind.php
         - src/Style/StyleInvalidationKind.php
+        - src/Style/StyleInteractionState.php
         - src/Style/StylePropertyCatalog.php
         - src/Style/StylePropertyDefinition.php
         - src/Style/StyleQueryFeature.php
@@ -55,4 +57,5 @@ parameters:
         - src/Style/StyleRenderCost.php
         - src/Style/StyleScope.php
         - src/Style/StyleValueUnit.php
+        - src/Style/StyleVariables.php
         - src/TemplateRegistry.php

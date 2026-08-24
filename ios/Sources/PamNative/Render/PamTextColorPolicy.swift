@@ -3,7 +3,11 @@ import UIKit
 enum PamTextColorPolicy {
     @discardableResult
     static func apply(argb: Int64, to view: UIView) -> Bool {
-        let color = UIColor(argb: argb)
+        apply(color: UIColor(argb: argb), to: view)
+    }
+
+    @discardableResult
+    static func apply(color: UIColor, to view: UIView) -> Bool {
         switch view {
         case let label as UILabel:
             label.textColor = color

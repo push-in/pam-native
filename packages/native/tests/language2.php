@@ -8,6 +8,7 @@ use Pam\Native\Internal\PamPhpCompiler;
 use Pam\Native\Internal\ScopedStyleCompiler;
 use Pam\Native\Internal\StyleQueryCompiler;
 use Pam\Native\Internal\StyleTokenGenerator;
+use Pam\Native\Internal\StyleUtilityCompiler;
 use Pam\Native\Internal\StyleValueCompiler;
 use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateRenderer;
@@ -17,6 +18,7 @@ use Pam\Native\PropKey;
 use Pam\Native\Style\StyleInvalidationKind;
 use Pam\Native\Style\StylePropertyCatalog;
 use Pam\Native\Style\StyleScope;
+use Pam\Native\Style\StyleVariables;
 use Pam\Native\Tooling\PamFormatter;
 
 $language2Tree = TemplateCompiler::compile(
@@ -107,6 +109,11 @@ $language2Styles = ScopedStyleCompiler::compile(<<<'CSS'
     transform: scale(0.98);
 }
 
+.touchable:focus-visible {
+    background: #3366FF;
+    transform: scale(1.04);
+}
+
 @media (min-width: 768dp) {
     .card { padding: 24px; }
 }
@@ -147,6 +154,13 @@ $assert(
     StylePropertyCatalog::find('background')?->nativeName === 'backgroundColor'
         && StylePropertyCatalog::find('transform')?->cost->value === 1,
     'The public CSS compatibility catalog must resolve aliases and compositor costs.',
+);
+$utility = StyleUtilityCompiler::compile('grid-4');
+$assert(
+    ($utility['attribute'] ?? null) === 'columns'
+        && ($utility['value'] ?? null) === 4
+        && ($language2Styles['styleIr']['utilities']['source'] ?? null) === 'tailwind-compatible',
+    'Optional Tailwind-compatible utilities must compile through the shared Style IR manifest.',
 );
 $moduleStyles = ScopedStyleCompiler::compile(
     '.card { padding: 12px; }',
@@ -271,6 +285,54 @@ $assert(
         && ($cascadeElement->properties()[PropKey::BackgroundColor->value] ?? null) === 0xFF222222,
     'Compound, child, descendant and attribute selectors must honor specificity and !important.',
 );
+$reactiveStyles = ScopedStyleCompiler::compile(
+    ':root { --space: 8px; --surface: #111111; } .reactive { padding: var(--space); background: var(--surface); }',
+    'ReactiveStyles.pam',
+);
+$reactiveTemplate = TemplateCompiler::compile('<View class="reactive" />', 'ReactiveStyles.pam', LanguageVersion::Language2);
+$reactiveRoot = new CompiledTemplateNode(
+    kind: $reactiveTemplate->kind,
+    name: $reactiveTemplate->name,
+    attributes: ['__pamStyles' => json_encode($reactiveStyles, JSON_THROW_ON_ERROR)],
+    source: $reactiveTemplate->source,
+    line: $reactiveTemplate->line,
+    column: $reactiveTemplate->column,
+);
+$reactiveRoot->children = $reactiveTemplate->children;
+StyleVariables::replace(['space' => '20px', 'surface' => '#4F46E5']);
+$reactiveElement = TemplateRenderer::render($reactiveRoot, null, []);
+$assert(
+    (float) ($reactiveElement->properties()[PropKey::PaddingLeft->value] ?? 0) === 20.0
+        && ($reactiveElement->properties()[PropKey::BackgroundColor->value] ?? null) === 0xFF4F46E5,
+    'Reactive CSS variables must invalidate and recompile only dependent declarations.',
+);
+StyleVariables::replace([]);
+
+$nativeResourceStyles = ScopedStyleCompiler::compile(
+    '.native-theme { -pam-native-background-color: colorSurface; -pam-native-text-color: label_primary; -pam-native-border-color: accent-color; }',
+    'NativeResources.pam',
+);
+$nativeResourceTemplate = TemplateCompiler::compile(
+    '<Text class="native-theme">Native theme</Text>',
+    'NativeResources.pam',
+    LanguageVersion::Language2,
+);
+$nativeResourceRoot = new CompiledTemplateNode(
+    kind: $nativeResourceTemplate->kind,
+    name: $nativeResourceTemplate->name,
+    attributes: ['__pamStyles' => json_encode($nativeResourceStyles, JSON_THROW_ON_ERROR)],
+    source: $nativeResourceTemplate->source,
+    line: $nativeResourceTemplate->line,
+    column: $nativeResourceTemplate->column,
+);
+$nativeResourceRoot->children = $nativeResourceTemplate->children;
+$nativeResourceElement = TemplateRenderer::render($nativeResourceRoot, null, []);
+$assert(
+    ($nativeResourceElement->properties()[PropKey::NativeBackgroundColorResource->value] ?? null) === 'colorSurface'
+        && ($nativeResourceElement->properties()[PropKey::NativeTextColorResource->value] ?? null) === 'label_primary'
+        && ($nativeResourceElement->properties()[PropKey::NativeBorderColorResource->value] ?? null) === 'accent-color',
+    'Native Android color resources and iOS named colors must cross the typed protocol unchanged.',
+);
 
 $styledTemplate = TemplateCompiler::compile(
     '<Pressable class="touchable"><View recipe="card" variant:tone="primary" /></Pressable>',
@@ -291,6 +353,10 @@ $styledChild = $styledElement->children()[0] ?? null;
 $assert(
     (float) ($styledElement->properties()[PropKey::PressOpacity->value] ?? 0) === 0.72
         && (float) ($styledElement->properties()[PropKey::PressScale->value] ?? 0) === 0.98
+        && str_contains(
+            (string) ($styledElement->properties()[PropKey::NativeStateStyles->value] ?? ''),
+            '"2"',
+        )
         && $styledChild instanceof \Pam\Native\Element
         && (float) ($styledChild->properties()[PropKey::PaddingLeft->value] ?? 0) === 16.0
         && ($styledChild->properties()[PropKey::BackgroundColor->value] ?? null) === 0xFF4F46E5,

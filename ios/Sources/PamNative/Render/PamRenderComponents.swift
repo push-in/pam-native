@@ -7,18 +7,24 @@ final class PamPressButton: UIButton {
     var pamPressedOpacity: CGFloat = 0.72
     var pamPressedScale: CGFloat = 1
     var pamHitSlop = UIEdgeInsets.zero
+    var pamStateStyles: [Int: [Int: Any]] = [:]
 
     private var restingAlpha: CGFloat?
     private var restingTransform: CGAffineTransform?
+    private var restingBackgroundColor: UIColor?
+    private var restingTitleColor: UIColor?
+    private var restingBorderColor: CGColor?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         focusEffect = UIFocusHaloEffect()
+        installHoverState()
     }
 
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         focusEffect = UIFocusHaloEffect()
+        installHoverState()
     }
 
     override var canBecomeFocused: Bool {
@@ -46,6 +52,7 @@ final class PamPressButton: UIButton {
             if isHighlighted {
                 restingAlpha = alpha
                 restingTransform = transform
+                applyPamState(1, active: true)
                 if PamMotionPolicy.isReduced {
                     layer.removeAllAnimations()
                     alpha = pamPressedOpacity
@@ -69,6 +76,7 @@ final class PamPressButton: UIButton {
                     layer.removeAllAnimations()
                     self.alpha = alpha
                     self.transform = transform
+                    applyPamState(1, active: false)
                     restingAlpha = nil
                     restingTransform = nil
                     return
@@ -81,9 +89,67 @@ final class PamPressButton: UIButton {
                     self.alpha = alpha
                     self.transform = transform
                 }
+                applyPamState(1, active: false)
                 restingAlpha = nil
                 restingTransform = nil
             }
+        }
+    }
+
+    override func didUpdateFocus(
+        in context: UIFocusUpdateContext,
+        with coordinator: UIFocusAnimationCoordinator
+    ) {
+        super.didUpdateFocus(in: context, with: coordinator)
+        coordinator.addCoordinatedAnimations { [weak self] in
+            guard let self else { return }
+            self.applyPamState(2, active: context.nextFocusedView === self)
+        }
+    }
+
+    private func installHoverState() {
+        if #available(iOS 13.0, *) {
+            addGestureRecognizer(UIHoverGestureRecognizer(target: self, action: #selector(hoverChanged(_:))))
+        }
+    }
+
+    @available(iOS 13.0, *)
+    @objc private func hoverChanged(_ recognizer: UIHoverGestureRecognizer) {
+        applyPamState(3, active: recognizer.state == .began || recognizer.state == .changed)
+    }
+
+    private func applyPamState(_ state: Int, active: Bool) {
+        guard let styles = pamStateStyles[state] else { return }
+        if !active {
+            alpha = restingAlpha ?? 1
+            transform = restingTransform ?? .identity
+            backgroundColor = restingBackgroundColor
+            setTitleColor(restingTitleColor, for: .normal)
+            layer.borderColor = restingBorderColor
+            restingAlpha = nil
+            restingTransform = nil
+            restingBackgroundColor = nil
+            restingTitleColor = nil
+            restingBorderColor = nil
+            return
+        }
+        if restingAlpha == nil { restingAlpha = alpha }
+        if restingTransform == nil { restingTransform = transform }
+        restingBackgroundColor = backgroundColor
+        restingTitleColor = titleColor(for: .normal)
+        restingBorderColor = layer.borderColor
+        if let opacity = styles[38] as? NSNumber { alpha = CGFloat(truncating: opacity) }
+        let x = (styles[74] as? NSNumber).map(CGFloat.init(truncating:)) ?? 1
+        let y = (styles[75] as? NSNumber).map(CGFloat.init(truncating:)) ?? 1
+        transform = transform.scaledBy(x: x, y: y)
+        if let color = styles[10] as? NSNumber {
+            backgroundColor = UIColor(argb: color.int64Value)
+        }
+        if let color = styles[11] as? NSNumber {
+            setTitleColor(UIColor(argb: color.int64Value), for: .normal)
+        }
+        if let color = styles[37] as? NSNumber {
+            layer.borderColor = UIColor(argb: color.int64Value).cgColor
         }
     }
 }
