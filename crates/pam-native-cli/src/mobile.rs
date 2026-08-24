@@ -676,7 +676,13 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             print_usage();
             Ok(0)
         }
-        "doctor" => doctor(parse_project_only(arguments)?),
+        "doctor" => {
+            let (project, fix) = parse_doctor_options(arguments)?;
+            if fix {
+                repair_android_environment(&project)?;
+            }
+            doctor(project)
+        }
         "audit" => audit_mobile(parse_mobile_audit_options(arguments)?),
         "prepare" => {
             let options = parse_options(arguments, false)?;
@@ -2598,6 +2604,112 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
     } else {
         Err("Pam Native doctor found blocking Android requirements".to_owned())
     }
+}
+
+fn parse_doctor_options(
+    arguments: impl Iterator<Item = OsString>,
+) -> Result<(PathBuf, bool), String> {
+    let mut project = None;
+    let mut fix = false;
+    for argument in arguments {
+        if argument == "--fix" {
+            fix = true;
+        } else if argument.to_string_lossy().starts_with('-') {
+            return Err(format!(
+                "unknown doctor option {}",
+                argument.to_string_lossy()
+            ));
+        } else if project.replace(PathBuf::from(&argument)).is_some() {
+            return Err("doctor accepts at most one project path".to_owned());
+        }
+    }
+    Ok((project.unwrap_or_else(|| PathBuf::from(".")), fix))
+}
+
+fn sdkmanager(sdk: &Path) -> Option<PathBuf> {
+    let executable = if cfg!(windows) {
+        "sdkmanager.bat"
+    } else {
+        "sdkmanager"
+    };
+    let candidates = [
+        sdk.join("cmdline-tools/latest/bin").join(executable),
+        sdk.join("tools/bin").join(executable),
+    ];
+    if let Some(found) = candidates.into_iter().find(|path| path.is_file()) {
+        return Some(found);
+    }
+    let versions = fs::read_dir(sdk.join("cmdline-tools")).ok()?;
+    versions
+        .filter_map(Result::ok)
+        .map(|entry| entry.path().join("bin").join(executable))
+        .filter(|path| path.is_file())
+        .max()
+}
+
+fn required_android_packages(project: &Project, runtime: &ResolvedRuntime) -> Vec<String> {
+    vec![
+        "platform-tools".to_owned(),
+        format!("platforms;android-{}", project.manifest.android.target_sdk),
+        format!("ndk;{}", runtime.release.ndk_version),
+        "cmake;3.22.1".to_owned(),
+    ]
+}
+
+fn android_packages_ready(project: &Project, runtime: &ResolvedRuntime, sdk: &Path) -> bool {
+    sdk.join("platform-tools/adb").is_file()
+        && sdk
+            .join(format!(
+                "platforms/android-{}",
+                project.manifest.android.target_sdk
+            ))
+            .is_dir()
+        && sdk.join("ndk").join(&runtime.release.ndk_version).is_dir()
+        && sdk.join("cmake/3.22.1").is_dir()
+}
+
+fn install_android_packages(
+    project: &Project,
+    runtime: &ResolvedRuntime,
+    accept_licenses: bool,
+) -> Result<(), String> {
+    let sdk = android_sdk()?;
+    if android_packages_ready(project, runtime, &sdk) {
+        return Ok(());
+    }
+    let manager = sdkmanager(&sdk).ok_or_else(|| format!(
+        "Android Command-line Tools are missing from {}. Open Android Studio > SDK Manager > SDK Tools, install `Android SDK Command-line Tools (latest)`, then run `pam doctor --fix`",
+        sdk.display()
+    ))?;
+    if accept_licenses {
+        println!("Accept the Android SDK licenses below to finish PAM setup.\n");
+        let status = Command::new(&manager)
+            .arg("--licenses")
+            .env("ANDROID_SDK_ROOT", &sdk)
+            .status()
+            .map_err(|error| format!("cannot start {}: {error}", manager.display()))?;
+        if !status.success() {
+            return Err("Android SDK licenses were not accepted".to_owned());
+        }
+    }
+    let packages = required_android_packages(project, runtime);
+    println!("Installing the Android components required by PAM Native...");
+    let status = Command::new(&manager)
+        .args(&packages)
+        .env("ANDROID_SDK_ROOT", &sdk)
+        .status()
+        .map_err(|error| format!("cannot start {}: {error}", manager.display()))?;
+    if !status.success() {
+        return Err("Android SDK setup is incomplete; run `pam doctor --fix` to accept licenses and install the required components".to_owned());
+    }
+    Ok(())
+}
+
+fn repair_android_environment(project_path: &Path) -> Result<(), String> {
+    repair_android(project_path)?;
+    let project = load_project(project_path)?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
+    install_android_packages(&project, &runtime, true)
 }
 
 fn ios_runtime_ready(runtime: &ResolvedRuntime) -> bool {
@@ -5556,9 +5668,11 @@ struct BuiltApk {
 }
 
 fn build(options: MobileOptions) -> Result<BuiltApk, String> {
+    repair_android(&options.project)?;
     let project = load_project(&options.project)?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
+    install_android_packages(&project, &runtime, false)?;
     let workspace = prepare(&project, &native_home, &options.abis)?;
     for abi in &options.abis {
         if !runtime_ready_at(&runtime.root, *abi) {
@@ -7725,5 +7839,40 @@ mod tests {
         assert!(
             parse_release_options(["--platform", "web"].into_iter().map(OsString::from)).is_err()
         );
+    }
+
+    #[test]
+    fn doctor_fix_is_order_independent_and_defaults_to_current_project() {
+        let (project, fix) =
+            parse_doctor_options(["--fix"].into_iter().map(OsString::from)).expect("doctor");
+        assert_eq!(project, PathBuf::from("."));
+        assert!(fix);
+
+        let (project, fix) = parse_doctor_options(
+            ["application", "--fix"].into_iter().map(OsString::from),
+        )
+        .expect("doctor project");
+        assert_eq!(project, PathBuf::from("application"));
+        assert!(fix);
+    }
+
+    #[test]
+    fn sdkmanager_is_discovered_from_versioned_command_line_tools() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-sdkmanager-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let executable = if cfg!(windows) {
+            root.join("cmdline-tools/12.0/bin/sdkmanager.bat")
+        } else {
+            root.join("cmdline-tools/12.0/bin/sdkmanager")
+        };
+        fs::create_dir_all(executable.parent().expect("parent")).expect("tools");
+        fs::write(&executable, "").expect("sdkmanager");
+        assert_eq!(sdkmanager(&root), Some(executable));
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }
