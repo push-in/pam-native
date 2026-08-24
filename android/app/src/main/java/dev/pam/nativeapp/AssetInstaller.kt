@@ -16,7 +16,11 @@ internal class AssetInstaller(private val context: Context) {
             scheduleReleaseCleanup(release)
             return entry
         }
-        val staging = File(context.cacheDir, "pam-install-$version")
+        // Android may purge cacheDir while a large Composer tree is being
+        // copied, producing a valid entry path whose nested templates vanish
+        // before PHP starts. Installation is transactional application state,
+        // not disposable cache, so stage beside the content-addressed releases.
+        val staging = installationStagingDirectory(context.filesDir, version)
         staging.deleteRecursively()
         check(staging.mkdirs()) { "Cannot create Pam Native staging directory" }
         copyDirectory(ASSET_ROOT, staging)
@@ -163,4 +167,9 @@ internal fun staleReleaseDirectories(
         .sortedByDescending(File::lastModified)
         .drop(retainedInactiveReleases)
         .toList()
+}
+
+internal fun installationStagingDirectory(filesDirectory: File, version: String): File {
+    require(version.matches(Regex("[a-f0-9]{64}")))
+    return File(filesDirectory, "pam/staging/pam-install-$version")
 }

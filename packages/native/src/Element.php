@@ -258,6 +258,28 @@ abstract class Element implements Renderable
         return $this->elementKey;
     }
 
+    /**
+     * Applies semantic theme defaults without replacing authored properties.
+     * Descendants are handled in one retained-tree pass before encoding.
+     *
+     * @param array<int, array<int, string|int|float|bool>> $defaultsByKind
+     */
+    final public function withThemeDefaults(array $defaultsByKind): static
+    {
+        $copy = clone $this;
+        foreach ($defaultsByKind[$this->kind->value] ?? [] as $key => $value) {
+            if (!array_key_exists($key, $copy->properties)) {
+                $copy->properties[$key] = $value;
+            }
+        }
+        $copy->children = array_map(
+            static fn (Element $child): Element => $child->withThemeDefaults($defaultsByKind),
+            $copy->children,
+        );
+
+        return $copy;
+    }
+
     final protected function withProperty(
         PropKey $key,
         string|int|float|bool|BinaryValue $value,

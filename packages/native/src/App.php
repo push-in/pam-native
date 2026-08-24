@@ -13,6 +13,8 @@ use Throwable;
 
 final class App
 {
+    private static ?Theme $activeTheme = null;
+
     private function __construct()
     {
     }
@@ -61,7 +63,18 @@ final class App
 
     public static function theme(Theme $theme): void
     {
+        self::$activeTheme = $theme;
         $theme->apply();
+    }
+
+    public static function activeTheme(): ?Theme
+    {
+        return self::$activeTheme;
+    }
+
+    public static function appearance(): UserInterfaceAppearance
+    {
+        return Runtime::windowMetrics()->appearance;
     }
 
     public static function component(string $tag, string $view): void

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.5 - 2026-08-23
+
+- Add Vue-like `p-model` and `p-model:checked` two-way bindings to Language 2,
+  while keeping the existing binding spellings compatible.
+- Apply accessible semantic theme defaults to imperative element trees without
+  replacing authored styles, preventing invisible dark-on-dark first frames.
+- Expose the live native appearance to plugins so PAM Native UI follows system
+  light and dark mode without environment configuration.
+- Move Android application-bundle staging out of purgeable cache storage and
+  certify a non-uniform visible first frame on API 36.1 and physical hardware.
+- Add an Android pixel-level first-frame regression and a bounded theme-default
+  performance budget for retained trees.
+
 ## 0.8.2 - 2026-08-23
 
 - Resolve Android runtime bundles from the latest PAM runtime release instead

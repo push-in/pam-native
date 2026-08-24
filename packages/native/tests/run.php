@@ -4423,6 +4423,30 @@ $assert(
         && Theme::contrastRatio(0xFF4ADE80, 0xFF052E16) >= 4.5,
     'Theme contrast validation must enforce WCAG AA semantic pairs.',
 );
+$darkDefaults = Theme::pamLab()->applyTo(
+    Screen::make(
+        Text::make('Visible'),
+        Button::make('Action'),
+    ),
+);
+$defaultText = $darkDefaults->children()[0] ?? null;
+$defaultButton = $darkDefaults->children()[1] ?? null;
+$assert(
+    isset($darkDefaults->properties()[PropKey::BackgroundColor->value])
+        && $defaultText instanceof \Pam\Native\Element
+        && isset($defaultText->properties()[PropKey::TextColor->value])
+        && $defaultButton instanceof \Pam\Native\Element
+        && isset($defaultButton->properties()[PropKey::BackgroundColor->value])
+        && isset($defaultButton->properties()[PropKey::TextColor->value]),
+    'Applied themes must give imperative trees visible semantic defaults.',
+);
+$authoredText = Theme::pamLab()->applyTo(
+    Text::make('Brand')->style(new Style(textColor: 0xFFFF00FF)),
+);
+$assert(
+    $authoredText->properties()[PropKey::TextColor->value] === 0xFFFF00FF,
+    'Theme defaults must never replace authored imperative properties.',
+);
 
 $template = new class extends Component {
     private string $name = 'PHP';
@@ -6215,8 +6239,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.8.4',
-    'The runtime SDK contract must match the 0.8.4 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.8.5',
+    'The runtime SDK contract must match the 0.8.5 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

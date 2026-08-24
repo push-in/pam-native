@@ -288,6 +288,8 @@
         { "name": "borderStyle", "values": [{ "name": "solid" }, { "name": "dashed" }, { "name": "dotted" }] },
         { "name": "opacity" },
         { "name": "model", "description": "Two-way component property binding for Input." },
+        { "name": "p-model", "description": "Vue-like two-way binding to typed component state." },
+        { "name": "p-model:checked", "description": "Explicit two-way boolean binding for checked controls." },
         { "name": "bind:value", "description": "Two-way Input binding to a component property." },
         { "name": "bind:checked", "description": "Two-way Switch binding to a boolean component property." },
         { "name": "@press", "description": "Short event syntax for a component method." },

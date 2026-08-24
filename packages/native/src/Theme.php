@@ -9,6 +9,8 @@ final readonly class Theme
     /** @param array<string, array<int, string|int|float|bool>> $classes */
     public function __construct(
         public array $classes,
+        /** @var array<int, array<int, string|int|float|bool>> */
+        public array $elementDefaults = [],
     ) {
     }
 
@@ -137,6 +139,27 @@ final readonly class Theme
                 PropKey::BorderColor->value => $palette['focus'],
                 PropKey::BorderWidth->value => 3.0,
             ],
+        ], [
+            NodeKind::Screen->value => [
+                PropKey::FlexGrow->value => 1.0,
+                PropKey::BackgroundColor->value => $palette['surface'],
+            ],
+            NodeKind::Text->value => [
+                PropKey::TextColor->value => $palette['text'],
+            ],
+            NodeKind::Button->value => [
+                PropKey::BackgroundColor->value => $palette['accent'],
+                PropKey::TextColor->value => $palette['onAccent'],
+                PropKey::MinHeight->value => DesignTokens::TouchTarget,
+                PropKey::PaddingHorizontal->value => DesignTokens::Space4,
+                PropKey::BorderRadius->value => DesignTokens::RadiusMedium,
+            ],
+            NodeKind::Input->value => [
+                PropKey::BackgroundColor->value => $palette['surfaceMuted'],
+                PropKey::TextColor->value => $palette['text'],
+                PropKey::PlaceholderColor->value => $palette['mutedText'],
+                PropKey::MinHeight->value => DesignTokens::TouchTarget,
+            ],
         ]);
     }
 
@@ -153,6 +176,11 @@ final readonly class Theme
         foreach ($this->classes as $name => $properties) {
             TemplateRegistry::style($name, $properties);
         }
+    }
+
+    public function applyTo(Element $element): Element
+    {
+        return $element->withThemeDefaults($this->elementDefaults);
     }
 
     /** @param array<string, int> $palette */

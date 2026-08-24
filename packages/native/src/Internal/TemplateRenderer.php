@@ -911,6 +911,27 @@ final class TemplateRenderer
             $attributes,
             self::styleSheetFonts($data),
         );
+        if (isset($attributes['p-model'])) {
+            $binding = in_array($tag, ['Switch', 'Toggle'], true)
+                ? 'bind:checked'
+                : 'bind:value';
+            if (isset($attributes[$binding])) {
+                throw new RuntimeException(
+                    "p-model cannot be combined with {$binding} on {$tag}.",
+                );
+            }
+            $attributes[$binding] = $attributes['p-model'];
+            unset($attributes['p-model']);
+        }
+        if (isset($attributes['p-model:checked'])) {
+            if (isset($attributes['bind:checked'])) {
+                throw new RuntimeException(
+                    "p-model:checked cannot be combined with bind:checked on {$tag}.",
+                );
+            }
+            $attributes['bind:checked'] = $attributes['p-model:checked'];
+            unset($attributes['p-model:checked']);
+        }
         if (isset($attributes['bind:value'])) {
             $attributes[':value'] = $attributes['bind:value'];
             $attributes['model'] = ltrim(
