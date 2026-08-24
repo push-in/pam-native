@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.0 - 2026-08-24
+
+- Introduces PAM Style Language 1.0 with deterministic PAMS IR, bytecode, fingerprints, source maps, compatibility metadata, and granular invalidation dependencies.
+- Adds compiled compound, ID, attribute, child, and descendant selectors with specificity, source order, cascade layers, and `!important`.
+- Adds native Grid lowering, modern media/container queries, CSS math and relative units, native environment values, and scoped/module/global ownership.
+- Adds typed design-token generation for PHP, Kotlin, and Swift plus `pam style inspect`, `manifest`, and `tokens` tooling.
+- Certifies the new style pipeline on PHP 8.5, Rust, Android API 26–36, Swift/UIKit, and an Android API 36 visual consumer.
+
 ## 0.8.8 - 2026-08-24
 
 - Align the public PHP SDK contract with the runtime release so the immutable
