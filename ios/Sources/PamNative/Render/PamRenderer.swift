@@ -1506,7 +1506,9 @@ public final class PamRenderer {
                 view.backgroundColor = UIColor(argb: color)
             }
         case PamConstants.nativeBackgroundColorResource:
-            view.backgroundColor = nativeColor(named: value.textOrNil())
+            if let color = nativeColor(named: value.textOrNil()) {
+                view.backgroundColor = color
+            }
         case PamConstants.borderColor,
              PamConstants.nativeBorderColorResource,
              PamConstants.borderWidth,
