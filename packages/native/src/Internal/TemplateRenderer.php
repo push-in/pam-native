@@ -2494,6 +2494,7 @@ final class TemplateRenderer
             'scopeId' => is_string($decoded['scopeId'] ?? null) ? $decoded['scopeId'] : '',
             'tokens' => self::safeStyleMetadata($decoded['tokens'] ?? [], $tree->source),
             'states' => self::safeStyleMetadata($decoded['states'] ?? [], $tree->source),
+            'stateRules' => self::safeStyleMetadata($decoded['stateRules'] ?? [], $tree->source),
             'recipes' => self::safeStyleMetadata($decoded['recipes'] ?? [], $tree->source),
             'queries' => self::safeStyleMetadata($decoded['queries'] ?? [], $tree->source),
             'keyframes' => self::safeStyleMetadata($decoded['keyframes'] ?? [], $tree->source),
@@ -2671,6 +2672,24 @@ final class TemplateRenderer
                 isset($pressed['scaleX'], $pressed['scaleY'])
                 && $pressed['scaleX'] === $pressed['scaleY']
             ) {
+                $attributes['pressedScale'] = $pressed['scaleX'];
+            }
+        }
+        foreach (($sheet['stateRules'] ?? []) as $stateRule) {
+            if (!is_array($stateRule)
+                || ($stateRule['state'] ?? null) !== 'pressed'
+                || !is_array($stateRule['selector'] ?? null)
+                || !self::styleSelectorMatches(
+                    $stateRule['selector'],
+                    $descriptor,
+                    is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [],
+                )) {
+                continue;
+            }
+            $pressed = $stateRule['declarations'] ?? [];
+            if (!is_array($pressed)) continue;
+            if (isset($pressed['opacity'])) $attributes['pressedOpacity'] = $pressed['opacity'];
+            if (isset($pressed['scaleX'], $pressed['scaleY']) && $pressed['scaleX'] === $pressed['scaleY']) {
                 $attributes['pressedScale'] = $pressed['scaleX'];
             }
         }

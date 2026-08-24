@@ -208,6 +208,16 @@ final class ScopedStyleCompiler
             $sourceOrder++;
         }
 
+        $stateRules = [];
+        foreach ($language2['states'] as $selector => $states) {
+            foreach ($states as $state => $stateDeclarations) {
+                $stateRules[] = [
+                    'selector' => StyleSelectorCompiler::compile($selector, $name),
+                    'state' => $state,
+                    'declarations' => $stateDeclarations,
+                ];
+            }
+        }
         $sheet = [
             'scope' => $scope->value,
             'scopeId' => substr(hash('sha256', $name), 0, 16),
@@ -218,6 +228,7 @@ final class ScopedStyleCompiler
             'fonts' => $fonts,
             'tokens' => $language2['tokens'],
             'states' => $language2['states'],
+            'stateRules' => $stateRules,
             'recipes' => $language2['recipes'],
             'queries' => $language2['queries'],
             'keyframes' => $language2['keyframes'],

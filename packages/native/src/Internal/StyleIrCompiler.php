@@ -48,6 +48,7 @@ final class StyleIrCompiler
             ],
             'tokens' => $sheet['tokens'] ?? [],
             'states' => $sheet['states'] ?? [],
+            'stateRules' => $sheet['stateRules'] ?? [],
             'recipes' => $sheet['recipes'] ?? [],
             'queries' => $sheet['queries'] ?? [],
             'keyframes' => $sheet['keyframes'] ?? [],
