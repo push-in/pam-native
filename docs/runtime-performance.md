@@ -73,6 +73,11 @@ components retain their previous element subtree, including descendant
 lifecycle state. Components using untracked mutable public fields retain the
 legacy full-render behavior for compatibility.
 
+The same retained dependency graph powers the public
+[`Signals`](signals.md) API. Signals add lazy `computed()` values, automatically
+tracked effects and nested batching while preserving component-level subtree
+reuse. No polling, global dirty flag or per-frame PHP callback is introduced.
+
 ## Incremental layout
 
 Property patches mark only their changed node IDs and ancestor paths as dirty.

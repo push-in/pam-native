@@ -77,6 +77,11 @@ final class App
         return Runtime::windowMetrics()->appearance;
     }
 
+    public static function windowMetrics(): WindowMetrics
+    {
+        return Runtime::windowMetrics();
+    }
+
     public static function component(string $tag, string $view): void
     {
         TemplateRegistry::view($tag, $view);
