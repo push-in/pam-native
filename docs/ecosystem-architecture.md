@@ -39,6 +39,7 @@ matrix, changelog, CI, and signed release evidence.
 | 27 | `pushinbr/pam-native-canvas` | Retained 2D paths, text, images, transforms and pointer input | PHP + Kotlin + Swift views | Golden images and touch latency on devices |
 | 28 | `pushinbr/pam-native-gpu` | Bounded programmable OpenGL ES 3 and Metal fragment rendering | PHP + Kotlin + Swift views | GPU/thermal matrix and shader golden images |
 | 29 | `pushinbr/pam-native-3d` | Sandboxed GLB/USDZ scenes, animation, transforms and orbit controls | PHP + Filament + RealityKit views | Asset, memory, GPU and thermal matrix on devices |
+| 30 | `pushinbr/pam-native-image` | Cached remote/sandbox image decoding, resizing, crossfade and lifecycle events | PHP + Coil + SDWebImage views | Golden images, cache policy, low-memory and network-fault matrix |
 
 ## Mandatory release gates
 

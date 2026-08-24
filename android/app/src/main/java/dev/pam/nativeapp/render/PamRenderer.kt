@@ -5269,7 +5269,7 @@ class PamRenderer(
 
     private fun attemptAutoFocus(view: View, attempt: Int) {
         view.postDelayed({
-            if (!view.isAttachedToWindow || !view.hasWindowFocus()) {
+            if (!view.isAttachedToWindow) {
                 if (attempt < AUTO_FOCUS_RETRIES) attemptAutoFocus(view, attempt + 1)
                 return@postDelayed
             }
