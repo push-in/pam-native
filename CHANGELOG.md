@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.1 - 2026-08-24
+
+- Propagate real safe-area, font-scale, refresh-rate, motion, pointer, input,
+  device, memory, display, dynamic-range, and performance style environment
+  values from Android and iOS.
+- Add dependency-scoped reactive CSS variables and route optional utility
+  classes through the same deterministic PAMS compiler and IR.
+- Resolve application `R.color` resources and iOS Asset Catalog named colors
+  through typed, append-only protocol properties with portable fallbacks.
+- Lower pressed, focus/focus-visible, and hover declarations to native state
+  maps while reconciling typed disabled, checked, selected, loading, error,
+  active, and empty states.
+- Add an executable CSS acceptance/rejection matrix and cross-platform protocol
+  parity coverage.
+
 ## 0.9.0 - 2026-08-24
 
 - Introduces PAM Style Language 1.0 with deterministic PAMS IR, bytecode, fingerprints, source maps, compatibility metadata, and granular invalidation dependencies.
