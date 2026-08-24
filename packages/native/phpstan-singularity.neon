@@ -37,5 +37,22 @@ parameters:
         - src/Component.php
         - src/Internal/CompiledTemplateNode.php
         - src/Internal/ScopedStyleCompiler.php
+        - src/Internal/StyleIrCompiler.php
+        - src/Internal/StyleQueryCompiler.php
+        - src/Internal/StyleSelectorCompiler.php
+        - src/Internal/StyleTokenGenerator.php
+        - src/Internal/StyleValueCompiler.php
         - src/Renderable.php
+        - src/Style/StyleCompatibility.php
+        - src/Style/StyleExpressionKind.php
+        - src/Style/StyleInvalidationKind.php
+        - src/Style/StylePropertyCatalog.php
+        - src/Style/StylePropertyDefinition.php
+        - src/Style/StyleQueryFeature.php
+        - src/Style/StyleQueryKind.php
+        - src/Style/StyleQueryOperator.php
+        - src/Style/StyleQueryValueKind.php
+        - src/Style/StyleRenderCost.php
+        - src/Style/StyleScope.php
+        - src/Style/StyleValueUnit.php
         - src/TemplateRegistry.php
