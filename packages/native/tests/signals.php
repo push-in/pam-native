@@ -45,3 +45,16 @@ $assert(
 );
 $price->unsubscribe($subscription);
 $effect->stop();
+
+$assert(
+    \Pam\Native\AdaptiveLayout::classify(
+        new \Pam\Native\WindowMetrics(599.0, 900.0, 2.0),
+    ) === \Pam\Native\DeviceClass::Compact
+    && \Pam\Native\AdaptiveLayout::classify(
+        new \Pam\Native\WindowMetrics(700.0, 900.0, 2.0),
+    ) === \Pam\Native\DeviceClass::Medium
+    && \Pam\Native\AdaptiveLayout::classify(
+        new \Pam\Native\WindowMetrics(900.0, 700.0, 2.0),
+    ) === \Pam\Native\DeviceClass::Expanded,
+    'Adaptive layout classes must use deterministic compact, medium and expanded breakpoints.',
+);
