@@ -808,16 +808,16 @@
         },
         {
             "name": "pushinbr/pam-native-image",
-            "version": "v0.1.2",
+            "version": "v0.1.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/pam-native-image.git",
-                "reference": "338364d3e35f4c3bb2d790e19ffd8f65c35e6b1f"
+                "reference": "0bcbd1fc77ffb06733fb758a8f4e444d75565e60"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/pam-native-image/zipball/338364d3e35f4c3bb2d790e19ffd8f65c35e6b1f",
-                "reference": "338364d3e35f4c3bb2d790e19ffd8f65c35e6b1f",
+                "url": "https://api.github.com/repos/push-in/pam-native-image/zipball/0bcbd1fc77ffb06733fb758a8f4e444d75565e60",
+                "reference": "0bcbd1fc77ffb06733fb758a8f4e444d75565e60",
                 "shasum": ""
             },
             "require": {
@@ -845,9 +845,9 @@
             "description": "High-performance cached native image loading for PAM Native.",
             "support": {
                 "issues": "https://github.com/push-in/pam-native-image/issues",
-                "source": "https://github.com/push-in/pam-native-image/tree/v0.1.2"
+                "source": "https://github.com/push-in/pam-native-image/tree/v0.1.3"
             },
-            "time": "2026-08-24T13:21:46+00:00"
+            "time": "2026-08-24T13:34:19+00:00"
         },
         {
             "name": "pushinbr/pam-native-intents",
