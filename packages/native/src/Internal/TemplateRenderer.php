@@ -103,6 +103,7 @@ use Pam\Native\MediaCachePolicy;
 use Pam\Native\MediaPriority;
 use Pam\Native\UI\View as NativeView;
 use Pam\Native\Style\StyleVariables;
+use Pam\Native\Style\StyleInteractionState;
 use ReflectionMethod;
 use ReflectionProperty;
 use RuntimeException;
@@ -153,6 +154,7 @@ final class TemplateRenderer
         'nativeBackgroundColorResource' => PropKey::NativeBackgroundColorResource,
         'nativeTextColorResource' => PropKey::NativeTextColorResource,
         'nativeBorderColorResource' => PropKey::NativeBorderColorResource,
+        'nativeStateStyles' => PropKey::NativeStateStyles,
         'textColor' => PropKey::TextColor,
         'fontSize' => PropKey::FontSize,
         'borderRadius' => PropKey::BorderRadius,
@@ -2692,9 +2694,9 @@ final class TemplateRenderer
                 $attributes['pressedScale'] = $pressed['scaleX'];
             }
         }
+        $nativeStates = [];
         foreach (($sheet['stateRules'] ?? []) as $stateRule) {
             if (!is_array($stateRule)
-                || ($stateRule['state'] ?? null) !== 'pressed'
                 || !is_array($stateRule['selector'] ?? null)
                 || !self::styleSelectorMatches(
                     $stateRule['selector'],
@@ -2703,12 +2705,53 @@ final class TemplateRenderer
                 )) {
                 continue;
             }
-            $pressed = $stateRule['declarations'] ?? [];
-            if (!is_array($pressed)) continue;
-            if (isset($pressed['opacity'])) $attributes['pressedOpacity'] = $pressed['opacity'];
-            if (isset($pressed['scaleX'], $pressed['scaleY']) && $pressed['scaleX'] === $pressed['scaleY']) {
-                $attributes['pressedScale'] = $pressed['scaleX'];
+            $state = $stateRule['state'] ?? null;
+            $declarations = $stateRule['declarations'] ?? [];
+            if (!is_string($state) || !is_array($declarations)) continue;
+            $declarations = self::resolveDynamicStyles($declarations, $data);
+            if ($state === 'pressed') {
+                if (isset($declarations['opacity'])) $attributes['pressedOpacity'] = $declarations['opacity'];
+                if (isset($declarations['scaleX'], $declarations['scaleY']) && $declarations['scaleX'] === $declarations['scaleY']) {
+                    $attributes['pressedScale'] = $declarations['scaleX'];
+                }
             }
+            $stateKind = match ($state) {
+                'pressed' => StyleInteractionState::Pressed,
+                'focus', 'focus-visible' => StyleInteractionState::Focused,
+                'hover' => StyleInteractionState::Hovered,
+                'disabled' => StyleInteractionState::Disabled,
+                'checked' => StyleInteractionState::Checked,
+                'selected' => StyleInteractionState::Selected,
+                'active' => StyleInteractionState::Active,
+                'loading' => StyleInteractionState::Loading,
+                'error' => StyleInteractionState::Error,
+                default => null,
+            };
+            if ($stateKind === null) continue;
+            if (in_array($state, $descriptor['pseudos'], true)) {
+                $attributes = [...$attributes, ...$declarations];
+            }
+            foreach ($declarations as $attribute => $value) {
+                $property = is_string($attribute) ? (self::PROPERTIES[$attribute] ?? null) : null;
+                if ($property !== null && in_array($property, [
+                    PropKey::Opacity,
+                    PropKey::ScaleX,
+                    PropKey::ScaleY,
+                    PropKey::TranslationX,
+                    PropKey::TranslationY,
+                    PropKey::BackgroundColor,
+                    PropKey::TextColor,
+                    PropKey::BorderColor,
+                ], true)) {
+                    $nativeStates[$stateKind->value][$property->value] = $value;
+                }
+            }
+        }
+        if ($nativeStates !== []) {
+            $attributes['nativeStateStyles'] = json_encode(
+                $nativeStates,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION,
+            );
         }
 
         return self::resolveDynamicStyles($attributes, $data);

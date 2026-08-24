@@ -460,4 +460,5 @@ enum PropKey: int
     case NativeBackgroundColorResource = 452;
     case NativeTextColorResource = 453;
     case NativeBorderColorResource = 454;
+    case NativeStateStyles = 455;
 }

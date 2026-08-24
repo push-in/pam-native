@@ -590,7 +590,8 @@ enum class PropKey(val value: Int) {
     ON_ACCESSIBILITY_ACTION(451),
     NATIVE_BACKGROUND_COLOR_RESOURCE(452),
     NATIVE_TEXT_COLOR_RESOURCE(453),
-    NATIVE_BORDER_COLOR_RESOURCE(454);
+    NATIVE_BORDER_COLOR_RESOURCE(454),
+    NATIVE_STATE_STYLES(455);
 
     companion object {
         fun from(value: Int): PropKey =

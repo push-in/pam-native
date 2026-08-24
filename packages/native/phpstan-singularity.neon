@@ -47,6 +47,7 @@ parameters:
         - src/Style/StyleCompatibility.php
         - src/Style/StyleExpressionKind.php
         - src/Style/StyleInvalidationKind.php
+        - src/Style/StyleInteractionState.php
         - src/Style/StylePropertyCatalog.php
         - src/Style/StylePropertyDefinition.php
         - src/Style/StyleQueryFeature.php

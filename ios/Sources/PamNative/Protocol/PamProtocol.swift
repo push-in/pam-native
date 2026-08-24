@@ -429,6 +429,7 @@ public enum PamConstants {
     public static let nativeBackgroundColorResource = 452
     public static let nativeTextColorResource = 453
     public static let nativeBorderColorResource = 454
+    public static let nativeStateStyles = 455
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

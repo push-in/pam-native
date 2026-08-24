@@ -109,6 +109,11 @@ $language2Styles = ScopedStyleCompiler::compile(<<<'CSS'
     transform: scale(0.98);
 }
 
+.touchable:focus-visible {
+    background: #3366FF;
+    transform: scale(1.04);
+}
+
 @media (min-width: 768dp) {
     .card { padding: 24px; }
 }
@@ -348,6 +353,10 @@ $styledChild = $styledElement->children()[0] ?? null;
 $assert(
     (float) ($styledElement->properties()[PropKey::PressOpacity->value] ?? 0) === 0.72
         && (float) ($styledElement->properties()[PropKey::PressScale->value] ?? 0) === 0.98
+        && str_contains(
+            (string) ($styledElement->properties()[PropKey::NativeStateStyles->value] ?? ''),
+            '"2"',
+        )
         && $styledChild instanceof \Pam\Native\Element
         && (float) ($styledChild->properties()[PropKey::PaddingLeft->value] ?? 0) === 16.0
         && ($styledChild->properties()[PropKey::BackgroundColor->value] ?? null) === 0xFF4F46E5,

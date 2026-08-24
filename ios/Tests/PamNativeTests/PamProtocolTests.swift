@@ -112,6 +112,7 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.nativeBackgroundColorResource, 452)
         XCTAssertEqual(PamConstants.nativeTextColorResource, 453)
         XCTAssertEqual(PamConstants.nativeBorderColorResource, 454)
+        XCTAssertEqual(PamConstants.nativeStateStyles, 455)
         XCTAssertEqual(
             [
                 NativeOperation.httpGet,

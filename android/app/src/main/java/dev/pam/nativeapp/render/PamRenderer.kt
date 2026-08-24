@@ -1535,6 +1535,7 @@ class PamRenderer(
                     is PamRecyclerList -> view.setTextColor(color)
                 }
             }
+            PropKey.NATIVE_STATE_STYLES -> configureNativeStateStyles(view, state)
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
                 applyLetterSpacing(it, state)
@@ -2308,6 +2309,7 @@ class PamRenderer(
                 is TextView -> view.setTextColor(Color.BLACK)
                 is PamRecyclerList -> view.setTextColor(Color.BLACK)
             }
+            PropKey.NATIVE_STATE_STYLES -> configureNativeStateStyles(view, state)
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
                 applyLetterSpacing(it, state)
@@ -3440,6 +3442,96 @@ class PamRenderer(
         val rotation: Float?,
     )
 
+    private enum class NativeStyleState(val value: Int) {
+        PRESSED(1),
+        FOCUSED(2),
+        HOVERED(3),
+        DISABLED(4),
+        CHECKED(5),
+        SELECTED(6),
+        ACTIVE(7),
+        LOADING(8),
+        ERROR(9),
+    }
+
+    private fun nativeStateDeclarations(state: NodeState, kind: NativeStyleState): org.json.JSONObject? {
+        val source = (state.properties[PropKey.NATIVE_STATE_STYLES] as? PropValue.Text)?.value
+            ?: return null
+        return try {
+            org.json.JSONObject(source).optJSONObject(kind.value.toString())
+        } catch (_: org.json.JSONException) {
+            null
+        }
+    }
+
+    private fun applyNativeStyleState(
+        view: View,
+        state: NodeState,
+        kind: NativeStyleState,
+        active: Boolean,
+    ) {
+        val styles = nativeStateDeclarations(state, kind) ?: return
+        if (!active) {
+            view.alpha = state.targetAlpha()
+            view.scaleX = state.targetScaleX()
+            view.scaleY = state.targetScaleY()
+            view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat()
+            view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()
+            updateBackground(view, state)
+            state.properties[PropKey.TEXT_COLOR]?.let { color ->
+                (view as? TextView)?.let { applySemanticTextColor(it, color.integer().toInt()) }
+            }
+            return
+        }
+        val keys = styles.keys()
+        while (keys.hasNext()) {
+            val rawKey = keys.next()
+            val key = rawKey.toIntOrNull()?.let(PropKey::from) ?: continue
+            when (key) {
+                PropKey.OPACITY -> view.alpha = styles.optDouble(rawKey, view.alpha.toDouble()).toFloat()
+                PropKey.SCALE_X -> view.scaleX = styles.optDouble(rawKey, view.scaleX.toDouble()).toFloat()
+                PropKey.SCALE_Y -> view.scaleY = styles.optDouble(rawKey, view.scaleY.toDouble()).toFloat()
+                PropKey.TRANSLATION_X -> view.translationX = styles.optDouble(rawKey, view.translationX.toDouble()).toFloat()
+                PropKey.TRANSLATION_Y -> view.translationY = styles.optDouble(rawKey, view.translationY.toDouble()).toFloat()
+                PropKey.BACKGROUND_COLOR -> view.background?.mutate()?.setTint(styles.optLong(rawKey).toInt())
+                PropKey.TEXT_COLOR -> (view as? TextView)?.let {
+                    applySemanticTextColor(it, styles.optLong(rawKey).toInt())
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun configureNativeStateStyles(view: View, state: NodeState) {
+        if (view !is EditText) {
+            view.onFocusChangeListener = View.OnFocusChangeListener { focusedView, focused ->
+                applyNativeStyleState(focusedView, state, NativeStyleState.FOCUSED, focused)
+                if (focused) {
+                    if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)
+                } else if (state.properties[PropKey.ON_BLUR] != null) {
+                    dispatch(state.id, EVENT_BLUR)
+                }
+            }
+        }
+        view.setOnHoverListener { hoveredView, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_HOVER_ENTER -> applyNativeStyleState(
+                    hoveredView,
+                    state,
+                    NativeStyleState.HOVERED,
+                    true,
+                )
+                MotionEvent.ACTION_HOVER_EXIT -> applyNativeStyleState(
+                    hoveredView,
+                    state,
+                    NativeStyleState.HOVERED,
+                    false,
+                )
+            }
+            false
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     private fun installPressFeedback(view: View, state: NodeState) {
         if (
@@ -3464,6 +3556,7 @@ class PamRenderer(
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
+                    applyNativeStyleState(view, state, NativeStyleState.PRESSED, true)
                     if (PamMotionPolicy.isReduced(view.context)) {
                         view.animate().cancel()
                         view.alpha = state.pressOpacity
@@ -3497,6 +3590,7 @@ class PamRenderer(
                             .setDuration(110)
                             .start()
                     }
+                    applyNativeStyleState(view, state, NativeStyleState.PRESSED, false)
                     dispatchDirectiveTouch(state, EventKind.TOUCH_END.value, event)
                 }
             }
@@ -3828,6 +3922,7 @@ class PamRenderer(
             })
         }
         input.onFocusChangeListener = View.OnFocusChangeListener { _, focused ->
+            applyNativeStyleState(input, state, NativeStyleState.FOCUSED, focused)
             if (focused) {
                 lastFocusedInput = input
                 if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)

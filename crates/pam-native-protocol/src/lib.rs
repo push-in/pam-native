@@ -545,6 +545,7 @@ pub enum PropKey {
     NativeBackgroundColorResource = 452,
     NativeTextColorResource = 453,
     NativeBorderColorResource = 454,
+    NativeStateStyles = 455,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1006,6 +1007,7 @@ impl TryFrom<u16> for PropKey {
             452 => Ok(Self::NativeBackgroundColorResource),
             453 => Ok(Self::NativeTextColorResource),
             454 => Ok(Self::NativeBorderColorResource),
+            455 => Ok(Self::NativeStateStyles),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1881,10 +1883,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=454 {
+        for value in 1..=455 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(455).is_err());
+        assert!(PropKey::try_from(456).is_err());
     }
 
     #[test]

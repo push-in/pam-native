@@ -53,6 +53,24 @@ public final class PamRenderer {
         return UIColor(named: name, in: .main, compatibleWith: host.traitCollection)
     }
 
+    private func decodeNativeStateStyles(_ source: String?) -> [Int: [Int: Any]] {
+        guard let source, let data = source.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [:] }
+        var output: [Int: [Int: Any]] = [:]
+        for (state, rawDeclarations) in object {
+            guard let stateId = Int(state),
+                  let declarations = rawDeclarations as? [String: Any]
+            else { continue }
+            var typed: [Int: Any] = [:]
+            for (property, value) in declarations {
+                if let propertyId = Int(property) { typed[propertyId] = value }
+            }
+            output[stateId] = typed
+        }
+        return output
+    }
+
     public func commit(_ batches: [[Mutation]]) {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in
@@ -1553,6 +1571,8 @@ public final class PamRenderer {
             if let color = nativeColor(named: value.textOrNil()) {
                 PamTextColorPolicy.apply(color: color, to: view)
             }
+        case PamConstants.nativeStateStyles:
+            (view as? PamPressButton)?.pamStateStyles = decodeNativeStateStyles(value.textOrNil())
         case PamConstants.textAlign:
             applyTextAlignment(view: view, nodeId: nodeId)
         case PamConstants.fontSize,
@@ -1867,6 +1887,8 @@ public final class PamRenderer {
             view.backgroundColor = .clear
         case PamConstants.nativeBackgroundColorResource:
             view.backgroundColor = .clear
+        case PamConstants.nativeStateStyles:
+            (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.imageFit:
             imageView(for: view)?.contentMode = .scaleAspectFill
             (view as? PamMediaView)?.setResizeMode(1)
