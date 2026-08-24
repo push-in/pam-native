@@ -6948,5 +6948,6 @@ $assert(
 
 require __DIR__.'/language2.php';
 require __DIR__.'/singularity.php';
+require __DIR__.'/signals.php';
 
 echo "Pam Native PHP SDK tests passed.\n";
