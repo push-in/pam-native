@@ -102,6 +102,7 @@ use Pam\Native\NativeMenuItem;
 use Pam\Native\MediaCachePolicy;
 use Pam\Native\MediaPriority;
 use Pam\Native\UI\View as NativeView;
+use Pam\Native\Style\StyleVariables;
 use ReflectionMethod;
 use ReflectionProperty;
 use RuntimeException;
@@ -129,6 +130,9 @@ final class TemplateRenderer
     /** @var array<string, ReflectionProperty> */
     private static array $properties = [];
 
+    /** @var array<string,array<string,mixed>> */
+    private static array $reactiveStyleCache = [];
+
     /** @var array<string, PropKey> */
     private const PROPERTIES = [
         'width' => PropKey::Width,
@@ -146,6 +150,9 @@ final class TemplateRenderer
         'maxWidth' => PropKey::MaxWidth,
         'maxHeight' => PropKey::MaxHeight,
         'backgroundColor' => PropKey::BackgroundColor,
+        'nativeBackgroundColorResource' => PropKey::NativeBackgroundColorResource,
+        'nativeTextColorResource' => PropKey::NativeTextColorResource,
+        'nativeBorderColorResource' => PropKey::NativeBorderColorResource,
         'textColor' => PropKey::TextColor,
         'fontSize' => PropKey::FontSize,
         'borderRadius' => PropKey::BorderRadius,
@@ -2493,6 +2500,8 @@ final class TemplateRenderer
             'scope' => is_int($decoded['scope'] ?? null) ? $decoded['scope'] : 1,
             'scopeId' => is_string($decoded['scopeId'] ?? null) ? $decoded['scopeId'] : '',
             'tokens' => self::safeStyleMetadata($decoded['tokens'] ?? [], $tree->source),
+            'variables' => self::safeStyleMetadata($decoded['variables'] ?? [], $tree->source),
+            'variableRules' => self::safeStyleMetadata($decoded['variableRules'] ?? [], $tree->source),
             'states' => self::safeStyleMetadata($decoded['states'] ?? [], $tree->source),
             'stateRules' => self::safeStyleMetadata($decoded['stateRules'] ?? [], $tree->source),
             'recipes' => self::safeStyleMetadata($decoded['recipes'] ?? [], $tree->source),
@@ -2569,7 +2578,7 @@ final class TemplateRenderer
         if (!is_array($sheet)) {
             return [];
         }
-        $sheet = self::responsiveStyleSheet($sheet, $data);
+        $sheet = self::responsiveStyleSheet(self::reactiveStyleSheet($sheet), $data);
         $descriptor = self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
         $cascadeRules = is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : [];
         $attributes = $cascadeRules !== []
@@ -2621,6 +2630,14 @@ final class TemplateRenderer
                 }
             }
         }
+        $utilityAttributes = [];
+        foreach (array_keys($classNames) as $class) {
+            $utility = StyleUtilityCompiler::compile($class);
+            if ($utility !== null) {
+                $utilityAttributes[$utility['attribute']] = $utility['value'];
+            }
+        }
+        $attributes = [...$utilityAttributes, ...$attributes];
 
         $recipeName = $rawAttributes['recipe'] ?? null;
         if ($recipeName !== null) {
@@ -2823,10 +2840,14 @@ final class TemplateRenderer
             'height' => $metrics->height,
             'fontScale' => is_numeric($provided['fontScale'] ?? null)
                 ? (float) $provided['fontScale']
-                : 1.0,
+                : $metrics->fontScale,
             'rootFontSize' => is_numeric($provided['rootFontSize'] ?? null)
                 ? (float) $provided['rootFontSize']
                 : 16.0,
+            'env.safe-area-inset-top' => $metrics->safeAreaTop,
+            'env.safe-area-inset-right' => $metrics->safeAreaRight,
+            'env.safe-area-inset-bottom' => $metrics->safeAreaBottom,
+            'env.safe-area-inset-left' => $metrics->safeAreaLeft,
         ];
         foreach ($provided as $name => $value) {
             if (is_string($name) && (is_int($value) || is_float($value))) {
@@ -2856,6 +2877,42 @@ final class TemplateRenderer
         }
 
         return $attributes;
+    }
+
+    /** @param array<string,mixed> $sheet @return array<string,mixed> */
+    private static function reactiveStyleSheet(array $sheet): array
+    {
+        $overrides = StyleVariables::all();
+        $bindings = $sheet['variableRules'] ?? [];
+        if ($overrides === [] || !is_array($bindings) || $bindings === []) return $sheet;
+        $fingerprint = is_string($sheet['styleFingerprint'] ?? null)
+            ? $sheet['styleFingerprint']
+            : hash('sha256', serialize($bindings));
+        $key = $fingerprint.':'.StyleVariables::revision();
+        if (isset(self::$reactiveStyleCache[$key])) return self::$reactiveStyleCache[$key];
+        $variables = is_array($sheet['variables'] ?? null) ? $sheet['variables'] : [];
+        foreach ($overrides as $name => $value) $variables[$name] = $value;
+        foreach ($bindings as $binding) {
+            if (!is_array($binding)
+                || !is_string($binding['selector'] ?? null)
+                || !is_int($binding['order'] ?? null)
+                || !is_string($binding['body'] ?? null)) continue;
+            $declarations = ScopedStyleCompiler::compileDeclarations(
+                $binding['body'],
+                $variables,
+                '<reactive-style-variable>',
+            );
+            foreach (($sheet['cascadeRules'] ?? []) as $index => $rule) {
+                if (!is_array($rule)
+                    || ($rule['order'] ?? null) !== $binding['order']
+                    || ($rule['selector']['source'] ?? null) !== $binding['selector']) continue;
+                foreach ($declarations as $attribute => $value) {
+                    $sheet['cascadeRules'][$index]['declarations'][$attribute]['value'] = $value;
+                }
+            }
+        }
+        if (count(self::$reactiveStyleCache) >= 64) self::$reactiveStyleCache = [];
+        return self::$reactiveStyleCache[$key] = $sheet;
     }
 
     /** @param array<string, mixed> $sheet @param array<string, mixed> $data */
@@ -2890,13 +2947,24 @@ final class TemplateRenderer
                         : 'portrait')
                     : null,
                 'colorScheme' => $metrics->appearance->value === 2 ? 'dark' : 'light',
+                'reducedMotion' => $metrics->reducedMotion ? 'reduce' : 'no-preference',
+                'pointer' => $metrics->pointer,
+                'deviceType' => $metrics->deviceType,
+                'refreshRate' => $metrics->refreshRate,
+                'dynamicRange' => $metrics->dynamicRange,
+                'displayMode' => $metrics->displayMode,
+                'foldPosture' => $metrics->foldPosture,
+                'inputMode' => $metrics->inputMode,
+                'memoryClass' => $metrics->memoryClass,
+                'performanceTier' => $metrics->performanceTier,
             ];
             $ast = is_array($query['ast'] ?? null) ? $query['ast'] : null;
             if (!self::queryMatches($condition, $ast, $environment)) {
                 continue;
             }
+            $queryStyles = self::reactiveStyleSheet($query['styles']);
             foreach (['classes', 'tags'] as $group) {
-                $incoming = $query['styles'][$group] ?? [];
+                $incoming = $queryStyles[$group] ?? [];
                 if (!is_array($incoming)) {
                     continue;
                 }
@@ -2909,7 +2977,7 @@ final class TemplateRenderer
                     }
                 }
             }
-            $incomingRules = $query['styles']['cascadeRules'] ?? [];
+            $incomingRules = $queryStyles['cascadeRules'] ?? [];
             if (is_array($incomingRules)) {
                 $baseOrder = count(is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : []);
                 foreach ($incomingRules as $incomingRule) {
@@ -3147,88 +3215,11 @@ final class TemplateRenderer
     /** @return array{PropKey, int|float}|null */
     private static function utility(string $class): ?array
     {
-        $fixed = [
-            'flex-1' => [PropKey::FlexGrow, 1.0],
-            'w-full' => [PropKey::WidthPercent, 100.0],
-            'h-full' => [PropKey::HeightPercent, 100.0],
-            'bg-white' => [PropKey::BackgroundColor, 0xFFFFFFFF],
-            'bg-black' => [PropKey::BackgroundColor, 0xFF000000],
-            'text-white' => [PropKey::TextColor, 0xFFFFFFFF],
-            'text-black' => [PropKey::TextColor, 0xFF000000],
-            'items-start' => [PropKey::AlignItems, Align::Start->value],
-            'items-center' => [PropKey::AlignItems, Align::Center->value],
-            'items-end' => [PropKey::AlignItems, Align::End->value],
-            'items-stretch' => [PropKey::AlignItems, Align::Stretch->value],
-            'items-baseline' => [PropKey::AlignItems, Align::Baseline->value],
-        ];
-
-        if (isset($fixed[$class])) {
-            return $fixed[$class];
+        $compiled = StyleUtilityCompiler::compile($class);
+        if ($compiled !== null) {
+            $key = self::PROPERTIES[$compiled['attribute']] ?? null;
+            return $key === null ? null : [$key, $compiled['value']];
         }
-
-        if (preg_match('/^(p|px|py|m|mx|my|gap|rounded|elevation)-(\\d+(?:\\.\\d+)?)$/', $class, $match) === 1) {
-            $key = match ($match[1]) {
-                'p' => PropKey::Padding,
-                'px' => PropKey::PaddingHorizontal,
-                'py' => PropKey::PaddingVertical,
-                'm' => PropKey::Margin,
-                'mx' => PropKey::MarginHorizontal,
-                'my' => PropKey::MarginVertical,
-                'gap' => PropKey::Gap,
-                'rounded' => PropKey::BorderRadius,
-                'elevation' => PropKey::Elevation,
-            };
-
-            return [$key, (float) $match[2] * 4.0];
-        }
-
-        if (preg_match('/^opacity-(\\d{1,3})$/', $class, $match) === 1) {
-            return [PropKey::Opacity, min(100, (int) $match[1]) / 100];
-        }
-
-        if (preg_match('/^grid-(\\d{1,2})$/', $class, $match) === 1) {
-            return [PropKey::GridColumns, max(1, min(64, (int) $match[1]))];
-        }
-
-        if (preg_match('/^col(?:(-sm|-md|-lg|-xl))?-(\\d{1,2})$/', $class, $match) === 1) {
-            $key = match ($match[1] ?? '') {
-                '-sm' => PropKey::GridSpanSm,
-                '-md' => PropKey::GridSpanMd,
-                '-lg' => PropKey::GridSpanLg,
-                '-xl' => PropKey::GridSpanXl,
-                default => PropKey::GridSpan,
-            };
-
-            return [$key, max(1, min(64, (int) $match[2]))];
-        }
-
-        if (preg_match('/^(offset|order)(?:(-sm|-md|-lg|-xl))?-(\\d+)$/', $class, $match) === 1) {
-            $keys = $match[1] === 'offset'
-                ? [
-                    '' => PropKey::GridOffset,
-                    '-sm' => PropKey::GridOffsetSm,
-                    '-md' => PropKey::GridOffsetMd,
-                    '-lg' => PropKey::GridOffsetLg,
-                    '-xl' => PropKey::GridOffsetXl,
-                ]
-                : [
-                    '' => PropKey::GridOrder,
-                    '-sm' => PropKey::GridOrderSm,
-                    '-md' => PropKey::GridOrderMd,
-                    '-lg' => PropKey::GridOrderLg,
-                    '-xl' => PropKey::GridOrderXl,
-                ];
-
-            return [$keys[$match[2] ?? ''], (int) $match[3]];
-        }
-
-        if (preg_match('/^gutter-(x|y)-(\\d+(?:\\.\\d+)?)$/', $class, $match) === 1) {
-            return [
-                $match[1] === 'x' ? PropKey::GridColumnGap : PropKey::GridRowGap,
-                (float) $match[2] * 4.0,
-            ];
-        }
-
         return null;
     }
 

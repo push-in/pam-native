@@ -41,6 +41,7 @@ parameters:
         - src/Internal/StyleQueryCompiler.php
         - src/Internal/StyleSelectorCompiler.php
         - src/Internal/StyleTokenGenerator.php
+        - src/Internal/StyleUtilityCompiler.php
         - src/Internal/StyleValueCompiler.php
         - src/Renderable.php
         - src/Style/StyleCompatibility.php
@@ -55,4 +56,5 @@ parameters:
         - src/Style/StyleRenderCost.php
         - src/Style/StyleScope.php
         - src/Style/StyleValueUnit.php
+        - src/Style/StyleVariables.php
         - src/TemplateRegistry.php

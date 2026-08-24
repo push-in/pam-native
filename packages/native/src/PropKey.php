@@ -457,4 +457,7 @@ enum PropKey: int
     case SharedTransitionConfig = 449;
     case AccessibilityActions = 450;
     case OnAccessibilityAction = 451;
+    case NativeBackgroundColorResource = 452;
+    case NativeTextColorResource = 453;
+    case NativeBorderColorResource = 454;
 }

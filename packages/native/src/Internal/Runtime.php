@@ -205,6 +205,21 @@ final class Runtime
                     appearance: UserInterfaceAppearance::tryFrom(
                         (int) ($values['appearance'] ?? UserInterfaceAppearance::Light->value),
                     ) ?? UserInterfaceAppearance::Light,
+                    fontScale: (float) ($values['fontScale'] ?? 1.0),
+                    safeAreaTop: (float) ($values['safeAreaTop'] ?? 0.0),
+                    safeAreaRight: (float) ($values['safeAreaRight'] ?? 0.0),
+                    safeAreaBottom: (float) ($values['safeAreaBottom'] ?? 0.0),
+                    safeAreaLeft: (float) ($values['safeAreaLeft'] ?? 0.0),
+                    refreshRate: (float) ($values['refreshRate'] ?? 60.0),
+                    reducedMotion: (bool) ($values['reducedMotion'] ?? false),
+                    deviceType: self::styleEnvironmentKeyword($values['deviceType'] ?? null, 'phone'),
+                    pointer: self::styleEnvironmentKeyword($values['pointer'] ?? null, 'coarse'),
+                    inputMode: self::styleEnvironmentKeyword($values['inputMode'] ?? null, 'touch'),
+                    dynamicRange: self::styleEnvironmentKeyword($values['dynamicRange'] ?? null, 'standard'),
+                    displayMode: self::styleEnvironmentKeyword($values['displayMode'] ?? null, 'standalone'),
+                    foldPosture: self::styleEnvironmentKeyword($values['foldPosture'] ?? null, 'flat'),
+                    memoryClass: (float) ($values['memoryClass'] ?? 0.0),
+                    performanceTier: (float) ($values['performanceTier'] ?? 1.0),
                 );
                 self::$dimensionsHandler?->__invoke(self::$windowMetrics);
                 self::render();
@@ -227,6 +242,13 @@ final class Runtime
         } catch (Throwable $error) {
             self::reportError($error);
         }
+    }
+
+    private static function styleEnvironmentKeyword(mixed $value, string $fallback): string
+    {
+        return is_string($value) && preg_match('/^[a-z][a-z0-9-]{0,31}$/D', $value) === 1
+            ? $value
+            : $fallback;
     }
 
     public static function dispatchModuleResult(

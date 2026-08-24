@@ -48,6 +48,11 @@ public final class PamRenderer {
         sessionDelegate.renderer = self
     }
 
+    private func nativeColor(named name: String?) -> UIColor? {
+        guard let name, !name.isEmpty else { return nil }
+        return UIColor(named: name, in: .main, compatibleWith: host.traitCollection)
+    }
+
     public func commit(_ batches: [[Mutation]]) {
         if !Thread.isMainThread {
             DispatchQueue.main.async { [weak self] in
@@ -1482,7 +1487,10 @@ public final class PamRenderer {
             if let color = value.integerOrNil() {
                 view.backgroundColor = UIColor(argb: color)
             }
+        case PamConstants.nativeBackgroundColorResource:
+            view.backgroundColor = nativeColor(named: value.textOrNil())
         case PamConstants.borderColor,
+             PamConstants.nativeBorderColorResource,
              PamConstants.borderWidth,
              PamConstants.borderStyle,
              PamConstants.borderLeftWidth,
@@ -1540,6 +1548,10 @@ public final class PamRenderer {
         case PamConstants.textColor:
             if let color = value.integerOrNil() {
                 PamTextColorPolicy.apply(argb: color, to: view)
+            }
+        case PamConstants.nativeTextColorResource:
+            if let color = nativeColor(named: value.textOrNil()) {
+                PamTextColorPolicy.apply(color: color, to: view)
             }
         case PamConstants.textAlign:
             applyTextAlignment(view: view, nodeId: nodeId)
@@ -1853,10 +1865,13 @@ public final class PamRenderer {
         switch key {
         case PamConstants.backgroundColor:
             view.backgroundColor = .clear
+        case PamConstants.nativeBackgroundColorResource:
+            view.backgroundColor = .clear
         case PamConstants.imageFit:
             imageView(for: view)?.contentMode = .scaleAspectFill
             (view as? PamMediaView)?.setResizeMode(1)
         case PamConstants.borderColor,
+             PamConstants.nativeBorderColorResource,
              PamConstants.borderWidth,
              PamConstants.borderStyle,
              PamConstants.borderLeftWidth,
@@ -2099,9 +2114,11 @@ public final class PamRenderer {
         let top = max(0, width(PamConstants.borderTopWidth))
         let right = max(0, width(PamConstants.borderRightWidth))
         let bottom = max(0, width(PamConstants.borderBottomWidth))
-        let color = UIColor(
+        let color = (nativeColor(
+            named: state.properties[PamConstants.nativeBorderColorResource]?.textOrNil()
+        ) ?? UIColor(
             argb: state.properties[PamConstants.borderColor]?.integerOrNil() ?? 0
-        ).cgColor
+        )).cgColor
         let directional = left != top || left != right || left != bottom
         let borderStyle = Int(
             state.properties[PamConstants.borderStyle]?.integerOrNil() ?? 1

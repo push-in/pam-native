@@ -1493,9 +1493,11 @@ class PamRenderer(
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = value.text(key)
             PropKey.SOURCE -> loadImage(view, state)
             PropKey.BACKGROUND_COLOR,
+            PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE,
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.NATIVE_BORDER_COLOR_RESOURCE,
             PropKey.BORDER_STYLE,
             PropKey.BORDER_TOP_LEFT_RADIUS,
             PropKey.BORDER_TOP_RIGHT_RADIUS,
@@ -1526,6 +1528,12 @@ class PamRenderer(
                     }
                 }
                 is PamRecyclerList -> view.setTextColor(value.integer().toInt())
+            }
+            PropKey.NATIVE_TEXT_COLOR_RESOURCE -> resolveNativeColor(value.text(key))?.let { color ->
+                when (view) {
+                    is TextView -> applySemanticTextColor(view, color)
+                    is PamRecyclerList -> view.setTextColor(color)
+                }
             }
             PropKey.FONT_SIZE -> (view as? TextView)?.let {
                 applyTextSizing(it, state)
@@ -2272,9 +2280,11 @@ class PamRenderer(
             PropKey.PLACEHOLDER -> (view as? EditText)?.hint = null
             PropKey.SOURCE -> pamImageView(view)?.let(imageLoader::cancel)
             PropKey.BACKGROUND_COLOR,
+            PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE,
             PropKey.BORDER_RADIUS,
             PropKey.BORDER_WIDTH,
             PropKey.BORDER_COLOR,
+            PropKey.NATIVE_BORDER_COLOR_RESOURCE,
             PropKey.BORDER_STYLE,
             PropKey.BORDER_TOP_LEFT_RADIUS,
             PropKey.BORDER_TOP_RIGHT_RADIUS,
@@ -2291,6 +2301,10 @@ class PamRenderer(
             PropKey.RIPPLE_ALPHA,
             -> updateBackground(view, state)
             PropKey.TEXT_COLOR -> when (view) {
+                is TextView -> view.setTextColor(Color.BLACK)
+                is PamRecyclerList -> view.setTextColor(Color.BLACK)
+            }
+            PropKey.NATIVE_TEXT_COLOR_RESOURCE -> when (view) {
                 is TextView -> view.setTextColor(Color.BLACK)
                 is PamRecyclerList -> view.setTextColor(Color.BLACK)
             }
@@ -4167,6 +4181,17 @@ class PamRenderer(
         view.setPadding(dp(left), dp(top), dp(right), dp(bottom) + state.safeBottomInset)
     }
 
+    private fun resolveNativeColor(name: String): Int? {
+        val identifier = context.resources.getIdentifier(name, "color", context.packageName)
+        if (identifier == 0) return null
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            context.resources.getColor(identifier, context.theme)
+        } else {
+            @Suppress("DEPRECATION")
+            context.resources.getColor(identifier)
+        }
+    }
+
     private fun updateBackground(view: View, state: NodeState) {
         val defaultColor = if (
             state.kind == NodeKind.IMAGE ||
@@ -4180,8 +4205,9 @@ class PamRenderer(
         } else {
             Color.TRANSPARENT.toLong()
         }
-        val color = state.integer(PropKey.BACKGROUND_COLOR, defaultColor)
-            .toInt()
+        val color = state.properties[PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE]
+            ?.let { resolveNativeColor(it.text(PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE)) }
+            ?: state.integer(PropKey.BACKGROUND_COLOR, defaultColor).toInt()
         val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
         val topLeft = dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat())
             .toFloat()
@@ -4216,7 +4242,9 @@ class PamRenderer(
                 leftBorderWidth != topBorderWidth ||
                 leftBorderWidth != bottomBorderWidth
             )
-        val borderColor = state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        val borderColor = state.properties[PropKey.NATIVE_BORDER_COLOR_RESOURCE]
+            ?.let { resolveNativeColor(it.text(PropKey.NATIVE_BORDER_COLOR_RESOURCE)) }
+            ?: state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
         val borderStyle = state.integer(PropKey.BORDER_STYLE, 1).toInt()
         val imageHost = state.kind == NodeKind.IMAGE ||
             state.kind == NodeKind.IMAGE_BACKGROUND ||

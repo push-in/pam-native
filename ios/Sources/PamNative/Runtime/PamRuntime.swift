@@ -412,6 +412,47 @@ public final class PamRuntime {
             textScale,
             darkAppearance,
         )
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow)
+        let insets = window?.safeAreaInsets ?? .zero
+        let screen = window?.screen ?? UIScreen.main
+        let idiom = UIDevice.current.userInterfaceIdiom
+        let deviceType = switch idiom {
+        case .pad: "tablet"
+        case .tv: "tv"
+        case .mac: "desktop"
+        default: "phone"
+        }
+        let inputMode = idiom == .tv ? "remote" : (idiom == .mac ? "mouse" : "touch")
+        let pointer = inputMode == "touch" || inputMode == "remote" ? "coarse" : "fine"
+        let memoryClass = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576
+        let refreshRate = Double(screen.maximumFramesPerSecond)
+        let performanceTier: Double = memoryClass >= 4_096 && refreshRate >= 90
+            ? 3
+            : (memoryClass >= 2_048 ? 2 : 1)
+        if let payload = try? WireMap.encode([
+            "width": .decimal(Double(widthDp)),
+            "height": .decimal(Double(heightDp)),
+            "density": .decimal(Double(screen.scale)),
+            "appearance": .integer(darkAppearance ? 2 : 1),
+            "fontScale": .decimal(Double(textScale)),
+            "safeAreaTop": .decimal(Double(insets.top)),
+            "safeAreaRight": .decimal(Double(insets.right)),
+            "safeAreaBottom": .decimal(Double(insets.bottom)),
+            "safeAreaLeft": .decimal(Double(insets.left)),
+            "refreshRate": .decimal(refreshRate),
+            "reducedMotion": .flag(UIAccessibility.isReduceMotionEnabled),
+            "deviceType": .text(deviceType),
+            "pointer": .text(pointer),
+            "inputMode": .text(inputMode),
+            "dynamicRange": .text(screen.traitCollection.displayGamut == .P3 ? "high" : "standard"),
+            "displayMode": .text("standalone"),
+            "foldPosture": .text("flat"),
+            "memoryClass": .decimal(memoryClass),
+            "performanceTier": .decimal(performanceTier),
+        ]) {
+            dispatchLifecycle(kind: EventKind.dimensions.rawValue, payload: payload)
+        }
     }
 
     public func dispatchLifecycle(kind: Int, payload: Data = Data()) {

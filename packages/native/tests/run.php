@@ -4201,6 +4201,17 @@ Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
     'height' => 915.0,
     'density' => 3.0,
     'appearance' => UserInterfaceAppearance::Dark->value,
+    'fontScale' => 1.15,
+    'safeAreaTop' => 24.0,
+    'safeAreaBottom' => 16.0,
+    'refreshRate' => 120.0,
+    'reducedMotion' => true,
+    'deviceType' => 'tablet',
+    'pointer' => 'fine',
+    'inputMode' => 'mouse',
+    'dynamicRange' => 'high',
+    'memoryClass' => 512.0,
+    'performanceTier' => 3.0,
 ]));
 Runtime::dispatchEvent(
     0,
@@ -4213,7 +4224,18 @@ $assert(
         && $windowMetrics->width === 412.0
         && $windowMetrics->height === 915.0
         && $windowMetrics->density === 3.0
-        && $windowMetrics->appearance === UserInterfaceAppearance::Dark,
+        && $windowMetrics->appearance === UserInterfaceAppearance::Dark
+        && $windowMetrics->fontScale === 1.15
+        && $windowMetrics->safeAreaTop === 24.0
+        && $windowMetrics->safeAreaBottom === 16.0
+        && $windowMetrics->refreshRate === 120.0
+        && $windowMetrics->reducedMotion
+        && $windowMetrics->deviceType === 'tablet'
+        && $windowMetrics->pointer === 'fine'
+        && $windowMetrics->inputMode === 'mouse'
+        && $windowMetrics->dynamicRange === 'high'
+        && $windowMetrics->memoryClass === 512.0
+        && $windowMetrics->performanceTier === 3.0,
     'Window metrics lifecycle event was not decoded.',
 );
 $assert(

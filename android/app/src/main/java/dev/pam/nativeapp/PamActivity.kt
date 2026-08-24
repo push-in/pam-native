@@ -1,6 +1,7 @@
 package dev.pam.nativeapp
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
@@ -13,6 +14,7 @@ import android.util.DisplayMetrics
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
@@ -27,6 +29,8 @@ import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import androidx.core.view.WindowCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
@@ -473,6 +477,35 @@ class PamActivity : FragmentActivity() {
         val density = resources.displayMetrics.density
         val widthDp = width / density
         val heightDp = height / density
+        val insets = ViewCompat.getRootWindowInsets(window.decorView)?.getInsets(
+            WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+        )
+        val configuration = resources.configuration
+        val deviceType = when {
+            configuration.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION -> "tv"
+            configuration.smallestScreenWidthDp >= 600 -> "tablet"
+            else -> "phone"
+        }
+        val inputMode = when {
+            deviceType == "tv" -> "remote"
+            configuration.keyboard != Configuration.KEYBOARD_NOKEYS -> "keyboard"
+            configuration.touchscreen == Configuration.TOUCHSCREEN_NOTOUCH -> "mouse"
+            else -> "touch"
+        }
+        val pointer = if (inputMode == "touch" || inputMode == "remote") "coarse" else "fine"
+        @Suppress("DEPRECATION")
+        val refreshRate = windowManager.defaultDisplay.refreshRate.coerceAtLeast(1f)
+        val reducedMotion = Settings.Global.getFloat(
+            contentResolver,
+            Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        ) == 0f
+        val memoryClass = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).memoryClass
+        val performanceTier = when {
+            memoryClass >= 512 && refreshRate >= 90f -> 3L
+            memoryClass >= 256 -> 2L
+            else -> 1L
+        }
         runtime.updateViewport(
             widthDp,
             heightDp,
@@ -487,6 +520,21 @@ class PamActivity : FragmentActivity() {
                     "height" to WireValue.Decimal(heightDp.toDouble()),
                     "density" to WireValue.Decimal(density.toDouble()),
                     "appearance" to WireValue.Integer(appearanceValue()),
+                    "fontScale" to WireValue.Decimal(configuration.fontScale.toDouble()),
+                    "safeAreaTop" to WireValue.Decimal(((insets?.top ?: 0) / density).toDouble()),
+                    "safeAreaRight" to WireValue.Decimal(((insets?.right ?: 0) / density).toDouble()),
+                    "safeAreaBottom" to WireValue.Decimal(((insets?.bottom ?: 0) / density).toDouble()),
+                    "safeAreaLeft" to WireValue.Decimal(((insets?.left ?: 0) / density).toDouble()),
+                    "refreshRate" to WireValue.Decimal(refreshRate.toDouble()),
+                    "reducedMotion" to WireValue.Flag(reducedMotion),
+                    "deviceType" to WireValue.Text(deviceType),
+                    "pointer" to WireValue.Text(pointer),
+                    "inputMode" to WireValue.Text(inputMode),
+                    "dynamicRange" to WireValue.Text("standard"),
+                    "displayMode" to WireValue.Text("standalone"),
+                    "foldPosture" to WireValue.Text("flat"),
+                    "memoryClass" to WireValue.Decimal(memoryClass.toDouble()),
+                    "performanceTier" to WireValue.Decimal(performanceTier.toDouble()),
                 ),
             ),
         )

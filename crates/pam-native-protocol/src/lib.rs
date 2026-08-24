@@ -542,6 +542,9 @@ pub enum PropKey {
     SharedTransitionConfig = 449,
     AccessibilityActions = 450,
     OnAccessibilityAction = 451,
+    NativeBackgroundColorResource = 452,
+    NativeTextColorResource = 453,
+    NativeBorderColorResource = 454,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1000,6 +1003,9 @@ impl TryFrom<u16> for PropKey {
             449 => Ok(Self::SharedTransitionConfig),
             450 => Ok(Self::AccessibilityActions),
             451 => Ok(Self::OnAccessibilityAction),
+            452 => Ok(Self::NativeBackgroundColorResource),
+            453 => Ok(Self::NativeTextColorResource),
+            454 => Ok(Self::NativeBorderColorResource),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1875,10 +1881,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=451 {
+        for value in 1..=454 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(452).is_err());
+        assert!(PropKey::try_from(455).is_err());
     }
 
     #[test]
