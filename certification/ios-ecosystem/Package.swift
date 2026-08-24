@@ -10,6 +10,7 @@ let package = Package(
         .package(path: "../../ios"),
         .package(url: "https://github.com/firebase/firebase-ios-sdk.git", exact: "12.17.0"),
         .package(url: "https://github.com/stripe/stripe-ios.git", exact: "26.0.0"),
+        .package(url: "https://github.com/SDWebImage/SDWebImage.git", exact: "5.21.7"),
     ],
     targets: [
         .target(
@@ -147,6 +148,11 @@ let package = Package(
             linkerSettings: [.linkedFramework("RealityKit"), .linkedFramework("Metal"), .linkedFramework("QuartzCore")],
         ),
         .target(
+            name: "PamPlugin23PushinbrPamNativeImage",
+            dependencies: [.product(name: "PamNative", package: "ios"), .product(name: "SDWebImage", package: "SDWebImage")],
+            path: "Sources/PamPlugin23PushinbrPamNativeImage",
+        ),
+        .target(
             name: "PamExtensionIntents",
             path: "Sources/PamExtensionIntents",
             linkerSettings: [.linkedFramework("AppIntents")],
@@ -168,7 +174,7 @@ let package = Package(
         ),
         .target(
             name: "PamNativePlugins",
-            dependencies: ["PamPlugin0PushinbrPamNativeAuth", "PamPlugin1PushinbrPamNativeBackgroundTransfer", "PamPlugin2PushinbrPamNativeBluetooth", "PamPlugin3PushinbrPamNativeFeatureFlags", "PamPlugin4PushinbrPamNativeFirebase", "PamPlugin5PushinbrPamNativeHealth", "PamPlugin6PushinbrPamNativeIntents", "PamPlugin7PushinbrPamNativeLiveActivities", "PamPlugin8PushinbrPamNativeMaps", "PamPlugin9PushinbrPamNativeMedia", "PamPlugin10PushinbrPamNativeMediaEditor", "PamPlugin11PushinbrPamNativeNfc", "PamPlugin12PushinbrPamNativePayments", "PamPlugin13PushinbrPamNativeRealtime", "PamPlugin14PushinbrPamNativeScanner", "PamPlugin15PushinbrPamNativeShareExtension", "PamPlugin16PushinbrPamNativeSubscriptions", "PamPlugin17PushinbrPamNativeVideo", "PamPlugin18PushinbrPamNativeWidgets", "PamPlugin19PushinbrPamNativeCamera", "PamPlugin20PushinbrPamNativeCanvas", "PamPlugin21PushinbrPamNativeGpu", "PamPlugin22PushinbrPamNative3d", "PamExtensionIntents", "PamExtensionLiveActivities", "PamExtensionShare", "PamExtensionWidgets"],
+            dependencies: ["PamPlugin0PushinbrPamNativeAuth", "PamPlugin1PushinbrPamNativeBackgroundTransfer", "PamPlugin2PushinbrPamNativeBluetooth", "PamPlugin3PushinbrPamNativeFeatureFlags", "PamPlugin4PushinbrPamNativeFirebase", "PamPlugin5PushinbrPamNativeHealth", "PamPlugin6PushinbrPamNativeIntents", "PamPlugin7PushinbrPamNativeLiveActivities", "PamPlugin8PushinbrPamNativeMaps", "PamPlugin9PushinbrPamNativeMedia", "PamPlugin10PushinbrPamNativeMediaEditor", "PamPlugin11PushinbrPamNativeNfc", "PamPlugin12PushinbrPamNativePayments", "PamPlugin13PushinbrPamNativeRealtime", "PamPlugin14PushinbrPamNativeScanner", "PamPlugin15PushinbrPamNativeShareExtension", "PamPlugin16PushinbrPamNativeSubscriptions", "PamPlugin17PushinbrPamNativeVideo", "PamPlugin18PushinbrPamNativeWidgets", "PamPlugin19PushinbrPamNativeCamera", "PamPlugin20PushinbrPamNativeCanvas", "PamPlugin21PushinbrPamNativeGpu", "PamPlugin22PushinbrPamNative3d", "PamPlugin23PushinbrPamNativeImage", "PamExtensionIntents", "PamExtensionLiveActivities", "PamExtensionShare", "PamExtensionWidgets"],
             path: "Sources/PamNativePlugins"
         ),
     ]
