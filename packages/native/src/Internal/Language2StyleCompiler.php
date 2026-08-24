@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\Style\StyleQueryKind;
 use RuntimeException;
 
 /** Extracts Language 2 constructs into a deterministic, runtime-free style IR. */
@@ -44,10 +45,13 @@ final class Language2StyleCompiler
                 continue;
             }
 
-            if (preg_match('/^(.+):(pressed|focused|disabled|selected|checked|hovered)$/D', $header, $match) === 1) {
+            if (preg_match('/^(.+):(pressed|focus|focused|focus-visible|disabled|selected|checked|hover|hovered|active|loading|error)$/D', $header, $match) === 1) {
                 $selector = trim($match[1]);
                 self::assertSelector($selector, $name);
-                $states[$selector][$match[2]] = ScopedStyleCompiler::compileDeclarations(
+                $state = match ($match[2]) {
+                    'focused' => 'focus', 'hovered' => 'hover', default => $match[2],
+                };
+                $states[$selector][$state] = ScopedStyleCompiler::compileDeclarations(
                     $body,
                     $tokens,
                     $name,
@@ -61,10 +65,13 @@ final class Language2StyleCompiler
             }
 
             if (preg_match('/^@(media|container)\s+(.+)$/D', $header, $match) === 1) {
-                self::assertQuery($match[1], trim($match[2]), $name);
+                $queryAst = StyleQueryCompiler::compile(trim($match[2]), $name);
                 $queries[] = [
-                    'kind' => $match[1] === 'media' ? 1 : 2,
+                    'kind' => $match[1] === 'media'
+                        ? StyleQueryKind::Media->value
+                        : StyleQueryKind::Container->value,
                     'condition' => trim($match[2]),
+                    'ast' => $queryAst,
                     'styles' => ScopedStyleCompiler::compile($body, $name.' '.$header),
                 ];
                 continue;
@@ -72,6 +79,17 @@ final class Language2StyleCompiler
 
             if (preg_match('/^@keyframes\s+([A-Za-z][A-Za-z0-9_-]*)$/D', $header, $match) === 1) {
                 $keyframes[$match[1]] = self::keyframes($body, $tokens, $name);
+                continue;
+            }
+
+            if (preg_match('/^@layer\s+([A-Za-z][A-Za-z0-9_.-]*)$/D', $header) === 1) {
+                $layer = self::extract($body, $name.' '.$header);
+                $tokens = [...$tokens, ...$layer['tokens']];
+                $states = array_replace_recursive($states, $layer['states']);
+                $recipes = array_replace_recursive($recipes, $layer['recipes']);
+                $queries = [...$queries, ...$layer['queries']];
+                $keyframes = [...$keyframes, ...$layer['keyframes']];
+                $legacy[] = $layer['source'];
                 continue;
             }
 
@@ -229,19 +247,7 @@ final class Language2StyleCompiler
 
     private static function assertSelector(string $selector, string $name): void
     {
-        if (
-            preg_match('/^(?:\.[A-Za-z_][A-Za-z0-9_-]*|[A-Za-z][A-Za-z0-9_.-]*)$/D', $selector) !== 1
-        ) {
-            throw new RuntimeException("Unsupported state selector {$selector} in {$name}.");
-        }
+        StyleSelectorCompiler::compile($selector, $name);
     }
 
-    private static function assertQuery(string $kind, string $condition, string $name): void
-    {
-        $media = '/^\((?:min|max)-(?:width|height):\s*[0-9]+(?:\.[0-9]+)?(?:dp|px)\)$/D';
-        $container = '/^(?:[A-Za-z][A-Za-z0-9_-]*\s+)?\((?:min|max)-(?:width|height):\s*[0-9]+(?:\.[0-9]+)?(?:dp|px)\)$/D';
-        if (preg_match($kind === 'media' ? $media : $container, $condition) !== 1) {
-            throw new RuntimeException("Unsupported @{$kind} condition {$condition} in {$name}.");
-        }
-    }
 }

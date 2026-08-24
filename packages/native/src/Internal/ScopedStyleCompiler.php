@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\Style\StyleScope;
 use RuntimeException;
 
 /**
@@ -94,9 +95,14 @@ final class ScopedStyleCompiler
      *     fonts: array<string, list<array{source: string, weight: string, style: string}>>
      * }
      */
-    public static function compile(string $source, string $name): array
+    public static function compile(
+        string $source,
+        string $name,
+        StyleScope $scope = StyleScope::Scoped,
+    ): array
     {
         $source = self::resolveImports($source, $name);
+        $irSource = $source;
         $language2 = Language2StyleCompiler::extract($source, $name);
         $source = $language2['source'];
         $clean = preg_replace('/\/\*[\s\S]*?\*\//', '', $source);
@@ -108,6 +114,7 @@ final class ScopedStyleCompiler
         $tags = [];
         $fonts = [];
         $classCascade = [];
+        $cascadeRules = [];
         $rules = [];
         $matchedBytes = 0;
         preg_match_all(
@@ -162,6 +169,20 @@ final class ScopedStyleCompiler
             }
             $declarations = self::declarations($body, $variables, $name);
             foreach (array_map('trim', explode(',', $selectorSource)) as $selector) {
+                $compiledSelector = StyleSelectorCompiler::compile($selector, $name);
+                $important = self::importantProperties($body);
+                $cascadeDeclarations = [];
+                foreach ($declarations as $attribute => $value) {
+                    $cascadeDeclarations[$attribute] = [
+                        'value' => $value,
+                        'important' => isset($important[$attribute]),
+                    ];
+                }
+                $cascadeRules[] = [
+                    'selector' => $compiledSelector,
+                    'declarations' => $cascadeDeclarations,
+                    'order' => $sourceOrder,
+                ];
                 if (preg_match('/^\.([A-Za-z_][A-Za-z0-9_-]*)$/D', $selector, $match) === 1) {
                     $classes[$match[1]] = [
                         ...($classes[$match[1]] ?? []),
@@ -182,23 +203,45 @@ final class ScopedStyleCompiler
                     ];
                     continue;
                 }
-                throw new RuntimeException(
-                    "Unsupported scoped selector {$selector} in {$name}; use a tag or .class.",
-                );
+                // Complex selectors are evaluated from cascadeRules at render time.
             }
             $sourceOrder++;
         }
 
-        return [
+        $stateRules = [];
+        foreach ($language2['states'] as $selector => $states) {
+            foreach ($states as $state => $stateDeclarations) {
+                $stateRules[] = [
+                    'selector' => StyleSelectorCompiler::compile($selector, $name),
+                    'state' => $state,
+                    'declarations' => $stateDeclarations,
+                ];
+            }
+        }
+        $sheet = [
+            'scope' => $scope->value,
+            'scopeId' => substr(hash('sha256', $name), 0, 16),
             'classes' => $classes,
             'tags' => $tags,
             'classCascade' => $classCascade,
+            'cascadeRules' => $cascadeRules,
             'fonts' => $fonts,
             'tokens' => $language2['tokens'],
             'states' => $language2['states'],
+            'stateRules' => $stateRules,
             'recipes' => $language2['recipes'],
             'queries' => $language2['queries'],
             'keyframes' => $language2['keyframes'],
+        ];
+        $compiledIr = StyleIrCompiler::compile($sheet, $irSource, $name);
+
+        return [
+            ...$sheet,
+            'styleIr' => $compiledIr['ir'],
+            'styleBytecode' => $compiledIr['bytecode'],
+            'styleFingerprint' => $compiledIr['fingerprint'],
+            'styleSourceMap' => $compiledIr['sourceMap'],
+            'styleCompatibility' => $compiledIr['compatibility'],
         ];
     }
 
@@ -471,7 +514,8 @@ final class ScopedStyleCompiler
                     "Custom properties in {$name} must be declared in :root.",
                 );
             }
-            $value = self::resolveVariables($rawValue, $variables, $name);
+            $value = preg_replace('/\s*!important\s*$/i', '', $rawValue) ?? $rawValue;
+            $value = self::resolveVariables($value, $variables, $name);
             if (in_array($property, ['padding', 'margin'], true)) {
                 self::expandBox($output, $property, $value, $name);
                 continue;
@@ -560,6 +604,23 @@ final class ScopedStyleCompiler
                 $output[$property === 'column-gap' ? 'gridColumnGap' : 'gridRowGap'] = self::scalar($value, $name);
                 continue;
             }
+            if ($property === 'grid-template-columns') {
+                $output['columns'] = self::gridColumns($value, $name);
+                continue;
+            }
+            if ($property === 'grid-column') {
+                if (preg_match('/^span\s+([1-9]|[1-5][0-9]|6[0-4])$/iD', trim($value), $match) !== 1) {
+                    throw new RuntimeException("Native grid-column in {$name} must be 'span 1' through 'span 64'.");
+                }
+                $output['span'] = $match[1];
+                continue;
+            }
+            if ($property === 'place-items') {
+                $parts = self::cssValueParts($value, $name);
+                $output['alignItems'] = self::unquote($parts[0] ?? 'stretch');
+                $output['justifyContent'] = self::unquote($parts[1] ?? $parts[0] ?? 'stretch');
+                continue;
+            }
             $attribute = self::PROPERTIES[$property] ?? null;
             if ($attribute === null) {
                 throw new RuntimeException(
@@ -596,6 +657,22 @@ final class ScopedStyleCompiler
         }
 
         return $output;
+    }
+
+    /** @return array<string, true> Native attribute names marked important. */
+    private static function importantProperties(string $source): array
+    {
+        $important = [];
+        foreach (self::rawDeclarations($source, 'style rule') as $property => $value) {
+            if (preg_match('/!important\s*$/i', $value) !== 1) {
+                continue;
+            }
+            $native = self::PROPERTIES[$property] ?? null;
+            if ($native !== null) {
+                $important[$native] = true;
+            }
+        }
+        return $important;
     }
 
     /**
@@ -984,9 +1061,9 @@ final class ScopedStyleCompiler
         if ($property === 'display') {
             return match (strtolower($value)) {
                 'none' => false,
-                'flex' => true,
+                'flex', 'grid' => true,
                 default => throw new RuntimeException(
-                    "Native display in {$name} supports only flex or none.",
+                    "Native display in {$name} supports flex, grid, or none.",
                 ),
             };
         }
@@ -1100,6 +1177,9 @@ final class ScopedStyleCompiler
     private static function scalar(string $value, string $name): string
     {
         $trimmed = trim($value);
+        if (StyleValueCompiler::isDynamic($trimmed)) {
+            return StyleValueCompiler::encode($trimmed, $name);
+        }
         if (preg_match('/^-?(?:\d+|\d*\.\d+)(?:px|dp|pt|rem)?$/D', $trimmed) !== 1) {
             throw new RuntimeException("Expected a native numeric CSS value in {$name}, got {$value}.");
         }
@@ -1108,6 +1188,24 @@ final class ScopedStyleCompiler
         }
 
         return preg_replace('/(?:px|dp|pt)$/', '', $trimmed) ?? $trimmed;
+    }
+
+    private static function gridColumns(string $value, string $name): string
+    {
+        $trimmed = trim($value);
+        if (preg_match('/^repeat\(\s*([1-9]|[1-5][0-9]|6[0-4])\s*,\s*(?:minmax\([^)]*\)|[^)]+)\)$/iD', $trimmed, $match) === 1) {
+            return $match[1];
+        }
+        $tracks = self::cssValueParts($trimmed, $name);
+        if ($tracks === [] || count($tracks) > 64) {
+            throw new RuntimeException("Native grid-template-columns in {$name} supports 1 through 64 tracks.");
+        }
+        foreach ($tracks as $track) {
+            if (preg_match('/^(?:\d+(?:\.\d+)?fr|auto|min-content|max-content|minmax\([^)]*\))$/iD', $track) !== 1) {
+                throw new RuntimeException("Unsupported native grid track {$track} in {$name}.");
+            }
+        }
+        return (string) count($tracks);
     }
 
     /** @param array<string, string|int|bool> $output */

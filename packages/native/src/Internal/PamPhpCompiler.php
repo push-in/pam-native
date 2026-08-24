@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\Style\StyleScope;
 use FilesystemIterator;
 use JsonException;
 use RecursiveDirectoryIterator;
@@ -112,7 +113,8 @@ final class PamPhpCompiler
             );
         }
 
-        [$php, $template, $templateLine, $style, $language] = self::split($contents, $source);
+        [$php, $template, $templateLine, $style, $language, $styleScope] =
+            self::split($contents, $source);
         $style = self::resolvedStyleSheet($style, $source);
         self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
@@ -123,7 +125,7 @@ final class PamPhpCompiler
             .DIRECTORY_SEPARATOR.$cacheKey.'.template.json';
         $metadataFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
             .DIRECTORY_SEPARATOR.$cacheKey.'.json';
-        $hash = hash('sha256', $contents."\0".$style);
+        $hash = hash('sha256', $contents."\0".$style."\0".$styleScope->value);
         $tree = self::cachedTree(
             $metadataFile,
             $templateFile,
@@ -141,7 +143,7 @@ final class PamPhpCompiler
             if ($style !== '') {
                 $tree = self::withStyleSheet(
                     $tree,
-                    ScopedStyleCompiler::compile($style, $source),
+                    ScopedStyleCompiler::compile($style, $source, $styleScope),
                 );
             }
             self::writeAtomic($classFile, rtrim($php)."\n");
@@ -249,7 +251,7 @@ final class PamPhpCompiler
         }
     }
 
-    /** @return array{string, string, int, string, LanguageVersion} */
+    /** @return array{string, string, int, string, LanguageVersion, StyleScope} */
     private static function split(string $source, string $name): array
     {
         $tokens = token_get_all($source);
@@ -283,7 +285,7 @@ final class PamPhpCompiler
 
         if (preg_match(
             '/\A\s*<template(?:\s+([^>]*))?>([\s\S]*?)<\/template>'
-            .'\s*(?:<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
+            .'\s*(?:<style(?:\s+(scoped|module|global))?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
             $markup,
             $match,
             PREG_OFFSET_CAPTURE,
@@ -296,9 +298,20 @@ final class PamPhpCompiler
             ? (string) ($match[1][0] ?? '')
             : '';
         $capture = $match[2];
-        $style = is_array($match[3] ?? null)
-            ? (string) ($match[3][0] ?? '')
+        $styleMode = is_array($match[3] ?? null)
+            ? strtolower((string) ($match[3][0] ?? ''))
             : '';
+        $style = is_array($match[4] ?? null)
+            ? (string) ($match[4][0] ?? '')
+            : '';
+        $styleScope = match ($styleMode) {
+            '', 'scoped' => StyleScope::Scoped,
+            'module' => StyleScope::Module,
+            'global' => StyleScope::Global,
+            default => throw new RuntimeException(
+                "Unsupported PAM style scope {$styleMode} in {$name}.",
+            ),
+        };
 
         $language = LanguageVersion::Language1;
         if (preg_match('/(?:language|version)\s*=\s*(["\'])2\1/D', trim($templateAttributes)) === 1) {
@@ -312,7 +325,7 @@ final class PamPhpCompiler
         $templateOffset = $closeOffset + $closeLength + $capture[1];
         $templateLine = substr_count(substr($source, 0, $templateOffset), "\n") + 1;
 
-        return [$php, $capture[0], $templateLine, $style, $language];
+        return [$php, $capture[0], $templateLine, $style, $language, $styleScope];
     }
 
     /**

@@ -1076,6 +1076,10 @@ final class TemplateRenderer
         }
         $childData = [
             ...$data,
+            '__pamStyleAncestors' => [
+                ...(is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : []),
+                self::styleNodeDescriptor($tag, $resolvedClass, $declaredAttributes, $scope, $data),
+            ],
             '__pamContainerWidth' => is_numeric($values['width'] ?? null)
                 ? (float) $values['width']
                 : ($data['__pamContainerWidth'] ?? null),
@@ -2457,6 +2461,7 @@ final class TemplateRenderer
                 'classes' => [],
                 'tags' => [],
                 'classCascade' => [],
+                'cascadeRules' => [],
                 'fonts' => [],
             ];
         }
@@ -2483,12 +2488,25 @@ final class TemplateRenderer
             'classes' => $classes,
             'tags' => $tags,
             'classCascade' => $classCascade,
+            'cascadeRules' => self::safeStyleMetadata($decoded['cascadeRules'] ?? [], $tree->source),
             'fonts' => $fonts,
+            'scope' => is_int($decoded['scope'] ?? null) ? $decoded['scope'] : 1,
+            'scopeId' => is_string($decoded['scopeId'] ?? null) ? $decoded['scopeId'] : '',
             'tokens' => self::safeStyleMetadata($decoded['tokens'] ?? [], $tree->source),
             'states' => self::safeStyleMetadata($decoded['states'] ?? [], $tree->source),
+            'stateRules' => self::safeStyleMetadata($decoded['stateRules'] ?? [], $tree->source),
             'recipes' => self::safeStyleMetadata($decoded['recipes'] ?? [], $tree->source),
             'queries' => self::safeStyleMetadata($decoded['queries'] ?? [], $tree->source),
             'keyframes' => self::safeStyleMetadata($decoded['keyframes'] ?? [], $tree->source),
+            'styleIr' => self::safeStyleMetadata($decoded['styleIr'] ?? [], $tree->source),
+            'styleBytecode' => is_string($decoded['styleBytecode'] ?? null)
+                ? $decoded['styleBytecode']
+                : '',
+            'styleFingerprint' => is_string($decoded['styleFingerprint'] ?? null)
+                ? $decoded['styleFingerprint']
+                : '',
+            'styleSourceMap' => self::safeStyleMetadata($decoded['styleSourceMap'] ?? [], $tree->source),
+            'styleCompatibility' => self::safeStyleMetadata($decoded['styleCompatibility'] ?? [], $tree->source),
         ];
     }
 
@@ -2521,8 +2539,19 @@ final class TemplateRenderer
     {
         $sheet = $data['__pamStyles'] ?? null;
         $classes = is_array($sheet) ? ($sheet['classes'] ?? null) : null;
-
-        return is_array($classes) ? $classes : [];
+        $known = is_array($classes) ? $classes : [];
+        if (is_array($sheet)) {
+            foreach (($sheet['cascadeRules'] ?? []) as $rule) {
+                foreach (($rule['selector']['compounds'] ?? []) as $compound) {
+                    foreach (($compound['classes'] ?? []) as $class) {
+                        if (is_string($class) && $class !== '') {
+                            $known[$class] ??= [];
+                        }
+                    }
+                }
+            }
+        }
+        return $known;
     }
 
     /**
@@ -2541,6 +2570,11 @@ final class TemplateRenderer
             return [];
         }
         $sheet = self::responsiveStyleSheet($sheet, $data);
+        $descriptor = self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
+        $cascadeRules = is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : [];
+        $attributes = $cascadeRules !== []
+            ? self::cascadeStyleAttributes($cascadeRules, $descriptor, $data)
+            : [];
         $classCascade = is_array($sheet['classCascade'] ?? null)
             ? $sheet['classCascade']
             : [];
@@ -2549,8 +2583,10 @@ final class TemplateRenderer
             true,
         );
         $tags = is_array($sheet['tags'] ?? null) ? $sheet['tags'] : [];
-        $attributes = is_array($tags[$tag] ?? null) ? $tags[$tag] : [];
-        if ($classCascade !== []) {
+        if ($cascadeRules === []) {
+            $attributes = is_array($tags[$tag] ?? null) ? $tags[$tag] : [];
+        }
+        if ($cascadeRules === [] && $classCascade !== []) {
             $winners = [];
             foreach (array_keys($classNames) as $class) {
                 $declarations = $classCascade[$class] ?? null;
@@ -2576,7 +2612,7 @@ final class TemplateRenderer
             foreach ($winners as $attribute => $entry) {
                 $attributes[$attribute] = $entry['value'];
             }
-        } else {
+        } elseif ($cascadeRules === []) {
             // Backward compatibility for templates compiled before cascade indexes.
             $classRules = is_array($sheet['classes'] ?? null) ? $sheet['classes'] : [];
             foreach (array_keys($classNames) as $class) {
@@ -2639,6 +2675,185 @@ final class TemplateRenderer
                 $attributes['pressedScale'] = $pressed['scaleX'];
             }
         }
+        foreach (($sheet['stateRules'] ?? []) as $stateRule) {
+            if (!is_array($stateRule)
+                || ($stateRule['state'] ?? null) !== 'pressed'
+                || !is_array($stateRule['selector'] ?? null)
+                || !self::styleSelectorMatches(
+                    $stateRule['selector'],
+                    $descriptor,
+                    is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [],
+                )) {
+                continue;
+            }
+            $pressed = $stateRule['declarations'] ?? [];
+            if (!is_array($pressed)) continue;
+            if (isset($pressed['opacity'])) $attributes['pressedOpacity'] = $pressed['opacity'];
+            if (isset($pressed['scaleX'], $pressed['scaleY']) && $pressed['scaleX'] === $pressed['scaleY']) {
+                $attributes['pressedScale'] = $pressed['scaleX'];
+            }
+        }
+
+        return self::resolveDynamicStyles($attributes, $data);
+    }
+
+    /** @param array<string, mixed> $raw @param array<string, mixed> $data @return array<string,mixed> */
+    private static function styleNodeDescriptor(string $tag, ?string $classes, array $raw, ?object $scope, array $data): array
+    {
+        $attributes = [];
+        foreach ($raw as $name => $value) {
+            if (str_starts_with($name, '@') || str_starts_with($name, 'on:')) {
+                continue;
+            }
+            try {
+                $attributes[ltrim($name, ':')] = str_starts_with($name, ':')
+                    ? self::dynamicValue($value, $scope, $data)
+                    : self::value($value, $scope, $data);
+            } catch (RuntimeException) {
+            }
+        }
+        $classList = array_values(array_filter(preg_split('/\s+/', trim($classes ?? '')) ?: []));
+        $pseudos = [];
+        foreach (['disabled', 'checked', 'selected', 'active', 'loading', 'error'] as $pseudo) {
+            if (($attributes[$pseudo] ?? false) === true) {
+                $pseudos[] = $pseudo;
+            }
+        }
+        if (($attributes['value'] ?? null) === '' || ($attributes['items'] ?? null) === []) {
+            $pseudos[] = 'empty';
+        }
+        return ['tag' => $tag, 'id' => isset($attributes['id']) ? (string) $attributes['id'] : null, 'classes' => $classList, 'attributes' => $attributes, 'pseudos' => $pseudos];
+    }
+
+    /** @param list<mixed> $rules @param array<string,mixed> $node @param array<string,mixed> $data @return array<string,string|int|bool> */
+    private static function cascadeStyleAttributes(array $rules, array $node, array $data): array
+    {
+        $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
+        $winners = [];
+        foreach ($rules as $rule) {
+            if (!is_array($rule) || !is_array($rule['selector'] ?? null) || !self::styleSelectorMatches($rule['selector'], $node, $ancestors)) {
+                continue;
+            }
+            $specificity = $rule['selector']['specificity'] ?? [0, 0, 0];
+            $score = ((int) ($specificity[0] ?? 0) * 1_000_000) + ((int) ($specificity[1] ?? 0) * 1_000) + (int) ($specificity[2] ?? 0);
+            foreach (($rule['declarations'] ?? []) as $attribute => $entry) {
+                if (!is_array($entry) || !array_key_exists('value', $entry)) {
+                    continue;
+                }
+                $rank = [(bool) ($entry['important'] ?? false) ? 1 : 0, $score, (int) ($rule['order'] ?? 0)];
+                if (!isset($winners[$attribute]) || $rank >= $winners[$attribute]['rank']) {
+                    $winners[$attribute] = ['rank' => $rank, 'value' => $entry['value']];
+                }
+            }
+        }
+        return array_map(static fn (array $winner): mixed => $winner['value'], $winners);
+    }
+
+    /** @param array<string,mixed> $selector @param array<string,mixed> $node @param list<mixed> $ancestors */
+    private static function styleSelectorMatches(array $selector, array $node, array $ancestors): bool
+    {
+        $compounds = $selector['compounds'] ?? null;
+        if (!is_array($compounds) || $compounds === []) return false;
+        $index = count($compounds) - 1;
+        if (!self::styleCompoundMatches($compounds[$index], $node)) return false;
+        $ancestorIndex = count($ancestors) - 1;
+        while ($index > 0) {
+            $relation = $compounds[$index]['combinator'] ?? 'descendant';
+            $index--;
+            if ($relation === 'child') {
+                if ($ancestorIndex < 0 || !self::styleCompoundMatches($compounds[$index], $ancestors[$ancestorIndex])) return false;
+                $ancestorIndex--;
+                continue;
+            }
+            $found = false;
+            while ($ancestorIndex >= 0) {
+                if (self::styleCompoundMatches($compounds[$index], $ancestors[$ancestorIndex])) { $found = true; $ancestorIndex--; break; }
+                $ancestorIndex--;
+            }
+            if (!$found) return false;
+        }
+        return true;
+    }
+
+    /** @param array<string,mixed> $compound */
+    private static function styleCompoundMatches(array $compound, mixed $node): bool
+    {
+        if (!is_array($node)) return false;
+        $tag = $compound['tag'] ?? null;
+        if ($tag !== null && $tag !== '*' && strcasecmp((string) ($node['tag'] ?? ''), (string) $tag) !== 0) return false;
+        if (($compound['id'] ?? null) !== null && ($node['id'] ?? null) !== $compound['id']) return false;
+        foreach (($compound['classes'] ?? []) as $class) if (!in_array($class, $node['classes'] ?? [], true)) return false;
+        foreach (($compound['pseudos'] ?? []) as $pseudo) {
+            if (in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $node['pseudos'] ?? [], true)) return false;
+        }
+        foreach (($compound['attributes'] ?? []) as $condition) {
+            $nodeAttributes = $node['attributes'] ?? [];
+            if (!is_array($nodeAttributes) || !array_key_exists($condition['name'], $nodeAttributes)) return false;
+            $operator = $condition['operator'] ?? '';
+            if ($operator === '') continue;
+            $actual = (string) $nodeAttributes[$condition['name']];
+            $expected = (string) ($condition['value'] ?? '');
+            $matches = match ($operator) {
+                '=' => $actual === $expected,
+                '~=' => in_array($expected, preg_split('/\s+/', $actual) ?: [], true),
+                '|=' => $actual === $expected || str_starts_with($actual, $expected.'-'),
+                '^=' => str_starts_with($actual, $expected), '$=' => str_ends_with($actual, $expected),
+                '*=' => str_contains($actual, $expected), default => false,
+            };
+            if (!$matches) return false;
+        }
+        return true;
+    }
+
+    /**
+     * @param array<string, string|int|bool> $attributes
+     * @param array<string, mixed> $data
+     * @return array<string, string|int|float|bool>
+     */
+    private static function resolveDynamicStyles(array $attributes, array $data): array
+    {
+        $metrics = Runtime::windowMetrics();
+        $containerWidth = $data['__pamContainerWidth'] ?? $metrics->width;
+        $containerHeight = $data['__pamContainerHeight'] ?? $metrics->height;
+        $provided = is_array($data['__pamStyleEnvironment'] ?? null)
+            ? $data['__pamStyleEnvironment']
+            : [];
+        $environment = [
+            'width' => $metrics->width,
+            'height' => $metrics->height,
+            'fontScale' => is_numeric($provided['fontScale'] ?? null)
+                ? (float) $provided['fontScale']
+                : 1.0,
+            'rootFontSize' => is_numeric($provided['rootFontSize'] ?? null)
+                ? (float) $provided['rootFontSize']
+                : 16.0,
+        ];
+        foreach ($provided as $name => $value) {
+            if (is_string($name) && (is_int($value) || is_float($value))) {
+                $environment[$name] = $value;
+            }
+        }
+        $vertical = [
+            'height' => true,
+            'minHeight' => true,
+            'maxHeight' => true,
+            'top' => true,
+            'bottom' => true,
+            'paddingTop' => true,
+            'paddingBottom' => true,
+            'marginTop' => true,
+            'marginBottom' => true,
+            'translationY' => true,
+        ];
+        foreach ($attributes as $name => $value) {
+            if (!is_string($value) || !StyleValueCompiler::encoded($value)) {
+                continue;
+            }
+            $environment['reference'] = isset($vertical[$name])
+                ? (float) $containerHeight
+                : (float) $containerWidth;
+            $attributes[$name] = StyleValueCompiler::resolve($value, $environment);
+        }
 
         return $attributes;
     }
@@ -2662,7 +2877,22 @@ final class TemplateRenderer
             $metrics = Runtime::windowMetrics();
             $width = $kind === 1 ? $metrics->width : ($data['__pamContainerWidth'] ?? null);
             $height = $kind === 1 ? $metrics->height : ($data['__pamContainerHeight'] ?? null);
-            if (!self::queryMatches($condition, $width, $height)) {
+            $providedEnvironment = is_array($data['__pamStyleEnvironment'] ?? null)
+                ? $data['__pamStyleEnvironment']
+                : [];
+            $environment = [
+                ...$providedEnvironment,
+                'width' => $width,
+                'height' => $height,
+                'orientation' => is_int($width) || is_float($width)
+                    ? ((is_int($height) || is_float($height)) && $width > $height
+                        ? 'landscape'
+                        : 'portrait')
+                    : null,
+                'colorScheme' => $metrics->appearance->value === 2 ? 'dark' : 'light',
+            ];
+            $ast = is_array($query['ast'] ?? null) ? $query['ast'] : null;
+            if (!self::queryMatches($condition, $ast, $environment)) {
                 continue;
             }
             foreach (['classes', 'tags'] as $group) {
@@ -2679,6 +2909,17 @@ final class TemplateRenderer
                     }
                 }
             }
+            $incomingRules = $query['styles']['cascadeRules'] ?? [];
+            if (is_array($incomingRules)) {
+                $baseOrder = count(is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : []);
+                foreach ($incomingRules as $incomingRule) {
+                    if (!is_array($incomingRule)) {
+                        continue;
+                    }
+                    $incomingRule['order'] = $baseOrder + (int) ($incomingRule['order'] ?? 0);
+                    $sheet['cascadeRules'][] = $incomingRule;
+                }
+            }
             // Query rules are later than base rules by definition.
             $sheet['classCascade'] = [];
         }
@@ -2687,13 +2928,16 @@ final class TemplateRenderer
 
     private static function queryMatches(
         string $condition,
-        mixed $width,
-        mixed $height,
+        ?array $ast,
+        array $environment,
     ): bool {
+        if ($ast !== null) {
+            return StyleQueryCompiler::matches($ast, $environment);
+        }
         if (preg_match('/\((min|max)-(width|height):\s*([0-9]+(?:\.[0-9]+)?)(?:dp|px)\)/D', $condition, $match) !== 1) {
             return false;
         }
-        $actual = $match[2] === 'width' ? $width : $height;
+        $actual = $environment[$match[2]] ?? null;
         if (!is_int($actual) && !is_float($actual)) {
             return false;
         }

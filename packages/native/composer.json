@@ -29,7 +29,8 @@
         "bin/pam-native-format",
         "bin/pam-native-language-server",
         "bin/pam-native-optimize",
-        "bin/pam-native-routes"
+        "bin/pam-native-routes",
+        "bin/pam-native-style"
     ],
     "extra": {
         "pam": {
@@ -180,6 +181,10 @@
                 "native:routes": {
                     "script": "bin/pam-native-routes",
                     "description": "Inspect PAM Native routes"
+                },
+                "style": {
+                    "script": "bin/pam-native-style",
+                    "description": "Inspect, explain and generate PAM Native styles"
                 },
                 "make:component": {
                     "bin": "bin/pam-native",
