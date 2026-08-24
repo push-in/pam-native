@@ -744,6 +744,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             package_android(options)
         }
         "release" => release(parse_release_options(arguments)?),
+        "production:certify" | "certify" => certify(parse_release_options(arguments)?),
         "sign" => signing_status(parse_project_only(arguments)?),
         "run" => {
             let mut options = parse_options(arguments, true)?;
@@ -5833,6 +5834,58 @@ fn release(options: ReleaseOptions) -> Result<u8, String> {
     }
 }
 
+fn certify(options: ReleaseOptions) -> Result<u8, String> {
+    let project = load_project(&options.project)?;
+    println!(
+        "PAM Native production certification: {}",
+        project.manifest.name
+    );
+    if doctor(options.project.clone())? != 0 {
+        return Err("production certification stopped because PAM Native doctor failed".to_owned());
+    }
+    if doctor_plugins(options.project.clone())? != 0 {
+        return Err(
+            "production certification stopped because plugin certification failed".to_owned(),
+        );
+    }
+    let audit = audit_mobile(MobileAuditOptions {
+        project: options.project.clone(),
+        json: false,
+        deny: MobileAuditSeverity::High,
+    })?;
+    if audit != 0 {
+        return Err("production certification stopped because the security audit found a high-severity issue".to_owned());
+    }
+    generate_typed_contracts(&project)?;
+    match options.platform {
+        ReleasePlatform::Android => {
+            build(MobileOptions {
+                project: options.project,
+                mode: BuildMode::Release,
+                abis: default_abis(),
+            })?;
+        }
+        ReleasePlatform::Ios => {
+            build_ios(options.project, true)?;
+        }
+        ReleasePlatform::All => {
+            if !cfg!(target_os = "macos") {
+                return Err(
+                    "--platform all requires macOS; use --platform android on this host".to_owned(),
+                );
+            }
+            build(MobileOptions {
+                project: options.project.clone(),
+                mode: BuildMode::Release,
+                abis: default_abis(),
+            })?;
+            build_ios(options.project, true)?;
+        }
+    }
+    println!("PAM Native production certification passed.");
+    Ok(0)
+}
+
 fn write_artifact_checksum(path: &Path) -> Result<(), String> {
     let bytes =
         fs::read(path).map_err(|error| format!("cannot hash {}: {error}", path.display()))?;
@@ -6950,7 +7003,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
     );
 }
 

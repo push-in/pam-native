@@ -221,6 +221,11 @@
                     "arguments": ["release"],
                     "description": "Certify, sign and package a PAM Native release"
                 },
+                "production:certify": {
+                    "bin": "bin/pam-native",
+                    "arguments": ["production:certify"],
+                    "description": "Run strict PAM Native production certification"
+                },
                 "sign": {
                     "bin": "bin/pam-native",
                     "arguments": ["sign"],
