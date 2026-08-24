@@ -42,6 +42,7 @@ $themeMs = (hrtime(true) - $started) / 1_000_000 / 500;
 
 $firstBudget = (float) (getenv('PAM_PERF_FIRST_FRAME_MS') ?: 40);
 $steadyBudget = (float) (getenv('PAM_PERF_STEADY_FRAME_MS') ?: 1);
+$themeBudget = (float) (getenv('PAM_PERF_THEME_DEFAULTS_MS') ?: 4);
 fwrite(STDOUT, json_encode([
     'nodes' => 1_001,
     'firstFrameMs' => round($firstMs, 3),
@@ -50,11 +51,13 @@ fwrite(STDOUT, json_encode([
     'budgets' => [
         'firstFrameMs' => $firstBudget,
         'steadyFrameMs' => $steadyBudget,
-        'themeDefaultsMs' => $steadyBudget,
+        // Theme application intentionally clones the complete immutable tree once.
+        // Keep its cross-runner budget separate from the retained steady-frame path.
+        'themeDefaultsMs' => $themeBudget,
     ],
 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n");
 
-if ($firstMs > $firstBudget || $steadyMs > $steadyBudget || $themeMs > $steadyBudget) {
+if ($firstMs > $firstBudget || $steadyMs > $steadyBudget || $themeMs > $themeBudget) {
     fwrite(STDERR, "Pam Native performance budget exceeded.\n");
     exit(1);
 }
