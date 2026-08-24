@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.7 - 2026-08-24
+
+- Add granular typed signals, computed values, effects, and batched reactive
+  updates without replacing the existing component API.
+- Add adaptive device/window metrics and stable device-class selection.
+- Add the delegated `production:certify` release-readiness contract.
+- Certify `pushinbr/pam-native-image` from public Composer distribution across
+  the aggregate Android and iOS plugin hosts.
+
 ## 0.8.5 - 2026-08-23
 
 - Add Vue-like `p-model` and `p-model:checked` two-way bindings to Language 2,
