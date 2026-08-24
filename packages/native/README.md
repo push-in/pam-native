@@ -1,18 +1,49 @@
-# pushinbr/pam-native
+<!-- pam:distribution-page:start -->
+<div align="center">
+
+# PAM Native — Composer Distribution
+
+**The public Composer source for the typed PAM Native PHP SDK.**
+
+This repository is an immutable release split of [pam-native](https://github.com/push-in/pam-native). Applications install it through Packagist; architecture, native hosts, issues, and contributions live in the canonical repository.
+
+[![Packagist](https://img.shields.io/packagist/v/pushinbr/pam-native?style=flat-square&label=stable)](https://packagist.org/packages/pushinbr/pam-native)
+![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=flat-square&logo=php&logoColor=white)
+![Status](https://img.shields.io/badge/repository-release%20mirror-64748b?style=flat-square)
+
+**[Canonical source](https://github.com/push-in/pam-native) · [Documentation](https://push-in.github.io/pam-docs/native/overview/) · [Packagist](https://packagist.org/packages/pushinbr/pam-native) · [Issues](https://github.com/push-in/pam-native/issues)**
+
+</div>
+
+---
+
+## Install the product
+
+```bash
+pam composer require pushinbr/pam-native
+pam doctor --fix
+```
+
+## Repository ownership
+
+| | |
+| --- | --- |
+| **Use this distribution for** | Reproducible Composer downloads and release provenance |
+| **Use the canonical repository for** | Source, roadmap, architecture, issues, security reports, and contributions |
+| **Publication rule** | Generated only from a completed, matching canonical release |
+| **Application workflow** | Normal `composer.json`, `composer.lock`, and `vendor` managed through `pam composer` |
+<!-- pam:distribution-page:end -->
 
 Pam Native renders real Android views from persistent PHP. PHP owns application
 state and events, Rust performs retained layout and incremental diffing, and
 Kotlin mounts bounded mutation batches on the Android UI thread.
 
-## Start here
+## Build your first application
 
 PAM Native is a Composer product and requires the PAM Runtime. Install PAM
 first, then create the project and run Composer through PAM:
 
 ```bash
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
-  --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
-  https://github.com/push-in/pam/releases/latest/download/install.sh | sh
 
 pam doctor
 pam init hello-native --template native

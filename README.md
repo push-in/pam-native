@@ -1,23 +1,52 @@
+<!-- pam:product-page:start -->
 <div align="center">
 
 # PAM Native
 
-### Build real Android and iOS apps with PHP.
+**Build real Android and iOS applications with typed PHP.**
 
-**The productivity you know from the web. The controls, performance, and feel users expect from native apps.**
+A Rust reconciler, retained native renderer, signals, navigation, UI-thread motion, and modular platform capabilities—with no JavaScript runtime or WebView.
 
-[![Documentation](https://img.shields.io/badge/docs-push--in.github.io-5b50d6?style=flat-square)](https://push-in.github.io/pam-docs/native/overview/)
-[![CI](https://img.shields.io/github/actions/workflow/status/push-in/pam-native/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/push-in/pam-native/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/push-in/pam-native?style=flat-square&label=stable)](https://github.com/push-in/pam-native/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/push-in/pam-native/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/push-in/pam-native/actions)
 ![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=flat-square&logo=php&logoColor=white)
-![Android](https://img.shields.io/badge/Android-API%2026–36-3DDC84?style=flat-square&logo=android&logoColor=white)
-![iOS](https://img.shields.io/badge/iOS-15%2B-000000?style=flat-square&logo=apple&logoColor=white)
-![License](https://img.shields.io/badge/license-Apache--2.0-22c55e?style=flat-square)
+![License](https://img.shields.io/github/license/push-in/pam-native?style=flat-square)
 
-**[Get started](https://push-in.github.io/pam-docs/native/overview/) · [Components](https://push-in.github.io/pam-docs/native/components/) · [Examples](docs/examples.md) · [Showcase](docs/showcase.md)**
+**[Documentation](https://push-in.github.io/pam-docs/native/overview/) · [Why this exists](#why-this-exists) · [What you can build](#what-you-can-build) · [Quick start](#quick-start) · [Issues](https://github.com/push-in/pam-native/issues)**
 
 </div>
 
 ---
+
+## Why this exists
+
+A Rust reconciler, retained native renderer, signals, navigation, UI-thread motion, and modular platform capabilities—with no JavaScript runtime or WebView.
+
+| | |
+| --- | --- |
+| **Role** | Native mobile product |
+| **Execution path** | PHP 8.5 · Rust · Android Views · UIKit |
+| **This repository owns** | Native project workflow, renderer, navigation, state, protocol, and plugin ABI |
+| **Boundary** | Camera, video, maps, payments, and other capabilities remain focused packages |
+
+## What you can build
+
+- Production phone and tablet applications
+- TV, foldable, keyboard, pointer, and D-pad experiences
+- Media, social, commerce, and offline-first products assembled from focused modules
+
+## Quick start
+
+```bash
+pam init my-app --template native
+cd my-app
+pam composer require pushinbr/pam-native
+pam doctor --fix
+pam dev
+```
+
+The **[PAM documentation](https://push-in.github.io/pam-docs/native/overview/)** covers prerequisites, production setup, and the complete workflow. PAM projects keep normal manifests and lockfiles; product features stay in the package that owns them.
+<!-- pam:product-page:end -->
 
 PAM Native lets PHP developers ship native mobile applications without adding
 a JavaScript runtime or turning the app into a website inside a WebView.
@@ -26,27 +55,7 @@ Write familiar PHP components, state, actions, and Laravel-inspired named
 routes. PAM keeps your PHP application alive, reconciles its interface in Rust,
 and renders real UIKit and Android controls.
 
-## Start here
-
-PAM Native is a Composer product built on the PAM Runtime. Install PAM first,
-then create the native project and let PAM use its verified Composer toolchain:
-
-```bash
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
-    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
-
-pam doctor
-pam init my-app --template native
-cd my-app
-pam composer require pushinbr/pam-native
-pam doctor --fix
-pam dev
-```
-
-The project remains a normal Composer application with `composer.json`,
-`composer.lock`, and `vendor`; PAM supplies the persistent PHP runtime and native
-host workflow.
+## See it in action
 
 ```php
 <?php
@@ -63,61 +72,6 @@ App::run(
     }),
 );
 ```
-
-Navigate by name. No URL-shaped internal routes, route context plumbing, or
-navigator object passed through your component tree.
-
-```php
-$this->pushRoute('product', productId: 42);
-$this->popRoute();
-```
-
-Route parameters map directly to typed constructor arguments:
-
-```php
-final class ProductScreen extends Component
-{
-    public function __construct(
-        public readonly int $productId,
-        public readonly bool $preview = false,
-    ) {
-    }
-
-    public function render(): Renderable
-    {
-        return Screen::make(
-            Text::make("Product #{$this->productId}"),
-            Button::make('Open preview')->onPress(
-                fn () => $this->replaceRoute(
-                    'product',
-                    productId: $this->productId,
-                    preview: true,
-                ),
-            ),
-        );
-    }
-}
-```
-
-### Grow and ship it
-
-```bash
-pam make:screen Products
-pam composer require pushinbr/pam-native-maps
-pam test
-pam build
-pam release --platform android
-```
-
-Use Packagist to explore official and community capabilities. Composer remains
-the package authority; PAM supplies the runtime and discovers package commands.
-
-Edit PHP and save. PAM refreshes the mounted native tree while preserving the
-state that can safely survive the change—including navigation, scroll, and
-focused input where supported.
-
-No JavaScript toolchain is required for application code. No DOM, CSS engine,
-or browser is shipped in your app.
 
 ## It feels familiar because it is
 
