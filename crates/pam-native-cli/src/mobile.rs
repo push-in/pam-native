@@ -7848,10 +7848,9 @@ mod tests {
         assert_eq!(project, PathBuf::from("."));
         assert!(fix);
 
-        let (project, fix) = parse_doctor_options(
-            ["application", "--fix"].into_iter().map(OsString::from),
-        )
-        .expect("doctor project");
+        let (project, fix) =
+            parse_doctor_options(["application", "--fix"].into_iter().map(OsString::from))
+                .expect("doctor project");
         assert_eq!(project, PathBuf::from("application"));
         assert!(fix);
     }
