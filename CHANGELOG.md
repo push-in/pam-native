@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.8 - 2026-08-24
+
+- Align the public PHP SDK contract with the runtime release so the immutable
+  Composer split, Packagist publication, and `pam production certify` can be
+  validated from the same versioned source.
+
 ## 0.8.7 - 2026-08-24
 
 - Add granular typed signals, computed values, effects, and batched reactive
