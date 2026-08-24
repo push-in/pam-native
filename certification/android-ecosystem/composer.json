@@ -16,6 +16,7 @@
     "pushinbr/pam-native-feature-flags": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-firebase": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-health": ">=0.1.0 <1.0.0",
+    "pushinbr/pam-native-image": "^0.1.2",
     "pushinbr/pam-native-intents": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-live-activities": ">=0.1.0 <1.0.0",
     "pushinbr/pam-native-maps": ">=0.1.0 <1.0.0",

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f00002c32ae1585d26e9ee067bf758b9",
+    "content-hash": "174d88d48f3a5a5a87c87525dfce48d1",
     "packages": [
         {
             "name": "pushinbr/pam-native",
@@ -807,6 +807,49 @@
             "time": "2026-08-23T18:02:35+00:00"
         },
         {
+            "name": "pushinbr/pam-native-image",
+            "version": "v0.1.2",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-native-image.git",
+                "reference": "338364d3e35f4c3bb2d790e19ffd8f65c35e6b1f"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-native-image/zipball/338364d3e35f4c3bb2d790e19ffd8f65c35e6b1f",
+                "reference": "338364d3e35f4c3bb2d790e19ffd8f65c35e6b1f",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.5",
+                "pushinbr/pam-native": "^0.8.0"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Image\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "High-performance cached native image loading for PAM Native.",
+            "support": {
+                "issues": "https://github.com/push-in/pam-native-image/issues",
+                "source": "https://github.com/push-in/pam-native-image/tree/v0.1.2"
+            },
+            "time": "2026-08-24T13:21:46+00:00"
+        },
+        {
             "name": "pushinbr/pam-native-intents",
             "version": "v0.2.0",
             "source": {
@@ -1351,5 +1394,5 @@
         "php": "^8.5"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.9.0"
 }
