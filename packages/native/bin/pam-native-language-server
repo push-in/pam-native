@@ -278,7 +278,7 @@ function completionItems(string $source, ?string $workspaceRoot): array
     foreach (componentDefinitions($workspaceRoot) as $name => $_definition) {
         $items[] = ['label' => $name, 'kind' => 7, 'detail' => 'Project PAM component'];
     }
-    foreach (['p-if', 'p-else-if', 'p-else', 'p-for', 'p-key', 'p-index', 'bind:value', 'bind:checked', 'recipe', 'variant:'] as $directive) {
+    foreach (['p-if', 'p-else-if', 'p-else', 'p-for', 'p-key', 'p-index', 'p-model', 'p-model:checked', 'bind:value', 'bind:checked', 'recipe', 'variant:'] as $directive) {
         $items[] = ['label' => $directive, 'kind' => 14, 'detail' => 'PAM template directive'];
     }
     preg_match_all('/public\s+(?:readonly\s+)?[\\?A-Za-z0-9_|]+\s+\$([A-Za-z_][A-Za-z0-9_]*)/', $source, $properties);
@@ -384,6 +384,8 @@ function pamHelp(string $word): ?string
         'p-for' => '**p-for** — Repeats the element for an iterable or positive integer. Pair it with a stable key.',
         'bind:value' => '**bind:value** — Two-way native input binding to typed component state.',
         'bind:checked' => '**bind:checked** — Two-way native boolean binding.',
+        'p-model' => '**p-model** — Vue-like two-way binding. Inputs bind value; Switch and Toggle bind checked state.',
+        'p-model:checked' => '**p-model:checked** — Explicit two-way boolean binding for checked controls.',
         '@press' => '**@press** — Calls a component action after a native press event.',
         'Show' => '**Show** — Declarative conditional rendering with a typed `when` expression.',
         'Match' => '**Match** — Strictly matches a value against `Case` branches.',

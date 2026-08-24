@@ -25,6 +25,32 @@ $assert(
     'Language 2 Show must render its typed truthy branch.',
 );
 
+$modelScope = new class extends \Pam\Native\Component {
+    public string $search = 'Loki';
+    public bool $enabled = false;
+};
+$modelTree = TemplateCompiler::compile(
+    '<Column><Input p-model="$search" /><Switch p-model="$enabled" /></Column>',
+    'Language2Model.pam',
+    LanguageVersion::Language2,
+);
+$modelElement = TemplateRenderer::render($modelTree, $modelScope, []);
+$modelInput = $modelElement->children()[0] ?? null;
+$modelSwitch = $modelElement->children()[1] ?? null;
+$assert(
+    $modelInput instanceof \Pam\Native\Element
+        && $modelSwitch instanceof \Pam\Native\Element
+        && ($modelInput->properties()[PropKey::Value->value] ?? null) === 'Loki'
+        && ($modelSwitch->properties()[PropKey::Checked->value] ?? null) === false,
+    'p-model must read typed input and checked state without PHP markup expressions.',
+);
+($modelInput->events()[\Pam\Native\EventKind::Change->value])('IPTV');
+($modelSwitch->events()[\Pam\Native\EventKind::Toggle->value])(true);
+$assert(
+    $modelScope->search === 'IPTV' && $modelScope->enabled,
+    'p-model must write native input and checked events back to component state.',
+);
+
 $matchTree = TemplateCompiler::compile(
     '<Match value="$mode"><Case value="compact"><Text>Compact</Text></Case><Default><Text>Default</Text></Default></Match>',
     'Language2Match.pam',

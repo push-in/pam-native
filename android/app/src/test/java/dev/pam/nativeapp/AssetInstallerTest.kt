@@ -67,4 +67,20 @@ class AssetInstallerTest {
             root.toFile().deleteRecursively()
         }
     }
+
+    @Test
+    fun stagesApplicationBundlesInDurableFilesInsteadOfPurgeableCache() {
+        val files = Files.createTempDirectory("pam-files-test")
+        try {
+            val version = "a".repeat(64)
+            val staging = installationStagingDirectory(files.toFile(), version)
+            assertEquals(
+                files.resolve("pam/staging/pam-install-$version").toFile(),
+                staging,
+            )
+            assertTrue(staging.canonicalPath.startsWith(files.toFile().canonicalPath))
+        } finally {
+            files.toFile().deleteRecursively()
+        }
+    }
 }

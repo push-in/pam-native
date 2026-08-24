@@ -192,6 +192,68 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun themedStarterPaintsAVisibleNonUniformFirstFrame() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val surface = 0xFF0F172A.toInt()
+        val foreground = 0xFFF8FAFC.toInt()
+        val accent = 0xFF4ADE80.toInt()
+        val onAccent = 0xFF052E16.toInt()
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN, mapOf(
+                                PropKey.BACKGROUND_COLOR to PropValue.Integer(surface.toLong()),
+                            ))),
+                            Mutation.Create(node(2, 1, NodeKind.TEXT, mapOf(
+                                PropKey.TEXT to PropValue.Text("Visible PAM Native"),
+                                PropKey.TEXT_COLOR to PropValue.Integer(foreground.toLong()),
+                            ))),
+                            Mutation.Create(node(3, 1, NodeKind.BUTTON, mapOf(
+                                PropKey.TEXT to PropValue.Text("Continue"),
+                                PropKey.BACKGROUND_COLOR to PropValue.Integer(accent.toLong()),
+                                PropKey.TEXT_COLOR to PropValue.Integer(onAccent.toLong()),
+                            ))),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(24f, 48f, 312f, 64f)),
+                            Mutation.Layout(3, Frame(24f, 136f, 312f, 56f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                activity.host.measure(
+                    View.MeasureSpec.makeMeasureSpec(360, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(720, View.MeasureSpec.EXACTLY),
+                )
+                activity.host.layout(0, 0, 360, 720)
+
+                val text = activity.host.getChildAt(0)
+                    .let { it as ViewGroup }
+                    .getChildAt(0) as TextView
+                val button = (text.parent as ViewGroup).getChildAt(1) as Button
+                assertEquals(foreground, text.currentTextColor)
+                assertEquals(onAccent, button.currentTextColor)
+
+                val bitmap = Bitmap.createBitmap(360, 720, Bitmap.Config.ARGB_8888)
+                activity.host.draw(Canvas(bitmap))
+                assertEquals(surface, bitmap.getPixel(350, 700))
+                assertTrue(
+                    "A mounted starter must paint more than one visible color",
+                    (0 until bitmap.height step 24)
+                        .flatMap { y -> (0 until bitmap.width step 24).map { x -> bitmap.getPixel(x, y) } }
+                        .toSet()
+                        .size >= 3,
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun largeAccessibilityScaleHonorsOptOutAndMaximumMultiplier() {
         assertEquals(1f, resolvedFontScale(false, 3f, 1.5f), 0.0001f)
         assertEquals(1.5f, resolvedFontScale(true, 3f, 1.5f), 0.0001f)

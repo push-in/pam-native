@@ -205,6 +205,18 @@ and accepts only `Case` plus one optional `Default`:
 
 Existing `p-if`, `p-else-if`, `p-else` and `p-for` remain supported.
 
+Two-way bindings use the Vue-like `p-model` directive. It binds `value` for
+inputs and `checked` for `Switch`/`Toggle` without evaluating PHP in markup:
+
+```xml
+<Input p-model="$search" />
+<Switch p-model="$enabled" />
+```
+
+`p-model:checked` is available when a custom checked control needs an explicit
+binding target. The older `bind:value` and `bind:checked` spellings remain
+compatible aliases.
+
 ### 7. Stable virtual lists
 
 Every Language 2 loop below `VirtualizedList` or `VirtualGrid` requires

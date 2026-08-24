@@ -8,6 +8,7 @@ use Closure;
 use JsonException;
 use LogicException;
 use Pam\Native\AppState;
+use Pam\Native\App;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\MemoryPressure;
@@ -106,6 +107,13 @@ final class Runtime
 
                 if (!$element instanceof Element) {
                     throw new LogicException('The Pam Native root must be renderable.');
+                }
+                $theme = App::activeTheme();
+                if ($theme !== null) {
+                    $element = Profiler::measure(
+                        'php.theme',
+                        static fn (): Element => $theme->applyTo($element),
+                    );
                 }
 
                 $encoder = self::$encoder ??= new TreeEncoder();

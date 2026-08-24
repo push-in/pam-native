@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Pam\Native\Internal\TreeEncoder;
+use Pam\Native\Theme;
 use Pam\Native\UI\Column;
 use Pam\Native\UI\Text;
 
@@ -32,16 +33,28 @@ for ($iteration = 0; $iteration < 500; $iteration++) {
 }
 $steadyMs = (hrtime(true) - $started) / 1_000_000 / 500;
 
+$theme = Theme::pamLab();
+$started = hrtime(true);
+for ($iteration = 0; $iteration < 500; $iteration++) {
+    $theme->applyTo($tree);
+}
+$themeMs = (hrtime(true) - $started) / 1_000_000 / 500;
+
 $firstBudget = (float) (getenv('PAM_PERF_FIRST_FRAME_MS') ?: 40);
 $steadyBudget = (float) (getenv('PAM_PERF_STEADY_FRAME_MS') ?: 1);
 fwrite(STDOUT, json_encode([
     'nodes' => 1_001,
     'firstFrameMs' => round($firstMs, 3),
     'steadyFrameMs' => round($steadyMs, 3),
-    'budgets' => ['firstFrameMs' => $firstBudget, 'steadyFrameMs' => $steadyBudget],
+    'themeDefaultsMs' => round($themeMs, 3),
+    'budgets' => [
+        'firstFrameMs' => $firstBudget,
+        'steadyFrameMs' => $steadyBudget,
+        'themeDefaultsMs' => $steadyBudget,
+    ],
 ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n");
 
-if ($firstMs > $firstBudget || $steadyMs > $steadyBudget) {
+if ($firstMs > $firstBudget || $steadyMs > $steadyBudget || $themeMs > $steadyBudget) {
     fwrite(STDERR, "Pam Native performance budget exceeded.\n");
     exit(1);
 }
