@@ -4276,15 +4276,11 @@ class PamRenderer(
         view.setPadding(dp(left), dp(top), dp(right), dp(bottom) + state.safeBottomInset)
     }
 
+    @SuppressLint("DiscouragedApi")
     private fun resolveNativeColor(name: String): Int? {
         val identifier = context.resources.getIdentifier(name, "color", context.packageName)
         if (identifier == 0) return null
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            context.resources.getColor(identifier, context.theme)
-        } else {
-            @Suppress("DEPRECATION")
-            context.resources.getColor(identifier)
-        }
+        return context.resources.getColor(identifier, context.theme)
     }
 
     private fun updateBackground(view: View, state: NodeState) {
