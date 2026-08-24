@@ -1,0 +1,63 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoloadCandidates = [dirname(__DIR__, 3).'/autoload.php', dirname(__DIR__).'/vendor/autoload.php'];
+$loaded = false;
+foreach ($autoloadCandidates as $autoload) {
+    if (is_file($autoload)) { require $autoload; $loaded = true; break; }
+}
+if (!$loaded) {
+    spl_autoload_register(static function (string $class): void {
+        $prefix = 'Pam\\Native\\';
+        if (!str_starts_with($class, $prefix)) return;
+        $path = dirname(__DIR__).'/src/'.str_replace('\\', '/', substr($class, strlen($prefix))).'.php';
+        if (is_file($path)) require $path;
+    });
+}
+
+use Pam\Native\Internal\ScopedStyleCompiler;
+use Pam\Native\Internal\StyleTokenGenerator;
+use Pam\Native\Style\StylePropertyCatalog;
+
+$command = $argv[1] ?? '';
+try {
+    if ($command === 'manifest') {
+        fwrite(STDOUT, json_encode(StylePropertyCatalog::manifest(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
+        exit(0);
+    }
+    $file = $argv[2] ?? '';
+    if (!in_array($command, ['inspect', 'tokens'], true) || $file === '' || !is_file($file)) {
+        fwrite(STDERR, "Usage:\n  pam-native-style manifest\n  pam-native-style inspect <file.css>\n  pam-native-style tokens <file.css> [output-directory]\n");
+        exit(2);
+    }
+    $source = file_get_contents($file);
+    if (!is_string($source)) throw new RuntimeException("Cannot read {$file}.");
+    $sheet = ScopedStyleCompiler::compile($source, $file);
+    if ($command === 'inspect') {
+        $report = [
+            'valid' => true,
+            'fingerprint' => $sheet['styleFingerprint'],
+            'scope' => $sheet['scope'],
+            'rules' => count($sheet['cascadeRules']),
+            'queries' => count($sheet['queries']),
+            'keyframes' => count($sheet['keyframes']),
+            'dependencies' => $sheet['styleIr']['dependencies'],
+            'compatibility' => $sheet['styleCompatibility'],
+            'sourceMap' => $sheet['styleSourceMap'],
+        ];
+        fwrite(STDOUT, json_encode($report, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n");
+        exit(0);
+    }
+    $output = $argv[3] ?? 'generated/style';
+    if (!is_dir($output) && !mkdir($output, 0755, true) && !is_dir($output)) throw new RuntimeException("Cannot create {$output}.");
+    $generated = StyleTokenGenerator::generate($sheet['tokens']);
+    foreach (['php' => 'Tokens.php', 'kotlin' => 'Tokens.kt', 'swift' => 'Tokens.swift'] as $language => $target) {
+        if (file_put_contents(rtrim($output, '/').'/'.$target, $generated[$language]) === false) throw new RuntimeException("Cannot write {$target}.");
+    }
+    fwrite(STDOUT, "Generated typed style tokens in {$output}.\n");
+} catch (Throwable $error) {
+    fwrite(STDERR, $error->getMessage()."\n");
+    exit(1);
+}

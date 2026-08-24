@@ -33,7 +33,8 @@ final class PamFormatter
             );
         }
 
-        [$php, $template, $style, $hasStyle, $language] = self::split($source, $name);
+        [$php, $template, $style, $hasStyle, $language, $styleScope] =
+            self::split($source, $name);
         $protectedTemplate = preg_replace_callback(
             '/<!--[\s\S]*?-->/',
             static fn (array $match): string =>
@@ -57,7 +58,7 @@ final class PamFormatter
 
         $formatted = rtrim($php)."\n?>\n\n".implode("\n", $lines);
         if ($hasStyle && trim($style) !== '') {
-            $formatted .= "\n\n<style scoped>\n"
+            $formatted .= "\n\n<style {$styleScope}>\n"
                 .self::style($style)
                 ."\n</style>";
         }
@@ -85,7 +86,7 @@ final class PamFormatter
         return true;
     }
 
-    /** @return array{string, string, string, bool, LanguageVersion} */
+    /** @return array{string, string, string, bool, LanguageVersion, string} */
     private static function split(string $source, string $name): array
     {
         $tokens = token_get_all($source);
@@ -111,12 +112,12 @@ final class PamFormatter
         $match = [];
         if (preg_match(
             '/\A\s*<template(?:\s+([^>]*))?>([\s\S]*?)<\/template>'
-                .'\s*(?:<style(?:\s+scoped)?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
+                .'\s*(?:<style(?:\s+(scoped|module|global))?\s*>([\s\S]*?)<\/style>)?\s*\z/D',
             $markup,
             $match,
         ) !== 1) {
             throw new RuntimeException(
-                "PAM component {$name} must contain one template and optional scoped style.",
+                "PAM component {$name} must contain one template and an optional scoped, module, or global style.",
             );
         }
 
@@ -130,12 +131,18 @@ final class PamFormatter
             );
         }
 
+        $styleScope = strtolower((string) ($match[3] ?? ''));
+        if ($styleScope === '') {
+            $styleScope = 'scoped';
+        }
+
         return [
             $php,
             (string) $match[2],
-            (string) ($match[3] ?? ''),
-            array_key_exists(3, $match),
+            (string) ($match[4] ?? ''),
+            array_key_exists(4, $match),
             $language,
+            $styleScope,
         ];
     }
 
