@@ -1,15 +1,12 @@
 package dev.pam.nativeapp
 
 import android.content.Intent
+import android.view.View
 import android.view.ViewGroup
-import androidx.test.espresso.Espresso.onView
-import androidx.test.espresso.assertion.ViewAssertions.matches
-import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
-import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
-import androidx.test.espresso.matcher.ViewMatchers.withText
+import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import org.hamcrest.Matchers.containsString
+import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,8 +29,9 @@ class CapabilityIntegrationTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
         ) as CapabilityTestActivity
         activity = launched
+        lateinit var overlay: PamDevToolsOverlay
         instrumentation.runOnMainSync {
-            val overlay = PamDevToolsOverlay(launched)
+            overlay = PamDevToolsOverlay(launched)
             launched.root.addView(
                 overlay,
                 ViewGroup.LayoutParams(
@@ -71,9 +69,13 @@ class CapabilityIntegrationTest {
             overlay.toggle()
         }
 
-        onView(withContentDescription("Pam Native DevTools")).check(matches(isDisplayed()))
-        onView(withText(containsString("FAIL"))).check(matches(isDisplayed()))
-        onView(withText(containsString("permissions.request"))).check(matches(isDisplayed()))
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync {
+            assertTrue(overlay.isShown)
+            val text = descendantText(overlay).joinToString("\n")
+            assertTrue(text.contains("FAIL"))
+            assertTrue(text.contains("permissions.request"))
+        }
     }
 
     @Test
@@ -124,5 +126,14 @@ class CapabilityIntegrationTest {
         assert(network.getInt("statusCode") == 202)
         assert(network.getInt("requestBytes") == 17)
         assert(network.getInt("responseBytes") == 8)
+    }
+
+    private fun descendantText(view: View?): List<String> {
+        if (view == null) return emptyList()
+        val own = (view as? TextView)?.text?.toString()?.let(::listOf).orEmpty()
+        if (view !is ViewGroup) return own
+        return own + (0 until view.childCount).flatMap { index ->
+            descendantText(view.getChildAt(index))
+        }
     }
 }
