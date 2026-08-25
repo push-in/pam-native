@@ -12,6 +12,17 @@ final class UpdateSlotManager
 
     private readonly string $root;
 
+    /** Uses the same private application directory consumed by both native hosts. */
+    public static function forRuntime(): self
+    {
+        $state = getenv('PAM_NATIVE_STATE_DIR');
+        if (!is_string($state) || $state === '' || str_contains($state, "\0")) {
+            throw new RuntimeException('PAM Native state directory is unavailable.');
+        }
+
+        return new self(dirname($state).'/updates');
+    }
+
     public function __construct(string $root)
     {
         if (str_contains($root, "\0") || (!is_dir($root) && !mkdir($root, 0o700, true) && !is_dir($root))) {

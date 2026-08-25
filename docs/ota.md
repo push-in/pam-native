@@ -17,6 +17,17 @@ Manifests are capped at 64 KiB and bundles at 256 MiB. Unknown fields,
 non-canonical JSON, invalid keys, mismatched bytes, or incompatible capabilities
 fail closed before staging.
 
+Build the platform-neutral `PNA1` payload from the exact PHP, Composer and asset
+tree that will execute on device:
+
+```bash
+pam update:bundle . artifacts/app-1.0.1.pna
+```
+
+The command prints the SHA-256 used as `bundleSha256`. It refuses symlinks,
+unsafe paths, more than 10,000 files, individual files over 8 MiB, and aggregate
+payloads over 256 MiB. Android and iOS use the same bounded decoder.
+
 ```php
 $decision = UpdateVerifier::evaluate(
     manifestJson: $manifest,
@@ -27,7 +38,7 @@ $decision = UpdateVerifier::evaluate(
 );
 
 if ($decision->approved() && UpdateVerifier::verifyBundle($download, $decision->manifest)) {
-    $slots = new UpdateSlotManager($applicationData.'/updates');
+    $slots = UpdateSlotManager::forRuntime();
     $slots->stage($download, $decision->manifest);
     $slots->activate();
 }
@@ -35,5 +46,12 @@ if ($decision->approved() && UpdateVerifier::verifyBundle($download, $decision->
 
 Activation uses a private locked directory, stages on the destination
 filesystem, hashes again after copying, atomically renames the candidate, and
-keeps one prior slot. If the health/readiness gate fails on the next launch,
-`rollback()` restores that prior bundle and quarantines the failed slot.
+keeps one prior slot. On the next cold launch, Android and iOS independently
+re-hash `active.bundle`, decode it into a content-addressed private release, and
+start that entry. A malformed, truncated or mismatched active slot is
+quarantined as `failed.*` and startup falls back to the store bundle.
+
+The downloader and manifest endpoint are deliberately application choices.
+They may be plain HTTPS, PAM HTTP, Laravel, a CDN, or another backend. The
+native package imports no server package, and a server needs no native package;
+the only shared boundary is the documented JSON and byte contract.

@@ -6394,6 +6394,16 @@ if (is_dir($updateSlotsPath)) {
     rmdir($updateSlotsPath);
 }
 $updateSlots = new \Pam\Native\Update\UpdateSlotManager($updateSlotsPath);
+$runtimeStatePath = sys_get_temp_dir().'/pam-native-runtime-state-'.getmypid().'/pam/state';
+mkdir($runtimeStatePath, 0o700, true);
+$previousRuntimeState = getenv('PAM_NATIVE_STATE_DIR');
+putenv('PAM_NATIVE_STATE_DIR='.$runtimeStatePath);
+$runtimeUpdateSlots = \Pam\Native\Update\UpdateSlotManager::forRuntime();
+$assert(
+    is_dir(dirname($runtimeStatePath).'/updates'),
+    'Runtime OTA slots must use the private directory shared with Android and iOS hosts.',
+);
+putenv($previousRuntimeState === false ? 'PAM_NATIVE_STATE_DIR' : 'PAM_NATIVE_STATE_DIR='.$previousRuntimeState);
 $assert(
     $updateSlots->stage($updateBundle, $updateManifest) === \Pam\Native\Update\UpdateActivationStatus::Staged
         && $updateSlots->activate() === \Pam\Native\Update\UpdateActivationStatus::Activated
@@ -6430,6 +6440,15 @@ foreach (glob($updateSlotsPath.'/*') ?: [] as $updateSlotFile) {
     }
 }
 rmdir($updateSlotsPath);
+foreach (glob(dirname($runtimeStatePath).'/updates/*') ?: [] as $runtimeUpdateFile) {
+    if (is_file($runtimeUpdateFile)) {
+        unlink($runtimeUpdateFile);
+    }
+}
+rmdir(dirname($runtimeStatePath).'/updates');
+rmdir($runtimeStatePath);
+rmdir(dirname($runtimeStatePath));
+rmdir(dirname(dirname($runtimeStatePath)));
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
     'render',

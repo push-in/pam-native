@@ -9,8 +9,13 @@ internal object DevBundle {
     private const val MAX_FILES = 10_000
     private const val MAX_FILE_BYTES = 8 * 1024 * 1024
 
-    fun extract(bytes: ByteArray, destination: File): File {
-        require(bytes.size <= MAX_BUNDLE_BYTES) { "Hot reload bundle exceeds 16 MiB" }
+    fun extract(
+        bytes: ByteArray,
+        destination: File,
+        maximumBundleBytes: Int = MAX_BUNDLE_BYTES,
+    ): File {
+        require(maximumBundleBytes in 1..MAX_PRODUCTION_BUNDLE_BYTES)
+        require(bytes.size <= maximumBundleBytes) { "PAM Native bundle exceeds its size limit" }
         val parent = destination.parentFile ?: error("Hot reload destination has no parent")
         check(parent.isDirectory || parent.mkdirs()) { "Cannot create hot reload parent directory" }
         val staging = File(parent, ".${destination.name}.incoming")
@@ -30,6 +35,8 @@ internal object DevBundle {
         }
         return File(destination, "index.php")
     }
+
+    private const val MAX_PRODUCTION_BUNDLE_BYTES = 256 * 1024 * 1024
 
     private fun extractInto(bytes: ByteArray, staging: File) {
         val reader = Reader(bytes)
