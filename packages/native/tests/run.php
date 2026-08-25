@@ -5161,6 +5161,34 @@ $assert(
         ),
     'PHP Runtime Turbo must emit a complete deterministic preload manifest.',
 );
+$freezeResult = PamPhpPreloader::optimize(
+    $pamPhpDirectory,
+    $pamPhpCache.'-freeze',
+    ['Dashboard'],
+);
+$freezeManifest = json_decode(
+    (string) file_get_contents($freezeResult['freeze']),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$freezePreload = json_decode(
+    (string) file_get_contents($freezeResult['manifest']),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$freezeTags = array_column($freezePreload['components'] ?? [], 'tag');
+$assert(
+    $freezeResult['discovered'] === $preloadResult['components']
+        && $freezeResult['components'] === 2
+        && $freezeResult['eliminated'] === $freezeResult['discovered'] - 2
+        && $freezeTags === ['CounterCard', 'Dashboard']
+        && $freezeManifest['abiVersion'] === \Pam\Native\Protocol::ABI_VERSION
+        && $freezeManifest['protocolVersion'] === \Pam\Native\Protocol::VERSION
+        && $freezeManifest['entrypoints'] === ['Dashboard']
+        && $freezeManifest['buildId'] === $freezeResult['buildId']
+        && str_contains((string) file_get_contents($freezeResult['preload']), 'hash_equals'),
+    'PAM Freeze must tree-shake unreachable components and pin a deterministic ABI build manifest.',
+);
 require $preloadResult['preload'];
 $assert(
     PamPhpRegistry::preloadMetadata([
