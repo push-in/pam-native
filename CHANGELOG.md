@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 - 2026-08-25
+
+- Refresh the immutable Android ecosystem lock to the independently versioned
+  plugin releases certified for the Native 1.x capability contract.
+- Remove the final public Firebase-to-feature-flags dependency from aggregate
+  release certification.
+
 ## 1.0.0 - 2026-08-25
 
 - Freeze the ABI, protocol and capability-negotiation contract for the 1.x line.
