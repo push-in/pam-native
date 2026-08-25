@@ -95,7 +95,7 @@ requireFragments($release, 'release.yml', [
     "      - ecosystem-android\n",
     "      - ecosystem-ios\n",
     "  community-first-run:\n",
-    "          script: pam-cli/scripts/community-experience-gate.sh mobile\n",
+    "          script: pam-cli/scripts/community-experience-gate.sh all\n",
     "      - community-first-run\n",
     "          git archive \\\n",
     "              --mtime=\"@\${source_date_epoch}\" \\\n",
