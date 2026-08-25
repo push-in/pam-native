@@ -6338,6 +6338,98 @@ $assert(
             === \Pam\Native\ProtocolCompatibilityStatus::ProtocolMismatch,
     'Protocol negotiation must fail closed for incompatible ABI and protocol ranges.',
 );
+$updateBundle = sys_get_temp_dir().'/pam-native-update-'.getmypid().'.bin';
+file_put_contents($updateBundle, 'signed-pam-native-bundle');
+$updateManifest = new \Pam\Native\Update\SignedUpdateManifest(
+    buildIdentifier: str_repeat('a', 64),
+    bundleSha256: hash_file('sha256', $updateBundle),
+    abiVersion: \Pam\Native\Protocol::ABI_VERSION,
+    protocolVersion: \Pam\Native\Protocol::VERSION,
+    channel: \Pam\Native\Update\UpdateChannel::Stable,
+    rolloutBasisPoints: 2_500,
+    capabilities: ['wire.binary.v1', 'renderer.incremental.v1'],
+);
+$updateJson = $updateManifest->canonicalJson();
+$updateKeyPair = sodium_crypto_sign_keypair();
+$updateSecretKey = sodium_crypto_sign_secretkey($updateKeyPair);
+$updatePublicKey = sodium_crypto_sign_publickey($updateKeyPair);
+$updateSignature = sodium_crypto_sign_detached($updateJson, $updateSecretKey);
+$approvedUpdate = \Pam\Native\Update\UpdateVerifier::evaluate(
+    $updateJson,
+    base64_encode($updateSignature),
+    base64_encode($updatePublicKey),
+    str_repeat('b', 64),
+    2_499,
+);
+$assert(
+    $approvedUpdate->approved()
+        && \Pam\Native\Update\UpdateVerifier::verifyBundle($updateBundle, $updateManifest)
+        && \Pam\Native\Update\UpdateVerifier::evaluate(
+            $updateJson,
+            base64_encode(str_repeat("\0", SODIUM_CRYPTO_SIGN_BYTES)),
+            base64_encode($updatePublicKey),
+            str_repeat('b', 64),
+            0,
+        )->status === \Pam\Native\Update\UpdateDecisionStatus::InvalidSignature
+        && \Pam\Native\Update\UpdateVerifier::evaluate(
+            $updateJson,
+            base64_encode($updateSignature),
+            base64_encode($updatePublicKey),
+            str_repeat('b', 64),
+            2_500,
+        )->status === \Pam\Native\Update\UpdateDecisionStatus::OutsideRollout
+        && array_map(
+            static fn (\Pam\Native\Update\UpdateDecisionStatus $status): int => $status->value,
+            \Pam\Native\Update\UpdateDecisionStatus::cases(),
+        ) === [1, 2, 3, 4, 5, 6],
+    'Signed OTA manifests must verify Ed25519, ABI, capabilities, rollout, and exact bundle bytes.',
+);
+$updateSlotsPath = sys_get_temp_dir().'/pam-native-update-slots-'.getmypid();
+if (is_dir($updateSlotsPath)) {
+    foreach (glob($updateSlotsPath.'/*') ?: [] as $updateSlotFile) {
+        if (is_file($updateSlotFile)) {
+            unlink($updateSlotFile);
+        }
+    }
+    rmdir($updateSlotsPath);
+}
+$updateSlots = new \Pam\Native\Update\UpdateSlotManager($updateSlotsPath);
+$assert(
+    $updateSlots->stage($updateBundle, $updateManifest) === \Pam\Native\Update\UpdateActivationStatus::Staged
+        && $updateSlots->activate() === \Pam\Native\Update\UpdateActivationStatus::Activated
+        && file_get_contents((string) $updateSlots->activeBundle()) === 'signed-pam-native-bundle',
+    'The first verified OTA bundle must activate atomically.',
+);
+file_put_contents($updateBundle, 'second-signed-pam-native-bundle');
+$secondUpdateManifest = new \Pam\Native\Update\SignedUpdateManifest(
+    buildIdentifier: str_repeat('c', 64),
+    bundleSha256: (string) hash_file('sha256', $updateBundle),
+    abiVersion: \Pam\Native\Protocol::ABI_VERSION,
+    protocolVersion: \Pam\Native\Protocol::VERSION,
+    channel: \Pam\Native\Update\UpdateChannel::Stable,
+    rolloutBasisPoints: 10_000,
+    capabilities: ['wire.binary.v1'],
+);
+$assert(
+    $updateSlots->stage($updateBundle, $secondUpdateManifest) === \Pam\Native\Update\UpdateActivationStatus::Staged
+        && $updateSlots->activate() === \Pam\Native\Update\UpdateActivationStatus::Activated
+        && file_get_contents((string) $updateSlots->activeBundle()) === 'second-signed-pam-native-bundle'
+        && $updateSlots->rollback() === \Pam\Native\Update\UpdateActivationStatus::RolledBack
+        && file_get_contents((string) $updateSlots->activeBundle()) === 'signed-pam-native-bundle'
+        && array_map(
+            static fn (\Pam\Native\Update\UpdateActivationStatus $status): int => $status->value,
+            \Pam\Native\Update\UpdateActivationStatus::cases(),
+        ) === [1, 2, 3],
+    'OTA slots must preserve one previous verified bundle and roll back atomically.',
+);
+sodium_memzero($updateSecretKey);
+unlink($updateBundle);
+foreach (glob($updateSlotsPath.'/*') ?: [] as $updateSlotFile) {
+    if (is_file($updateSlotFile)) {
+        unlink($updateSlotFile);
+    }
+}
+rmdir($updateSlotsPath);
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
     'render',
