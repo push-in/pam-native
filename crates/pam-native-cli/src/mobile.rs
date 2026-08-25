@@ -17,6 +17,13 @@ const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_DEV_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
+const PLUGIN_CAPABILITIES: [&str; 5] = [
+    "compiler.freeze.v1",
+    "plugins.composer.v1",
+    "renderer.incremental.v1",
+    "runtime.modules.v1",
+    "wire.binary.v1",
+];
 const PLUGIN_LOCK_VERSION: u32 = 1;
 const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
 const RUNTIME_LOCK_VERSION: u32 = 1;
@@ -275,6 +282,8 @@ struct ComposerPackage {
     #[serde(default)]
     install_path: Option<PathBuf>,
     #[serde(default)]
+    require: BTreeMap<String, String>,
+    #[serde(default)]
     extra: ComposerExtra,
 }
 
@@ -299,6 +308,8 @@ struct PluginManifest {
     protocol: u32,
     pam_native: PluginCompatibility,
     #[serde(default)]
+    capabilities: PluginCapabilities,
+    #[serde(default)]
     php: PluginPhp,
     #[serde(default)]
     android: PluginAndroid,
@@ -310,6 +321,15 @@ struct PluginManifest {
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PluginCapabilities {
+    #[serde(default)]
+    required: Vec<String>,
+    #[serde(default)]
+    optional: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1474,6 +1494,22 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
             current_version,
             &current_version_text,
         )?;
+        let coupled_plugins = package
+            .require
+            .keys()
+            .filter(|dependency| {
+                dependency.starts_with("pushinbr/pam-native-")
+                    && dependency.as_str() != "pushinbr/pam-native"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !coupled_plugins.is_empty() {
+            return Err(format!(
+                "plugin {} depends on sibling PAM Native plugins: {}; depend only on pushinbr/pam-native and negotiate public capabilities instead",
+                package.name,
+                coupled_plugins.join(", ")
+            ));
+        }
         let idl_digest = plugin_manifest
             .idl
             .as_ref()
@@ -1527,6 +1563,21 @@ fn validate_plugin_manifest(
         return Err(format!(
             "plugin {package} requires protocol {}, but this SDK implements {}",
             manifest.protocol, PLUGIN_PROTOCOL_VERSION
+        ));
+    }
+    validate_plugin_capabilities(package, "required", &manifest.capabilities.required)?;
+    validate_plugin_capabilities(package, "optional", &manifest.capabilities.optional)?;
+    let missing = manifest
+        .capabilities
+        .required
+        .iter()
+        .filter(|capability| !PLUGIN_CAPABILITIES.contains(&capability.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "plugin {package} requires unavailable capabilities: {}",
+            missing.join(", ")
         ));
     }
     let minimum = parse_release_version(&manifest.pam_native.minimum)
@@ -1642,6 +1693,33 @@ fn validate_plugin_manifest(
     for binding in &manifest.views {
         validate_binding(package, "view", &binding.name, &binding.class)?;
         validate_ios_binding(package, "view", binding.ios_class.as_deref())?;
+    }
+    Ok(())
+}
+
+fn validate_plugin_capabilities(
+    package: &str,
+    kind: &str,
+    capabilities: &[String],
+) -> Result<(), String> {
+    if capabilities.len() > 64
+        || capabilities.iter().collect::<BTreeSet<_>>().len() != capabilities.len()
+    {
+        return Err(format!(
+            "plugin {package} has an invalid {kind} capability list"
+        ));
+    }
+    if capabilities.iter().any(|capability| {
+        capability.len() > 96
+            || capability.split(['.', '_', '-']).count() < 2
+            || capability.split(['.', '_', '-']).count() > 8
+            || !capability.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+            })
+    }) {
+        return Err(format!("plugin {package} has an invalid {kind} capability"));
     }
     Ok(())
 }
@@ -7133,6 +7211,37 @@ mod tests {
         assert_eq!(value["counts"]["high"], 1);
         assert_eq!(value["findings"][0]["severityCode"], 3);
         assert!(value["findings"][0].get("severity").is_none());
+    }
+
+    #[test]
+    fn plugin_capabilities_are_bounded_and_independent() {
+        assert!(
+            validate_plugin_capabilities(
+                "community/camera",
+                "required",
+                &["runtime.modules.v1".to_owned(), "wire.binary.v1".to_owned()],
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_plugin_capabilities(
+                "community/camera",
+                "required",
+                &[
+                    "runtime.modules.v1".to_owned(),
+                    "runtime.modules.v1".to_owned()
+                ],
+            )
+            .is_err()
+        );
+        assert!(
+            validate_plugin_capabilities(
+                "community/camera",
+                "required",
+                &["pushinbr/pam-native-image".to_owned()],
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -180,6 +180,24 @@ final class PluginManager
                 );
             }
 
+            $capabilityConfig = $manifest['capabilities'] ?? [];
+            if (!is_array($capabilityConfig)) {
+                throw new PluginException("Pam Native plugin {$name} has invalid capabilities.");
+            }
+            $requiredCapabilities = $capabilityConfig['required'] ?? [];
+            $optionalCapabilities = $capabilityConfig['optional'] ?? [];
+            if (!is_array($requiredCapabilities) || !is_array($optionalCapabilities)) {
+                throw new PluginException("Pam Native plugin {$name} has invalid capabilities.");
+            }
+            self::validateCapabilities($requiredCapabilities, $name, 'required');
+            self::validateCapabilities($optionalCapabilities, $name, 'optional');
+            $missingCapabilities = array_values(array_diff($requiredCapabilities, Protocol::CAPABILITIES));
+            if ($missingCapabilities !== []) {
+                throw new PluginException(
+                    "Pam Native plugin {$name} requires unavailable capabilities: ".implode(', ', $missingCapabilities).'.',
+                );
+            }
+
             $compatibility = $manifest['pamNative'] ?? null;
             $minimum = is_array($compatibility) ? ($compatibility['minimum'] ?? null) : null;
             $maximum = is_array($compatibility) ? ($compatibility['maximumExclusive'] ?? null) : null;
@@ -272,6 +290,19 @@ final class PluginManager
         }
 
         return null;
+    }
+
+    /** @param array<array-key, mixed> $capabilities */
+    private static function validateCapabilities(array $capabilities, string $package, string $kind): void
+    {
+        if (count($capabilities) > 64 || $capabilities !== array_values(array_unique($capabilities, SORT_REGULAR))) {
+            throw new PluginException("Pam Native plugin {$package} has an invalid {$kind} capability list.");
+        }
+        foreach ($capabilities as $capability) {
+            if (!is_string($capability) || preg_match('/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+){1,7}$/D', $capability) !== 1) {
+                throw new PluginException("Pam Native plugin {$package} has an invalid {$kind} capability.");
+            }
+        }
     }
 
     /** @return array<string, mixed> */

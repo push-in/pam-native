@@ -6264,6 +6264,32 @@ $assert(
     \Pam\Native\Protocol::SDK_VERSION === '0.10.0',
     'The runtime SDK contract must match the 0.10.0 package release.',
 );
+$protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
+    abiVersion: 1,
+    minimumProtocolVersion: 1,
+    maximumProtocolVersion: 2,
+    capabilities: ['wire.binary.v1', 'renderer.incremental.v1', 'peer.future.v1'],
+));
+$assert(
+    $protocolReport->isCompatible()
+        && $protocolReport->protocolVersion === 1
+        && $protocolReport->capabilities === ['renderer.incremental.v1', 'wire.binary.v1']
+        && $protocolReport->requireCapabilities(['wire.binary.v1'])->isCompatible()
+        && $protocolReport->requireCapabilities(['renderer.gpu.v1'])->status
+            === \Pam\Native\ProtocolCompatibilityStatus::MissingCapability
+        && array_map(
+            static fn (\Pam\Native\ProtocolCompatibilityStatus $status): int => $status->value,
+            \Pam\Native\ProtocolCompatibilityStatus::cases(),
+        ) === [1, 2, 3, 4],
+    'Protocol negotiation must select the common ABI, version and capabilities deterministically.',
+);
+$assert(
+    \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(2, 1, 1, []))->status
+        === \Pam\Native\ProtocolCompatibilityStatus::AbiMismatch
+        && \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(1, 2, 3, []))->status
+            === \Pam\Native\ProtocolCompatibilityStatus::ProtocolMismatch,
+    'Protocol negotiation must fail closed for incompatible ABI and protocol ranges.',
+);
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
     'render',
