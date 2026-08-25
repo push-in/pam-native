@@ -16,6 +16,8 @@ final class ProtocolHandshakeTests: XCTestCase {
         XCTAssertEqual(negotiateProtocol(with: try ProtocolHandshake(
             abiVersion: 1, minimumProtocolVersion: 2, maximumProtocolVersion: 3, capabilities: [])).status, .protocolMismatch)
         XCTAssertEqual([1, 2, 3, 4], [ProtocolCompatibilityStatus.compatible.rawValue,
-            .abiMismatch.rawValue, .protocolMismatch.rawValue, .missingCapability.rawValue])
+            ProtocolCompatibilityStatus.abiMismatch.rawValue,
+            ProtocolCompatibilityStatus.protocolMismatch.rawValue,
+            ProtocolCompatibilityStatus.missingCapability.rawValue])
     }
 }
