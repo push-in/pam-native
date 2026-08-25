@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 - 2026-08-25
+
+- Keep the checked-out PAM candidate outside the Native Cargo workspace during
+  the mandatory clean-starter release gate.
+- Restore the end-to-end `pam init --template mobile` plus `pam dev` journey in
+  release certification without weakening workspace isolation.
+
 ## 1.0.1 - 2026-08-25
 
 - Refresh the immutable Android ecosystem lock to the independently versioned

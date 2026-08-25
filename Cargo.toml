@@ -5,9 +5,10 @@ members = [
     "crates/pam-native-engine",
     "crates/pam-native-protocol",
 ]
+exclude = ["pam-cli"]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
