@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.3 - 2026-08-25
+
+- Certify Native 1.x dependents against this exact canonical release candidate
+  before either side is published to Packagist.
+- Preserve independent frontend, backend and plugin release ordering without a
+  circular dependency on an already-public Native 1.x package.
+
 ## 1.0.2 - 2026-08-25
 
 - Keep the checked-out PAM candidate outside the Native Cargo workspace during
