@@ -318,6 +318,53 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  community-first-run:
+    name: Create and launch a clean community mobile app
+    needs: [source-contracts, android, native-cli]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: push-in/pam
+          ref: main
+          path: pam-cli
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: pam-native-cli-linux-x86_64
+          path: candidate-cli
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - name: Install the public PAM entrypoint
+        run: |
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
+            -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+          test -x "${HOME}/.local/bin/pam"
+          candidate=$(find candidate-cli -maxdepth 1 -type f -name 'pam-native-cli-*-linux-x86_64' -print -quit)
+          test -n "${candidate}"
+          chmod +x "${candidate}"
+          printf 'PAM_BIN=%s\n' "${HOME}/.local/bin/pam" >>"${GITHUB_ENV}"
+          printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"
+      - name: Prove pam init and pam dev from an empty directory
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PAM_NATIVE_PACKAGE_PATH: ${{ github.workspace }}/packages/native
+          PAM_NATIVE_HOME: ${{ github.workspace }}
+          PAM_NATIVE_CLI: ${{ env.PAM_NATIVE_CLI }}
+          PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: pam-cli/scripts/community-experience-gate.sh mobile
+
   publish:
     name: Publish GitHub release
     needs:
@@ -329,6 +376,7 @@ jobs:
       - ecosystem-compatibility
       - ecosystem-android
       - ecosystem-ios
+      - community-first-run
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
