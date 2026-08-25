@@ -33,6 +33,7 @@ short end-to-end recipes.
 | Native/community plugins | [Plugins](plugins.md) |
 | Release process | [Releasing](releasing.md) |
 | Signed runtime bundles, rollout and rollback | [OTA](ota.md) |
+| Incremental adoption in existing Android and iOS apps | [Brownfield](brownfield.md) |
 | Migrating from 0.5 to 0.6 | [Migration guide](migration-0.6.md) |
 
 Examples use integer-backed enums for every coded status, type, state and
