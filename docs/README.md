@@ -1,5 +1,8 @@
 # Pam Native documentation
 
+- [Performance offensive](performance-offensive.md): frame scheduling,
+  incremental invalidation, reproducible tail-latency budgets, LTO, and PGO.
+
 - [PHP Runtime Manager](runtime-manager.md)
 - [Singularity architecture](singularity.md)
 - [UI Language 2](ui-language-2.md)

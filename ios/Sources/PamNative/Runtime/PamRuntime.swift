@@ -618,7 +618,14 @@ public final class PamRuntime {
             guard let target = self.displayLinkTarget else { return }
             let link = CADisplayLink(target: target, selector: #selector(PamRuntimeDisplayLinkTarget.didTick(_:)))
             if #available(iOS 15.0, *) {
-                link.preferredFramesPerSecond = 120
+                let maximum = Float(UIScreen.main.maximumFramesPerSecond)
+                link.preferredFrameRateRange = CAFrameRateRange(
+                    minimum: min(60, maximum),
+                    maximum: maximum,
+                    preferred: maximum
+                )
+            } else {
+                link.preferredFramesPerSecond = UIScreen.main.maximumFramesPerSecond
             }
             link.isPaused = true
             link.add(to: .main, forMode: .common)

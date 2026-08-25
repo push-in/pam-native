@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BinaryHeap};
+use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -19,6 +19,7 @@ pub enum RefreshRate {
     Hertz60 = 1,
     Hertz90 = 2,
     Hertz120 = 3,
+    Hertz144 = 4,
 }
 
 impl RefreshRate {
@@ -28,12 +29,15 @@ impl RefreshRate {
             Self::Hertz60 => Duration::from_nanos(16_666_667),
             Self::Hertz90 => Duration::from_nanos(11_111_111),
             Self::Hertz120 => Duration::from_nanos(8_333_333),
+            Self::Hertz144 => Duration::from_nanos(6_944_444),
         }
     }
 
     #[must_use]
     pub fn closest(frames_per_second: f64) -> Self {
-        if frames_per_second >= 105.0 {
+        if frames_per_second >= 132.0 {
+            Self::Hertz144
+        } else if frames_per_second >= 105.0 {
             Self::Hertz120
         } else if frames_per_second >= 75.0 {
             Self::Hertz90
@@ -101,7 +105,7 @@ pub struct DrainReport {
 #[derive(Debug)]
 pub struct FrameScheduler {
     queue: BinaryHeap<ScheduledTask>,
-    coalesced: BTreeMap<u64, TaskId>,
+    coalesced: HashMap<u64, TaskId>,
     next_id: TaskId,
     sequence: u64,
     maximum_tasks: usize,
@@ -113,7 +117,7 @@ impl Default for FrameScheduler {
     fn default() -> Self {
         Self {
             queue: BinaryHeap::new(),
-            coalesced: BTreeMap::new(),
+            coalesced: HashMap::new(),
             next_id: 1,
             sequence: 0,
             maximum_tasks: 4_096,
@@ -218,8 +222,10 @@ mod tests {
     #[test]
     fn computes_real_display_budgets() {
         assert_eq!(RefreshRate::closest(120.0), RefreshRate::Hertz120);
+        assert_eq!(RefreshRate::closest(144.0), RefreshRate::Hertz144);
         assert_eq!(RefreshRate::closest(90.0), RefreshRate::Hertz90);
         assert_eq!(RefreshRate::closest(59.0), RefreshRate::Hertz60);
         assert!(RefreshRate::Hertz120.frame_budget() < RefreshRate::Hertz60.frame_budget());
+        assert!(RefreshRate::Hertz144.frame_budget() < RefreshRate::Hertz120.frame_budget());
     }
 }

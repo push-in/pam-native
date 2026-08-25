@@ -4609,7 +4609,7 @@ file_put_contents(
     "protocol": 1,
     "pamNative": {
         "minimum": "0.3.0",
-        "maximumExclusive": "0.10.0"
+        "maximumExclusive": "0.11.0"
     },
     "php": {
         "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
@@ -6261,8 +6261,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.9.1',
-    'The runtime SDK contract must match the 0.9.1 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '0.10.0',
+    'The runtime SDK contract must match the 0.10.0 package release.',
 );
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,

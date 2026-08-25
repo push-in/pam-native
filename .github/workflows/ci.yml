@@ -46,13 +46,14 @@ jobs:
           composer validate --strict --working-dir=examples/showcase
       - name: Rust contracts
         run: |
+          bash -n scripts/build-performance.sh
           cargo fmt --all -- --check
           cargo test --locked --all-targets
           cargo clippy --locked --all-targets -- -D warnings
       - name: PHP and benchmark contracts
         run: |
           composer install --working-dir=examples/showcase --no-interaction
-          cargo run --locked --release -p pam-native-engine --example benchmark -- --check
+          cargo run --locked --profile performance -p pam-native-engine --example benchmark -- --check
           php packages/native/tests/run.php
           php packages/native/tests/performance.php
           php packages/native/tests/navigation_performance.php
