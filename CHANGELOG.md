@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.5 - 2026-08-25
+
+- Resolve the versioned PAM install root from the public launcher before clean
+  mobile builds, keeping runtime discovery independent from install versions.
+- Build iOS ZIP artifacts with normalized timestamps, modes and ordering for
+  byte-identical cross-run release evidence.
+
 ## 1.0.4 - 2026-08-25
 
 - Carry the installed PAM runtime catalog into clean Native starter execution,

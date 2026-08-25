@@ -55,18 +55,15 @@ jobs:
         shell: bash
         run: |
           version=${GITHUB_REF_NAME#v}
+          source_date_epoch=$(git log -1 --format=%ct)
           mkdir -p dist
           artifact="pam-native-ios-${version}.zip"
-          git archive \
-            --format=zip \
-            --prefix="pam-native-ios-${version}/" \
-            --output="dist/${artifact}" \
-            HEAD:ios
-          git archive \
-            --format=zip \
-            --prefix="pam-native-ios-${version}/" \
-            --output="${RUNNER_TEMP}/${artifact}" \
-            HEAD:ios
+          python3 scripts/deterministic-zip.py --tree HEAD:ios \
+            --prefix "pam-native-ios-${version}" --epoch "${source_date_epoch}" \
+            --output "dist/${artifact}"
+          python3 scripts/deterministic-zip.py --tree HEAD:ios \
+            --prefix "pam-native-ios-${version}" --epoch "${source_date_epoch}" \
+            --output "${RUNNER_TEMP}/${artifact}"
           cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
           python3 benchmarks/package/reproducibility.py \
             --pair "1=dist/${artifact}=${RUNNER_TEMP}/${artifact}" \
@@ -357,7 +354,10 @@ jobs:
             --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
             -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
           test -x "${HOME}/.local/bin/pam"
-          test -f "${HOME}/.local/share/pam/runtime/catalog.json"
+          pam_launcher=$(readlink -f "${HOME}/.local/bin/pam")
+          pam_install_root=$(cd "$(dirname "${pam_launcher}")/.." && pwd)
+          pam_home="${pam_install_root}/share/pam"
+          test -f "${pam_home}/runtime/catalog.json"
           PHP_CONFIG=$(command -v php-config) cargo build --locked --release \
             --manifest-path pam-cli/Cargo.toml --bin pam
           test -x pam-cli/target/release/pam
@@ -365,7 +365,7 @@ jobs:
           test -n "${candidate}"
           chmod +x "${candidate}"
           printf 'PAM_BIN=%s\n' "${GITHUB_WORKSPACE}/pam-cli/target/release/pam" >>"${GITHUB_ENV}"
-          printf 'PAM_HOME=%s\n' "${HOME}/.local/share/pam" >>"${GITHUB_ENV}"
+          printf 'PAM_HOME=%s\n' "${pam_home}" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"
       - name: Prove every documented pam init and pam dev journey
         uses: reactivecircus/android-emulator-runner@v2
