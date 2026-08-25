@@ -1166,6 +1166,26 @@ $assert(
         && $kotlinEventValues[1] === $phpEventNames,
     'PHP and Kotlin event protocol enums must remain byte-for-byte aligned.',
 );
+$kotlinHandshake = (string) file_get_contents(
+    $repositoryRoot.'/android/app/src/main/java/dev/pam/nativeapp/protocol/ProtocolHandshake.kt',
+);
+$swiftHandshake = (string) file_get_contents(
+    $repositoryRoot.'/ios/Sources/PamNative/Protocol/ProtocolHandshake.swift',
+);
+foreach (\Pam\Native\Protocol::CAPABILITIES as $capability) {
+    $assert(
+        str_contains($rustProtocol, '"'.$capability.'"')
+            && str_contains($kotlinHandshake, '"'.$capability.'"')
+            && str_contains($swiftHandshake, '"'.$capability.'"'),
+        "Runtime capability {$capability} must remain aligned across PHP, Rust, Kotlin, and Swift.",
+    );
+}
+$assert(
+    str_contains($rustProtocol, 'pub const ABI_VERSION: u16 = 1;')
+        && str_contains($kotlinHandshake, 'PAM_ABI_VERSION = 1')
+        && str_contains($swiftHandshake, 'PAM_ABI_VERSION = 1'),
+    'ABI version 1 must remain aligned across every runtime host.',
+);
 
 foreach ([
     AnimationKind::cases(),
