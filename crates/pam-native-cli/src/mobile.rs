@@ -6998,7 +6998,7 @@ fn encode_bundle(root: &Path, maximum_bytes: usize, purpose: &str) -> Result<Vec
         bytes.extend_from_slice(&content_length.to_le_bytes());
         bytes.extend_from_slice(&contents);
         if bytes.len() > maximum_bytes {
-            return Err(format!("{purpose} bundle exceeds {} bytes", maximum_bytes));
+            return Err(format!("{purpose} bundle exceeds {maximum_bytes} bytes"));
         }
     }
     Ok(bytes)

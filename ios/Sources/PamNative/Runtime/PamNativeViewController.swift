@@ -62,7 +62,7 @@ public final class PamNativeViewController: UIViewController {
         }
     }
 
-    public func dispatchBack(): Bool {
+    public func dispatchBack() -> Bool {
         guard runtime != nil else { return false }
         runtime?.dispatchBack()
         return true
