@@ -38,7 +38,7 @@ jobs:
             pam-native-widgets pam-native-firebase pam-native-laravel-sync
             pam-native-sync-laravel
             pam-native-camera pam-native-media-editor pam-native-canvas
-            pam-native-gpu pam-native-3d pam-native-image
+            pam-native-gpu pam-native-3d pam-native-image pam-native-nitro
           )
           if [[ "${SELECTED_PACKAGE}" != all ]]; then
             valid=false
