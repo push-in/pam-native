@@ -138,7 +138,7 @@ jobs:
         run: |
           test -n "${PACKAGIST_USERNAME}"
           test -n "${PACKAGIST_TOKEN}"
-          payload='{"repository":{"url":"https://github.com/push-in/pam-native-php"}}'
+          payload='{"repository":{"url":"https://github.com/push-in/pam-native"}}'
           encoded_username=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_USERNAME"));')
           encoded_token=$(php -r 'echo rawurlencode((string) getenv("PACKAGIST_TOKEN"));')
           if ! curl --proto '=https' --tlsv1.2 \

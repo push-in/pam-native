@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.0 - 2026-08-24
+
+- Make reactive updates dependency-granular with indexed worklet bindings and a
+  reusable evaluation stack, eliminating full binding scans and hot-path stack
+  allocations.
+- Add first-class 144 Hz scheduling alongside 60, 90, and 120 Hz budgets, and
+  drive iOS commits at the display's real adaptive maximum frame rate.
+- Add reproducible p50/p95/p99 engine budgets that fail CI on full-commit or
+  patch regressions.
+- Ship fat-LTO performance builds plus locally reproducible PGO training, while
+  preserving symbols in the dedicated profiling artifact.
+- Make the canonical monorepo directly Composer-installable so Packagist points
+  to push-in/pam-native, while retaining the legacy split as a release mirror.
+
 ## 0.9.1 - 2026-08-24
 
 - Propagate real safe-area, font-scale, refresh-rate, motion, pointer, input,

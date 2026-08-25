@@ -7,7 +7,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.9.1"
+version = "0.10.0"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"
@@ -19,7 +19,12 @@ unsafe_op_in_unsafe_fn = "deny"
 [profile.release]
 opt-level = 3
 codegen-units = 1
-lto = "thin"
+lto = "fat"
 overflow-checks = false
 panic = "abort"
 strip = "symbols"
+
+[profile.performance]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"

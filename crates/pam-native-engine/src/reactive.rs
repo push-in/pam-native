@@ -115,28 +115,35 @@ impl Worklet {
         })
     }
 
-    fn execute(&self, signals: &BTreeMap<SignalId, f64>) -> Result<f64, ReactiveError> {
-        let mut stack = Vec::with_capacity(self.maximum_stack);
+    fn execute(
+        &self,
+        signals: &BTreeMap<SignalId, f64>,
+        stack: &mut Vec<f64>,
+    ) -> Result<f64, ReactiveError> {
+        stack.clear();
+        if stack.capacity() < self.maximum_stack {
+            stack.reserve(self.maximum_stack - stack.capacity());
+        }
         for instruction in &self.instructions {
             match *instruction {
                 Instruction::Signal(id) => {
                     stack.push(*signals.get(&id).ok_or(ReactiveError::UnknownSignal(id))?)
                 }
                 Instruction::Constant(value) => stack.push(value),
-                Instruction::Negate => unary(&mut stack, |value| -value)?,
-                Instruction::Absolute => unary(&mut stack, f64::abs)?,
-                Instruction::Add => binary(&mut stack, |left, right| left + right)?,
-                Instruction::Subtract => binary(&mut stack, |left, right| left - right)?,
-                Instruction::Multiply => binary(&mut stack, |left, right| left * right)?,
-                Instruction::Divide => binary(&mut stack, |left, right| {
+                Instruction::Negate => unary(stack, |value| -value)?,
+                Instruction::Absolute => unary(stack, f64::abs)?,
+                Instruction::Add => binary(stack, |left, right| left + right)?,
+                Instruction::Subtract => binary(stack, |left, right| left - right)?,
+                Instruction::Multiply => binary(stack, |left, right| left * right)?,
+                Instruction::Divide => binary(stack, |left, right| {
                     if right.abs() <= f64::EPSILON {
                         0.0
                     } else {
                         left / right
                     }
                 })?,
-                Instruction::Minimum => binary(&mut stack, f64::min)?,
-                Instruction::Maximum => binary(&mut stack, f64::max)?,
+                Instruction::Minimum => binary(stack, f64::min)?,
+                Instruction::Maximum => binary(stack, f64::max)?,
                 Instruction::Clamp => {
                     let maximum = stack.pop().ok_or(ReactiveError::StackUnderflow)?;
                     let minimum = stack.pop().ok_or(ReactiveError::StackUnderflow)?;
@@ -182,8 +189,10 @@ pub struct ReactiveRuntime {
     signals: BTreeMap<SignalId, f64>,
     worklets: BTreeMap<WorkletId, Worklet>,
     bindings: Vec<NativeBinding>,
+    bindings_by_worklet: BTreeMap<WorkletId, Vec<NativeBinding>>,
     dependencies: BTreeMap<SignalId, BTreeSet<WorkletId>>,
     last_values: BTreeMap<(u64, PropKey), f64>,
+    evaluation_stack: Vec<f64>,
 }
 
 impl ReactiveRuntime {
@@ -219,9 +228,27 @@ impl ReactiveRuntime {
         if binding.node == 0 || !self.worklets.contains_key(&binding.worklet) {
             return Err(ReactiveError::UnknownWorklet(binding.worklet));
         }
+        if let Some(previous) = self
+            .bindings
+            .iter()
+            .find(|current| current.node == binding.node && current.property == binding.property)
+            .copied()
+            && let Some(bindings) = self.bindings_by_worklet.get_mut(&previous.worklet)
+        {
+            bindings.retain(|current| {
+                current.node != binding.node || current.property != binding.property
+            });
+            if bindings.is_empty() {
+                self.bindings_by_worklet.remove(&previous.worklet);
+            }
+        }
         self.bindings
             .retain(|current| current.node != binding.node || current.property != binding.property);
         self.bindings.push(binding);
+        self.bindings_by_worklet
+            .entry(binding.worklet)
+            .or_default()
+            .push(binding);
         Ok(())
     }
 
@@ -241,28 +268,29 @@ impl ReactiveRuntime {
             return Ok(Vec::new());
         }
         *current = value;
-        let affected = self.dependencies.get(&id).cloned().unwrap_or_default();
+        let Some(affected) = self.dependencies.get(&id) else {
+            return Ok(Vec::new());
+        };
         let mut mutations = Vec::new();
-        for binding in self
-            .bindings
-            .iter()
-            .filter(|binding| affected.contains(&binding.worklet))
-        {
-            let value = self.worklets[&binding.worklet].execute(&self.signals)?;
-            let key = (binding.node, binding.property);
-            if self
-                .last_values
-                .get(&key)
-                .is_some_and(|last| last.to_bits() == value.to_bits())
-            {
-                continue;
+        for worklet in affected {
+            let value =
+                self.worklets[worklet].execute(&self.signals, &mut self.evaluation_stack)?;
+            for binding in self.bindings_by_worklet.get(worklet).into_iter().flatten() {
+                let key = (binding.node, binding.property);
+                if self
+                    .last_values
+                    .get(&key)
+                    .is_some_and(|last| last.to_bits() == value.to_bits())
+                {
+                    continue;
+                }
+                self.last_values.insert(key, value);
+                mutations.push(Mutation::Update {
+                    id: binding.node,
+                    key: binding.property,
+                    value: Some(PropValue::Float(value)),
+                });
             }
-            self.last_values.insert(key, value);
-            mutations.push(Mutation::Update {
-                id: binding.node,
-                key: binding.property,
-                value: Some(PropValue::Float(value)),
-            });
         }
         Ok(mutations)
     }
