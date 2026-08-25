@@ -1166,6 +1166,26 @@ $assert(
         && $kotlinEventValues[1] === $phpEventNames,
     'PHP and Kotlin event protocol enums must remain byte-for-byte aligned.',
 );
+$kotlinHandshake = (string) file_get_contents(
+    $repositoryRoot.'/android/app/src/main/java/dev/pam/nativeapp/protocol/ProtocolHandshake.kt',
+);
+$swiftHandshake = (string) file_get_contents(
+    $repositoryRoot.'/ios/Sources/PamNative/Protocol/ProtocolHandshake.swift',
+);
+foreach (\Pam\Native\Protocol::CAPABILITIES as $capability) {
+    $assert(
+        str_contains($rustProtocol, '"'.$capability.'"')
+            && str_contains($kotlinHandshake, '"'.$capability.'"')
+            && str_contains($swiftHandshake, '"'.$capability.'"'),
+        "Runtime capability {$capability} must remain aligned across PHP, Rust, Kotlin, and Swift.",
+    );
+}
+$assert(
+    str_contains($rustProtocol, 'pub const ABI_VERSION: u16 = 1;')
+        && str_contains($kotlinHandshake, 'PAM_ABI_VERSION = 1')
+        && str_contains($swiftHandshake, 'PAM_ABI_VERSION = 1'),
+    'ABI version 1 must remain aligned across every runtime host.',
+);
 
 foreach ([
     AnimationKind::cases(),
@@ -4608,8 +4628,8 @@ file_put_contents(
     "version": 1,
     "protocol": 1,
     "pamNative": {
-        "minimum": "0.3.0",
-        "maximumExclusive": "0.11.0"
+        "minimum": "1.0.0",
+        "maximumExclusive": "2.0.0"
     },
     "php": {
         "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
@@ -5160,6 +5180,34 @@ $assert(
             true,
         ),
     'PHP Runtime Turbo must emit a complete deterministic preload manifest.',
+);
+$freezeResult = PamPhpPreloader::optimize(
+    $pamPhpDirectory,
+    $pamPhpCache.'-freeze',
+    ['Dashboard'],
+);
+$freezeManifest = json_decode(
+    (string) file_get_contents($freezeResult['freeze']),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$freezePreload = json_decode(
+    (string) file_get_contents($freezeResult['manifest']),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
+$freezeTags = array_column($freezePreload['components'] ?? [], 'tag');
+$assert(
+    $freezeResult['discovered'] === $preloadResult['components']
+        && $freezeResult['components'] === 2
+        && $freezeResult['eliminated'] === $freezeResult['discovered'] - 2
+        && $freezeTags === ['CounterCard', 'Dashboard']
+        && $freezeManifest['abiVersion'] === \Pam\Native\Protocol::ABI_VERSION
+        && $freezeManifest['protocolVersion'] === \Pam\Native\Protocol::VERSION
+        && $freezeManifest['entrypoints'] === ['Dashboard']
+        && $freezeManifest['buildId'] === $freezeResult['buildId']
+        && str_contains((string) file_get_contents($freezeResult['preload']), 'hash_equals'),
+    'PAM Freeze must tree-shake unreachable components and pin a deterministic ABI build manifest.',
 );
 require $preloadResult['preload'];
 $assert(
@@ -6261,9 +6309,146 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.10.0',
-    'The runtime SDK contract must match the 0.10.0 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.0.0',
+    'The runtime SDK contract must match the stable 1.0.0 package release.',
 );
+$protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
+    abiVersion: 1,
+    minimumProtocolVersion: 1,
+    maximumProtocolVersion: 2,
+    capabilities: ['wire.binary.v1', 'renderer.incremental.v1', 'peer.future.v1'],
+));
+$assert(
+    $protocolReport->isCompatible()
+        && $protocolReport->protocolVersion === 1
+        && $protocolReport->capabilities === ['renderer.incremental.v1', 'wire.binary.v1']
+        && $protocolReport->requireCapabilities(['wire.binary.v1'])->isCompatible()
+        && $protocolReport->requireCapabilities(['renderer.gpu.v1'])->status
+            === \Pam\Native\ProtocolCompatibilityStatus::MissingCapability
+        && array_map(
+            static fn (\Pam\Native\ProtocolCompatibilityStatus $status): int => $status->value,
+            \Pam\Native\ProtocolCompatibilityStatus::cases(),
+        ) === [1, 2, 3, 4],
+    'Protocol negotiation must select the common ABI, version and capabilities deterministically.',
+);
+$assert(
+    \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(2, 1, 1, []))->status
+        === \Pam\Native\ProtocolCompatibilityStatus::AbiMismatch
+        && \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(1, 2, 3, []))->status
+            === \Pam\Native\ProtocolCompatibilityStatus::ProtocolMismatch,
+    'Protocol negotiation must fail closed for incompatible ABI and protocol ranges.',
+);
+$updateBundle = sys_get_temp_dir().'/pam-native-update-'.getmypid().'.bin';
+file_put_contents($updateBundle, 'signed-pam-native-bundle');
+$updateManifest = new \Pam\Native\Update\SignedUpdateManifest(
+    buildIdentifier: str_repeat('a', 64),
+    bundleSha256: hash_file('sha256', $updateBundle),
+    abiVersion: \Pam\Native\Protocol::ABI_VERSION,
+    protocolVersion: \Pam\Native\Protocol::VERSION,
+    channel: \Pam\Native\Update\UpdateChannel::Stable,
+    rolloutBasisPoints: 2_500,
+    capabilities: ['wire.binary.v1', 'renderer.incremental.v1'],
+);
+$updateJson = $updateManifest->canonicalJson();
+$updateKeyPair = sodium_crypto_sign_keypair();
+$updateSecretKey = sodium_crypto_sign_secretkey($updateKeyPair);
+$updatePublicKey = sodium_crypto_sign_publickey($updateKeyPair);
+$updateSignature = sodium_crypto_sign_detached($updateJson, $updateSecretKey);
+$approvedUpdate = \Pam\Native\Update\UpdateVerifier::evaluate(
+    $updateJson,
+    base64_encode($updateSignature),
+    base64_encode($updatePublicKey),
+    str_repeat('b', 64),
+    2_499,
+);
+$assert(
+    $approvedUpdate->approved()
+        && \Pam\Native\Update\UpdateVerifier::verifyBundle($updateBundle, $updateManifest)
+        && \Pam\Native\Update\UpdateVerifier::evaluate(
+            $updateJson,
+            base64_encode(str_repeat("\0", SODIUM_CRYPTO_SIGN_BYTES)),
+            base64_encode($updatePublicKey),
+            str_repeat('b', 64),
+            0,
+        )->status === \Pam\Native\Update\UpdateDecisionStatus::InvalidSignature
+        && \Pam\Native\Update\UpdateVerifier::evaluate(
+            $updateJson,
+            base64_encode($updateSignature),
+            base64_encode($updatePublicKey),
+            str_repeat('b', 64),
+            2_500,
+        )->status === \Pam\Native\Update\UpdateDecisionStatus::OutsideRollout
+        && array_map(
+            static fn (\Pam\Native\Update\UpdateDecisionStatus $status): int => $status->value,
+            \Pam\Native\Update\UpdateDecisionStatus::cases(),
+        ) === [1, 2, 3, 4, 5, 6],
+    'Signed OTA manifests must verify Ed25519, ABI, capabilities, rollout, and exact bundle bytes.',
+);
+$updateSlotsPath = sys_get_temp_dir().'/pam-native-update-slots-'.getmypid();
+if (is_dir($updateSlotsPath)) {
+    foreach (glob($updateSlotsPath.'/*') ?: [] as $updateSlotFile) {
+        if (is_file($updateSlotFile)) {
+            unlink($updateSlotFile);
+        }
+    }
+    rmdir($updateSlotsPath);
+}
+$updateSlots = new \Pam\Native\Update\UpdateSlotManager($updateSlotsPath);
+$runtimeStatePath = sys_get_temp_dir().'/pam-native-runtime-state-'.getmypid().'/pam/state';
+mkdir($runtimeStatePath, 0o700, true);
+$previousRuntimeState = getenv('PAM_NATIVE_STATE_DIR');
+putenv('PAM_NATIVE_STATE_DIR='.$runtimeStatePath);
+$runtimeUpdateSlots = \Pam\Native\Update\UpdateSlotManager::forRuntime();
+$assert(
+    is_dir(dirname($runtimeStatePath).'/updates'),
+    'Runtime OTA slots must use the private directory shared with Android and iOS hosts.',
+);
+putenv($previousRuntimeState === false ? 'PAM_NATIVE_STATE_DIR' : 'PAM_NATIVE_STATE_DIR='.$previousRuntimeState);
+$assert(
+    $updateSlots->stage($updateBundle, $updateManifest) === \Pam\Native\Update\UpdateActivationStatus::Staged
+        && $updateSlots->activate() === \Pam\Native\Update\UpdateActivationStatus::Activated
+        && file_get_contents((string) $updateSlots->activeBundle()) === 'signed-pam-native-bundle',
+    'The first verified OTA bundle must activate atomically.',
+);
+file_put_contents($updateBundle, 'second-signed-pam-native-bundle');
+$secondUpdateManifest = new \Pam\Native\Update\SignedUpdateManifest(
+    buildIdentifier: str_repeat('c', 64),
+    bundleSha256: (string) hash_file('sha256', $updateBundle),
+    abiVersion: \Pam\Native\Protocol::ABI_VERSION,
+    protocolVersion: \Pam\Native\Protocol::VERSION,
+    channel: \Pam\Native\Update\UpdateChannel::Stable,
+    rolloutBasisPoints: 10_000,
+    capabilities: ['wire.binary.v1'],
+);
+$assert(
+    $updateSlots->stage($updateBundle, $secondUpdateManifest) === \Pam\Native\Update\UpdateActivationStatus::Staged
+        && $updateSlots->activate() === \Pam\Native\Update\UpdateActivationStatus::Activated
+        && file_get_contents((string) $updateSlots->activeBundle()) === 'second-signed-pam-native-bundle'
+        && $updateSlots->rollback() === \Pam\Native\Update\UpdateActivationStatus::RolledBack
+        && file_get_contents((string) $updateSlots->activeBundle()) === 'signed-pam-native-bundle'
+        && array_map(
+            static fn (\Pam\Native\Update\UpdateActivationStatus $status): int => $status->value,
+            \Pam\Native\Update\UpdateActivationStatus::cases(),
+        ) === [1, 2, 3],
+    'OTA slots must preserve one previous verified bundle and roll back atomically.',
+);
+sodium_memzero($updateSecretKey);
+unlink($updateBundle);
+foreach (glob($updateSlotsPath.'/*') ?: [] as $updateSlotFile) {
+    if (is_file($updateSlotFile)) {
+        unlink($updateSlotFile);
+    }
+}
+rmdir($updateSlotsPath);
+foreach (glob(dirname($runtimeStatePath).'/updates/*') ?: [] as $runtimeUpdateFile) {
+    if (is_file($runtimeUpdateFile)) {
+        unlink($runtimeUpdateFile);
+    }
+}
+rmdir(dirname($runtimeStatePath).'/updates');
+rmdir($runtimeStatePath);
+rmdir(dirname($runtimeStatePath));
+rmdir(dirname(dirname($runtimeStatePath)));
 $imageEditorParameters = (new ReflectionMethod(
     \Pam\Native\System\ImageEditor::class,
     'render',

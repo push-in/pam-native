@@ -31,18 +31,27 @@ if (!$loaded) {
 
 use Pam\Native\Internal\PamPhpPreloader;
 
-if ($argc !== 3) {
-    fwrite(STDERR, "Usage: pam-native-optimize <component-directory> <cache-directory>\n");
+if ($argc < 3) {
+    fwrite(STDERR, "Usage: pam-native-optimize <component-directory> <cache-directory> [--entry=Tag ...]\n");
     exit(2);
 }
 
 try {
-    $result = PamPhpPreloader::optimize($argv[1], $argv[2]);
+    $entries = [];
+    foreach (array_slice($argv, 3) as $argument) {
+        if (!str_starts_with($argument, '--entry=') || strlen($argument) <= 8) {
+            throw new InvalidArgumentException("Unknown optimize option {$argument}.");
+        }
+        $entries[] = substr($argument, 8);
+    }
+    $result = PamPhpPreloader::optimize($argv[1], $argv[2], $entries);
     fwrite(
         STDOUT,
-        "Optimized {$result['components']} PAM components.\n"
+        "Optimized {$result['components']} of {$result['discovered']} PAM components ({$result['eliminated']} eliminated).\n"
         ."Preload: {$result['preload']}\n"
-        ."Manifest: {$result['manifest']}\n",
+        ."Manifest: {$result['manifest']}\n"
+        ."Freeze: {$result['freeze']}\n"
+        ."Build: {$result['buildId']}\n",
     );
 } catch (Throwable $error) {
     fwrite(STDERR, $error->getMessage()."\n");

@@ -5,11 +5,98 @@ pub const TREE_MAGIC: [u8; 4] = *b"PNT1";
 pub const PATCH_MAGIC: [u8; 4] = *b"PNP1";
 pub const BATCH_MAGIC: [u8; 4] = *b"PNB1";
 pub const PROTOCOL_VERSION: u16 = 1;
+pub const MINIMUM_PROTOCOL_VERSION: u16 = 1;
+pub const ABI_VERSION: u16 = 1;
+pub const CAPABILITIES: [&str; 5] = [
+    "compiler.freeze.v1",
+    "plugins.composer.v1",
+    "renderer.incremental.v1",
+    "runtime.modules.v1",
+    "wire.binary.v1",
+];
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_NODES: usize = 100_000;
 pub const MAX_TREE_DEPTH: usize = 512;
 pub const MAX_PROPERTIES_PER_NODE: usize = 128;
 pub const MAX_VALUE_BYTES: usize = 1024 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum CompatibilityStatus {
+    Compatible = 1,
+    AbiMismatch = 2,
+    ProtocolMismatch = 3,
+    MissingCapability = 4,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProtocolHandshake {
+    pub abi_version: u16,
+    pub minimum_protocol_version: u16,
+    pub maximum_protocol_version: u16,
+    pub capabilities: BTreeSet<String>,
+}
+
+impl ProtocolHandshake {
+    pub fn local() -> Self {
+        Self {
+            abi_version: ABI_VERSION,
+            minimum_protocol_version: MINIMUM_PROTOCOL_VERSION,
+            maximum_protocol_version: PROTOCOL_VERSION,
+            capabilities: CAPABILITIES.into_iter().map(str::to_owned).collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompatibilityReport {
+    pub status: CompatibilityStatus,
+    pub protocol_version: Option<u16>,
+    pub capabilities: BTreeSet<String>,
+}
+
+impl CompatibilityReport {
+    pub fn require(mut self, required: &[&str]) -> Self {
+        if self.status == CompatibilityStatus::Compatible
+            && required
+                .iter()
+                .any(|name| !self.capabilities.contains(*name))
+        {
+            self.status = CompatibilityStatus::MissingCapability;
+            self.protocol_version = None;
+            self.capabilities.clear();
+        }
+        self
+    }
+}
+
+pub fn negotiate(peer: &ProtocolHandshake) -> CompatibilityReport {
+    if peer.abi_version != ABI_VERSION {
+        return CompatibilityReport {
+            status: CompatibilityStatus::AbiMismatch,
+            protocol_version: None,
+            capabilities: BTreeSet::new(),
+        };
+    }
+    let minimum = MINIMUM_PROTOCOL_VERSION.max(peer.minimum_protocol_version);
+    let maximum = PROTOCOL_VERSION.min(peer.maximum_protocol_version);
+    if minimum > maximum {
+        return CompatibilityReport {
+            status: CompatibilityStatus::ProtocolMismatch,
+            protocol_version: None,
+            capabilities: BTreeSet::new(),
+        };
+    }
+    CompatibilityReport {
+        status: CompatibilityStatus::Compatible,
+        protocol_version: Some(maximum),
+        capabilities: ProtocolHandshake::local()
+            .capabilities
+            .intersection(&peer.capabilities)
+            .cloned()
+            .collect(),
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -1938,6 +2025,48 @@ mod tests {
         let original = tree("Pam Native");
         let encoded = original.encode().expect("encode");
         assert_eq!(Tree::decode(&encoded).expect("decode"), original);
+    }
+
+    #[test]
+    fn handshake_negotiates_common_contract_and_fails_closed() {
+        let peer = ProtocolHandshake {
+            abi_version: 1,
+            minimum_protocol_version: 1,
+            maximum_protocol_version: 2,
+            capabilities: ["wire.binary.v1", "peer.future.v1"]
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
+        };
+        let report = negotiate(&peer);
+        assert_eq!(report.status, CompatibilityStatus::Compatible);
+        assert_eq!(report.protocol_version, Some(1));
+        assert_eq!(report.capabilities, ["wire.binary.v1".to_owned()].into());
+        assert_eq!(
+            report.clone().require(&["wire.binary.v1"]).status,
+            CompatibilityStatus::Compatible
+        );
+        assert_eq!(
+            report.require(&["renderer.gpu.v1"]).status,
+            CompatibilityStatus::MissingCapability
+        );
+        assert_eq!(
+            negotiate(&ProtocolHandshake {
+                abi_version: 2,
+                ..peer.clone()
+            })
+            .status,
+            CompatibilityStatus::AbiMismatch
+        );
+        assert_eq!(
+            negotiate(&ProtocolHandshake {
+                minimum_protocol_version: 2,
+                maximum_protocol_version: 3,
+                ..peer
+            })
+            .status,
+            CompatibilityStatus::ProtocolMismatch
+        );
     }
 
     #[test]

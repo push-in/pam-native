@@ -5,6 +5,7 @@
 
 - [PHP Runtime Manager](runtime-manager.md)
 - [Singularity architecture](singularity.md)
+- [Stable 1.x architecture, independence, capabilities and Freeze](architecture-1.0.md)
 - [UI Language 2](ui-language-2.md)
 - [Migrating to UI Language 2](migration-ui-language-2.md)
 
@@ -31,6 +32,8 @@ short end-to-end recipes.
 | Debug overlay and diagnostics | [DevTools](devtools.md) |
 | Native/community plugins | [Plugins](plugins.md) |
 | Release process | [Releasing](releasing.md) |
+| Signed runtime bundles, rollout and rollback | [OTA](ota.md) |
+| Incremental adoption in existing Android and iOS apps | [Brownfield](brownfield.md) |
 | Migrating from 0.5 to 0.6 | [Migration guide](migration-0.6.md) |
 
 Examples use integer-backed enums for every coded status, type, state and

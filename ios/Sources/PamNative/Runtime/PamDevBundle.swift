@@ -2,11 +2,17 @@ import Foundation
 
 enum PamDevBundle {
     private static let maximumBundleBytes = 16 * 1024 * 1024
+    private static let maximumProductionBundleBytes = 256 * 1024 * 1024
     private static let maximumFiles = 10_000
     private static let maximumFileBytes = 8 * 1024 * 1024
 
-    static func extract(_ data: Data, to destination: URL) throws -> URL {
-        guard data.count <= maximumBundleBytes else {
+    static func extract(
+        _ data: Data,
+        to destination: URL,
+        maximumBytes: Int = maximumBundleBytes
+    ) throws -> URL {
+        guard (1...maximumProductionBundleBytes).contains(maximumBytes),
+              data.count <= maximumBytes else {
             throw BundleError.bundleTooLarge
         }
         let manager = FileManager.default

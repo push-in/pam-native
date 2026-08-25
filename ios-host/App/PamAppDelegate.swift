@@ -37,7 +37,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
         self.devTools = devTools
 #endif
 
-        guard let entry = Bundle.main.url(
+        guard let embeddedEntry = Bundle.main.url(
             forResource: "__PAM_ENTRY_BASENAME__",
             withExtension: "__PAM_ENTRY_EXTENSION__",
             subdirectory: "PamBundle"
@@ -45,6 +45,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
             presentFatalError("PAM entry file is missing from the application bundle.")
             return false
         }
+        let entry = PamActiveUpdateInstaller.resolve(embeddedEntry: embeddedEntry)
 
         let runtime = PamRuntime(
             hostView: controller.view,

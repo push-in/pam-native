@@ -130,7 +130,8 @@ class PamActivity : FragmentActivity() {
         reportNotificationOpen(intent)
 
         runCatching {
-            val entry = AssetInstaller(this).install()
+            val embeddedEntry = AssetInstaller(this).install()
+            val entry = ActiveUpdateInstaller(this).resolve(embeddedEntry)
             runtimeEntryPath = entry.absolutePath
             val density = resources.displayMetrics.density
             val widthDp = windowWidth / density

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 - 2026-08-25
+
+- Freeze the ABI, protocol and capability-negotiation contract for the 1.x line.
+- Add deterministic Freeze optimization, retained Fiber lanes, native worklets,
+  signed atomic OTA boot, stable brownfield hosts and independent plugin gates.
+- Certify clean `pam init --template mobile` plus `pam dev` launch as a hard
+  release prerequisite on a real Android emulator.
+- Require PHP 8.5 by default and retain frontend/backend independence.
+
 ## 0.10.0 - 2026-08-24
 
 - Make reactive updates dependency-granular with indexed worklet bindings and a

@@ -16,7 +16,15 @@ const MAX_PROJECT_FILES: usize = 10_000;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_DEV_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_UPDATE_BUNDLE_BYTES: usize = 256 * 1024 * 1024;
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
+const PLUGIN_CAPABILITIES: [&str; 5] = [
+    "compiler.freeze.v1",
+    "plugins.composer.v1",
+    "renderer.incremental.v1",
+    "runtime.modules.v1",
+    "wire.binary.v1",
+];
 const PLUGIN_LOCK_VERSION: u32 = 1;
 const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
 const RUNTIME_LOCK_VERSION: u32 = 1;
@@ -275,6 +283,8 @@ struct ComposerPackage {
     #[serde(default)]
     install_path: Option<PathBuf>,
     #[serde(default)]
+    require: BTreeMap<String, String>,
+    #[serde(default)]
     extra: ComposerExtra,
 }
 
@@ -299,6 +309,8 @@ struct PluginManifest {
     protocol: u32,
     pam_native: PluginCompatibility,
     #[serde(default)]
+    capabilities: PluginCapabilities,
+    #[serde(default)]
     php: PluginPhp,
     #[serde(default)]
     android: PluginAndroid,
@@ -310,6 +322,15 @@ struct PluginManifest {
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PluginCapabilities {
+    #[serde(default)]
+    required: Vec<String>,
+    #[serde(default)]
+    optional: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -777,6 +798,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "screenshot" => screenshot_android(parse_screenshot_options(arguments, "android.png")?),
         "plugin:list" => list_plugins(parse_project_only(arguments)?),
         "plugin:doctor" => doctor_plugins(parse_project_only(arguments)?),
+        "update:bundle" => build_update_bundle(parse_update_bundle_options(arguments)?),
         "runtime:list" => list_runtimes(parse_project_only(arguments)?),
         "runtime:info" => runtime_info(parse_project_only(arguments)?),
         "runtime:use" => runtime_use(parse_runtime_use(arguments)?),
@@ -954,6 +976,24 @@ fn parse_project_only(mut arguments: impl Iterator<Item = OsString>) -> Result<P
         ));
     }
     Ok(PathBuf::from(project))
+}
+
+fn parse_update_bundle_options(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let project = PathBuf::from(arguments.next().unwrap_or_else(|| OsString::from(".")));
+    let output = PathBuf::from(
+        arguments
+            .next()
+            .unwrap_or_else(|| OsString::from("artifacts/pam-update.pna")),
+    );
+    if let Some(extra) = arguments.next() {
+        return Err(format!(
+            "unexpected update bundle argument {}",
+            extra.to_string_lossy()
+        ));
+    }
+    Ok((project, output))
 }
 
 fn parse_native_diagnostics_options(
@@ -1474,6 +1514,22 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
             current_version,
             &current_version_text,
         )?;
+        let coupled_plugins = package
+            .require
+            .keys()
+            .filter(|dependency| {
+                dependency.starts_with("pushinbr/pam-native-")
+                    && dependency.as_str() != "pushinbr/pam-native"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if !coupled_plugins.is_empty() {
+            return Err(format!(
+                "plugin {} depends on sibling PAM Native plugins: {}; depend only on pushinbr/pam-native and negotiate public capabilities instead",
+                package.name,
+                coupled_plugins.join(", ")
+            ));
+        }
         let idl_digest = plugin_manifest
             .idl
             .as_ref()
@@ -1527,6 +1583,21 @@ fn validate_plugin_manifest(
         return Err(format!(
             "plugin {package} requires protocol {}, but this SDK implements {}",
             manifest.protocol, PLUGIN_PROTOCOL_VERSION
+        ));
+    }
+    validate_plugin_capabilities(package, "required", &manifest.capabilities.required)?;
+    validate_plugin_capabilities(package, "optional", &manifest.capabilities.optional)?;
+    let missing = manifest
+        .capabilities
+        .required
+        .iter()
+        .filter(|capability| !PLUGIN_CAPABILITIES.contains(&capability.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "plugin {package} requires unavailable capabilities: {}",
+            missing.join(", ")
         ));
     }
     let minimum = parse_release_version(&manifest.pam_native.minimum)
@@ -1642,6 +1713,33 @@ fn validate_plugin_manifest(
     for binding in &manifest.views {
         validate_binding(package, "view", &binding.name, &binding.class)?;
         validate_ios_binding(package, "view", binding.ios_class.as_deref())?;
+    }
+    Ok(())
+}
+
+fn validate_plugin_capabilities(
+    package: &str,
+    kind: &str,
+    capabilities: &[String],
+) -> Result<(), String> {
+    if capabilities.len() > 64
+        || capabilities.iter().collect::<BTreeSet<_>>().len() != capabilities.len()
+    {
+        return Err(format!(
+            "plugin {package} has an invalid {kind} capability list"
+        ));
+    }
+    if capabilities.iter().any(|capability| {
+        capability.len() > 96
+            || capability.split(['.', '_', '-']).count() < 2
+            || capability.split(['.', '_', '-']).count() > 8
+            || !capability.bytes().enumerate().all(|(index, byte)| {
+                byte.is_ascii_lowercase()
+                    || byte.is_ascii_digit()
+                    || (index > 0 && matches!(byte, b'.' | b'_' | b'-'))
+            })
+    }) {
+        return Err(format!("plugin {package} has an invalid {kind} capability"));
     }
     Ok(())
 }
@@ -4379,6 +4477,16 @@ fn doctor_plugins(project_path: PathBuf) -> Result<u8, String> {
         format!("version {PLUGIN_PROTOCOL_VERSION}"),
     );
     check("Installed plugins", true, project.plugins.len().to_string());
+    let lock_errors = plugin_lock_errors(&project)?;
+    check(
+        "Composer plugin lock",
+        lock_errors.is_empty(),
+        if lock_errors.is_empty() {
+            "every plugin is pinned by name and exact version".to_owned()
+        } else {
+            lock_errors.join("; ")
+        },
+    );
     for plugin in &project.plugins {
         check(
             &plugin.package,
@@ -4394,8 +4502,63 @@ fn doctor_plugins(project_path: PathBuf) -> Result<u8, String> {
             ),
         );
     }
-    println!("\nAll discovered plugins are compatible and safe to autolink.");
-    Ok(0)
+    if lock_errors.is_empty() {
+        println!(
+            "\nAll discovered plugins are compatible, independent, locked, and safe to autolink."
+        );
+        Ok(0)
+    } else {
+        println!("\nPlugin certification failed; regenerate and commit composer.lock.");
+        Ok(1)
+    }
+}
+
+fn plugin_lock_errors(project: &Project) -> Result<Vec<String>, String> {
+    let path = project.root.join("composer.lock");
+    let bytes =
+        fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Err("composer.lock exceeds the 16 MiB certification limit".to_owned());
+    }
+    let document: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid {}: {error}", path.display()))?;
+    let mut locked = BTreeMap::new();
+    for key in ["packages", "packages-dev"] {
+        for package in document
+            .get(key)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            if let (Some(name), Some(version)) = (
+                package.get("name").and_then(serde_json::Value::as_str),
+                package.get("version").and_then(serde_json::Value::as_str),
+            ) {
+                locked.insert(name, version);
+            }
+        }
+    }
+    let mut errors = Vec::new();
+    for plugin in &project.plugins {
+        match locked.get(plugin.package.as_str()) {
+            None => errors.push(format!("{} is absent from composer.lock", plugin.package)),
+            Some(version) if *version != plugin.package_version => errors.push(format!(
+                "{} installed {} but lock pins {}",
+                plugin.package, plugin.package_version, version
+            )),
+            Some(_) => {}
+        }
+        if plugin.package_version.is_empty()
+            || plugin.package_version.starts_with("dev-")
+            || plugin.package_version.ends_with("-dev")
+        {
+            errors.push(format!(
+                "{} does not use an immutable release version",
+                plugin.package
+            ));
+        }
+    }
+    Ok(errors)
 }
 
 fn check(label: &str, okay: bool, detail: String) {
@@ -6792,12 +6955,18 @@ fn refresh_dev_bundle(
 }
 
 fn encode_dev_bundle(root: &Path) -> Result<Vec<u8>, String> {
+    encode_bundle(root, MAX_DEV_BUNDLE_BYTES, "hot reload")
+}
+
+fn encode_bundle(root: &Path, maximum_bytes: usize, purpose: &str) -> Result<Vec<u8>, String> {
     let files = files_in(root)?;
     if files.is_empty() || files.len() > MAX_PROJECT_FILES {
-        return Err("hot reload bundle must contain between 1 and 10,000 files".to_owned());
+        return Err(format!(
+            "{purpose} bundle must contain between 1 and 10,000 files"
+        ));
     }
     if !root.join("index.php").is_file() {
-        return Err("hot reload bundle must contain index.php".to_owned());
+        return Err(format!("{purpose} bundle must contain index.php"));
     }
     let count = u32::try_from(files.len()).map_err(|_| "too many hot reload files".to_owned())?;
     let mut bytes = Vec::new();
@@ -6828,11 +6997,46 @@ fn encode_dev_bundle(root: &Path) -> Result<Vec<u8>, String> {
         bytes.extend_from_slice(path);
         bytes.extend_from_slice(&content_length.to_le_bytes());
         bytes.extend_from_slice(&contents);
-        if bytes.len() > MAX_DEV_BUNDLE_BYTES {
-            return Err("hot reload bundle exceeds 16 MiB; reduce development assets".to_owned());
+        if bytes.len() > maximum_bytes {
+            return Err(format!("{purpose} bundle exceeds {maximum_bytes} bytes"));
         }
     }
     Ok(bytes)
+}
+
+fn build_update_bundle((project_path, output): (PathBuf, PathBuf)) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let staging = std::env::temp_dir().join(format!(
+        "pam-native-update-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    let result = (|| {
+        stage_project_at(&project, &staging)?;
+        let bundle = encode_bundle(&staging, MAX_UPDATE_BUNDLE_BYTES, "update")?;
+        let destination = if output.is_absolute() {
+            output
+        } else {
+            project.root.join(output)
+        };
+        write_atomic(&destination, &bundle)?;
+        println!(
+            "PAM Native update bundle\nPath   {}\nSHA256 {:x}\nBytes  {}",
+            destination.display(),
+            Sha256::digest(&bundle),
+            bundle.len()
+        );
+        Ok(0)
+    })();
+    if staging.is_dir() {
+        fs::remove_dir_all(&staging).map_err(|error| {
+            format!("cannot clean update staging {}: {error}", staging.display())
+        })?;
+    }
+    result
 }
 
 fn dev_bundle_path(path: &Path) -> Result<String, String> {
@@ -7003,7 +7207,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
     );
 }
 
@@ -7026,7 +7230,10 @@ mod tests {
 
         let first = encode_dev_bundle(&root).expect("first bundle");
         let second = encode_dev_bundle(&root).expect("second bundle");
+        let production =
+            encode_bundle(&root, MAX_UPDATE_BUNDLE_BYTES, "update").expect("production bundle");
         assert_eq!(first, second);
+        assert_eq!(first, production);
         assert!(first.starts_with(b"PNA1"));
         assert!(first.len() <= MAX_DEV_BUNDLE_BYTES);
 
@@ -7133,6 +7340,37 @@ mod tests {
         assert_eq!(value["counts"]["high"], 1);
         assert_eq!(value["findings"][0]["severityCode"], 3);
         assert!(value["findings"][0].get("severity").is_none());
+    }
+
+    #[test]
+    fn plugin_capabilities_are_bounded_and_independent() {
+        assert!(
+            validate_plugin_capabilities(
+                "community/camera",
+                "required",
+                &["runtime.modules.v1".to_owned(), "wire.binary.v1".to_owned()],
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_plugin_capabilities(
+                "community/camera",
+                "required",
+                &[
+                    "runtime.modules.v1".to_owned(),
+                    "runtime.modules.v1".to_owned()
+                ],
+            )
+            .is_err()
+        );
+        assert!(
+            validate_plugin_capabilities(
+                "community/camera",
+                "required",
+                &["pushinbr/pam-native-image".to_owned()],
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -7559,6 +7797,14 @@ mod tests {
         )
         .expect("installed");
         fs::write(
+            root.join("composer.lock"),
+            r#"{
+                "packages": [{"name": "community/example", "version": "1.2.3"}],
+                "packages-dev": []
+            }"#,
+        )
+        .expect("composer lock");
+        fs::write(
             package.join("pam-native.plugin.json"),
             r#"{
                 "version": 1,
@@ -7615,6 +7861,22 @@ mod tests {
         let project = load_project(&root).expect("discover plugin");
         assert_eq!(project.plugins.len(), 1);
         assert_eq!(project.plugins[0].package, "community/example");
+        assert!(
+            plugin_lock_errors(&project)
+                .expect("certify lock")
+                .is_empty()
+        );
+        fs::write(
+            root.join("composer.lock"),
+            r#"{"packages":[{"name":"community/example","version":"1.2.4"}]}"#,
+        )
+        .expect("mismatched lock");
+        assert_eq!(plugin_lock_errors(&project).expect("reject lock").len(), 1);
+        fs::write(
+            root.join("composer.lock"),
+            r#"{"packages":[{"name":"community/example","version":"1.2.3"}]}"#,
+        )
+        .expect("restore lock");
         let audit = collect_mobile_audit_findings(&project);
         assert!(audit.iter().any(|finding| {
             finding.rule == "android.sensitive-permission"

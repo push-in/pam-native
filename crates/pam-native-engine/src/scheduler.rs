@@ -2,6 +2,8 @@ use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap};
 use std::time::{Duration, Instant};
 
+use crate::fiber::FiberLane;
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[repr(u8)]
 pub enum TaskPriority {
@@ -12,6 +14,20 @@ pub enum TaskPriority {
     Prefetch = 5,
     Background = 6,
     Idle = 7,
+}
+
+impl From<TaskPriority> for FiberLane {
+    fn from(priority: TaskPriority) -> Self {
+        match priority {
+            TaskPriority::Input => Self::Input,
+            TaskPriority::Animation => Self::Animation,
+            TaskPriority::VisibleRender => Self::VisibleRender,
+            TaskPriority::Navigation => Self::Navigation,
+            TaskPriority::Prefetch => Self::Prefetch,
+            TaskPriority::Background => Self::Background,
+            TaskPriority::Idle => Self::Idle,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -227,5 +243,7 @@ mod tests {
         assert_eq!(RefreshRate::closest(59.0), RefreshRate::Hertz60);
         assert!(RefreshRate::Hertz120.frame_budget() < RefreshRate::Hertz60.frame_budget());
         assert!(RefreshRate::Hertz144.frame_budget() < RefreshRate::Hertz120.frame_budget());
+        assert_eq!(FiberLane::from(TaskPriority::Input) as u8, 1);
+        assert_eq!(FiberLane::from(TaskPriority::Idle) as u8, 7);
     }
 }

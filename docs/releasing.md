@@ -1,5 +1,17 @@
 # Releasing Pam Native
 
+## Non-negotiable community first-run gate
+
+No release may be published merely because source tests and package builds are
+green. The release graph must create a project in a new temporary directory
+through `pam init --template mobile`, allow the generated Composer project and
+native toolchain to install their own declared dependencies, execute `pam dev`,
+launch on an Android emulator, inspect process logs for runtime/plugin failures,
+and capture a valid PNG. The same contract covers `native-ui`; PAM owns the
+equivalent journeys for every other official template. `publish` explicitly
+depends on this gate, so a missing Gradle/SDK/runtime, early exit, or runtime
+error blocks the release.
+
 Application releases use one fail-closed entry point:
 
 ```bash

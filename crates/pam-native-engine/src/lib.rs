@@ -1,5 +1,6 @@
 pub mod bridge_v2;
 mod ffi;
+pub mod fiber;
 mod font_metrics;
 mod layout;
 pub mod performance;

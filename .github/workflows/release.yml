@@ -318,6 +318,68 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  community-first-run:
+    name: Create and run every clean community starter
+    needs: [source-contracts, android, native-cli]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: push-in/pam
+          ref: main
+          path: pam-cli
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: push-in/pam-native-ui
+          ref: 20ae14301c019fa0ca43c6977f80e74a80eb1bf6
+          path: pam-native-ui-candidate
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: pam-native-cli-linux-x86_64
+          path: candidate-cli
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Assemble the candidate PAM entrypoint and public runtime payload
+        run: |
+          curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+            --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
+            -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+          test -x "${HOME}/.local/bin/pam"
+          PHP_CONFIG=$(command -v php-config) cargo build --locked --release \
+            --manifest-path pam-cli/Cargo.toml --bin pam
+          test -x pam-cli/target/release/pam
+          candidate=$(find candidate-cli -maxdepth 1 -type f -name 'pam-native-cli-*-linux-x86_64' -print -quit)
+          test -n "${candidate}"
+          chmod +x "${candidate}"
+          printf 'PAM_BIN=%s\n' "${GITHUB_WORKSPACE}/pam-cli/target/release/pam" >>"${GITHUB_ENV}"
+          printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"
+      - name: Prove every documented pam init and pam dev journey
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PAM_NATIVE_PACKAGE_PATH: ${{ github.workspace }}/packages/native
+          PAM_NATIVE_HOME: ${{ github.workspace }}
+          PAM_MOBILE_UI_PACKAGE_PATH: ${{ github.workspace }}/pam-native-ui-candidate
+          PAM_NATIVE_CLI: ${{ env.PAM_NATIVE_CLI }}
+          PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: pam-cli/scripts/community-experience-gate.sh all
+
   publish:
     name: Publish GitHub release
     needs:
@@ -329,6 +391,7 @@ jobs:
       - ecosystem-compatibility
       - ecosystem-android
       - ecosystem-ios
+      - community-first-run
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7

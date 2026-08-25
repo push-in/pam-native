@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "84954ddac5373dfe4ce33dfb6f4b1e8e",
+    "content-hash": "8a475184be1b1a55c847f5fe299423b1",
     "packages": [
         {
             "name": "pam-community/example-plugin",
@@ -12,11 +12,11 @@
             "dist": {
                 "type": "path",
                 "url": "../community-plugin",
-                "reference": "b125eff40b4dd80e3d3377045880fc33dea7d3c4"
+                "reference": "666557afb4a1183e297934678866c8626ec52437"
             },
             "require": {
                 "php": "^8.5",
-                "pushinbr/pam-native": "^0.8.0"
+                "pushinbr/pam-native": "^1.0"
             },
             "type": "pam-native-plugin",
             "extra": {
@@ -40,11 +40,11 @@
         },
         {
             "name": "pushinbr/pam-native",
-            "version": "0.8.0",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/native",
-                "reference": "8a1b7836e42ebd13c4b9527d88923970667fd2c5"
+                "reference": "6b32db52d200273c4f88bb781af860486073497e"
             },
             "require": {
                 "php": "^8.5"
@@ -55,7 +55,8 @@
                 "bin/pam-native-format",
                 "bin/pam-native-language-server",
                 "bin/pam-native-optimize",
-                "bin/pam-native-routes"
+                "bin/pam-native-routes",
+                "bin/pam-native-style"
             ],
             "type": "library",
             "extra": {
@@ -109,6 +110,13 @@
                                 "audit"
                             ],
                             "description": "Audit native capabilities and platform authority"
+                        },
+                        "update:bundle": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "update:bundle"
+                            ],
+                            "description": "Build a deterministic signed-update payload"
                         },
                         "codegen": {
                             "bin": "bin/pam-native",
@@ -254,6 +262,10 @@
                             "script": "bin/pam-native-routes",
                             "description": "Inspect PAM Native routes"
                         },
+                        "style": {
+                            "script": "bin/pam-native-style",
+                            "description": "Inspect, explain and generate PAM Native styles"
+                        },
                         "make:component": {
                             "bin": "bin/pam-native",
                             "arguments": [
@@ -309,6 +321,13 @@
                                 "release"
                             ],
                             "description": "Certify, sign and package a PAM Native release"
+                        },
+                        "production:certify": {
+                            "bin": "bin/pam-native",
+                            "arguments": [
+                                "production:certify"
+                            ],
+                            "description": "Run strict PAM Native production certification"
                         },
                         "sign": {
                             "bin": "bin/pam-native",
