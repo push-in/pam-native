@@ -4628,8 +4628,8 @@ file_put_contents(
     "version": 1,
     "protocol": 1,
     "pamNative": {
-        "minimum": "0.3.0",
-        "maximumExclusive": "0.11.0"
+        "minimum": "1.0.0",
+        "maximumExclusive": "2.0.0"
     },
     "php": {
         "provider": "Pam\\Native\\Tests\\Fixtures\\ExamplePluginProvider"
@@ -6309,8 +6309,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '0.10.0',
-    'The runtime SDK contract must match the 0.10.0 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.0.0',
+    'The runtime SDK contract must match the stable 1.0.0 package release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

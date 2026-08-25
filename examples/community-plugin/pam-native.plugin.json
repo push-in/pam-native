@@ -3,7 +3,7 @@
     "version": 1,
     "protocol": 1,
     "pamNative": {
-        "minimum": "0.8.0",
+        "minimum": "1.0.0",
         "maximumExclusive": "2.0.0"
     },
     "php": {
