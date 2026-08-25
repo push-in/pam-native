@@ -41,6 +41,7 @@ jobs:
       - name: Validate manifests
         run: |
           cargo metadata --locked --no-deps
+          composer validate --strict --no-check-lock composer.json
           composer validate --strict --no-check-lock packages/native/composer.json
           composer validate --strict --no-check-lock examples/community-plugin/composer.json
           composer validate --strict --working-dir=examples/showcase

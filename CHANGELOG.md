@@ -11,6 +11,8 @@
   patch regressions.
 - Ship fat-LTO performance builds plus locally reproducible PGO training, while
   preserving symbols in the dedicated profiling artifact.
+- Make the canonical monorepo directly Composer-installable so Packagist points
+  to push-in/pam-native, while retaining the legacy split as a release mirror.
 
 ## 0.9.1 - 2026-08-24
 
