@@ -357,6 +357,7 @@ jobs:
             --connect-timeout 15 --max-time 120 --max-filesize 1048576 \
             -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
           test -x "${HOME}/.local/bin/pam"
+          test -f "${HOME}/.local/share/pam/runtime/catalog.json"
           PHP_CONFIG=$(command -v php-config) cargo build --locked --release \
             --manifest-path pam-cli/Cargo.toml --bin pam
           test -x pam-cli/target/release/pam
@@ -364,11 +365,13 @@ jobs:
           test -n "${candidate}"
           chmod +x "${candidate}"
           printf 'PAM_BIN=%s\n' "${GITHUB_WORKSPACE}/pam-cli/target/release/pam" >>"${GITHUB_ENV}"
+          printf 'PAM_HOME=%s\n' "${HOME}/.local/share/pam" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"
       - name: Prove every documented pam init and pam dev journey
         uses: reactivecircus/android-emulator-runner@v2
         env:
           PAM_NATIVE_PACKAGE_PATH: ${{ github.workspace }}/packages/native
+          PAM_HOME: ${{ env.PAM_HOME }}
           PAM_NATIVE_HOME: ${{ github.workspace }}
           PAM_MOBILE_UI_PACKAGE_PATH: ${{ github.workspace }}/pam-native-ui-candidate
           PAM_NATIVE_CLI: ${{ env.PAM_NATIVE_CLI }}

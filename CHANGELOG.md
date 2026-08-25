@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4 - 2026-08-25
+
+- Carry the installed PAM runtime catalog into clean Native starter execution,
+  so the candidate CLI can resolve Android PHP runtimes without host setup.
+- Keep Laravel/backend sync adapters independent from the Native frontend while
+  still certifying their own PHP dependency graphs.
+
 ## 1.0.3 - 2026-08-25
 
 - Certify Native 1.x dependents against this exact canonical release candidate
