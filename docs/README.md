@@ -5,6 +5,7 @@
 
 - [PHP Runtime Manager](runtime-manager.md)
 - [Singularity architecture](singularity.md)
+- [Stable 1.x architecture, independence, capabilities and Freeze](architecture-1.0.md)
 - [UI Language 2](ui-language-2.md)
 - [Migrating to UI Language 2](migration-ui-language-2.md)
 
