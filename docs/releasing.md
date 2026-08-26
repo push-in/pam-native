@@ -21,6 +21,11 @@ pam release --platform ios
 pam release --platform all
 ```
 
+The repository release workflow also supports a manual rerun against an
+existing immutable `v*` tag. Select that tag as the workflow ref; the workflow
+then builds and attests the exact tagged tree. This recovery path never moves a
+tag and never accepts an arbitrary version input.
+
 The command runs Native doctor and plugin certification before validating
 signing and producing checksummed release artifacts. It never creates signing
 credentials or uploads to a store. CI/store adapters consume the resulting
