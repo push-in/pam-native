@@ -41,3 +41,17 @@ suites retain frame-time, startup, memory, and long-run budgets.
 Profile a release-like binary and optimize only measured hot paths. Compare the
 same device, build type, fixture, thermal state, and sample count. A change is
 accepted only when functional tests remain green and its p99 does not regress.
+
+## Visual DOM budget
+
+```bash
+php packages/native/tests/visual_dom_performance.php
+```
+
+CI builds a 5,001-node retained document, executes 4,000 indexed selectors and
+applies 5,000 property/class changes through one transaction. Default ceilings
+are 500 ms for indexing, 500 ms for queries and 5,000 ms for the mutation batch;
+override them with `PAM_DOM_INDEX_MS`, `PAM_DOM_QUERY_MS` and
+`PAM_DOM_MUTATION_MS` only during investigation. The benchmark prints measured
+latencies and peak memory as JSON so release evidence can retain the exact
+machine result.

@@ -22,6 +22,16 @@ abstract class Element implements Renderable
 
     private ?string $elementKey = null;
 
+    private ?string $domIdentity = null;
+
+    private ?string $domId = null;
+
+    /** @var list<string> */
+    private array $domClasses = [];
+
+    /** @var array<string, string> */
+    private array $domDataset = [];
+
     final protected function __construct(private readonly NodeKind $kind)
     {
     }
@@ -34,6 +44,50 @@ abstract class Element implements Renderable
 
         $copy = clone $this;
         $copy->elementKey = $key;
+
+        return $copy;
+    }
+
+    final public function id(string $id): static
+    {
+        if (preg_match('/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/D', $id) !== 1) {
+            throw new InvalidArgumentException('DOM ids must use a bounded portable identifier.');
+        }
+
+        $copy = clone $this;
+        $copy->domId = $id;
+
+        return $copy->testId($id);
+    }
+
+    final public function class(string ...$classes): static
+    {
+        $copy = clone $this;
+        foreach ($classes as $class) {
+            foreach (preg_split('/\s+/', trim($class), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $token) {
+                if (preg_match('/^[A-Za-z_][A-Za-z0-9_-]{0,127}$/D', $token) !== 1) {
+                    throw new InvalidArgumentException("Invalid DOM class token {$token}.");
+                }
+                if (!in_array($token, $copy->domClasses, true)) {
+                    $copy->domClasses[] = $token;
+                }
+            }
+        }
+
+        return $copy;
+    }
+
+    final public function data(string $name, string $value): static
+    {
+        if (preg_match('/^[a-z][a-z0-9-]{0,63}$/D', $name) !== 1) {
+            throw new InvalidArgumentException('DOM data names must use lowercase kebab-case.');
+        }
+        if (strlen($value) > 4_096 || preg_match('//u', $value) !== 1) {
+            throw new InvalidArgumentException('DOM data values must be valid UTF-8 up to 4 KiB.');
+        }
+
+        $copy = clone $this;
+        $copy->domDataset[$name] = $value;
 
         return $copy;
     }
@@ -256,6 +310,87 @@ abstract class Element implements Renderable
     final public function elementKey(): ?string
     {
         return $this->elementKey;
+    }
+
+    final public function domIdentity(): ?string
+    {
+        return $this->domIdentity;
+    }
+
+    final public function domId(): ?string
+    {
+        return $this->domId;
+    }
+
+    /** @return list<string> */
+    final public function domClasses(): array
+    {
+        return $this->domClasses;
+    }
+
+    /** @return array<string, string> */
+    final public function domDataset(): array
+    {
+        return $this->domDataset;
+    }
+
+    /** @internal Visual DOM retained-tree operation. */
+    final public function domWithIdentity(string $identity): static
+    {
+        if (preg_match('/^n[1-9][0-9]{0,18}$/D', $identity) !== 1) {
+            throw new InvalidArgumentException('DOM identities must be positive bounded handles.');
+        }
+        $copy = clone $this;
+        $copy->domIdentity = $identity;
+
+        return $copy;
+    }
+
+    /** @internal Visual DOM retained-tree operation. @param list<Element> $children */
+    final public function domWithChildren(array $children): static
+    {
+        return $this->withChildren($children);
+    }
+
+    /** @internal Visual DOM retained-tree operation. */
+    final public function domWithProperty(
+        PropKey $key,
+        string|int|float|bool|BinaryValue $value,
+    ): static {
+        return $this->withProperty($key, $value);
+    }
+
+    /** @internal Visual DOM retained-tree operation. */
+    final public function domWithoutProperty(PropKey $key): static
+    {
+        $copy = clone $this;
+        unset($copy->properties[$key->value]);
+
+        return $copy;
+    }
+
+    /** @internal Visual DOM retained-tree operation. */
+    final public function domWithEvent(EventKind $kind, Closure $handler): static
+    {
+        return $this->withEvent($kind, $handler);
+    }
+
+    /** @internal Visual DOM retained-tree operation. @param list<string> $classes */
+    final public function domWithClasses(array $classes): static
+    {
+        $copy = clone $this;
+        $copy->domClasses = [];
+
+        return $copy->class(...$classes);
+    }
+
+    /** @internal Visual DOM retained-tree operation. */
+    final public function domWithoutData(string $name): static
+    {
+        $copy = clone $this;
+        unset($copy->domDataset[$name]);
+
+        return $copy;
     }
 
     /**

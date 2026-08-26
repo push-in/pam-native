@@ -7157,5 +7157,6 @@ require __DIR__.'/language2.php';
 require __DIR__.'/style_conformance.php';
 require __DIR__.'/singularity.php';
 require __DIR__.'/signals.php';
+require __DIR__.'/visual_dom.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

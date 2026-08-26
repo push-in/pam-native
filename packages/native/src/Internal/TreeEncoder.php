@@ -232,7 +232,10 @@ final class TreeEncoder
             $this->encodeNode($child, $childId, $id, $childIndex, $childPath);
         }
 
-        if ($path === 'root' || ($element->elementKey() !== null && $element->children() !== [])) {
+        if (
+            $path === 'root'
+            || (($element->domIdentity() !== null || $element->elementKey() !== null) && $element->children() !== [])
+        ) {
             $this->cacheCandidates[] = new SubtreeCacheCandidate(
                 element: $element,
                 path: $path,
@@ -392,14 +395,17 @@ final class TreeEncoder
 
     private function pathSegment(Element $element, int $index): string
     {
-        return $element->elementKey() !== null
+        return $element->domIdentity() !== null
+            ? 'dom:'.$element->domIdentity()
+            : ($element->elementKey() !== null
             ? 'key:'.$element->elementKey()
-            : $element->kind()->value.':'.$index;
+            : $element->kind()->value.':'.$index);
     }
 
     private function nodeId(string $path, Element $element): int
     {
-        $identity = $path.'|'.$element->kind()->value;
+        $identity = ($element->domIdentity() === null ? $path : 'dom:'.$element->domIdentity())
+            .'|'.$element->kind()->value;
         $id = $this->identityIds[$identity]
             ??= (int) hexdec(substr(hash('xxh3', $identity), 0, 15));
 
