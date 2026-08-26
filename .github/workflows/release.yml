@@ -2,6 +2,11 @@ name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing immutable v* tag to release
+        required: true
+        type: string
   push:
     tags:
       - "v*"
@@ -13,33 +18,60 @@ permissions:
 
 env:
   PAM_RUNTIME_RELEASE_TAG: v2.0.7
+  PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
 
 defaults:
   run:
     shell: bash --noprofile --norc -euo pipefail {0}
 
 jobs:
+  release-ref:
+    name: Resolve immutable release tag
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Validate immutable tag authority
+        run: |
+          [[ "${PAM_RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(git rev-parse "${PAM_RELEASE_TAG}^{commit}")" = "$(git rev-parse HEAD)"
+
   source-contracts:
     name: Certify source contracts and device hosts
+    needs: release-ref
     uses: ./.github/workflows/ci.yml
+    with:
+      checkout_ref: ${{ inputs.release_tag || github.ref }}
 
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
+    needs: release-ref
     uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main
 
   ecosystem-android:
     name: Certify official Android plugins
+    needs: release-ref
     uses: ./.github/workflows/ecosystem-android.yml
+    with:
+      checkout_ref: ${{ inputs.release_tag || github.ref }}
 
   ecosystem-ios:
     name: Certify official iOS plugins
+    needs: release-ref
     uses: ./.github/workflows/ecosystem-ios.yml
+    with:
+      checkout_ref: ${{ inputs.release_tag || github.ref }}
 
   ios:
     name: Package iOS renderer
+    needs: release-ref
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
       - name: Build Swift package for iOS
         working-directory: ios
         run: >-
@@ -56,7 +88,7 @@ jobs:
       - name: Create versioned archive
         shell: bash
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           source_date_epoch=$(git log -1 --format=%ct)
           mkdir -p dist
           artifact="pam-native-ios-${version}.zip"
@@ -78,13 +110,13 @@ jobs:
       - name: Enforce the iOS package budget
         run: >-
           python3 benchmarks/package/gate.py
-          --artifact "1=dist/pam-native-ios-${GITHUB_REF_NAME#v}.zip"
-          --output "dist/pam-native-ios-${GITHUB_REF_NAME#v}.package-budget.json"
+          --artifact "1=dist/pam-native-ios-${PAM_RELEASE_TAG#v}.zip"
+          --output "dist/pam-native-ios-${PAM_RELEASE_TAG#v}.package-budget.json"
       - name: Verify the iOS package budget evidence
         run: >-
           python3 benchmarks/package/gate.py
-          --artifact "1=dist/pam-native-ios-${GITHUB_REF_NAME#v}.zip"
-          --verify-report "dist/pam-native-ios-${GITHUB_REF_NAME#v}.package-budget.json"
+          --artifact "1=dist/pam-native-ios-${PAM_RELEASE_TAG#v}.zip"
+          --verify-report "dist/pam-native-ios-${PAM_RELEASE_TAG#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -103,9 +135,12 @@ jobs:
 
   android:
     name: Package Android renderer and plugin API
+    needs: release-ref
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -127,7 +162,7 @@ jobs:
             :plugin-api:assembleRelease
       - name: Create versioned artifacts
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           source_date_epoch=$(git log -1 --format=%ct)
           mkdir -p dist
           cp android/plugin-api/build/outputs/aar/plugin-api-release.aar \
@@ -162,7 +197,7 @@ jobs:
           cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"
       - name: Rebuild and verify the Android plugin API reproducibly
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           artifact="dist/pam-native-android-plugin-api-${version}.aar"
           ./android/gradlew -p android \
             -PpamNativeRoot="$GITHUB_WORKSPACE" \
@@ -177,7 +212,7 @@ jobs:
           rm "${RUNNER_TEMP}/${renderer}"
       - name: Write Android checksums
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           (
             cd dist
             sha256sum "pam-native-android-plugin-api-${version}.aar" \
@@ -188,15 +223,15 @@ jobs:
       - name: Enforce Android package budgets
         run: >-
           python3 benchmarks/package/gate.py
-          --artifact "2=dist/pam-native-android-renderer-${GITHUB_REF_NAME#v}.tar.gz"
-          --artifact "3=dist/pam-native-android-plugin-api-${GITHUB_REF_NAME#v}.aar"
-          --output "dist/pam-native-android-${GITHUB_REF_NAME#v}.package-budget.json"
+          --artifact "2=dist/pam-native-android-renderer-${PAM_RELEASE_TAG#v}.tar.gz"
+          --artifact "3=dist/pam-native-android-plugin-api-${PAM_RELEASE_TAG#v}.aar"
+          --output "dist/pam-native-android-${PAM_RELEASE_TAG#v}.package-budget.json"
       - name: Verify Android package budget evidence
         run: >-
           python3 benchmarks/package/gate.py
-          --artifact "2=dist/pam-native-android-renderer-${GITHUB_REF_NAME#v}.tar.gz"
-          --artifact "3=dist/pam-native-android-plugin-api-${GITHUB_REF_NAME#v}.aar"
-          --verify-report "dist/pam-native-android-${GITHUB_REF_NAME#v}.package-budget.json"
+          --artifact "2=dist/pam-native-android-renderer-${PAM_RELEASE_TAG#v}.tar.gz"
+          --artifact "3=dist/pam-native-android-plugin-api-${PAM_RELEASE_TAG#v}.aar"
+          --verify-report "dist/pam-native-android-${PAM_RELEASE_TAG#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -216,12 +251,15 @@ jobs:
 
   php-sdk:
     name: Package PHP SDK
+    needs: release-ref
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
       - name: Create reproducible SDK archive
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           source_date_epoch=$(git log -1 --format=%ct)
           mkdir -p dist
           create_php_archive() {
@@ -252,13 +290,13 @@ jobs:
       - name: Enforce the PHP SDK package budget
         run: >-
           python3 benchmarks/package/gate.py
-          --artifact "4=dist/pam-native-php-${GITHUB_REF_NAME#v}.tar.gz"
-          --output "dist/pam-native-php-${GITHUB_REF_NAME#v}.package-budget.json"
+          --artifact "4=dist/pam-native-php-${PAM_RELEASE_TAG#v}.tar.gz"
+          --output "dist/pam-native-php-${PAM_RELEASE_TAG#v}.package-budget.json"
       - name: Verify the PHP SDK package budget evidence
         run: >-
           python3 benchmarks/package/gate.py
-          --artifact "4=dist/pam-native-php-${GITHUB_REF_NAME#v}.tar.gz"
-          --verify-report "dist/pam-native-php-${GITHUB_REF_NAME#v}.package-budget.json"
+          --artifact "4=dist/pam-native-php-${PAM_RELEASE_TAG#v}.tar.gz"
+          --verify-report "dist/pam-native-php-${PAM_RELEASE_TAG#v}.package-budget.json"
       - uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
@@ -277,6 +315,7 @@ jobs:
 
   native-cli:
     name: Package Native CLI (${{ matrix.platform }})
+    needs: release-ref
     strategy:
       fail-fast: false
       matrix:
@@ -298,6 +337,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: ${{ matrix.target }}
@@ -307,7 +348,7 @@ jobs:
       - name: Build versioned Native CLI
         shell: bash
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           artifact="pam-native-cli-${version}-${{ matrix.platform }}${{ matrix.extension }}"
           cargo build --locked --release --package pam-native-cli --target '${{ matrix.target }}'
           mkdir -p dist
@@ -337,6 +378,8 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
       - uses: actions/checkout@v7
         with:
           repository: push-in/pam
@@ -416,6 +459,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.PAM_RELEASE_TAG }}
       - uses: actions/download-artifact@v8
         with:
           pattern: pam-native-*
@@ -425,7 +470,7 @@ jobs:
         run: rm -f dist/Info.plist dist/pam-native-android-prerequisites.tar.gz
       - name: Reverify downloaded package budget evidence
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           python3 benchmarks/package/gate.py \
             --artifact "1=dist/pam-native-ios-${version}.zip" \
             --verify-report "dist/pam-native-ios-${version}.package-budget.json"
@@ -438,7 +483,7 @@ jobs:
             --verify-report "dist/pam-native-php-${version}.package-budget.json"
       - name: Reverify downloaded reproducibility evidence
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           python3 benchmarks/package/reproducibility.py \
             --artifact "1=dist/pam-native-ios-${version}.zip" \
             --verify-report "dist/pam-native-ios-${version}.reproducibility.json"
@@ -456,11 +501,11 @@ jobs:
       - name: Generate SPDX 2.3 software bill of materials
         id: sbom
         run: |
-          version=${GITHUB_REF_NAME#v}
+          version=${PAM_RELEASE_TAG#v}
           sbom="dist/pam-native-${version}.spdx.json"
           python3 scripts/sbom.py \
             --version "${version}" \
-            --commit "${GITHUB_SHA}" \
+            --commit "$(git rev-parse HEAD)" \
             --created-epoch "$(git log -1 --format=%ct)" \
             --output "${sbom}"
           echo "path=${sbom}" >> "$GITHUB_OUTPUT"
@@ -471,5 +516,6 @@ jobs:
           sbom-path: ${{ steps.sbom.outputs.path }}
       - uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.PAM_RELEASE_TAG }}
           files: dist/*
           generate_release_notes: true

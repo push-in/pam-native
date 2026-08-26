@@ -2,6 +2,10 @@ name: Ecosystem Android certification
 
 on:
   workflow_call:
+    inputs:
+      checkout_ref:
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -30,6 +34,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
