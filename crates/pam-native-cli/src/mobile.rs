@@ -6872,13 +6872,41 @@ fn wait_for_android_install_services() -> Result<(), String> {
                                 &settings_stdout,
                                 &settings_stderr,
                             ) {
-                                return Ok(());
+                                match Command::new("adb")
+                                    .args(["shell", "sm", "list-volumes", "all"])
+                                    .output()
+                                {
+                                    Ok(storage) => {
+                                        let storage_stdout =
+                                            String::from_utf8_lossy(&storage.stdout);
+                                        let storage_stderr =
+                                            String::from_utf8_lossy(&storage.stderr);
+                                        if adb_storage_manager_ready(
+                                            storage.status.success(),
+                                            &storage_stdout,
+                                            &storage_stderr,
+                                        ) {
+                                            return Ok(());
+                                        }
+                                        last_diagnostic = format!(
+                                            "package and settings ready; storage manager response: {}\n{}",
+                                            storage_stdout.trim(),
+                                            storage_stderr.trim()
+                                        );
+                                    }
+                                    Err(error) => {
+                                        last_diagnostic = format!(
+                                            "package and settings ready; cannot query storage manager: {error}"
+                                        );
+                                    }
+                                }
+                            } else {
+                                last_diagnostic = format!(
+                                    "package service ready; settings provider response: {}\n{}",
+                                    settings_stdout.trim(),
+                                    settings_stderr.trim()
+                                );
                             }
-                            last_diagnostic = format!(
-                                "package service ready; settings provider response: {}\n{}",
-                                settings_stdout.trim(),
-                                settings_stderr.trim()
-                            );
                         }
                         Err(error) => {
                             last_diagnostic = format!(
@@ -6899,7 +6927,7 @@ fn wait_for_android_install_services() -> Result<(), String> {
     }
 
     Err(format!(
-        "Android package and settings services did not become ready within {} seconds; last adb response: {}",
+        "Android package, settings and storage services did not become ready within {} seconds; last adb response: {}",
         ADB_INSTALL_SERVICE_POLLS * ADB_INSTALL_SERVICE_POLL_INTERVAL.as_secs() as usize,
         last_diagnostic.trim()
     ))
@@ -6921,9 +6949,13 @@ fn adb_settings_provider_ready(status_success: bool, stdout: &str, stderr: &str)
     matches!(stdout.trim(), "0" | "1")
 }
 
+fn adb_storage_manager_ready(status_success: bool, stdout: &str, stderr: &str) -> bool {
+    status_success && stderr.trim().is_empty() && !stdout.trim().is_empty()
+}
+
 fn transient_adb_install_failure(diagnostic: &str) -> bool {
     let diagnostic = diagnostic.to_ascii_lowercase();
-    [
+    let known_service_failure = [
         "broken pipe",
         "connection reset",
         "device offline",
@@ -6935,7 +6967,11 @@ fn transient_adb_install_failure(diagnostic: &str) -> bool {
         "cannot connect to daemon",
     ]
     .iter()
-    .any(|message| diagnostic.contains(message))
+    .any(|message| diagnostic.contains(message));
+    let storage_startup_failure = diagnostic.contains("installlocationutils")
+        && diagnostic.contains("storagemanager.getvolumes()")
+        && diagnostic.contains("null object reference");
+    known_service_failure || storage_startup_failure
 }
 
 fn debug_application_id(project: &Project) -> String {
@@ -8190,6 +8226,12 @@ mod tests {
         assert!(transient_adb_install_failure(
             "java.lang.IllegalStateException: Cannot access system provider: 'settings' before system providers are installed!"
         ));
+        assert!(transient_adb_install_failure(
+            "java.lang.NullPointerException: StorageManager.getVolumes() on a null object reference at InstallLocationUtils.resolveInstallVolume"
+        ));
+        assert!(!transient_adb_install_failure(
+            "java.lang.NullPointerException: unrelated application exception"
+        ));
         assert!(!transient_adb_install_failure(
             "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"
         ));
@@ -8223,6 +8265,17 @@ mod tests {
             "java.lang.IllegalStateException: Cannot access system provider: settings"
         ));
         assert!(!adb_settings_provider_ready(true, "null\n", ""));
+        assert!(adb_storage_manager_ready(
+            true,
+            "private mounted null\nemulated;0 mounted null\n",
+            ""
+        ));
+        assert!(!adb_storage_manager_ready(true, "", ""));
+        assert!(!adb_storage_manager_ready(
+            false,
+            "",
+            "java.lang.NullPointerException"
+        ));
     }
 
     #[test]
