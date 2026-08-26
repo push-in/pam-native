@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.11 - 2026-08-26
+
+- Waits for Android to register a successfully installed activity before launching it, covering the final package-manager cold-boot race with bounded retries.
+- Keeps permission, manifest and other permanent launch failures fail-closed instead of retrying them.
+
 ## 1.0.10 - 2026-08-26
 
 - Makes Android boot-cold installs resilient to partially initialized package/storage services with a bounded recovery window and automatic non-streaming ADB fallback.

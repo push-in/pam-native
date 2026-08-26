@@ -34,6 +34,8 @@ const ADB_INSTALL_ATTEMPTS: usize = 12;
 const ADB_INSTALL_SERVICE_POLLS: usize = 60;
 const ADB_INSTALL_SERVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const ADB_INSTALL_RECOVERY_INTERVAL: Duration = Duration::from_secs(5);
+const ADB_LAUNCH_ATTEMPTS: usize = 60;
+const ADB_LAUNCH_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -6794,19 +6796,52 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
         BuildMode::Debug => debug_application_id(project),
         BuildMode::Release => project.manifest.application_id.clone(),
     };
-    command_status(
-        "adb",
-        &[
-            "shell",
-            "am",
-            "start",
-            "-W",
-            "-n",
-            &format!("{application_id}/dev.pam.nativeapp.PamActivity"),
-        ],
-    )?;
+    launch_android_activity(&application_id)?;
     println!("Started {application_id}");
     Ok(())
+}
+
+fn launch_android_activity(application_id: &str) -> Result<(), String> {
+    let component = format!("{application_id}/dev.pam.nativeapp.PamActivity");
+    let mut last_diagnostic = String::new();
+    for attempt in 1..=ADB_LAUNCH_ATTEMPTS {
+        let output = Command::new("adb")
+            .args(["shell", "am", "start", "-W", "-n", &component])
+            .output()
+            .map_err(|error| format!("cannot start adb activity launch: {error}"))?;
+        std::io::stdout()
+            .write_all(&output.stdout)
+            .map_err(|error| format!("cannot write adb output: {error}"))?;
+        std::io::stderr()
+            .write_all(&output.stderr)
+            .map_err(|error| format!("cannot write adb error output: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        last_diagnostic = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if attempt == ADB_LAUNCH_ATTEMPTS || !transient_adb_launch_failure(&last_diagnostic) {
+            return Err(format!(
+                "adb activity launch failed with status {}: {}",
+                output.status,
+                last_diagnostic.trim()
+            ));
+        }
+        eprintln!(
+            "pam-native: Android accepted the install but has not registered the activity yet; waiting before launch ({}/{})",
+            attempt + 1,
+            ADB_LAUNCH_ATTEMPTS
+        );
+        std::thread::sleep(ADB_LAUNCH_RETRY_INTERVAL);
+    }
+    Err(format!(
+        "Android activity did not become visible: {}",
+        last_diagnostic.trim()
+    ))
 }
 
 fn install_apk(apk: &Path) -> Result<(), String> {
@@ -6984,6 +7019,18 @@ fn transient_adb_install_failure(diagnostic: &str) -> bool {
     let package_storage_startup_failure = diagnostic.contains("packagemanagerinternal.freestorage")
         && diagnostic.contains("null object reference");
     known_service_failure || storage_startup_failure || package_storage_startup_failure
+}
+
+fn transient_adb_launch_failure(diagnostic: &str) -> bool {
+    let diagnostic = diagnostic.to_ascii_lowercase();
+    (diagnostic.contains("error type 3")
+        && diagnostic.contains("activity class")
+        && diagnostic.contains("does not exist"))
+        || diagnostic.contains("unable to resolve intent")
+        || diagnostic.contains("failure calling service activity")
+        || diagnostic.contains("can't find service: activity")
+        || diagnostic.contains("device offline")
+        || diagnostic.contains("broken pipe")
 }
 
 fn debug_application_id(project: &Project) -> String {
@@ -8252,6 +8299,22 @@ mod tests {
         ));
         assert!(!transient_adb_install_failure(
             "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]"
+        ));
+    }
+
+    #[test]
+    fn retries_only_transient_adb_activity_registration_failures() {
+        assert!(transient_adb_launch_failure(
+            "Error type 3: Activity class {dev.pam.app/dev.pam.nativeapp.PamActivity} does not exist."
+        ));
+        assert!(transient_adb_launch_failure(
+            "Error: Activity not started, unable to resolve Intent"
+        ));
+        assert!(transient_adb_launch_failure(
+            "cmd: Failure calling service activity: Broken pipe (32)"
+        ));
+        assert!(!transient_adb_launch_failure(
+            "java.lang.SecurityException: Permission Denial"
         ));
     }
 
