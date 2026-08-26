@@ -5,6 +5,7 @@ root=${1:-.}
 root=$(cd "${root}" && pwd -P)
 
 paths=(
+  .build
   target
   android/.gradle
   android/build
@@ -23,6 +24,7 @@ paths=(
   .pam-native/ios/App/build
   .pam-native/ios/HotReloadBundle
   examples/showcase/vendor
+  pam-cli/target
 )
 
 for relative in "${paths[@]}"; do

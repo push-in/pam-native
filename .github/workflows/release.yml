@@ -44,6 +44,7 @@ jobs:
         run: >-
           xcodebuild
           -scheme PamNative
+          -derivedDataPath '${{ github.workspace }}/.build/DerivedData'
           -configuration Release
           -destination 'generic/platform=iOS Simulator'
           CODE_SIGNING_ALLOWED=NO
@@ -95,6 +96,9 @@ jobs:
           path: dist/pam-native-ios-*
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   android:
     name: Package Android renderer and plugin API
@@ -205,6 +209,9 @@ jobs:
           path: dist/pam-native-android-*
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   php-sdk:
     name: Package PHP SDK
@@ -263,6 +270,9 @@ jobs:
           path: dist/pam-native-php-*
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   native-cli:
     name: Package Native CLI (${{ matrix.platform }})
@@ -314,6 +324,10 @@ jobs:
           path: dist/pam-native-cli-*
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        shell: bash
+        run: scripts/cleanup-build-artifacts.sh
 
   community-first-run:
     name: Create and run every clean community starter
@@ -382,6 +396,9 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: pam-cli/scripts/community-experience-gate.sh all
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   publish:
     name: Publish GitHub release
