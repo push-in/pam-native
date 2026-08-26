@@ -88,7 +88,7 @@ requireFragments($release, 'release.yml', [
     "  source-contracts:\n",
     "    uses: ./.github/workflows/ci.yml\n",
     "  ecosystem-android:\n",
-    "      native_ref: \${{ inputs.release_tag || github.ref }}\n",
+    "      native_ref: \${{ inputs.release_tag || github.ref_name }}\n",
     "    uses: ./.github/workflows/ecosystem-android.yml\n",
     "  ecosystem-ios:\n",
     "    uses: ./.github/workflows/ecosystem-ios.yml\n",
@@ -120,6 +120,9 @@ requireFragments($release, 'release.yml', [
     "            --created-epoch \"$(git log -1 --format=%ct)\" \\\n",
     "        uses: actions/attest-sbom@v4\n",
 ]);
+if (str_contains($release, 'inputs.release_tag || github.ref }}')) {
+    fail('release.yml must pass a short immutable tag, never refs/tags/*, to reusable workflows');
+}
 requireFragments($composerPackage, 'composer-package.yml', [
     "  ecosystem-compatibility:\n",
     "      native_ref: \${{ inputs.release_tag }}\n",
