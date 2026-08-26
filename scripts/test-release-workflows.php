@@ -60,6 +60,7 @@ $ci = workflow($root, 'ci.yml');
 $android = workflow($root, 'ecosystem-android.yml');
 $ios = workflow($root, 'ecosystem-ios.yml');
 $release = workflow($root, 'release.yml');
+$composerPackage = workflow($root, 'composer-package.yml');
 $androidBuild = file_get_contents("{$root}/android/build.gradle.kts");
 if ($androidBuild === false) {
     fail('cannot read android/build.gradle.kts');
@@ -87,6 +88,7 @@ requireFragments($release, 'release.yml', [
     "  source-contracts:\n",
     "    uses: ./.github/workflows/ci.yml\n",
     "  ecosystem-android:\n",
+    "      native_ref: \${{ inputs.release_tag || github.ref }}\n",
     "    uses: ./.github/workflows/ecosystem-android.yml\n",
     "  ecosystem-ios:\n",
     "    uses: ./.github/workflows/ecosystem-ios.yml\n",
@@ -117,6 +119,10 @@ requireFragments($release, 'release.yml', [
     "            sha256sum \"\${artifact}\" > \"\${artifact}.sha256\"\n",
     "            --created-epoch \"$(git log -1 --format=%ct)\" \\\n",
     "        uses: actions/attest-sbom@v4\n",
+]);
+requireFragments($composerPackage, 'composer-package.yml', [
+    "  ecosystem-compatibility:\n",
+    "      native_ref: \${{ inputs.release_tag }}\n",
 ]);
 if (substr_count($release, 'cmp "dist/${artifact}" "${RUNNER_TEMP}/${artifact}"') !== 3) {
     fail('release.yml must verify iOS, Android renderer, and PHP SDK archives byte for byte');
