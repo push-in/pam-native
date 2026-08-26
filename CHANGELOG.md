@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.8 - 2026-08-25
+
+- Require both Android's package service and global settings provider to be
+  operational before APK installation, closing the gap between a superficial
+  emulator boot and a usable Package Installer.
+- Recover from the bounded Android startup state where system providers are
+  still being installed without retrying permanent application failures.
+
 ## 1.0.7 - 2026-08-25
 
 - Wait for Android's package manager service, not only `sys.boot_completed`,

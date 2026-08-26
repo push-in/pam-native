@@ -31,8 +31,8 @@ const RUNTIME_LOCK_VERSION: u32 = 1;
 const MAX_ANDROID_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
 const ADB_INSTALL_ATTEMPTS: usize = 4;
-const ADB_PACKAGE_SERVICE_POLLS: usize = 60;
-const ADB_PACKAGE_SERVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const ADB_INSTALL_SERVICE_POLLS: usize = 60;
+const ADB_INSTALL_SERVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -6810,7 +6810,7 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
 
 fn install_apk(apk: &Path) -> Result<(), String> {
     let apk = apk.to_string_lossy();
-    wait_for_adb_package_service()?;
+    wait_for_android_install_services()?;
     for attempt in 1..=ADB_INSTALL_ATTEMPTS {
         let output = Command::new("adb")
             .args(["install", "-r", apk.as_ref()])
@@ -6844,14 +6844,14 @@ fn install_apk(apk: &Path) -> Result<(), String> {
             attempt + 1,
             ADB_INSTALL_ATTEMPTS
         );
-        wait_for_adb_package_service()?;
+        wait_for_android_install_services()?;
     }
     unreachable!("bounded adb install loop always returns")
 }
 
-fn wait_for_adb_package_service() -> Result<(), String> {
+fn wait_for_android_install_services() -> Result<(), String> {
     let mut last_diagnostic = String::new();
-    for poll in 1..=ADB_PACKAGE_SERVICE_POLLS {
+    for poll in 1..=ADB_INSTALL_SERVICE_POLLS {
         match Command::new("adb")
             .args(["shell", "service", "check", "package"])
             .output()
@@ -6860,21 +6860,47 @@ fn wait_for_adb_package_service() -> Result<(), String> {
                 let stdout = String::from_utf8_lossy(&output.stdout);
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 if adb_package_service_ready(output.status.success(), &stdout, &stderr) {
-                    return Ok(());
+                    match Command::new("adb")
+                        .args(["shell", "settings", "get", "global", "device_provisioned"])
+                        .output()
+                    {
+                        Ok(settings) => {
+                            let settings_stdout = String::from_utf8_lossy(&settings.stdout);
+                            let settings_stderr = String::from_utf8_lossy(&settings.stderr);
+                            if adb_settings_provider_ready(
+                                settings.status.success(),
+                                &settings_stdout,
+                                &settings_stderr,
+                            ) {
+                                return Ok(());
+                            }
+                            last_diagnostic = format!(
+                                "package service ready; settings provider response: {}\n{}",
+                                settings_stdout.trim(),
+                                settings_stderr.trim()
+                            );
+                        }
+                        Err(error) => {
+                            last_diagnostic = format!(
+                                "package service ready; cannot query settings provider: {error}"
+                            );
+                        }
+                    }
+                } else {
+                    last_diagnostic = format!("{}\n{}", stdout.trim(), stderr.trim());
                 }
-                last_diagnostic = format!("{}\n{}", stdout.trim(), stderr.trim());
             }
             Err(error) => last_diagnostic = error.to_string(),
         }
 
-        if poll < ADB_PACKAGE_SERVICE_POLLS {
-            std::thread::sleep(ADB_PACKAGE_SERVICE_POLL_INTERVAL);
+        if poll < ADB_INSTALL_SERVICE_POLLS {
+            std::thread::sleep(ADB_INSTALL_SERVICE_POLL_INTERVAL);
         }
     }
 
     Err(format!(
-        "Android package service did not become ready within {} seconds; last adb response: {}",
-        ADB_PACKAGE_SERVICE_POLLS * ADB_PACKAGE_SERVICE_POLL_INTERVAL.as_secs() as usize,
+        "Android package and settings services did not become ready within {} seconds; last adb response: {}",
+        ADB_INSTALL_SERVICE_POLLS * ADB_INSTALL_SERVICE_POLL_INTERVAL.as_secs() as usize,
         last_diagnostic.trim()
     ))
 }
@@ -6888,6 +6914,13 @@ fn adb_package_service_ready(status_success: bool, stdout: &str, stderr: &str) -
         .contains("service package: found")
 }
 
+fn adb_settings_provider_ready(status_success: bool, stdout: &str, stderr: &str) -> bool {
+    if !status_success || !stderr.trim().is_empty() {
+        return false;
+    }
+    matches!(stdout.trim(), "0" | "1")
+}
+
 fn transient_adb_install_failure(diagnostic: &str) -> bool {
     let diagnostic = diagnostic.to_ascii_lowercase();
     [
@@ -6897,6 +6930,8 @@ fn transient_adb_install_failure(diagnostic: &str) -> bool {
         "protocol fault",
         "failure calling service package",
         "can't find service: package",
+        "cannot access system provider",
+        "before system providers are installed",
         "cannot connect to daemon",
     ]
     .iter()
@@ -8152,6 +8187,9 @@ mod tests {
         assert!(transient_adb_install_failure(
             "adb: failed to install app.apk: can't find service: package"
         ));
+        assert!(transient_adb_install_failure(
+            "java.lang.IllegalStateException: Cannot access system provider: 'settings' before system providers are installed!"
+        ));
         assert!(!transient_adb_install_failure(
             "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"
         ));
@@ -8177,6 +8215,14 @@ mod tests {
             "Service package: found\n",
             "error: device offline"
         ));
+        assert!(adb_settings_provider_ready(true, "1\n", ""));
+        assert!(adb_settings_provider_ready(true, "0\n", ""));
+        assert!(!adb_settings_provider_ready(
+            false,
+            "",
+            "java.lang.IllegalStateException: Cannot access system provider: settings"
+        ));
+        assert!(!adb_settings_provider_ready(true, "null\n", ""));
     }
 
     #[test]
