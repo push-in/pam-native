@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.9 - 2026-08-25
+
+- Require Android's storage manager to return mounted-volume state before APK
+  installation, in addition to the package and settings readiness probes.
+- Recover only from the exact Package Installer startup signature involving
+  `InstallLocationUtils` and a null `StorageManager`, while unrelated null
+  pointer failures remain fail-fast.
+
 ## 1.0.8 - 2026-08-25
 
 - Require both Android's package service and global settings provider to be
