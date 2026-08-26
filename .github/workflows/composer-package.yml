@@ -49,6 +49,9 @@ jobs:
           scripts/composer-package.sh validate-tag "${RELEASE_TAG}"
           split_sha=$(scripts/composer-package.sh split "${RELEASE_TAG}")
           scripts/composer-package.sh verify-split "${split_sha}"
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   publish:
     name: Validate and publish PHP SDK
@@ -154,3 +157,6 @@ jobs:
               --data "${payload}" \
               "https://packagist.org/api/create-package?username=${encoded_username}&apiToken=${encoded_token}"
           fi
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
