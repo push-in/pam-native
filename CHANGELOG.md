@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.12 - 2026-08-26
+
+- Covers Android 36's late `PackageManagerInternal.isSameApp` initialization during cold-boot activity launch.
+- Extends the bounded activity-registration recovery window to four minutes for slow emulators and first-run devices.
+
 ## 1.0.11 - 2026-08-26
 
 - Waits for Android to register a successfully installed activity before launching it, covering the final package-manager cold-boot race with bounded retries.
