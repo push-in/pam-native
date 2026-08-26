@@ -30,9 +30,10 @@ const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
 const RUNTIME_LOCK_VERSION: u32 = 1;
 const MAX_ANDROID_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
-const ADB_INSTALL_ATTEMPTS: usize = 4;
+const ADB_INSTALL_ATTEMPTS: usize = 12;
 const ADB_INSTALL_SERVICE_POLLS: usize = 60;
 const ADB_INSTALL_SERVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const ADB_INSTALL_RECOVERY_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -6812,8 +6813,16 @@ fn install_apk(apk: &Path) -> Result<(), String> {
     let apk = apk.to_string_lossy();
     wait_for_android_install_services()?;
     for attempt in 1..=ADB_INSTALL_ATTEMPTS {
-        let output = Command::new("adb")
-            .args(["install", "-r", apk.as_ref()])
+        let mut command = Command::new("adb");
+        command.arg("install");
+        if attempt > 1 {
+            // A booting PackageInstaller may expose its binder before its storage
+            // collaborators exist. The non-streaming transport avoids that broken
+            // write-session path while Android finishes bringing services online.
+            command.arg("--no-streaming");
+        }
+        let output = command
+            .args(["-r", apk.as_ref()])
             .output()
             .map_err(|error| format!("cannot start adb install: {error}"))?;
         std::io::stdout()
@@ -6840,11 +6849,12 @@ fn install_apk(apk: &Path) -> Result<(), String> {
         }
 
         eprintln!(
-            "pam-native: transient adb package-service failure; waiting for Android to recover before install ({}/{})",
+            "pam-native: transient adb install-service failure; waiting for Android to recover before non-streaming retry ({}/{})",
             attempt + 1,
             ADB_INSTALL_ATTEMPTS
         );
         wait_for_android_install_services()?;
+        std::thread::sleep(ADB_INSTALL_RECOVERY_INTERVAL);
     }
     unreachable!("bounded adb install loop always returns")
 }
@@ -6971,7 +6981,9 @@ fn transient_adb_install_failure(diagnostic: &str) -> bool {
     let storage_startup_failure = diagnostic.contains("installlocationutils")
         && diagnostic.contains("storagemanager.getvolumes()")
         && diagnostic.contains("null object reference");
-    known_service_failure || storage_startup_failure
+    let package_storage_startup_failure = diagnostic.contains("packagemanagerinternal.freestorage")
+        && diagnostic.contains("null object reference");
+    known_service_failure || storage_startup_failure || package_storage_startup_failure
 }
 
 fn debug_application_id(project: &Project) -> String {
@@ -8228,6 +8240,9 @@ mod tests {
         ));
         assert!(transient_adb_install_failure(
             "java.lang.NullPointerException: StorageManager.getVolumes() on a null object reference at InstallLocationUtils.resolveInstallVolume"
+        ));
+        assert!(transient_adb_install_failure(
+            "java.lang.NullPointerException: PackageManagerInternal.freeStorage(java.lang.String, long, int) on a null object reference"
         ));
         assert!(!transient_adb_install_failure(
             "java.lang.NullPointerException: unrelated application exception"
