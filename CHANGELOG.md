@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.10 - 2026-08-26
+
+- Makes Android boot-cold installs resilient to partially initialized package/storage services with a bounded recovery window and automatic non-streaming ADB fallback.
+- Recognizes the Android 36 `PackageManagerInternal.freeStorage` startup race without hiding permanent installation failures.
+
 ## 1.0.9 - 2026-08-25
 
 - Require Android's storage manager to return mounted-volume state before APK
