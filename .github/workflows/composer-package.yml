@@ -28,6 +28,8 @@ jobs:
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
     uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main
+    with:
+      native_ref: ${{ inputs.release_tag }}
 
   validate:
     name: Validate PHP SDK release
