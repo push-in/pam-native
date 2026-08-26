@@ -34,7 +34,7 @@ const ADB_INSTALL_ATTEMPTS: usize = 12;
 const ADB_INSTALL_SERVICE_POLLS: usize = 60;
 const ADB_INSTALL_SERVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 const ADB_INSTALL_RECOVERY_INTERVAL: Duration = Duration::from_secs(5);
-const ADB_LAUNCH_ATTEMPTS: usize = 60;
+const ADB_LAUNCH_ATTEMPTS: usize = 120;
 const ADB_LAUNCH_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -7023,6 +7023,8 @@ fn transient_adb_install_failure(diagnostic: &str) -> bool {
 
 fn transient_adb_launch_failure(diagnostic: &str) -> bool {
     let diagnostic = diagnostic.to_ascii_lowercase();
+    let package_manager_startup_failure = diagnostic.contains("packagemanagerinternal.issameapp")
+        && diagnostic.contains("null object reference");
     (diagnostic.contains("error type 3")
         && diagnostic.contains("activity class")
         && diagnostic.contains("does not exist"))
@@ -7031,6 +7033,7 @@ fn transient_adb_launch_failure(diagnostic: &str) -> bool {
         || diagnostic.contains("can't find service: activity")
         || diagnostic.contains("device offline")
         || diagnostic.contains("broken pipe")
+        || package_manager_startup_failure
 }
 
 fn debug_application_id(project: &Project) -> String {
@@ -8312,6 +8315,9 @@ mod tests {
         ));
         assert!(transient_adb_launch_failure(
             "cmd: Failure calling service activity: Broken pipe (32)"
+        ));
+        assert!(transient_adb_launch_failure(
+            "java.lang.NullPointerException: PackageManagerInternal.isSameApp(java.lang.String, int, int) on a null object reference"
         ));
         assert!(!transient_adb_launch_failure(
             "java.lang.SecurityException: Permission Denial"
