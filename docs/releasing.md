@@ -22,9 +22,10 @@ pam release --platform all
 ```
 
 The repository release workflow also supports a manual rerun against an
-existing immutable `v*` tag. Select that tag as the workflow ref; the workflow
-then builds and attests the exact tagged tree. This recovery path never moves a
-tag and never accepts an arbitrary version input.
+existing immutable `v*` tag. Run the workflow from the default branch and enter
+the existing tag in `release_tag`; a fail-closed authority job resolves the tag
+to its commit before every artifact job checks out and builds that exact tree.
+This recovery path never moves a tag or accepts a non-semver ref.
 
 The command runs Native doctor and plugin certification before validating
 signing and producing checksummed release artifacts. It never creates signing

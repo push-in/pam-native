@@ -2,6 +2,10 @@ name: Ecosystem iOS certification
 
 on:
   workflow_call:
+    inputs:
+      checkout_ref:
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -27,6 +31,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Fetch released plugin sources
         env:
           GH_TOKEN: ${{ github.token }}

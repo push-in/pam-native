@@ -2,6 +2,10 @@ name: CI
 
 on:
   workflow_call:
+    inputs:
+      checkout_ref:
+        required: false
+        type: string
   workflow_dispatch:
   push:
     branches:
@@ -30,6 +34,8 @@ jobs:
           - "8.5"
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy,rustfmt
@@ -88,6 +94,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -152,6 +160,8 @@ jobs:
           - 36
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -198,6 +208,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - name: Test PamNative on an iOS Simulator
         working-directory: ios
         run: |
@@ -243,6 +255,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.checkout_ref || github.ref }}
       - uses: actions/download-artifact@v8
         with:
           name: pam-native-android-api-26-tests
