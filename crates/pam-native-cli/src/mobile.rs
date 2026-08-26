@@ -30,6 +30,7 @@ const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
 const RUNTIME_LOCK_VERSION: u32 = 1;
 const MAX_ANDROID_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
+const ADB_INSTALL_ATTEMPTS: usize = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -6785,7 +6786,7 @@ fn connected_abi() -> Result<AndroidAbi, String> {
 }
 
 fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<(), String> {
-    command_status("adb", &["install", "-r", apk.to_string_lossy().as_ref()])?;
+    install_apk(apk)?;
     let application_id = match mode {
         BuildMode::Debug => debug_application_id(project),
         BuildMode::Release => project.manifest.application_id.clone(),
@@ -6803,6 +6804,64 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
     )?;
     println!("Started {application_id}");
     Ok(())
+}
+
+fn install_apk(apk: &Path) -> Result<(), String> {
+    let apk = apk.to_string_lossy();
+    for attempt in 1..=ADB_INSTALL_ATTEMPTS {
+        let output = Command::new("adb")
+            .args(["install", "-r", apk.as_ref()])
+            .output()
+            .map_err(|error| format!("cannot start adb install: {error}"))?;
+        std::io::stdout()
+            .write_all(&output.stdout)
+            .map_err(|error| format!("cannot write adb output: {error}"))?;
+        std::io::stderr()
+            .write_all(&output.stderr)
+            .map_err(|error| format!("cannot write adb error output: {error}"))?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        let diagnostic = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if attempt == ADB_INSTALL_ATTEMPTS || !transient_adb_install_failure(&diagnostic) {
+            return Err(format!(
+                "adb install failed with status {}: {}",
+                output.status,
+                diagnostic.trim()
+            ));
+        }
+
+        eprintln!(
+            "pam-native: transient adb package-service failure; retrying install ({}/{})",
+            attempt + 1,
+            ADB_INSTALL_ATTEMPTS
+        );
+        std::thread::sleep(Duration::from_secs(attempt as u64 * 2));
+        let _ = Command::new("adb")
+            .args(["shell", "getprop", "sys.boot_completed"])
+            .output();
+    }
+    unreachable!("bounded adb install loop always returns")
+}
+
+fn transient_adb_install_failure(diagnostic: &str) -> bool {
+    let diagnostic = diagnostic.to_ascii_lowercase();
+    [
+        "broken pipe",
+        "connection reset",
+        "device offline",
+        "protocol fault",
+        "failure calling service package",
+        "can't find service: package",
+        "cannot connect to daemon",
+    ]
+    .iter()
+    .any(|message| diagnostic.contains(message))
 }
 
 fn debug_application_id(project: &Project) -> String {
@@ -8043,6 +8102,23 @@ mod tests {
             "https://mirror.example/pam/v2.0.10"
         );
         assert!(!android_runtime_release_base(None).contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn retries_only_transient_adb_package_service_failures() {
+        assert!(transient_adb_install_failure(
+            "cmd: Failure calling service package: Broken pipe (32)"
+        ));
+        assert!(transient_adb_install_failure("error: device offline"));
+        assert!(transient_adb_install_failure(
+            "adb: failed to install app.apk: can't find service: package"
+        ));
+        assert!(!transient_adb_install_failure(
+            "Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]"
+        ));
+        assert!(!transient_adb_install_failure(
+            "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]"
+        ));
     }
 
     #[test]

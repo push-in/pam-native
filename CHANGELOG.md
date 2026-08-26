@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.6 - 2026-08-25
+
+- Recover automatically from bounded transient Android package-service and ADB
+  transport failures while preserving immediate failure for real APK errors.
+- Keep clean first-run builds deterministic even on slow software-emulated CI
+  devices without hiding invalid signatures, storage failures or bad packages.
+
 ## 1.0.5 - 2026-08-25
 
 - Resolve the versioned PAM install root from the public launcher before clean
