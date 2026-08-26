@@ -20,4 +20,6 @@ preserves that original error and also reports the cleanup failure.
 
 Official packages and contributors must follow the same invariant. A workflow
 that builds native code without an unconditional cleanup step is not eligible
-to publish a release.
+to publish a release. Repository workflows use
+`scripts/cleanup-build-artifacts.sh` from an `if: always()` final step after
+required artifacts have been uploaded.
