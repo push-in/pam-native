@@ -7,6 +7,7 @@ namespace Pam\Native;
 use Closure;
 use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
+use Pam\Native\Dom\Document;
 use Pam\Native\Plugin\PluginManager;
 use Pam\Native\Navigation\TabNavigator;
 use Throwable;
@@ -32,6 +33,15 @@ final class App
 
             throw $error;
         }
+    }
+
+    /**
+     * Creates a retained, queryable visual document that can be passed directly
+     * to App::run(). The document remains the mutation handle for its lifetime.
+     */
+    public static function document(Renderable $root): Document
+    {
+        return Document::from($root);
     }
 
     public static function views(string $path, ?string $cachePath = null): void

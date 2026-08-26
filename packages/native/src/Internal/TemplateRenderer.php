@@ -1376,6 +1376,7 @@ final class TemplateRenderer
 
         if ($resolvedClass !== null) {
             $element = self::classes($element, $resolvedClass, $data);
+            $element = $element->class($resolvedClass);
         }
 
         $element = self::attributes($element, $values);
@@ -1633,6 +1634,19 @@ final class TemplateRenderer
      */
     private static function attributes(Element $element, array $attributes): Element
     {
+        if (isset($attributes['id'])) {
+            $element = $element->id(self::stringValue($attributes['id'], 'DOM id'));
+        }
+
+        foreach ($attributes as $name => $value) {
+            if (str_starts_with($name, 'data-')) {
+                $element = $element->data(
+                    substr($name, 5),
+                    self::stringValue($value, "DOM {$name}"),
+                );
+            }
+        }
+
         if (isset($attributes['key'])) {
             $element = $element->key(self::stringValue($attributes['key'], 'Element key'));
         }

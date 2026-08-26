@@ -63,6 +63,7 @@ jobs:
           cargo run --locked --profile performance -p pam-native-engine --example benchmark -- --check
           php packages/native/tests/run.php
           php packages/native/tests/performance.php
+          php packages/native/tests/visual_dom_performance.php
           php packages/native/tests/navigation_performance.php
           php packages/native/tests/fuzz.php
           phpstan analyse --configuration=packages/native/phpstan-singularity.neon --no-progress

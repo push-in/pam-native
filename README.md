@@ -132,6 +132,11 @@ accessibility diagnostics, Composer-extensible tags and a full editor-neutral
 LSP. Attributes such as `#[Prop]` and `#[Action]` remain the canonical PHP API.
 Read the [UI Language 2 guide](docs/ui-language-2.md).
 
+Need precise imperative control without introducing a browser runtime? The
+[Visual DOM](docs/visual-dom.md) adds indexed selectors, atomic tree mutations,
+events, native animation and asynchronous layout observation directly on the
+same retained PHP → Rust → Android/UIKit pipeline.
+
 ## Native where it matters
 
 - Real Android Views and UIKit controls

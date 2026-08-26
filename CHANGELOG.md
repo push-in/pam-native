@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.15 - 2026-08-26
+
+- Adds the typed Visual DOM with indexed selectors, stable element handles,
+  structural mutations, atomic rollback, observations, native motion, focus,
+  asynchronous measurement and diagnostic snapshots.
+- Connects declarative `id`, `class`, and `data-*` metadata to the same retained
+  document while preserving the existing CSS compiler and test identifiers.
+- Uses Visual DOM identities in incremental binary patches so sibling insertion
+  preserves mounted Android and iOS views.
+- Adds a mandatory 5,001-node performance gate for document indexing, 4,000
+  indexed queries and 5,000 batched mutations.
+
 ## 1.0.14 - 2026-08-26
 
 - Makes post-build cleanup mandatory for Android and iOS development, build,

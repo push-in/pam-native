@@ -94,6 +94,13 @@ binding, conditional blocks, loops, utility classes and user-defined theme
 tokens. The fluent PHP element API and custom Kotlin views remain available as
 escape hatches, so the template/class convention is optional.
 
+For targeted imperative UI work, wrap any root with `App::document(...)` and
+use the typed [Visual DOM](../../docs/visual-dom.md): indexed `#id`, `.class`,
+type and `data-*` selectors; atomic structural mutations; `classList`; typed
+styles and events; native animation; resize/intersection observation; and
+incremental patches with stable native identities. It extends the existing
+element pipeline and does not duplicate navigation, storage or networking.
+
 Complex controls can expose localized TalkBack and VoiceOver alternatives to
 gesture-only interaction. Bind up to eight `{name, label}` entries through
 `:accessibilityActions` and handle `on:accessibilityAction`, or use
