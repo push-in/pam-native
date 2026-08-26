@@ -31,6 +31,8 @@ const RUNTIME_LOCK_VERSION: u32 = 1;
 const MAX_ANDROID_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
 const ADB_INSTALL_ATTEMPTS: usize = 4;
+const ADB_PACKAGE_SERVICE_POLLS: usize = 60;
+const ADB_PACKAGE_SERVICE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -6808,6 +6810,7 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
 
 fn install_apk(apk: &Path) -> Result<(), String> {
     let apk = apk.to_string_lossy();
+    wait_for_adb_package_service()?;
     for attempt in 1..=ADB_INSTALL_ATTEMPTS {
         let output = Command::new("adb")
             .args(["install", "-r", apk.as_ref()])
@@ -6837,16 +6840,52 @@ fn install_apk(apk: &Path) -> Result<(), String> {
         }
 
         eprintln!(
-            "pam-native: transient adb package-service failure; retrying install ({}/{})",
+            "pam-native: transient adb package-service failure; waiting for Android to recover before install ({}/{})",
             attempt + 1,
             ADB_INSTALL_ATTEMPTS
         );
-        std::thread::sleep(Duration::from_secs(attempt as u64 * 2));
-        let _ = Command::new("adb")
-            .args(["shell", "getprop", "sys.boot_completed"])
-            .output();
+        wait_for_adb_package_service()?;
     }
     unreachable!("bounded adb install loop always returns")
+}
+
+fn wait_for_adb_package_service() -> Result<(), String> {
+    let mut last_diagnostic = String::new();
+    for poll in 1..=ADB_PACKAGE_SERVICE_POLLS {
+        match Command::new("adb")
+            .args(["shell", "service", "check", "package"])
+            .output()
+        {
+            Ok(output) => {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if adb_package_service_ready(output.status.success(), &stdout, &stderr) {
+                    return Ok(());
+                }
+                last_diagnostic = format!("{}\n{}", stdout.trim(), stderr.trim());
+            }
+            Err(error) => last_diagnostic = error.to_string(),
+        }
+
+        if poll < ADB_PACKAGE_SERVICE_POLLS {
+            std::thread::sleep(ADB_PACKAGE_SERVICE_POLL_INTERVAL);
+        }
+    }
+
+    Err(format!(
+        "Android package service did not become ready within {} seconds; last adb response: {}",
+        ADB_PACKAGE_SERVICE_POLLS * ADB_PACKAGE_SERVICE_POLL_INTERVAL.as_secs() as usize,
+        last_diagnostic.trim()
+    ))
+}
+
+fn adb_package_service_ready(status_success: bool, stdout: &str, stderr: &str) -> bool {
+    if !status_success {
+        return false;
+    }
+    format!("{stdout}\n{stderr}")
+        .to_ascii_lowercase()
+        .contains("service package: found")
 }
 
 fn transient_adb_install_failure(diagnostic: &str) -> bool {
@@ -8118,6 +8157,25 @@ mod tests {
         ));
         assert!(!transient_adb_install_failure(
             "Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]"
+        ));
+    }
+
+    #[test]
+    fn waits_for_the_android_package_service_instead_of_boot_completed_only() {
+        assert!(adb_package_service_ready(
+            true,
+            "Service package: found\n",
+            ""
+        ));
+        assert!(!adb_package_service_ready(
+            true,
+            "Service package: not found\n",
+            ""
+        ));
+        assert!(!adb_package_service_ready(
+            false,
+            "Service package: found\n",
+            "error: device offline"
         ));
     }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.7 - 2026-08-25
+
+- Wait for Android's package manager service, not only `sys.boot_completed`,
+  before installing an APK and after a transient package-service restart.
+- Keep the recovery bounded and preserve fail-fast behavior for permanent APK
+  installation errors.
+
 ## 1.0.6 - 2026-08-25
 
 - Recover automatically from bounded transient Android package-service and ADB
