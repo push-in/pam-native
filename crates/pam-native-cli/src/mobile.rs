@@ -7033,6 +7033,7 @@ fn transient_adb_launch_failure(diagnostic: &str) -> bool {
         || diagnostic.contains("can't find service: activity")
         || diagnostic.contains("device offline")
         || diagnostic.contains("broken pipe")
+        || diagnostic.contains("too early to start activity")
         || package_manager_startup_failure
 }
 
@@ -8318,6 +8319,9 @@ mod tests {
         ));
         assert!(transient_adb_launch_failure(
             "java.lang.NullPointerException: PackageManagerInternal.isSameApp(java.lang.String, int, int) on a null object reference"
+        ));
+        assert!(transient_adb_launch_failure(
+            "java.lang.IllegalStateException: Too early to start activity."
         ));
         assert!(!transient_adb_launch_failure(
             "java.lang.SecurityException: Permission Denial"

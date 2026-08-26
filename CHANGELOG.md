@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.13 - 2026-08-26
+
+- Recognizes Android's explicit `Too early to start activity` response as cold-boot readiness and continues the existing bounded launch retry.
+
 ## 1.0.12 - 2026-08-26
 
 - Covers Android 36's late `PackageManagerInternal.isSameApp` initialization during cold-boot activity launch.
