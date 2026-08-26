@@ -28,6 +28,10 @@ credentials or uploads to a store. CI/store adapters consume the resulting
 
 ## Release gate
 
+Build hygiene is mandatory for every gate. Final deliverables must be copied to
+`dist` or uploaded before an unconditional cleanup removes all regenerable
+Gradle, Cargo and Xcode outputs. See [Mandatory build hygiene](build-hygiene.md).
+
 1. Run PHP SDK tests and lint.
 2. Run the Rust workspace tests.
 3. Compile Android unit and instrumented-test sources.

@@ -6309,8 +6309,8 @@ $assert(
     'Grouped drawer state must restore selection and expanded sections.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.0.13',
-    'The runtime SDK contract must match the stable 1.0.13 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.0.14',
+    'The runtime SDK contract must match the stable 1.0.14 package release.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.14 - 2026-08-26
+
+- Makes post-build cleanup mandatory for Android and iOS development, build,
+  run and packaging flows while preserving only declared final deliverables in
+  `dist`.
+- Cleans the actual project-local Gradle home, Android build outputs, iOS
+  DerivedData and temporary export workspace after successful and failed
+  operations.
+
 ## 1.0.13 - 2026-08-26
 
 - Recognizes Android's explicit `Too early to start activity` response as cold-boot readiness and continues the existing bounded launch retry.
