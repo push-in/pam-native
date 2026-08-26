@@ -43,28 +43,28 @@ jobs:
     needs: release-ref
     uses: ./.github/workflows/ci.yml
     with:
-      checkout_ref: ${{ inputs.release_tag || github.ref }}
+      checkout_ref: ${{ inputs.release_tag || github.ref_name }}
 
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
     needs: release-ref
     uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main
     with:
-      native_ref: ${{ inputs.release_tag || github.ref }}
+      native_ref: ${{ inputs.release_tag || github.ref_name }}
 
   ecosystem-android:
     name: Certify official Android plugins
     needs: release-ref
     uses: ./.github/workflows/ecosystem-android.yml
     with:
-      checkout_ref: ${{ inputs.release_tag || github.ref }}
+      checkout_ref: ${{ inputs.release_tag || github.ref_name }}
 
   ecosystem-ios:
     name: Certify official iOS plugins
     needs: release-ref
     uses: ./.github/workflows/ecosystem-ios.yml
     with:
-      checkout_ref: ${{ inputs.release_tag || github.ref }}
+      checkout_ref: ${{ inputs.release_tag || github.ref_name }}
 
   ios:
     name: Package iOS renderer

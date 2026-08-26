@@ -8,7 +8,7 @@ members = [
 exclude = ["pam-cli"]
 
 [workspace.package]
-version = "1.0.15"
+version = "1.0.16"
 edition = "2024"
 rust-version = "1.88"
 license = "Apache-2.0"

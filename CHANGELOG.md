@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.16 - 2026-08-26
+
+- Passes the short immutable release tag to every reusable certification
+  workflow, preventing `refs/tags/*` from being interpreted as a Composer
+  semantic version during ecosystem candidate resolution.
+- Adds a release-workflow regression contract that rejects full Git refs at
+  reusable workflow boundaries.
+
 ## 1.0.15 - 2026-08-26
 
 - Adds the typed Visual DOM with indexed selectors, stable element handles,
