@@ -46,6 +46,10 @@ pam dev
 ```
 
 The **[PAM documentation](https://push-in.github.io/pam-docs/native/overview/)** covers prerequisites, production setup, and the complete workflow. PAM projects keep normal manifests and lockfiles; product features stay in the package that owns them.
+
+Every build follows the mandatory [build hygiene contract](docs/build-hygiene.md):
+final APK/AAB/IPA/app deliverables are preserved in `dist`, while regenerable
+Gradle, Cargo and Xcode intermediates are removed when the command exits.
 <!-- pam:product-page:end -->
 
 PAM Native lets PHP developers ship native mobile applications without adding

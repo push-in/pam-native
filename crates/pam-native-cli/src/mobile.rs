@@ -778,9 +778,12 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             if options.abis == default_abis() {
                 options.abis = vec![connected_abi()?];
             }
-            let apk = build(options)?;
-            install_and_launch(&apk.project, &apk.path, apk.mode)?;
-            Ok(0)
+            let project_root = options.project.clone();
+            with_android_build_cleanup(&project_root, || {
+                let apk = build_intermediate(options)?;
+                install_and_launch(&apk.project, &apk.path, apk.mode)?;
+                Ok(0)
+            })
         }
         "dev" => {
             let mut options = parse_options(arguments, false)?;
@@ -3654,7 +3657,7 @@ fn replace_ios_placeholders(path: &Path, replacements: &[(&str, &str)]) -> Resul
     write_atomic(path, contents.as_bytes())
 }
 
-fn build_ios(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
+fn build_ios_intermediate(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
     if !cfg!(target_os = "macos") {
         return Err("iOS builds require macOS with Xcode".to_owned());
     }
@@ -3693,6 +3696,29 @@ fn build_ios(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
     Ok(app)
 }
 
+fn build_ios(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
+    let project = load_project(&project_path)?;
+    with_ios_build_cleanup(&project.root, || {
+        let app = build_ios_intermediate(project.root.clone(), release)?;
+        let output = project.root.join("dist");
+        fs::create_dir_all(&output)
+            .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
+        let destination = output.join(format!(
+            "{}-{}-ios-{}.app",
+            android_artifact_stem(&project),
+            project.manifest.version_name,
+            if release { "release" } else { "debug" }
+        ));
+        if destination.exists() {
+            fs::remove_dir_all(&destination)
+                .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
+        }
+        copy_tree(&app, &destination, &[])?;
+        println!("Preserved {}", destination.display());
+        Ok(destination)
+    })
+}
+
 fn booted_ios_simulator() -> Result<String, String> {
     let output = Command::new("xcrun")
         .args(["simctl", "list", "devices", "booted", "--json"])
@@ -3717,10 +3743,12 @@ fn booted_ios_simulator() -> Result<String, String> {
 
 fn run_ios(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
-    let simulator = booted_ios_simulator()?;
-    let app = build_ios(project.root.clone(), false)?;
-    install_and_launch_ios(&project, &simulator, &app)?;
-    Ok(0)
+    with_ios_build_cleanup(&project.root, || {
+        let simulator = booted_ios_simulator()?;
+        let app = build_ios_intermediate(project.root.clone(), false)?;
+        install_and_launch_ios(&project, &simulator, &app)?;
+        Ok(0)
+    })
 }
 
 fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Result<(), String> {
@@ -3743,6 +3771,11 @@ fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Res
 
 fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
+    let root = project.root.clone();
+    with_ios_build_cleanup(&root, || dev_ios_intermediate(project))
+}
+
+fn dev_ios_intermediate(project: Project) -> Result<u8, String> {
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
         crate::dev_event::SurfaceCode::Ios,
@@ -3751,7 +3784,7 @@ fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
     );
     clean_ios_dev_artifacts(&project.root)?;
     let simulator = booted_ios_simulator()?;
-    let app = build_ios(project.root.clone(), false)?;
+    let app = build_ios_intermediate(project.root.clone(), false)?;
     install_and_launch_ios(&project, &simulator, &app)?;
     println!(
         "Pam Native iOS hot reload listening on 127.0.0.1:{DEFAULT_PORT}. Press Ctrl+C to stop."
@@ -3842,12 +3875,32 @@ fn clean_android_dev_artifacts(project_path: &Path) -> Result<(), String> {
     let paths = [
         generated.join("app/build"),
         generated.join("build"),
-        generated.join("gradle-home/caches"),
-        generated.join("gradle-home/daemon"),
-        generated.join("gradle-home/native"),
-        generated.join("gradle-home/workers"),
+        project.root.join(".pam-native/gradle-home/caches"),
+        project.root.join(".pam-native/gradle-home/daemon"),
+        project.root.join(".pam-native/gradle-home/native"),
+        project.root.join(".pam-native/gradle-home/notifications"),
+        project.root.join(".pam-native/gradle-home/workers"),
     ];
     clean_dev_paths(&project.root, &paths)
+}
+
+fn with_android_build_cleanup<T>(
+    project_path: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let outcome = operation();
+    let cleanup = clean_android_dev_artifacts(project_path);
+    match (outcome, cleanup) {
+        (Err(error), Err(cleanup_error)) => {
+            eprintln!(
+                "PAM Native could not complete mandatory Android build cleanup: {cleanup_error}"
+            );
+            Err(error)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
 }
 
 fn clean_ios_dev_artifacts(project_root: &Path) -> Result<(), String> {
@@ -3855,9 +3908,27 @@ fn clean_ios_dev_artifacts(project_root: &Path) -> Result<(), String> {
         project_root,
         &[
             project_root.join(".pam-native/ios/App/DerivedData"),
+            project_root.join(".pam-native/ios/App/build"),
             project_root.join(".pam-native/ios/HotReloadBundle"),
         ],
     )
+}
+
+fn with_ios_build_cleanup<T>(
+    project_root: &Path,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let outcome = operation();
+    let cleanup = clean_ios_dev_artifacts(project_root);
+    match (outcome, cleanup) {
+        (Err(error), Err(cleanup_error)) => {
+            eprintln!("PAM Native could not complete mandatory iOS build cleanup: {cleanup_error}");
+            Err(error)
+        }
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
 }
 
 fn clean_dev_paths(project_root: &Path, paths: &[PathBuf]) -> Result<(), String> {
@@ -4065,6 +4136,11 @@ fn signing_status_ios(project_path: PathBuf) -> Result<u8, String> {
 }
 
 fn package_ios(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    with_ios_build_cleanup(&project.root, || package_ios_intermediate(project_path))
+}
+
+fn package_ios_intermediate(project_path: PathBuf) -> Result<u8, String> {
     if !cfg!(target_os = "macos") {
         return Err("iOS packaging requires macOS with Xcode".to_owned());
     }
@@ -5837,7 +5913,7 @@ struct BuiltApk {
     mode: BuildMode,
 }
 
-fn build(options: MobileOptions) -> Result<BuiltApk, String> {
+fn build_intermediate(options: MobileOptions) -> Result<BuiltApk, String> {
     repair_android(&options.project)?;
     let project = load_project(&options.project)?;
     let native_home = native_home()?;
@@ -5895,10 +5971,57 @@ fn build(options: MobileOptions) -> Result<BuiltApk, String> {
     })
 }
 
+fn android_artifact_stem(project: &Project) -> String {
+    project
+        .manifest
+        .name
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_owned()
+}
+
+fn persist_built_apk(mut built: BuiltApk) -> Result<BuiltApk, String> {
+    let output = built.project.root.join("dist");
+    fs::create_dir_all(&output)
+        .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
+    let destination = output.join(format!(
+        "{}-{}-android-{}.apk",
+        android_artifact_stem(&built.project),
+        built.project.manifest.version_name,
+        built.mode.directory()
+    ));
+    fs::copy(&built.path, &destination)
+        .map_err(|error| format!("cannot copy {}: {error}", destination.display()))?;
+    write_artifact_checksum(&destination)?;
+    built.path = destination;
+    Ok(built)
+}
+
+fn build(options: MobileOptions) -> Result<BuiltApk, String> {
+    let project_root = options.project.clone();
+    with_android_build_cleanup(&project_root, || {
+        persist_built_apk(build_intermediate(options)?)
+    })
+}
+
 fn package_android(options: MobileOptions) -> Result<u8, String> {
+    let project_root = options.project.clone();
+    with_android_build_cleanup(&project_root, || package_android_intermediate(options))
+}
+
+fn package_android_intermediate(options: MobileOptions) -> Result<u8, String> {
     let signing_project = load_project(&options.project)?;
     validate_android_signing(&signing_project)?;
-    let built = build(options)?;
+    let built = build_intermediate(options)?;
     let workspace = built.project.root.join(".pam-native/android");
     let gradlew = workspace.join("gradlew");
     let status = Command::new(&gradlew)
@@ -5920,32 +6043,17 @@ fn package_android(options: MobileOptions) -> Result<u8, String> {
     let output = built.project.root.join("dist");
     fs::create_dir_all(&output)
         .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
-    let name = built
-        .project
-        .manifest
-        .name
-        .to_ascii_lowercase()
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() {
-                character
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>();
+    let name = android_artifact_stem(&built.project);
     let destination = output.join(format!(
         "{}-{}-android.aab",
-        name.trim_matches('-'),
-        built.project.manifest.version_name
+        name, built.project.manifest.version_name
     ));
     fs::copy(&source, &destination)
         .map_err(|error| format!("cannot copy {}: {error}", destination.display()))?;
     write_artifact_checksum(&destination)?;
     let apk_destination = output.join(format!(
         "{}-{}-android.apk",
-        name.trim_matches('-'),
-        built.project.manifest.version_name
+        name, built.project.manifest.version_name
     ));
     fs::copy(&built.path, &apk_destination)
         .map_err(|error| format!("cannot copy {}: {error}", apk_destination.display()))?;
@@ -7069,7 +7177,12 @@ fn command_status(command: &str, arguments: &[&str]) -> Result<(), String> {
 }
 
 fn dev(options: MobileOptions) -> Result<u8, String> {
-    let apk = build(options)?;
+    let project_root = options.project.clone();
+    with_android_build_cleanup(&project_root, || dev_intermediate(options))
+}
+
+fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
+    let apk = build_intermediate(options)?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
         crate::dev_event::SurfaceCode::Android,
@@ -8400,15 +8513,18 @@ mod tests {
         ));
         let application_build = root.join(".pam-native/android/app/build/outputs");
         let root_build = root.join(".pam-native/android/build");
-        let gradle_cache = root.join(".pam-native/android/gradle-home/caches/modules");
+        let gradle_cache = root.join(".pam-native/gradle-home/caches/modules");
+        let gradle_daemon = root.join(".pam-native/gradle-home/daemon/8.0");
         let source = root.join(".pam-native/android/app/src/main/AndroidManifest.xml");
         fs::create_dir_all(&application_build).expect("application build");
         fs::create_dir_all(&root_build).expect("root build");
         fs::create_dir_all(&gradle_cache).expect("Gradle cache");
+        fs::create_dir_all(&gradle_daemon).expect("Gradle daemon");
         fs::create_dir_all(source.parent().expect("source parent")).expect("sources");
         fs::write(application_build.join("app.apk"), [0_u8; 32]).expect("APK");
         fs::write(root_build.join("artifact.bin"), [0_u8; 32]).expect("build output");
         fs::write(gradle_cache.join("module.bin"), [0_u8; 32]).expect("cache");
+        fs::write(gradle_daemon.join("daemon.bin"), [0_u8; 32]).expect("daemon");
         fs::write(&source, "<manifest />\n").expect("manifest");
         fs::write(
             root.join("pam-native.json"),
@@ -8423,9 +8539,53 @@ mod tests {
 
         assert!(!root.join(".pam-native/android/app/build").exists());
         assert!(!root.join(".pam-native/android/build").exists());
-        assert!(!root.join(".pam-native/android/gradle-home/caches").exists());
+        assert!(!root.join(".pam-native/gradle-home/caches").exists());
+        assert!(!root.join(".pam-native/gradle-home/daemon").exists());
         assert!(source.is_file());
         assert!(root.join(".pam-native/android/app/src").is_dir());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn android_build_cleanup_preserves_only_the_dist_artifact() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-android-build-clean-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let intermediate =
+            root.join(".pam-native/android/app/build/outputs/apk/debug/app-debug.apk");
+        fs::create_dir_all(intermediate.parent().expect("APK parent")).expect("APK output");
+        fs::write(&intermediate, b"apk").expect("APK");
+        fs::write(
+            root.join("pam-native.json"),
+            r#"{"version":1,"applicationId":"dev.pam.cleanup","name":"Cleanup App","entry":"index.php","versionName":"1.2.3"}"#,
+        )
+        .expect("manifest");
+        fs::write(root.join("index.php"), "<?php\n").expect("entry");
+        fs::create_dir_all(root.join("vendor")).expect("vendor");
+        fs::write(root.join("vendor/autoload.php"), "<?php\n").expect("autoload");
+        let project = load_project(&root).expect("project");
+
+        let built = with_android_build_cleanup(&root, || {
+            persist_built_apk(BuiltApk {
+                project,
+                path: intermediate,
+                mode: BuildMode::Debug,
+            })
+        })
+        .expect("persist and clean");
+
+        assert_eq!(
+            built.path,
+            root.join("dist/cleanup-app-1.2.3-android-debug.apk")
+        );
+        assert!(built.path.is_file());
+        assert!(built.path.with_extension("apk.sha256").is_file());
+        assert!(!root.join(".pam-native/android/app/build").exists());
+        assert!(root.join("index.php").is_file());
         fs::remove_dir_all(root).expect("cleanup");
     }
 
@@ -8439,16 +8599,20 @@ mod tests {
                 .as_nanos()
         ));
         let derived_data = root.join(".pam-native/ios/App/DerivedData/Build/Products");
+        let package_build = root.join(".pam-native/ios/App/build/export/App.ipa");
         let source = root.join(".pam-native/ios/App/Sources/AppDelegate.swift");
         let hot_reload = root.join(".pam-native/ios/HotReloadBundle/index.php");
         let neighboring_artifact = root.join("artifacts/release-evidence.json");
         fs::create_dir_all(&derived_data).expect("derived data");
+        fs::create_dir_all(package_build.parent().expect("package build parent"))
+            .expect("package build");
         fs::create_dir_all(source.parent().expect("source parent")).expect("sources");
         fs::create_dir_all(hot_reload.parent().expect("hot reload parent"))
             .expect("hot reload bundle");
         fs::create_dir_all(neighboring_artifact.parent().expect("artifact parent"))
             .expect("artifacts");
         fs::write(derived_data.join("application.bin"), [0_u8; 32]).expect("build output");
+        fs::write(&package_build, [0_u8; 32]).expect("package output");
         fs::write(&source, "// generated host source\n").expect("source");
         fs::write(&hot_reload, "<?php\n").expect("hot reload entry");
         fs::write(&neighboring_artifact, "{}\n").expect("evidence");
@@ -8456,6 +8620,7 @@ mod tests {
         clean_ios_dev_artifacts(&root).expect("clean iOS artifacts");
 
         assert!(!root.join(".pam-native/ios/App/DerivedData").exists());
+        assert!(!root.join(".pam-native/ios/App/build").exists());
         assert!(!root.join(".pam-native/ios/HotReloadBundle").exists());
         assert!(source.is_file());
         assert!(neighboring_artifact.is_file());

@@ -78,6 +78,9 @@ jobs:
           python3 -m json.tool packages/native/resources/pam-native-ui-ir.schema.json >/dev/null
           node --check editors/vscode/extension.js
           node editors/vscode/test.js
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   android:
     name: Android renderer build and unit contracts
@@ -132,6 +135,9 @@ jobs:
           path: dist/pam-native-android-prerequisites.tar.gz
           if-no-files-found: error
           retention-days: 1
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   android-instrumented:
     name: Android API ${{ matrix.api-level }} renderer contracts
@@ -182,6 +188,9 @@ jobs:
             android/app/build/outputs/androidTest-results/connected/
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   ios:
     name: Swift and UIKit contracts
@@ -221,6 +230,9 @@ jobs:
           SWIFT_COMPILATION_MODE=wholemodule
           DEAD_CODE_STRIPPING=YES
           build
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   accessibility-evidence:
     name: Cross-platform accessibility evidence
@@ -267,3 +279,6 @@ jobs:
           path: evidence/pam-native-accessibility-evidence.json
           if-no-files-found: error
           retention-days: 30
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
