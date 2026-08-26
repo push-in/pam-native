@@ -30,6 +30,8 @@ $document = App::document(
 $assert($document instanceof Document, 'App::document must create a visual document.');
 $assert($document->root()->id() === 'app', 'The visual document must expose its root.');
 $assert($document->id('profile-name')->closest('.card')?->id() === 'profile', 'closest() must traverse visual ancestors.');
+$otherDocument = Document::from(View::make(Text::make('Other')->id('other')));
+$assert(!$document->root()->contains($otherDocument->id('other')), 'contains() must not alias handles from another document.');
 $assert($document->querySelector('View.card > Text.primary')?->id() === 'profile-name', 'Child selectors must match the right-most result.');
 $assert($document->querySelector('.card Button.action[data-state="idle"]') !== null, 'Compound descendant selectors must match data attributes.');
 $assert(count($document->all('.label')) === 2, 'Class indexes must return every matching element.');
@@ -75,6 +77,10 @@ try {
     $assert($error->getMessage() === 'rollback fixture', 'Transactions must rethrow their original error.');
 }
 $assert($document->querySelector('#rollback') === null && $document->toElement() === $snapshot, 'Failed transactions must restore the exact immutable tree.');
+
+$imported = Document::from($document->toElement());
+$imported->root()->append(Text::make('Imported')->id('imported-child'));
+$assert($imported->id('imported-child')->connected(), 'Imported documents must allocate a collision-free identity namespace.');
 
 $invalidSelectorRejected = false;
 try {

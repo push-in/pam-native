@@ -46,7 +46,9 @@ final class Document implements Renderable
 
     private function __construct(Renderable $root)
     {
-        $this->root = $this->normalize($root->toElement(), false);
+        // A Document owns its identity namespace. Importing a tree from another
+        // document must never preserve handles that could collide on insertion.
+        $this->root = $this->normalize($root->toElement(), true);
         $this->reindex();
     }
 

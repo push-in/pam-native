@@ -85,7 +85,8 @@ final class Element
 
     public function contains(self $candidate): bool
     {
-        return $this->document->contains($this->identity, $candidate->identity);
+        return $this->document === $candidate->document
+            && $this->document->contains($this->identity, $candidate->identity);
     }
 
     public function matches(string $selector): bool
