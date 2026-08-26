@@ -158,7 +158,7 @@ class PackageBudgetGateTests(unittest.TestCase):
         for surface in ("ios", "android", "php"):
             self.assertEqual(
                 workflow.count(
-                    f'--output "dist/pam-native-{surface}-${{GITHUB_REF_NAME#v}}.package-budget.json"'
+                    f'--output "dist/pam-native-{surface}-${{PAM_RELEASE_TAG#v}}.package-budget.json"'
                 ),
                 1,
             )
