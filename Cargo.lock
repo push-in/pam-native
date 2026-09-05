@@ -76,7 +76,7 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 
 [[package]]
 name = "pam-native-cli"
-version = "1.0.16"
+version = "1.0.17"
 dependencies = [
  "serde",
  "serde_json",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "pam-native-engine"
-version = "1.0.16"
+version = "1.0.17"
 dependencies = [
  "pam-native-protocol",
  "ttf-parser",
@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "pam-native-protocol"
-version = "1.0.16"
+version = "1.0.17"
 
 [[package]]
 name = "proc-macro2"

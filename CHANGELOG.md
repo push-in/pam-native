@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.17 - 2026-09-04
+
+- Add exact project-relative `.pamignore` exclusions for mobile bundles.
+- Restore PHP language tooling and embedded template/CSS highlighting for PAM components in VS Code.
+- Publish editor package 0.1.1 with PHP definition/hover regression coverage.
+
+
 ## 1.0.16 - 2026-08-26
 
 - Passes the short immutable release tag to every reusable certification
