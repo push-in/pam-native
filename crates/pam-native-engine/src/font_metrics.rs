@@ -353,5 +353,39 @@ mod tests {
             widths[2] > widths[1],
             "accessibility scaling must resize the automatic box: {widths:?}"
         );
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::AlignItems, PropValue::Integer(1));
+        let available = widths[0] + (widths[1] - widths[0]) * 0.25;
+        tree.nodes
+            .get_mut(&2)
+            .unwrap()
+            .properties
+            .insert(PropKey::Width, PropValue::Float(f64::from(available)));
+        let mut heights = Vec::new();
+        for weight in [400, 700] {
+            tree.nodes
+                .get_mut(&2)
+                .unwrap()
+                .properties
+                .insert(PropKey::FontWeight, PropValue::Integer(weight));
+            let layouts = crate::layout::calculate_with_text_metrics(
+                &tree,
+                crate::layout::Size {
+                    width: 384.0,
+                    height: 800.0,
+                },
+                1.0,
+                cache.measure_nodes(&tree, &[2]),
+            )
+            .unwrap();
+            heights.push(layouts[&2].height);
+        }
+        assert!(
+            heights[1] > heights[0],
+            "heavier text must wrap and grow vertically in a constrained box: {heights:?}"
+        );
     }
 }

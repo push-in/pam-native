@@ -741,7 +741,11 @@ fn layout_node(
                     context.children,
                     child,
                     axis,
-                    available_main,
+                    if axis == Axis::Horizontal {
+                        main
+                    } else {
+                        available_main
+                    },
                     available_cross,
                     context.text_scale,
                     context.text_metrics,
@@ -957,7 +961,11 @@ fn layout_wrapped_children(
                 context.children,
                 child,
                 axis,
-                available_main,
+                if axis == Axis::Horizontal {
+                    main
+                } else {
+                    available_main
+                },
                 available_cross,
                 context.text_scale,
                 context.text_metrics,

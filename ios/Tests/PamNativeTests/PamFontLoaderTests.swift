@@ -17,7 +17,12 @@ final class PamFontLoaderTests: XCTestCase {
             let font = try XCTUnwrap(loader.assetFont(family: "asset://fonts/Inter.ttf", size: 22, weight: weight))
             XCTAssertTrue(font.familyName.contains("Inter"))
             let variations = try XCTUnwrap(CTFontCopyVariation(font) as? [NSNumber: NSNumber])
-            XCTAssertEqual(variations[NSNumber(value: 0x77676874)]?.intValue, weight)
+            let axes = try XCTUnwrap(CTFontCopyVariationAxes(font) as? [NSDictionary])
+            let weightAxis = try XCTUnwrap(axes.first {
+                ($0[kCTFontVariationAxisIdentifierKey] as? NSNumber)?.intValue == 0x77676874
+            })
+            let defaultWeight = try XCTUnwrap(weightAxis[kCTFontVariationAxisDefaultValueKey] as? NSNumber)
+            XCTAssertEqual(variations[NSNumber(value: 0x77676874)]?.intValue ?? defaultWeight.intValue, weight)
         }
         XCTAssertNil(loader.assetFont(family: "asset://../outside.ttf", size: 22, weight: 400))
         XCTAssertNil(loader.assetFont(family: "asset://fonts/missing.ttf", size: 22, weight: 400))
