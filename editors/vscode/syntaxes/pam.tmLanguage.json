@@ -3,32 +3,89 @@
     "name": "PAM Native",
     "scopeName": "source.pam",
     "patterns": [
-        {"include": "#php"},
-        {"include": "#style"},
-        {"include": "#template"}
+        {
+            "include": "#php"
+        },
+        {
+            "include": "#style"
+        },
+        {
+            "include": "#template"
+        }
     ],
     "repository": {
         "php": {
             "begin": "<\\?php",
             "end": "\\?>",
-            "beginCaptures": {"0": {"name": "punctuation.section.embedded.begin.php"}},
-            "endCaptures": {"0": {"name": "punctuation.section.embedded.end.php"}},
-            "contentName": "source.php"
+            "beginCaptures": {
+                "0": {
+                    "name": "punctuation.section.embedded.begin.php"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "punctuation.section.embedded.end.php"
+                }
+            },
+            "contentName": "source.php",
+            "patterns": [
+                {
+                    "include": "source.php"
+                }
+            ]
         },
         "style": {
             "begin": "(<style)(\\s+scoped)?(>)",
             "end": "</style>",
-            "contentName": "source.css"
+            "contentName": "source.css",
+            "patterns": [
+                {
+                    "include": "source.css"
+                }
+            ],
+            "beginCaptures": {
+                "1": {
+                    "name": "entity.name.tag.style.html"
+                },
+                "2": {
+                    "name": "entity.other.attribute-name.html"
+                },
+                "3": {
+                    "name": "punctuation.definition.tag.end.html"
+                }
+            },
+            "endCaptures": {
+                "0": {
+                    "name": "entity.name.tag.style.html"
+                }
+            }
         },
         "template": {
             "begin": "<template(?:\\s+language=\\\"2\\\")?>",
             "end": "</template>",
             "contentName": "text.html.pam",
             "patterns": [
-                {"match": "\\b(p-if|p-else-if|p-else|p-for|p-key|p-index|recipe|variant:[A-Za-z][A-Za-z0-9_-]*)\\b", "name": "keyword.control.pam"},
-                {"match": "(@[A-Za-z][A-Za-z0-9:-]*|:[A-Za-z][A-Za-z0-9:-]*|bind:[A-Za-z][A-Za-z0-9:-]*)", "name": "entity.other.attribute-name.pam"},
-                {"begin": "\\{\\{", "end": "\\}\\}", "contentName": "source.pam-expression"},
-                {"include": "text.html.basic"}
+                {
+                    "match": "\\b(p-if|p-else-if|p-else|p-for|p-key|p-index|recipe|variant:[A-Za-z][A-Za-z0-9_-]*)\\b",
+                    "name": "keyword.control.pam"
+                },
+                {
+                    "match": "(@[A-Za-z][A-Za-z0-9:-]*|:[A-Za-z][A-Za-z0-9:-]*|bind:[A-Za-z][A-Za-z0-9:-]*)",
+                    "name": "entity.other.attribute-name.pam"
+                },
+                {
+                    "begin": "\\{\\{",
+                    "end": "\\}\\}",
+                    "contentName": "source.pam-expression",
+                    "patterns": [
+                        {
+                            "include": "source.php"
+                        }
+                    ]
+                },
+                {
+                    "include": "text.html.basic"
+                }
             ]
         }
     }

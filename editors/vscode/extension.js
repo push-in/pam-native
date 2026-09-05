@@ -6,12 +6,12 @@ const fs = require("fs");
 const path = require("path");
 
 class PamLanguageClient {
-    constructor(cwd, executable, diagnostics) {
+    constructor(cwd, executable, diagnostics, args = []) {
         this.nextId = 1;
         this.pending = new Map();
         this.buffer = Buffer.alloc(0);
         this.diagnostics = diagnostics;
-        this.process = cp.spawn(executable, [], {cwd, stdio: ["pipe", "pipe", "pipe"]});
+        this.process = cp.spawn(executable, args, {cwd, stdio: ["pipe", "pipe", "pipe"]});
         this.process.stdout.on("data", chunk => this.consume(chunk));
         this.process.stderr.setEncoding("utf8").on("data", message => {
             if (message.trim()) console.error(`[pam-native] ${message.trim()}`);
@@ -90,6 +90,21 @@ class PamLanguageClient {
     close(document) { this.notify("textDocument/didClose", {textDocument: {uri: document.uri.toString()}}); }
 }
 
+function isPam(document) {
+    return document.languageId === "pam" || /\.pam(?:\.php)?$/.test(document.uri.path);
+}
+
+function isPhpPosition(document, position) {
+    const prefix = document.getText(new vscode.Range(new vscode.Position(0, 0), position));
+    return prefix.lastIndexOf("<?php") > prefix.lastIndexOf("?>");
+}
+
+const pamSelector = [
+    {language: "pam"},
+    {language: "php", pattern: "**/*.pam"},
+    {language: "php", pattern: "**/*.pam.php"},
+];
+
 async function activate(context) {
     const workspace = vscode.workspace.workspaceFolders?.[0];
     const activeDocument = vscode.window.activeTextEditor?.document;
@@ -99,19 +114,23 @@ async function activate(context) {
     const projectExecutable = process.platform === "win32"
         ? path.join(cwd, "vendor", "bin", "pam-native-language-server.bat")
         : path.join(cwd, "vendor", "bin", "pam-native-language-server");
+    if (!configured && !fs.existsSync(projectExecutable) && !vscode.workspace.textDocuments.some(isPam)) return;
     const executable = configured || (fs.existsSync(projectExecutable) ? projectExecutable : "pam-native-language-server");
     const diagnostics = vscode.languages.createDiagnosticCollection("pam-native");
-    const client = new PamLanguageClient(cwd, executable, diagnostics);
+    const runtime = vscode.workspace.getConfiguration("pam").get("languageServer.runtime", "pam");
+    const client = configured
+        ? new PamLanguageClient(cwd, executable, diagnostics)
+        : new PamLanguageClient(cwd, runtime, diagnostics, ["exec", executable]);
     await client.request("initialize", {processId: process.pid, rootUri: workspace?.uri.toString() ?? null, capabilities: {}});
     client.notify("initialized", {});
 
-    for (const document of vscode.workspace.textDocuments.filter(document => document.languageId === "pam")) client.open(document);
+    for (const document of vscode.workspace.textDocuments.filter(document => isPam(document))) client.open(document);
     context.subscriptions.push(
         diagnostics,
-        vscode.workspace.onDidOpenTextDocument(document => { if (document.languageId === "pam") client.open(document); }),
-        vscode.workspace.onDidChangeTextDocument(event => { if (event.document.languageId === "pam") client.change(event.document); }),
-        vscode.workspace.onDidCloseTextDocument(document => { if (document.languageId === "pam") client.close(document); }),
-        vscode.languages.registerDocumentFormattingEditProvider("pam", {
+        vscode.workspace.onDidOpenTextDocument(document => { if (isPam(document)) client.open(document); }),
+        vscode.workspace.onDidChangeTextDocument(event => { if (isPam(event.document)) client.change(event.document); }),
+        vscode.workspace.onDidCloseTextDocument(document => { if (isPam(document)) client.close(document); }),
+        vscode.languages.registerDocumentFormattingEditProvider(pamSelector, {
             async provideDocumentFormattingEdits(document, options) {
                 const edits = await client.request("textDocument/formatting", {textDocument: {uri: document.uri.toString()}, options});
                 return edits.map(edit => vscode.TextEdit.replace(
@@ -120,19 +139,22 @@ async function activate(context) {
                 ));
             },
         }),
-        vscode.languages.registerCompletionItemProvider("pam", {
+        vscode.languages.registerCompletionItemProvider(pamSelector, {
             async provideCompletionItems(document, position) {
+                if (document.languageId === "php" && isPhpPosition(document, position)) return null;
                 return client.request("textDocument/completion", {textDocument: {uri: document.uri.toString()}, position});
             },
         }, "<", ":", "@"),
-        vscode.languages.registerHoverProvider("pam", {
+        vscode.languages.registerHoverProvider(pamSelector, {
             async provideHover(document, position) {
+                if (document.languageId === "php" && isPhpPosition(document, position)) return null;
                 const hover = await client.request("textDocument/hover", {textDocument: {uri: document.uri.toString()}, position});
                 return hover ? new vscode.Hover(new vscode.MarkdownString(hover.contents.value)) : null;
             },
         }),
-        vscode.languages.registerDefinitionProvider("pam", {
+        vscode.languages.registerDefinitionProvider(pamSelector, {
             async provideDefinition(document, position) {
+                if (document.languageId === "php" && isPhpPosition(document, position)) return null;
                 const definition = await client.request("textDocument/definition", {textDocument: {uri: document.uri.toString()}, position});
                 if (!definition) return null;
                 return new vscode.Location(

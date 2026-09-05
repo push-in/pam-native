@@ -1,0 +1,12 @@
+{
+    "scopeName": "pam.php.embedded",
+    "injectionSelector": "L:text.html.php - source.php - source.css",
+    "patterns": [
+        {
+            "include": "source.pam#template"
+        },
+        {
+            "include": "source.pam#style"
+        }
+    ]
+}
