@@ -2,7 +2,7 @@
     "name": "pam-native",
     "displayName": "PAM Native",
     "description": "Language support for PAM Native components.",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "publisher": "pushin",
     "engines": {
         "vscode": "^1.95.0"
