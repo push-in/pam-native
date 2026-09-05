@@ -5743,7 +5743,14 @@ fn stage_project_at(project: &Project, destination: &Path) -> Result<(), String>
     fs::create_dir_all(destination)
         .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
     let mut budget = CopyBudget::default();
-    copy_project_files(&project.root, &project.root, destination, &mut budget)?;
+    let exclusions = read_bundle_exclusions(&project.root)?;
+    copy_project_files(
+        &project.root,
+        &project.root,
+        destination,
+        &mut budget,
+        &exclusions,
+    )?;
     if project.manifest.entry != Path::new("index.php") {
         let entry = project.manifest.entry.to_string_lossy().replace('\\', "/");
         if entry.contains('\'') {
@@ -5773,6 +5780,7 @@ fn copy_project_files(
     current: &Path,
     destination: &Path,
     budget: &mut CopyBudget,
+    exclusions: &[PathBuf],
 ) -> Result<(), String> {
     let mut entries = fs::read_dir(current)
         .map_err(|error| format!("cannot read {}: {error}", current.display()))?
@@ -5785,7 +5793,9 @@ fn copy_project_files(
             .strip_prefix(root)
             .map_err(|error| error.to_string())?
             .to_path_buf();
-        if ignored_project_path(&relative) {
+        if ignored_project_path(&relative)
+            || exclusions.iter().any(|path| relative.starts_with(path))
+        {
             continue;
         }
         let file_type = entry
@@ -5801,7 +5811,7 @@ fn copy_project_files(
         if file_type.is_dir() {
             fs::create_dir_all(&target)
                 .map_err(|error| format!("cannot create {}: {error}", target.display()))?;
-            copy_project_files(root, &entry.path(), destination, budget)?;
+            copy_project_files(root, &entry.path(), destination, budget, exclusions)?;
         } else if file_type.is_file() {
             let bytes = entry.metadata().map_err(|error| error.to_string())?.len();
             budget.files += 1;
@@ -5826,6 +5836,39 @@ fn copy_project_files(
         }
     }
     Ok(())
+}
+
+/// Exact project-relative files/directories; deliberately not gitignore globs.
+fn read_bundle_exclusions(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let file = root.join(".pamignore");
+    let source = match fs::read_to_string(&file) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("cannot read {}: {error}", file.display())),
+    };
+    parse_bundle_exclusions(&source)
+}
+
+fn parse_bundle_exclusions(source: &str) -> Result<Vec<PathBuf>, String> {
+    source
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let path = PathBuf::from(line.trim_end_matches('/'));
+            if path.as_os_str().is_empty()
+                || line.contains(['*', '?', '!', ':', '\\'])
+                || path
+                    .components()
+                    .any(|part| !matches!(part, Component::Normal(_)))
+            {
+                return Err(format!(
+                    "invalid .pamignore path: {line}; use exact project-relative paths"
+                ));
+            }
+            Ok(path)
+        })
+        .collect()
 }
 
 fn ignored_project_path(path: &Path) -> bool {
@@ -8674,5 +8717,79 @@ mod tests {
         fs::write(&executable, "").expect("sdkmanager");
         assert_eq!(sdkmanager(&root), Some(executable));
         fs::remove_dir_all(root).expect("cleanup");
+    }
+}
+
+#[cfg(test)]
+mod bundle_exclusion_tests {
+    use super::*;
+
+    #[test]
+    fn staging_omits_exclusions_and_preserves_application_files() {
+        let root = std::env::temp_dir().join(format!("pam-exclusions-{}", std::process::id()));
+        let source = root.join("source");
+        let output = root.join("output");
+        fs::create_dir_all(source.join("BASE LAYOUT/Fintech App")).unwrap();
+        fs::create_dir_all(source.join("src")).unwrap();
+        fs::create_dir_all(&output).unwrap();
+        fs::write(source.join("BASE LAYOUT/Fintech App/design.json"), "{}").unwrap();
+        fs::write(source.join("src/Page.pam"), "<?php ?>").unwrap();
+        fs::write(source.join("phpunit.xml"), "tests").unwrap();
+        fs::write(source.join("phpunit.xml.bak"), "keep").unwrap();
+        fs::write(source.join(".pamignore"), "BASE LAYOUT/\nphpunit.xml\n").unwrap();
+        let exclusions = read_bundle_exclusions(&source).unwrap();
+        let mut budget = CopyBudget { files: 0, bytes: 0 };
+        copy_project_files(&source, &source, &output, &mut budget, &exclusions).unwrap();
+        assert!(!output.join("BASE LAYOUT").exists());
+        assert!(!output.join("phpunit.xml").exists());
+        assert!(!output.join(".pamignore").exists());
+        assert_eq!(
+            fs::read_to_string(output.join("src/Page.pam")).unwrap(),
+            "<?php ?>"
+        );
+        assert!(output.join("phpunit.xml.bak").is_file());
+        assert_eq!(budget.files, 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn excludes_reference_directories_with_spaces_and_exact_files() {
+        let rules =
+            parse_bundle_exclusions("# references\nBASE LAYOUT/\nconfig/local.php\n").unwrap();
+        assert!(
+            rules
+                .iter()
+                .any(|rule| Path::new("BASE LAYOUT/Fintech App/manifest.json").starts_with(rule))
+        );
+        assert!(
+            rules
+                .iter()
+                .any(|rule| Path::new("config/local.php").starts_with(rule))
+        );
+        assert!(
+            !rules
+                .iter()
+                .any(|rule| Path::new("config/local.php.bak").starts_with(rule))
+        );
+        assert!(
+            !rules
+                .iter()
+                .any(|rule| Path::new("src/Welcome.pam").starts_with(rule))
+        );
+    }
+
+    #[test]
+    fn rejects_escape_paths_and_unsupported_patterns() {
+        for input in [
+            "../secret",
+            "/etc",
+            "*",
+            "!src",
+            "C:/files",
+            "./",
+            "foo/../bar",
+        ] {
+            assert!(parse_bundle_exclusions(input).is_err(), "{input}");
+        }
     }
 }
