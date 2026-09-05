@@ -4,26 +4,61 @@
     "description": "Language support for PAM Native components.",
     "version": "0.1.0",
     "publisher": "pushin",
-    "engines": {"vscode": "^1.95.0"},
-    "categories": ["Programming Languages", "Formatters"],
-    "activationEvents": ["onLanguage:pam"],
+    "engines": {
+        "vscode": "^1.95.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Formatters"
+    ],
+    "activationEvents": [
+        "onLanguage:pam",
+        "onLanguage:php"
+    ],
     "main": "./extension.js",
     "contributes": {
-        "languages": [{
-            "id": "pam",
-            "aliases": ["PAM Native", "pam"],
-            "extensions": [".pam", ".pam.php"],
-            "configuration": "./language-configuration.json"
-        }],
-        "grammars": [{
-            "language": "pam",
-            "scopeName": "source.pam",
-            "path": "./syntaxes/pam.tmLanguage.json"
-        }],
+        "languages": [
+            {
+                "id": "pam",
+                "aliases": [
+                    "PAM Native",
+                    "pam"
+                ],
+                "extensions": [
+                    ".pam",
+                    ".pam.php"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "pam",
+                "scopeName": "source.pam",
+                "path": "./syntaxes/pam.tmLanguage.json",
+                "embeddedLanguages": {
+                    "source.php": "php",
+                    "source.css": "css",
+                    "text.html.pam": "html",
+                    "source.pam-expression": "php"
+                }
+            },
+            {
+                "scopeName": "pam.php.embedded",
+                "path": "./syntaxes/pam-php.injection.json",
+                "injectTo": [
+                    "text.html.php"
+                ]
+            }
+        ],
         "configurationDefaults": {
             "[pam]": {
                 "editor.defaultFormatter": "pushin.pam-native",
                 "editor.formatOnSave": true
+            },
+            "files.associations": {
+                "*.pam": "php",
+                "*.pam.php": "php"
             }
         },
         "configuration": {
@@ -33,10 +68,20 @@
                     "type": "string",
                     "default": "",
                     "description": "Optional absolute path to pam-native-language-server. The project vendor/bin and PATH are used by default."
+                },
+                "pam.languageServer.runtime": {
+                    "type": "string",
+                    "default": "pam",
+                    "description": "PAM runtime executable used to run the language server with the project PHP version."
                 }
             }
         }
     },
-    "scripts": {"test": "node --check extension.js && node test.js"},
-    "license": "Apache-2.0"
+    "scripts": {
+        "test": "node --check extension.js && node test.js"
+    },
+    "license": "Apache-2.0",
+    "extensionPack": [
+        "bmewburn.vscode-intelephense-client"
+    ]
 }
