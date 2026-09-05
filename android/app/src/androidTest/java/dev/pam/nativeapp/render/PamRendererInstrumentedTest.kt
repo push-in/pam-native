@@ -1429,6 +1429,45 @@ class PamRendererInstrumentedTest {
         }
     }
 
+    @Test
+    fun textRendererPreservesFractionalMetricsWhenWeightChanges() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val fontContext = object : android.content.ContextWrapper(activity) {
+                    override fun getAssets() = instrumentation.context.assets
+                }
+                fontContext.assets.open("pam/fonts/Inter.ttf").close()
+                val renderer = PamRenderer(fontContext, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("linkinpay"),
+                        PropKey.FONT_FAMILY to PropValue.Text("asset://fonts/Inter.ttf"),
+                        PropKey.FONT_SIZE to PropValue.Integer(22),
+                        PropKey.FONT_WEIGHT to PropValue.Integer(400),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(24f, 24f, 120f, 40f)),
+                    Mutation.SetRoot(1),
+                )))
+                val text = (activity.host.getChildAt(0) as ViewGroup).getChildAt(0) as TextView
+                for ((weight, reference) in listOf(400L to 268.34375f, 600L to 279.34375f, 700L to 284.875f)) {
+                    renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.FONT_WEIGHT, PropValue.Integer(weight)))))
+                    assertTrue(text.paintFlags and android.graphics.Paint.LINEAR_TEXT_FLAG != 0)
+                    if (Build.VERSION.SDK_INT >= 28) assertEquals(weight.toInt(), text.typeface.weight)
+                    val expected = reference / 64f * text.textSize
+                    val drawn = text.paint.measureText(text.text.toString())
+                    assertTrue("drawn=$drawn expected=$expected weight=$weight", drawn <= kotlin.math.ceil(expected))
+                }
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
     private fun node(
         id: Long,
         parent: Long,

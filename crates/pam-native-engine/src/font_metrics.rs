@@ -11,9 +11,15 @@ pub(crate) type TextMetrics = BTreeMap<u64, GlyphAdvances>;
 #[derive(Debug, Default)]
 pub(crate) struct FontMetricsCache {
     asset_root: Option<PathBuf>,
-    fonts: BTreeMap<String, CachedFont>,
-    node_fonts: BTreeMap<u64, String>,
+    fonts: BTreeMap<FontInstance, CachedFont>,
+    node_fonts: BTreeMap<u64, FontInstance>,
     metrics: TextMetrics,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct FontInstance {
+    family: String,
+    weight: u16,
 }
 
 #[derive(Debug)]
@@ -42,7 +48,7 @@ impl FontMetricsCache {
     }
 
     pub(crate) fn measure_nodes(&mut self, tree: &Tree, ids: &[u64]) -> &TextMetrics {
-        let mut required_characters = BTreeMap::<String, BTreeSet<char>>::new();
+        let mut required_characters = BTreeMap::<FontInstance, BTreeSet<char>>::new();
         let mut changed_nodes = Vec::new();
         for id in ids {
             self.node_fonts.remove(id);
@@ -60,6 +66,16 @@ impl FontMetricsCache {
             let Some(PropValue::String(text)) = node.properties.get(&PropKey::Text) else {
                 continue;
             };
+            let weight = node
+                .properties
+                .get(&PropKey::FontWeight)
+                .and_then(PropValue::as_number)
+                .unwrap_or(400.0)
+                .clamp(1.0, 1000.0) as u16;
+            let family = FontInstance {
+                family: family.clone(),
+                weight,
+            };
             self.node_fonts.insert(node.id, family.clone());
             changed_nodes.push(node.id);
             let characters = required_characters.entry(family.clone()).or_default();
@@ -70,9 +86,9 @@ impl FontMetricsCache {
             }
         }
 
-        let mut snapshots = BTreeMap::<String, GlyphAdvances>::new();
+        let mut snapshots = BTreeMap::<FontInstance, GlyphAdvances>::new();
         for (family, characters) in required_characters {
-            let Some(path) = self.resolve_asset_font(&family) else {
+            let Some(path) = self.resolve_asset_font(&family.family) else {
                 continue;
             };
             let cached = self
@@ -86,9 +102,13 @@ impl FontMetricsCache {
             if cached.bytes.is_empty() {
                 continue;
             }
-            let Ok(face) = ttf_parser::Face::parse(&cached.bytes, 0) else {
+            let Ok(mut face) = ttf_parser::Face::parse(&cached.bytes, 0) else {
                 continue;
             };
+            face.set_variation(
+                ttf_parser::Tag::from_bytes(b"wght"),
+                f32::from(family.weight),
+            );
             let units_per_em = f32::from(face.units_per_em());
             let mut changed = false;
             for character in characters {
@@ -204,5 +224,168 @@ mod tests {
 
         assert!(!cache.node_fonts.contains_key(&2));
         assert!(cache.node_fonts.contains_key(&3));
+    }
+    #[test]
+    fn variable_weight_updates_intrinsic_width_without_changing_font_family() {
+        let mut cache = FontMetricsCache::default();
+        cache.set_asset_root(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures"));
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([(
+                1,
+                Node {
+                    id: 1,
+                    parent: 0,
+                    index: 0,
+                    kind: NodeKind::Text,
+                    properties: BTreeMap::from([
+                        (
+                            PropKey::FontFamily,
+                            PropValue::String("asset://fonts/Inter.ttf".into()),
+                        ),
+                        (PropKey::Text, PropValue::String("linkinpay".into())),
+                        (PropKey::FontWeight, PropValue::Integer(400)),
+                    ]),
+                },
+            )]),
+        };
+        let width = |metrics: &super::TextMetrics| -> f32 {
+            "linkinpay".chars().map(|c| metrics[&1][&c]).sum()
+        };
+        // Shared fixture values asserted by the Android instrumentation test.
+        for (weight, expected) in [
+            (400, 268.34375),
+            (500, 273.875),
+            (600, 279.34375),
+            (700, 284.875),
+        ] {
+            tree.nodes
+                .get_mut(&1)
+                .unwrap()
+                .properties
+                .insert(PropKey::FontWeight, PropValue::Integer(weight));
+            assert_eq!(width(cache.measure_tree(&tree)) * 64.0, expected);
+        }
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::FontWeight, PropValue::Integer(400));
+        let regular = width(cache.measure_tree(&tree));
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::FontWeight, PropValue::Integer(700));
+        let bold = width(cache.measure_nodes(&tree, &[1]));
+        assert!(
+            bold > regular,
+            "bold {bold} must be measured separately from regular {regular}"
+        );
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::FontWeight, PropValue::Integer(400));
+        assert_eq!(width(cache.measure_nodes(&tree, &[1])), regular);
+    }
+    #[test]
+    fn automatic_row_layout_reflows_variable_font_after_weight_and_scale_changes() {
+        let mut cache = FontMetricsCache::default();
+        cache.set_asset_root(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures"));
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::Row,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (
+                    2,
+                    Node {
+                        id: 2,
+                        parent: 1,
+                        index: 0,
+                        kind: NodeKind::Text,
+                        properties: BTreeMap::from([
+                            (
+                                PropKey::FontFamily,
+                                PropValue::String("asset://fonts/Inter.ttf".into()),
+                            ),
+                            (PropKey::Text, PropValue::String("linkinpay".into())),
+                            (PropKey::FontSize, PropValue::Integer(22)),
+                            (PropKey::FontWeight, PropValue::Integer(400)),
+                        ]),
+                    },
+                ),
+            ]),
+        };
+        let mut widths = Vec::new();
+        for (weight, scale) in [(400, 1.0), (700, 1.0), (700, 1.5)] {
+            tree.nodes
+                .get_mut(&2)
+                .unwrap()
+                .properties
+                .insert(PropKey::FontWeight, PropValue::Integer(weight));
+            let layouts = crate::layout::calculate_with_text_metrics(
+                &tree,
+                crate::layout::Size {
+                    width: 384.0,
+                    height: 800.0,
+                },
+                scale,
+                cache.measure_nodes(&tree, &[2]),
+            )
+            .unwrap();
+            widths.push(layouts[&2].width);
+        }
+        assert!(
+            widths[1] > widths[0],
+            "weight change must resize the automatic box: {widths:?}"
+        );
+        assert!(
+            widths[2] > widths[1],
+            "accessibility scaling must resize the automatic box: {widths:?}"
+        );
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::AlignItems, PropValue::Integer(1));
+        let available = widths[0] + (widths[1] - widths[0]) * 0.25;
+        tree.nodes
+            .get_mut(&2)
+            .unwrap()
+            .properties
+            .insert(PropKey::Width, PropValue::Float(f64::from(available)));
+        let mut heights = Vec::new();
+        for weight in [400, 700] {
+            tree.nodes
+                .get_mut(&2)
+                .unwrap()
+                .properties
+                .insert(PropKey::FontWeight, PropValue::Integer(weight));
+            let layouts = crate::layout::calculate_with_text_metrics(
+                &tree,
+                crate::layout::Size {
+                    width: 384.0,
+                    height: 800.0,
+                },
+                1.0,
+                cache.measure_nodes(&tree, &[2]),
+            )
+            .unwrap();
+            heights.push(layouts[&2].height);
+        }
+        assert!(
+            heights[1] > heights[0],
+            "heavier text must wrap and grow vertically in a constrained box: {heights:?}"
+        );
     }
 }

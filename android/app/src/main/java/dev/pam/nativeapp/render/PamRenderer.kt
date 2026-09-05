@@ -4718,16 +4718,13 @@ class PamRenderer(
     }
 
     private fun applyTypeface(view: TextView, state: NodeState) {
-        val bold = state.integer(PropKey.FONT_WEIGHT, 400L) >= 600L
+        val weight = state.integer(PropKey.FONT_WEIGHT, 400L).coerceIn(1L, 1000L).toInt()
         val italic = state.integer(PropKey.FONT_STYLE, 1L) == 2L
-        val style = when {
-            bold && italic -> Typeface.BOLD_ITALIC
-            bold -> Typeface.BOLD
-            italic -> Typeface.ITALIC
-            else -> Typeface.NORMAL
-        }
         val family = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value
-        view.typeface = typefaces.resolve(family, style)
+        // Keep fractional glyph advances consistent with the layout engine.
+        view.paintFlags = view.paintFlags or android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
+            android.graphics.Paint.LINEAR_TEXT_FLAG
+        view.typeface = typefaces.resolve(family, weight, italic)
     }
 
     private fun applySafeAreaBottom(view: View, state: NodeState, enabled: Boolean) {
