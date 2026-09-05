@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.18 - 2026-09-05
+
+- Measure variable fonts using their requested weight and update automatic layout when weight or accessibility scale changes.
+- Preserve exact Android font weights and fractional glyph advances to prevent text clipping.
+- Load packaged iOS font assets with their requested OpenType weight through CoreText.
+- Measure wrapped row children against their allocated width so text height grows with its lines.
+
 ## 1.0.17 - 2026-09-04
 
 - Add exact project-relative `.pamignore` exclusions for mobile bundles.
