@@ -3,6 +3,7 @@ import ImageIO
 import UIKit
 
 public final class PamRenderer {
+    private let fontLoader = PamFontLoader()
     private let host: UIView
     private let dispatchEvent: (Int64, Int, Data) -> Void
     private let nativeViews: NativeViewRegistry
@@ -2312,7 +2313,10 @@ public final class PamRenderer {
             weight = .regular
         }
         let family = state.properties[PamConstants.fontFamily]?.textOrNil()
-        var baseFont = family.flatMap { UIFont(name: $0, size: baseSize) }
+        var baseFont = family.flatMap {
+            fontLoader.assetFont(family: $0, size: baseSize, weight: numericWeight)
+                ?? UIFont(name: $0, size: baseSize)
+        }
             ?? UIFont.systemFont(ofSize: baseSize, weight: weight)
         if state.properties[PamConstants.fontStyle]?.integerOrNil() == 2,
            let italicDescriptor = baseFont.fontDescriptor
