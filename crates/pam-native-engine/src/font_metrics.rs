@@ -289,4 +289,69 @@ mod tests {
             .insert(PropKey::FontWeight, PropValue::Integer(400));
         assert_eq!(width(cache.measure_nodes(&tree, &[1])), regular);
     }
+    #[test]
+    fn automatic_row_layout_reflows_variable_font_after_weight_and_scale_changes() {
+        let mut cache = FontMetricsCache::default();
+        cache.set_asset_root(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures"));
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::Row,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (
+                    2,
+                    Node {
+                        id: 2,
+                        parent: 1,
+                        index: 0,
+                        kind: NodeKind::Text,
+                        properties: BTreeMap::from([
+                            (
+                                PropKey::FontFamily,
+                                PropValue::String("asset://fonts/Inter.ttf".into()),
+                            ),
+                            (PropKey::Text, PropValue::String("linkinpay".into())),
+                            (PropKey::FontSize, PropValue::Integer(22)),
+                            (PropKey::FontWeight, PropValue::Integer(400)),
+                        ]),
+                    },
+                ),
+            ]),
+        };
+        let mut widths = Vec::new();
+        for (weight, scale) in [(400, 1.0), (700, 1.0), (700, 1.5)] {
+            tree.nodes
+                .get_mut(&2)
+                .unwrap()
+                .properties
+                .insert(PropKey::FontWeight, PropValue::Integer(weight));
+            let layouts = crate::layout::calculate_with_text_metrics(
+                &tree,
+                crate::layout::Size {
+                    width: 384.0,
+                    height: 800.0,
+                },
+                scale,
+                cache.measure_nodes(&tree, &[2]),
+            )
+            .unwrap();
+            widths.push(layouts[&2].width);
+        }
+        assert!(
+            widths[1] > widths[0],
+            "weight change must resize the automatic box: {widths:?}"
+        );
+        assert!(
+            widths[2] > widths[1],
+            "accessibility scaling must resize the automatic box: {widths:?}"
+        );
+    }
 }
