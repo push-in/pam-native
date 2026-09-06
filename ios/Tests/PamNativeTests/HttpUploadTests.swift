@@ -44,6 +44,14 @@ final class HttpUploadTests: XCTestCase {
     }
 
     func testStreamsTwoMiBFromStableSnapshotAndRemovesTemporaryFile() throws {
+        try assertStreamedUpload(status: 204)
+    }
+
+    func testDoesNotForwardFileUploadToRedirectLocation() throws {
+        try assertStreamedUpload(status: 307)
+    }
+
+    private func assertStreamedUpload(status expectedStatus: Int64) throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let root = directory.appendingPathComponent("files")
         let cache = directory.appendingPathComponent("snapshots")
@@ -53,7 +61,7 @@ final class HttpUploadTests: XCTestCase {
         let bytes = Data((0..<(2 * 1024 * 1024)).map { UInt8($0 % 251) })
         try bytes.write(to: source)
         let ready = expectation(description: "Upload server ready")
-        let server = try UploadHTTPServer(length: bytes.count, source: source) { ready.fulfill() }
+        let server = try UploadHTTPServer(length: bytes.count, source: source, responseStatus: expectedStatus) { ready.fulfill() }
         let module = HttpModule(configuration: .ephemeral, filesRoot: root, uploadCache: cache)
         defer { module.close(); server.stop() }
         wait(for: [ready], timeout: 5)
@@ -68,8 +76,7 @@ final class HttpUploadTests: XCTestCase {
                 XCTFail("Upload failed: \(String(data: payload, encoding: .utf8) ?? "unknown")")
                 return
             }
-            do { XCTAssertEqual(try WireMap.decode(payload)["statusCode"], .integer(204)) }
-            catch { XCTFail("Invalid upload response: \(error)") }
+            XCTAssertEqual(try WireMap.decode(payload)["statusCode"], .integer(expectedStatus))
         }
         wait(for: [completed], timeout: 20)
         XCTAssertEqual(server.digest, SHA256.hash(data: bytes))
@@ -85,6 +92,7 @@ private final class UploadHTTPServer: @unchecked Sendable {
     private let source: URL
     private let responds: Bool
     private let onReceived: () -> Void
+    private let responseStatus: Int64
     private var received = Data()
     private var headersRead = false
     private var connections: [NWConnection] = []
@@ -92,12 +100,13 @@ private final class UploadHTTPServer: @unchecked Sendable {
     var url: String? { listener.port.map { "http://127.0.0.1:\($0.rawValue)/upload" } }
     var digest: SHA256.Digest { queue.sync { SHA256.hash(data: received) } }
 
-    init(length: Int, source: URL, responds: Bool = true,
+    init(length: Int, source: URL, responds: Bool = true, responseStatus: Int64 = 204,
          received: @escaping () -> Void = {}, ready: @escaping () -> Void) throws {
         self.length = length
         self.source = source
         self.responds = responds
         self.onReceived = received
+        self.responseStatus = responseStatus
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         listener = try NWListener(using: parameters)
@@ -141,7 +150,9 @@ private final class UploadHTTPServer: @unchecked Sendable {
             if self.received.count == self.length {
                 self.onReceived()
                 guard self.responds else { return }
-                let response = Data("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8)
+                let statusLine = self.responseStatus == 307 ? "307 Temporary Redirect" : "204 No Content"
+                let redirect = self.responseStatus == 307 ? "Location: http://127.0.0.1:1/must-not-receive-file\r\n" : ""
+                let response = Data("HTTP/1.1 \(statusLine)\r\n\(redirect)Content-Length: 0\r\nConnection: close\r\n\r\n".utf8)
                 connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
             } else if finished {
                 connection.cancel()

@@ -80,7 +80,11 @@ class HttpUploadInstrumentedTest {
         } finally { releaseServer.countDown(); module.close(); directory.deleteRecursively() }
     }
 
-    @Test fun streamsBinaryFileBeyondPhpBodyLimitAndCleansSnapshot() {
+    @Test fun streamsBinaryFileBeyondPhpBodyLimitAndCleansSnapshot() = assertStreamedUpload(expectedStatus = 204)
+
+    @Test fun doesNotForwardFileUploadToRedirectLocation() = assertStreamedUpload(expectedStatus = 307)
+
+    private fun assertStreamedUpload(expectedStatus: Int) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(context.cacheDir, "http-upload-test-${UUID.randomUUID()}").apply { mkdirs() }
         val root = File(directory, "files").apply { mkdir() }
@@ -125,7 +129,9 @@ class HttpUploadInstrumentedTest {
                                 remaining -= count
                             }
                             receivedHash.set(digest.digest())
-                            socket.getOutputStream().write("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                            val statusLine = if (expectedStatus == 307) "307 Temporary Redirect" else "204 No Content"
+                            val redirect = if (expectedStatus == 307) "Location: http://127.0.0.1:1/must-not-receive-file\r\n" else ""
+                            socket.getOutputStream().write("HTTP/1.1 $statusLine\r\n${redirect}Content-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
                         }
                     } catch (error: Throwable) { failure.set(error) }
                 }
@@ -143,7 +149,7 @@ class HttpUploadInstrumentedTest {
                 assertFalse("Server did not stop", serving.isAlive)
                 assertNull(failure.get())
                 assertEquals(ModuleResultStatus.SUCCESS, result)
-                assertEquals(WireValue.Integer(204), WireMap.decode(payload)["statusCode"])
+                assertEquals(WireValue.Integer(expectedStatus.toLong()), WireMap.decode(payload)["statusCode"])
                 assertArrayEquals(expectedHash.digest(), receivedHash.get())
                 assertTrue("Snapshot leaked", cache.listFiles().isNullOrEmpty())
                 assertEquals("changed after upload started", source.readText())
