@@ -76,7 +76,12 @@ final class HttpUploadTests: XCTestCase {
                 XCTFail("Upload failed: \(String(data: payload, encoding: .utf8) ?? "unknown")")
                 return
             }
-            XCTAssertEqual(try WireMap.decode(payload)["statusCode"], .integer(expectedStatus))
+            do {
+                let values = try WireMap.decode(payload)
+                XCTAssertEqual(values["statusCode"], .integer(expectedStatus))
+            } catch {
+                XCTFail("Invalid upload response: \(error)")
+            }
         }
         wait(for: [completed], timeout: 20)
         XCTAssertEqual(server.digest, SHA256.hash(data: bytes))
