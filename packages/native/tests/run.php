@@ -3235,6 +3235,30 @@ $assert(
     'Location failures must reach the optional failure callback.',
 );
 
+foreach ([true, false] as $notificationGranted) {
+    $notificationDecision = null;
+    $permissionRequest = \Pam\Native\System\Notifications::requestPermission(
+        static function (bool $granted) use (&$notificationDecision): void { $notificationDecision = $granted; },
+        failure: static function (string $message): void { throw new RuntimeException('A permission decision is not a failure.'); },
+    );
+    Runtime::dispatchModuleResult($permissionRequest, ModuleResultStatus::Success->value, Wire::map(['granted' => $notificationGranted]));
+    $assert($notificationDecision === $notificationGranted, 'Notification permission must preserve granted and denied decisions.');
+}
+$notificationFailure = null;
+$permissionRequest = \Pam\Native\System\Notifications::requestPermission(
+    static function (bool $granted): void { throw new RuntimeException('Native failure must not invoke permission success.'); },
+    failure: static function (string $message) use (&$notificationFailure): void { $notificationFailure = $message; },
+);
+Runtime::dispatchModuleResult($permissionRequest, ModuleResultStatus::Failure->value, 'No foreground activity.');
+$assert($notificationFailure === 'No foreground activity.', 'Notification permission failure must reach the optional callback.');
+$permissionRequest = \Pam\Native\System\Notifications::requestPermission(static function (bool $granted): void {});
+$permissionErrorsBefore = count(TestDiagnostics::$messages);
+Runtime::dispatchModuleResult($permissionRequest, ModuleResultStatus::Failure->value, 'Permission module failed.');
+$assert(count(TestDiagnostics::$messages) === $permissionErrorsBefore + 1
+    && str_contains(TestDiagnostics::$messages[array_key_last(TestDiagnostics::$messages)], 'Permission module failed.'),
+    'Omitting the permission failure callback must preserve legacy error reporting.');
+array_pop(TestDiagnostics::$messages);
+
 $pushRegistrationFailure = null;
 $pushRegistrationRequest = PushNotifications::register(
     static function (): void {
