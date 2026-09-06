@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.21 - 2026-09-06
+
+- Add `Clipboard::setSensitiveText()` for expiring sensitive clipboard writes.
+- Mark sensitive Android clips so supported keyboards and system surfaces avoid previews.
+- Clear unchanged sensitive Android clips after a bounded lifetime and use native expiration on iOS.
+
 ## 1.0.20 - 2026-09-06
 
 - Add `Http::upload()` for native streaming PUT uploads from private files, with bounded snapshots, network deadlines and cleanup on completion or failure.
