@@ -363,7 +363,25 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                 throw RuntimeError("Clipboard text exceeds one megabyte")
             }
             DispatchQueue.main.async {
-                UIPasteboard.general.string = text
+                let sensitive: Bool
+                if case .flag(true)? = values["sensitive"] {
+                    sensitive = true
+                } else {
+                    sensitive = false
+                }
+                if sensitive {
+                    guard case let .integer(seconds)? = values["clearAfterSeconds"],
+                          (15...300).contains(seconds) else {
+                        completion(.failure, "Sensitive clipboard expiry must be between 15 and 300 seconds".data(using: .utf8) ?? Data())
+                        return
+                    }
+                    UIPasteboard.general.setItems(
+                        [["public.utf8-plain-text": text]],
+                        options: [.localOnly: true, .expirationDate: Date().addingTimeInterval(TimeInterval(seconds))]
+                    )
+                } else {
+                    UIPasteboard.general.string = text
+                }
                 completion(.success, Data())
             }
         } catch {

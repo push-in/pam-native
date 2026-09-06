@@ -1309,6 +1309,23 @@ $assert(
             === 'Pam Native',
     'Clipboard writes must use the bounded typed native operation channel.',
 );
+Clipboard::setSensitiveText('private-pix-code', 45);
+$sensitiveClipboardPayload = Wire::decodeMap(TestDiagnostics::$typedCall['payload']);
+$assert(
+    TestDiagnostics::$typedCall['operation'] === NativeOperation::ClipboardSetText->value
+        && $sensitiveClipboardPayload['text'] === 'private-pix-code'
+        && $sensitiveClipboardPayload['sensitive'] === true
+        && $sensitiveClipboardPayload['clearAfterSeconds'] === 45,
+    'Sensitive clipboard writes must carry bounded privacy metadata.',
+);
+foreach ([14, 301] as $invalidClipboardExpiry) {
+    try {
+        Clipboard::setSensitiveText('private', $invalidClipboardExpiry);
+        $assert(false, 'Sensitive clipboard expiry must reject unsafe bounds.');
+    } catch (InvalidArgumentException) {
+        $assert(true, 'Sensitive clipboard expiry rejects unsafe bounds.');
+    }
+}
 $assert(
     array_map(
         static fn (NativeOperation $operation): int => $operation->value,
