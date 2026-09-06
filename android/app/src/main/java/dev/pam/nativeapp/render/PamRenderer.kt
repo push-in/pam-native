@@ -86,6 +86,18 @@ import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
+/**
+ * PAM's layout engine sends physical x/y coordinates. Keep FrameLayout from
+ * resolving its implicit START gravity again when a parent is RTL, otherwise
+ * every absolutely positioned child is anchored to the right edge.
+ */
+@SuppressLint("RtlHardcoded")
+internal const val PAM_PHYSICAL_FRAME_GRAVITY: Int = Gravity.TOP or Gravity.LEFT
+
+private const val LOCAL_MODAL_SELECTION_BEHAVIOR = 24L
+private const val KEYBOARD_VIEWPORT_RECONCILE_RETRIES = 8
+private const val KEYBOARD_VIEWPORT_RECONCILE_RETRY_MS = 100L
+
 internal inline fun <reified T> snapshotValues(
     size: Int,
     valueAt: (Int) -> Any?,
@@ -109,8 +121,29 @@ internal fun resolvedKeyboardInset(
     return max(platformInset, resizedInset)
 }
 
+internal fun isLocalModalSelectionEvent(properties: PropValue?): Boolean {
+    val host = (properties as? PropValue.Properties)?.value ?: return false
+    val behavior = (host["behavior"] as? WireValue.Integer)?.value ?: return false
+
+    return behavior == LOCAL_MODAL_SELECTION_BEHAVIOR
+}
+
 internal fun visibleImeInset(rawInset: Int, visible: Boolean): Int =
     if (visible) rawInset.coerceAtLeast(0) else 0
+
+internal fun keyboardTopForInset(windowBottom: Int, keyboardInset: Int): Int =
+    windowBottom - keyboardInset.coerceAtLeast(0)
+
+internal fun keyboardOverlapForBounds(
+    originalBottom: Float,
+    windowBottom: Int,
+    keyboardInset: Int,
+    offset: Int,
+): Int {
+    val keyboardTop = keyboardTopForInset(windowBottom, keyboardInset)
+    val visibleBottom = min(originalBottom, windowBottom.toFloat())
+    return max(0, (visibleBottom - keyboardTop + offset).toInt())
+}
 
 internal fun interactiveKeyboardTranslation(
     keyboardOverlap: Int,
@@ -134,6 +167,14 @@ internal fun keyboardAvoidingViewportHeight(
 internal fun keyboardAvoidingBehaviorReducesViewport(behavior: Int): Boolean =
     behavior == 1 || behavior == 3
 
+internal fun useDarkStatusBarIcons(
+    systemBarsAppearance: Int?,
+    darkTheme: Boolean,
+    lightStatusBarMask: Int,
+): Boolean = systemBarsAppearance?.let { appearance ->
+    appearance and lightStatusBarMask != 0
+} ?: !darkTheme
+
 internal fun safeAreaChildCrossAxisReduction(
     mainAxisHorizontal: Boolean,
     horizontalInsets: Int,
@@ -143,6 +184,26 @@ internal fun safeAreaChildCrossAxisReduction(
 } else {
     horizontalInsets to 0
 }
+
+internal fun measuredCrossAxisViewportReduction(
+    mainAxisHorizontal: Boolean,
+    engineWidth: Int,
+    measuredWidth: Int,
+    engineHeight: Int,
+    measuredHeight: Int,
+): Pair<Int, Int> = safeAreaChildCrossAxisReduction(
+    mainAxisHorizontal = mainAxisHorizontal,
+    horizontalInsets = if (measuredWidth > 0) {
+        (engineWidth - measuredWidth).coerceAtLeast(0)
+    } else {
+        0
+    },
+    verticalInsets = if (measuredHeight > 0) {
+        (engineHeight - measuredHeight).coerceAtLeast(0)
+    } else {
+        0
+    },
+)
 
 internal fun safeAreaFlexViewportExtent(
     layoutExtent: Int,
@@ -157,9 +218,31 @@ internal fun safeAreaFlexViewportExtent(
         }
     }
 
+internal fun safeAreaLayoutBoundsChanged(
+    left: Int,
+    top: Int,
+    right: Int,
+    bottom: Int,
+    oldLeft: Int,
+    oldTop: Int,
+    oldRight: Int,
+    oldBottom: Int,
+): Boolean =
+    left != oldLeft || top != oldTop || right != oldRight || bottom != oldBottom
+
 internal fun measuredParentExtent(measuredExtent: Int, layoutParamExtent: Int): Int =
     measuredExtent.takeIf { it > 0 }
         ?: layoutParamExtent.coerceAtLeast(0)
+
+internal fun parentViewportMeasurementIsStale(
+    measuredExtent: Int,
+    layoutParamExtent: Int,
+    layoutRequested: Boolean,
+): Boolean =
+    layoutRequested &&
+        measuredExtent > 0 &&
+        layoutParamExtent > 0 &&
+        measuredExtent != layoutParamExtent
 
 internal fun hostedContentExtent(
     measuredExtent: Int,
@@ -167,6 +250,9 @@ internal fun hostedContentExtent(
     nativePadding: Int,
 ): Int = (measuredParentExtent(measuredExtent, layoutParamExtent) - nativePadding)
     .coerceAtLeast(0)
+
+internal fun usesNativeViewGroupPadding(kind: NodeKind): Boolean =
+    kind == NodeKind.CUSTOM_VIEW
 
 internal fun resolvedAndroidLetterSpacing(
     logicalSpacing: Float,
@@ -324,6 +410,14 @@ class PamRenderer(
         }
     }
 
+    fun isLayoutInProgress(): Boolean {
+        if (host.isInLayout) return true
+        for (index in 0 until views.size()) {
+            if (views.valueAt(index).isInLayout) return true
+        }
+        return false
+    }
+
     fun commit(batches: List<List<Mutation>>) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
@@ -384,6 +478,26 @@ class PamRenderer(
                 )
             }
         }
+        ensureFocusedInputVisibleAfterCommit()
+    }
+
+    private fun ensureFocusedInputVisibleAfterCommit() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        if (currentPlatformImeInset() <= 0) return
+        val input = (host.findFocus() as? EditText)
+            ?: lastFocusedInput?.takeIf(EditText::hasFocus)
+            ?: return
+        var ancestor = input.parent as? View
+        while (ancestor != null) {
+            if (ancestor is PamScrollContainer) {
+                // Scroll-offset restoration is posted during commit. Queueing
+                // this reconciliation afterwards makes keyboard visibility win
+                // over a stale retained offset from the reactive render.
+                ancestor.ensureViewportTargetVisible(input)
+                return
+            }
+            ancestor = ancestor.parent as? View
+        }
     }
 
     private fun syncHostBackground() {
@@ -394,7 +508,11 @@ class PamRenderer(
         java.util.WeakHashMap<EditText, PamModalHost>()
 
     private fun openLocalModalInput(input: EditText) {
-        localModalInputTargets[input]?.setVisible(true)
+        val target = localModalInputTargets[input] ?: return
+        localModalInputTargets.values.toSet().forEach { modal ->
+            if (modal !== target) modal.setVisible(false)
+        }
+        target.setVisible(true)
     }
 
     private fun bindLocalModalInput(input: EditText, target: PamModalHost) {
@@ -435,7 +553,12 @@ class PamRenderer(
                 }
                 marker?.startsWith(LOCAL_MODAL_TRIGGER_PREFIX) == true -> {
                     modals[marker.removePrefix(LOCAL_MODAL_TRIGGER_PREFIX)]?.let { target ->
-                        { target.setVisible(true) }
+                        {
+                            modals.values.forEach { modal ->
+                                if (modal !== target) modal.setVisible(false)
+                            }
+                            target.setVisible(true)
+                        }
                     }
                 }
                 else -> null
@@ -565,6 +688,23 @@ class PamRenderer(
         }
     }
 
+    fun hasPresentedModal(): Boolean {
+        for (position in views.size() - 1 downTo 0) {
+            if ((views.valueAt(position) as? PamModalHost)?.isPresented() == true) {
+                return true
+            }
+        }
+        return false
+    }
+
+    fun consumePresentedModalBack(): Boolean {
+        for (position in views.size() - 1 downTo 0) {
+            val modal = views.valueAt(position) as? PamModalHost ?: continue
+            if (modal.consumeActivityBack()) return true
+        }
+        return false
+    }
+
     override fun close() {
         check(Looper.myLooper() == Looper.getMainLooper())
         for (position in 0 until views.size()) {
@@ -662,7 +802,9 @@ class PamRenderer(
             -> Space(context)
             NodeKind.ACTIVITY_INDICATOR -> PamActivityIndicator(context)
             NodeKind.SWITCH -> PamSwitch(context)
-            NodeKind.MODAL -> PamModalHost(context)
+            NodeKind.MODAL -> PamModalHost(context) {
+                (context as? PamActivity)?.suppressNextPamBack()
+            }
             NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {
                 installKeyboardInsets(it, requireNotNull(state))
             }
@@ -685,7 +827,12 @@ class PamRenderer(
                     ?: error("Custom native view is missing its generated name")
                 nativeViews.create(name) { kind, payload ->
                     if (kind == EVENT_NATIVE) {
-                        updateLocalModalSelection(custom.id)
+                        if (isLocalModalSelectionEvent(
+                                custom.properties[PropKey.HOST_PROPERTIES],
+                            )
+                        ) {
+                            updateLocalModalSelection(custom.id)
+                        }
                         closeLocalModalAncestor(custom.id)
                     }
                     val eventProperty = nativeEventProperty(kind)
@@ -1140,7 +1287,9 @@ class PamRenderer(
         val view = views[id] ?: return
         val state = nodes[id] ?: return
         val parentState = nodes[state.parent]
-        val parentFrame = frames[effectiveParent(state.parent)]
+        val effectiveParentId = effectiveParent(state.parent)
+        val parentFrame = frames[effectiveParentId]
+        val parentView = views[effectiveParentId]
         val density = resourcesDensity()
         val horizontal = snappedPixelSpan(
             frame.x,
@@ -1154,18 +1303,24 @@ class PamRenderer(
             parentFrame?.y ?: 0f,
             density,
         )
-        val parentSafePadding = parentState?.kind == NodeKind.SAFE_AREA_VIEW &&
-            parentState.integer(
+        val hostedParentState = nodes[effectiveParent(state.parent)]
+        val safeAreaParentState = when {
+            parentState?.kind == NodeKind.SAFE_AREA_VIEW -> parentState
+            hostedParentState?.kind == NodeKind.SAFE_AREA_VIEW -> hostedParentState
+            else -> null
+        }
+        val parentSafePadding = safeAreaParentState != null &&
+            safeAreaParentState.integer(
                 PropKey.SAFE_AREA_MODE,
                 SAFE_AREA_PADDING.toLong(),
             ).toInt() == SAFE_AREA_PADDING
         val parentSafeHorizontal = if (parentSafePadding) {
-            (if (parentState?.flag(PropKey.SAFE_AREA_LEFT, true) == true) {
-                parentState.safeAreaLeftInset
+            (if (safeAreaParentState?.flag(PropKey.SAFE_AREA_LEFT, true) == true) {
+                safeAreaParentState.safeAreaLeftInset
             } else {
                 0
-            }) + (if (parentState?.flag(PropKey.SAFE_AREA_RIGHT, true) == true) {
-                parentState.safeAreaRightInset
+            }) + (if (safeAreaParentState?.flag(PropKey.SAFE_AREA_RIGHT, true) == true) {
+                safeAreaParentState.safeAreaRightInset
             } else {
                 0
             })
@@ -1173,12 +1328,12 @@ class PamRenderer(
             0
         }
         val parentSafeVertical = if (parentSafePadding) {
-            (if (parentState?.flag(PropKey.SAFE_AREA_TOP, true) == true) {
-                parentState.safeAreaTopInset
+            (if (safeAreaParentState?.flag(PropKey.SAFE_AREA_TOP, true) == true) {
+                safeAreaParentState.safeAreaTopInset
             } else {
                 0
-            }) + (if (parentState?.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true) == true) {
-                parentState.safeAreaBottomInset
+            }) + (if (safeAreaParentState?.flag(PropKey.SAFE_AREA_BOTTOM_EDGE, true) == true) {
+                safeAreaParentState.safeAreaBottomInset
             } else {
                 0
             })
@@ -1203,6 +1358,55 @@ class PamRenderer(
                 horizontalInsets = parentSafeHorizontal,
                 verticalInsets = parentSafeVertical,
             )
+        val parentLayout = parentView?.layoutParams
+        val measuredParentWidth = parentView?.let { measured ->
+            val layoutWidth = parentLayout?.width ?: 0
+            measuredParentExtent(
+                if (parentViewportMeasurementIsStale(
+                        measured.width,
+                        layoutWidth,
+                        measured.isLayoutRequested,
+                    )
+                ) {
+                    0
+                } else {
+                    measured.width
+                },
+                layoutWidth,
+            )
+        } ?: 0
+        val measuredParentHeight = parentView?.let { measured ->
+            val layoutHeight = parentLayout?.height ?: 0
+            measuredParentExtent(
+                if (parentViewportMeasurementIsStale(
+                        measured.height,
+                        layoutHeight,
+                        measured.isLayoutRequested,
+                    )
+                ) {
+                    0
+                } else {
+                    measured.height
+                },
+                layoutHeight,
+            )
+        } ?: 0
+        val (measuredHorizontalReduction, measuredVerticalReduction) =
+            measuredCrossAxisViewportReduction(
+                mainAxisHorizontal = parentMainAxisHorizontal,
+                engineWidth = dp(parentFrame?.width ?: 0f),
+                measuredWidth = measuredParentWidth,
+                engineHeight = dp(parentFrame?.height ?: 0f),
+                measuredHeight = measuredParentHeight,
+            )
+        val parentCrossAxisWidthReduction = max(
+            parentSafeWidthReduction,
+            measuredHorizontalReduction,
+        )
+        val parentCrossAxisHeightReduction = max(
+            parentSafeHeightReduction,
+            measuredVerticalReduction,
+        )
         val safeMargin = state.kind == NodeKind.SAFE_AREA_VIEW &&
             state.integer(PropKey.SAFE_AREA_MODE, SAFE_AREA_PADDING.toLong()).toInt() ==
             SAFE_AREA_MARGIN
@@ -1230,10 +1434,10 @@ class PamRenderer(
             0
         }
         var width = (
-            horizontal.extent - safeLeft - safeRight - parentSafeWidthReduction
+            horizontal.extent - safeLeft - safeRight - parentCrossAxisWidthReduction
             ).coerceAtLeast(0)
         var height = (
-            vertical.extent - safeTop - safeBottom - parentSafeHeightReduction
+            vertical.extent - safeTop - safeBottom - parentCrossAxisHeightReduction
             ).coerceAtLeast(0)
         height = keyboardAvoidingViewportHeight(
             baseHeight = height,
@@ -1250,7 +1454,7 @@ class PamRenderer(
             // Layout-only parents have no Android View. Their children are hosted by the
             // nearest materialized ancestor, whose measured viewport is the one that can be
             // reduced by safe areas or fixed siblings.
-            parentView = views[effectiveParent(state.parent)],
+            parentView = parentView,
             applyHorizontal = { offset, reduction ->
                 leftPx -= offset
                 width = (width - reduction).coerceAtLeast(0)
@@ -1270,10 +1474,11 @@ class PamRenderer(
             current.topMargin != topPx
         if (layoutChanged) {
             view.layoutParams = FrameLayout.LayoutParams(width, height).apply {
+                gravity = PAM_PHYSICAL_FRAME_GRAVITY
                 leftMargin = leftPx
                 topMargin = topPx
             }
-            children[state.id]?.forEach(::applyLayout)
+            applyHostedChildLayouts(state.id)
         }
         // Some plugin hosts (for example Calendar) draw against tagged child
         // bounds. A descendant frame can change without mutating the host's
@@ -1320,7 +1525,16 @@ class PamRenderer(
             Axis.HORIZONTAL -> parentView.width
             Axis.VERTICAL -> parentView.height
         }
-        if (!parentView.isLaidOut || rawMeasuredExtent <= 0) {
+        val layoutParamExtent = when (axis) {
+            Axis.HORIZONTAL -> parentView.layoutParams?.width ?: 0
+            Axis.VERTICAL -> parentView.layoutParams?.height ?: 0
+        }
+        val measurementIsStale = parentViewportMeasurementIsStale(
+            measuredExtent = rawMeasuredExtent,
+            layoutParamExtent = layoutParamExtent,
+            layoutRequested = parentView.isLayoutRequested,
+        )
+        if (!parentView.isLaidOut || rawMeasuredExtent <= 0 || measurementIsStale) {
             deferViewportLayoutUntilMeasured(state.id, parentView, axis)
         }
         val hostedThroughLayoutOnlyParent = views[state.parent] == null
@@ -1334,13 +1548,13 @@ class PamRenderer(
         }
         val measuredExtent = when (axis) {
             Axis.HORIZONTAL -> hostedContentExtent(
-                parentView.width,
-                parentView.layoutParams?.width ?: 0,
+                if (measurementIsStale) 0 else parentView.width,
+                layoutParamExtent,
                 nativePadding,
             )
             Axis.VERTICAL -> hostedContentExtent(
-                parentView.height,
-                parentView.layoutParams?.height ?: 0,
+                if (measurementIsStale) 0 else parentView.height,
+                layoutParamExtent,
                 nativePadding,
             )
         }
@@ -1546,7 +1760,10 @@ class PamRenderer(
                 configurePressable(view, state)
             }
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = value.text(key)
-            PropKey.ACCESSIBILITY_HINT -> view.tooltipText = value.text(key)
+            PropKey.ACCESSIBILITY_HINT -> {
+                view.tooltipText = null
+                configureAccessibilityDelegate(view, state)
+            }
             PropKey.TEST_ID -> view.transitionName = value.text(key)
             PropKey.SHARED_TRANSITION_TAG ->
                 view.setTag(dev.pam.nativeapp.R.id.pam_shared_transition_tag, value.text(key))
@@ -2410,7 +2627,10 @@ class PamRenderer(
                 configurePressable(view, state)
             }
             PropKey.ACCESSIBILITY_LABEL -> view.contentDescription = null
-            PropKey.ACCESSIBILITY_HINT -> view.tooltipText = null
+            PropKey.ACCESSIBILITY_HINT -> {
+                view.tooltipText = null
+                configureAccessibilityDelegate(view, state)
+            }
             PropKey.ACCESSIBILITY_ROLE -> {
                 (view as? PamActivityIndicator)?.setHostAccessibility(false)
                 configureAccessibilityDelegate(view, state)
@@ -3477,12 +3697,15 @@ class PamRenderer(
             view.scaleY = state.targetScaleY()
             view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat()
             view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()
+            view.elevation = dp(state.number(PropKey.ELEVATION, 0.0).toFloat()).toFloat()
             updateBackground(view, state)
             state.properties[PropKey.TEXT_COLOR]?.let { color ->
                 (view as? TextView)?.let { applySemanticTextColor(it, color.integer().toInt()) }
             }
             return
         }
+        var backgroundColorOverride: Int? = null
+        var borderColorOverride: Int? = null
         val keys = styles.keys()
         while (keys.hasNext()) {
             val rawKey = keys.next()
@@ -3493,12 +3716,22 @@ class PamRenderer(
                 PropKey.SCALE_Y -> view.scaleY = styles.optDouble(rawKey, view.scaleY.toDouble()).toFloat()
                 PropKey.TRANSLATION_X -> view.translationX = styles.optDouble(rawKey, view.translationX.toDouble()).toFloat()
                 PropKey.TRANSLATION_Y -> view.translationY = styles.optDouble(rawKey, view.translationY.toDouble()).toFloat()
-                PropKey.BACKGROUND_COLOR -> view.background?.mutate()?.setTint(styles.optLong(rawKey).toInt())
+                PropKey.BACKGROUND_COLOR -> backgroundColorOverride = styles.optLong(rawKey).toInt()
+                PropKey.BORDER_COLOR -> borderColorOverride = styles.optLong(rawKey).toInt()
                 PropKey.TEXT_COLOR -> (view as? TextView)?.let {
                     applySemanticTextColor(it, styles.optLong(rawKey).toInt())
                 }
+                PropKey.ELEVATION -> view.elevation = dp(styles.optDouble(rawKey).toFloat()).toFloat()
                 else -> Unit
             }
+        }
+        if (backgroundColorOverride != null || borderColorOverride != null) {
+            updateBackground(
+                view = view,
+                state = state,
+                backgroundColorOverride = backgroundColorOverride,
+                borderColorOverride = borderColorOverride,
+            )
         }
     }
 
@@ -4262,7 +4495,11 @@ class PamRenderer(
     }
 
     private fun applyLeafPadding(view: View, state: NodeState) {
-        if (view is ViewGroup) {
+        // Flex containers receive engine-computed child frames, so Android
+        // padding would offset their content twice. Custom native ViewGroups
+        // own descendant layout and must receive authored padding as real
+        // View padding (for example Material list-item content insets).
+        if (view is ViewGroup && !usesNativeViewGroupPadding(state.kind)) {
             view.setPadding(0, 0, 0, state.safeBottomInset)
             return
         }
@@ -4283,7 +4520,12 @@ class PamRenderer(
         return context.resources.getColor(identifier, context.theme)
     }
 
-    private fun updateBackground(view: View, state: NodeState) {
+    private fun updateBackground(
+        view: View,
+        state: NodeState,
+        backgroundColorOverride: Int? = null,
+        borderColorOverride: Int? = null,
+    ) {
         val defaultColor = if (
             state.kind == NodeKind.IMAGE ||
             state.kind == NodeKind.IMAGE_BACKGROUND ||
@@ -4296,7 +4538,7 @@ class PamRenderer(
         } else {
             Color.TRANSPARENT.toLong()
         }
-        val color = state.properties[PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE]
+        val color = backgroundColorOverride ?: state.properties[PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE]
             ?.let { resolveNativeColor(it.text(PropKey.NATIVE_BACKGROUND_COLOR_RESOURCE)) }
             ?: state.integer(PropKey.BACKGROUND_COLOR, defaultColor).toInt()
         val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
@@ -4333,7 +4575,7 @@ class PamRenderer(
                 leftBorderWidth != topBorderWidth ||
                 leftBorderWidth != bottomBorderWidth
             )
-        val borderColor = state.properties[PropKey.NATIVE_BORDER_COLOR_RESOURCE]
+        val borderColor = borderColorOverride ?: state.properties[PropKey.NATIVE_BORDER_COLOR_RESOURCE]
             ?.let { resolveNativeColor(it.text(PropKey.NATIVE_BORDER_COLOR_RESOURCE)) }
             ?: state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
         val borderStyle = state.integer(PropKey.BORDER_STYLE, 1).toInt()
@@ -4917,14 +5159,45 @@ class PamRenderer(
             safeArea.clipToPadding = true
         }
         view.setOnApplyWindowInsetsListener { target, insets ->
-            val raw = windowSafeAreaInsets(insets)
-            val resolved = safeAreaInsetsForView(raw, target)
-            state.safeAreaLeftInset = resolved.left
-            state.safeAreaTopInset = resolved.top
-            state.safeAreaRightInset = resolved.right
-            state.safeAreaBottomInset = resolved.bottom
-            applySafeAreaLayout(target, state)
+            refreshSafeAreaLayout(target, state, insets)
             insets
+        }
+        // Insets are normally dispatched before the orientation layout pass.
+        // Bounds-dependent consumption must therefore be recalculated once
+        // the SafeAreaView owns its final geometry; otherwise a landscape
+        // navigation inset (right edge) can remain as a zero bottom inset
+        // after returning to portrait on Samsung devices.
+        view.addOnLayoutChangeListener {
+                target,
+                left,
+                top,
+                right,
+                bottom,
+                oldLeft,
+                oldTop,
+                oldRight,
+                oldBottom,
+            ->
+            if (!safeAreaLayoutBoundsChanged(
+                    left,
+                    top,
+                    right,
+                    bottom,
+                    oldLeft,
+                    oldTop,
+                    oldRight,
+                    oldBottom,
+                )
+            ) {
+                return@addOnLayoutChangeListener
+            }
+            target.post {
+                if (!target.isAttachedToWindow || views[state.id] !== target) return@post
+                target.rootWindowInsets?.let { current ->
+                    refreshSafeAreaLayout(target, state, current)
+                }
+                target.requestApplyInsets()
+            }
         }
         if (view.isAttachedToWindow) {
             view.requestApplyInsets()
@@ -4938,6 +5211,20 @@ class PamRenderer(
                 override fun onViewDetachedFromWindow(detached: View) = Unit
             })
         }
+    }
+
+    private fun refreshSafeAreaLayout(
+        target: View,
+        state: NodeState,
+        insets: WindowInsets,
+    ) {
+        val raw = windowSafeAreaInsets(insets)
+        val resolved = safeAreaInsetsForView(raw, target)
+        state.safeAreaLeftInset = resolved.left
+        state.safeAreaTopInset = resolved.top
+        state.safeAreaRightInset = resolved.right
+        state.safeAreaBottomInset = resolved.bottom
+        applySafeAreaLayout(target, state)
     }
 
     private fun windowSafeAreaInsets(insets: WindowInsets): SafeAreaInsets {
@@ -5064,7 +5351,7 @@ class PamRenderer(
             },
         )
         applyLayout(state.id)
-        children[state.id]?.forEach(::applyLayout)
+        applyHostedChildLayouts(state.id)
     }
 
     private fun installKeyboardInsets(view: View, state: NodeState) {
@@ -5199,11 +5486,16 @@ class PamRenderer(
         ) keyboard else 0
         if (state.keyboardAvoidingViewportInset != viewportInset) {
             state.keyboardAvoidingViewportInset = viewportInset
-            applyLayout(state.id)
-            view.postOnAnimation {
+            val applyViewportLayout = {
                 if (nodes[state.id] === state) {
-                    applyDescendantLayouts(state.id)
+                    scheduleKeyboardViewportDescendantLayout(view, state)
+                    applyLayout(state.id)
                 }
+            }
+            if (host.isInLayout || view.isInLayout) {
+                view.post { applyViewportLayout() }
+            } else {
+                applyViewportLayout()
             }
         }
         when (state.keyboardBehavior) {
@@ -5254,7 +5546,9 @@ class PamRenderer(
         }
         val scroll = when (state.keyboardBehavior) {
             KEYBOARD_PAN -> precedingScrollContainer(state)
-            KEYBOARD_PADDING -> containedScrollContainer(state)
+            KEYBOARD_PADDING,
+            KEYBOARD_RESIZE,
+            -> containedScrollContainer(state)
             else -> null
         }
         val scrollId = scroll?.first ?: 0L
@@ -5267,9 +5561,17 @@ class PamRenderer(
             state.keyboardAvoidingScrollId = scrollId
         }
         scroll?.second?.let { container ->
-            container.setKeyboardAvoidanceInset(keyboard)
+            container.setKeyboardAvoidanceInset(
+                if (state.keyboardBehavior == KEYBOARD_RESIZE) 0 else keyboard,
+            )
             if (keyboard > 0) {
-                state.keyboardFocusedInput?.let(container::ensureKeyboardTargetVisible)
+                state.keyboardFocusedInput?.let { input ->
+                    if (state.keyboardBehavior == KEYBOARD_RESIZE) {
+                        container.ensureViewportTargetVisible(input)
+                    } else {
+                        container.ensureKeyboardTargetVisible(input)
+                    }
+                }
             }
         }
         if (keyboard > 0) {
@@ -5303,11 +5605,20 @@ class PamRenderer(
             rootLocation[1] + root.height +
                 ((root as? PamRootHost)?.stableSafeAreaInsets?.bottom ?: 0)
         }
-        val safe = (root as? PamRootHost)?.stableSafeAreaInsets
-        val effectiveInset = (keyboardInset - (safe?.top ?: 0))
-            .coerceAtLeast(0)
-        val keyboardTop = windowBottom - effectiveInset
-        return max(0, (originalBottom - keyboardTop + offset).toInt())
+        // WindowInsets.Type.ime() is a bottom inset in the same full-window
+        // coordinate space as `windowBottom`. Removing the top safe-area
+        // inset here leaves exactly that many pixels hidden behind the IME.
+        // A safe-area/flex parent can temporarily extend this view beyond the
+        // physical window while Android and the PHP layout settle after a
+        // rotation. That overflow is already removed by viewport compensation;
+        // counting it here would subtract the same pixels twice and collapse
+        // the keyboard-safe viewport to zero.
+        return keyboardOverlapForBounds(
+            originalBottom = originalBottom,
+            windowBottom = windowBottom,
+            keyboardInset = keyboardInset,
+            offset = offset,
+        )
     }
 
     private fun applyDescendantLayouts(parentId: Long) {
@@ -5315,6 +5626,50 @@ class PamRenderer(
             applyLayout(childId)
             applyDescendantLayouts(childId)
         }
+    }
+
+    private fun applyHostedChildLayouts(parentId: Long) {
+        children[parentId]?.forEach { childId ->
+            if (views[childId] == null) {
+                // Layout-only Row/Column/View nodes have no Android View of
+                // their own. Their nearest materialized descendants are
+                // hosted directly by this ancestor and must be reconciled
+                // whenever its native bounds change, regardless of mutation
+                // order within the frame.
+                applyHostedChildLayouts(childId)
+            } else {
+                applyLayout(childId)
+            }
+        }
+    }
+
+    private fun scheduleKeyboardViewportDescendantLayout(
+        view: View,
+        state: NodeState,
+    ) {
+        val generation = ++state.keyboardViewportReconcileGeneration
+        fun reconcile(attempt: Int) {
+            view.postDelayed({
+                if (
+                    nodes[state.id] !== state ||
+                    generation != state.keyboardViewportReconcileGeneration
+                ) {
+                    return@postDelayed
+                }
+                if (!host.isInLayout && !view.isInLayout) {
+                    // Flex descendants must be recomputed from the KAV's
+                    // measured viewport. Insets can transition through old,
+                    // zero and new values before a single Android layout pass,
+                    // so an onLayout callback alone is not a reliable signal.
+                    applyDescendantLayouts(state.id)
+                    ensureFocusedInputVisibleAfterCommit()
+                }
+                if (attempt < KEYBOARD_VIEWPORT_RECONCILE_RETRIES) {
+                    reconcile(attempt + 1)
+                }
+            }, if (attempt == 0) 0L else KEYBOARD_VIEWPORT_RECONCILE_RETRY_MS)
+        }
+        reconcile(attempt = 0)
     }
 
     private fun updateTranslatedTouchTarget(
@@ -5541,8 +5896,17 @@ class PamRenderer(
             ?: return StatusBarConfig(Color.BLACK, STATUS_BAR_LIGHT, false, false, false, false)
         val decor = window.decorView
         val lightIcons = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val appearance = decor.windowInsetsController?.systemBarsAppearance ?: 0
-            appearance and WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS == 0
+            val darkTheme = context.resources.configuration.uiMode and
+                Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            // A newly created controller can still expose the previous
+            // Activity's appearance until the first inset traversal. The
+            // default must be deterministic; explicit PAM StatusBar nodes are
+            // merged below and remain authoritative.
+            !useDarkStatusBarIcons(
+                systemBarsAppearance = null,
+                darkTheme = darkTheme,
+                lightStatusBarMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
+            )
         } else {
             decor.systemUiVisibility and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR == 0
         }
@@ -6160,7 +6524,9 @@ class PamRenderer(
         } else {
             emptyList()
         }
-        if (role == 1 && actions.isEmpty()) {
+        val hint = state.textOrNull(PropKey.ACCESSIBILITY_HINT)
+            ?.takeIf(String::isNotEmpty)
+        if (role == 1 && actions.isEmpty() && hint == null) {
             view.accessibilityDelegate = null
             return
         }
@@ -6174,6 +6540,9 @@ class PamRenderer(
             ) {
                 super.onInitializeAccessibilityNodeInfo(host, info)
                 info.className = accessibilityClass(role)
+                if (hint != null) {
+                    info.hintText = hint
+                }
                 applyAccessibilityRoleInfo(info, role, state)
                 actions.forEachIndexed { index, action ->
                     info.addAction(
@@ -6472,6 +6841,7 @@ class PamRenderer(
         var keyboardAnimating: Boolean = false,
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
+        var keyboardViewportReconcileGeneration: Int = 0,
         var keyboardAvoidingScrollId: Long = 0L,
         var keyboardAvoidingViewportInset: Int = 0,
         var keyboardFocusedInput: EditText? = null,

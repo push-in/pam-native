@@ -5887,6 +5887,11 @@ fn ignored_project_path(path: &Path) -> bool {
         || components
             .iter()
             .any(|component| component.starts_with('.'))
+        || components.contains(&"__pycache__")
+        || matches!(
+            path.extension().and_then(OsStr::to_str),
+            Some("pyc" | "pyo")
+        )
         || components
             .iter()
             .any(|component| matches!(*component, "node_modules" | "target" | "dist" | "build"))
@@ -6818,7 +6823,12 @@ fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
-    if engine_ready_at(native_home, abi) {
+    // Packaged SDKs ship an immutable prebuilt archive and do not require a
+    // Rust toolchain. A source checkout is different: the archive may exist
+    // from an earlier build while layout/protocol sources have changed. Let
+    // Cargo perform its inexpensive freshness check in that case so Android
+    // builds can never silently link stale native behavior.
+    if engine_ready_at(native_home, abi) && !native_home.join(".git").is_dir() {
         return Ok(());
     }
     let installed = installed_rust_targets()?;
@@ -8030,6 +8040,11 @@ mod tests {
         assert!(ignored_project_path(Path::new(
             "vendor/package/examples/demo/vendor/autoload.php"
         )));
+        assert!(ignored_project_path(Path::new(
+            "tools/__pycache__/audit.cpython-313.pyc"
+        )));
+        assert!(ignored_project_path(Path::new("tools/audit.pyc")));
+        assert!(ignored_project_path(Path::new("tools/audit.pyo")));
         assert!(!ignored_project_path(Path::new(
             "vendor/package/src/View.php"
         )));

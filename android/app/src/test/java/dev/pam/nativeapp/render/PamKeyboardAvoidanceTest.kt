@@ -62,6 +62,27 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun imeTopUsesFullWindowCoordinatesWithoutSubtractingTheTopSafeArea() {
+        assertEquals(
+            1_517,
+            keyboardTopForInset(windowBottom = 2_400, keyboardInset = 883),
+        )
+    }
+
+    @Test
+    fun overlapDoesNotCountParentOverflowBeyondPhysicalWindowTwice() {
+        assertEquals(
+            686,
+            keyboardOverlapForBounds(
+                originalBottom = 1_216f,
+                windowBottom = 1_080,
+                keyboardInset = 686,
+                offset = 0,
+            ),
+        )
+    }
+
+    @Test
     fun resizeBehaviorReducesTheKeyboardAvoidingViewport() {
         assertEquals(
             1_280,

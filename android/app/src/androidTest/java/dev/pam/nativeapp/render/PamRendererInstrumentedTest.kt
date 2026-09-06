@@ -2,6 +2,7 @@ package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -17,6 +18,7 @@ import android.view.ViewGroup
 import android.view.MotionEvent
 import android.view.TextureView
 import android.view.WindowInsetsController
+import android.view.WindowInsets
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.EditText
@@ -40,9 +42,203 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun nestedRowKeepsExplicitCrossAxisHeightWhileItsNativeRelayoutIsPending() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(node(
+                                2,
+                                1,
+                                NodeKind.VIEW,
+                                mapOf(PropKey.TEST_ID to PropValue.Text("number-field")),
+                            )),
+                            Mutation.Create(node(3, 2, NodeKind.ROW)),
+                            Mutation.Create(node(
+                                4,
+                                3,
+                                NodeKind.INPUT,
+                                mapOf(PropKey.TEST_ID to PropValue.Text("stacked-input")),
+                            )),
+                            Mutation.Create(node(
+                                5,
+                                3,
+                                NodeKind.COLUMN,
+                                mapOf(PropKey.TEST_ID to PropValue.Text("stacked-controls")),
+                            )),
+                            Mutation.Create(node(
+                                6,
+                                5,
+                                NodeKind.PRESSABLE,
+                                mapOf(PropKey.TEST_ID to PropValue.Text("stacked-increase")),
+                            )),
+                            Mutation.Create(node(
+                                7,
+                                5,
+                                NodeKind.PRESSABLE,
+                                mapOf(PropKey.TEST_ID to PropValue.Text("stacked-decrease")),
+                            )),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 640f)),
+                            Mutation.Layout(2, Frame(16f, 32f, 328f, 64f)),
+                            Mutation.Layout(3, Frame(16f, 48f, 328f, 48f)),
+                            Mutation.Layout(4, Frame(16f, 48f, 276f, 48f)),
+                            Mutation.Layout(5, Frame(296f, 48f, 48f, 48f)),
+                            Mutation.Layout(6, Frame(296f, 48f, 48f, 24f)),
+                            Mutation.Layout(7, Frame(296f, 72f, 48f, 24f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+
+            onMain(instrumentation) {
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Layout(4, Frame(16f, 48f, 276f, 96f)),
+                            Mutation.Layout(5, Frame(296f, 48f, 48f, 96f)),
+                            Mutation.Layout(6, Frame(296f, 48f, 48f, 48f)),
+                            Mutation.Layout(7, Frame(296f, 96f, 48f, 48f)),
+                            // The engine may emit flattened descendants before their
+                            // materialized host. Host relayout must reconcile them.
+                            Mutation.Layout(3, Frame(16f, 48f, 328f, 96f)),
+                            Mutation.Layout(2, Frame(16f, 32f, 328f, 112f)),
+                        ),
+                    ),
+                )
+
+                val density = activity.host.resources.displayMetrics.density
+                val field = requireNotNull(activity.host.findByTransitionName("number-field"))
+                val input = requireNotNull(activity.host.findByTransitionName("stacked-input"))
+                val controls = requireNotNull(
+                    activity.host.findByTransitionName("stacked-controls"),
+                )
+                val increase = requireNotNull(
+                    activity.host.findByTransitionName("stacked-increase"),
+                )
+                val decrease = requireNotNull(
+                    activity.host.findByTransitionName("stacked-decrease"),
+                )
+
+                assertEquals((112f * density).roundToInt(), field.layoutParams.height)
+                assertEquals((96f * density).roundToInt(), input.layoutParams.height)
+                assertEquals((96f * density).roundToInt(), controls.layoutParams.height)
+                assertEquals((48f * density).roundToInt(), increase.layoutParams.height)
+                assertEquals((48f * density).roundToInt(), decrease.layoutParams.height)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun safeAreaRestoresTheBottomNavigationInsetAfterLandscapeRoundTrip() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val density = activity.host.resources.displayMetrics.density
+                val width = activity.host.width / density
+                val height = activity.host.height / density
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(node(
+                                2,
+                                1,
+                                NodeKind.SAFE_AREA_VIEW,
+                                mapOf(
+                                    PropKey.TEST_ID to PropValue.Text("rotation-safe-area"),
+                                ),
+                            )),
+                            Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                            Mutation.Layout(2, Frame(0f, 0f, width, height)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            }
+            waitForOrientation(instrumentation, activity, landscape = true)
+            resizeRootToActivity(instrumentation, activity, renderer)
+
+            onMain(instrumentation) {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            waitForOrientation(instrumentation, activity, landscape = false)
+            resizeRootToActivity(instrumentation, activity, renderer)
+            instrumentation.waitForIdleSync()
+            Thread.sleep(250)
+
+            onMain(instrumentation) {
+                val safeArea = activity.host.findByTransitionName("rotation-safe-area")
+                assertTrue(safeArea is ViewGroup)
+                val expectedBottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    activity.host.rootWindowInsets
+                        ?.getInsetsIgnoringVisibility(
+                            WindowInsets.Type.systemBars() or
+                                WindowInsets.Type.displayCutout(),
+                        )
+                        ?.bottom ?: 0
+                } else {
+                    @Suppress("DEPRECATION")
+                    activity.host.rootWindowInsets?.systemWindowInsetBottom ?: 0
+                }
+                assertTrue("Portrait device must expose a bottom navigation inset", expectedBottom > 0)
+                assertEquals(expectedBottom, requireNotNull(safeArea).paddingBottom)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) {
+                activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                activity.finish()
+            }
+        }
+    }
+
+    @Test
+    fun transparentInputUnderlineRemovesOnlyThePlatformBackground() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val input = PamEditText(activity)
+                val platformBackground = input.background
+                assertTrue(platformBackground != null)
+
+                input.setUnderlineColor(Color.TRANSPARENT)
+                assertNull(input.background)
+
+                input.setUnderlineColor(null)
+                assertSame(platformBackground, input.background)
+
+                val customBackground = ColorDrawable(Color.BLUE)
+                input.background = customBackground
+                input.setUnderlineColor(Color.TRANSPARENT)
+                assertSame(customBackground, input.background)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun keyboardFocusUsesVisibleSystemHighlightAndSkipsDisabledControls() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -68,6 +264,17 @@ class PamRendererInstrumentedTest {
                 pressable.isEnabled = false
                 assertFalse(pressable.isEnabled)
                 assertFalse(pressable.isFocusable)
+
+                val input = PamEditText(activity)
+                assertTrue(input.isFocusable)
+                assertTrue(input.isFocusableInTouchMode)
+                input.isEnabled = false
+                assertFalse(input.isEnabled)
+                assertFalse(input.isFocusable)
+                assertFalse(input.isFocusableInTouchMode)
+                input.isEnabled = true
+                assertTrue(input.isFocusable)
+                assertTrue(input.isFocusableInTouchMode)
             }
         } finally {
             activity.finish()
@@ -159,6 +366,83 @@ class PamRendererInstrumentedTest {
         val alreadyLarge = minimumTouchTargetInsets(64, 52, 48)
         assertEquals(0, alreadyLarge.left + alreadyLarge.right)
         assertEquals(0, alreadyLarge.top + alreadyLarge.bottom)
+    }
+
+    @Test
+    fun rendererRoutesExpandedMinimumTouchTargetBeforeNormalChildHitTesting() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val events = ArrayList<Pair<Long, Int>>()
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { id, kind, _ ->
+                    events += id to kind
+                }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(node(
+                                2,
+                                1,
+                                NodeKind.PRESSABLE,
+                                mapOf(
+                                    PropKey.ON_PRESS to PropValue.Flag(true),
+                                    PropKey.TEST_ID to PropValue.Text("minimum-target"),
+                                ),
+                            )),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(100f, 100f, 40f, 40f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+
+            onMain(instrumentation) {
+                val target = requireNotNull(
+                    activity.host.findByTransitionName("minimum-target"),
+                )
+                val parent = target.parent as ViewGroup
+                assertEquals(dp(activity.host, 40f), target.width)
+                assertEquals(dp(activity.host, 40f), target.height)
+
+                val targetLocation = IntArray(2)
+                val parentLocation = IntArray(2)
+                target.getLocationOnScreen(targetLocation)
+                parent.getLocationOnScreen(parentLocation)
+                val x = targetLocation[0] - parentLocation[0] - dp(activity.host, 3f)
+                val y = targetLocation[1] - parentLocation[1] + target.height / 2
+                val downAt = SystemClock.uptimeMillis()
+                val down = MotionEvent.obtain(
+                    downAt,
+                    downAt,
+                    MotionEvent.ACTION_DOWN,
+                    x.toFloat(),
+                    y.toFloat(),
+                    0,
+                )
+                val up = MotionEvent.obtain(
+                    downAt,
+                    downAt + 16,
+                    MotionEvent.ACTION_UP,
+                    x.toFloat(),
+                    y.toFloat(),
+                    0,
+                )
+                assertTrue(parent.dispatchTouchEvent(down))
+                assertTrue(parent.dispatchTouchEvent(up))
+                down.recycle()
+                up.recycle()
+
+                assertEquals(listOf(2L to 1), events)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
     }
 
     private fun recordingButton(activity: PamTestActivity, onUp: () -> Unit): Button =
@@ -1490,6 +1774,49 @@ class PamRendererInstrumentedTest {
 
     private fun onMain(instrumentation: Instrumentation, block: () -> Unit) {
         instrumentation.runOnMainSync(block)
+    }
+
+    private fun waitForOrientation(
+        instrumentation: Instrumentation,
+        activity: PamTestActivity,
+        landscape: Boolean,
+    ) {
+        val deadline = SystemClock.uptimeMillis() + 10_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            instrumentation.waitForIdleSync()
+            var matches = false
+            onMain(instrumentation) {
+                matches = if (landscape) {
+                    activity.host.width > activity.host.height
+                } else {
+                    activity.host.height > activity.host.width
+                }
+            }
+            if (matches) return
+            Thread.sleep(100)
+        }
+        throw AssertionError("Test activity did not reach the requested orientation")
+    }
+
+    private fun resizeRootToActivity(
+        instrumentation: Instrumentation,
+        activity: PamTestActivity,
+        renderer: PamRenderer,
+    ) {
+        onMain(instrumentation) {
+            val density = activity.host.resources.displayMetrics.density
+            val width = activity.host.width / density
+            val height = activity.host.height / density
+            renderer.commit(
+                listOf(
+                    listOf(
+                        Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                        Mutation.Layout(2, Frame(0f, 0f, width, height)),
+                    ),
+                ),
+            )
+        }
+        instrumentation.waitForIdleSync()
     }
 
     private fun dp(view: View, value: Float): Int =

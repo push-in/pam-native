@@ -224,6 +224,150 @@ class PamScrollContainerInstrumentedTest {
     }
 
     @Test
+    fun resizedViewportScrollsFocusedFormTargetIntoVisibleViewport() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            lateinit var input: View
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                val column = FrameLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                }
+                input = View(activity)
+                column.addView(
+                    input,
+                    FrameLayout.LayoutParams(300, 80).apply { topMargin = 720 },
+                )
+                scroll.insert(column)
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+
+                scroll.layoutParams = scroll.layoutParams.apply { height = 200 }
+                relayout(activity.host)
+                // A reactive renderer commit restores its retained offset via
+                // a posted callback immediately before focus reconciliation.
+                scroll.restoreOffsetPixels(0, 0)
+                scroll.ensureViewportTargetVisible(input)
+            }
+            instrumentation.waitForIdleSync()
+            Thread.sleep(120)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val targetLocation = IntArray(2)
+                val scrollLocation = IntArray(2)
+                input.getLocationOnScreen(targetLocation)
+                scroll.getLocationOnScreen(scrollLocation)
+
+                assertTrue(scroll.snapshotOffsetPixels().second > 0)
+                val targetBottom = targetLocation[1] + input.height
+                val viewportBottom = scrollLocation[1] + scroll.height
+                assertTrue(
+                    "targetBottom=$targetBottom viewportBottom=$viewportBottom " +
+                        "offset=${scroll.snapshotOffsetPixels().second}",
+                    targetBottom <= viewportBottom,
+                )
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun keyboardClearanceAtContentEndClampsWithoutRepeatedScrolling() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            lateinit var input: View
+            var viewportEvents = 0
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                val column = FrameLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                }
+                input = View(activity)
+                column.addView(
+                    input,
+                    FrameLayout.LayoutParams(300, 80).apply { topMargin = 920 },
+                )
+                scroll.insert(column)
+                scroll.setOnViewportChanged { _, _ -> viewportEvents += 1 }
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 200))
+                relayout(activity.host)
+                scroll.ensureViewportTargetVisible(input)
+            }
+            instrumentation.waitForIdleSync()
+            val eventsAtEnd = viewportEvents
+            onMain(instrumentation) {
+                assertEquals(800, scroll.snapshotOffsetPixels().second)
+                scroll.ensureViewportTargetVisible(input)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(800, scroll.snapshotOffsetPixels().second)
+                assertEquals(eventsAtEnd, viewportEvents)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun constrainedKeyboardViewportUsesStableSymmetricClearance() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var scroll: PamScrollContainer
+            lateinit var input: View
+            var viewportEvents = 0
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity)
+                val column = FrameLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        1_000,
+                    )
+                }
+                input = View(activity)
+                column.addView(
+                    input,
+                    FrameLayout.LayoutParams(300, 73).apply { topMargin = 800 },
+                )
+                scroll.insert(column)
+                scroll.setOnViewportChanged { _, _ -> viewportEvents += 1 }
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 85))
+                relayout(activity.host)
+                scroll.ensureViewportTargetVisible(input)
+            }
+            instrumentation.waitForIdleSync()
+            val stableOffset = scroll.snapshotOffsetPixels().second
+            val stableEvents = viewportEvents
+            onMain(instrumentation) {
+                // Only twelve pixels remain around a 73px editor. Splitting
+                // those pixels evenly keeps both edges visible and prevents
+                // alternating between incompatible top/bottom clearances.
+                assertEquals(794, stableOffset)
+                scroll.ensureViewportTargetVisible(input)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(stableOffset, scroll.snapshotOffsetPixels().second)
+                assertEquals(stableEvents, viewportEvents)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun requestScrollJumpsToEndOrIdentifiedDescendant() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

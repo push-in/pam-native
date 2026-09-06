@@ -51,6 +51,7 @@ final class Runtime
     private static ?TreeEncoder $encoder = null;
     private static bool $rendering = false;
     private static bool $renderRequested = false;
+    private static bool $dispatchingEvent = false;
     private static WindowMetrics $windowMetrics;
 
     private function __construct()
@@ -166,6 +167,12 @@ final class Runtime
         if (self::$root === null) {
             return;
         }
+        if (self::$dispatchingEvent) {
+            // dispatchEvent() renders once after the callback. Coalesce state
+            // mutations raised inside that callback instead of traversing the
+            // tree immediately and then traversing it again.
+            return;
+        }
         if (self::$rendering) {
             self::$renderRequested = true;
 
@@ -221,6 +228,7 @@ final class Runtime
                     memoryClass: (float) ($values['memoryClass'] ?? 0.0),
                     performanceTier: (float) ($values['performanceTier'] ?? 1.0),
                 );
+                DependencyTracker::invalidateAll();
                 self::$dimensionsHandler?->__invoke(self::$windowMetrics);
                 self::render();
 
@@ -237,7 +245,12 @@ final class Runtime
             if ($callback === null) {
                 return;
             }
-            $callback($payload);
+            self::$dispatchingEvent = true;
+            try {
+                $callback($payload);
+            } finally {
+                self::$dispatchingEvent = false;
+            }
             self::render();
         } catch (Throwable $error) {
             self::reportError($error);
@@ -375,6 +388,7 @@ final class Runtime
         self::$encoder = null;
         self::$rendering = false;
         self::$renderRequested = false;
+        self::$dispatchingEvent = false;
         self::$windowMetrics = new WindowMetrics(0.0, 0.0, 1.0);
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();

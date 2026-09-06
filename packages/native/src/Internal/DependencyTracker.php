@@ -17,6 +17,8 @@ final class DependencyTracker
     private static ?WeakMap $dependencies = null;
     /** @var WeakMap<Component, true>|null */
     private static ?WeakMap $dirty = null;
+    /** @var WeakMap<Component, Component>|null */
+    private static ?WeakMap $parents = null;
 
     private function __construct()
     {
@@ -25,6 +27,14 @@ final class DependencyTracker
     public static function begin(Component $component): void
     {
         self::clear($component);
+        $last = array_key_last(self::$stack);
+        $parent = $last === null ? null : self::$stack[$last];
+        $parents = self::$parents ??= new WeakMap();
+        if ($parent instanceof Component && $parent !== $component) {
+            $parents[$component] = $parent;
+        } else {
+            unset($parents[$component]);
+        }
         self::$stack[] = $component;
     }
 
@@ -68,7 +78,7 @@ final class DependencyTracker
                 continue;
             }
             foreach ($components as $component => $_) {
-                $dirty[$component] = true;
+                self::markComponentAndAncestorsDirty($component, $dirty);
             }
         }
     }
@@ -86,7 +96,19 @@ final class DependencyTracker
     public static function markDirty(Component $component): void
     {
         $dirty = self::$dirty ??= new WeakMap();
-        $dirty[$component] = true;
+        self::markComponentAndAncestorsDirty($component, $dirty);
+    }
+
+    public static function invalidateAll(): void
+    {
+        $dependencies = self::$dependencies;
+        if ($dependencies === null) {
+            return;
+        }
+        $dirty = self::$dirty ??= new WeakMap();
+        foreach ($dependencies as $component => $_) {
+            $dirty[$component] = true;
+        }
     }
 
     public static function forget(Component $component): void
@@ -94,6 +116,8 @@ final class DependencyTracker
         self::clear($component);
         $dirty = self::$dirty ??= new WeakMap();
         unset($dirty[$component]);
+        $parents = self::$parents ??= new WeakMap();
+        unset($parents[$component]);
     }
 
     public static function reset(): void
@@ -102,6 +126,29 @@ final class DependencyTracker
         self::$subscribers = null;
         self::$dependencies = null;
         self::$dirty = null;
+        self::$parents = null;
+    }
+
+    /** @param WeakMap<Component, true> $dirty */
+    private static function markComponentAndAncestorsDirty(
+        Component $component,
+        WeakMap $dirty,
+    ): void {
+        $parents = self::$parents;
+        $current = $component;
+        while (true) {
+            if (isset($dirty[$current])) {
+                return;
+            }
+            $dirty[$current] = true;
+            $parent = $parents !== null && isset($parents[$current])
+                ? $parents[$current]
+                : null;
+            if (!$parent instanceof Component || $parent === $current) {
+                return;
+            }
+            $current = $parent;
+        }
     }
 
     private static function clear(Component $component): void

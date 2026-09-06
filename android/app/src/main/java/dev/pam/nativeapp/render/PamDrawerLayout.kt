@@ -6,6 +6,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.view.MotionEvent
 import android.view.View
@@ -15,6 +16,25 @@ import android.view.WindowInsetsController
 import android.view.inputmethod.InputMethodManager
 import android.widget.FrameLayout
 import kotlin.math.abs
+
+internal fun drawerIsVisuallyOpen(requestedOpen: Boolean, permanent: Boolean): Boolean =
+    requestedOpen || permanent
+
+internal fun permanentDrawerContentClip(
+    viewportLeft: Int,
+    viewportRight: Int,
+    drawerWidth: Int,
+    right: Boolean,
+): Pair<Int, Int> {
+    val safeLeft = viewportLeft.coerceAtLeast(0)
+    val safeRight = viewportRight.coerceAtLeast(safeLeft)
+    val reservation = drawerWidth.coerceIn(0, safeRight - safeLeft)
+    return if (right) {
+        safeLeft + reservation to safeRight
+    } else {
+        safeLeft to safeRight - reservation
+    }
+}
 
 internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private var open = false
@@ -33,6 +53,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private var gestureStartProgress = 0f
     private var tracking = false
     private var progress = 0f
+    private var progressAnimator: ValueAnimator? = null
     private var onOpen: (() -> Unit)? = null
     private var onClose: (() -> Unit)? = null
     private val overlayPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -44,6 +65,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private var viewportBaseBottomPadding = 0
     private var statusBarAppearanceBeforeOpen: Int? = null
     private var systemUiVisibilityBeforeOpen: Int? = null
+    private val permanentContentClipBounds = Rect()
 
     init {
         clipChildren = false
@@ -109,17 +131,20 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
 
     fun setOpen(value: Boolean, animated: Boolean = true) {
         val permanent = resolvedType() == TYPE_PERMANENT
-        val next = value || permanent
-        if (open == next && animated) {
-            updateDrawer(true)
+        val wasVisuallyOpen = drawerIsVisuallyOpen(open, permanent)
+        if (open == value) {
+            updateDrawer(false)
             return
         }
-        val changed = open != next
-        open = next
+        open = value
+        val isVisuallyOpen = drawerIsVisuallyOpen(open, permanent)
         updateStatusBar()
-        updateDrawer(animated)
-        if (changed) {
-            if (open) onOpen?.invoke() else onClose?.invoke()
+        // Requested state can change while a permanent drawer remains
+        // visually open. Animating that no-op retains a stale permanent
+        // content translation after DRAWER_TYPE changes back to Front.
+        updateDrawer(animated && wasVisuallyOpen != isVisuallyOpen)
+        if (wasVisuallyOpen != isVisuallyOpen) {
+            if (isVisuallyOpen) onOpen?.invoke() else onClose?.invoke()
         }
     }
 
@@ -188,6 +213,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             super.dispatchDraw(canvas)
             return
         }
+        updatePermanentContentClip(content)
         val drawingTime = drawingTime
         if (resolvedType() == TYPE_BACK) {
             drawChild(canvas, drawer, drawingTime)
@@ -290,23 +316,31 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private fun updateDrawer(animated: Boolean) {
         val content = getChildAt(0) ?: return
         val drawer = getChildAt(1) ?: return
+        content.animate().cancel()
+        drawer.animate().cancel()
+        progressAnimator?.cancel()
+        progressAnimator = null
         val type = resolvedType()
-        if (type == TYPE_PERMANENT) open = true
+        val visuallyOpen = drawerIsVisuallyOpen(open, type == TYPE_PERMANENT)
         val width = drawerWidthPx()
         val direction = if (isRight()) -1f else 1f
         val openX = if (isRight()) this.width.toFloat() - width else 0f
         val closedX = if (isRight()) this.width.toFloat() else -width
         val drawerTarget = when (type) {
-            TYPE_BACK, TYPE_PERMANENT -> openX
-            TYPE_SLIDE -> if (open) openX else openX + (closedX - openX) * 0.35f
-            else -> if (open) openX else closedX
+            TYPE_PERMANENT -> 0f
+            TYPE_BACK -> openX
+            TYPE_SLIDE -> if (visuallyOpen) openX else openX + (closedX - openX) * 0.35f
+            else -> if (visuallyOpen) openX else closedX
         }
         val contentTarget = when (type) {
-            TYPE_BACK, TYPE_SLIDE -> if (open) direction * width else 0f
-            TYPE_PERMANENT -> direction * width
+            TYPE_BACK, TYPE_SLIDE -> if (visuallyOpen) direction * width else 0f
+            // The engine gives permanent drawer children disjoint frames, so
+            // translating either child here would reserve the drawer twice.
+            TYPE_PERMANENT -> 0f
             else -> 0f
         }
-        val targetProgress = if (open && type != TYPE_PERMANENT) 1f else 0f
+        val targetProgress = if (visuallyOpen && type != TYPE_PERMANENT) 1f else 0f
+        updatePermanentContentClip(content)
         if (!animated || PamMotionPolicy.isReduced(context)) {
             drawer.translationX = drawerTarget
             content.translationX = contentTarget
@@ -316,7 +350,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
         }
         drawer.animate().translationX(drawerTarget).setDuration(200).start()
         content.animate().translationX(contentTarget).setDuration(200).start()
-        ValueAnimator.ofFloat(progress, targetProgress).apply {
+        progressAnimator = ValueAnimator.ofFloat(progress, targetProgress).apply {
             duration = 200
             addUpdateListener {
                 progress = it.animatedValue as Float
@@ -366,6 +400,32 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private fun drawerWidthPx(): Float = dp(drawerWidthDp).coerceAtMost(width.toFloat())
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
+    private fun updatePermanentContentClip(content: View) {
+        if (resolvedType() != TYPE_PERMANENT || content.width <= 0 || content.height <= 0) {
+            if (content.clipBounds != null) content.clipBounds = null
+            return
+        }
+        val reservation = drawerWidthPx().toInt()
+        val partitionedContentWidth = (width - reservation).coerceAtLeast(0)
+        if (content.width <= partitionedContentWidth + 1) {
+            if (content.clipBounds != null) content.clipBounds = null
+            return
+        }
+        val safeViewport = (content as? ViewGroup)?.getChildAt(0)
+        val viewportLeft = safeViewport?.left ?: 0
+        val viewportRight = safeViewport?.right ?: content.width
+        val (left, right) = permanentDrawerContentClip(
+            viewportLeft = viewportLeft,
+            viewportRight = viewportRight,
+            drawerWidth = reservation,
+            right = isRight(),
+        )
+        permanentContentClipBounds.set(left, 0, right, content.height)
+        if (content.clipBounds != permanentContentClipBounds) {
+            content.clipBounds = permanentContentClipBounds
+        }
+    }
+
     private fun enforceDrawerViewport(drawer: View) {
         if (insetDrawer !== drawer) {
             insetDrawer = drawer
@@ -377,12 +437,28 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             drawer.paddingRight,
             maxOf(drawerBaseBottomPadding, navigationInsetBottom),
         )
-        val drawerParams = (drawer.layoutParams as? LayoutParams)
-            ?: LayoutParams(drawerWidthPx().toInt(), ViewGroup.LayoutParams.MATCH_PARENT)
-        drawerParams.width = drawerWidthPx().toInt()
-        drawerParams.height = ViewGroup.LayoutParams.MATCH_PARENT
-        drawerParams.topMargin = if (resolvedType() == TYPE_PERMANENT) statusInsetTop else 0
-        drawer.layoutParams = drawerParams
+        val drawerWidth = drawerWidthPx().toInt()
+        val drawerTop = if (resolvedType() == TYPE_PERMANENT) statusInsetTop else 0
+        val drawerParams = drawer.layoutParams as? LayoutParams
+        if (drawerParams == null) {
+            drawer.postOnAnimation {
+                drawer.layoutParams = LayoutParams(
+                    drawerWidth,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ).apply { topMargin = drawerTop }
+            }
+        } else if (
+            drawerParams.width != drawerWidth
+            || drawerParams.height != ViewGroup.LayoutParams.MATCH_PARENT
+            || drawerParams.topMargin != drawerTop
+        ) {
+            drawerParams.width = drawerWidth
+            drawerParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+            drawerParams.topMargin = drawerTop
+            drawer.postOnAnimation {
+                if (drawer.isAttachedToWindow) drawer.requestLayout()
+            }
+        }
         val viewport = (drawer as? ViewGroup)?.getChildAt(0) ?: return
         if (insetViewport !== viewport) {
             insetViewport = viewport
@@ -395,12 +471,23 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             maxOf(viewportBaseBottomPadding, navigationInsetBottom),
         )
         (viewport as? ViewGroup)?.clipToPadding = true
-        viewport.layoutParams = (viewport.layoutParams ?: LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT,
-        )).apply {
-            width = ViewGroup.LayoutParams.MATCH_PARENT
-            height = ViewGroup.LayoutParams.MATCH_PARENT
+        val viewportParams = viewport.layoutParams
+        if (viewportParams == null) {
+            viewport.postOnAnimation {
+                viewport.layoutParams = LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+            }
+        } else if (
+            viewportParams.width != ViewGroup.LayoutParams.MATCH_PARENT
+            || viewportParams.height != ViewGroup.LayoutParams.MATCH_PARENT
+        ) {
+            viewportParams.width = ViewGroup.LayoutParams.MATCH_PARENT
+            viewportParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+            viewport.postOnAnimation {
+                if (viewport.isAttachedToWindow) viewport.requestLayout()
+            }
         }
     }
 

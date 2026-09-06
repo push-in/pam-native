@@ -450,16 +450,51 @@ fn layout_node(
         return Ok(());
     }
     if node.kind == NodeKind::DrawerLayout {
+        let permanent = integer(node, PropKey::DrawerType) == Some(4)
+            || number(node, PropKey::DrawerPermanentBreakpoint)
+                .is_some_and(|breakpoint| breakpoint > 0.0 && inner.width >= breakpoint);
+        let drawer_width = number(node, PropKey::DrawerWidth)
+            .or_else(|| {
+                node_children
+                    .iter()
+                    .filter(|child| visible(child))
+                    .nth(1)
+                    .and_then(|child| number(child, PropKey::Width))
+            })
+            .unwrap_or(inner.width * 0.82)
+            .clamp(0.0, inner.width);
+        let content_width = (inner.width - drawer_width).max(0.0);
+        let right = integer(node, PropKey::DrawerPosition) == Some(3);
         for (position, child) in node_children
             .iter()
             .filter(|child| visible(child))
             .enumerate()
         {
-            let child_frame = if position == 0 {
+            let child_frame = if permanent && position == 0 {
+                Layout {
+                    x: if right {
+                        inner.x
+                    } else {
+                        inner.x + drawer_width
+                    },
+                    width: content_width,
+                    ..inner
+                }
+            } else if permanent {
+                Layout {
+                    x: if right {
+                        inner.x + content_width
+                    } else {
+                        inner.x
+                    },
+                    width: drawer_width,
+                    ..inner
+                }
+            } else if position == 0 {
                 inner
             } else {
                 Layout {
-                    width: number(child, PropKey::Width).unwrap_or(inner.width * 0.82),
+                    width: drawer_width,
                     ..inner
                 }
             };
@@ -2900,6 +2935,100 @@ mod tests {
     }
 
     #[test]
+    fn permanent_drawer_reserves_layout_width_for_content_on_both_edges() {
+        let layout_for = |position: i64, drawer_type: i64, breakpoint: Option<f64>| {
+            let mut drawer_properties = vec![
+                (PropKey::DrawerType, PropValue::Integer(drawer_type)),
+                (PropKey::DrawerPosition, PropValue::Integer(position)),
+                (PropKey::DrawerWidth, PropValue::Float(256.0)),
+            ];
+            if let Some(value) = breakpoint {
+                drawer_properties
+                    .push((PropKey::DrawerPermanentBreakpoint, PropValue::Float(value)));
+            }
+            let tree = Tree {
+                root: 1,
+                nodes: BTreeMap::from([
+                    (1, node(1, 0, 0, NodeKind::DrawerLayout, drawer_properties)),
+                    (
+                        2,
+                        node(
+                            2,
+                            1,
+                            0,
+                            NodeKind::View,
+                            [(PropKey::WidthPercent, PropValue::Float(100.0))],
+                        ),
+                    ),
+                    (
+                        3,
+                        node(
+                            3,
+                            1,
+                            1,
+                            NodeKind::View,
+                            [(PropKey::Width, PropValue::Float(256.0))],
+                        ),
+                    ),
+                ]),
+            };
+
+            calculate(
+                &tree,
+                Size {
+                    width: 1_000.0,
+                    height: 700.0,
+                },
+            )
+            .expect("permanent drawer layout")
+        };
+
+        let left = layout_for(2, 4, None);
+        assert_eq!(
+            left[&2],
+            Layout {
+                x: 256.0,
+                y: 0.0,
+                width: 744.0,
+                height: 700.0
+            }
+        );
+        assert_eq!(
+            left[&3],
+            Layout {
+                x: 0.0,
+                y: 0.0,
+                width: 256.0,
+                height: 700.0
+            }
+        );
+
+        let right = layout_for(3, 4, None);
+        assert_eq!(
+            right[&2],
+            Layout {
+                x: 0.0,
+                y: 0.0,
+                width: 744.0,
+                height: 700.0
+            }
+        );
+        assert_eq!(
+            right[&3],
+            Layout {
+                x: 744.0,
+                y: 0.0,
+                width: 256.0,
+                height: 700.0
+            }
+        );
+
+        let responsive = layout_for(1, 1, Some(840.0));
+        assert_eq!(responsive[&2], left[&2]);
+        assert_eq!(responsive[&3], left[&3]);
+    }
+
+    #[test]
     fn flex_wrap_respects_intrinsic_cross_axis_minimums() {
         let tree = Tree {
             root: 1,
@@ -3745,6 +3874,136 @@ mod tests {
     }
 
     #[test]
+    fn nested_row_keeps_explicit_cross_axis_height_for_stacked_controls() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::CustomView,
+                        [(PropKey::WidthPercent, PropValue::Float(100.0))],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Height, PropValue::Float(112.0)),
+                            (PropKey::MinHeight, PropValue::Float(112.0)),
+                            (PropKey::PaddingHorizontal, PropValue::Float(16.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Text,
+                        [
+                            (PropKey::Text, PropValue::String("Number Input".into())),
+                            (PropKey::LineHeight, PropValue::Float(16.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        3,
+                        1,
+                        NodeKind::Row,
+                        [
+                            (PropKey::WidthPercent, PropValue::Float(100.0)),
+                            (PropKey::Gap, PropValue::Float(4.0)),
+                        ],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        5,
+                        0,
+                        NodeKind::Input,
+                        [
+                            (PropKey::Height, PropValue::Float(96.0)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                            (PropKey::MinWidth, PropValue::Float(64.0)),
+                        ],
+                    ),
+                ),
+                (
+                    7,
+                    node(
+                        7,
+                        5,
+                        1,
+                        NodeKind::Column,
+                        [
+                            (PropKey::Width, PropValue::Float(48.0)),
+                            (PropKey::Height, PropValue::Float(96.0)),
+                        ],
+                    ),
+                ),
+                (
+                    8,
+                    node(
+                        8,
+                        7,
+                        0,
+                        NodeKind::Pressable,
+                        [
+                            (PropKey::Width, PropValue::Float(48.0)),
+                            (PropKey::Height, PropValue::Float(48.0)),
+                        ],
+                    ),
+                ),
+                (
+                    9,
+                    node(
+                        9,
+                        7,
+                        1,
+                        NodeKind::Pressable,
+                        [
+                            (PropKey::Width, PropValue::Float(48.0)),
+                            (PropKey::Height, PropValue::Float(48.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("stacked number input layout");
+
+        assert_eq!(layouts[&3].height, 112.0);
+        assert_eq!(layouts[&5].height, 96.0);
+        assert_eq!(layouts[&6].height, 96.0);
+        assert_eq!(layouts[&7].height, 96.0);
+        assert_eq!(layouts[&8].height, 48.0);
+        assert_eq!(layouts[&9].height, 48.0);
+        assert_eq!(layouts[&9].y, layouts[&8].y + layouts[&8].height);
+    }
+
+    #[test]
     fn native_grid_uses_its_authored_minimum_instead_of_fallback_child_flow() {
         let tree = Tree {
             root: 1,
@@ -3877,7 +4136,7 @@ mod tests {
             [
                 (
                     PropKey::Text,
-                    PropValue::String("pushinbr/pam-mobile-ui".into()),
+                    PropValue::String("pushinbr/pam-native-ui".into()),
                 ),
                 (PropKey::FontSize, PropValue::Float(12.0)),
             ],
@@ -3890,7 +4149,7 @@ mod tests {
             [
                 (
                     PropKey::Text,
-                    PropValue::String("pushinbr/pam-mobile-ui".into()),
+                    PropValue::String("pushinbr/pam-native-ui".into()),
                 ),
                 (PropKey::FontSize, PropValue::Float(12.0)),
                 (PropKey::TextTransform, PropValue::Integer(2)),

@@ -550,6 +550,82 @@ class PamNavigationHostInstrumentedTest {
         }
     }
 
+    @Test
+    fun permanentDrawerKeepsEnginePartitionedChildrenAtTheirAuthoredFrames() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var content: View
+            lateinit var drawer: View
+            onMain(instrumentation) {
+                val density = activity.resources.displayMetrics.density
+                val parentWidth = (900f * density).toInt()
+                val drawerWidth = (240f * density).toInt()
+                content = View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        parentWidth - drawerWidth,
+                        1_200,
+                    ).apply { leftMargin = drawerWidth }
+                }
+                drawer = View(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(drawerWidth, 1_200)
+                }
+                val layout = PamDrawerLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(parentWidth, 1_200)
+                    insert(content, 0)
+                    insert(drawer, 1)
+                    setDrawerWidth(240f)
+                    setDrawerType(TYPE_PERMANENT)
+                }
+                activity.host.addView(layout)
+                layout.layout(0, 0, parentWidth, 1_200)
+            }
+
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(0f, content.translationX, 0.01f)
+                assertEquals(0f, drawer.translationX, 0.01f)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun permanentToFrontTransitionCancelsTheObsoleteContentAnimation() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var layout: PamDrawerLayout
+            lateinit var content: View
+            onMain(instrumentation) {
+                content = View(activity)
+                layout = PamDrawerLayout(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(1_080, 2_280)
+                    addView(content)
+                    addView(View(activity))
+                    setDrawerType(TYPE_PERMANENT)
+                }
+                activity.host.addView(layout)
+                layout.layout(0, 0, 1_080, 2_280)
+
+                // Mirrors incremental property order after rotating from an
+                // expanded permanent drawer back to compact Front.
+                layout.setOpen(true, animated = false)
+                layout.setOpen(false, animated = true)
+                layout.setDrawerType(TYPE_FRONT)
+            }
+
+            Thread.sleep(350)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(0f, content.translationX, 0.01f)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity =
         instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).apply {
@@ -567,5 +643,6 @@ class PamNavigationHostInstrumentedTest {
         const val TRANSITION_SLIDE_FROM_RIGHT = 2
         const val TRANSITION_NONE = 8
         const val TYPE_PERMANENT = 4
+        const val TYPE_FRONT = 1
     }
 }

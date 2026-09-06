@@ -111,6 +111,8 @@ $language2Styles = ScopedStyleCompiler::compile(<<<'CSS'
 
 .touchable:focus-visible {
     background: #3366FF;
+    border-color: #2244CC;
+    elevation: 3;
     transform: scale(1.04);
 }
 
@@ -350,6 +352,11 @@ $styledRoot = new CompiledTemplateNode(
 $styledRoot->children = $styledTemplate->children;
 $styledElement = TemplateRenderer::render($styledRoot, null, []);
 $styledChild = $styledElement->children()[0] ?? null;
+$nativeStateStyles = json_decode(
+    (string) ($styledElement->properties()[PropKey::NativeStateStyles->value] ?? ''),
+    true,
+    flags: JSON_THROW_ON_ERROR,
+);
 $assert(
     (float) ($styledElement->properties()[PropKey::PressOpacity->value] ?? 0) === 0.72
         && (float) ($styledElement->properties()[PropKey::PressScale->value] ?? 0) === 0.98
@@ -357,6 +364,8 @@ $assert(
             (string) ($styledElement->properties()[PropKey::NativeStateStyles->value] ?? ''),
             '"2"',
         )
+        && ($nativeStateStyles[2][PropKey::BorderColor->value] ?? null) === 0xFF2244CC
+        && (float) ($nativeStateStyles[2][PropKey::Elevation->value] ?? 0) === 3.0
         && $styledChild instanceof \Pam\Native\Element
         && (float) ($styledChild->properties()[PropKey::PaddingLeft->value] ?? 0) === 16.0
         && ($styledChild->properties()[PropKey::BackgroundColor->value] ?? null) === 0xFF4F46E5,

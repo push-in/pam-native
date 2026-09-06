@@ -62,6 +62,9 @@ class PamActivity : FragmentActivity() {
     private val diagnosticsExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     private var viewportWidth = 0
     private var viewportHeight = 0
+    private var viewportUpdateScheduled = false
+    private var viewportUpdateReplayRequested = false
+    private var forceScheduledViewportUpdate = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -144,9 +147,9 @@ class PamActivity : FragmentActivity() {
                 isDarkAppearance(),
             )
             runtimeStarted = true
-            rootHost.onStableInsetsChanged = { updateViewportFromWindow() }
+            rootHost.onStableInsetsChanged = { scheduleViewportUpdate() }
             window.decorView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                updateViewportFromWindow()
+                scheduleViewportUpdate()
             }
             if (BuildConfig.DEBUG) {
                 hotReload = HotReloadClient(
@@ -202,7 +205,7 @@ class PamActivity : FragmentActivity() {
         super.onConfigurationChanged(newConfig)
         if (!runtimeStarted) return
         applyDefaultSystemBars()
-        updateViewportFromWindow(force = true)
+        scheduleViewportUpdate(force = true)
     }
 
     @Suppress("DEPRECATION")
@@ -230,16 +233,32 @@ class PamActivity : FragmentActivity() {
         super.onLowMemory()
     }
 
+    // API 33+ is handled by registerBackCallback(), including predictive
+    // progress on API 34+. These overrides are the legacy keyboard/button
+    // path retained exclusively for older supported Android releases.
+    @SuppressLint("GestureBackNavigation")
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (
-            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU &&
-            keyCode == KeyEvent.KEYCODE_BACK
-        ) {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (consumeSuppressedBack()) return true
-            runtime.dispatchBack()
-            return true
+            if (runtime.consumePresentedModalBack()) return true
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+                runtime.dispatchBack()
+                return true
+            }
         }
         return super.onKeyUp(keyCode, event)
+    }
+
+    @Suppress("DEPRECATION")
+    @SuppressLint("GestureBackNavigation")
+    override fun onBackPressed() {
+        if (!runtimeStarted) {
+            super.onBackPressed()
+            return
+        }
+        if (consumeSuppressedBack()) return
+        if (runtime.consumePresentedModalBack()) return
+        runtime.dispatchBack()
     }
 
     internal fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
@@ -392,7 +411,11 @@ class PamActivity : FragmentActivity() {
                 private var interactive = false
 
                 override fun onBackStarted(backEvent: BackEvent) {
-                    interactive = rootHost.startPredictiveBack()
+                    interactive = if (runtime.hasPresentedModal()) {
+                        false
+                    } else {
+                        rootHost.startPredictiveBack()
+                    }
                 }
 
                 override fun onBackProgressed(backEvent: BackEvent) {
@@ -410,6 +433,11 @@ class PamActivity : FragmentActivity() {
                         interactive = false
                         return
                     }
+                    if (runtime.consumePresentedModalBack()) {
+                        if (interactive) rootHost.cancelPredictiveBack()
+                        interactive = false
+                        return
+                    }
                     if (interactive) rootHost.commitPredictiveBack()
                     interactive = false
                     runtime.dispatchBack()
@@ -417,7 +445,12 @@ class PamActivity : FragmentActivity() {
             }
         } else {
             OnBackInvokedCallback {
-                if (!consumeSuppressedBack()) runtime.dispatchBack()
+                if (
+                    !consumeSuppressedBack()
+                    && !runtime.consumePresentedModalBack()
+                ) {
+                    runtime.dispatchBack()
+                }
             }
         }.also { callback ->
             onBackInvokedDispatcher.registerOnBackInvokedCallback(
@@ -433,7 +466,6 @@ class PamActivity : FragmentActivity() {
 
     private fun consumeSuppressedBack(): Boolean {
         if (SystemClock.uptimeMillis() > suppressBackUntil) return false
-        suppressBackUntil = 0L
         return true
     }
 
@@ -465,8 +497,35 @@ class PamActivity : FragmentActivity() {
     }
 
     private fun resolvedViewportSize(): Pair<Int, Int> {
-        val (width, height) = fullWindowSize()
-        return width to height
+        val (windowWidth, windowHeight) = fullWindowSize()
+        return resolvedViewportSize(
+            laidOutWidth = window.decorView.width,
+            laidOutHeight = window.decorView.height,
+            windowWidth = windowWidth,
+            windowHeight = windowHeight,
+        )
+    }
+
+    private fun scheduleViewportUpdate(force: Boolean = false) {
+        forceScheduledViewportUpdate = forceScheduledViewportUpdate || force
+        if (viewportUpdateScheduled) {
+            // A configuration callback can enqueue a pre-layout read before
+            // decorView receives its new orientation bounds. Do not discard a
+            // later onLayout signal just because that stale read is pending.
+            viewportUpdateReplayRequested = true
+            return
+        }
+        viewportUpdateScheduled = true
+        window.decorView.post {
+            viewportUpdateScheduled = false
+            val shouldForce = forceScheduledViewportUpdate
+            forceScheduledViewportUpdate = false
+            updateViewportFromWindow(force = shouldForce)
+            if (viewportUpdateReplayRequested) {
+                viewportUpdateReplayRequested = false
+                scheduleViewportUpdate()
+            }
+        }
     }
 
     private fun updateViewportFromWindow(force: Boolean = false) {
@@ -589,6 +648,6 @@ class PamActivity : FragmentActivity() {
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
-        const val BACK_SUPPRESSION_WINDOW_MS = 250L
+        const val BACK_SUPPRESSION_WINDOW_MS = 1_000L
     }
 }

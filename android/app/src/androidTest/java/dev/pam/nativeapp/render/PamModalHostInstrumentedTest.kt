@@ -29,4 +29,20 @@ class PamModalHostInstrumentedTest {
         assertEquals(640, sheet.height)
         assertEquals(Gravity.BOTTOM, sheet.gravity)
     }
+
+    @Test
+    fun nonDismissibleModalBlocksUserDismissalIndependentOfPresentation() {
+        assertEquals(true, blocksModalDismissal(dismissible = false))
+        assertEquals(false, blocksModalDismissal(dismissible = true))
+    }
+
+    @Test
+    fun dialogBackdropHitTestingSeparatesSurfaceFromDismissibleScrim() {
+        assertEquals(false, isPointOutsideModalChild(320f, 480f, 120, 300, 960, 720))
+        assertEquals(false, isPointOutsideModalChild(120f, 300f, 120, 300, 960, 720))
+        assertEquals(true, isPointOutsideModalChild(119f, 480f, 120, 300, 960, 720))
+        assertEquals(true, isPointOutsideModalChild(320f, 299f, 120, 300, 960, 720))
+        assertEquals(true, isPointOutsideModalChild(960f, 480f, 120, 300, 960, 720))
+        assertEquals(true, isPointOutsideModalChild(320f, 720f, 120, 300, 960, 720))
+    }
 }
