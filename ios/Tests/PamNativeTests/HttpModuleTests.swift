@@ -65,6 +65,41 @@ final class HttpModuleTests: XCTestCase {
         module.close()
     }
 
+    func testRedirectDoesNotForwardHeadersOrBodyToAnotherRequest() throws {
+        for target in ["https://api.example.test/redirected", "https://other.example.test/redirected"] {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [HTTPURLProtocol.self]
+            let module = HttpModule(configuration: configuration)
+            let completed = expectation(description: "Redirect returned without following")
+            var requests = 0
+            HTTPURLProtocol.handler = { request in
+                requests += 1
+                XCTAssertEqual(request.url?.absoluteString, "https://api.example.test/upload")
+                return (
+                    HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 307,
+                                    httpVersion: nil, headerFields: ["Location": target])!,
+                    Data()
+                )
+            }
+            let payload = try WireMap.encode([
+                "url": .text("https://api.example.test/upload"),
+                "method": .text("POST"),
+                "headers": .text(#"{"Authorization":"Bearer test-only"}"#),
+                "body": .text("private test payload"),
+            ])
+            module.invoke(method: "request", payload: payload) { status, response in
+                XCTAssertEqual(status, .success)
+                do {
+                    XCTAssertEqual(try WireMap.decode(response)["statusCode"], .integer(307))
+                } catch { XCTFail("Cannot decode redirect response: \(error)") }
+                completed.fulfill()
+            }
+            wait(for: [completed], timeout: 5)
+            XCTAssertEqual(requests, 1)
+            module.close()
+        }
+    }
+
     func testRejectsGenericAndCrossOriginTraceHeaders() throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [HTTPURLProtocol.self]
@@ -136,6 +171,10 @@ private final class HTTPURLProtocol: URLProtocol {
     override func startLoading() {
         do {
             let (response, data) = try XCTUnwrap(Self.handler)(request)
+            if let target = response.value(forHTTPHeaderField: "Location"), let url = URL(string: target) {
+                client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: url), redirectResponse: response)
+                return
+            }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
