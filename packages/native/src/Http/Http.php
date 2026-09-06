@@ -126,6 +126,9 @@ final class Http
         return self::send('PUT', $url, $callback, $headers, null, $timeoutMs, $trace, $path);
     }
 
+    /** @param Closure(HttpResponse): void $callback
+     * @param array<string, string> $headers
+     */
     private static function send(
         string $method,
         string $url,
