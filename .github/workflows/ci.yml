@@ -85,6 +85,7 @@ jobs:
           python3 -m json.tool packages/native/resources/pam-native-ui-ir.schema.json >/dev/null
           node --check editors/vscode/extension.js
           node editors/vscode/test.js
+          python3 editors/vscode/test_package.py
       - name: Remove regenerable build artifacts
         if: always()
         run: scripts/cleanup-build-artifacts.sh

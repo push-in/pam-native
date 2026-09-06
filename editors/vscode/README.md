@@ -45,3 +45,8 @@ the distributed extension. A SHA-256 sidecar accompanies the VSIX. Entries have
 fixed ordering, timestamps and permissions, producing identical archives when
 built with the same Python/zlib toolchain. Release automation may upload both
 files; this command does not publish to GitHub or the VS Code Marketplace.
+
+CI runs `python3 editors/vscode/test_package.py` to check deterministic output,
+checksums, XML metadata, bundled runtime/grammar paths, license inclusion and
+exclusion of development files. A VS Code installation smoke check remains a
+separate release validation.
