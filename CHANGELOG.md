@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.20 - 2026-09-06
+
+- Add `Http::upload()` for native streaming PUT uploads from private files, with bounded snapshots, network deadlines and cleanup on completion or failure.
+- Refuse HTTP redirects on iOS, matching Android, including file uploads.
+- Add `Files::sha256()` to hash private files in native workers without passing their bytes through PHP.
+- Document upload limits and uncertain outcomes; foreground uploads do not provide progress, individual cancellation or restart recovery.
+- Add reproducible VS Code extension packaging with metadata, license and checksum verification.
+
 ## 1.0.19 - 2026-09-06
 
 - Allow applications to recover from native notification permission failures through an optional failure callback.

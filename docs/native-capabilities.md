@@ -142,7 +142,7 @@ digest on the native file worker. Only the private path and 64-character digest
 cross the bridge. Files are read in 64 KiB blocks and limited to 64 MiB; empty
 files have the standard SHA-256 empty digest. The optional failure callback
 receives native read, path or size errors. Without it, native failure follows
-the normal exception behavior. This API is currently unreleased.
+the normal exception behavior. Available since SDK 1.0.20.
 
 Use it before requesting an upload grant that binds the expected content
 digest. Keep the source unchanged until the upload completes and require the
@@ -170,8 +170,7 @@ document picker remains the portable fallback.
 
 `Http::upload()` sends a private `Files` path as the raw body of an HTTPS
 `PUT`. Pass `FileReference::$path`, not its `pam-file://` URI or an absolute
-device path. This API is available in the source branch; it is not yet part
-of a published SDK release.
+device path. Available since SDK 1.0.20.
 
 ```php
 use Pam\Native\Http\Http;
