@@ -28,3 +28,25 @@ with this directory as `--extensionDevelopmentPath`, the test file as
 `--extensionTestsPath`, and the sample app as the workspace. Intelephense must be
 installed. It checks PHP language identity, SDK class definition, inherited method
 definition and PHP hover. The test does not claim universal PHP language coverage.
+
+## Build an installable extension
+
+From the SDK checkout, run:
+
+```sh
+python3 editors/vscode/package.py --output /tmp/pam-vscode-dist
+code --install-extension /tmp/pam-vscode-dist/pam-native-vscode-0.1.1.vsix
+```
+
+The filename follows the version in `package.json`. The build uses Python's standard
+library and does not install npm dependencies. It includes only the extension
+runtime, grammar, manifest, README and SDK license; development tests stay outside
+the distributed extension. A SHA-256 sidecar accompanies the VSIX. Entries have
+fixed ordering, timestamps and permissions, producing identical archives when
+built with the same Python/zlib toolchain. Release automation may upload both
+files; this command does not publish to GitHub or the VS Code Marketplace.
+
+CI runs `python3 editors/vscode/test_package.py` to check deterministic output,
+checksums, XML metadata, bundled runtime/grammar paths, license inclusion and
+exclusion of development files. A VS Code installation smoke check remains a
+separate release validation.
