@@ -3,6 +3,7 @@ package dev.pam.nativeapp.modules
 import dev.pam.nativeapp.BuildConfig
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
@@ -10,12 +11,20 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 
-internal class HttpModule : NativeModule, AutoCloseable {
+internal class HttpModule(
+    private val filesRoot: File? = null,
+    private val uploadCache: File? = null,
+) : NativeModule, AutoCloseable {
     private val executor: ExecutorService = Executors.newFixedThreadPool(4) { runnable ->
         Thread(runnable, "pam-http").apply { isDaemon = true }
+    }
+    private val uploadDeadlines = Executors.newSingleThreadScheduledExecutor { runnable ->
+        Thread(runnable, "pam-http-upload-timeout").apply { isDaemon = true }
     }
     private val closed = AtomicBoolean()
     private val connections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
@@ -25,7 +34,7 @@ internal class HttpModule : NativeModule, AutoCloseable {
         payload: ByteArray,
         completion: ModuleCompletion,
     ) {
-        if (method != "get" && method != "request") {
+        if (method !in setOf("get", "request", "upload")) {
             completion.complete(ModuleResultStatus.FAILURE, "Unknown HTTP method".toByteArray())
             return
         }
@@ -41,6 +50,8 @@ internal class HttpModule : NativeModule, AutoCloseable {
                         ?: error("HTTP URL is required")
                     val requestMethod = if (method == "get") {
                         "GET"
+                    } else if (method == "upload") {
+                        "PUT"
                     } else {
                         (values["method"] as? WireValue.Text)?.value
                             ?: error("HTTP method is required")
@@ -52,7 +63,21 @@ internal class HttpModule : NativeModule, AutoCloseable {
                     val timeoutMs = ((values["timeoutMs"] as? WireValue.Integer)?.value ?: 30_000L)
                         .coerceIn(1_000L, 120_000L)
                         .toInt()
-                    fetch(url, requestMethod, headersJson, body, timeoutMs, traceparent, traceOrigin)
+                    val snapshot = if (method == "upload") {
+                        require(body == null) { "File upload cannot include a text body" }
+                        val path = (values["path"] as? WireValue.Text)?.value
+                            ?: error("Upload source path is required")
+                        HttpUploadSnapshot.create(
+                            requireNotNull(filesRoot) { "Private files directory is unavailable" },
+                            requireNotNull(uploadCache) { "Private upload cache is unavailable" },
+                            path,
+                        ) { closed.get() || Thread.currentThread().isInterrupted }
+                    } else null
+                    try {
+                        fetch(url, requestMethod, headersJson, body, timeoutMs, traceparent, traceOrigin, snapshot?.file)
+                    } finally {
+                        snapshot?.close()
+                    }
                 }.fold(
                     onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
                     onFailure = {
@@ -72,6 +97,7 @@ internal class HttpModule : NativeModule, AutoCloseable {
         if (!closed.compareAndSet(false, true)) return
         connections.toList().forEach(HttpURLConnection::disconnect)
         connections.clear()
+        uploadDeadlines.shutdownNow()
         executor.shutdownNow()
     }
 
@@ -83,6 +109,7 @@ internal class HttpModule : NativeModule, AutoCloseable {
         timeoutMs: Int,
         traceparent: String?,
         traceOrigin: String?,
+        bodyFile: File?,
     ): ByteArray {
         val uri = URI(source)
         require(uri.scheme == "https" || (BuildConfig.DEBUG && uri.scheme == "http")) {
@@ -91,46 +118,65 @@ internal class HttpModule : NativeModule, AutoCloseable {
         require(uri.userInfo == null && uri.host != null) { "Invalid HTTP URL" }
         val connection = URL(source).openConnection() as HttpURLConnection
         connections += connection
-        if (closed.get()) {
-            connections -= connection
-            connection.disconnect()
-            error("HTTP module is closed")
-        }
-        require(requestMethod in ALLOWED_METHODS) { "Unsupported HTTP method $requestMethod" }
-        require(body == null || body.toByteArray(Charsets.UTF_8).size <= MAX_REQUEST_BYTES) {
-            "HTTP request body exceeds one MiB"
-        }
-        connection.requestMethod = requestMethod
-        connection.connectTimeout = 10_000
-        connection.readTimeout = timeoutMs
-        connection.instanceFollowRedirects = false
-        connection.setRequestProperty("Accept", "application/json, text/plain, */*")
-        val headers = JSONObject(headersJson)
-        require(headers.length() <= 32) { "HTTP requests support at most 32 headers" }
-        headers.keys().forEach { name ->
-            val value = headers.getString(name)
-            require(SAFE_HEADER_NAME.matches(name) && !value.contains('\r') && !value.contains('\n')) {
-                "Invalid HTTP header"
-            }
-            require(value.toByteArray(Charsets.UTF_8).size <= 8_192) { "HTTP header value is too large" }
-            require(name.lowercase() !in RESERVED_TRACE_HEADERS) {
-                "Trace headers require an origin-scoped context"
-            }
-            connection.setRequestProperty(name, value)
-        }
-        if (traceparent != null || traceOrigin != null) {
-            require(traceparent != null && traceOrigin != null) { "Incomplete HTTP trace context" }
-            require(TRACEPARENT.matches(traceparent)) { "Invalid W3C version 00 traceparent" }
-            require(origin(uri) == traceOrigin && traceOrigin.startsWith("https://")) {
-                "Trace context origin does not match the HTTP request origin"
-            }
-            connection.setRequestProperty("traceparent", traceparent)
-        }
-        if (body != null) {
-            connection.doOutput = true
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-        }
+        var deadline: ScheduledFuture<*>? = null
+        val timedOut = AtomicBoolean()
         try {
+            if (bodyFile != null) {
+                deadline = uploadDeadlines.schedule({ timedOut.set(true); connection.disconnect() }, timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+            }
+            check(!closed.get()) { "HTTP module is closed" }
+            require(requestMethod in ALLOWED_METHODS) { "Unsupported HTTP method $requestMethod" }
+            require(body == null || body.toByteArray(Charsets.UTF_8).size <= MAX_REQUEST_BYTES) {
+                "HTTP request body exceeds one MiB"
+            }
+            connection.requestMethod = requestMethod
+            connection.connectTimeout = if (bodyFile != null) minOf(10_000, timeoutMs) else 10_000
+            connection.readTimeout = timeoutMs
+            connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Accept", "application/json, text/plain, */*")
+            val headers = JSONObject(headersJson)
+            require(headers.length() <= 32) { "HTTP requests support at most 32 headers" }
+            headers.keys().forEach { name ->
+                val value = headers.getString(name)
+                require(SAFE_HEADER_NAME.matches(name) && !value.contains('\r') && !value.contains('\n')) {
+                    "Invalid HTTP header"
+                }
+                require(value.toByteArray(Charsets.UTF_8).size <= 8_192) { "HTTP header value is too large" }
+                require(name.lowercase() !in RESERVED_TRACE_HEADERS) {
+                    "Trace headers require an origin-scoped context"
+                }
+                require(bodyFile == null || name.lowercase() !in FILE_TRANSPORT_HEADERS) {
+                    "File upload headers cannot override HTTP transport fields"
+                }
+                connection.setRequestProperty(name, value)
+            }
+            if (traceparent != null || traceOrigin != null) {
+                require(traceparent != null && traceOrigin != null) { "Incomplete HTTP trace context" }
+                require(TRACEPARENT.matches(traceparent)) { "Invalid W3C version 00 traceparent" }
+                require(origin(uri) == traceOrigin && traceOrigin.startsWith("https://")) {
+                    "Trace context origin does not match the HTTP request origin"
+                }
+                connection.setRequestProperty("traceparent", traceparent)
+            }
+            if (bodyFile != null) {
+                connection.doOutput = true
+                connection.setFixedLengthStreamingMode(bodyFile.length())
+                bodyFile.inputStream().use { input ->
+                    connection.outputStream.use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            check(!closed.get() && !timedOut.get() && !Thread.currentThread().isInterrupted) { "HTTP upload cancelled" }
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            output.write(buffer, 0, count)
+                        }
+                    }
+                }
+            } else if (body != null) {
+                connection.doOutput = true
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            check(!timedOut.get()) { "HTTP upload timed out" }
             val status = connection.responseCode
             val input = if (status >= 400) connection.errorStream else connection.inputStream
             val body = input?.use { stream ->
@@ -153,6 +199,7 @@ internal class HttpModule : NativeModule, AutoCloseable {
                 ),
             )
         } finally {
+            deadline?.cancel(false)
             connections -= connection
             connection.disconnect()
         }
@@ -167,6 +214,7 @@ internal class HttpModule : NativeModule, AutoCloseable {
         }
 
         val ALLOWED_METHODS = setOf("GET", "POST", "PUT", "PATCH", "DELETE")
+        val FILE_TRANSPORT_HEADERS = setOf("host", "content-length", "transfer-encoding", "connection", "trailer", "upgrade")
         val RESERVED_TRACE_HEADERS = setOf("traceparent", "tracestate")
         val TRACEPARENT = Regex("^00-(?!0{32})[0-9a-f]{32}-(?!0{16})[0-9a-f]{16}-[0-9a-f]{2}$")
         val SAFE_HEADER_NAME = Regex("^[A-Za-z0-9-]{1,64}$")

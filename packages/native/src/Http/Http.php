@@ -102,6 +102,43 @@ final class Http
         int $timeoutMs = 30_000,
         ?OutboundTraceContext $trace = null,
     ): int {
+        return self::send($method, $url, $callback, $headers, $body, $timeoutMs, $trace);
+    }
+
+    /**
+     * PUT a file from the private Files directory without reading its bytes into PHP.
+     * @param Closure(HttpResponse): void $callback
+     * @param array<string, string> $headers
+     */
+    public static function upload(
+        string $url,
+        string $path,
+        Closure $callback,
+        array $headers = [],
+        int $timeoutMs = 120_000,
+        ?OutboundTraceContext $trace = null,
+    ): int {
+        if ($path === '' || strlen($path) > 4096 || str_starts_with($path, '/')
+            || str_contains($path, '\\') || preg_match('/[\x00-\x1f\x7f]/', $path)
+            || array_intersect(explode('/', $path), ['', '.', '..']) !== []) {
+            throw new RuntimeException('Upload source must be a relative private file path.');
+        }
+        return self::send('PUT', $url, $callback, $headers, null, $timeoutMs, $trace, $path);
+    }
+
+    /** @param Closure(HttpResponse): void $callback
+     * @param array<string, string> $headers
+     */
+    private static function send(
+        string $method,
+        string $url,
+        Closure $callback,
+        array $headers,
+        ?string $body,
+        int $timeoutMs,
+        ?OutboundTraceContext $trace,
+        ?string $source = null,
+    ): int {
         $method = strtoupper(trim($method));
         if (!in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], true)) {
             throw new RuntimeException("Unsupported HTTP method {$method}.");
@@ -128,6 +165,9 @@ final class Http
             if (in_array(strtolower($name), ['traceparent', 'tracestate'], true)) {
                 throw new RuntimeException('Trace headers require an origin-scoped OutboundTraceContext.');
             }
+            if ($source !== null && in_array(strtolower($name), ['host', 'content-length', 'transfer-encoding', 'connection', 'trailer', 'upgrade'], true)) {
+                throw new RuntimeException('File upload headers cannot override HTTP transport fields.');
+            }
             $normalizedHeaders[$name] = $value;
         }
 
@@ -141,6 +181,9 @@ final class Http
             'headers' => json_encode($normalizedHeaders, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             'timeoutMs' => max(1_000, min(120_000, $timeoutMs)),
         ];
+        if ($source !== null) {
+            $payload['path'] = $source;
+        }
         if ($body !== null) {
             $payload['body'] = $body;
         }
@@ -151,7 +194,7 @@ final class Http
 
         return Runtime::call(
             module: 'http',
-            method: 'request',
+            method: $source === null ? 'request' : 'upload',
             payload: Wire::map($payload),
             callback: self::responseCallback($callback),
         );

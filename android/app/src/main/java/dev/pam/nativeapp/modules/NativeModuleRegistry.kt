@@ -5,7 +5,10 @@ import java.util.concurrent.atomic.AtomicLong
 
 class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val generation = AtomicLong(1)
-    private val http = HttpModule()
+    private val http = HttpModule(
+        java.io.File(context.filesDir, "pam-files"),
+        java.io.File(context.cacheDir, "pam-http-uploads"),
+    )
     private val storage = StorageModule(context)
     private val system = SystemModule(context)
     private val sqlite = SQLiteModule(context)

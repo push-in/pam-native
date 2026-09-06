@@ -4118,6 +4118,34 @@ $assert(
     'Generic HTTP request did not decode its response.',
 );
 
+$uploadResponse = null;
+$uploadId = Http::upload('https://storage.example.test/signed', 'documents/test.png',
+    static function (HttpResponse $response) use (&$uploadResponse): void { $uploadResponse = $response; },
+    ['Content-Type' => 'image/png'],
+);
+$uploadCall = TestDiagnostics::$moduleCall;
+$uploadPayload = Wire::decodeMap($uploadCall['payload'] ?? '');
+$assert($uploadCall['method'] === 'upload' && $uploadPayload['method'] === 'PUT'
+    && $uploadPayload['path'] === 'documents/test.png' && !array_key_exists('body', $uploadPayload)
+    && $uploadPayload['timeoutMs'] === 120_000,
+    'HTTP upload must send a private path instead of file bytes through PHP.');
+Runtime::dispatchModuleResult($uploadId, \Pam\Native\ModuleResultStatus::Success->value,
+    Wire::map(['statusCode' => 204, 'body' => '']));
+$assert($uploadResponse instanceof HttpResponse && $uploadResponse->successful(), 'Upload response was not delivered.');
+foreach (['', '/absolute', '../outside', 'a/../b', 'a//b', "a\\b", "a\0b"] as $path) {
+    $rejected = false;
+    try { Http::upload('https://storage.example.test/signed', $path, static function (HttpResponse $response): void {}); }
+    catch (RuntimeException) { $rejected = true; }
+    $assert($rejected, 'Invalid upload path reached the native module.');
+}
+foreach (['Host', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Trailer', 'Upgrade'] as $header) {
+    $rejected = false;
+    try { Http::upload('https://storage.example.test/signed', 'document.png',
+        static function (HttpResponse $response): void {}, [$header => 'invalid']); }
+    catch (RuntimeException) { $rejected = true; }
+    $assert($rejected, 'Upload allowed a transport-managed header.');
+}
+
 $traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
 $trace = new OutboundTraceContext($traceparent, 'https://api.example.test/');
 Http::get('https://api.example.test/orders', static function (HttpResponse $response): void {}, $trace);
