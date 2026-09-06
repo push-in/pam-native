@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.19 - 2026-09-06
+
+- Allow applications to recover from native notification permission failures through an optional failure callback.
+- Preserve the existing permission granted/denied callbacks and global error reporting when no failure callback is supplied.
+
 ## 1.0.18 - 2026-09-05
 
 - Measure variable fonts using their requested weight and update automatic layout when weight or accessibility scale changes.
