@@ -244,6 +244,8 @@ execution window, not an unlimited background service.
 use Pam\Native\System\Clipboard;
 
 Clipboard::setText('Invite code: PAM42');
+// Private values are marked as sensitive and expire after 60 seconds.
+Clipboard::setSensitiveText($pixCode);
 Clipboard::hasText(function (bool $available): void {
     if ($available) {
         Clipboard::getText(fn (string $text) => $this->paste($text));

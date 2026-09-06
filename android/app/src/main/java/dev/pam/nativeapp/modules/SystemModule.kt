@@ -16,6 +16,7 @@ import android.hardware.SensorManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -290,14 +291,40 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     }
 
     private fun clipboardSetText(payload: ByteArray, completion: ModuleCompletion) {
-        val text = WireMap.decode(payload).text("text")
+        val values = WireMap.decode(payload)
+        val text = values.text("text")
+        val sensitive = values.flag("sensitive", false)
+        val clearAfterSeconds = values.integer(
+            "clearAfterSeconds",
+            ClipboardPrivacyPolicy.defaultExpirySeconds,
+        )
         require(text.toByteArray(Charsets.UTF_8).size <= MAX_CLIPBOARD_BYTES) {
             "Clipboard text exceeds one megabyte"
         }
+        val clearAfterMillis = if (sensitive) ClipboardPrivacyPolicy.expiryMillis(clearAfterSeconds) else 0L
         main.post {
-            clipboard().setPrimaryClip(ClipData.newPlainText("", text))
+            val clip = ClipData.newPlainText("", text)
+            if (sensitive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                clip.description.extras = PersistableBundle().apply {
+                    putBoolean(ClipboardPrivacyPolicy.sensitiveExtra, true)
+                }
+            }
+            clipboard().setPrimaryClip(clip)
+            if (sensitive) scheduleClipboardClear(text, clearAfterMillis)
             completion.success()
         }
+    }
+
+    private fun scheduleClipboardClear(expectedText: String, delayMillis: Long) {
+        main.postDelayed({
+            if (closed.get()) return@postDelayed
+            val manager = clipboard()
+            val current = manager.primaryClip?.takeIf { it.itemCount > 0 }
+                ?.getItemAt(0)?.text?.toString()
+            if (!ClipboardPrivacyPolicy.shouldClear(expectedText, current)) return@postDelayed
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) manager.clearPrimaryClip()
+            else manager.setPrimaryClip(ClipData.newPlainText("", ""))
+        }, delayMillis)
     }
 
     private fun clipboardGetText(completion: ModuleCompletion) {

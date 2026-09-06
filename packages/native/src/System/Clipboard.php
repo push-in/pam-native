@@ -34,6 +34,36 @@ final class Clipboard
         );
     }
 
+    /**
+     * Copies private text with platform sensitivity metadata and automatic expiry.
+     *
+     * @param Closure(bool): void|null $completed
+     */
+    public static function setSensitiveText(
+        string $text,
+        int $clearAfterSeconds = 60,
+        ?Closure $completed = null,
+    ): int {
+        if (strlen($text) > self::MAX_TEXT_BYTES) {
+            throw new \InvalidArgumentException('Clipboard text cannot exceed one megabyte.');
+        }
+        if ($clearAfterSeconds < 15 || $clearAfterSeconds > 300) {
+            throw new \InvalidArgumentException('Sensitive clipboard expiry must be between 15 and 300 seconds.');
+        }
+
+        return Runtime::callNative(
+            NativeOperation::ClipboardSetText,
+            Wire::map([
+                'text' => $text,
+                'sensitive' => true,
+                'clearAfterSeconds' => $clearAfterSeconds,
+            ]),
+            static function (ModuleResultStatus $status) use ($completed): void {
+                $completed?->__invoke($status === ModuleResultStatus::Success);
+            },
+        );
+    }
+
     /** @param Closure(?string): void $completed */
     public static function getText(Closure $completed): int
     {
