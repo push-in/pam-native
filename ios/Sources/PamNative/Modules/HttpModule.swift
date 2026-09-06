@@ -10,7 +10,7 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
     }
 
     init(configuration: URLSessionConfiguration) {
-        session = URLSession(configuration: configuration)
+        session = URLSession(configuration: configuration, delegate: HttpRedirectPolicy(), delegateQueue: nil)
     }
 
     public func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
@@ -175,5 +175,18 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
         let canonicalHost = host.contains(":") ? "[\(host)]" : host
         let port = url.port.flatMap { $0 == 443 ? nil : ":\($0)" } ?? ""
         return "\(scheme)://\(canonicalHost)\(port)"
+    }
+}
+
+// Keep HTTP requests bound to the URL chosen by the caller, matching Android.
+private final class HttpRedirectPolicy: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 }
