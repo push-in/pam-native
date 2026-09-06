@@ -304,7 +304,7 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
         val clearAfterMillis = if (sensitive) ClipboardPrivacyPolicy.expiryMillis(clearAfterSeconds) else 0L
         main.post {
             val clip = ClipData.newPlainText("", text)
-            if (sensitive && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            if (sensitive) {
                 clip.description.extras = PersistableBundle().apply {
                     putBoolean(ClipboardPrivacyPolicy.sensitiveExtra, true)
                 }
