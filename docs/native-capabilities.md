@@ -196,6 +196,17 @@ IncomingShares::listen($openComposer);
 `BackgroundTasks::end()`.
 
 `Notifications` requests permission and schedules/cancels local notifications.
+Permission denial reaches the normal callback with `false`. Unexpected native
+failures can be handled separately without invoking the global error handler:
+
+```php
+Notifications::requestPermission(
+    fn (bool $granted) => $this->onPermissionDecision($granted),
+    failure: fn (string $message) => $this->onPermissionFailure($message),
+);
+```
+
+The failure callback is optional; omitting it preserves existing error reporting.
 On Android, place the Firebase client file at
 `.pam/google-services.json` (preferred) or `google-services.json` in the PAM
 project root. The generated host then enables Firebase Messaging,

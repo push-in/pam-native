@@ -18,12 +18,15 @@ final class Notifications
     {
     }
 
-    /** @param Closure(bool): void $callback */
-    public static function requestPermission(Closure $callback): int
+    /**
+     * @param Closure(bool): void $callback
+     * @param Closure(string): void|null $failure
+     */
+    public static function requestPermission(Closure $callback, ?Closure $failure = null): int
     {
         return self::call('requestPermission', [], static function (array $values) use ($callback): void {
             $callback((bool) ($values['granted'] ?? false));
-        });
+        }, $failure);
     }
 
     public static function schedule(
@@ -73,14 +76,18 @@ final class Notifications
         );
     }
 
-    private static function call(string $method, array $payload, Closure $callback): int
+    private static function call(string $method, array $payload, Closure $callback, ?Closure $failure = null): int
     {
         return NativeModules::call(
             'notifications',
             $method,
             $payload,
-            static function ($result) use ($callback): void {
+            static function ($result) use ($callback, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+                        return;
+                    }
                     throw new RuntimeException($result->payload);
                 }
                 $callback($result->payload === '' ? [] : Wire::decodeMap($result->payload));
