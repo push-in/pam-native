@@ -23,6 +23,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             switch method {
             case "read":
                 queue.async { self.read(payload, completion) }
+            case "sha256":
+                queue.async { self.sha256(payload, completion) }
             case "write":
                 queue.async { self.write(payload, completion) }
             case "copyAsset":
@@ -53,6 +55,15 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         } catch {
             completion(.failure, Data(error.localizedDescription.utf8))
         }
+    }
+
+    private func sha256(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(path)? = values["path"] else { throw FileModuleError("Hash source path is required") }
+            let digest = try PrivateFileSha256.digest(root: root, path: path)
+            completion(.success, try WireMap.encode(["sha256": .text(digest)]))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
     private func stat(_ payload: Data, _ completion: @escaping ModuleCompletion) {

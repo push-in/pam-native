@@ -137,6 +137,19 @@ reject embedded credentials and non-HTTPS URLs, enforce a caller-controlled
 size limit (64 MiB by default, 256 MiB maximum), and replace the destination
 atomically only after a successful transfer.
 
+`Files::sha256($file->path, $callback, $failure)` computes a lowercase SHA-256
+digest on the native file worker. Only the private path and 64-character digest
+cross the bridge. Files are read in 64 KiB blocks and limited to 64 MiB; empty
+files have the standard SHA-256 empty digest. The optional failure callback
+receives native read, path or size errors. Without it, native failure follows
+the normal exception behavior. This API is currently unreleased.
+
+Use it before requesting an upload grant that binds the expected content
+digest. Keep the source unchanged until the upload completes and require the
+server to validate the uploaded bytes: hashing alone does not lock the file
+or prevent a concurrent write of the same size. The operation does not copy,
+delete or modify the source file.
+
 Use `Files::downloadWithProgress()` for authenticated documents or visible
 transfer UI. Request headers are validated on both sides of the bridge;
 connection framing headers and CR/LF values are rejected. The progress closure

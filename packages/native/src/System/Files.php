@@ -38,6 +38,28 @@ final class Files
         });
     }
 
+    /**
+     * Hash a private file natively without moving its bytes through PHP.
+     * @param Closure(string): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function sha256(string $path, Closure $callback, ?Closure $failure = null): int
+    {
+        if (trim($path) === '' || strlen($path) > 4096 || str_starts_with($path, '/')
+            || str_contains($path, '\\') || preg_match('/[\x00-\x1f\x7f]/', $path)
+            || array_intersect(explode('/', $path), ['', '.', '..']) !== []) {
+            throw new InvalidArgumentException('Hash source must be a relative private file path.');
+        }
+
+        return self::invokeOptionalFailure('sha256', ['path' => $path], static function (array $values) use ($callback): void {
+            $digest = $values['sha256'] ?? null;
+            if (!is_string($digest) || preg_match('/^[a-f0-9]{64}$/D', $digest) !== 1) {
+                throw new RuntimeException('Native SHA-256 result is invalid.');
+            }
+            $callback($digest);
+        }, $failure);
+    }
+
     public static function write(string $path, string $contents, ?Closure $callback = null): int
     {
         return self::invoke(

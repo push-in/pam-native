@@ -3460,6 +3460,41 @@ $assert(
     'Media capture must resolve user cancellation with null instead of throwing.',
 );
 
+$fileDigest = null;
+$hashRequest = Files::sha256('documents/identity.pdf', static function (string $digest) use (&$fileDigest): void {
+    $fileDigest = $digest;
+});
+$hashCall = TestDiagnostics::$moduleCall;
+$assert($hashCall !== null && $hashCall['module'] === 'files' && $hashCall['method'] === 'sha256'
+    && Wire::decodeMap($hashCall['payload']) === ['path' => 'documents/identity.pdf'],
+    'Files SHA-256 must bridge only a private path, never file bytes.');
+Runtime::dispatchModuleResult($hashRequest, ModuleResultStatus::Success->value, Wire::map(['sha256' => hash('sha256', 'abc')]));
+$assert($fileDigest === hash('sha256', 'abc'), 'Files SHA-256 must deliver the native digest.');
+
+$hashFailure = null;
+$hashRequest = Files::sha256('missing.pdf', static function (string $_): void {}, static function (string $message) use (&$hashFailure): void {
+    $hashFailure = $message;
+});
+Runtime::dispatchModuleResult($hashRequest, ModuleResultStatus::Failure->value, 'File does not exist');
+$assert($hashFailure === 'File does not exist', 'Files SHA-256 must expose native failure through the optional failure callback.');
+
+foreach (['', ' ', '/absolute', '../outside', 'a//b', 'a/../b', 'a\\b', "bad\nname", str_repeat('a', 4097)] as $unsafeHashPath) {
+    $rejected = false;
+    try { Files::sha256($unsafeHashPath, static function (string $_): void {}); }
+    catch (InvalidArgumentException) { $rejected = true; }
+    $assert($rejected, 'Files SHA-256 must reject unsafe private paths before crossing the bridge.');
+}
+$diagnosticsBeforeHashTests = TestDiagnostics::$messages;
+foreach (['', str_repeat('A', 64), str_repeat('g', 64), str_repeat('a', 63), str_repeat('a', 64)."\n", 42] as $invalidDigest) {
+    $fileDigest = null;
+    $beforeMessages = count(TestDiagnostics::$messages);
+    $hashRequest = Files::sha256('document.pdf', static function (string $digest) use (&$fileDigest): void { $fileDigest = $digest; });
+    Runtime::dispatchModuleResult($hashRequest, ModuleResultStatus::Success->value, Wire::map(['sha256' => $invalidDigest]));
+    $assert($fileDigest === null && count(TestDiagnostics::$messages) > $beforeMessages,
+        'Files SHA-256 must reject malformed native digest results.');
+}
+TestDiagnostics::$messages = $diagnosticsBeforeHashTests;
+
 $copiedAsset = null;
 $copyAssetRequest = Files::copyAsset(
     'assets/templates/story.webp',

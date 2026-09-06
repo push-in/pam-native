@@ -37,6 +37,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         runCatching {
             when (method) {
                 "read" -> executor.execute { read(payload, completion) }
+                "sha256" -> executor.execute { sha256(payload, completion) }
                 "write" -> executor.execute { write(payload, completion) }
                 "copyAsset" -> executor.execute { copyAsset(payload, completion) }
                 "download" -> executor.execute { download(payload, completion) }
@@ -53,6 +54,13 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "capture" -> capture(payload, completion)
                 else -> error("Unknown files method $method")
             }
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun sha256(payload: ByteArray, completion: ModuleCompletion) {
+        runCatching {
+            val digest = PrivateFileSha256.digest(root, WireMap.decode(payload).requiredText("path"))
+            completion.complete(ModuleResultStatus.SUCCESS, WireMap.encode(mapOf("sha256" to WireValue.Text(digest))))
         }.onFailure { completion.failure(it) }
     }
 
