@@ -143,6 +143,10 @@ class PamRuntime(
         dispatchEvent(0, EVENT_BACK)
     }
 
+    fun hasPresentedModal(): Boolean = renderer.hasPresentedModal()
+
+    fun consumePresentedModalBack(): Boolean = renderer.consumePresentedModalBack()
+
     fun reload(
         entryPath: String,
         confirmedAtNanos: Long? = null,
@@ -455,6 +459,11 @@ class PamRuntime(
         val current = ArrayList<PendingBatch>(pendingBatches.size)
         while (pendingBatches.isNotEmpty()) {
             current += pendingBatches.removeFirst()
+        }
+        if (renderer.isLayoutInProgress()) {
+            current.asReversed().forEach(pendingBatches::addFirst)
+            scheduleFrame()
+            return
         }
         val started = System.nanoTime()
         var committed = false

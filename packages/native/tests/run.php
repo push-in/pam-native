@@ -3072,6 +3072,52 @@ $assert(
 );
 TemplateRegistry::reset();
 
+$nestedStateChild = new class extends Component {
+    /** @return array{label: string} */
+    protected function initialState(): array
+    {
+        return ['label' => 'Nested A'];
+    }
+
+    public function changeLabel(string $label): void
+    {
+        $this->state->label = $label;
+    }
+
+    public function render(): \Pam\Native\Renderable
+    {
+        return Text::make((string) $this->state->label);
+    }
+};
+$nestedStateParent = new class($nestedStateChild) extends Component {
+    public function __construct(private readonly Component $child)
+    {
+    }
+
+    /** @return array{revision: int} */
+    protected function initialState(): array
+    {
+        return ['revision' => 0];
+    }
+
+    public function render(): \Pam\Native\Renderable
+    {
+        // Give the parent its own dependency so it is eligible for retained
+        // subtree reuse, matching a real stateful route component.
+        $this->state->revision;
+
+        return Column::make($this->child);
+    }
+};
+$nestedInitial = $nestedStateParent->toElement();
+$nestedStateChild->changeLabel('Nested B');
+$nestedUpdated = $nestedStateParent->toElement();
+$assert(
+    ($nestedInitial->children()[0]->properties()[PropKey::Text->value] ?? null) === 'Nested A'
+        && ($nestedUpdated->children()[0]->properties()[PropKey::Text->value] ?? null) === 'Nested B',
+    'Nested component state changes must invalidate every retained ancestor.',
+);
+
 $incremental = new TreeEncoder();
 $initial = $incremental->encode(Text::make('A')->key('value'));
 $unchanged = $incremental->encode(Text::make('A')->key('value'));
@@ -6411,6 +6457,62 @@ $assert(
         && $restoredGroupedDrawer->isGroupExpanded('Actions')
         && $restoredGroupedDrawer->isGroupExpanded('Forms'),
     'Grouped drawer state must restore selection and expanded sections.',
+);
+
+$responsiveMetricsReader = new class extends Component {
+    public int $renders = 0;
+
+    protected function initialState(): array
+    {
+        return ['revision' => 0];
+    }
+
+    public function render(): Renderable
+    {
+        $this->renders++;
+        $this->state->revision;
+        App::windowMetrics();
+
+        return Text::make('Nested responsive navigator metrics');
+    }
+};
+App::run($responsiveMetricsReader);
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 1_000.0,
+    'height' => 600.0,
+    'density' => 2.0,
+]));
+$nestedResponsiveDrawer = Router::drawer('overview')
+    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
+    ->route('field', 'Text field', Screen::make(Text::make('Text field')))
+    ->responsive(840.0)
+    ->persistence('test-nested-responsive-drawer-presentation')
+    ->build();
+$assert(
+    $responsiveMetricsReader->renders === 2
+        && $nestedResponsiveDrawer->resolvedType()
+        === \Pam\Native\Navigation\DrawerType::Permanent,
+    'Window-metric readers and nested responsive drawers must update without being the App root.',
+);
+Runtime::shutdown();
+
+$responsiveDrawer = Router::drawer('overview')
+    ->route('overview', 'Overview', Screen::make(Text::make('Overview')))
+    ->route('field', 'Text field', Screen::make(Text::make('Text field')))
+    ->responsive(840.0)
+    ->persistence('test-responsive-drawer-presentation')
+    ->build();
+$responsiveDrawer->dimensions(new WindowMetrics(1_000.0, 600.0, 2.0));
+$permanentDrawerElement = $responsiveDrawer->toElement();
+$permanentOpen = $permanentDrawerElement->events()[EventKind::DrawerOpen->value] ?? null;
+$permanentOpen?->__invoke();
+$responsiveDrawer->dimensions(new WindowMetrics(412.0, 915.0, 2.0));
+$compactDrawerElement = $responsiveDrawer->toElement();
+$assert(
+    $responsiveDrawer->resolvedType() === \Pam\Native\Navigation\DrawerType::Front
+        && $responsiveDrawer->getState()['open'] === false
+        && $compactDrawerElement->properties()[PropKey::DrawerOpen->value] === false,
+    'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
     \Pam\Native\Protocol::SDK_VERSION === '1.0.21',

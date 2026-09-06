@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.animation.ValueAnimator
 import android.app.Dialog
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PixelFormat
@@ -10,6 +11,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.Outline
 import android.os.Build
+import android.util.AttributeSet
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -53,7 +55,23 @@ internal fun interactiveBottomSheetLayout(
     return baseHeight.coerceAtLeast(1) to translation
 }
 
-internal class PamModalHost(context: Context) : FrameLayout(context) {
+internal fun blocksModalDismissal(dismissible: Boolean): Boolean = !dismissible
+
+internal fun isPointOutsideModalChild(
+    x: Float,
+    y: Float,
+    left: Int,
+    top: Int,
+    right: Int,
+    bottom: Int,
+): Boolean = x < left || x >= right || y < top || y >= bottom
+
+internal class PamModalHost @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null,
+    defStyleAttr: Int = 0,
+    private val onBackConsumed: (() -> Unit)? = null,
+) : FrameLayout(context, attrs, defStyleAttr) {
     private val content = PamModalContent(context)
     private val handle = View(context)
     private var dialog: Dialog? = null
@@ -90,6 +108,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     private var dragStartY = 0f
     private var dragActive = false
     private var dragFromHandle = false
+    private var modalBackdropPressed = false
     private var dragVelocity: VelocityTracker? = null
 
     private val updateRunnable = Runnable {
@@ -130,7 +149,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             }
             insets
         }
-        content.observeMotion = ::onBottomSheetMotion
+        content.observeMotion = ::onModalMotion
     }
 
     fun insert(view: View, index: Int) {
@@ -144,6 +163,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         if (presentation == value) return
         presentation = value
         dialog?.let {
+            applyDismissPolicy(it)
             applyWindowConfiguration(it)
             applyWindowLayout(it)
         }
@@ -209,6 +229,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
     fun setBottomSheetDismissible(value: Boolean) {
         bottomSheetDismissible = value
+        dialog?.let(::applyDismissPolicy)
     }
 
     fun setBottomSheetBackdropDismiss(value: Boolean) {
@@ -297,6 +318,19 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         dragVelocity = null
     }
 
+    fun isPresented(): Boolean = dialog?.isShowing == true
+
+    /**
+     * Activity-level fallback for synthetic/OEM Back dispatch that reaches
+     * both the dialog and its host activity. A visible modal always owns Back;
+     * the activity must never pop its navigator or finish underneath it.
+     */
+    fun consumeActivityBack(): Boolean {
+        if (!isPresented()) return false
+        if (desiredVisible) requestCloseFromBack()
+        return true
+    }
+
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         scheduleUpdate()
@@ -353,7 +387,8 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             modal.requestWindowFeature(Window.FEATURE_NO_TITLE)
             (content.parent as? ViewGroup)?.removeView(content)
             modal.setContentView(content)
-            modal.setCanceledOnTouchOutside(false)
+            applyDismissPolicy(modal)
+            modal.setOnCancelListener { requestClose() }
             modal.setOnKeyListener { _, keyCode, event ->
                 if (
                     keyCode == KeyEvent.KEYCODE_BACK
@@ -403,7 +438,7 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
     }
 
     private fun requestClose() {
-        if (!bottomSheetDismissible && presentation == PRESENTATION_SHEET) return
+        if (blocksModalDismissal(bottomSheetDismissible)) return
         desiredVisible = false
         val callback = onRequestClose
         if (callback != null) {
@@ -412,6 +447,17 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
             return
         }
         dismiss(notify = true, animated = true)
+    }
+
+    private fun applyDismissPolicy(modal: Dialog) {
+        val dismissible = !blocksModalDismissal(bottomSheetDismissible)
+        modal.setCancelable(dismissible)
+        // Sheets own their backdrop gesture inside PamModalContent. Dialog
+        // windows have platform decor insets outside that content, so Android
+        // itself must observe those touches and report them through onCancel.
+        modal.setCanceledOnTouchOutside(
+            presentation != PRESENTATION_SHEET && dismissible,
+        )
     }
 
     private fun registerDialogBackCallback(modal: Dialog) {
@@ -441,8 +487,18 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
 
     private fun requestCloseFromBack() {
         if (hideVisibleKeyboard()) return
-        (context as? PamActivity)?.suppressNextPamBack()
+        onBackConsumed?.invoke()
+        pamActivity()?.suppressNextPamBack()
         requestClose()
+    }
+
+    private fun pamActivity(): PamActivity? {
+        var current: Context? = context
+        while (current is ContextWrapper) {
+            if (current is PamActivity) return current
+            current = current.baseContext
+        }
+        return current as? PamActivity
     }
 
     private fun hideVisibleKeyboard(): Boolean {
@@ -550,8 +606,28 @@ internal class PamModalHost(context: Context) : FrameLayout(context) {
         updateBottomSheetChrome()
     }
 
-    private fun onBottomSheetMotion(event: MotionEvent) {
-        if (presentation != PRESENTATION_SHEET) return
+    private fun onModalMotion(event: MotionEvent) {
+        if (presentation != PRESENTATION_SHEET) {
+            val modalChild = sheetChild() ?: return
+            val outside = isPointOutsideModalChild(
+                event.x,
+                event.y,
+                modalChild.left,
+                modalChild.top,
+                modalChild.right,
+                modalChild.bottom,
+            )
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> modalBackdropPressed = outside
+                MotionEvent.ACTION_UP -> {
+                    val shouldDismiss = modalBackdropPressed && outside
+                    modalBackdropPressed = false
+                    if (shouldDismiss) requestClose()
+                }
+                MotionEvent.ACTION_CANCEL -> modalBackdropPressed = false
+            }
+            return
+        }
         val sheet = sheetChild() ?: return
         val sheetTop = content.height - sheet.height
         when (event.actionMasked) {
@@ -867,5 +943,18 @@ private class PamModalContent(context: Context) : FrameLayout(context) {
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         observeMotion?.invoke(event)
         return super.dispatchTouchEvent(event)
+    }
+
+    // Keep a gesture that starts on the otherwise empty backdrop alive until
+    // ACTION_UP. Child controls still receive events first through
+    // dispatchTouchEvent, so this only consumes touches no descendant handled.
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_UP) performClick()
+        return true
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
     }
 }

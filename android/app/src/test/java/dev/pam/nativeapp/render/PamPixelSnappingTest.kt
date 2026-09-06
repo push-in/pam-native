@@ -1,9 +1,17 @@
 package dev.pam.nativeapp.render
 
+import android.view.Gravity
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PamPixelSnappingTest {
+    @Test
+    fun physicalFrameGravityDoesNotResolveThroughStartInRtl() {
+        assertEquals(Gravity.TOP or Gravity.LEFT, PAM_PHYSICAL_FRAME_GRAVITY)
+        assertFalse(PAM_PHYSICAL_FRAME_GRAVITY and Gravity.RELATIVE_LAYOUT_DIRECTION != 0)
+    }
+
     @Test
     fun centered_children_share_the_same_physical_center() {
         val density = 2.625f

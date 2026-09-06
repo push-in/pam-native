@@ -28,8 +28,21 @@ internal open class PamContainer(context: Context) :
 
     override fun shouldDelayChildPressedState(): Boolean = false
 
-    override fun dispatchTouchEvent(event: MotionEvent): Boolean =
-        pointerEvents != POINTER_EVENTS_NONE && super.dispatchTouchEvent(event)
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (pointerEvents == POINTER_EVENTS_NONE) return false
+
+        // ViewGroup's normal dispatch can accept the delegated ACTION_DOWN as
+        // the container's own event and then skip the TouchDelegate on
+        // ACTION_UP when the pointer started outside the child's visual
+        // bounds. Route PAM's grouped delegates before child hit testing so a
+        // compact 40dp control receives the complete 48dp Material gesture.
+        val delegated = if (pointerEvents == POINTER_EVENTS_BOX_ONLY) {
+            false
+        } else {
+            (touchDelegate as? PamTouchDelegateGroup)?.onTouchEvent(event) == true
+        }
+        return delegated || super.dispatchTouchEvent(event)
+    }
 
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean =
         when (pointerEvents) {

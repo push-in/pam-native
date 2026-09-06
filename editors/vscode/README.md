@@ -28,7 +28,6 @@ with this directory as `--extensionDevelopmentPath`, the test file as
 `--extensionTestsPath`, and the sample app as the workspace. Intelephense must be
 installed. It checks PHP language identity, SDK class definition, inherited method
 definition and PHP hover. The test does not claim universal PHP language coverage.
-
 ## Build an installable extension
 
 From the SDK checkout, run:

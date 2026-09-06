@@ -345,6 +345,7 @@ public enum PamConstants {
     public static let checked = 51
     public static let loading = 52
     public static let selected = 66
+    public static let elevation = 56
     public static let drawerOpen = 85
     public static let drawerPosition = 86
     public static let modalPresentation = 58

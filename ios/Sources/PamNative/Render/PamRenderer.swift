@@ -1523,6 +1523,8 @@ public final class PamRenderer {
             view.layer.cornerRadius = CGFloat(value.decimalOrZero())
             applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
+        case PamConstants.elevation:
+            applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.shadowOffsetX,
              PamConstants.shadowOffsetY,
              PamConstants.shadowBlurRadius,
@@ -1908,6 +1910,8 @@ public final class PamRenderer {
             view.layer.cornerRadius = 0
             applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
+        case PamConstants.elevation:
+            applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.textAlign:
             applyTextAlignment(view: view, nodeId: nodeId)
         case PamConstants.shadowOffsetX,
@@ -2198,12 +2202,24 @@ public final class PamRenderer {
     }
 
     private func applyBoxShadow(view: UIView, nodeId: Int64) {
-        guard let state = nodes[nodeId],
-              let colorValue = state.properties[PamConstants.shadowColor]?.integerOrNil()
-        else {
+        guard let state = nodes[nodeId] else {
             view.layer.shadowColor = nil
             view.layer.shadowOpacity = 0
             view.layer.shadowPath = nil
+            return
+        }
+
+        guard let colorValue = state.properties[PamConstants.shadowColor]?.integerOrNil() else {
+            let elevation = max(
+                0,
+                CGFloat(state.properties[PamConstants.elevation]?.decimalOrNil() ?? 0),
+            )
+            PamMaterialElevation.apply(
+                elevation,
+                to: view.layer,
+                bounds: view.bounds,
+                cornerRadius: view.layer.cornerRadius,
+            )
             return
         }
 

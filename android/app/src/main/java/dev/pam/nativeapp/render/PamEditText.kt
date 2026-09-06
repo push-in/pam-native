@@ -2,6 +2,7 @@ package dev.pam.nativeapp.render
 
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.drawable.Drawable
 import android.os.Build
 import android.text.Editable
@@ -11,6 +12,8 @@ import android.view.ActionMode
 import android.view.KeyEvent
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputConnectionWrapper
@@ -21,6 +24,7 @@ internal class PamEditText @JvmOverloads constructor(
     attributes: AttributeSet? = null,
 ) : EditText(context, attributes) {
     private var editableKeyListener: KeyListener? = keyListener
+    private val originalBackground = background
     private val originalBackgroundTint = backgroundTintList
     private val originalCursorState: Drawable.ConstantState? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -30,11 +34,19 @@ internal class PamEditText @JvmOverloads constructor(
         }
     private var contextMenuHidden = false
     private var contentSizeScheduled = false
+    private var focusVisibilityScheduled = false
     private var lastContentWidth = -1
     private var lastContentHeight = -1
     private var selectionCallback: ((Int, Int) -> Unit)? = null
     private var contentSizeCallback: ((Int, Int) -> Unit)? = null
     private var keyCallback: ((String) -> Unit)? = null
+
+    override fun setEnabled(enabled: Boolean) {
+        super.setEnabled(enabled)
+        isFocusable = enabled
+        isFocusableInTouchMode = enabled
+        if (!enabled) clearFocus()
+    }
 
     fun setInputCallbacks(
         selection: ((Int, Int) -> Unit)?,
@@ -86,6 +98,16 @@ internal class PamEditText @JvmOverloads constructor(
     }
 
     fun setUnderlineColor(color: Int?) {
+        val transparent = color != null && Color.alpha(color) == 0
+        if (transparent && background === originalBackground) {
+            // A transparent tint still lets the framework EditText drawable
+            // paint its focused accent on some Android versions. Remove only
+            // that original platform drawable; never discard a custom PAM
+            // background that may have been applied afterwards.
+            background = null
+        } else if (!transparent && background == null && originalBackground != null) {
+            background = originalBackground
+        }
         backgroundTintList = color?.let(ColorStateList::valueOf)
             ?: originalBackgroundTint
     }
@@ -114,6 +136,36 @@ internal class PamEditText @JvmOverloads constructor(
     ) {
         super.onLayout(changed, left, top, right, bottom)
         scheduleContentSize()
+        scheduleFocusedVisibility()
+    }
+
+    private fun scheduleFocusedVisibility(attempt: Int = 0) {
+        if (!hasFocus() || focusVisibilityScheduled) return
+        focusVisibilityScheduled = true
+        postDelayed({
+            focusVisibilityScheduled = false
+            if (!isAttachedToWindow || !hasFocus()) return@postDelayed
+            val imeVisible = !(
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                rootWindowInsets?.isVisible(WindowInsets.Type.ime()) != true
+            )
+            if (imeVisible) {
+                var ancestor = parent as? View
+                while (ancestor != null) {
+                    if (ancestor is PamScrollContainer) {
+                        ancestor.ensureViewportTargetVisible(this)
+                        break
+                    }
+                    ancestor = ancestor.parent as? View
+                }
+            }
+            // Orientation dispatches layout before the replacement IME inset
+            // is necessarily visible. Reconcile for a bounded settling window;
+            // losing focus cancels the chain on the next callback.
+            if (attempt < FOCUS_VISIBILITY_RETRIES) {
+                scheduleFocusedVisibility(attempt + 1)
+            }
+        }, if (attempt == 0) 0L else FOCUS_VISIBILITY_RETRY_MS)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -184,6 +236,8 @@ internal class PamEditText @JvmOverloads constructor(
         }
 
     private companion object {
+        const val FOCUS_VISIBILITY_RETRIES = 8
+        const val FOCUS_VISIBILITY_RETRY_MS = 100L
         const val MAX_KEY_BYTES = 64
         val BLOCKED_ACTION_MODE = object : ActionMode.Callback {
             override fun onCreateActionMode(mode: ActionMode?, menu: Menu?): Boolean =

@@ -8,6 +8,7 @@
         tools:replace="android:usesCleartextTraffic">
         <activity
             android:name=".PamTestActivity"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
             android:exported="false"
             android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <activity

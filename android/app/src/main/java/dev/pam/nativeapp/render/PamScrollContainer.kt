@@ -285,7 +285,20 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     fun keyboardAvoidanceInsetPixels(): Int = keyboardAvoidanceInsetPx
 
     fun ensureKeyboardTargetVisible(target: View) {
-        if (keyboardAvoidanceInsetPx <= 0 || horizontal) return
+        if (keyboardAvoidanceInsetPx <= 0) return
+        ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true)
+    }
+
+    fun ensureViewportTargetVisible(target: View) {
+        ensureTargetVisible(target, obscuredInsetPx = 0, retry = true)
+    }
+
+    private fun ensureTargetVisible(
+        target: View,
+        obscuredInsetPx: Int,
+        retry: Boolean,
+    ) {
+        if (horizontal) return
         activeScroll.post {
             if (
                 !isAttachedToWindow ||
@@ -297,16 +310,30 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
             val rect = Rect(0, 0, target.width, target.height)
             content.offsetDescendantRectToMyCoords(target, rect)
             val current = primaryCurrentOffset()
-            val clearance = dp(KEYBOARD_TARGET_CLEARANCE_DP)
+            val viewportExtent = (activeScroll.height - obscuredInsetPx)
+                .coerceAtLeast(0)
+            val clearance = minOf(
+                dp(KEYBOARD_TARGET_CLEARANCE_DP),
+                ((viewportExtent - rect.height()).coerceAtLeast(0) / 2),
+            )
             val visibleEnd = current +
-                (activeScroll.height - keyboardAvoidanceInsetPx).coerceAtLeast(0)
+                viewportExtent
             val next = when {
                 rect.bottom + clearance > visibleEnd ->
                     current + rect.bottom + clearance - visibleEnd
                 rect.top - clearance < current -> rect.top - clearance
                 else -> current
             }
-            if (next != current) scrollToPrimary(next.coerceAtLeast(0))
+            val boundedNext = next.coerceIn(0, primaryMaxOffset())
+            if (boundedNext != current) scrollToPrimary(boundedNext)
+            // Keyboard insets and orientation-driven PHP layout can settle on
+            // the next frame. Recheck once so the focused editor cannot be
+            // left outside a newly reduced viewport after rotation.
+            if (retry) {
+                activeScroll.postOnAnimation {
+                    ensureTargetVisible(target, obscuredInsetPx, retry = false)
+                }
+            }
         }
     }
 
@@ -512,10 +539,12 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         if (horizontal) scrollXOf(activeScroll) else scrollYOf(activeScroll)
 
     private fun scrollToPrimary(offset: Int) {
+        val bounded = offset.coerceIn(0, primaryMaxOffset())
+        if (bounded == primaryCurrentOffset()) return
         if (horizontal) {
-            activeScroll.scrollTo(offset.coerceAtLeast(0), scrollYOf(activeScroll))
+            activeScroll.scrollTo(bounded, scrollYOf(activeScroll))
         } else {
-            activeScroll.scrollTo(scrollXOf(activeScroll), offset.coerceAtLeast(0))
+            activeScroll.scrollTo(scrollXOf(activeScroll), bounded)
         }
     }
 
@@ -769,7 +798,10 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         const val KEYBOARD_DISMISS_NONE = 1
         const val KEYBOARD_DISMISS_INTERACTIVE = 3
         const val NORMAL_DECELERATION_RATE = 0.985f
-        const val KEYBOARD_TARGET_CLEARANCE_DP = 16f
+        // Material supporting text (helper/error/counter) occupies 20dp with a
+        // 4dp top gap. Keeping this full strip visible prevents focused fields
+        // from touching the IME and hiding their validation state.
+        const val KEYBOARD_TARGET_CLEARANCE_DP = 24f
 
         fun alignedTargetOffset(
             targetStart: Int,

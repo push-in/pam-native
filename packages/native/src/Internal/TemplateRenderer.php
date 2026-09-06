@@ -2756,6 +2756,7 @@ final class TemplateRenderer
                     PropKey::BackgroundColor,
                     PropKey::TextColor,
                     PropKey::BorderColor,
+                    PropKey::Elevation,
                 ], true)) {
                     $nativeStates[$stateKind->value][$property->value] = $value;
                 }

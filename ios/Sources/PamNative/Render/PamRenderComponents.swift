@@ -1,6 +1,32 @@
 import Foundation
 import UIKit
 
+enum PamMaterialElevation {
+    static func apply(
+        _ elevation: CGFloat,
+        to layer: CALayer,
+        bounds: CGRect,
+        cornerRadius: CGFloat
+    ) {
+        guard elevation > 0 else {
+            layer.shadowColor = nil
+            layer.shadowOpacity = 0
+            layer.shadowOffset = .zero
+            layer.shadowRadius = 0
+            layer.shadowPath = nil
+            return
+        }
+        layer.shadowColor = UIColor.black.cgColor
+        layer.shadowOpacity = Float(min(0.24, 0.10 + elevation * 0.008))
+        layer.shadowOffset = CGSize(width: 0, height: max(1, elevation * 0.45))
+        layer.shadowRadius = max(1, elevation * 0.72)
+        layer.shadowPath = UIBezierPath(
+            roundedRect: bounds,
+            cornerRadius: max(0, cornerRadius)
+        ).cgPath
+    }
+}
+
 final class PamPressButton: UIButton {
     static let minimumTouchTarget: CGFloat = 44
 
@@ -14,6 +40,11 @@ final class PamPressButton: UIButton {
     private var restingBackgroundColor: UIColor?
     private var restingTitleColor: UIColor?
     private var restingBorderColor: CGColor?
+    private var restingShadowColor: CGColor?
+    private var restingShadowOpacity: Float?
+    private var restingShadowOffset: CGSize?
+    private var restingShadowRadius: CGFloat?
+    private var restingShadowPath: CGPath?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -126,11 +157,21 @@ final class PamPressButton: UIButton {
             backgroundColor = restingBackgroundColor
             setTitleColor(restingTitleColor, for: .normal)
             layer.borderColor = restingBorderColor
+            layer.shadowColor = restingShadowColor
+            layer.shadowOpacity = restingShadowOpacity ?? 0
+            layer.shadowOffset = restingShadowOffset ?? .zero
+            layer.shadowRadius = restingShadowRadius ?? 0
+            layer.shadowPath = restingShadowPath
             restingAlpha = nil
             restingTransform = nil
             restingBackgroundColor = nil
             restingTitleColor = nil
             restingBorderColor = nil
+            restingShadowColor = nil
+            restingShadowOpacity = nil
+            restingShadowOffset = nil
+            restingShadowRadius = nil
+            restingShadowPath = nil
             return
         }
         if restingAlpha == nil { restingAlpha = alpha }
@@ -138,6 +179,11 @@ final class PamPressButton: UIButton {
         restingBackgroundColor = backgroundColor
         restingTitleColor = titleColor(for: .normal)
         restingBorderColor = layer.borderColor
+        restingShadowColor = layer.shadowColor
+        restingShadowOpacity = layer.shadowOpacity
+        restingShadowOffset = layer.shadowOffset
+        restingShadowRadius = layer.shadowRadius
+        restingShadowPath = layer.shadowPath
         if let opacity = styles[38] as? NSNumber { alpha = CGFloat(truncating: opacity) }
         let x = (styles[74] as? NSNumber).map(CGFloat.init(truncating:)) ?? 1
         let y = (styles[75] as? NSNumber).map(CGFloat.init(truncating:)) ?? 1
@@ -150,6 +196,14 @@ final class PamPressButton: UIButton {
         }
         if let color = styles[37] as? NSNumber {
             layer.borderColor = UIColor(argb: color.int64Value).cgColor
+        }
+        if let elevation = styles[56] as? NSNumber {
+            PamMaterialElevation.apply(
+                CGFloat(truncating: elevation),
+                to: layer,
+                bounds: bounds,
+                cornerRadius: layer.cornerRadius
+            )
         }
     }
 }

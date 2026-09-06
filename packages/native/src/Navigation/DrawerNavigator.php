@@ -8,6 +8,7 @@ use BackedEnum;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\AccessibilityRole;
+use Pam\Native\App;
 use Pam\Native\Renderable;
 use Pam\Native\Restorable;
 use Pam\Native\Routing\RouteName;
@@ -66,12 +67,12 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
         private readonly float $swipeEdgeWidth = 32.0,
         private readonly float $swipeMinDistance = 56.0,
         private readonly float $permanentBreakpoint = 840.0,
-        private readonly int $backgroundColor = 0xFFFFFFFF,
-        private readonly int $activeColor = 0xFF0F172A,
-        private readonly int $inactiveColor = 0xFF64748B,
-        private readonly int $activeBackgroundColor = 0xFFE2E8F0,
-        private readonly int $overlayColor = 0x33000000,
-        private readonly int $dividerColor = 0xFFE2E8F0,
+        private int $backgroundColor = 0xFFFFFFFF,
+        private int $activeColor = 0xFF0F172A,
+        private int $inactiveColor = 0xFF64748B,
+        private int $activeBackgroundColor = 0xFFE2E8F0,
+        private int $overlayColor = 0x33000000,
+        private int $dividerColor = 0xFFE2E8F0,
         private readonly ?Closure $customContent = null,
     ) {
         $initialRoute = RouteName::value($initialRoute);
@@ -288,14 +289,47 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
 
     public function dimensions(WindowMetrics $metrics): void
     {
+        $wasPermanent = $this->resolvedType() === DrawerType::Permanent;
         $this->windowWidth = max(0.0, $metrics->width);
+        $isPermanent = $this->resolvedType() === DrawerType::Permanent;
+        if (!$wasPermanent && $isPermanent && $this->open) {
+            // A modal/front drawer becomes part of the page structure at the
+            // permanent breakpoint. Its transient open state must not survive
+            // that presentation change and cover the compact screen when the
+            // device rotates back.
+            $this->open = false;
+            State::set($this->stateKey(), $this->saveState());
+        }
+    }
+
+    public function appearance(
+        int $backgroundColor,
+        int $activeColor,
+        int $inactiveColor,
+        int $activeBackgroundColor,
+        int $overlayColor,
+        int $dividerColor,
+    ): void {
+        $this->backgroundColor = $backgroundColor;
+        $this->activeColor = $activeColor;
+        $this->inactiveColor = $inactiveColor;
+        $this->activeBackgroundColor = $activeBackgroundColor;
+        $this->overlayColor = $overlayColor;
+        $this->dividerColor = $dividerColor;
     }
 
     public function resolvedType(): DrawerType
     {
+        // A navigator can be nested under an application component instead
+        // of being passed directly to App::run(). In that case it does not
+        // own the dimensions callback, but Runtime still keeps authoritative
+        // window metrics and rerenders the tree after every size change.
+        $windowWidth = $this->windowWidth > 0.0
+            ? $this->windowWidth
+            : App::windowMetrics()->width;
         if (
             $this->permanentBreakpoint > 0.0
-            && $this->windowWidth >= $this->permanentBreakpoint
+            && $windowWidth >= $this->permanentBreakpoint
         ) {
             return DrawerType::Permanent;
         }
@@ -452,10 +486,14 @@ final class DrawerNavigator implements Renderable, Restorable, NavigationStatePr
             )
             ->permanentBreakpoint($this->permanentBreakpoint)
             ->onOpen(function (): void {
-                $this->openDrawer();
+                if ($this->resolvedType() !== DrawerType::Permanent) {
+                    $this->openDrawer();
+                }
             })
             ->onClose(function (): void {
-                $this->closeDrawer();
+                if ($this->resolvedType() !== DrawerType::Permanent) {
+                    $this->closeDrawer();
+                }
             });
     }
 
