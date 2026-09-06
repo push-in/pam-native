@@ -20,6 +20,66 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class HttpUploadInstrumentedTest {
+    @Test fun closingModuleInterruptsUploadAndCleansSnapshot() = assertInterruptedUpload(timeout = false)
+
+    @Test fun deadlineInterruptsUnresponsiveServerAndCleansSnapshot() = assertInterruptedUpload(timeout = true)
+
+    private fun assertInterruptedUpload(timeout: Boolean) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = File(context.cacheDir, "http-upload-stop-${UUID.randomUUID()}").apply { mkdirs() }
+        val root = File(directory, "files").apply { mkdir() }
+        val cache = File(directory, "snapshots").apply { mkdir() }
+        val source = File(root, "document.bin").apply { writeBytes(ByteArray(65_536) { 42 }) }
+        val module = HttpModule(root, cache)
+        val releaseServer = CountDownLatch(1)
+        try {
+            ServerSocket(0, 1, InetAddress.getByName("127.0.0.1")).use { server ->
+                server.soTimeout = 5_000
+                val received = CountDownLatch(1)
+                val failure = AtomicReference<Throwable?>()
+                val serving = thread(name = "pam-http-stalled-upload-test") {
+                    try {
+                        server.accept().use { socket ->
+                            socket.soTimeout = 5_000
+                            val input = socket.getInputStream()
+                            assertEquals("PUT /upload HTTP/1.1", line(input))
+                            while (line(input).isNotEmpty()) { /* Consume headers. */ }
+                            var remaining = source.length()
+                            val buffer = ByteArray(8_192)
+                            while (remaining > 0) {
+                                val count = input.read(buffer, 0, minOf(buffer.size.toLong(), remaining).toInt())
+                                require(count > 0) { "Upload ended early" }
+                                remaining -= count
+                            }
+                            received.countDown()
+                            releaseServer.await(10, TimeUnit.SECONDS)
+                        }
+                    } catch (error: Throwable) { failure.set(error) }
+                }
+                try {
+                    val completed = CountDownLatch(1)
+                    val result = AtomicReference<ModuleResultStatus?>()
+                    module.invoke("upload", WireMap.encode(mapOf(
+                        "url" to WireValue.Text("http://127.0.0.1:${server.localPort}/upload"),
+                        "path" to WireValue.Text(source.name),
+                        "timeoutMs" to WireValue.Integer(if (timeout) 1_000L else 15_000L),
+                    ))) { status, _ -> result.set(status); completed.countDown() }
+                    assertTrue("Server did not receive upload", received.await(5, TimeUnit.SECONDS))
+                    if (!timeout) module.close()
+                    assertTrue("Interrupted upload did not complete", completed.await(5, TimeUnit.SECONDS))
+                    assertEquals(ModuleResultStatus.FAILURE, result.get())
+                    assertTrue("Snapshot leaked", cache.listFiles().isNullOrEmpty())
+                    assertTrue(source.isFile)
+                } finally {
+                    releaseServer.countDown()
+                    serving.join(5_000)
+                }
+                assertFalse("Server did not stop", serving.isAlive)
+                assertNull(failure.get())
+            }
+        } finally { releaseServer.countDown(); module.close(); directory.deleteRecursively() }
+    }
+
     @Test fun streamsBinaryFileBeyondPhpBodyLimitAndCleansSnapshot() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val directory = File(context.cacheDir, "http-upload-test-${UUID.randomUUID()}").apply { mkdirs() }

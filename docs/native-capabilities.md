@@ -153,6 +153,52 @@ must provide the standard camera/photo usage descriptions in the application
 `Info.plist`. The direct `MediaLibrary` query is currently Android-only; the
 document picker remains the portable fallback.
 
+## Foreground file uploads
+
+`Http::upload()` sends a private `Files` path as the raw body of an HTTPS
+`PUT`. Pass `FileReference::$path`, not its `pam-file://` URI or an absolute
+device path. This API is available in the source branch; it is not yet part
+of a published SDK release.
+
+```php
+use Pam\Native\Http\Http;
+use Pam\Native\Http\HttpResponse;
+
+Http::upload(
+    url: $signedUploadUrl,
+    path: $file->path,
+    callback: function (HttpResponse $response): void {
+        // Check the expected storage status before confirming with your API.
+    },
+    headers: ['Content-Type' => $file->mimeType],
+);
+```
+
+Native workers first copy the source into a private temporary snapshot, then
+stream that snapshot to the server. File bytes do not pass through PHP or
+the bridge. Sources are limited to 64 MiB; applications should enforce any
+smaller limit required by their API. The source remains available after the
+request, while the snapshot is removed when the request completes or fails.
+Snapshot creation requires temporary disk space approximately equal to the
+file size. Avoid modifying the source until snapshot creation has completed;
+the server should validate a previously agreed checksum when byte identity
+matters.
+
+The default network deadline is 120 seconds, configurable from 1 to 120
+seconds. Queueing and snapshot creation precede this deadline. Redirects are
+returned to the caller without forwarding the upload. Native code supplies
+the content length: `Host`, `Content-Length`, `Transfer-Encoding`,
+`Connection`, `Trailer`, and `Upgrade` cannot be supplied by the application.
+Use only headers required by the upload destination; an API bearer token
+should not be copied to an unrelated storage URL.
+
+Uploads are foreground operations with no automatic retry, progress callback,
+per-request cancellation, or process-restart recovery. Closing the native HTTP
+module interrupts active requests. A timeout does not establish whether the
+server received the file: query the application's upload status before
+retrying or completing a business operation. HTTP response bodies retain the
+normal transport limit of 900 KiB.
+
 ## Incoming shares
 
 Declare only the MIME types the application accepts:
