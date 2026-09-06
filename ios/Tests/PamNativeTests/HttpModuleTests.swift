@@ -75,7 +75,7 @@ final class HttpModuleTests: XCTestCase {
             wait(for: [ready], timeout: 5)
             let completed = expectation(description: "Redirect returned without following")
             let payload = try WireMap.encode([
-                "url": .text(server.url),
+                "url": .text(try XCTUnwrap(server.url)),
                 "method": .text("POST"),
                 "headers": .text(#"{"Authorization":"Bearer test-only"}"#),
                 "body": .text("private test payload"),
@@ -184,7 +184,7 @@ private final class RedirectHTTPServer: @unchecked Sendable {
     private var connections: [NWConnection] = []
     private let crossOrigin: Bool
 
-    var url: String { "http://127.0.0.1:\(listener.port!.rawValue)/upload" }
+    var url: String? { listener.port.map { "http://127.0.0.1:\($0.rawValue)/upload" } }
     var requestCount: Int { queue.sync { count } }
 
     init(crossOrigin: Bool, ready: @escaping () -> Void) throws {
@@ -212,9 +212,10 @@ private final class RedirectHTTPServer: @unchecked Sendable {
                 if finished { connection.cancel() } else { self.receive(connection, head: head) }
                 return
             }
+            guard let port = self.listener.port else { connection.cancel(); return }
             self.count += 1
             let host = self.crossOrigin ? "localhost" : "127.0.0.1"
-            let location = "http://\(host):\(self.listener.port!.rawValue)/redirected"
+            let location = "http://\(host):\(port.rawValue)/redirected"
             let response = self.count == 1
                 ? "HTTP/1.1 307 Temporary Redirect\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
