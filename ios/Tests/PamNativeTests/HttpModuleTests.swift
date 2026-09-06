@@ -1,4 +1,5 @@
 import XCTest
+import Network
 @testable import PamNative
 
 final class HttpModuleTests: XCTestCase {
@@ -66,37 +67,31 @@ final class HttpModuleTests: XCTestCase {
     }
 
     func testRedirectDoesNotForwardHeadersOrBodyToAnotherRequest() throws {
-        for target in ["https://api.example.test/redirected", "https://other.example.test/redirected"] {
-            let configuration = URLSessionConfiguration.ephemeral
-            configuration.protocolClasses = [HTTPURLProtocol.self]
-            let module = HttpModule(configuration: configuration)
+        for crossOrigin in [false, true] {
+            let ready = expectation(description: "Loopback HTTP server ready")
+            let server = try RedirectHTTPServer(crossOrigin: crossOrigin) { ready.fulfill() }
+            let module = HttpModule(configuration: .ephemeral)
+            defer { module.close(); server.stop() }
+            wait(for: [ready], timeout: 5)
             let completed = expectation(description: "Redirect returned without following")
-            var requests = 0
-            HTTPURLProtocol.handler = { request in
-                requests += 1
-                XCTAssertEqual(request.url?.absoluteString, "https://api.example.test/upload")
-                return (
-                    HTTPURLResponse(url: try XCTUnwrap(request.url), statusCode: 307,
-                                    httpVersion: nil, headerFields: ["Location": target])!,
-                    Data()
-                )
-            }
             let payload = try WireMap.encode([
-                "url": .text("https://api.example.test/upload"),
+                "url": .text(server.url),
                 "method": .text("POST"),
                 "headers": .text(#"{"Authorization":"Bearer test-only"}"#),
                 "body": .text("private test payload"),
             ])
             module.invoke(method: "request", payload: payload) { status, response in
-                XCTAssertEqual(status, .success)
+                defer { completed.fulfill() }
+                guard status == .success else {
+                    XCTFail("HTTP failed: \(String(data: response, encoding: .utf8) ?? "unknown")")
+                    return
+                }
                 do {
                     XCTAssertEqual(try WireMap.decode(response)["statusCode"], .integer(307))
                 } catch { XCTFail("Cannot decode redirect response: \(error)") }
-                completed.fulfill()
             }
-            wait(for: [completed], timeout: 5)
-            XCTAssertEqual(requests, 1)
-            module.close()
+            wait(for: [completed], timeout: 10)
+            XCTAssertEqual(server.requestCount, 1)
         }
     }
 
@@ -171,10 +166,6 @@ private final class HTTPURLProtocol: URLProtocol {
     override func startLoading() {
         do {
             let (response, data) = try XCTUnwrap(Self.handler)(request)
-            if let target = response.value(forHTTPHeaderField: "Location"), let url = URL(string: target) {
-                client?.urlProtocol(self, wasRedirectedTo: URLRequest(url: url), redirectResponse: response)
-                return
-            }
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data)
             client?.urlProtocolDidFinishLoading(self)
@@ -184,4 +175,55 @@ private final class HTTPURLProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+}
+
+private final class RedirectHTTPServer: @unchecked Sendable {
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "pam.test.http.redirect")
+    private var count = 0
+    private var connections: [NWConnection] = []
+    private let crossOrigin: Bool
+
+    var url: String { "http://127.0.0.1:\(listener.port!.rawValue)/upload" }
+    var requestCount: Int { queue.sync { count } }
+
+    init(crossOrigin: Bool, ready: @escaping () -> Void) throws {
+        self.crossOrigin = crossOrigin
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
+        listener = try NWListener(using: parameters)
+        listener.stateUpdateHandler = { state in if case .ready = state { ready() } }
+        listener.newConnectionHandler = { [weak self] connection in
+            guard let self else { connection.cancel(); return }
+            self.connections.append(connection)
+            connection.start(queue: self.queue)
+            self.receive(connection, head: Data())
+        }
+        listener.start(queue: queue)
+    }
+
+    private func receive(_ connection: NWConnection, head: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16_384) { [weak self] data, _, finished, error in
+            guard let self, let data, error == nil else { connection.cancel(); return }
+            var head = head
+            head.append(data)
+            guard head.count <= 16_384 else { connection.cancel(); return }
+            guard head.range(of: Data("\r\n\r\n".utf8)) != nil else {
+                if finished { connection.cancel() } else { self.receive(connection, head: head) }
+                return
+            }
+            self.count += 1
+            let host = self.crossOrigin ? "localhost" : "127.0.0.1"
+            let location = "http://\(host):\(self.listener.port!.rawValue)/redirected"
+            let response = self.count == 1
+                ? "HTTP/1.1 307 Temporary Redirect\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
+        }
+    }
+
+    func stop() {
+        listener.cancel()
+        queue.sync { connections.forEach { $0.cancel() }; connections.removeAll() }
+    }
 }
