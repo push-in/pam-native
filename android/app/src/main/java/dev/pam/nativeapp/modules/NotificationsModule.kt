@@ -29,6 +29,7 @@ internal class NotificationsModule(private val activity: PamActivity) : NativeMo
                 "schedule" -> schedule(payload, completion)
                 "cancel" -> cancel(payload, completion)
                 "registerPush" -> registerPush(completion)
+                "unregisterPush" -> unregisterPush(completion)
                 "nextPushEvent" -> PamPushNotifications.next(completion)
                 else -> error("Unknown notifications method $method")
             }
@@ -81,6 +82,41 @@ internal class NotificationsModule(private val activity: PamActivity) : NativeMo
                 completion.complete(
                     ModuleResultStatus.FAILURE,
                     (error.message ?: "Push registration failed").toByteArray(),
+                )
+            }
+        }
+        main.post(::poll)
+    }
+
+    private fun unregisterPush(completion: ModuleCompletion) {
+        val firebase = runCatching {
+            Class.forName("com.google.firebase.messaging.FirebaseMessaging")
+        }.getOrElse {
+            error(
+                "Push unregistration requires the host app to provide Firebase Messaging " +
+                    "or a generated notifications module",
+            )
+        }
+        val instance = firebase.getMethod("getInstance").invoke(null)
+        val task = firebase.getMethod("deleteToken").invoke(instance)
+        val started = System.currentTimeMillis()
+        fun poll() {
+            runCatching {
+                val complete = task.javaClass.getMethod("isComplete").invoke(task) as Boolean
+                if (!complete) {
+                    require(System.currentTimeMillis() - started < 15_000) {
+                        "Push token unregistration timed out"
+                    }
+                    main.postDelayed(::poll, 50)
+                    return
+                }
+                val successful = task.javaClass.getMethod("isSuccessful").invoke(task) as Boolean
+                require(successful) { "Firebase rejected push token unregistration" }
+                completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+            }.onFailure { error ->
+                completion.complete(
+                    ModuleResultStatus.FAILURE,
+                    (error.message ?: "Push unregistration failed").toByteArray(),
                 )
             }
         }

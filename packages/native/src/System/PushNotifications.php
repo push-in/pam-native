@@ -58,6 +58,34 @@ final class PushNotifications
         );
     }
 
+    /**
+     * Stops remote notifications for this installation and invalidates its native token.
+     *
+     * @param Closure(): void $callback
+     * @param Closure(string): void|null $failure
+     */
+    public static function unregister(
+        Closure $callback,
+        ?Closure $failure = null,
+    ): int {
+        return NativeModules::call(
+            'notifications',
+            'unregisterPush',
+            [],
+            static function ($result) use ($callback, $failure): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
+                    throw new RuntimeException($result->payload);
+                }
+                $callback();
+            },
+        );
+    }
+
     /** @param Closure(PushMessage): void $callback */
     public static function listen(Closure $callback): int
     {

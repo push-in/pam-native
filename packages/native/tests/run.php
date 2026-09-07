@@ -3349,6 +3349,37 @@ $assert(
     'Push registration failures must reach the optional failure callback.',
 );
 
+$pushUnregistered = false;
+$pushUnregisterRequest = PushNotifications::unregister(
+    static function () use (&$pushUnregistered): void { $pushUnregistered = true; },
+    static function (string $message): void { throw new RuntimeException($message); },
+);
+$pushUnregisterCall = TestDiagnostics::$moduleCall;
+$assert(
+    $pushUnregisterCall !== null
+        && $pushUnregisterCall['requestId'] === $pushUnregisterRequest
+        && $pushUnregisterCall['module'] === 'notifications'
+        && $pushUnregisterCall['method'] === 'unregisterPush',
+    'Push unregistration must emit its typed native module call.',
+);
+Runtime::dispatchModuleResult($pushUnregisterRequest, ModuleResultStatus::Success->value, '');
+$assert($pushUnregistered, 'Push unregistration must invoke its success callback.');
+
+$pushUnregisterFailure = null;
+$failedPushUnregisterRequest = PushNotifications::unregister(
+    static function (): void { throw new RuntimeException('Failed push unregistration must not invoke success.'); },
+    static function (string $message) use (&$pushUnregisterFailure): void { $pushUnregisterFailure = $message; },
+);
+Runtime::dispatchModuleResult(
+    $failedPushUnregisterRequest,
+    ModuleResultStatus::Failure->value,
+    'Firebase rejected push token unregistration.',
+);
+$assert(
+    $pushUnregisterFailure === 'Firebase rejected push token unregistration.',
+    'Push unregistration failures must reach the optional failure callback.',
+);
+
 $recording = null;
 $audioRequest = AudioRecorder::stop(
     static function (AudioRecording $value) use (&$recording): void {
