@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.23 - 2026-09-07
+
+- Add `PushNotifications::unregister()` to invalidate FCM tokens and unregister from APNs without a broad provider plugin.
+- Install the Android Rust cross-compilation target before certifying clean community starter projects.
+
 ## 1.0.22 - 2026-09-07
 
 - Generate Android manifests with only the optional permissions selected by the app and its plugins.
