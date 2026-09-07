@@ -4845,7 +4845,7 @@ fn configure_android(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
-    add_permissions(
+    sync_permissions(
         &workspace.join("app/src/main/AndroidManifest.xml"),
         &permissions,
     )?;
@@ -4868,12 +4868,43 @@ fn property_value(value: &str) -> String {
         .replace(':', "\\:")
 }
 
-fn add_permissions(manifest: &Path, permissions: &[String]) -> Result<(), String> {
-    if permissions.is_empty() {
-        return Ok(());
-    }
+const OPTIONAL_ANDROID_PERMISSIONS: &[&str] = &[
+    "android.permission.VIBRATE",
+    "android.permission.POST_NOTIFICATIONS",
+    "android.permission.WAKE_LOCK",
+    "android.permission.CAMERA",
+    "android.permission.RECORD_AUDIO",
+    "android.permission.ACCESS_FINE_LOCATION",
+    "android.permission.ACCESS_COARSE_LOCATION",
+    "android.permission.READ_CONTACTS",
+    "android.permission.READ_EXTERNAL_STORAGE",
+    "android.permission.READ_MEDIA_IMAGES",
+    "android.permission.READ_MEDIA_VIDEO",
+    "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+];
+
+fn sync_permissions(manifest: &Path, permissions: &[String]) -> Result<(), String> {
     let mut contents = fs::read_to_string(manifest)
         .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    let selected = permissions
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    for permission in OPTIONAL_ANDROID_PERMISSIONS {
+        if selected.contains(permission) {
+            continue;
+        }
+        contents = contents.replace(
+            &format!("    <uses-permission android:name=\"{permission}\" />\n"),
+            "",
+        );
+    }
+    if !selected.contains("android.permission.READ_EXTERNAL_STORAGE") {
+        contents = contents.replace(
+            "    <uses-permission\n        android:name=\"android.permission.READ_EXTERNAL_STORAGE\"\n        android:maxSdkVersion=\"32\" />\n",
+            "",
+        );
+    }
     let marker = "    <application";
     let position = contents
         .find(marker)
@@ -8557,6 +8588,48 @@ mod tests {
         assert!(!root.join(".pam-native/android").exists());
         assert!(source.is_file());
         assert!(clean_dev_paths(&root, &[root.join("vendor")]).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn generated_android_manifest_keeps_only_selected_optional_permissions() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-permissions-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        fs::write(
+            &manifest,
+            include_str!("../../../android/app/src/main/AndroidManifest.xml"),
+        )
+        .expect("manifest");
+
+        sync_permissions(
+            &manifest,
+            &[
+                "android.permission.CAMERA".to_owned(),
+                "android.permission.POST_NOTIFICATIONS".to_owned(),
+            ],
+        )
+        .expect("synchronize permissions");
+
+        let generated = fs::read_to_string(&manifest).expect("generated manifest");
+        assert!(generated.contains("android.permission.INTERNET"));
+        assert!(generated.contains("android.permission.CAMERA"));
+        assert!(generated.contains("android.permission.POST_NOTIFICATIONS"));
+        for permission in OPTIONAL_ANDROID_PERMISSIONS {
+            if matches!(
+                *permission,
+                "android.permission.CAMERA" | "android.permission.POST_NOTIFICATIONS"
+            ) {
+                continue;
+            }
+            assert!(!generated.contains(permission), "retained {permission}");
+        }
         fs::remove_dir_all(root).expect("cleanup");
     }
 

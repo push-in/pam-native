@@ -8,6 +8,24 @@ notification, push, observation and cleanup recipes.
 
 ## Permissions
 
+Declare every optional Android capability used by the application in
+`pam-native.json`. PAM also includes permissions declared by installed native
+plugins and removes unused optional permissions from the generated application:
+
+```json
+{
+  "android": {
+    "permissions": [
+      "android.permission.CAMERA",
+      "android.permission.POST_NOTIFICATIONS"
+    ]
+  }
+}
+```
+
+Declaring a permission does not grant it. Request it at the point of use with
+the typed API so the user sees the reason in context.
+
 Use `PermissionKind` instead of platform permission strings:
 
 ```php
