@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.24 - 2026-09-07
+
+- Retry Android installs when a booting PackageInstaller leaves an inaccessible transient session.
+
 ## 1.0.23 - 2026-09-07
 
 - Add `PushNotifications::unregister()` to invalidate FCM tokens and unregister from APNs without a broad provider plugin.
