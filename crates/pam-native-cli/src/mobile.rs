@@ -8516,6 +8516,14 @@ mod tests {
     }
 
     #[test]
+    fn macrobenchmark_instrumentation_runs_outside_the_target_process() {
+        let build = include_str!("../../../android/macrobenchmark/build.gradle.kts");
+        assert!(build.contains(
+            "experimentalProperties[\"android.experimental.self-instrumenting\"] = true"
+        ));
+    }
+
+    #[test]
     fn retries_only_transient_adb_activity_registration_failures() {
         assert!(transient_adb_launch_failure(
             "Error type 3: Activity class {dev.pam.app/dev.pam.nativeapp.PamActivity} does not exist."

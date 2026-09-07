@@ -64,6 +64,34 @@ final class Showcase
                             fontWeight: 700,
                             letterSpacing: 1.2,
                         )),
+                    Row::make(
+                        Button::make("Patch #{$this->count}")
+                            ->key('counter')
+                            ->accessibilityLabel('benchmark-counter')
+                            ->style(new Style(
+                                flexGrow: 1,
+                                textColor: 0xFF052E16,
+                                backgroundColor: 0xFF22C55E,
+                                borderRadius: 10,
+                                fontWeight: 700,
+                            ))
+                            ->onPress(function (): void {
+                                $this->count++;
+                            }),
+                        Button::make('10K list')
+                            ->key('details')
+                            ->accessibilityLabel('benchmark-list-route')
+                            ->style(new Style(
+                                flexGrow: 1,
+                                textColor: 0xFFF8FAFC,
+                                backgroundColor: 0xFF334155,
+                                borderRadius: 10,
+                                fontWeight: 700,
+                            ))
+                            ->onPress(function (): void {
+                                Navigation::push('details');
+                            }),
+                    )->key('actions')->style(new Style(height: 52, gap: 10)),
                     Text::make('PHP logic. Native pixels.')
                         ->key('title')
                         ->style(new Style(
@@ -127,34 +155,6 @@ final class Showcase
                         ->onChange(function (string $value): void {
                             $this->name = $value;
                         }),
-                    Row::make(
-                        Button::make("Patch #{$this->count}")
-                            ->key('counter')
-                            ->accessibilityLabel('benchmark-counter')
-                            ->style(new Style(
-                                flexGrow: 1,
-                                textColor: 0xFF052E16,
-                                backgroundColor: 0xFF22C55E,
-                                borderRadius: 10,
-                                fontWeight: 700,
-                            ))
-                            ->onPress(function (): void {
-                                $this->count++;
-                            }),
-                        Button::make('10K list')
-                            ->key('details')
-                            ->accessibilityLabel('benchmark-list-route')
-                            ->style(new Style(
-                                flexGrow: 1,
-                                textColor: 0xFFF8FAFC,
-                                backgroundColor: 0xFF334155,
-                                borderRadius: 10,
-                                fontWeight: 700,
-                            ))
-                            ->onPress(function (): void {
-                                Navigation::push('details');
-                            }),
-                    )->key('actions')->style(new Style(height: 52, gap: 10)),
                     Button::make('Tags, classes, props and slots')
                         ->key('tags')
                         ->style(new Style(

@@ -89,8 +89,15 @@ class PamNativeBenchmark {
 
     private fun UiDevice.ensureHome() {
         if (hasObject(By.desc("benchmark-counter"))) return
-        requireObject("benchmark-back").click()
-        wait(Until.hasObject(By.desc("benchmark-counter")), UI_TIMEOUT_MS)
+
+        wait(Until.findObject(By.desc("Open the technical lab")), UI_TIMEOUT_MS)?.let {
+            it.click()
+            requireObject("benchmark-counter")
+            return
+        }
+
+        pressBack()
+        requireObject("benchmark-counter")
     }
 
     private fun UiDevice.swipeUp() {
