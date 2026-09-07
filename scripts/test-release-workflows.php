@@ -102,6 +102,7 @@ requireFragments($release, 'release.yml', [
     "          test -f \"\${pam_home}/runtime/catalog.json\"\n",
     "          printf 'PAM_HOME=%s\\n' \"\${pam_home}\" >>\"\${GITHUB_ENV}\"\n",
     "          PAM_HOME: \${{ env.PAM_HOME }}\n",
+    "          targets: x86_64-linux-android\n",
     "          script: pam-cli/scripts/community-experience-gate.sh all\n",
     "      - community-first-run\n",
     "              --mtime=\"@\${source_date_epoch}\" \\\n",

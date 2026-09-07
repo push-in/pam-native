@@ -408,6 +408,8 @@ jobs:
           php-version: '8.5'
           coverage: none
       - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: x86_64-linux-android
       - name: Assemble the candidate PAM entrypoint and public runtime payload
         run: |
           curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
