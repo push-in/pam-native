@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.25 - 2026-09-07
+
+- Isolate Android macrobenchmarks from the target process so the Kotlin instrumentation runtime loads reliably.
+- Exercise the complete PAM Native showcase benchmark on Android API 36 in CI and preserve its reports and metrics.
+
 ## 1.0.24 - 2026-09-07
 
 - Retry Android installs when a booting PackageInstaller leaves an inaccessible transient session.
