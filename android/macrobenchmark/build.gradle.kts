@@ -13,6 +13,7 @@ android {
     namespace = "dev.pam.nativeapp.benchmark"
     compileSdk = 36
     targetProjectPath = ":app"
+    experimentalProperties["android.experimental.self-instrumenting"] = true
 
     defaultConfig {
         minSdk = 26

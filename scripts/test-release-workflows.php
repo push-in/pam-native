@@ -71,7 +71,13 @@ requireFragments($ci, 'ci.yml', [
     "php scripts/test-hot-reload-evidence.php\n",
     "python3 -m unittest benchmarks/package/test_reproducibility.py\n",
     "python3 -m json.tool benchmarks/package/reproducibility.schema.json >/dev/null\n",
+    "            runtime/catalog.json \\\n",
+    "if [ \"\${{ matrix.api-level }}\" = \"36\" ]; then PAM_HOME=\"\$GITHUB_WORKSPACE\" PAM_NATIVE_HOME=\"\$GITHUB_WORKSPACE\" cargo run --locked --release --package pam-native-cli -- prepare examples/showcase; fi\n",
+    "if [ \"\${{ matrix.api-level }}\" = \"36\" ]; then ./examples/showcase/.pam-native/android/gradlew -p examples/showcase/.pam-native/android -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR :macrobenchmark:connectedBenchmarkAndroidTest; fi\n",
 ]);
+if (str_contains($ci, 'if [[')) {
+    fail('ci.yml emulator scripts must remain POSIX sh compatible');
+}
 requireFragments($android, 'ecosystem-android.yml', [
     "  workflow_call:\n",
     "      - android/**\n",
