@@ -98,11 +98,18 @@ $registration = PushNotifications::register(
     $recordProviderFailure,
 );
 $subscription = PushNotifications::listenAndRoute($navigator, $onMessage);
+
+// After the application server forgets this installation:
+PushNotifications::unregister($onRemoved, $recordProviderFailure);
 ```
 
 The second `register()` callback receives provider/configuration failures and
 keeps them in application control. It is optional; omitting it preserves the
 legacy exception behavior.
+
+`unregister()` invalidates the FCM token on Android and unregisters the
+application from APNs on iOS. Remove the installation token from the
+application server first so a provider failure can be retried safely.
 
 Android projects only need their Firebase client file at
 `.pam/google-services.json` (preferred) or root `google-services.json`. PAM

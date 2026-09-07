@@ -217,6 +217,12 @@ $pushSubscription = PushNotifications::listenAndRoute(
 
 // During component cleanup:
 PushNotifications::unsubscribe($pushSubscription);
+
+// After removing this installation token from your server:
+PushNotifications::unregister(
+    fn () => $this->markNotificationsDisabled(),
+    fn (string $message) => $this->recordPushUnregistrationFailure($message),
+);
 ```
 
 Android FCM is enabled by adding `.pam/google-services.json`; APNs delegate

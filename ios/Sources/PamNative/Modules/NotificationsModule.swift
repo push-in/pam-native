@@ -93,6 +93,12 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
                 completion(.success, Data())
             case "registerPush":
                 PushTokenRegistry.shared.register(completion: completion)
+            case "unregisterPush":
+                DispatchQueue.main.async {
+                    UIApplication.shared.unregisterForRemoteNotifications()
+                    PushTokenRegistry.shared.unregister()
+                    completion(.success, Data())
+                }
             case "nextPushEvent":
                 PushTokenRegistry.shared.nextEvent(completion: completion)
             default:
@@ -140,6 +146,15 @@ private final class PushTokenRegistry {
         waiters.removeAll()
         lock.unlock()
         callbacks.forEach { $0(.success, payload(value)) }
+    }
+
+    func unregister() {
+        lock.lock()
+        token = nil
+        let callbacks = waiters
+        waiters.removeAll()
+        lock.unlock()
+        callbacks.forEach { $0(.failure, Data("Push registration was cancelled".utf8)) }
     }
 
     func reject(_ message: String) {

@@ -287,6 +287,16 @@ PushNotifications::register(
 
 Omitting the callback preserves the legacy exception behavior.
 
+After the server removes the installation token, disable provider delivery and
+invalidate the native token with the same failure contract:
+
+```php
+PushNotifications::unregister(
+    fn () => $this->markNotificationsDisabled(),
+    fn (string $message) => $this->recordPushUnregistrationFailure($message),
+);
+```
+
 ```swift
 func application(
     _ application: UIApplication,
