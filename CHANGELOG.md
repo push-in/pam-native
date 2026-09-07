@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.22 - 2026-09-07
+
+- Generate Android manifests with only the optional permissions selected by the app and its plugins.
+- Preserve the core network permissions required by every PAM Native application.
+- Remove broad camera, microphone, location, contacts and media access inherited from the SDK template when unused.
+
 ## 1.0.21 - 2026-09-06
 
 - Add `Clipboard::setSensitiveText()` for expiring sensitive clipboard writes.
