@@ -7202,6 +7202,10 @@ fn transient_adb_install_failure(diagnostic: &str) -> bool {
         "cannot access system provider",
         "before system providers are installed",
         "cannot connect to daemon",
+        // Android can leave a PackageInstaller session visible to `pm` but
+        // detached from the shell caller while system services settle after
+        // boot. A fresh install attempt creates a new session successfully.
+        "caller has no access to session",
     ]
     .iter()
     .any(|message| diagnostic.contains(message));
@@ -8496,6 +8500,9 @@ mod tests {
         ));
         assert!(transient_adb_install_failure(
             "java.lang.NullPointerException: PackageManagerInternal.freeStorage(java.lang.String, long, int) on a null object reference"
+        ));
+        assert!(transient_adb_install_failure(
+            "java.lang.SecurityException: Caller has no access to session 1733352945"
         ));
         assert!(!transient_adb_install_failure(
             "java.lang.NullPointerException: unrelated application exception"
