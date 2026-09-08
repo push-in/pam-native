@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.26 - 2026-09-08
+
+- Add reusable native masked, currency and locale-aware input formatting.
+- Add bounded native gesture translation and deterministic end-state reset.
+- Preserve pull-to-refresh gestures when refresh surfaces are nested in scrolling pages.
+- Install optimized local Android runs from the minified, locally signed Benchmark variant.
+
 ## 1.0.25 - 2026-09-07
 
 - Isolate Android macrobenchmarks from the target process so the Kotlin instrumentation runtime loads reliably.
