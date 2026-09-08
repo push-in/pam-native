@@ -44,14 +44,23 @@ enum BuildMode {
 }
 
 impl BuildMode {
-    fn gradle_task(self) -> &'static str {
-        match self {
-            Self::Debug => "assembleDebug",
-            Self::Release => "assembleRelease",
+    fn gradle_task(self, installable: bool) -> &'static str {
+        match (self, installable) {
+            (Self::Debug, _) => "assembleDebug",
+            (Self::Release, true) => "assembleBenchmark",
+            (Self::Release, false) => "assembleRelease",
         }
     }
 
-    fn directory(self) -> &'static str {
+    fn directory(self, installable: bool) -> &'static str {
+        match (self, installable) {
+            (Self::Debug, _) => "debug",
+            (Self::Release, true) => "benchmark",
+            (Self::Release, false) => "release",
+        }
+    }
+
+    fn artifact_label(self) -> &'static str {
         match self {
             Self::Debug => "debug",
             Self::Release => "release",
@@ -780,7 +789,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             }
             let project_root = options.project.clone();
             with_android_build_cleanup(&project_root, || {
-                let apk = build_intermediate(options)?;
+                let apk = build_intermediate(options, true)?;
                 install_and_launch(&apk.project, &apk.path, apk.mode)?;
                 Ok(0)
             })
@@ -5992,7 +6001,7 @@ struct BuiltApk {
     mode: BuildMode,
 }
 
-fn build_intermediate(options: MobileOptions) -> Result<BuiltApk, String> {
+fn build_intermediate(options: MobileOptions, installable: bool) -> Result<BuiltApk, String> {
     repair_android(&options.project)?;
     let project = load_project(&options.project)?;
     let native_home = native_home()?;
@@ -6014,7 +6023,7 @@ fn build_intermediate(options: MobileOptions) -> Result<BuiltApk, String> {
     }
     let gradlew = workspace.join("gradlew");
     let status = Command::new(&gradlew)
-        .arg(format!(":app:{}", options.mode.gradle_task()))
+        .arg(format!(":app:{}", options.mode.gradle_task(installable)))
         .arg("--stacktrace")
         .env("GRADLE_USER_HOME", android_gradle_user_home(&project.root))
         .current_dir(&workspace)
@@ -6025,10 +6034,10 @@ fn build_intermediate(options: MobileOptions) -> Result<BuiltApk, String> {
     }
     let output_directory = workspace
         .join("app/build/outputs/apk")
-        .join(options.mode.directory());
-    let signed_apk = output_directory.join(format!("app-{}.apk", options.mode.directory()));
-    let unsigned_apk =
-        output_directory.join(format!("app-{}-unsigned.apk", options.mode.directory()));
+        .join(options.mode.directory(installable));
+    let variant = options.mode.directory(installable);
+    let signed_apk = output_directory.join(format!("app-{variant}.apk"));
+    let unsigned_apk = output_directory.join(format!("app-{variant}-unsigned.apk"));
     let apk = if signed_apk.is_file() {
         signed_apk
     } else if unsigned_apk.is_file() {
@@ -6080,7 +6089,7 @@ fn persist_built_apk(mut built: BuiltApk) -> Result<BuiltApk, String> {
         "{}-{}-android-{}.apk",
         android_artifact_stem(&built.project),
         built.project.manifest.version_name,
-        built.mode.directory()
+        built.mode.artifact_label()
     ));
     fs::copy(&built.path, &destination)
         .map_err(|error| format!("cannot copy {}: {error}", destination.display()))?;
@@ -6092,7 +6101,7 @@ fn persist_built_apk(mut built: BuiltApk) -> Result<BuiltApk, String> {
 fn build(options: MobileOptions) -> Result<BuiltApk, String> {
     let project_root = options.project.clone();
     with_android_build_cleanup(&project_root, || {
-        persist_built_apk(build_intermediate(options)?)
+        persist_built_apk(build_intermediate(options, false)?)
     })
 }
 
@@ -6104,7 +6113,7 @@ fn package_android(options: MobileOptions) -> Result<u8, String> {
 fn package_android_intermediate(options: MobileOptions) -> Result<u8, String> {
     let signing_project = load_project(&options.project)?;
     validate_android_signing(&signing_project)?;
-    let built = build_intermediate(options)?;
+    let built = build_intermediate(options, false)?;
     let workspace = built.project.root.join(".pam-native/android");
     let gradlew = workspace.join("gradlew");
     let status = Command::new(&gradlew)
@@ -7271,7 +7280,7 @@ fn dev(options: MobileOptions) -> Result<u8, String> {
 }
 
 fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
-    let apk = build_intermediate(options)?;
+    let apk = build_intermediate(options, true)?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
         crate::dev_event::SurfaceCode::Android,
@@ -7648,6 +7657,15 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn release_run_uses_the_minified_locally_installable_variant() {
+        assert_eq!(BuildMode::Release.gradle_task(true), "assembleBenchmark");
+        assert_eq!(BuildMode::Release.directory(true), "benchmark");
+        assert_eq!(BuildMode::Release.artifact_label(), "release");
+        assert_eq!(BuildMode::Release.gradle_task(false), "assembleRelease");
+        assert_eq!(BuildMode::Release.directory(false), "release");
+    }
 
     #[test]
     fn hot_reload_bundle_matches_the_bounded_native_contract() {
