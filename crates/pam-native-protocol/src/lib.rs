@@ -633,6 +633,15 @@ pub enum PropKey {
     NativeTextColorResource = 453,
     NativeBorderColorResource = 454,
     NativeStateStyles = 455,
+    InputFormat = 456,
+    InputFormatPattern = 457,
+    InputFormatPlaceholder = 458,
+    InputFormatPrefix = 459,
+    InputFormatSuffix = 460,
+    InputFormatDecimalDigits = 461,
+    GestureNativeTranslationLimitX = 462,
+    GestureNativeResetOnEnd = 463,
+    InputFormatLocale = 464,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1095,6 +1104,15 @@ impl TryFrom<u16> for PropKey {
             453 => Ok(Self::NativeTextColorResource),
             454 => Ok(Self::NativeBorderColorResource),
             455 => Ok(Self::NativeStateStyles),
+            456 => Ok(Self::InputFormat),
+            457 => Ok(Self::InputFormatPattern),
+            458 => Ok(Self::InputFormatPlaceholder),
+            459 => Ok(Self::InputFormatPrefix),
+            460 => Ok(Self::InputFormatSuffix),
+            461 => Ok(Self::InputFormatDecimalDigits),
+            462 => Ok(Self::GestureNativeTranslationLimitX),
+            463 => Ok(Self::GestureNativeResetOnEnd),
+            464 => Ok(Self::InputFormatLocale),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1970,10 +1988,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=455 {
+        for value in 1..=464 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(456).is_err());
+        assert!(PropKey::try_from(465).is_err());
     }
 
     #[test]

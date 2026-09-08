@@ -39,4 +39,20 @@ class PamDrawerLayoutTest {
         assertTrue(drawerIsVisuallyOpen(requestedOpen, permanent = true))
         assertTrue(drawerIsVisuallyOpen(requestedOpen, permanent = false))
     }
+
+    @Test
+    fun slideDrawerIsFullyOutsideViewportWhenClosed() {
+        assertEquals(-672f, slideDrawerRestingX(false, openX = 0f, closedX = -672f))
+        assertEquals(0f, slideDrawerRestingX(true, openX = 0f, closedX = -672f))
+        assertEquals(2_154f, slideDrawerRestingX(false, openX = 1_482f, closedX = 2_154f))
+    }
+
+    @Test
+    fun closedDrawerContentIsRemovedUntilOpeningGestureStarts() {
+        assertFalse(drawerContentVisible(visuallyOpen = false, permanent = false))
+        assertTrue(drawerContentVisible(visuallyOpen = false, permanent = false, tracking = true))
+        assertTrue(drawerContentVisible(visuallyOpen = true, permanent = false))
+        assertTrue(drawerContentVisible(visuallyOpen = false, permanent = true))
+    }
+
 }

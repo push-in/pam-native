@@ -40,6 +40,8 @@ final class GestureDetector extends Element
             ->withProperty(PropKey::GestureMinPointers, $minimumPointers)
             ->withProperty(PropKey::GestureMaxPointers, $minimumPointers)
             ->withProperty(PropKey::GestureDirection, GestureDirection::Any->value)
+            ->withProperty(PropKey::PressOpacity, 1.0)
+            ->withProperty(PropKey::PressScale, 1.0)
             ->withProperty(
                 PropKey::GestureComposition,
                 GestureComposition::Exclusive->value,
@@ -100,6 +102,8 @@ final class GestureDetector extends Element
         float $minimumScale = 1.0,
         float $maximumScale = 4.0,
         int $resetKey = 0,
+        float $translationLimitX = 0.0,
+        bool $resetOnEnd = false,
     ): self {
         return $this
             ->withProperty(PropKey::GestureNativeTransform, $enabled)
@@ -111,7 +115,12 @@ final class GestureDetector extends Element
                 PropKey::GestureNativeMaxScale,
                 max($minimumScale, min(100.0, $maximumScale)),
             )
-            ->withProperty(PropKey::GestureNativeResetKey, max(0, $resetKey));
+            ->withProperty(PropKey::GestureNativeResetKey, max(0, $resetKey))
+            ->withProperty(
+                PropKey::GestureNativeTranslationLimitX,
+                max(0.0, min(10_000.0, $translationLimitX)),
+            )
+            ->withProperty(PropKey::GestureNativeResetOnEnd, $resetOnEnd);
     }
 
     /** @param Closure(GestureEvent): void $handler */

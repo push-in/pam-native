@@ -1,7 +1,9 @@
 package dev.pam.nativeapp.render
 
 import android.content.Context
+import android.graphics.Canvas
 import android.os.SystemClock
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -51,12 +53,31 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var nativeTransformEnabled = false
     private var nativeMinScale = 1f
     private var nativeMaxScale = 4f
+    private var nativeTranslationLimitX = 0f
+    private var nativeResetOnEnd = false
     private var nativeResetKey = 0L
     private var nativeBaseTranslationX = 0f
     private var nativeBaseTranslationY = 0f
     private var nativeBaseScaleX = 1f
     private var nativeBaseScaleY = 1f
     private var nativeBaseRotation = 0f
+    private var nativeGestureTransformActive = false
+    private var nativeAppliedTranslationX = 0f
+    private var nativeAppliedTranslationY = 0f
+    private var nativeTransformTarget: View? = null
+    private var nativeInteractionEnabled = false
+
+    fun setNativeTransformTarget(target: View?) {
+        nativeTransformTarget = target
+    }
+
+    fun setNativeInteractionEnabled(enabled: Boolean) {
+        nativeInteractionEnabled = enabled
+        updateClickable()
+    }
+
+    private fun nativeTransformTarget(): View? =
+        nativeTransformTarget?.takeIf { it.parent === this } ?: getChildAt(0)
 
     private val pressInRunnable = Runnable {
         if (gestureActive && eligibleForPress) {
@@ -162,10 +183,14 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         nativeMinScale: Float = 1f,
         nativeMaxScale: Float = 4f,
         nativeResetKey: Long = 0L,
+        nativeTranslationLimitX: Float = 0f,
+        nativeResetOnEnd: Boolean = false,
     ) {
         this.nativeTransformEnabled = nativeTransform
         this.nativeMinScale = nativeMinScale.coerceAtLeast(0.01f)
         this.nativeMaxScale = nativeMaxScale.coerceAtLeast(this.nativeMinScale)
+        this.nativeTranslationLimitX = nativeTranslationLimitX.coerceAtLeast(0f)
+        this.nativeResetOnEnd = nativeResetOnEnd
         if (this.nativeResetKey != nativeResetKey) {
             this.nativeResetKey = nativeResetKey
             resetNativeTransform()
@@ -179,18 +204,32 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     private fun applyNativeTransform(payload: PamGesturePayload) {
         if (!nativeTransformEnabled) return
-        val child = getChildAt(0) ?: return
+        traceGesture("transform type=${payload.type} state=${payload.state} x=${payload.translationX}")
+        val child = nativeTransformTarget() ?: return
+        val translationTarget = child
         if (payload.state == 1) {
-            nativeBaseTranslationX = child.translationX
-            nativeBaseTranslationY = child.translationY
+            nativeBaseTranslationX = translationTarget.translationX
+            nativeBaseTranslationY = translationTarget.translationY
             nativeBaseScaleX = child.scaleX
             nativeBaseScaleY = child.scaleY
             nativeBaseRotation = child.rotation
         }
         when (payload.type) {
             2, 5 -> {
-                child.translationX = nativeBaseTranslationX + payload.translationX
-                child.translationY = nativeBaseTranslationY + payload.translationY
+                val translatedX = nativeBaseTranslationX + payload.translationX
+                translationTarget.translationX = if (nativeTranslationLimitX > 0f) {
+                    translatedX.coerceIn(-nativeTranslationLimitX, nativeTranslationLimitX)
+                } else {
+                    translatedX
+                }
+                translationTarget.translationY = nativeBaseTranslationY + payload.translationY
+                nativeGestureTransformActive = payload.state in 1..2
+                nativeAppliedTranslationX = translationTarget.translationX
+                nativeAppliedTranslationY = translationTarget.translationY
+                traceGesture(
+                    "applied targetX=${translationTarget.translationX} " +
+                        "childX=${child.translationX}",
+                )
             }
             3 -> {
                 val scale = (nativeBaseScaleX * payload.scale)
@@ -202,19 +241,58 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 payload.rotation.toDouble(),
             ).toFloat()
         }
+        if (nativeResetOnEnd && payload.state in 3..5) {
+            nativeGestureTransformActive = false
+            translationTarget.animate().cancel()
+            translationTarget.animate()
+                .translationX(nativeBaseTranslationX)
+                .translationY(nativeBaseTranslationY)
+                .setDuration(180L)
+                .start()
+        }
     }
 
     private fun resetNativeTransform() {
-        val child = getChildAt(0) ?: return
+        val child = nativeTransformTarget() ?: return
+        val translationTarget = child
+        translationTarget.animate().cancel()
+        translationTarget.translationX = 0f
+        translationTarget.translationY = 0f
         child.animate().cancel()
-        child.translationX = 0f
-        child.translationY = 0f
         child.scaleX = 1f
         child.scaleY = 1f
         child.rotation = 0f
+        nativeGestureTransformActive = false
+        nativeAppliedTranslationX = 0f
+        nativeAppliedTranslationY = 0f
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        val child = nativeTransformTarget()
+        if (nativeGestureTransformActive && child != null) {
+            val checkpoint = canvas.save()
+            val originalX = child.translationX
+            val originalY = child.translationY
+            try {
+                child.translationX = 0f
+                child.translationY = 0f
+                canvas.translate(nativeAppliedTranslationX, nativeAppliedTranslationY)
+                super.dispatchDraw(canvas)
+            } finally {
+                child.translationX = originalX
+                child.translationY = originalY
+                canvas.restoreToCount(checkpoint)
+            }
+            return
+        }
+        super.dispatchDraw(canvas)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        traceGesture(
+            "touch action=${event.actionMasked} x=${event.x} y=${event.y} " +
+                "rawX=${event.rawX} rawY=${event.rawY}",
+        )
         if (gestureRequiresParentInterception(
                 event.actionMasked,
                 gestureRecognizer.requiresMultiPointerStream(),
@@ -239,6 +317,12 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             parent?.requestDisallowInterceptTouchEvent(false)
         }
         return handled
+    }
+
+    private fun traceGesture(message: String) {
+        if (dev.pam.nativeapp.BuildConfig.DEBUG && Log.isLoggable(GESTURE_LOG_TAG, Log.DEBUG)) {
+            Log.d(GESTURE_LOG_TAG, "${transitionName ?: id}: $message")
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -299,15 +383,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     override fun performLongClick(): Boolean {
-        super.performLongClick()
-        val callback = onLongPress ?: return false
-        callback()
-        return true
+        val platformHandled = super.performLongClick()
+        onLongPress?.invoke()
+        return platformHandled || onLongPress != null
     }
 
     override fun onDetachedFromWindow() {
         gestureRecognizer.cancel()
         cancelGesture(emitOut = false)
+        nativeTransformTarget = null
         super.onDetachedFromWindow()
     }
 
@@ -455,7 +539,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private fun updateClickable() {
         isClickable = localOnPress != null || onPress != null || onPressIn != null ||
             onPressOut != null || onPressMove != null || onLongPress != null ||
-            gestureRecognizer.isEnabled()
+            gestureRecognizer.isEnabled() || nativeInteractionEnabled
         if (!isClickable) {
             cancelGesture(emitOut = false)
         }
@@ -486,6 +570,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         )
 
     private companion object {
+        const val GESTURE_LOG_TAG = "PamGesture"
         const val DEFAULT_PRESS_OPACITY = 0.72f
         const val DEFAULT_RETENTION_HORIZONTAL = 20f
         const val DEFAULT_RETENTION_BOTTOM = 30f

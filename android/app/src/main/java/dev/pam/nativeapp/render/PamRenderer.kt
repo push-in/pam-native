@@ -36,6 +36,7 @@ import android.text.method.TransformationMethod
 import android.text.style.URLSpan
 import android.text.util.Linkify
 import android.util.LongSparseArray
+import android.util.Log
 import android.util.TypedValue
 import android.view.Choreographer
 import android.view.DragEvent
@@ -45,6 +46,7 @@ import android.view.inputmethod.InputMethodManager
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsAnimation
@@ -63,6 +65,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.Space
+import dev.pam.nativeapp.BuildConfig
 import android.widget.Switch
 import android.widget.TextView
 import androidx.annotation.RequiresApi
@@ -80,6 +83,9 @@ import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
 import org.json.JSONArray
 import java.nio.ByteOrder
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.text.NumberFormat
 import java.util.LinkedHashSet
 import java.util.Locale
 import kotlin.math.max
@@ -1158,6 +1164,10 @@ class PamRenderer(
             return
         }
         when (val parent = views[parentId]) {
+            is PamPressable -> {
+                parent.insert(view, index)
+                parent.setNativeTransformTarget(view)
+            }
             is PamContainer -> parent.insert(view, index)
             is PamRefreshContainer -> parent.insert(view, index)
             is PamDrawerLayout -> parent.insert(view, index)
@@ -1886,8 +1896,16 @@ class PamRenderer(
             PropKey.INPUT_RETURN_KEY_LABEL,
             PropKey.INPUT_SCROLL_ENABLED,
             PropKey.INPUT_UNDERLINE_COLOR,
+            PropKey.INPUT_FORMAT,
+            PropKey.INPUT_FORMAT_PATTERN,
+            PropKey.INPUT_FORMAT_PLACEHOLDER,
+            PropKey.INPUT_FORMAT_PREFIX,
+            PropKey.INPUT_FORMAT_SUFFIX,
+            PropKey.INPUT_FORMAT_DECIMAL_DIGITS,
+            PropKey.INPUT_FORMAT_LOCALE,
             -> (view as? PamEditText)?.let {
                 applyInputConfiguration(it, state)
+                applyInputValue(it, state, it.text.toString())
             }
             PropKey.CHECKED -> if (view is Switch && view.isChecked != value.flag()) {
                 state.updating = true
@@ -2359,6 +2377,8 @@ class PamRenderer(
             PropKey.GESTURE_NATIVE_MIN_SCALE,
             PropKey.GESTURE_NATIVE_MAX_SCALE,
             PropKey.GESTURE_NATIVE_RESET_KEY,
+            PropKey.GESTURE_NATIVE_TRANSLATION_LIMIT_X,
+            PropKey.GESTURE_NATIVE_RESET_ON_END,
             -> configurePressable(view, state)
             PropKey.WIDTH,
             PropKey.HEIGHT,
@@ -2617,8 +2637,16 @@ class PamRenderer(
             PropKey.INPUT_RETURN_KEY_LABEL,
             PropKey.INPUT_SCROLL_ENABLED,
             PropKey.INPUT_UNDERLINE_COLOR,
+            PropKey.INPUT_FORMAT,
+            PropKey.INPUT_FORMAT_PATTERN,
+            PropKey.INPUT_FORMAT_PLACEHOLDER,
+            PropKey.INPUT_FORMAT_PREFIX,
+            PropKey.INPUT_FORMAT_SUFFIX,
+            PropKey.INPUT_FORMAT_DECIMAL_DIGITS,
+            PropKey.INPUT_FORMAT_LOCALE,
             -> (view as? PamEditText)?.let {
                 applyInputConfiguration(it, state)
+                applyInputValue(it, state, it.text.toString())
             }
             PropKey.MAX_LENGTH -> (view as? EditText)?.filters = emptyArray()
             PropKey.AUTO_FOCUS -> Unit
@@ -3302,6 +3330,9 @@ class PamRenderer(
         val dropEnabled = state.flag(PropKey.DROP_ENABLED, false)
         val dragData = state.textOrNull(PropKey.DRAG_DATA).orEmpty()
         val menuItems = decodeContextMenuItems(state.properties[PropKey.CONTEXT_MENU_ITEMS])
+        (view as? PamPressable)?.setNativeInteractionEnabled(
+            draggable || dropEnabled || menuItems.isNotEmpty(),
+        )
 
         view.setOnLongClickListener(
             when {
@@ -3312,6 +3343,9 @@ class PamRenderer(
                         dragData,
                         0,
                     )
+                    if (BuildConfig.DEBUG && Log.isLoggable(INTERACTION_LOG_TAG, Log.DEBUG)) {
+                        Log.d(INTERACTION_LOG_TAG, "${state.id}: drag start requested=$started data=$dragData")
+                    }
                     if (started && state.properties[PropKey.ON_DRAG_START] != null) {
                         dispatch(state.id, EventKind.DRAG_START.value)
                     }
@@ -3342,10 +3376,23 @@ class PamRenderer(
                 else -> null
             },
         )
+        view.isLongClickable = draggable || menuItems.isNotEmpty()
 
         view.setOnDragListener(
             if (dropEnabled || draggable) {
                 View.OnDragListener { _, event ->
+                    if (
+                        BuildConfig.DEBUG &&
+                        (event.action == DragEvent.ACTION_DRAG_STARTED ||
+                            event.action == DragEvent.ACTION_DROP ||
+                            event.action == DragEvent.ACTION_DRAG_ENDED) &&
+                        Log.isLoggable(INTERACTION_LOG_TAG, Log.DEBUG)
+                    ) {
+                        Log.d(
+                            INTERACTION_LOG_TAG,
+                            "${state.id}: drag action=${event.action} dropEnabled=$dropEnabled draggable=$draggable",
+                        )
+                    }
                     when (event.action) {
                         DragEvent.ACTION_DRAG_STARTED ->
                             dropEnabled && event.clipDescription?.hasMimeType("text/plain") == true
@@ -3997,7 +4044,10 @@ class PamRenderer(
             targetOpacity = state.targetAlpha(),
             targetScaleX = state.targetScaleX(),
             targetScaleY = state.targetScaleY(),
-            delayLongPressMs = state.integer(PropKey.PRESS_DELAY_LONG_MS, 500L),
+            delayLongPressMs = state.integer(
+                PropKey.PRESS_DELAY_LONG_MS,
+                ViewConfiguration.getLongPressTimeout().toLong(),
+            ),
             delayPressInMs = state.integer(PropKey.PRESS_DELAY_IN_MS, 0L),
             delayPressOutMs = state.integer(PropKey.PRESS_DELAY_OUT_MS, 0L),
             retentionLeft = dp(
@@ -4047,6 +4097,10 @@ class PamRenderer(
             nativeMinScale = state.number(PropKey.GESTURE_NATIVE_MIN_SCALE, 1.0).toFloat(),
             nativeMaxScale = state.number(PropKey.GESTURE_NATIVE_MAX_SCALE, 4.0).toFloat(),
             nativeResetKey = state.integer(PropKey.GESTURE_NATIVE_RESET_KEY, 0L),
+            nativeTranslationLimitX = dp(
+                state.number(PropKey.GESTURE_NATIVE_TRANSLATION_LIMIT_X, 0.0).toFloat(),
+            ).toFloat(),
+            nativeResetOnEnd = state.flag(PropKey.GESTURE_NATIVE_RESET_ON_END, false),
         )
     }
 
@@ -4128,7 +4182,10 @@ class PamRenderer(
                     start: Int,
                     count: Int,
                     after: Int,
-                ) = Unit
+                ) {
+                    state.inputDeleting = count > after
+                    state.inputDigitsBeforeChange = text?.count(Char::isDigit) ?: 0
+                }
 
                 override fun onTextChanged(
                     text: CharSequence?,
@@ -4139,7 +4196,36 @@ class PamRenderer(
 
                 override fun afterTextChanged(editable: Editable?) {
                     if (state.updating) return
-                    state.nativeValue = editable?.toString().orEmpty()
+                    var current = editable?.toString().orEmpty()
+                    val selection = input.selectionStart.coerceAtLeast(0)
+                    if (
+                        state.inputDeleting
+                        && current.count(Char::isDigit) == state.inputDigitsBeforeChange
+                    ) {
+                        val removeAt = current.take(selection).count(Char::isDigit) - 1
+                        if (removeAt >= 0) {
+                            var seen = 0
+                            current = current.filter { character ->
+                                !character.isDigit() || seen++ != removeAt
+                            }
+                        }
+                    }
+                    val formatted = formatInputValue(current, state)
+                    if (formatted != current) {
+                        val digitOffset = current.take(selection).count(Char::isDigit)
+                        val currency = state.integer(
+                            PropKey.INPUT_FORMAT,
+                            INPUT_FORMAT_NONE.toLong(),
+                        ).toInt() == INPUT_FORMAT_CURRENCY
+                        state.updating = true
+                        input.setText(formatted)
+                        input.setSelection(
+                            if (currency) formatted.length
+                            else cursorAfterDigits(formatted, digitOffset),
+                        )
+                        state.updating = false
+                    }
+                    state.nativeValue = formatted
                     state.nativeValueAcknowledged = false
                     if (state.properties[PropKey.ON_CHANGE] == null) return
                     when (state.inputSyncMode()) {
@@ -4436,24 +4522,82 @@ class PamRenderer(
 
     private fun applyInputValue(view: View, state: NodeState, next: String) {
         val input = view as? EditText ?: return
+        val formattedNext = formatInputValue(next, state)
         if (
             input.hasFocus() &&
             state.inputSyncMode() != INPUT_SYNC_IMMEDIATE &&
-            next != state.nativeValue &&
+            formattedNext != state.nativeValue &&
             !state.nativeValueAcknowledged
         ) {
             return
         }
-        if (input.text.toString() == next) {
+        if (input.text.toString() == formattedNext) {
             state.nativeValueAcknowledged = true
             return
         }
         state.updating = true
-        input.setText(next)
+        input.setText(formattedNext)
         input.setSelection(input.text.length)
-        state.nativeValue = next
+        state.nativeValue = formattedNext
         state.nativeValueAcknowledged = true
         state.updating = false
+    }
+
+    private fun formatInputValue(value: String, state: NodeState): String =
+        when (state.integer(PropKey.INPUT_FORMAT, INPUT_FORMAT_NONE.toLong()).toInt()) {
+            INPUT_FORMAT_PATTERN -> formatPatternInput(value, state)
+            INPUT_FORMAT_CURRENCY -> formatCurrencyInput(value, state)
+            else -> value
+        }
+
+    private fun formatPatternInput(value: String, state: NodeState): String {
+        val pattern = state.textOrNull(PropKey.INPUT_FORMAT_PATTERN).orEmpty().take(128)
+        if (pattern.isEmpty()) return value
+        val slot = state.textOrNull(PropKey.INPUT_FORMAT_PLACEHOLDER)?.firstOrNull() ?: '#'
+        val digits = value.filter(Char::isDigit)
+        if (digits.isEmpty()) return ""
+        val output = StringBuilder(pattern.length)
+        var digitIndex = 0
+        for (character in pattern) {
+            if (character == slot) {
+                if (digitIndex >= digits.length) break
+                output.append(digits[digitIndex++])
+            } else if (digitIndex == 0 || digitIndex < digits.length) {
+                output.append(character)
+            }
+        }
+        return output.toString()
+    }
+
+    private fun formatCurrencyInput(value: String, state: NodeState): String {
+        val digits = value.filter(Char::isDigit).take(36)
+        if (digits.isEmpty()) return ""
+        val decimals = state.integer(PropKey.INPUT_FORMAT_DECIMAL_DIGITS, 2L).toInt().coerceIn(0, 6)
+        val amount = BigDecimal(BigInteger(digits), decimals)
+        val requestedLocale = state.textOrNull(PropKey.INPUT_FORMAT_LOCALE)
+            ?.trim()
+            ?.takeIf(String::isNotEmpty)
+        val locale = requestedLocale
+            ?.let(Locale::forLanguageTag)
+            ?.takeUnless { it.language.isEmpty() }
+            ?: Locale.getDefault()
+        val formatter = NumberFormat.getNumberInstance(locale).apply {
+            minimumFractionDigits = decimals
+            maximumFractionDigits = decimals
+            isGroupingUsed = true
+        }
+        val prefix = state.textOrNull(PropKey.INPUT_FORMAT_PREFIX).orEmpty().take(16)
+        val suffix = state.textOrNull(PropKey.INPUT_FORMAT_SUFFIX).orEmpty().take(16)
+        return prefix + formatter.format(amount) + suffix
+    }
+
+    private fun cursorAfterDigits(value: String, digitCount: Int): Int {
+        if (digitCount <= 0) return 0
+        var seen = 0
+        value.forEachIndexed { index, character ->
+            if (character.isDigit() && ++seen >= digitCount) return index + 1
+        }
+        return value.length
     }
 
     private fun applyStringList(view: View, state: NodeState, value: PropValue) {
@@ -6862,6 +7006,8 @@ class PamRenderer(
         var lastDirectiveIntersection: Boolean? = null,
         var inputSelectionStart: Int = 0,
         var inputSelectionEnd: Int = 0,
+        var inputDeleting: Boolean = false,
+        var inputDigitsBeforeChange: Int = 0,
     ) {
         fun inputSyncMode(): Int = integer(PropKey.INPUT_SYNC_MODE, INPUT_SYNC_DEBOUNCED.toLong()).toInt()
 
@@ -6915,6 +7061,7 @@ class PamRenderer(
         const val MODAL_CLOSE_MARKER = "pam:modal-close"
         const val MODAL_CLOSE_ACCESSIBILITY_LABEL = "Close modal"
         const val ACCESSIBILITY_ACTION_BASE = 0x3F00_0000
+        const val INTERACTION_LOG_TAG = "PamInteraction"
         val ACCESSIBILITY_ACTION_NAME = Regex("^[a-z][a-z0-9._-]{0,63}$")
         const val EVENT_PRESS = 1
         const val EVENT_CHANGE = 2
@@ -6971,6 +7118,9 @@ class PamRenderer(
         const val INPUT_MODE_URL = 8
         const val INPUT_SUBMIT_BLUR = 2
         const val INPUT_SUBMIT_NEWLINE = 3
+        const val INPUT_FORMAT_NONE = 1
+        const val INPUT_FORMAT_PATTERN = 2
+        const val INPUT_FORMAT_CURRENCY = 3
         const val INPUT_ALIGN_AUTO = 1
         const val INPUT_ALIGN_TOP = 2
         const val INPUT_ALIGN_CENTER = 3

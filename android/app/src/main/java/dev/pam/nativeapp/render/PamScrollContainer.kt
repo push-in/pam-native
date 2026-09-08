@@ -582,11 +582,33 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         private var flingStarted = false
         private var gestureStartScroll = 0
         private var gestureActive = false
+        private var nestedGestureList: PamRecyclerList? = null
+        private var nestedGestureDownY = 0f
         private val touch = ScrollTouchTracker(context)
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                nestedGestureList = overflowingListAt(event)
+                nestedGestureDownY = event.y
+            }
+            if (event.actionMasked == MotionEvent.ACTION_MOVE) {
+                nestedGestureList?.let { list ->
+                    val direction = if (event.y - nestedGestureDownY < 0f) 1 else -1
+                    if (list.canScrollInDirection(direction)) return false
+                    nestedGestureList = null
+                }
+            }
             val intercepted = super.onInterceptTouchEvent(event)
+            if (nestedGestureList != null) {
+                if (
+                    event.actionMasked == MotionEvent.ACTION_UP ||
+                    event.actionMasked == MotionEvent.ACTION_CANCEL
+                ) {
+                    nestedGestureList = null
+                }
+                return false
+            }
             if (
                 intercepted &&
                 event.actionMasked == MotionEvent.ACTION_MOVE &&
@@ -595,6 +617,24 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
                 dismissKeyboard()
             }
             return intercepted
+        }
+
+        private fun overflowingListAt(event: MotionEvent): PamRecyclerList? {
+            val screenX = event.rawX.toInt()
+            val screenY = event.rawY.toInt()
+            fun visit(view: View): PamRecyclerList? {
+                val rect = Rect()
+                if (!view.getGlobalVisibleRect(rect) || !rect.contains(screenX, screenY)) {
+                    return null
+                }
+                if (view is PamRecyclerList && view.hasScrollableContent()) return view
+                if (view !is ViewGroup) return null
+                for (index in view.childCount - 1 downTo 0) {
+                    visit(view.getChildAt(index))?.let { return it }
+                }
+                return null
+            }
+            return getChildAt(0)?.let(::visit)
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {

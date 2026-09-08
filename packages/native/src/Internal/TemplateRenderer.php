@@ -37,6 +37,7 @@ use Pam\Native\ImageCachePolicy;
 use Pam\Native\ImageResizeMethod;
 use Pam\Native\InputAutoCapitalize;
 use Pam\Native\InputAutofillImportance;
+use Pam\Native\InputFormat;
 use Pam\Native\InputMode;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputSyncMode;
@@ -155,6 +156,13 @@ final class TemplateRenderer
         'nativeTextColorResource' => PropKey::NativeTextColorResource,
         'nativeBorderColorResource' => PropKey::NativeBorderColorResource,
         'nativeStateStyles' => PropKey::NativeStateStyles,
+        'inputFormat' => PropKey::InputFormat,
+        'inputFormatPattern' => PropKey::InputFormatPattern,
+        'inputFormatPlaceholder' => PropKey::InputFormatPlaceholder,
+        'inputFormatPrefix' => PropKey::InputFormatPrefix,
+        'inputFormatSuffix' => PropKey::InputFormatSuffix,
+        'inputFormatDecimalDigits' => PropKey::InputFormatDecimalDigits,
+        'inputFormatLocale' => PropKey::InputFormatLocale,
         'textColor' => PropKey::TextColor,
         'fontSize' => PropKey::FontSize,
         'borderRadius' => PropKey::BorderRadius,
@@ -369,6 +377,8 @@ final class TemplateRenderer
         'gestureNativeMinScale' => PropKey::GestureNativeMinScale,
         'gestureNativeMaxScale' => PropKey::GestureNativeMaxScale,
         'gestureNativeResetKey' => PropKey::GestureNativeResetKey,
+        'gestureNativeTranslationLimitX' => PropKey::GestureNativeTranslationLimitX,
+        'gestureNativeResetOnEnd' => PropKey::GestureNativeResetOnEnd,
         'flexShrink' => PropKey::FlexShrink,
         'paddingLeft' => PropKey::PaddingLeft,
         'paddingTop' => PropKey::PaddingTop,
@@ -1951,6 +1961,13 @@ final class TemplateRenderer
             PropKey::InputReturnKeyLabel,
             PropKey::InputScrollEnabled,
             PropKey::InputUnderlineColor,
+            PropKey::InputFormat,
+            PropKey::InputFormatPattern,
+            PropKey::InputFormatPlaceholder,
+            PropKey::InputFormatPrefix,
+            PropKey::InputFormatSuffix,
+            PropKey::InputFormatDecimalDigits,
+            PropKey::InputFormatLocale,
             => $kind === NodeKind::Input,
             default => true,
         };
@@ -2242,6 +2259,12 @@ final class TemplateRenderer
                 'send' => ReturnKeyType::Send->value,
                 'none' => ReturnKeyType::None->value,
                 'previous' => ReturnKeyType::Previous->value,
+            ]),
+            PropKey::InputFormat => self::named($value, [
+                'none' => InputFormat::None->value,
+                'pattern' => InputFormat::Pattern->value,
+                'mask' => InputFormat::Pattern->value,
+                'currency' => InputFormat::Currency->value,
             ]),
             PropKey::SafeAreaMode => self::named($value, [
                 'padding' => SafeAreaMode::Padding->value,

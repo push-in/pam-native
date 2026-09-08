@@ -6016,10 +6016,7 @@ fn build_intermediate(options: MobileOptions) -> Result<BuiltApk, String> {
     let status = Command::new(&gradlew)
         .arg(format!(":app:{}", options.mode.gradle_task()))
         .arg("--stacktrace")
-        .env(
-            "GRADLE_USER_HOME",
-            project.root.join(".pam-native/gradle-home"),
-        )
+        .env("GRADLE_USER_HOME", android_gradle_user_home(&project.root))
         .current_dir(&workspace)
         .status()
         .map_err(|error| format!("cannot start Gradle: {error}"))?;
@@ -6048,6 +6045,13 @@ fn build_intermediate(options: MobileOptions) -> Result<BuiltApk, String> {
         path: apk,
         mode: options.mode,
     })
+}
+
+fn android_gradle_user_home(project_root: &Path) -> PathBuf {
+    std::env::var_os("PAM_NATIVE_GRADLE_HOME")
+        .or_else(|| std::env::var_os("GRADLE_USER_HOME"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| project_root.join(".pam-native/gradle-home"))
 }
 
 fn android_artifact_stem(project: &Project) -> String {
@@ -6107,7 +6111,7 @@ fn package_android_intermediate(options: MobileOptions) -> Result<u8, String> {
         .args([":app:bundleRelease", "--stacktrace"])
         .env(
             "GRADLE_USER_HOME",
-            built.project.root.join(".pam-native/gradle-home"),
+            android_gradle_user_home(&built.project.root),
         )
         .current_dir(&workspace)
         .status()
@@ -6608,10 +6612,7 @@ fn run_android_performance_suite(
         .arg(":macrobenchmark:connectedBenchmarkAndroidTest")
         .arg(class_argument)
         .args(["--stacktrace", "--no-configuration-cache"])
-        .env(
-            "GRADLE_USER_HOME",
-            project.root.join(".pam-native/gradle-home"),
-        )
+        .env("GRADLE_USER_HOME", android_gradle_user_home(&project.root))
         .current_dir(&workspace)
         .status()
         .map_err(|error| format!("cannot start the Android benchmark: {error}"))?;

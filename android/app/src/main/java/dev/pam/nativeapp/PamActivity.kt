@@ -208,7 +208,7 @@ class PamActivity : FragmentActivity() {
         scheduleViewportUpdate(force = true)
     }
 
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (!runtimeStarted) return
@@ -261,6 +261,7 @@ class PamActivity : FragmentActivity() {
         runtime.dispatchBack()
     }
 
+    @Suppress("DEPRECATION")
     internal fun launchForResult(intent: Intent, callback: (Int, Intent?) -> Unit) {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback

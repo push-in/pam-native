@@ -160,8 +160,8 @@ internal class PamGestureRecognizer(private val view: View) {
     private fun move(event: MotionEvent, current: PamGestureConfig) {
         if (!active || event.pointerCount !in current.minPointers..current.maxPointers) return
         velocity?.addMovement(event)
-        val dx = event.x - startX
-        val dy = event.y - startY
+        val dx = event.rawX - startPageX
+        val dy = event.rawY - startPageY
         val distance = hypot(dx, dy)
         when (current.type) {
             TYPE_PAN -> {
@@ -202,8 +202,8 @@ internal class PamGestureRecognizer(private val view: View) {
         velocity?.addMovement(event)
         velocity?.computeCurrentVelocity(1_000)
         view.removeCallbacks(longPress)
-        val dx = event.x - startX
-        val dy = event.y - startY
+        val dx = event.rawX - startPageX
+        val dy = event.rawY - startPageY
         val duration = event.eventTime - beganAt
         if (!cancelled && !recognized) {
             when (current.type) {
@@ -271,8 +271,8 @@ internal class PamGestureRecognizer(private val view: View) {
             y = y,
             pageX = pageX,
             pageY = pageY,
-            translationX = x - startX,
-            translationY = y - startY,
+            translationX = pageX - startPageX,
+            translationY = pageY - startPageY,
             velocityX = velocity?.xVelocity ?: 0f,
             velocityY = velocity?.yVelocity ?: 0f,
             scale = scale,
