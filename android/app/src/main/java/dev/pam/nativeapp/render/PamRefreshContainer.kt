@@ -115,6 +115,12 @@ internal class PamRefreshContainer(context: Context) : FrameLayout(context) {
                 downX = event.x
                 downY = event.y
                 dragging = false
+                // A refresh surface is commonly nested in a page ScrollView.
+                // Keep the ancestor from stealing the downward stream before
+                // this container has crossed touch slop and can claim it.
+                // Horizontal/content gestures still reach the child because
+                // interception remains false until the pull is established.
+                parent?.requestDisallowInterceptTouchEvent(true)
             }
             MotionEvent.ACTION_MOVE -> {
                 val distanceX = abs(event.x - downX)
@@ -130,7 +136,10 @@ internal class PamRefreshContainer(context: Context) : FrameLayout(context) {
                     return true
                 }
             }
-            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> dragging = false
+            MotionEvent.ACTION_CANCEL, MotionEvent.ACTION_UP -> {
+                dragging = false
+                parent?.requestDisallowInterceptTouchEvent(false)
+            }
         }
 
         return false
