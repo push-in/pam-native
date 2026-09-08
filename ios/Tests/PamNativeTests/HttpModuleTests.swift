@@ -219,7 +219,12 @@ private final class RedirectHTTPServer: @unchecked Sendable {
             let response = self.count == 1
                 ? "HTTP/1.1 307 Temporary Redirect\r\nLocation: \(location)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 : "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
+            connection.send(
+                content: Data(response.utf8),
+                contentContext: .defaultMessage,
+                isComplete: true,
+                completion: .contentProcessed { _ in connection.cancel() }
+            )
         }
     }
 
