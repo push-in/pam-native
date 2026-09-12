@@ -318,6 +318,9 @@ final class TemplateExpression
 
                 return $this->invoke($name, $arguments);
             }
+            if ($this->take(T_DOUBLE_COLON)) {
+                return $this->resolveStaticEnumCase($name);
+            }
         }
 
         throw new RuntimeException(
@@ -388,6 +391,11 @@ final class TemplateExpression
             throw new RuntimeException("Template expression \${$name} is undefined.");
         }
 
+        return $this->resolvePostfix($value);
+    }
+
+    private function resolvePostfix(mixed $value): mixed
+    {
         while (true) {
             if ($this->take(T_OBJECT_OPERATOR) || $this->takePropertyDot()) {
                 $segment = $this->peek();
@@ -436,6 +444,66 @@ final class TemplateExpression
         }
 
         return $value;
+    }
+
+    private function resolveStaticEnumCase(string $name): mixed
+    {
+        $case = $this->peek();
+        if ($case === null || $case['type'] !== T_STRING) {
+            throw new RuntimeException('Template enum case is invalid.');
+        }
+        $this->position++;
+        $class = $this->resolveScopedClassName($name);
+        if ($class === null || !enum_exists($class)) {
+            throw new RuntimeException("Template enum {$name} does not exist.");
+        }
+        $constant = $class.'::'.$case['text'];
+        if (!defined($constant)) {
+            throw new RuntimeException("Template enum case {$constant} does not exist.");
+        }
+
+        return $this->resolvePostfix(constant($constant));
+    }
+
+    private function resolveScopedClassName(string $name): ?string
+    {
+        if (enum_exists($name)) {
+            return $name;
+        }
+        if ($this->scope === null) {
+            return null;
+        }
+        $reflection = new \ReflectionClass($this->scope);
+        $local = $reflection->getNamespaceName().'\\'.$name;
+        if (enum_exists($local)) {
+            return $local;
+        }
+        $file = $reflection->getFileName();
+        if (!is_string($file) || !is_readable($file)) {
+            return null;
+        }
+        $source = (string) file_get_contents($file);
+        if (($close = strpos($source, '?>')) !== false) {
+            $source = substr($source, 0, $close);
+        }
+        if (preg_match_all('/^use\s+([^;]+);/mi', $source, $matches) !== false) {
+            foreach ($matches[1] as $import) {
+                if (!is_string($import) || str_contains($import, '{')) {
+                    continue;
+                }
+                $parts = preg_split('/\s+as\s+/i', trim($import));
+                if (!is_array($parts) || !isset($parts[0])) {
+                    continue;
+                }
+                $candidate = ltrim(trim($parts[0]), '\\');
+                $alias = isset($parts[1]) ? trim($parts[1]) : substr($candidate, strrpos($candidate, '\\') + 1);
+                if ($alias === $name && enum_exists($candidate)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return null;
     }
 
     private function takePropertyDot(): bool
@@ -737,6 +805,7 @@ final class TemplateExpression
                         T_IS_GREATER_OR_EQUAL,
                         T_IS_SMALLER_OR_EQUAL,
                         T_OBJECT_OPERATOR,
+                        T_DOUBLE_COLON,
                         T_DOUBLE_ARROW,
                         T_COALESCE,
                     ], true)

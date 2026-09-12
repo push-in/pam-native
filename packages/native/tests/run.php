@@ -231,6 +231,7 @@ spl_autoload_register(static function (string $class): void {
 });
 
 require __DIR__.'/Fixtures/ExamplePluginProvider.php';
+require __DIR__.'/Fixtures/TemplateEnumScope.php';
 
 final class TestDiagnostics
 {
@@ -264,6 +265,10 @@ enum TypedRouteTestName: string
 {
     case Home = 'home';
     case Product = 'product';
+}
+
+final class TemplateEnumScope
+{
 }
 
 if (!function_exists('pam_native_error')) {
@@ -5222,6 +5227,22 @@ $assert(
         ['left' => false, 'right' => true],
     ) === false,
     'Template logical AND must consume its right operand when the left operand is false.',
+);
+$assert(
+    TemplateExpression::evaluate(
+        'TypedRouteTestName::Home->value',
+        new TemplateEnumScope(),
+        [],
+    ) === 'home',
+    'Template expressions must resolve scoped PHP enum cases and their backed values.',
+);
+$assert(
+    TemplateExpression::evaluate(
+        'ImportedState::Ready->value',
+        new \Pam\Native\Tests\Fixtures\Screen\TemplateEnumScope(),
+        [],
+    ) === 1,
+    'Template expressions must resolve imported and aliased PHP enum cases from the component file.',
 );
 $assert(
     \Pam\Native\Internal\TemplateExpression::evaluate(
