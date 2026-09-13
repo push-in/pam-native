@@ -1291,6 +1291,28 @@ class PamRendererInstrumentedTest {
                     }
                 }
                 assertTrue("Dark indicator must have visible contrast, not just a pixel difference", contrastingPixels > width)
+            } catch (failure: AssertionError) {
+                // Keep the exact frames that failed, without requesting a
+                // redraw or retrying until a broken indicator happens to show.
+                val directory = requireNotNull(
+                    instrumentation.targetContext.getExternalFilesDir("renderer-evidence"),
+                )
+                check(directory.isDirectory || directory.mkdirs())
+                mapOf(
+                    "indicator-initial.png" to requireNotNull(initialWindow),
+                    "indicator-shown.png" to screenShown,
+                    "indicator-hidden.png" to screenHidden,
+                ).forEach { (name, bitmap) ->
+                    java.io.File(directory, name).outputStream().use { output ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                    }
+                }
+                throw AssertionError(
+                    "${failure.message}; fixture=${location.contentToString()} " +
+                        "size=${width}x$height trackTop=$trackTop " +
+                        "capture=${screenShown.width}x${screenShown.height}",
+                    failure,
+                )
             } finally {
                 screenShown.recycle()
                 screenHidden.recycle()

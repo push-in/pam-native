@@ -203,7 +203,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: |
-            ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest
+            trap 'test_exit=$?; mkdir -p android/app/build/renderer-evidence; adb pull /sdcard/Android/data/dev.pam.nativeapp.debug/files/renderer-evidence/. android/app/build/renderer-evidence/ || true; exit "$test_exit"' EXIT; ./android/gradlew -p android -PpamNativeRoot="$GITHUB_WORKSPACE" :app:connectedDebugAndroidTest
             if [ "${{ matrix.api-level }}" = "36" ]; then composer install --working-dir=examples/showcase --no-interaction --prefer-dist --no-progress; fi
             if [ "${{ matrix.api-level }}" = "36" ]; then PAM_HOME="$GITHUB_WORKSPACE" PAM_NATIVE_HOME="$GITHUB_WORKSPACE" cargo run --locked --release --package pam-native-cli -- prepare examples/showcase; fi
             if [ "${{ matrix.api-level }}" = "36" ]; then ./examples/showcase/.pam-native/android/gradlew -p examples/showcase/.pam-native/android -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR :macrobenchmark:connectedBenchmarkAndroidTest; fi
@@ -214,6 +214,7 @@ jobs:
           path: |
             android/app/build/reports/androidTests/connected/
             android/app/build/outputs/androidTest-results/connected/
+            android/app/build/renderer-evidence/
             android/macrobenchmark/build/reports/androidTests/connected/
             android/macrobenchmark/build/outputs/androidTest-results/connected/
             android/macrobenchmark/build/outputs/connected_android_test_additional_output/
