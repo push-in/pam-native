@@ -2114,17 +2114,35 @@ fn estimated_character_width(character: char, font_size: f32) -> f32 {
     let em = match character {
         ' ' | '\t' => 0.25,
         'i' | '!' | '.' | ',' | ':' | ';' | '\'' => 0.23,
-        'l' | 'I' | '|' => 0.21,
+        'l' | '|' => 0.21,
         'r' => 0.32,
         'f' | 't' => 0.42,
         'm' => 0.78,
         'w' => 0.74,
-        'M' => 0.82,
-        'W' => 0.87,
+        // Rounded regular Roboto advances, before the platform guard. A
+        // single 0.59-em uppercase class under-measured labels such as PHP
+        // and HTTP, even with the guard, clipping intrinsic-width chips.
+        // Packaged fonts still use their actual per-weight TTF metrics.
+        'A' | 'C' | 'U' => 0.653,
+        'B' | 'K' | 'X' => 0.628,
+        'D' => 0.657,
+        'E' => 0.569,
+        'F' | 'J' => 0.553,
+        'G' => 0.682,
+        'H' | 'N' => 0.714,
+        'I' => 0.272,
+        'L' => 0.539,
+        'M' => 0.874,
+        'O' | 'Q' => 0.688,
+        'P' => 0.631,
+        'R' => 0.617,
+        'S' => 0.594,
+        'T' | 'Y' | 'Z' => 0.601,
+        'V' => 0.637,
+        'W' => 0.888,
         '@' => 0.95,
         '%' => 0.74,
         '&' => 0.56,
-        character if character.is_ascii_uppercase() => 0.59,
         character if character.is_ascii_digit() => 0.56,
         character if character.is_ascii() => 0.54,
         _ => 1.0,
@@ -2663,6 +2681,24 @@ mod tests {
         let width = 303.0;
         assert!(measured_text_width(label, 48.0, 0.0, None) > width);
         assert_eq!(wrapped_text_lines(label, 48.0, 0.0, width).len(), 2);
+    }
+
+    #[test]
+    fn fallback_uppercase_labels_fit_platform_glyph_advances() {
+        // Roboto variable font measured at weight 600 on the API 36 device.
+        // At 200% text scale the old PHP estimate was 46.8032 dp, less than
+        // the actual 47.789063 dp; Android wrapped its final P out of view.
+        for scale in [1.0, 1.3, 2.0] {
+            let width = measured_text_width("PHP", 12.0 * scale, 0.0, None);
+            assert!(
+                width >= 23.894531 * scale,
+                "PHP width at scale {scale}: {width}"
+            );
+            assert_eq!(wrapped_text_lines("PHP", 12.0 * scale, 0.0, width).len(), 1);
+        }
+        // Preserve a genuinely narrow capital I instead of widening every
+        // uppercase letter to compensate for H, N and M.
+        assert!(estimated_character_width('I', 24.0) < estimated_character_width('H', 24.0));
     }
 
     #[test]
