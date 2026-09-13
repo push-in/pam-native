@@ -1282,7 +1282,9 @@ fn natural_scroll_extent(
             if axis == Axis::Vertical {
                 available_cross
             } else {
-                available_main
+                // The scrolling axis is unconstrained. Measuring a text leaf
+                // at viewport width would wrap it before computing overflow.
+                f32::INFINITY
             },
             if axis == Axis::Vertical {
                 available_main
@@ -1323,6 +1325,9 @@ fn natural_scroll_extent(
         }
     };
     let mut extents = Vec::with_capacity(visible_children.len());
+    let mut grow_total = 0.0_f32;
+    let mut grow_unit = 0.0_f32;
+    let mut fixed_extent = 0.0_f32;
     for child in visible_children {
         let extent = natural_scroll_extent(
             children,
@@ -1336,10 +1341,25 @@ fn natural_scroll_extent(
         )?;
         let (before, after) = margin_main(child, axis);
         extents.push(extent + before + after);
+        let grow = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
+        if grow > 0.0 {
+            grow_total += grow;
+            grow_unit = grow_unit.max((extent + before + after) / grow);
+        } else {
+            fixed_extent += extent + before + after;
+        }
     }
     let content = if node_axis == axis {
         let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
-        extents.iter().sum::<f32>() + gap * extents.len().saturating_sub(1) as f32
+        // Zero-basis grow items share the content width by weight. A sum of
+        // their different intrinsic widths would give the widest item too
+        // little space, even inside an unconstrained horizontal scroller.
+        let main = if axis == Axis::Horizontal && grow_total > 0.0 {
+            fixed_extent + grow_unit * grow_total
+        } else {
+            extents.iter().sum::<f32>()
+        };
+        main + gap * extents.len().saturating_sub(1) as f32
     } else {
         extents.into_iter().fold(0.0, f32::max)
     };
@@ -1414,7 +1434,10 @@ fn intrinsic_extent(
                 && integer(child, PropKey::PositionType).unwrap_or(1) != 2
         })
         .collect::<Vec<_>>();
-    if node_children.is_empty() || !content_sized(node) {
+    let horizontal_scroll_height = node.kind == NodeKind::Scroll
+        && boolean(node, PropKey::ScrollHorizontal)
+        && requested_axis == Axis::Vertical;
+    if node_children.is_empty() || (!content_sized(node) && !horizontal_scroll_height) {
         return finite_non_negative(leaf_intrinsic(
             node,
             requested_axis,
@@ -1438,6 +1461,43 @@ fn intrinsic_extent(
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
     let inner_width = (available_width - padding_left - padding_right).max(0.0);
     let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
+    if horizontal_scroll_height {
+        // Measure at the same natural content width used by layout_node, not
+        // the viewport width: scrolling content must not wrap to fit the view.
+        let fill_viewport = !matches!(
+            node.properties.get(&PropKey::ScrollFillViewport),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        );
+        let mut height = 0.0_f32;
+        for child in node_children {
+            let natural_width = natural_scroll_extent(
+                children,
+                child,
+                Axis::Horizontal,
+                inner_width,
+                inner_height,
+                text_scale,
+                text_metrics,
+                depth + 1,
+            )?;
+            let width = if fill_viewport {
+                natural_width.max(inner_width)
+            } else {
+                natural_width
+            };
+            height = height.max(constrained_intrinsic_extent(
+                children,
+                child,
+                Axis::Vertical,
+                width,
+                inner_height,
+                text_scale,
+                text_metrics,
+                depth + 1,
+            )?);
+        }
+        return finite_non_negative(height + padding_top + padding_bottom);
+    }
     if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
         let content = match requested_axis {
             Axis::Horizontal => inner_width,
@@ -3595,6 +3655,156 @@ mod tests {
 
         assert!(!layouts.contains_key(&2));
         assert_eq!(layouts[&3].x, 0.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_auto_height_follows_content_and_padding() {
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Scroll,
+                        [
+                            (PropKey::ScrollHorizontal, PropValue::Boolean(true)),
+                            (PropKey::PaddingVertical, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (3, node(3, 2, 0, NodeKind::Row, [])),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(400.0)),
+                            (PropKey::Height, PropValue::Float(56.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(24.0))],
+                    ),
+                ),
+            ]),
+        };
+        let viewport = Size {
+            width: 300.0,
+            height: 500.0,
+        };
+        let layouts = calculate(&tree, viewport).expect("auto horizontal scroll");
+        assert_eq!(layouts[&2].height, 72.0);
+        assert_eq!(layouts[&3].width, 400.0);
+        assert_eq!(layouts[&3].height, 56.0);
+        assert_eq!(layouts[&5].y, 72.0);
+        tree.nodes
+            .get_mut(&2)
+            .unwrap()
+            .properties
+            .insert(PropKey::Height, PropValue::Float(100.0));
+        let layouts = calculate(&tree, viewport).expect("explicit horizontal scroll");
+        assert_eq!(layouts[&2].height, 100.0);
+        assert_eq!(layouts[&5].y, 100.0);
+        tree.nodes
+            .get_mut(&2)
+            .unwrap()
+            .properties
+            .remove(&PropKey::Height);
+        tree.nodes.insert(
+            4,
+            node(
+                4,
+                3,
+                0,
+                NodeKind::Text,
+                [
+                    (
+                        PropKey::Text,
+                        PropValue::String(
+                            "A long scrolling label that must not wrap to the viewport width"
+                                .to_owned(),
+                        ),
+                    ),
+                    (PropKey::FontSize, PropValue::Float(14.0)),
+                    (PropKey::LineHeight, PropValue::Float(20.0)),
+                ],
+            ),
+        );
+        let layouts = calculate(&tree, viewport).expect("natural text width in horizontal scroll");
+        assert!(layouts[&3].width > viewport.width);
+        assert_eq!(layouts[&4].height, 20.0);
+        assert_eq!(layouts[&2].height, 36.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_reserves_widest_grow_share() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Scroll,
+                        [(PropKey::ScrollHorizontal, PropValue::Boolean(true))],
+                    ),
+                ),
+                (2, node(2, 1, 0, NodeKind::Row, [])),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(120.0)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(180.0)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 200.0,
+                height: 56.0,
+            },
+        )
+        .expect("equal grow content remains readable");
+        assert_eq!(layouts[&2].width, 360.0);
+        assert_eq!(layouts[&3].width, 180.0);
+        assert_eq!(layouts[&4].width, 180.0);
     }
 
     #[test]
