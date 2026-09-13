@@ -1791,6 +1791,15 @@ fn constrained_intrinsic_extent(
     text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
+    // Height depends on wrapping at the child's own width, not the whole
+    // parent's width. The cross-axis containing width is definite here even
+    // when the height being measured is intrinsically sized.
+    let available_width = if axis == Axis::Vertical {
+        dimension(node, PropKey::Width, PropKey::WidthPercent, available_width)
+            .unwrap_or(available_width)
+    } else {
+        available_width
+    };
     let extent = intrinsic_extent(
         children,
         node,
@@ -2626,6 +2635,67 @@ mod tests {
         assert_eq!(child.height, 156.0);
         assert_eq!(child.x, 114.0);
         assert_eq!(child.y, 200.0);
+    }
+
+    #[test]
+    fn auto_row_height_respects_nested_text_column_width() {
+        for (width_key, width_value) in [(PropKey::Width, 180.0), (PropKey::WidthPercent, 45.0)] {
+            let tree = Tree {
+                root: 1,
+                nodes: BTreeMap::from([
+                    (1, node(1, 0, 0, NodeKind::Screen, [])),
+                    (2, node(2, 1, 0, NodeKind::Row, [])),
+                    (
+                        3,
+                        node(
+                            3,
+                            2,
+                            0,
+                            NodeKind::Column,
+                            [(width_key, PropValue::Float(width_value))],
+                        ),
+                    ),
+                    (
+                        4,
+                        node(
+                            4,
+                            3,
+                            0,
+                            NodeKind::Text,
+                            [
+                                (PropKey::Text, PropValue::String("Currency Field".into())),
+                                (PropKey::FontSize, PropValue::Float(24.0)),
+                                (PropKey::LineHeight, PropValue::Float(30.0)),
+                            ],
+                        ),
+                    ),
+                    (
+                        5,
+                        node(
+                            5,
+                            2,
+                            1,
+                            NodeKind::View,
+                            [
+                                (PropKey::Width, PropValue::Float(48.0)),
+                                (PropKey::Height, PropValue::Float(48.0)),
+                            ],
+                        ),
+                    ),
+                ]),
+            };
+            let layouts = calculate_with_text_scale(
+                &tree,
+                Size {
+                    width: 400.0,
+                    height: 800.0,
+                },
+                2.0,
+            )
+            .expect("scaled header layout");
+            assert!(layouts[&4].height >= 120.0);
+            assert!(layouts[&2].height >= layouts[&4].height);
+        }
     }
 
     #[test]
