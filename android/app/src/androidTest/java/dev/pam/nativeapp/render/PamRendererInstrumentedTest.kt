@@ -1264,6 +1264,24 @@ class PamRendererInstrumentedTest {
             SystemClock.sleep(100)
             val screenHidden = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             try {
+                // Gradle collects this directory before uninstalling test APKs.
+                // Keep all three frames even on success so collection itself
+                // can be verified without intentionally breaking the renderer.
+                val directory = InstrumentationRegistry.getArguments()
+                    .getString("additionalTestOutputDir")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { java.io.File(it) }
+                    ?: requireNotNull(instrumentation.context.getExternalFilesDir("renderer-evidence"))
+                check(directory.isDirectory || directory.mkdirs())
+                mapOf(
+                    "indicator-initial.png" to requireNotNull(initialWindow),
+                    "indicator-shown.png" to screenShown,
+                    "indicator-hidden.png" to screenHidden,
+                ).forEach { (name, bitmap) ->
+                    java.io.File(directory, name).outputStream().use { output ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                    }
+                }
                 assertEquals(
                     "Window capture must include the rendered fixture",
                     Color.LTGRAY,
@@ -1292,21 +1310,6 @@ class PamRendererInstrumentedTest {
                 }
                 assertTrue("Dark indicator must have visible contrast, not just a pixel difference", contrastingPixels > width)
             } catch (failure: AssertionError) {
-                // Keep the exact frames that failed, without requesting a
-                // redraw or retrying until a broken indicator happens to show.
-                val directory = requireNotNull(
-                    instrumentation.targetContext.getExternalFilesDir("renderer-evidence"),
-                )
-                check(directory.isDirectory || directory.mkdirs())
-                mapOf(
-                    "indicator-initial.png" to requireNotNull(initialWindow),
-                    "indicator-shown.png" to screenShown,
-                    "indicator-hidden.png" to screenHidden,
-                ).forEach { (name, bitmap) ->
-                    java.io.File(directory, name).outputStream().use { output ->
-                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-                    }
-                }
                 throw AssertionError(
                     "${failure.message}; fixture=${location.contentToString()} " +
                         "size=${width}x$height trackTop=$trackTop " +
