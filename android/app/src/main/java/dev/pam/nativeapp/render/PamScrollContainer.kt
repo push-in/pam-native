@@ -16,7 +16,7 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-internal class PamScrollContainer(
+internal class PamScrollContainer @JvmOverloads constructor(
     context: Context,
     initialHorizontal: Boolean = false,
     initialPersistentScrollbar: Boolean = false,
