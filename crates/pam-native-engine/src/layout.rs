@@ -2003,8 +2003,8 @@ fn wrapped_text_lines_with_metrics<'a>(
         let mut last_break = None;
         let mut width = 0.0;
         for (offset, character) in hard_line.char_indices() {
-            let advance =
-                measured_character_width(character, font_size, glyph_advances) + letter_spacing;
+            let glyph_width = measured_character_width(character, font_size, glyph_advances);
+            let advance = glyph_width + if offset > start { letter_spacing } else { 0.0 };
             if character.is_whitespace() {
                 last_break = Some(offset);
             }
@@ -2013,7 +2013,10 @@ fn wrapped_text_lines_with_metrics<'a>(
             // that child again does not wrap its last word onto a phantom
             // second line.
             let fit_tolerance = 0.5_f32.max(font_size * 0.02);
-            if width + advance > available_width + fit_tolerance && offset > start {
+            if platform_text_width(width + advance, glyph_advances.is_some())
+                > available_width + fit_tolerance
+                && offset > start
+            {
                 let end = last_break
                     .filter(|position| *position > start)
                     .unwrap_or(offset);
@@ -2027,14 +2030,14 @@ fn wrapped_text_lines_with_metrics<'a>(
                     offset
                 };
                 last_break = None;
-                width = measured_text_width(
+                width = raw_text_width(
                     &hard_line[start..offset],
                     font_size,
                     letter_spacing,
                     glyph_advances,
                 );
             }
-            width += advance;
+            width += glyph_width + if offset > start { letter_spacing } else { 0.0 };
         }
         result.push(hard_line[start..].trim_end());
     }
@@ -2052,6 +2055,18 @@ fn measured_text_width(
     letter_spacing: f32,
     glyph_advances: Option<&BTreeMap<char, f32>>,
 ) -> f32 {
+    platform_text_width(
+        raw_text_width(text, font_size, letter_spacing, glyph_advances),
+        glyph_advances.is_some(),
+    )
+}
+
+fn raw_text_width(
+    text: &str,
+    font_size: f32,
+    letter_spacing: f32,
+    glyph_advances: Option<&BTreeMap<char, f32>>,
+) -> f32 {
     let mut characters = text.chars().peekable();
     let mut width = 0.0;
     while let Some(character) = characters.next() {
@@ -2060,7 +2075,11 @@ fn measured_text_width(
             width += letter_spacing;
         }
     }
-    if glyph_advances.is_some() {
+    width
+}
+
+fn platform_text_width(width: f32, has_glyph_metrics: bool) -> f32 {
+    if has_glyph_metrics {
         // TTF advances describe the ideal unhinted run. Android's TextView can
         // shape and hint the same run slightly wider when it builds its
         // StaticLayout. A fixed half-pixel guard was insufficient for longer
@@ -2636,6 +2655,14 @@ mod tests {
         assert_eq!(child.height, 156.0);
         assert_eq!(child.x, 114.0);
         assert_eq!(child.y, 200.0);
+    }
+
+    #[test]
+    fn wrapping_uses_the_same_platform_width_as_intrinsic_measurement() {
+        let label = "Currency Field";
+        let width = 303.0;
+        assert!(measured_text_width(label, 48.0, 0.0, None) > width);
+        assert_eq!(wrapped_text_lines(label, 48.0, 0.0, width).len(), 2);
     }
 
     #[test]
