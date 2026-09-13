@@ -1179,7 +1179,12 @@ class PamRendererInstrumentedTest {
             onMain(instrumentation) {
                 renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
                 renderer.commit(listOf(listOf(
-                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN, mapOf(
+                        // Keep the canvas distinct from the gray child. The
+                        // renderer otherwise inherits its first descendant's
+                        // background, making the child-pixel check vacuous.
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.WHITE.toLong()),
+                    ))),
                     Mutation.Create(node(5, 1, NodeKind.SCROLL, mapOf(
                         PropKey.TEST_ID to PropValue.Text("indicator-parent-scroll"),
                     ))),
@@ -1290,6 +1295,8 @@ class PamRendererInstrumentedTest {
                 var difference = 0
                 var initialDifference = 0
                 val initial = requireNotNull(initialWindow)
+                assertEquals("Fixture canvas must be distinct from the child", Color.WHITE,
+                    initial.getPixel(location[0] - 1, location[1] + 10))
                 assertEquals(Color.LTGRAY, initial.getPixel(location[0] + 10, location[1] + 10))
                 for (y in location[1] + trackTop until location[1] + height) {
                     for (x in location[0] until location[0] + width) {
