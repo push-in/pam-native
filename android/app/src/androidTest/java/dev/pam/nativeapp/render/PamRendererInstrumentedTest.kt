@@ -1168,6 +1168,99 @@ class PamRendererInstrumentedTest {
         }
     }
 
+    @Test
+    fun rendererKeepsPersistentHorizontalIndicatorVisibleBelowContent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        lateinit var scroll: PamScrollContainer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.SCROLL, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("indicator-scroll"),
+                        PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true),
+                        PropKey.SHOWS_SCROLL_INDICATOR to PropValue.Flag(true),
+                        PropKey.SCROLL_PERSISTENT_SCROLLBAR to PropValue.Flag(true),
+                    ))),
+                    Mutation.Create(node(3, 2, NodeKind.ROW)),
+                    Mutation.Create(node(4, 3, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.LTGRAY.toLong()),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 300f, 52f)),
+                    Mutation.Layout(3, Frame(0f, 0f, 900f, 52f)),
+                    Mutation.Layout(4, Frame(0f, 0f, 900f, 48f)),
+                    Mutation.SetRoot(1),
+                )))
+                scroll = activity.host.findByTransitionName("indicator-scroll") as PamScrollContainer
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertTrue("Renderer fixture must overflow", scroll.getChildAt(0).canScrollHorizontally(1))
+                val shown = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                val hidden = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                try {
+                    shown.eraseColor(Color.WHITE)
+                    hidden.eraseColor(Color.WHITE)
+                    scroll.draw(Canvas(shown))
+                    scroll.setShowsScrollIndicator(false)
+                    scroll.draw(Canvas(hidden))
+                    var difference = 0
+                    for (y in dp(scroll, 48f) until scroll.height) {
+                        for (x in 0 until scroll.width) {
+                            if (shown.getPixel(x, y) != hidden.getPixel(x, y)) difference++
+                        }
+                    }
+                    assertTrue("Persistent indicator must occupy the reserved strip", difference > 0)
+                } finally {
+                    shown.recycle()
+                    hidden.recycle()
+                }
+            }
+            val location = IntArray(2)
+            var width = 0
+            var height = 0
+            var trackTop = 0
+            onMain(instrumentation) {
+                scroll.setShowsScrollIndicator(true)
+                scroll.getLocationOnScreen(location)
+                width = scroll.width
+                height = scroll.height
+                trackTop = dp(scroll, 48f)
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            val screenShown = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            onMain(instrumentation) { scroll.setShowsScrollIndicator(false) }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            val screenHidden = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                assertEquals(
+                    "Window capture must include the rendered fixture",
+                    Color.LTGRAY,
+                    screenShown.getPixel(location[0] + 10, location[1] + 10),
+                )
+                var difference = 0
+                for (y in location[1] + trackTop until location[1] + height) {
+                    for (x in location[0] until location[0] + width) {
+                        if (screenShown.getPixel(x, y) != screenHidden.getPixel(x, y)) difference++
+                    }
+                }
+                assertTrue("Indicator must also appear in the actual window capture", difference > 0)
+            } finally {
+                screenShown.recycle()
+                screenHidden.recycle()
+                onMain(instrumentation) { renderer.close() }
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Suppress("DEPRECATION")
     @Test
     fun statusBarConfigurationFollowsTheActiveRetainedRoute() {

@@ -105,6 +105,9 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         showsIndicator = value
         activeScroll.isHorizontalScrollBarEnabled = value && horizontal
         activeScroll.isVerticalScrollBarEnabled = value && !horizontal
+        // The framework flags can change without invalidating the hardware
+        // display list: Canvas.draw sees them while the window stays stale.
+        activeScroll.invalidate()
     }
 
     fun setFillViewport(value: Boolean) {
@@ -137,6 +140,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     fun setPersistentScrollbar(value: Boolean) {
         persistentScrollbar = value
         activeScroll.isScrollbarFadingEnabled = !value
+        activeScroll.invalidate()
     }
 
     fun setPagingEnabled(value: Boolean) {
