@@ -260,6 +260,9 @@ internal fun hostedContentExtent(
 internal fun usesNativeViewGroupPadding(kind: NodeKind): Boolean =
     kind == NodeKind.CUSTOM_VIEW
 
+internal fun engineFrameMargin(offset: Int, nativeFramePadding: Int): Int =
+    offset - nativeFramePadding
+
 internal fun resolvedAndroidLetterSpacing(
     logicalSpacing: Float,
     logicalFontSize: Float,
@@ -1133,9 +1136,18 @@ class PamRenderer(
         val density = resourcesDensity()
         val horizontal = snappedPixelSpan(frame.x, frame.width, parentFrame.x, density)
         val vertical = snappedPixelSpan(frame.y, frame.height, parentFrame.y, density)
+        val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
+            views[hostedParent] as? FrameLayout
+        } else {
+            null
+        }
         view.layoutParams = FrameLayout.LayoutParams(horizontal.extent, vertical.extent).apply {
-            leftMargin = if (id == rootId) 0 else horizontal.offset
-            topMargin = if (id == rootId) 0 else vertical.offset
+            leftMargin = if (id == rootId) 0 else engineFrameMargin(
+                horizontal.offset, paddedHost?.paddingLeft ?: 0,
+            )
+            topMargin = if (id == rootId) 0 else engineFrameMargin(
+                vertical.offset, paddedHost?.paddingTop ?: 0,
+            )
         }
     }
 
@@ -1455,8 +1467,17 @@ class PamRenderer(
             resize = state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW &&
                 keyboardAvoidingBehaviorReducesViewport(state.keyboardBehavior),
         )
-        var leftPx = horizontal.offset + safeLeft
-        var topPx = vertical.offset + safeTop
+        // Engine frames already include authored padding. FrameLayout adds
+        // its padding to child margins again, unlike engine-owned containers
+        // whose Android padding is zero. Preserve native host padding while
+        // expressing engine positions relative to that padded origin.
+        val paddedHost = if (hostedParentState?.kind == NodeKind.CUSTOM_VIEW) {
+            parentView as? FrameLayout
+        } else {
+            null
+        }
+        var leftPx = engineFrameMargin(horizontal.offset, paddedHost?.paddingLeft ?: 0) + safeLeft
+        var topPx = engineFrameMargin(vertical.offset, paddedHost?.paddingTop ?: 0) + safeTop
         compensateFlexParentViewportReduction(
             state = state,
             parentState = parentState,
