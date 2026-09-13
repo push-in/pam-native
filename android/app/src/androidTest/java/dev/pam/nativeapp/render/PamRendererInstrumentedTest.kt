@@ -11,6 +11,8 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -43,6 +45,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.roundToInt
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
@@ -126,7 +130,7 @@ class PamRendererInstrumentedTest {
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("73125")
             instrumentation.waitForIdleSync()
-            assertEquals("731,25", currency.text.toString())
+            assertInputTextArrives(instrumentation, currency, "731,25")
 
             lateinit var mask: EditText
             onMain(instrumentation) {
@@ -140,7 +144,7 @@ class PamRendererInstrumentedTest {
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("21912345678")
             instrumentation.waitForIdleSync()
-            assertEquals("(21) 91234-5678", mask.text.toString())
+            assertInputTextArrives(instrumentation, mask, "(21) 91234-5678")
             onMain(instrumentation) { renderer.close() }
         } finally {
             onMain(instrumentation) { activity.finish() }
@@ -2001,6 +2005,37 @@ class PamRendererInstrumentedTest {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             },
         ) as PamTestActivity
+
+    private fun assertInputTextArrives(
+        instrumentation: Instrumentation,
+        input: EditText,
+        expected: String,
+    ) {
+        // Input injection completion and app queue idleness do not guarantee
+        // that an IME has finished updating the editor. Observe the actual
+        // value without slowing the key burst or reading Views off-main.
+        val arrived = CountDownLatch(1)
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(text: Editable?) {
+                if (text.toString() == expected) arrived.countDown()
+            }
+        }
+        onMain(instrumentation) {
+            input.addTextChangedListener(watcher)
+            if (input.text.toString() == expected) arrived.countDown()
+        }
+        try {
+            val completed = arrived.await(2, TimeUnit.SECONDS)
+            onMain(instrumentation) {
+                assertTrue("Input did not retain the complete burst: ${input.text}", completed)
+                assertEquals(expected, input.text.toString())
+            }
+        } finally {
+            onMain(instrumentation) { input.removeTextChangedListener(watcher) }
+        }
+    }
 
     private fun onMain(instrumentation: Instrumentation, block: () -> Unit) {
         instrumentation.runOnMainSync(block)
