@@ -51,6 +51,33 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun physicalCellFrameIsNotMirroredAgainByAnRtlHolder() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        onMain(instrumentation) {
+            for (direction in listOf(View.LAYOUT_DIRECTION_LTR, View.LAYOUT_DIRECTION_RTL)) {
+                val holder = FrameLayout(instrumentation.targetContext).apply {
+                    layoutDirection = direction
+                    setPadding(21, 13, 21, 13)
+                }
+                val child = View(instrumentation.targetContext)
+                holder.addView(child, FrameLayout.LayoutParams(100, 40).apply {
+                    gravity = PAM_PHYSICAL_FRAME_GRAVITY
+                    leftMargin = engineFrameMargin(51, holder.paddingLeft)
+                    topMargin = engineFrameMargin(23, holder.paddingTop)
+                })
+                holder.measure(
+                    View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                )
+                holder.layout(0, 0, 300, 100)
+                assertEquals("physical x in direction $direction", 51, child.left)
+                assertEquals("physical y in direction $direction", 23, child.top)
+                assertEquals(151, child.right)
+            }
+        }
+    }
+
+    @Test
     fun engineChildCoordinatesSurviveCustomFrameLayoutPadding() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         onMain(instrumentation) {
