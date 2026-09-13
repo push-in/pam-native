@@ -626,75 +626,25 @@ fn layout_node(
         ordered_children.clear();
     }
     let total_gap = main_gap * flow_children.len().saturating_sub(1) as f32;
-    let total_flex = flow_children
-        .iter()
-        .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
-        .sum::<f32>();
-    let mut base_main = BTreeMap::new();
-    for child in &flow_children {
-        base_main.insert(
-            child.id,
-            child_main(
-                context.children,
-                child,
-                axis,
-                available_main,
-                available_cross,
-                context.text_scale,
-                context.text_metrics,
-                depth + 1,
-            )?,
-        );
-    }
-    let fixed = flow_children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
-        .map(|child| {
-            let (before, after) = margin_main(child, axis);
-            base_main[&child.id] + before + after
-        })
-        .sum::<f32>();
-    let flex_margins = flow_children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) > 0.0)
-        .map(|child| {
-            let (before, after) = margin_main(child, axis);
-            before + after
-        })
-        .sum::<f32>();
-    let overflow = (fixed + flex_margins + total_gap - available_main).max(0.0);
-    let shrink_weight = flow_children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
-        .map(|child| {
-            number(child, PropKey::FlexShrink).unwrap_or(0.0).max(0.0) * base_main[&child.id]
-        })
-        .sum::<f32>();
-    let resolved_main = flow_children
-        .iter()
-        .map(|child| {
-            let base = base_main[&child.id];
-            let weight = number(child, PropKey::FlexShrink).unwrap_or(0.0).max(0.0) * base;
-            let main = if overflow > 0.0 && shrink_weight > 0.0 {
-                (base - overflow * weight / shrink_weight).max(0.0)
-            } else {
-                base
-            };
-            (child.id, main)
-        })
-        .collect::<BTreeMap<_, _>>();
-    let resolved_fixed = flow_children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
-        .map(|child| {
-            let (before, after) = margin_main(child, axis);
-            resolved_main[&child.id] + before + after
-        })
-        .sum::<f32>();
-    let remaining = (available_main - resolved_fixed - flex_margins - total_gap).max(0.0);
-    let flex_allocations = allocate_flex_main(&flow_children, axis, available_main, remaining)?;
-    let flex_consumed = flex_allocations.values().sum::<f32>();
-    let consumed = resolved_fixed + flex_margins + total_gap + flex_consumed;
+    let resolved_main = resolved_child_main_sizes(
+        context.children,
+        &flow_children,
+        axis,
+        available_main,
+        available_cross,
+        main_gap,
+        context.text_scale,
+        context.text_metrics,
+        depth + 1,
+    )?;
+    let consumed = total_gap
+        + flow_children
+            .iter()
+            .map(|child| {
+                let (before, after) = margin_main(child, axis);
+                resolved_main[&child.id] + before + after
+            })
+            .sum::<f32>();
     let free = (available_main - consumed).max(0.0);
     let auto_margin_count = if axis == Axis::Horizontal {
         flow_children
@@ -753,12 +703,7 @@ fn layout_node(
     };
 
     for child in ordered_children {
-        let flex = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
-        let main = if flex > 0.0 && total_flex > 0.0 {
-            flex_allocations.get(&child.id).copied().unwrap_or(0.0)
-        } else {
-            resolved_main[&child.id]
-        };
+        let main = resolved_main[&child.id];
         let (mut main_before, main_after) = margin_main(child, axis);
         if axis == Axis::Horizontal && boolean(child, PropKey::MarginLeftAuto) {
             main_before += auto_margin;
@@ -1552,13 +1497,32 @@ fn intrinsic_extent(
         };
         return finite_non_negative(content + padding_extent);
     }
+    // Height measurement must use the same allocated widths as final layout.
+    // Measuring every flex child against the whole row misses wrapped lines.
+    let allocated_widths = if flow_axis == Axis::Horizontal && requested_axis == Axis::Vertical {
+        Some(resolved_child_main_sizes(
+            children,
+            &node_children,
+            flow_axis,
+            inner_width,
+            inner_height,
+            main_gap,
+            text_scale,
+            text_metrics,
+            depth + 1,
+        )?)
+    } else {
+        None
+    };
     let mut child_extents = Vec::with_capacity(node_children.len());
     for child in &node_children {
         // Resolve a child's width against its containing block before
         // measuring wrapped height. Final-layout callers already pass the
         // allocated width, so this must not live in the shared measurement
         // helper (which would apply percentages a second time).
-        let child_available_width = if requested_axis == Axis::Vertical {
+        let child_available_width = if let Some(widths) = &allocated_widths {
+            widths[&child.id]
+        } else if requested_axis == Axis::Vertical {
             dimension(child, PropKey::Width, PropKey::WidthPercent, inner_width)
                 .unwrap_or(inner_width)
         } else {
@@ -2175,6 +2139,85 @@ fn intrinsic_cross(
         text_metrics,
         depth,
     )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolved_child_main_sizes(
+    children_index: &BTreeMap<u64, Vec<&Node>>,
+    children: &[&Node],
+    axis: Axis,
+    available_main: f32,
+    available_cross: f32,
+    main_gap: f32,
+    text_scale: f32,
+    text_metrics: &TextMetrics,
+    depth: usize,
+) -> Result<BTreeMap<u64, f32>, LayoutError> {
+    let total_gap = main_gap * children.len().saturating_sub(1) as f32;
+    let mut sizes = BTreeMap::new();
+    for child in children {
+        sizes.insert(
+            child.id,
+            child_main(
+                children_index,
+                child,
+                axis,
+                available_main,
+                available_cross,
+                text_scale,
+                text_metrics,
+                depth,
+            )?,
+        );
+    }
+    let fixed = children
+        .iter()
+        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
+        .map(|child| {
+            let (before, after) = margin_main(child, axis);
+            sizes[&child.id] + before + after
+        })
+        .sum::<f32>();
+    let flex_margins = children
+        .iter()
+        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) > 0.0)
+        .map(|child| {
+            let (before, after) = margin_main(child, axis);
+            before + after
+        })
+        .sum::<f32>();
+    let overflow = (fixed + flex_margins + total_gap - available_main).max(0.0);
+    let shrink_weight = children
+        .iter()
+        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
+        .map(|child| number(child, PropKey::FlexShrink).unwrap_or(0.0).max(0.0) * sizes[&child.id])
+        .sum::<f32>();
+    if overflow > 0.0 && shrink_weight > 0.0 {
+        for child in children {
+            let base = sizes[&child.id];
+            let weight = number(child, PropKey::FlexShrink).unwrap_or(0.0).max(0.0) * base;
+            sizes.insert(
+                child.id,
+                (base - overflow * weight / shrink_weight).max(0.0),
+            );
+        }
+    }
+    let resolved_fixed = children
+        .iter()
+        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
+        .map(|child| {
+            let (before, after) = margin_main(child, axis);
+            sizes[&child.id] + before + after
+        })
+        .sum::<f32>();
+    let remaining = (available_main - resolved_fixed - flex_margins - total_gap).max(0.0);
+    sizes.extend(allocate_flex_main(
+        children,
+        axis,
+        available_main,
+        remaining,
+    )?);
+    Ok(sizes)
 }
 
 fn allocate_flex_main(
@@ -2997,6 +3040,83 @@ mod tests {
         assert_eq!(layouts[&2].width, 50.0);
         assert_eq!(layouts[&3].width, 50.0);
         assert_eq!(layouts[&3].x, 50.0);
+    }
+
+    #[test]
+    fn auto_row_measures_text_height_at_allocated_flex_width() {
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Column, [])),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Row,
+                    [
+                        (PropKey::WidthPercent, PropValue::Float(100.0)),
+                        (PropKey::AlignItems, PropValue::Integer(2)),
+                    ],
+                ),
+            ),
+        ]);
+        for index in 0..3_u32 {
+            let button_id = 3 + u64::from(index);
+            let text_id = 6 + u64::from(index);
+            nodes.insert(
+                button_id,
+                node(
+                    button_id,
+                    2,
+                    index,
+                    NodeKind::Pressable,
+                    [
+                        (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        (PropKey::MinWidth, PropValue::Float(0.0)),
+                        (PropKey::MinHeight, PropValue::Float(40.0)),
+                        (PropKey::PaddingHorizontal, PropValue::Float(16.0)),
+                        (PropKey::PaddingVertical, PropValue::Float(8.0)),
+                        (PropKey::FlexDirection, PropValue::Integer(2)),
+                    ],
+                ),
+            );
+            nodes.insert(
+                text_id,
+                node(
+                    text_id,
+                    button_id,
+                    0,
+                    NodeKind::Text,
+                    [
+                        (PropKey::Text, PropValue::String("7 days".into())),
+                        (PropKey::FontSize, PropValue::Float(14.0)),
+                        (PropKey::LineHeight, PropValue::Float(20.0)),
+                        (PropKey::FlexShrink, PropValue::Float(1.0)),
+                    ],
+                ),
+            );
+        }
+        let layouts = calculate_with_text_scale(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 300.0,
+                height: 500.0,
+            },
+            2.0,
+        )
+        .expect("layout");
+        assert_eq!(layouts[&3].width, 100.0);
+        assert!(layouts[&2].height >= 96.0, "row height: {:?}", layouts[&2]);
+        assert!(
+            layouts[&3].height >= 96.0,
+            "button height: {:?}",
+            layouts[&3]
+        );
+        assert!(
+            layouts[&6].height >= 80.0,
+            "wrapped text: {:?}",
+            layouts[&6]
+        );
     }
 
     #[test]
