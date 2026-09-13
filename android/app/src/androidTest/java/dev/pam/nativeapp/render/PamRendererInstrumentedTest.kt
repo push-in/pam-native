@@ -86,6 +86,68 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun formattedInputsRetainRapidKeyboardEvents() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.INPUT_FORMAT to PropValue.Integer(3),
+                        PropKey.INPUT_FORMAT_DECIMAL_DIGITS to PropValue.Integer(2),
+                        PropKey.INPUT_FORMAT_LOCALE to PropValue.Text("pt-BR"),
+                        PropKey.TEST_ID to PropValue.Text("rapid-currency-input"),
+                    ))),
+                    Mutation.Create(node(3, 1, NodeKind.INPUT, mapOf(
+                        PropKey.INPUT_FORMAT to PropValue.Integer(2),
+                        PropKey.INPUT_FORMAT_PATTERN to PropValue.Text("(##) #####-####"),
+                        PropKey.TEST_ID to PropValue.Text("rapid-mask-input"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(16f, 40f, 328f, 56f)),
+                    Mutation.Layout(3, Frame(16f, 112f, 328f, 56f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            instrumentation.waitForIdleSync()
+
+            lateinit var currency: EditText
+            onMain(instrumentation) {
+                currency = requireNotNull(
+                    activity.host.findByTransitionName("rapid-currency-input"),
+                ) as EditText
+                currency.setText("128450")
+                currency.setSelection(currency.text.length)
+                currency.requestFocus()
+            }
+            repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
+            instrumentation.sendStringSync("73125")
+            instrumentation.waitForIdleSync()
+            assertEquals("731,25", currency.text.toString())
+
+            lateinit var mask: EditText
+            onMain(instrumentation) {
+                mask = requireNotNull(
+                    activity.host.findByTransitionName("rapid-mask-input"),
+                ) as EditText
+                mask.setText("11987654321")
+                mask.setSelection(mask.text.length)
+                mask.requestFocus()
+            }
+            repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
+            instrumentation.sendStringSync("21912345678")
+            instrumentation.waitForIdleSync()
+            assertEquals("(21) 91234-5678", mask.text.toString())
+            onMain(instrumentation) { renderer.close() }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun openDrawerDispatchesTapToDestinationPressable() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

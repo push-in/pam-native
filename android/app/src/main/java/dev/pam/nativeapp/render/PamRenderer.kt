@@ -4218,10 +4218,17 @@ class PamRenderer(
                             INPUT_FORMAT_NONE.toLong(),
                         ).toInt() == INPUT_FORMAT_CURRENCY
                         state.updating = true
-                        input.setText(formatted)
+                        // Keep the same Editable/input connection while formatting. Calling
+                        // setText() from a TextWatcher restarts the connection and can drop
+                        // subsequent key events from a fast IME (or hardware keyboard).
+                        editable?.replace(0, editable.length, formatted)
+                        val formattedSelection = if (currency) {
+                            input.text.length
+                        } else {
+                            cursorAfterDigits(input.text.toString(), digitOffset)
+                        }
                         input.setSelection(
-                            if (currency) formatted.length
-                            else cursorAfterDigits(formatted, digitOffset),
+                            formattedSelection.coerceIn(0, input.text.length),
                         )
                         state.updating = false
                     }

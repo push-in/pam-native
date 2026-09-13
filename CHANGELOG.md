@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.27 - 2026-09-12
+
+- Preserve the active Android `Editable` while applying mask and currency
+  formatting so rapid hardware/IME input cannot lose queued key events.
+- Clamp the formatted cursor to the committed editable length, preventing
+  backspace sequences from producing an invalid selection or crashing.
+
 ## 1.0.26 - 2026-09-08
 
 - Add reusable native masked, currency and locale-aware input formatting.
