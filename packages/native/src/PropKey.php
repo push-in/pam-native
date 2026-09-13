@@ -461,4 +461,13 @@ enum PropKey: int
     case NativeTextColorResource = 453;
     case NativeBorderColorResource = 454;
     case NativeStateStyles = 455;
+    case InputFormat = 456;
+    case InputFormatPattern = 457;
+    case InputFormatPlaceholder = 458;
+    case InputFormatPrefix = 459;
+    case InputFormatSuffix = 460;
+    case InputFormatDecimalDigits = 461;
+    case GestureNativeTranslationLimitX = 462;
+    case GestureNativeResetOnEnd = 463;
+    case InputFormatLocale = 464;
 }

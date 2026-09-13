@@ -10,6 +10,7 @@ use Pam\Native\EventKind;
 use Pam\Native\InputAutoCapitalize;
 use Pam\Native\InputAutofillImportance;
 use Pam\Native\InputContentSizeEvent;
+use Pam\Native\InputFormat;
 use Pam\Native\InputKeyEvent;
 use Pam\Native\InputMode;
 use Pam\Native\InputSelectionEvent;
@@ -20,6 +21,50 @@ use Pam\Native\PropKey;
 /** @phpstan-require-extends Element */
 trait HasInputBehavior
 {
+    public function format(InputFormat $format): static
+    {
+        return $this->withProperty(PropKey::InputFormat, $format->value);
+    }
+
+    public function mask(string $pattern, string $placeholder = '#'): static
+    {
+        if ($pattern === '' || strlen($pattern) > 128) {
+            throw new \InvalidArgumentException(
+                'Input masks require a pattern between 1 and 128 bytes.',
+            );
+        }
+        if (strlen($placeholder) !== 1) {
+            throw new \InvalidArgumentException(
+                'Input mask placeholders must be exactly one byte.',
+            );
+        }
+
+        return $this
+            ->format(InputFormat::Pattern)
+            ->withProperty(PropKey::InputFormatPattern, $pattern)
+            ->withProperty(PropKey::InputFormatPlaceholder, $placeholder);
+    }
+
+    public function currency(
+        int $decimalDigits = 2,
+        string $prefix = '',
+        string $suffix = '',
+        ?string $locale = null,
+    ): static {
+        $input = $this
+            ->format(InputFormat::Currency)
+            ->withProperty(
+                PropKey::InputFormatDecimalDigits,
+                min(6, max(0, $decimalDigits)),
+            )
+            ->withProperty(PropKey::InputFormatPrefix, substr($prefix, 0, 16))
+            ->withProperty(PropKey::InputFormatSuffix, substr($suffix, 0, 16));
+
+        return $locale === null || trim($locale) === ''
+            ? $input
+            : $input->withProperty(PropKey::InputFormatLocale, substr(trim($locale), 0, 35));
+    }
+
     public function editable(bool $editable = true): static
     {
         return $this->withProperty(PropKey::InputEditable, $editable);

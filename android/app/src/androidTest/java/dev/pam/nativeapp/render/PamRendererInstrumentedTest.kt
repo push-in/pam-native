@@ -47,6 +47,232 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun currencyInputKeepsNumericTypingAtTheTrailingMinorUnit() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.INPUT_FORMAT to PropValue.Integer(3),
+                        PropKey.INPUT_FORMAT_DECIMAL_DIGITS to PropValue.Integer(2),
+                        PropKey.INPUT_FORMAT_LOCALE to PropValue.Text("pt-BR"),
+                        PropKey.ON_CHANGE to PropValue.Flag(true),
+                        PropKey.TEST_ID to PropValue.Text("currency-input"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(16f, 40f, 328f, 56f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val input = requireNotNull(
+                    activity.host.findByTransitionName("currency-input"),
+                ) as EditText
+                input.requestFocus()
+                "123456".forEach { digit -> input.append(digit.toString()) }
+                assertEquals("1.234,56", input.text.toString())
+                assertEquals(input.text.length, input.selectionStart)
+                assertEquals(input.text.length, input.selectionEnd)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun formattedInputsRetainRapidKeyboardEvents() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.INPUT_FORMAT to PropValue.Integer(3),
+                        PropKey.INPUT_FORMAT_DECIMAL_DIGITS to PropValue.Integer(2),
+                        PropKey.INPUT_FORMAT_LOCALE to PropValue.Text("pt-BR"),
+                        PropKey.TEST_ID to PropValue.Text("rapid-currency-input"),
+                    ))),
+                    Mutation.Create(node(3, 1, NodeKind.INPUT, mapOf(
+                        PropKey.INPUT_FORMAT to PropValue.Integer(2),
+                        PropKey.INPUT_FORMAT_PATTERN to PropValue.Text("(##) #####-####"),
+                        PropKey.TEST_ID to PropValue.Text("rapid-mask-input"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(16f, 40f, 328f, 56f)),
+                    Mutation.Layout(3, Frame(16f, 112f, 328f, 56f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            instrumentation.waitForIdleSync()
+
+            lateinit var currency: EditText
+            onMain(instrumentation) {
+                currency = requireNotNull(
+                    activity.host.findByTransitionName("rapid-currency-input"),
+                ) as EditText
+                currency.setText("128450")
+                currency.setSelection(currency.text.length)
+                currency.requestFocus()
+            }
+            repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
+            instrumentation.sendStringSync("73125")
+            instrumentation.waitForIdleSync()
+            assertEquals("731,25", currency.text.toString())
+
+            lateinit var mask: EditText
+            onMain(instrumentation) {
+                mask = requireNotNull(
+                    activity.host.findByTransitionName("rapid-mask-input"),
+                ) as EditText
+                mask.setText("11987654321")
+                mask.setSelection(mask.text.length)
+                mask.requestFocus()
+            }
+            repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
+            instrumentation.sendStringSync("21912345678")
+            instrumentation.waitForIdleSync()
+            assertEquals("(21) 91234-5678", mask.text.toString())
+            onMain(instrumentation) { renderer.close() }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun openDrawerDispatchesTapToDestinationPressable() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val events = ArrayList<Pair<Long, Int>>()
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { id, kind, _ ->
+                    events += id to kind
+                }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(7, 1, NodeKind.SCROLL)),
+                    Mutation.Create(node(2, 7, NodeKind.DRAWER_LAYOUT, mapOf(
+                        PropKey.DRAWER_OPEN to PropValue.Flag(true),
+                        PropKey.DRAWER_WIDTH to PropValue.Decimal(304.0),
+                    ))),
+                    Mutation.Create(NodeSpec(3, 2, 0, NodeKind.VIEW, emptyMap())),
+                    Mutation.Create(NodeSpec(4, 2, 1, NodeKind.SAFE_AREA_VIEW, emptyMap())),
+                    Mutation.Create(node(8, 4, NodeKind.COLUMN)),
+                    Mutation.Create(node(5, 8, NodeKind.PRESSABLE, mapOf(
+                        PropKey.ON_PRESS to PropValue.Flag(true),
+                        PropKey.TEST_ID to PropValue.Text("drawer-destination"),
+                    ))),
+                    Mutation.Create(node(6, 5, NodeKind.TEXT)),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(7, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(3, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(4, Frame(0f, 0f, 304f, 720f)),
+                    Mutation.Layout(8, Frame(0f, 0f, 304f, 720f)),
+                    Mutation.Layout(5, Frame(16f, 100f, 272f, 52f)),
+                    Mutation.Layout(6, Frame(16f, 14f, 120f, 24f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val target = requireNotNull(activity.host.findByTransitionName("drawer-destination"))
+                var ancestor = target.parent
+                while (ancestor != null && ancestor !is PamDrawerLayout) {
+                    ancestor = ancestor.parent
+                }
+                requireNotNull(ancestor as? PamDrawerLayout)
+                val targetLocation = IntArray(2)
+                val hostLocation = IntArray(2)
+                target.getLocationOnScreen(targetLocation)
+                activity.host.getLocationOnScreen(hostLocation)
+                val x = targetLocation[0] - hostLocation[0] + target.width / 2f
+                val y = targetLocation[1] - hostLocation[1] + target.height / 2f
+                val downAt = SystemClock.uptimeMillis()
+                val down = MotionEvent.obtain(downAt, downAt, MotionEvent.ACTION_DOWN, x, y, 0)
+                val up = MotionEvent.obtain(downAt, downAt + 16, MotionEvent.ACTION_UP, x, y, 0)
+                assertTrue(activity.host.dispatchTouchEvent(down))
+                assertTrue(activity.host.dispatchTouchEvent(up))
+                down.recycle()
+                up.recycle()
+                assertEquals(listOf(5L to EventKind.PRESS.value), events)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun rendererKeepsNativePanTransformOnAComposedSwipeForeground() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.VIEW)),
+                    Mutation.Create(node(3, 2, NodeKind.ROW)),
+                    Mutation.Create(node(4, 2, NodeKind.PRESSABLE, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("swipe-gesture"),
+                        PropKey.GESTURE_TYPE to PropValue.Integer(2),
+                        PropKey.GESTURE_ENABLED to PropValue.Flag(true),
+                        PropKey.GESTURE_MIN_POINTERS to PropValue.Integer(1),
+                        PropKey.GESTURE_MAX_POINTERS to PropValue.Integer(1),
+                        PropKey.GESTURE_DIRECTION to PropValue.Integer(2),
+                        PropKey.GESTURE_COMPOSITION to PropValue.Integer(1),
+                        PropKey.GESTURE_MIN_DISTANCE to PropValue.Decimal(24.0),
+                        PropKey.GESTURE_NATIVE_TRANSFORM to PropValue.Flag(true),
+                        PropKey.GESTURE_NATIVE_TRANSLATION_LIMIT_X to PropValue.Decimal(96.0),
+                    ))),
+                    Mutation.Create(node(5, 4, NodeKind.ROW)),
+                    Mutation.Create(node(6, 5, NodeKind.TEXT)),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 120f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 360f, 64f)),
+                    Mutation.Layout(3, Frame(0f, 0f, 360f, 64f)),
+                    Mutation.Layout(4, Frame(0f, 0f, 360f, 64f)),
+                    Mutation.Layout(5, Frame(0f, 0f, 360f, 64f)),
+                    Mutation.Layout(6, Frame(16f, 20f, 160f, 24f)),
+                )))
+                val gesture = requireNotNull(
+                    activity.host.findByTransitionName("swipe-gesture"),
+                ) as PamPressable
+                val foreground = gesture.getChildAt(0)
+                val downTime = SystemClock.uptimeMillis()
+                gesture.dispatchTouchEvent(MotionEvent.obtain(
+                    downTime, downTime, MotionEvent.ACTION_DOWN, 320f, 32f, 0,
+                ))
+                gesture.dispatchTouchEvent(MotionEvent.obtain(
+                    downTime, downTime + 32L, MotionEvent.ACTION_MOVE, 0f, 32f, 0,
+                ))
+                assertEquals(
+                    -96f * activity.resources.displayMetrics.density,
+                    foreground.translationX,
+                    0.5f,
+                )
+                gesture.dispatchTouchEvent(MotionEvent.obtain(
+                    downTime, downTime + 48L, MotionEvent.ACTION_UP, 0f, 32f, 0,
+                ))
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun nestedRowKeepsExplicitCrossAxisHeightWhileItsNativeRelayoutIsPending() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -1180,6 +1406,10 @@ class PamRendererInstrumentedTest {
         try {
             onMain(instrumentation) {
                 val list = PamRecyclerList(activity)
+                assertFalse(
+                    "A bounded recycler must not pre-scroll its enclosing PamScrollContainer.",
+                    list.isNestedScrollingEnabled,
+                )
                 activity.host.addView(
                     list,
                     FrameLayout.LayoutParams(

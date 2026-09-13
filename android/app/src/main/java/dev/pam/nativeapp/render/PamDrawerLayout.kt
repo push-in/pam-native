@@ -20,6 +20,13 @@ import kotlin.math.abs
 internal fun drawerIsVisuallyOpen(requestedOpen: Boolean, permanent: Boolean): Boolean =
     requestedOpen || permanent
 
+/** A slide drawer must leave the viewport completely when its requested state is closed. */
+internal fun slideDrawerRestingX(visuallyOpen: Boolean, openX: Float, closedX: Float): Float =
+    if (visuallyOpen) openX else closedX
+
+internal fun drawerContentVisible(visuallyOpen: Boolean, permanent: Boolean, tracking: Boolean = false): Boolean =
+    visuallyOpen || permanent || tracking
+
 internal fun permanentDrawerContentClip(
     viewportLeft: Int,
     viewportRight: Int,
@@ -68,7 +75,11 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
     private val permanentContentClipBounds = Rect()
 
     init {
-        clipChildren = false
+        // The drawer animates inside this viewport. Clipping prevents a closed
+        // child from leaking into neighbouring layouts when the host is used
+        // in a bounded pane instead of as a full-screen root.
+        clipChildren = true
+        clipToPadding = true
         setWillNotDraw(false)
         setOnApplyWindowInsetsListener { _, insets ->
             val nextTop = if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -216,16 +227,20 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
         updatePermanentContentClip(content)
         val drawingTime = drawingTime
         if (resolvedType() == TYPE_BACK) {
-            drawChild(canvas, drawer, drawingTime)
+            if (drawer.visibility == View.VISIBLE) drawChild(canvas, drawer, drawingTime)
             drawChild(canvas, content, drawingTime)
         } else {
             drawChild(canvas, content, drawingTime)
-            if (progress > 0f && resolvedType() != TYPE_PERMANENT) {
+            if (
+                drawer.visibility == View.VISIBLE &&
+                progress > 0f &&
+                resolvedType() != TYPE_PERMANENT
+            ) {
                 overlayPaint.color = overlayColor
                 overlayPaint.alpha = ((overlayColor ushr 24) * progress).toInt()
                 canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), overlayPaint)
             }
-            drawChild(canvas, drawer, drawingTime)
+            if (drawer.visibility == View.VISIBLE) drawChild(canvas, drawer, drawingTime)
         }
     }
 
@@ -277,6 +292,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
                 } else {
                     event.x <= edge
                 }
+                if (tracking) getChildAt(1)?.visibility = View.VISIBLE
                 if (tracking && keyboardDismissMode == KEYBOARD_ON_DRAG) {
                     (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
                         ?.hideSoftInputFromWindow(windowToken, 0)
@@ -329,7 +345,7 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
         val drawerTarget = when (type) {
             TYPE_PERMANENT -> 0f
             TYPE_BACK -> openX
-            TYPE_SLIDE -> if (visuallyOpen) openX else openX + (closedX - openX) * 0.35f
+            TYPE_SLIDE -> slideDrawerRestingX(visuallyOpen, openX, closedX)
             else -> if (visuallyOpen) openX else closedX
         }
         val contentTarget = when (type) {
@@ -340,15 +356,27 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
             else -> 0f
         }
         val targetProgress = if (visuallyOpen && type != TYPE_PERMANENT) 1f else 0f
+        if (drawerContentVisible(visuallyOpen, type == TYPE_PERMANENT)) {
+            drawer.visibility = View.VISIBLE
+        }
         updatePermanentContentClip(content)
         if (!animated || PamMotionPolicy.isReduced(context)) {
             drawer.translationX = drawerTarget
             content.translationX = contentTarget
             progress = targetProgress
+            drawer.visibility = if (drawerContentVisible(visuallyOpen, type == TYPE_PERMANENT)) {
+                View.VISIBLE
+            } else {
+                View.INVISIBLE
+            }
             invalidate()
             return
         }
-        drawer.animate().translationX(drawerTarget).setDuration(200).start()
+        drawer.animate().translationX(drawerTarget).setDuration(200).withEndAction {
+            if (!drawerContentVisible(open, resolvedType() == TYPE_PERMANENT)) {
+                drawer.visibility = View.INVISIBLE
+            }
+        }.start()
         content.animate().translationX(contentTarget).setDuration(200).start()
         progressAnimator = ValueAnimator.ofFloat(progress, targetProgress).apply {
             duration = 200
@@ -370,10 +398,11 @@ internal class PamDrawerLayout(context: Context) : FrameLayout(context) {
         val closedX = if (isRight()) this.width.toFloat() else -width
         val drawerStart = when (type) {
             TYPE_BACK, TYPE_PERMANENT -> openX
-            TYPE_SLIDE -> openX + (closedX - openX) * 0.35f
+            TYPE_SLIDE -> closedX
             else -> closedX
         }
         progress = value.coerceIn(0f, 1f)
+        drawer.visibility = View.VISIBLE
         drawer.translationX = drawerStart + (openX - drawerStart) * progress
         content.translationX = when (type) {
             TYPE_BACK, TYPE_SLIDE -> direction * width * progress

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.27 - 2026-09-12
+
+- Preserve the active Android `Editable` while applying mask and currency
+  formatting so rapid hardware/IME input cannot lose queued key events.
+- Clamp the formatted cursor to the committed editable length, preventing
+  backspace sequences from producing an invalid selection or crashing.
+
+## 1.0.26 - 2026-09-08
+
+- Add reusable native masked, currency and locale-aware input formatting.
+- Add bounded native gesture translation and deterministic end-state reset.
+- Preserve pull-to-refresh gestures when refresh surfaces are nested in scrolling pages.
+- Install optimized local Android runs from the minified, locally signed Benchmark variant.
+
 ## 1.0.25 - 2026-09-07
 
 - Isolate Android macrobenchmarks from the target process so the Kotlin instrumentation runtime loads reliably.

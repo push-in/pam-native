@@ -931,7 +931,11 @@ public final class PamRenderer {
                 nativeMinimumScale:
                     state.properties[PamConstants.gestureNativeMinScale]?.decimalOrNil() ?? 1,
                 nativeMaximumScale:
-                    state.properties[PamConstants.gestureNativeMaxScale]?.decimalOrNil() ?? 4
+                    state.properties[PamConstants.gestureNativeMaxScale]?.decimalOrNil() ?? 4,
+                nativeTranslationLimitX:
+                    state.properties[PamConstants.gestureNativeTranslationLimitX]?.decimalOrNil() ?? 0,
+                nativeResetOnEnd:
+                    state.properties[PamConstants.gestureNativeResetOnEnd]?.boolOrNil() ?? false
             )
             eventBridges[nodeId]?[EventKind.gestureUpdate.rawValue] = bridge
         }
@@ -1430,6 +1434,8 @@ public final class PamRenderer {
                     label.text = textValue
                 } else if let button = view as? UIButton {
                     button.setTitle(textValue, for: .normal)
+                } else if let field = view as? PamInputField {
+                    field.setFormattedTextFromRenderer(textValue)
                 } else if let field = view as? UITextField {
                     field.text = textValue
                 }
@@ -1437,6 +1443,8 @@ public final class PamRenderer {
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
+            } else if let textValue = value.textOrNil(), let field = view as? PamInputField {
+                field.setFormattedTextFromRenderer(textValue)
             } else if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.text = textValue
             } else if let boolValue = value.boolOrNil(), let switchView = view as? PamVuetifySwitch {
@@ -1448,6 +1456,24 @@ public final class PamRenderer {
         case PamConstants.placeholder:
             if let textValue = value.textOrNil(), let field = view as? UITextField {
                 field.placeholder = textValue
+            }
+        case PamConstants.inputFormat,
+             PamConstants.inputFormatPattern,
+             PamConstants.inputFormatPlaceholder,
+             PamConstants.inputFormatPrefix,
+             PamConstants.inputFormatSuffix,
+             PamConstants.inputFormatDecimalDigits,
+             PamConstants.inputFormatLocale:
+            if let field = view as? PamInputField, let state = nodes[nodeId] {
+                field.configureInputFormat(
+                    format: Int(state.properties[PamConstants.inputFormat]?.integerOrNil() ?? 1),
+                    pattern: state.properties[PamConstants.inputFormatPattern]?.textOrNil() ?? "",
+                    placeholder: state.properties[PamConstants.inputFormatPlaceholder]?.textOrNil() ?? "#",
+                    prefix: state.properties[PamConstants.inputFormatPrefix]?.textOrNil() ?? "",
+                    suffix: state.properties[PamConstants.inputFormatSuffix]?.textOrNil() ?? "",
+                    decimalDigits: Int(state.properties[PamConstants.inputFormatDecimalDigits]?.integerOrNil() ?? 2),
+                    locale: state.properties[PamConstants.inputFormatLocale]?.textOrNil() ?? ""
+                )
             }
         case PamConstants.source:
             if let imageView = imageView(for: view), let source = value.textOrNil() {
@@ -1871,7 +1897,9 @@ public final class PamRenderer {
              PamConstants.gestureMinDurationMs,
              PamConstants.gestureNativeTransform,
              PamConstants.gestureNativeMinScale,
-             PamConstants.gestureNativeMaxScale:
+             PamConstants.gestureNativeMaxScale,
+             PamConstants.gestureNativeTranslationLimitX,
+             PamConstants.gestureNativeResetOnEnd:
             installEvents(for: nodeId)
         case PamConstants.gestureNativeResetKey:
             if let child = view.subviews.first {
@@ -3575,6 +3603,8 @@ public final class PamRenderer {
         private var nativeGestureTransform = false
         private var nativeGestureMinimumScale: CGFloat = 1
         private var nativeGestureMaximumScale: CGFloat = 4
+        private var nativeGestureTranslationLimitX: CGFloat = 0
+        private var nativeGestureResetOnEnd = false
         private var nativeGestureBaseTransform = CGAffineTransform.identity
         private var scrollGestureStart: CGFloat = 0
 
@@ -3733,7 +3763,9 @@ public final class PamRenderer {
             emitsCancel: Bool,
             nativeTransform: Bool,
             nativeMinimumScale: Double,
-            nativeMaximumScale: Double
+            nativeMaximumScale: Double,
+            nativeTranslationLimitX: Double,
+            nativeResetOnEnd: Bool
         ) {
             semanticGestureType = type
             semanticGestureDirection = direction
@@ -3749,6 +3781,8 @@ public final class PamRenderer {
                 nativeGestureMinimumScale,
                 CGFloat(nativeMaximumScale)
             )
+            nativeGestureTranslationLimitX = CGFloat(max(0, nativeTranslationLimitX))
+            nativeGestureResetOnEnd = nativeResetOnEnd
 
             let minimum = min(max(minimumPointers, 1), 10)
             let maximum = min(max(maximumPointers, minimum), 10)
@@ -4227,9 +4261,12 @@ public final class PamRenderer {
             }
             switch semanticGestureType {
             case 2, 5:
+                let translatedX = nativeGestureTranslationLimitX > 0
+                    ? min(nativeGestureTranslationLimitX, max(-nativeGestureTranslationLimitX, translation.x))
+                    : translation.x
                 child.transform = nativeGestureBaseTransform.concatenating(
                     CGAffineTransform(
-                        translationX: translation.x,
+                        translationX: translatedX,
                         y: translation.y
                     )
                 )
@@ -4251,6 +4288,16 @@ public final class PamRenderer {
                 child.transform = nativeGestureBaseTransform.rotated(by: rotation)
             default:
                 break
+            }
+            if nativeGestureResetOnEnd,
+               sender.state == .ended || sender.state == .cancelled || sender.state == .failed {
+                UIView.animate(
+                    withDuration: 0.18,
+                    delay: 0,
+                    options: [.curveEaseOut, .beginFromCurrentState]
+                ) {
+                    child.transform = self.nativeGestureBaseTransform
+                }
             }
         }
 

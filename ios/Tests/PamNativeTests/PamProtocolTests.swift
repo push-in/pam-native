@@ -113,6 +113,8 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(PamConstants.nativeTextColorResource, 453)
         XCTAssertEqual(PamConstants.nativeBorderColorResource, 454)
         XCTAssertEqual(PamConstants.nativeStateStyles, 455)
+        XCTAssertEqual(PamConstants.inputFormat, 456)
+        XCTAssertEqual(PamConstants.inputFormatLocale, 464)
         XCTAssertEqual(PamConstants.elevation, 56)
         XCTAssertEqual(
             [

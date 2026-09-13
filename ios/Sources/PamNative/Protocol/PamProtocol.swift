@@ -431,6 +431,15 @@ public enum PamConstants {
     public static let nativeTextColorResource = 453
     public static let nativeBorderColorResource = 454
     public static let nativeStateStyles = 455
+    public static let inputFormat = 456
+    public static let inputFormatPattern = 457
+    public static let inputFormatPlaceholder = 458
+    public static let inputFormatPrefix = 459
+    public static let inputFormatSuffix = 460
+    public static let inputFormatDecimalDigits = 461
+    public static let gestureNativeTranslationLimitX = 462
+    public static let gestureNativeResetOnEnd = 463
+    public static let inputFormatLocale = 464
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

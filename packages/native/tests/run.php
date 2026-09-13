@@ -52,6 +52,7 @@ use Pam\Native\ImageResizeMethod;
 use Pam\Native\InputAutoCapitalize;
 use Pam\Native\InputAutofillImportance;
 use Pam\Native\InputContentSizeEvent;
+use Pam\Native\InputFormat;
 use Pam\Native\InputKeyEvent;
 use Pam\Native\InputMode;
 use Pam\Native\InputSelectionEvent;
@@ -230,6 +231,7 @@ spl_autoload_register(static function (string $class): void {
 });
 
 require __DIR__.'/Fixtures/ExamplePluginProvider.php';
+require __DIR__.'/Fixtures/TemplateEnumScope.php';
 
 final class TestDiagnostics
 {
@@ -263,6 +265,10 @@ enum TypedRouteTestName: string
 {
     case Home = 'home';
     case Product = 'product';
+}
+
+final class TemplateEnumScope
+{
 }
 
 if (!function_exists('pam_native_error')) {
@@ -908,6 +914,10 @@ $gesture = GestureDetector::make(
     ->composition(GestureComposition::Simultaneous)
     ->minimumDistance(12.0)
     ->minimumDuration(80)
+    ->nativeTransform(
+        translationLimitX: 96.0,
+        resetOnEnd: true,
+    )
     ->onBegin(static function (): void {
     })
     ->onUpdate(static function (): void {
@@ -923,6 +933,12 @@ $assert(
         && $gesture->properties()[PropKey::GestureMaxPointers->value] === 2
         && $gesture->properties()[PropKey::GestureDirection->value]
             === GestureDirection::Horizontal->value
+        && $gesture->properties()[PropKey::PressOpacity->value] === 1.0
+        && $gesture->properties()[PropKey::PressScale->value] === 1.0
+        && $gesture->properties()[PropKey::GestureNativeTranslationLimitX->value]
+            === 96.0
+        && $gesture->properties()[PropKey::GestureNativeResetOnEnd->value]
+            === true
         && count($gesture->events()) === 4,
     'GestureDetector must compile to an additive native Pressable contract.',
 );
@@ -1439,6 +1455,38 @@ $assert(
         && $inputKey instanceof InputKeyEvent
         && $inputKey->key === 'Enter',
     'Input helpers must preserve native editing, selection, keyboard, size and key behavior.',
+);
+$maskedInput = \Pam\Native\UI\Input::make('11987654321')->mask('(##) #####-####');
+$currencyInput = \Pam\Native\UI\Input::make('123456')->currency(2, 'R$ ', ' BRL', 'pt-BR');
+$assert(
+    $maskedInput->properties()[PropKey::InputFormat->value] === InputFormat::Pattern->value
+        && $maskedInput->properties()[PropKey::InputFormatPattern->value] === '(##) #####-####'
+        && $maskedInput->properties()[PropKey::InputFormatPlaceholder->value] === '#'
+        && $currencyInput->properties()[PropKey::InputFormat->value] === InputFormat::Currency->value
+        && $currencyInput->properties()[PropKey::InputFormatDecimalDigits->value] === 2
+        && $currencyInput->properties()[PropKey::InputFormatPrefix->value] === 'R$ '
+        && $currencyInput->properties()[PropKey::InputFormatSuffix->value] === ' BRL'
+        && $currencyInput->properties()[PropKey::InputFormatLocale->value] === 'pt-BR',
+    'Input formatting helpers must expose typed pattern and locale-aware currency contracts.',
+);
+$templateFormattedInputs = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column>'
+        .'<Input inputFormat="mask" inputFormatPattern="(##) #####-####" />'
+        .'<Input inputFormat="currency" inputFormatDecimalDigits="2" inputFormatPrefix="R$ " inputFormatLocale="pt-BR" />'
+        .'</Column>',
+    ),
+    new class {
+    },
+    [],
+);
+$assert(
+    array_map(
+        static fn (\Pam\Native\Element $input): int => $input
+            ->properties()[PropKey::InputFormat->value],
+        $templateFormattedInputs->children(),
+    ) === [InputFormat::Pattern->value, InputFormat::Currency->value],
+    'Template inputFormat aliases must compile to the sequential native enum.',
 );
 $secureAliasElement = TemplateRenderer::render(
     TemplateCompiler::compile('<Input secureTextEntry="true" />'),
@@ -5181,6 +5229,22 @@ $assert(
     'Template logical AND must consume its right operand when the left operand is false.',
 );
 $assert(
+    TemplateExpression::evaluate(
+        'TypedRouteTestName::Home->value',
+        new TemplateEnumScope(),
+        [],
+    ) === 'home',
+    'Template expressions must resolve scoped PHP enum cases and their backed values.',
+);
+$assert(
+    TemplateExpression::evaluate(
+        'ImportedState::Ready->value',
+        new \Pam\Native\Tests\Fixtures\Screen\TemplateEnumScope(),
+        [],
+    ) === 1,
+    'Template expressions must resolve imported and aliased PHP enum cases from the component file.',
+);
+$assert(
     \Pam\Native\Internal\TemplateExpression::evaluate(
         '$left || $right',
         null,
@@ -6546,8 +6610,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.0.25',
-    'The runtime SDK contract must match the stable 1.0.25 package release.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.0.27',
+    'The runtime SDK contract must match the 1.0.27 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

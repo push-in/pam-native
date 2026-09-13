@@ -719,6 +719,35 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     private var lastContentWidth = -1
     private var lastContentHeight = -1
     private var syncingText = false
+    private var inputFormat = 1
+    private var inputFormatPattern = ""
+    private var inputFormatPlaceholder: Character = "#"
+    private var inputFormatPrefix = ""
+    private var inputFormatSuffix = ""
+    private var inputFormatDecimalDigits = 2
+    private var inputFormatLocale: Locale?
+
+    func configureInputFormat(
+        format: Int,
+        pattern: String,
+        placeholder: String,
+        prefix: String,
+        suffix: String,
+        decimalDigits: Int,
+        locale: String
+    ) {
+        inputFormat = min(3, max(1, format))
+        inputFormatPattern = String(pattern.prefix(128))
+        inputFormatPlaceholder = placeholder.first ?? "#"
+        inputFormatPrefix = String(prefix.prefix(16))
+        inputFormatSuffix = String(suffix.prefix(16))
+        inputFormatDecimalDigits = min(6, max(0, decimalDigits))
+        let localeIdentifier = locale.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "-", with: "_")
+        inputFormatLocale = localeIdentifier.isEmpty ? nil : Locale(identifier: localeIdentifier)
+        let formatted = formatInput(text ?? "")
+        if formatted != text { setTextFromRenderer(formatted) }
+    }
 
     override var text: String! {
         didSet {
@@ -737,6 +766,10 @@ final class PamInputField: UITextField, UITextFieldDelegate {
         syncingText = false
         syncFontCache()
         scheduleContentSizeUpdate()
+    }
+
+    func setFormattedTextFromRenderer(_ value: String) {
+        setTextFromRenderer(formatInput(value))
     }
 
     func setInputCallbacks(
@@ -808,7 +841,94 @@ final class PamInputField: UITextField, UITextFieldDelegate {
                 }
             }
         }
-        return true
+        guard inputFormat != 1,
+              let current = textField.text,
+              let swiftRange = Range(range, in: current) else { return true }
+        var proposed = current.replacingCharacters(in: swiftRange, with: string)
+        if string.isEmpty,
+           proposed.filter(\.isNumber).count == current.filter(\.isNumber).count {
+            proposed = removingDigit(beforeUTF16Offset: range.location, from: proposed)
+        }
+        let formatted = formatInput(proposed)
+        setTextFromRenderer(formatted)
+        let cursor = cursorAfterDigits(
+            in: formatted,
+            count: proposed.prefix(range.location + string.utf16.count).filter(\.isNumber).count
+        )
+        if let position = position(from: beginningOfDocument, offset: cursor) {
+            selectedTextRange = textRange(from: position, to: position)
+        }
+        sendActions(for: .editingChanged)
+        return false
+    }
+
+    private func formatInput(_ value: String) -> String {
+        switch inputFormat {
+        case 2: return formatPattern(value)
+        case 3: return formatCurrency(value)
+        default: return value
+        }
+    }
+
+    private func formatPattern(_ value: String) -> String {
+        let digits = value.filter(\.isNumber)
+        guard !digits.isEmpty, !inputFormatPattern.isEmpty else {
+            return digits.isEmpty ? "" : value
+        }
+        var result = ""
+        var index = digits.startIndex
+        for character in inputFormatPattern {
+            if character == inputFormatPlaceholder {
+                guard index < digits.endIndex else { break }
+                result.append(digits[index])
+                index = digits.index(after: index)
+            } else if index == digits.startIndex || index < digits.endIndex {
+                result.append(character)
+            }
+        }
+        return result
+    }
+
+    private func formatCurrency(_ value: String) -> String {
+        let digits = String(value.filter(\.isNumber).prefix(36))
+        guard !digits.isEmpty, let integer = Decimal(string: digits) else { return "" }
+        var divisor = Decimal(1)
+        for _ in 0..<inputFormatDecimalDigits { divisor *= 10 }
+        let formatter = NumberFormatter()
+        formatter.locale = inputFormatLocale ?? .current
+        formatter.numberStyle = .decimal
+        formatter.usesGroupingSeparator = true
+        formatter.minimumFractionDigits = inputFormatDecimalDigits
+        formatter.maximumFractionDigits = inputFormatDecimalDigits
+        return inputFormatPrefix + (formatter.string(from: NSDecimalNumber(decimal: integer / divisor)) ?? digits) + inputFormatSuffix
+    }
+
+    private func cursorAfterDigits(in value: String, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        var seen = 0
+        for (offset, character) in value.enumerated() where character.isNumber {
+            seen += 1
+            if seen >= count { return offset + 1 }
+        }
+        return value.count
+    }
+
+    private func removingDigit(beforeUTF16Offset offset: Int, from value: String) -> String {
+        var characters = Array(value)
+        let prefix = String(
+            decoding: value.utf16.prefix(max(0, offset)),
+            as: UTF16.self
+        )
+        var digit = prefix.filter(\.isNumber).count - 1
+        guard digit >= 0 else { return value }
+        for index in characters.indices where characters[index].isNumber {
+            if digit == 0 {
+                characters.remove(at: index)
+                return String(characters)
+            }
+            digit -= 1
+        }
+        return value
     }
 
     func textFieldDidChangeSelection(_ textField: UITextField) {

@@ -34,6 +34,10 @@ import dev.pam.nativeapp.R
 import dev.pam.nativeapp.PamActivity
 import java.lang.ref.WeakReference
 
+// The legacy soft-input flags remain necessary for the API 26 compatibility
+// floor. API 30+ insets are handled separately by WindowInsetsCompat below;
+// this function only configures the window-manager fallback contract.
+@Suppress("DEPRECATION")
 internal fun modalSoftInputAdjustMode(
     focusKeyboard: Boolean,
     presentation: Int,

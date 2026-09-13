@@ -8,6 +8,7 @@ import android.graphics.Typeface
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -47,10 +48,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var viewportChanged: ((Float, Int, Int, Int) -> Unit)? = null
     private var richIds: List<Long> = emptyList()
     private var richExtents: Map<Long, Int> = emptyMap()
+    private val accessibilityModes = IdentityHashMap<View, Int>()
 
     init {
         itemAnimator = null
-        isNestedScrollingEnabled = true
+        // PamScrollContainer coordinates ownership explicitly so a bounded
+        // list and its page never consume the same drag simultaneously.
+        isNestedScrollingEnabled = false
         clipChildren = true
         clipToPadding = false
         setHasFixedSize(true)
@@ -58,9 +62,58 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         addOnScrollListener(object : OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 updateAdaptivePrefetch(if (horizontal) dx else dy)
+                updateAccessibilityVisibility()
                 dispatchViewport()
             }
         })
+    }
+
+    override fun onChildAttachedToWindow(child: View) {
+        accessibilityModes.putIfAbsent(child, child.importantForAccessibility)
+        super.onChildAttachedToWindow(child)
+        updateAccessibilityVisibility()
+    }
+
+    override fun onChildDetachedFromWindow(child: View) {
+        accessibilityModes.remove(child)
+        super.onChildDetachedFromWindow(child)
+    }
+
+    override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        super.onLayout(changed, left, top, right, bottom)
+        updateAccessibilityVisibility()
+    }
+
+    /**
+     * RecyclerView deliberately lays out prefetched rows beyond its clipped
+     * viewport. Android's accessibility snapshot can otherwise intersect a
+     * descendant with the clip and publish an inverted rectangle. Keep those
+     * rows mounted for performance, but expose semantics only after the whole
+     * row is visible; scrolling restores the holder's original mode.
+     */
+    private fun updateAccessibilityVisibility() {
+        val viewportLeft = paddingLeft
+        val viewportTop = paddingTop
+        val viewportRight = width - paddingRight
+        val viewportBottom = height - paddingBottom
+        for (index in 0 until childCount) {
+            val child = getChildAt(index)
+            val original = accessibilityModes[child] ?: child.importantForAccessibility.also {
+                accessibilityModes[child] = it
+            }
+            val fullyVisible = child.left >= viewportLeft &&
+                child.top >= viewportTop &&
+                child.right <= viewportRight &&
+                child.bottom <= viewportBottom
+            val desired = if (fullyVisible) {
+                original
+            } else {
+                View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            }
+            if (child.importantForAccessibility != desired) {
+                child.importantForAccessibility = desired
+            }
+        }
     }
 
     fun setItems(items: PackedStringList?) {
@@ -202,12 +255,74 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
     }
 
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && scrollEnabled) {
+            // Run before RecyclerView dispatches DOWN to a row child. Waiting
+            // for onInterceptTouchEvent is too late when the row itself owns
+            // the first phase of the gesture inside a platform ScrollView.
+            parent?.requestDisallowInterceptTouchEvent(canConsumeScrollGesture())
+        }
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun canConsumeScrollGesture(): Boolean {
+        val count = adapter?.itemCount ?: 0
+        if (count <= 0) return false
+        val hasOverflow = if (horizontal) {
+            count.toLong() * dp(rowHeight) > width
+        } else if (richIds.isNotEmpty()) {
+            richIds.sumOf { richExtents[it]?.toLong() ?: dp(rowHeight).toLong() } > height
+        } else {
+            val rows = (count + columns.coerceAtLeast(1) - 1) /
+                columns.coerceAtLeast(1)
+            rows.toLong() * dp(rowHeight) > height
+        }
+        return hasOverflow || if (horizontal) {
+            canScrollHorizontally(-1) || canScrollHorizontally(1)
+        } else {
+            canScrollVertically(-1) || canScrollVertically(1)
+        }
+    }
+
+    internal fun hasScrollableContent(): Boolean = canConsumeScrollGesture()
+
+    internal fun canScrollInDirection(direction: Int): Boolean {
+        val manager = layoutManager as? LinearLayoutManager ?: return false
+        val count = adapter?.itemCount ?: 0
+        if (count <= 0) return false
+        if (direction > 0) {
+            val last = manager.findLastVisibleItemPosition()
+            val view = manager.findViewByPosition(last)
+            val edge = if (horizontal) {
+                (view?.left ?: 0) + (view?.width?.takeIf { it > 0 } ?: dp(rowHeight))
+            } else {
+                (view?.top ?: 0) + (view?.height?.takeIf { it > 0 } ?: dp(rowHeight))
+            }
+            val viewport = if (horizontal) width - paddingRight else height - paddingBottom
+            return last < count - 1 || edge > viewport
+        }
+        val first = manager.findFirstVisibleItemPosition()
+        val view = manager.findViewByPosition(first)
+        val edge = if (horizontal) view?.left ?: 0 else view?.top ?: 0
+        val viewport = if (horizontal) paddingLeft else paddingTop
+        return first > 0 || edge < viewport
+    }
+
     override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
         if (!scrollEnabled) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 touchDownX = event.x
                 touchDownY = event.y
+                // PamScrollContainer intentionally uses the platform
+                // ScrollView for native parity. It is not a
+                // NestedScrollingParent, so an overflowing RecyclerView must
+                // retain the gesture until it reaches its own boundary.
+                // Otherwise the page steals every vertical drag and rows
+                // beyond the list viewport become unreachable.
+                parent?.requestDisallowInterceptTouchEvent(
+                    canConsumeScrollGesture(),
+                )
             }
             MotionEvent.ACTION_MOVE -> {
                 val delta = if (horizontal) {
@@ -216,16 +331,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                     event.y - touchDownY
                 }
                 val direction = if (delta < 0f) 1 else -1
-                val canScroll = if (horizontal) {
-                    canScrollHorizontally(direction)
-                } else {
-                    canScrollVertically(direction)
-                }
+                val canScroll = canScrollInDirection(direction)
                 if (abs(delta) > touchSlop && !canScroll) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                     return false
                 }
             }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL ->
+                parent?.requestDisallowInterceptTouchEvent(false)
         }
         return super.onInterceptTouchEvent(event)
     }
@@ -697,8 +810,12 @@ private abstract class PackedRowAdapter(
         Color.BLACK,
     )
     private val headerBackground = context.themeColor(
-        android.R.attr.colorControlHighlight,
-        0x1F000000,
+        android.R.attr.colorAccent,
+        0xFF00875A.toInt(),
+    )
+    private val headerForeground = context.themeColor(
+        android.R.attr.colorAccent,
+        0xFF006C49.toInt(),
     )
 
     init {
@@ -720,9 +837,10 @@ private abstract class PackedRowAdapter(
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RowHolder =
         RowHolder(TextView(context).apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(16f), 0, dp(16f), 0)
+            setPadding(dp(20f), 0, dp(20f), 0)
             includeFontPadding = false
             setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
         })
 
     override fun onBindViewHolder(holder: RowHolder, position: Int) {
@@ -745,9 +863,18 @@ private abstract class PackedRowAdapter(
         val header = isHeader(position)
         holder.text.apply {
             text = value(position)
-            setTextColor(textColor)
+            setTextColor(if (header) headerForeground else textColor)
             setTypeface(typeface, if (header) Typeface.BOLD else Typeface.NORMAL)
-            setBackgroundColor(if (header) headerBackground else Color.TRANSPARENT)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (header) 13f else 16f)
+            letterSpacing = if (header) 0.035f else 0f
+            setBackgroundColor(
+                if (header) Color.argb(
+                    24,
+                    Color.red(headerBackground),
+                    Color.green(headerBackground),
+                    Color.blue(headerBackground),
+                ) else Color.TRANSPARENT,
+            )
             isEnabled = !header
         }
         applyLayout(holder.text)
