@@ -51,6 +51,31 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun engineChildCoordinatesSurviveCustomFrameLayoutPadding() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        onMain(instrumentation) {
+            val host = FrameLayout(instrumentation.targetContext)
+            host.setPadding(21, 13, 21, 13)
+            val child = View(instrumentation.targetContext)
+            host.addView(child, FrameLayout.LayoutParams(258, 54).apply {
+                gravity = Gravity.TOP or Gravity.LEFT
+                leftMargin = engineFrameMargin(21, host.paddingLeft)
+                topMargin = engineFrameMargin(13, host.paddingTop)
+            })
+            host.measure(
+                View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(80, View.MeasureSpec.EXACTLY),
+            )
+            host.layout(0, 0, 300, 80)
+            assertEquals(21, child.left)
+            assertEquals(13, child.top)
+            assertEquals(21, host.width - child.right)
+            assertEquals(13, host.height - child.bottom)
+            assertEquals(21, host.paddingLeft)
+        }
+    }
+
+    @Test
     fun currencyInputKeepsNumericTypingAtTheTrailingMinorUnit() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
