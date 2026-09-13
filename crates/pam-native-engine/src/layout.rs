@@ -1554,11 +1554,21 @@ fn intrinsic_extent(
     }
     let mut child_extents = Vec::with_capacity(node_children.len());
     for child in &node_children {
+        // Resolve a child's width against its containing block before
+        // measuring wrapped height. Final-layout callers already pass the
+        // allocated width, so this must not live in the shared measurement
+        // helper (which would apply percentages a second time).
+        let child_available_width = if requested_axis == Axis::Vertical {
+            dimension(child, PropKey::Width, PropKey::WidthPercent, inner_width)
+                .unwrap_or(inner_width)
+        } else {
+            inner_width
+        };
         let child_extent = constrained_intrinsic_extent(
             children,
             child,
             requested_axis,
-            inner_width,
+            child_available_width,
             inner_height,
             text_scale,
             text_metrics,
@@ -1791,15 +1801,6 @@ fn constrained_intrinsic_extent(
     text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
-    // Height depends on wrapping at the child's own width, not the whole
-    // parent's width. The cross-axis containing width is definite here even
-    // when the height being measured is intrinsically sized.
-    let available_width = if axis == Axis::Vertical {
-        dimension(node, PropKey::Width, PropKey::WidthPercent, available_width)
-            .unwrap_or(available_width)
-    } else {
-        available_width
-    };
     let extent = intrinsic_extent(
         children,
         node,
@@ -2640,7 +2641,7 @@ mod tests {
     #[test]
     fn auto_row_height_respects_nested_text_column_width() {
         for (width_key, width_value) in [(PropKey::Width, 180.0), (PropKey::WidthPercent, 45.0)] {
-            let tree = Tree {
+            let mut tree = Tree {
                 root: 1,
                 nodes: BTreeMap::from([
                     (1, node(1, 0, 0, NodeKind::Screen, [])),
@@ -2695,6 +2696,24 @@ mod tests {
             .expect("scaled header layout");
             assert!(layouts[&4].height >= 120.0);
             assert!(layouts[&2].height >= layouts[&4].height);
+            let row = tree.nodes.get_mut(&2).expect("header row");
+            row.properties
+                .insert(PropKey::Height, PropValue::Float(400.0));
+            row.properties
+                .insert(PropKey::AlignItems, PropValue::Integer(1));
+            let layouts = calculate_with_text_scale(
+                &tree,
+                Size {
+                    width: 400.0,
+                    height: 800.0,
+                },
+                2.0,
+            )
+            .expect("fixed header layout");
+            assert_eq!(
+                layouts[&3].height, layouts[&4].height,
+                "final child width must not apply its percentage twice"
+            );
         }
     }
 
