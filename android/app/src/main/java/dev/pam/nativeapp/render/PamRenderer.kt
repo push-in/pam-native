@@ -1142,6 +1142,9 @@ class PamRenderer(
             null
         }
         view.layoutParams = FrameLayout.LayoutParams(horizontal.extent, vertical.extent).apply {
+            // Cell frames are physical engine coordinates too; START would
+            // mirror them a second time inside an RTL holder.
+            gravity = PAM_PHYSICAL_FRAME_GRAVITY
             leftMargin = if (id == rootId) 0 else engineFrameMargin(
                 horizontal.offset, paddedHost?.paddingLeft ?: 0,
             )
