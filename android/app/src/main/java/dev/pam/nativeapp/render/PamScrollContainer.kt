@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
 import android.view.MotionEvent
+import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
@@ -15,15 +16,21 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-internal class PamScrollContainer(context: Context) : FrameLayout(context) {
-    private var horizontal = false
+internal class PamScrollContainer(
+    context: Context,
+    initialHorizontal: Boolean = false,
+    initialPersistentScrollbar: Boolean = false,
+    initialIndicatorStyle: ScrollIndicatorStyle = ScrollIndicatorStyle.AUTO,
+) : FrameLayout(context) {
+    private var horizontal = initialHorizontal
     private var scrollEnabled = true
     private var showsIndicator = false
     private var fillViewport = true
     private var nestedScrollEnabled = true
     private var configuredOverScrollMode = OVER_SCROLL_IF_CONTENT_SCROLLS
     private var fadingEdgeLengthPx = 0
-    private var persistentScrollbar = false
+    private var persistentScrollbar = initialPersistentScrollbar
+    private var indicatorStyle = initialIndicatorStyle
     private var pagingEnabled = false
     private var snapIntervalPx = 0
     private var decelerationRate = NORMAL_DECELERATION_RATE
@@ -54,7 +61,7 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
         clipToPadding = false
         setBackgroundColor(Color.TRANSPARENT)
     }
-    private var activeScroll: ViewGroup = createVerticalScroll()
+    private var activeScroll: ViewGroup = if (horizontal) createHorizontalScroll() else createVerticalScroll()
 
     init {
         clipChildren = true
@@ -73,20 +80,40 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
 
     fun setHorizontal(value: Boolean) {
         if (horizontal == value) return
+        horizontal = value
+        replaceActiveScroll()
+    }
+
+    fun setIndicatorStyle(value: Int) {
+        val next = ScrollIndicatorStyle.fromWire(value)
+        if (indicatorStyle == next) return
+        indicatorStyle = next
+        replaceActiveScroll()
+    }
+
+    private fun replaceActiveScroll() {
         val previous = activeScroll
         val previousX = scrollXOf(previous)
         val previousY = scrollYOf(previous)
+        val focused = content.findFocus()
+        previous.setOnScrollChangeListener(null as View.OnScrollChangeListener?)
         previous.removeView(content)
         removeView(previous)
-        horizontal = value
-        activeScroll = if (value) createHorizontalScroll() else createVerticalScroll()
+        activeScroll = if (horizontal) createHorizontalScroll() else createVerticalScroll()
         activeScroll.setBackgroundColor(Color.TRANSPARENT)
         activeScroll.addView(content, contentLayout())
-        addView(activeScroll, matchParentLayout())
+        // Attaching a fading viewport schedules the platform's fade callback.
+        // Disabling fading later does not cancel that already queued callback.
+        // Configure before attachment so persistent indicators never enqueue it.
         applyConfiguration()
+        addView(activeScroll, matchParentLayout())
         if (!hasRequestedOffsetX) requestedOffsetX = previousX
         if (!hasRequestedOffsetY) requestedOffsetY = previousY
         applyRequestedOffset()
+        focused?.requestFocus()
+        // Theme changes must not jump back to the beginning. Let the new
+        // platform viewport measure before restoring uncontrolled offsets.
+        restoreOffsetPixels(previousX, previousY)
     }
 
     fun isHorizontal(): Boolean = horizontal
@@ -138,9 +165,11 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     }
 
     fun setPersistentScrollbar(value: Boolean) {
+        if (persistentScrollbar == value) return
         persistentScrollbar = value
-        activeScroll.isScrollbarFadingEnabled = !value
-        activeScroll.invalidate()
+        // A fresh viewport drops any fade callback queued by the old one.
+        // Content, focus and scroll offsets are retained by replacement.
+        replaceActiveScroll()
     }
 
     fun setPagingEnabled(value: Boolean) {
@@ -424,18 +453,22 @@ internal class PamScrollContainer(context: Context) : FrameLayout(context) {
     }
 
     private fun createVerticalScroll(): ViewGroup =
-        PamVerticalScrollView(context, ::dismissKeyboard).apply {
+        PamVerticalScrollView(indicatorContext(), ::dismissKeyboard).apply {
             setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
                 dispatchViewport(scrollX, scrollY)
             }
         }
 
     private fun createHorizontalScroll(): ViewGroup =
-        PamHorizontalScrollView(context, ::dismissKeyboard).apply {
+        PamHorizontalScrollView(indicatorContext(), ::dismissKeyboard).apply {
             setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
                 dispatchViewport(scrollX, scrollY)
             }
         }
+
+    private fun indicatorContext(): Context =
+        if (indicatorStyle == ScrollIndicatorStyle.AUTO) context
+        else ContextThemeWrapper(context, indicatorStyle.themeResource)
 
     private fun applyConfiguration() {
         activeScroll.clipChildren = true

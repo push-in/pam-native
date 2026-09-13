@@ -1174,30 +1174,55 @@ class PamRendererInstrumentedTest {
         val activity = launchActivity(instrumentation)
         lateinit var renderer: PamRenderer
         lateinit var scroll: PamScrollContainer
+        var initialWindow: Bitmap? = null
         try {
             onMain(instrumentation) {
                 renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
                 renderer.commit(listOf(listOf(
                     Mutation.Create(node(1, 0, NodeKind.SCREEN)),
-                    Mutation.Create(node(2, 1, NodeKind.SCROLL, mapOf(
+                    Mutation.Create(node(5, 1, NodeKind.SCROLL, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("indicator-parent-scroll"),
+                    ))),
+                    Mutation.Create(node(6, 5, NodeKind.COLUMN)),
+                    Mutation.Create(node(2, 6, NodeKind.SCROLL, mapOf(
                         PropKey.TEST_ID to PropValue.Text("indicator-scroll"),
-                        PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true),
                         PropKey.SHOWS_SCROLL_INDICATOR to PropValue.Flag(true),
+                        PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true),
+                        PropKey.SCROLL_FILL_VIEWPORT to PropValue.Flag(true),
+                        PropKey.SCROLL_NESTED_ENABLED to PropValue.Flag(true),
+                        PropKey.SCROLL_FADING_EDGE_LENGTH to PropValue.Decimal(12.0),
                         PropKey.SCROLL_PERSISTENT_SCROLLBAR to PropValue.Flag(true),
+                        PropKey.SCROLL_INDICATOR_STYLE to PropValue.Integer(ScrollIndicatorStyle.DARK.wireValue.toLong()),
                     ))),
                     Mutation.Create(node(3, 2, NodeKind.ROW)),
                     Mutation.Create(node(4, 3, NodeKind.VIEW, mapOf(
                         PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.LTGRAY.toLong()),
                     ))),
                     Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
-                    Mutation.Layout(2, Frame(0f, 0f, 300f, 52f)),
-                    Mutation.Layout(3, Frame(0f, 0f, 900f, 52f)),
-                    Mutation.Layout(4, Frame(0f, 0f, 900f, 48f)),
+                    Mutation.Layout(5, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(6, Frame(0f, 0f, 360f, 1400f)),
+                    Mutation.Layout(2, Frame(16f, 980f, 300f, 52f)),
+                    Mutation.Layout(3, Frame(16f, 980f, 900f, 52f)),
+                    Mutation.Layout(4, Frame(16f, 980f, 900f, 48f)),
                     Mutation.SetRoot(1),
                 )))
                 scroll = activity.host.findByTransitionName("indicator-scroll") as PamScrollContainer
             }
             instrumentation.waitForIdleSync()
+            // Showcase samples start outside the vertical viewport. Reveal the
+            // row without ever touching its horizontal scroll or drawing it in
+            // software first.
+            // Outlive the platform's initial fade delay: a persistent indicator
+            // must remain available when users reach a later showcase sample.
+            SystemClock.sleep(1800)
+            requireNotNull(instrumentation.uiAutomation.takeScreenshot()).recycle()
+            onMain(instrumentation) {
+                val parent = activity.host.findByTransitionName("indicator-parent-scroll") as PamScrollContainer
+                parent.setContentOffsetY(500f)
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            initialWindow = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
             onMain(instrumentation) {
                 assertTrue("Renderer fixture must overflow", scroll.getChildAt(0).canScrollHorizontally(1))
                 val shown = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
@@ -1245,18 +1270,34 @@ class PamRendererInstrumentedTest {
                     screenShown.getPixel(location[0] + 10, location[1] + 10),
                 )
                 var difference = 0
+                var initialDifference = 0
+                val initial = requireNotNull(initialWindow)
+                assertEquals(Color.LTGRAY, initial.getPixel(location[0] + 10, location[1] + 10))
                 for (y in location[1] + trackTop until location[1] + height) {
                     for (x in location[0] until location[0] + width) {
                         if (screenShown.getPixel(x, y) != screenHidden.getPixel(x, y)) difference++
+                        if (initial.getPixel(x, y) != screenHidden.getPixel(x, y)) initialDifference++
                     }
                 }
                 assertTrue("Indicator must also appear in the actual window capture", difference > 0)
+                assertTrue("Indicator must appear before any software draw or toggle", initialDifference > 0)
+                var contrastingPixels = 0
+                for (y in location[1] + trackTop until location[1] + height) {
+                    for (x in location[0] until location[0] + width) {
+                        val pixel = initial.getPixel(x, y)
+                        if (Color.red(pixel) < 128 && Color.green(pixel) < 128 && Color.blue(pixel) < 128) {
+                            contrastingPixels++
+                        }
+                    }
+                }
+                assertTrue("Dark indicator must have visible contrast, not just a pixel difference", contrastingPixels > width)
             } finally {
                 screenShown.recycle()
                 screenHidden.recycle()
                 onMain(instrumentation) { renderer.close() }
             }
         } finally {
+            initialWindow?.recycle()
             activity.finish()
         }
     }

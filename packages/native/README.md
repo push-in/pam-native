@@ -393,6 +393,14 @@ Scroll::make($content)
     ->onScroll($rememberOffset);
 ```
 
+Use `->showsIndicator()->indicatorStyle(ScrollIndicatorStyle::Dark)` for a dark
+indicator on a light surface, or `ScrollIndicatorStyle::Light` on a dark surface.
+`Auto` retains the platform default (which may be low contrast on custom
+surfaces). The typed enum uses wire values Auto=1, Dark=2, Light=3. Templates
+accept `scrollIndicatorStyle="dark"` / `"light"` / `"auto"`. Android keeps its
+system scrollbar geometry, fading and interaction, including API 26; UIKit
+uses its native indicator styles. Appearance changes preserve scroll position.
+
 Declarative components use `ScrollView` with direct children. PAM inserts the
 correct native content container, so compact horizontal items keep their
 authored widths and loops may render any number of children:

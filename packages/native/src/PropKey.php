@@ -470,4 +470,5 @@ enum PropKey: int
     case GestureNativeTranslationLimitX = 462;
     case GestureNativeResetOnEnd = 463;
     case InputFormatLocale = 464;
+    case ScrollIndicatorStyle = 465;
 }

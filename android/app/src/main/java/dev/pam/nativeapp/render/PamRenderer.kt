@@ -801,7 +801,15 @@ class PamRenderer(
             }
             NodeKind.IMAGE -> PamImageView(context)
             NodeKind.IMAGE_BACKGROUND -> PamImageBackground(context)
-            NodeKind.SCROLL -> PamScrollContainer(context)
+            NodeKind.SCROLL -> PamScrollContainer(
+                context,
+                initialHorizontal = state?.flag(PropKey.SCROLL_HORIZONTAL, false) ?: false,
+                initialPersistentScrollbar = state?.flag(PropKey.SCROLL_PERSISTENT_SCROLLBAR, false) ?: false,
+                initialIndicatorStyle = ScrollIndicatorStyle.fromWire(
+                    state?.integer(PropKey.SCROLL_INDICATOR_STYLE, ScrollIndicatorStyle.AUTO.wireValue.toLong())
+                        ?.toInt() ?: ScrollIndicatorStyle.AUTO.wireValue,
+                ),
+            )
             NodeKind.LIST,
             NodeKind.SECTION_LIST,
             NodeKind.VIRTUAL_LIST,
@@ -2199,6 +2207,8 @@ class PamRenderer(
                 )
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(value.flag())
+            PropKey.SCROLL_INDICATOR_STYLE ->
+                (view as? PamScrollContainer)?.setIndicatorStyle(value.integer().toInt())
             PropKey.SCROLL_PAGING_ENABLED ->
                 (view as? PamScrollContainer)?.setPagingEnabled(value.flag())
             PropKey.SCROLL_SNAP_INTERVAL ->
@@ -2779,6 +2789,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setFadingEdgeLength(0f)
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(false)
+            PropKey.SCROLL_INDICATOR_STYLE ->
+                (view as? PamScrollContainer)?.setIndicatorStyle(ScrollIndicatorStyle.AUTO.wireValue)
             PropKey.SCROLL_PAGING_ENABLED ->
                 (view as? PamScrollContainer)?.setPagingEnabled(false)
             PropKey.SCROLL_SNAP_INTERVAL ->
