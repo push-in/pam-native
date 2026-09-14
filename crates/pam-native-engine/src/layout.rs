@@ -1114,14 +1114,34 @@ fn layout_grid(
         y += *height + row_gap;
     }
     for placement in placements {
-        let (margin_top, _) = margin_main(placement.child, Axis::Vertical);
+        let (margin_top, margin_bottom) = margin_main(placement.child, Axis::Vertical);
         let (margin_left, margin_right) = margin_cross(placement.child, Axis::Vertical);
+        let alignment = integer(placement.child, PropKey::AlignSelf)
+            .map(cross_alignment)
+            .unwrap_or_else(|| cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4)));
+        let row_height = row_heights[placement.row];
+        let height = if alignment == CrossAlignment::Stretch
+            && dimension(placement.child, PropKey::Height, PropKey::HeightPercent, inner.height).is_none()
+        {
+            constrained(
+                (row_height - margin_top - margin_bottom).max(0.0),
+                number(placement.child, PropKey::MinHeight),
+                dimension(placement.child, PropKey::MaxHeight, PropKey::MaxHeightPercent, inner.height),
+            )?
+        } else {
+            placement.height
+        };
+        let offset = match alignment {
+            CrossAlignment::Center => (row_height - height + margin_top - margin_bottom) / 2.0,
+            CrossAlignment::End => row_height - height - margin_bottom,
+            _ => margin_top,
+        }.max(0.0);
         let x = inner.x + placement.column as f32 * (unit + column_gap) + margin_left;
         let frame = Layout {
             x,
-            y: inner.y + row_offsets[placement.row] + margin_top,
+            y: inner.y + row_offsets[placement.row] + offset,
             width: (placement.width - margin_left - margin_right).max(0.0),
-            height: placement.height,
+            height,
         };
         layout_node(context, placement.child.id, frame, false, depth + 1, output)?;
     }
@@ -4945,6 +4965,49 @@ mod tests {
         assert_eq!(tablet[&3].x, 304.0);
         assert_eq!(tablet[&4].x, 608.0);
         assert_eq!(tablet[&4].y, 0.0);
+    }
+
+    #[test]
+    fn grid_rows_stretch_auto_height_and_respect_explicit_alignment_and_limits() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [(PropKey::GridColumns, PropValue::Integer(5))])),
+                (2, node(2, 1, 0, NodeKind::View, [
+                    (PropKey::GridSpan, PropValue::Integer(1)),
+                    (PropKey::Height, PropValue::Float(80.0)),
+                ])),
+                (3, node(3, 1, 1, NodeKind::View, [
+                    (PropKey::GridSpan, PropValue::Integer(1)),
+                    (PropKey::MinHeight, PropValue::Float(20.0)),
+                    (PropKey::MarginTop, PropValue::Float(4.0)),
+                    (PropKey::MarginBottom, PropValue::Float(8.0)),
+                ])),
+                (4, node(4, 1, 2, NodeKind::View, [
+                    (PropKey::GridSpan, PropValue::Integer(1)),
+                    (PropKey::Height, PropValue::Float(20.0)),
+                    (PropKey::AlignSelf, PropValue::Integer(2)),
+                ])),
+                (5, node(5, 1, 3, NodeKind::View, [
+                    (PropKey::GridSpan, PropValue::Integer(1)),
+                    (PropKey::MinHeight, PropValue::Float(20.0)),
+                    (PropKey::MaxHeight, PropValue::Float(40.0)),
+                ])),
+                (6, node(6, 1, 4, NodeKind::View, [
+                    (PropKey::GridSpan, PropValue::Integer(1)),
+                    (PropKey::Height, PropValue::Float(20.0)),
+                    (PropKey::AlignSelf, PropValue::Integer(3)),
+                ])),
+            ]),
+        };
+        let frames = calculate(&tree, Size { width: 500.0, height: 200.0 }).expect("grid alignment");
+        assert_eq!(frames[&2].height, 80.0);
+        assert_eq!(frames[&3].height, 68.0);
+        assert_eq!(frames[&3].y, 4.0);
+        assert_eq!(frames[&4].height, 20.0);
+        assert_eq!(frames[&4].y, 30.0);
+        assert_eq!(frames[&5].height, 40.0);
+        assert_eq!(frames[&6].y, 60.0);
     }
 
     #[test]
