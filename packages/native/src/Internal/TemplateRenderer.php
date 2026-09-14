@@ -38,6 +38,7 @@ use Pam\Native\ImageResizeMethod;
 use Pam\Native\InputAutoCapitalize;
 use Pam\Native\InputAutofillImportance;
 use Pam\Native\InputFormat;
+use Pam\Native\ScrollIndicatorStyle;
 use Pam\Native\InputMode;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputSyncMode;
@@ -258,6 +259,7 @@ final class TemplateRenderer
         'refreshIndicatorSize' => PropKey::RefreshIndicatorSize,
         'scrollEnabled' => PropKey::ScrollEnabled,
         'showsScrollIndicator' => PropKey::ShowsScrollIndicator,
+        'scrollIndicatorStyle' => PropKey::ScrollIndicatorStyle,
         'showsHorizontalScrollIndicator' => PropKey::ShowsScrollIndicator,
         'showsVerticalScrollIndicator' => PropKey::ShowsScrollIndicator,
         'contentOffsetX' => PropKey::ScrollContentOffsetX,
@@ -1976,6 +1978,11 @@ final class TemplateRenderer
     private static function propertyValue(PropKey $key, mixed $value): string|int|float|bool|null
     {
         return match ($key) {
+            PropKey::ScrollIndicatorStyle => self::named($value, [
+                'auto' => ScrollIndicatorStyle::Auto->value,
+                'dark' => ScrollIndicatorStyle::Dark->value,
+                'light' => ScrollIndicatorStyle::Light->value,
+            ]),
             PropKey::BackgroundColor,
             PropKey::TextColor,
             PropKey::BorderColor,

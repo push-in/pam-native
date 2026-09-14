@@ -11,6 +11,8 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -43,9 +45,63 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.roundToInt
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun physicalCellFrameIsNotMirroredAgainByAnRtlHolder() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        onMain(instrumentation) {
+            for (direction in listOf(View.LAYOUT_DIRECTION_LTR, View.LAYOUT_DIRECTION_RTL)) {
+                val holder = FrameLayout(instrumentation.targetContext).apply {
+                    layoutDirection = direction
+                    setPadding(21, 13, 21, 13)
+                }
+                val child = View(instrumentation.targetContext)
+                holder.addView(child, FrameLayout.LayoutParams(100, 40).apply {
+                    gravity = PAM_PHYSICAL_FRAME_GRAVITY
+                    leftMargin = engineFrameMargin(51, holder.paddingLeft)
+                    topMargin = engineFrameMargin(23, holder.paddingTop)
+                })
+                holder.measure(
+                    View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                )
+                holder.layout(0, 0, 300, 100)
+                assertEquals("physical x in direction $direction", 51, child.left)
+                assertEquals("physical y in direction $direction", 23, child.top)
+                assertEquals(151, child.right)
+            }
+        }
+    }
+
+    @Test
+    fun engineChildCoordinatesSurviveCustomFrameLayoutPadding() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        onMain(instrumentation) {
+            val host = FrameLayout(instrumentation.targetContext)
+            host.setPadding(21, 13, 21, 13)
+            val child = View(instrumentation.targetContext)
+            host.addView(child, FrameLayout.LayoutParams(258, 54).apply {
+                gravity = Gravity.TOP or Gravity.LEFT
+                leftMargin = engineFrameMargin(21, host.paddingLeft)
+                topMargin = engineFrameMargin(13, host.paddingTop)
+            })
+            host.measure(
+                View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(80, View.MeasureSpec.EXACTLY),
+            )
+            host.layout(0, 0, 300, 80)
+            assertEquals(21, child.left)
+            assertEquals(13, child.top)
+            assertEquals(21, host.width - child.right)
+            assertEquals(13, host.height - child.bottom)
+            assertEquals(21, host.paddingLeft)
+        }
+    }
+
     @Test
     fun currencyInputKeepsNumericTypingAtTheTrailingMinorUnit() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -126,7 +182,7 @@ class PamRendererInstrumentedTest {
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("73125")
             instrumentation.waitForIdleSync()
-            assertEquals("731,25", currency.text.toString())
+            assertInputTextArrives(instrumentation, currency, "731,25")
 
             lateinit var mask: EditText
             onMain(instrumentation) {
@@ -140,7 +196,7 @@ class PamRendererInstrumentedTest {
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("21912345678")
             instrumentation.waitForIdleSync()
-            assertEquals("(21) 91234-5678", mask.text.toString())
+            assertInputTextArrives(instrumentation, mask, "(21) 91234-5678")
             onMain(instrumentation) { renderer.close() }
         } finally {
             onMain(instrumentation) { activity.finish() }
@@ -1112,6 +1168,188 @@ class PamRendererInstrumentedTest {
         }
     }
 
+    @Test
+    fun rendererKeepsPersistentHorizontalIndicatorVisibleBelowContent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        lateinit var scroll: PamScrollContainer
+        var initialWindow: Bitmap? = null
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN, mapOf(
+                        // Keep the canvas distinct from the gray child. The
+                        // renderer otherwise inherits its first descendant's
+                        // background, making the child-pixel check vacuous.
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.WHITE.toLong()),
+                    ))),
+                    Mutation.Create(node(5, 1, NodeKind.SCROLL, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("indicator-parent-scroll"),
+                    ))),
+                    Mutation.Create(node(6, 5, NodeKind.COLUMN)),
+                    Mutation.Create(node(2, 6, NodeKind.SCROLL, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("indicator-scroll"),
+                        PropKey.SHOWS_SCROLL_INDICATOR to PropValue.Flag(true),
+                        PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true),
+                        PropKey.SCROLL_FILL_VIEWPORT to PropValue.Flag(true),
+                        PropKey.SCROLL_NESTED_ENABLED to PropValue.Flag(true),
+                        PropKey.SCROLL_FADING_EDGE_LENGTH to PropValue.Decimal(12.0),
+                        PropKey.SCROLL_PERSISTENT_SCROLLBAR to PropValue.Flag(true),
+                        PropKey.SCROLL_INDICATOR_STYLE to PropValue.Integer(ScrollIndicatorStyle.DARK.wireValue.toLong()),
+                    ))),
+                    Mutation.Create(node(3, 2, NodeKind.ROW)),
+                    Mutation.Create(node(4, 3, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.LTGRAY.toLong()),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(5, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(6, Frame(0f, 0f, 360f, 1400f)),
+                    Mutation.Layout(2, Frame(16f, 980f, 300f, 52f)),
+                    Mutation.Layout(3, Frame(16f, 980f, 900f, 52f)),
+                    Mutation.Layout(4, Frame(16f, 980f, 900f, 48f)),
+                    Mutation.SetRoot(1),
+                )))
+                scroll = activity.host.findByTransitionName("indicator-scroll") as PamScrollContainer
+            }
+            instrumentation.waitForIdleSync()
+            // Showcase samples start outside the vertical viewport. Reveal the
+            // row without ever touching its horizontal scroll or drawing it in
+            // software first.
+            // Outlive the platform's initial fade delay: a persistent indicator
+            // must remain available when users reach a later showcase sample.
+            SystemClock.sleep(1800)
+            requireNotNull(instrumentation.uiAutomation.takeScreenshot()).recycle()
+            onMain(instrumentation) {
+                val parent = activity.host.findByTransitionName("indicator-parent-scroll") as PamScrollContainer
+                parent.setContentOffsetY(500f)
+            }
+            instrumentation.waitForIdleSync()
+            // Idle on the UI thread does not guarantee that the compositor has
+            // presented the newly revealed content. Wait for the gray child,
+            // never for the indicator itself, without drawing/toggling the view.
+            // Keep the final frame on timeout so the existing content assertion
+            // still fails with captured evidence if rendering never happens.
+            val initialFrameDeadline = SystemClock.uptimeMillis() + 2000L
+            val initialLocation = IntArray(2)
+            do {
+                onMain(instrumentation) { scroll.getLocationOnScreen(initialLocation) }
+                initialWindow?.recycle()
+                val frame = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                initialWindow = frame
+                val x = initialLocation[0] + 10
+                val y = initialLocation[1] + 10
+                if (x in 0 until frame.width && y in 0 until frame.height
+                    && frame.getPixel(x, y) == Color.LTGRAY) break
+                SystemClock.sleep(50)
+            } while (SystemClock.uptimeMillis() < initialFrameDeadline)
+            onMain(instrumentation) {
+                assertTrue("Renderer fixture must overflow", scroll.getChildAt(0).canScrollHorizontally(1))
+                val shown = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                val hidden = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                try {
+                    shown.eraseColor(Color.WHITE)
+                    hidden.eraseColor(Color.WHITE)
+                    scroll.draw(Canvas(shown))
+                    scroll.setShowsScrollIndicator(false)
+                    scroll.draw(Canvas(hidden))
+                    var difference = 0
+                    for (y in dp(scroll, 48f) until scroll.height) {
+                        for (x in 0 until scroll.width) {
+                            if (shown.getPixel(x, y) != hidden.getPixel(x, y)) difference++
+                        }
+                    }
+                    assertTrue("Persistent indicator must occupy the reserved strip", difference > 0)
+                } finally {
+                    shown.recycle()
+                    hidden.recycle()
+                }
+            }
+            val location = IntArray(2)
+            var width = 0
+            var height = 0
+            var trackTop = 0
+            onMain(instrumentation) {
+                scroll.setShowsScrollIndicator(true)
+                scroll.getLocationOnScreen(location)
+                width = scroll.width
+                height = scroll.height
+                trackTop = dp(scroll, 48f)
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            val screenShown = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            onMain(instrumentation) { scroll.setShowsScrollIndicator(false) }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            val screenHidden = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                // Gradle collects this directory before uninstalling test APKs.
+                // Keep all three frames even on success so collection itself
+                // can be verified without intentionally breaking the renderer.
+                val directory = InstrumentationRegistry.getArguments()
+                    .getString("additionalTestOutputDir")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { java.io.File(it) }
+                    ?: requireNotNull(instrumentation.context.getExternalFilesDir("renderer-evidence"))
+                check(directory.isDirectory || directory.mkdirs())
+                mapOf(
+                    "indicator-initial.png" to requireNotNull(initialWindow),
+                    "indicator-shown.png" to screenShown,
+                    "indicator-hidden.png" to screenHidden,
+                ).forEach { (name, bitmap) ->
+                    java.io.File(directory, name).outputStream().use { output ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                    }
+                }
+                assertEquals(
+                    "Window capture must include the rendered fixture",
+                    Color.LTGRAY,
+                    screenShown.getPixel(location[0] + 10, location[1] + 10),
+                )
+                var difference = 0
+                var initialDifference = 0
+                val initial = requireNotNull(initialWindow)
+                assertEquals("Fixture canvas must be distinct from the child", Color.WHITE,
+                    initial.getPixel(location[0] - 1, location[1] + 10))
+                assertEquals(Color.LTGRAY, initial.getPixel(location[0] + 10, location[1] + 10))
+                for (y in location[1] + trackTop until location[1] + height) {
+                    for (x in location[0] until location[0] + width) {
+                        if (screenShown.getPixel(x, y) != screenHidden.getPixel(x, y)) difference++
+                        if (initial.getPixel(x, y) != screenHidden.getPixel(x, y)) initialDifference++
+                    }
+                }
+                assertTrue("Indicator must also appear in the actual window capture", difference > 0)
+                assertTrue("Indicator must appear before any software draw or toggle", initialDifference > 0)
+                var contrastingPixels = 0
+                for (y in location[1] + trackTop until location[1] + height) {
+                    for (x in location[0] until location[0] + width) {
+                        val pixel = initial.getPixel(x, y)
+                        if (Color.red(pixel) < 128 && Color.green(pixel) < 128 && Color.blue(pixel) < 128) {
+                            contrastingPixels++
+                        }
+                    }
+                }
+                assertTrue("Dark indicator must have visible contrast, not just a pixel difference", contrastingPixels > width)
+            } catch (failure: AssertionError) {
+                throw AssertionError(
+                    "${failure.message}; fixture=${location.contentToString()} " +
+                        "size=${width}x$height trackTop=$trackTop " +
+                        "capture=${screenShown.width}x${screenShown.height}",
+                    failure,
+                )
+            } finally {
+                screenShown.recycle()
+                screenHidden.recycle()
+                onMain(instrumentation) { renderer.close() }
+            }
+        } finally {
+            initialWindow?.recycle()
+            activity.finish()
+        }
+    }
+
     @Suppress("DEPRECATION")
     @Test
     fun statusBarConfigurationFollowsTheActiveRetainedRoute() {
@@ -2001,6 +2239,37 @@ class PamRendererInstrumentedTest {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             },
         ) as PamTestActivity
+
+    private fun assertInputTextArrives(
+        instrumentation: Instrumentation,
+        input: EditText,
+        expected: String,
+    ) {
+        // Input injection completion and app queue idleness do not guarantee
+        // that an IME has finished updating the editor. Observe the actual
+        // value without slowing the key burst or reading Views off-main.
+        val arrived = CountDownLatch(1)
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(text: Editable?) {
+                if (text.toString() == expected) arrived.countDown()
+            }
+        }
+        onMain(instrumentation) {
+            input.addTextChangedListener(watcher)
+            if (input.text.toString() == expected) arrived.countDown()
+        }
+        try {
+            val completed = arrived.await(2, TimeUnit.SECONDS)
+            onMain(instrumentation) {
+                assertTrue("Input did not retain the complete burst: ${input.text}", completed)
+                assertEquals(expected, input.text.toString())
+            }
+        } finally {
+            onMain(instrumentation) { input.removeTextChangedListener(watcher) }
+        }
+    }
 
     private fun onMain(instrumentation: Instrumentation, block: () -> Unit) {
         instrumentation.runOnMainSync(block)

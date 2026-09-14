@@ -440,6 +440,7 @@ public enum PamConstants {
     public static let gestureNativeTranslationLimitX = 462
     public static let gestureNativeResetOnEnd = 463
     public static let inputFormatLocale = 464
+    public static let scrollIndicatorStyle = 465
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

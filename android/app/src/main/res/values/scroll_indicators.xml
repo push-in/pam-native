@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="PamScrollIndicator.Dark" parent="">
+        <item name="android:scrollbarThumbHorizontal">@drawable/pam_scroll_indicator_dark</item>
+        <item name="android:scrollbarThumbVertical">@drawable/pam_scroll_indicator_dark</item>
+    </style>
+    <style name="PamScrollIndicator.Light" parent="">
+        <item name="android:scrollbarThumbHorizontal">@drawable/pam_scroll_indicator_light</item>
+        <item name="android:scrollbarThumbVertical">@drawable/pam_scroll_indicator_light</item>
+    </style>
+</resources>

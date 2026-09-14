@@ -260,6 +260,9 @@ internal fun hostedContentExtent(
 internal fun usesNativeViewGroupPadding(kind: NodeKind): Boolean =
     kind == NodeKind.CUSTOM_VIEW
 
+internal fun engineFrameMargin(offset: Int, nativeFramePadding: Int): Int =
+    offset - nativeFramePadding
+
 internal fun resolvedAndroidLetterSpacing(
     logicalSpacing: Float,
     logicalFontSize: Float,
@@ -798,7 +801,15 @@ class PamRenderer(
             }
             NodeKind.IMAGE -> PamImageView(context)
             NodeKind.IMAGE_BACKGROUND -> PamImageBackground(context)
-            NodeKind.SCROLL -> PamScrollContainer(context)
+            NodeKind.SCROLL -> PamScrollContainer(
+                context,
+                initialHorizontal = state?.flag(PropKey.SCROLL_HORIZONTAL, false) ?: false,
+                initialPersistentScrollbar = state?.flag(PropKey.SCROLL_PERSISTENT_SCROLLBAR, false) ?: false,
+                initialIndicatorStyle = ScrollIndicatorStyle.fromWire(
+                    state?.integer(PropKey.SCROLL_INDICATOR_STYLE, ScrollIndicatorStyle.AUTO.wireValue.toLong())
+                        ?.toInt() ?: ScrollIndicatorStyle.AUTO.wireValue,
+                ),
+            )
             NodeKind.LIST,
             NodeKind.SECTION_LIST,
             NodeKind.VIRTUAL_LIST,
@@ -1133,9 +1144,21 @@ class PamRenderer(
         val density = resourcesDensity()
         val horizontal = snappedPixelSpan(frame.x, frame.width, parentFrame.x, density)
         val vertical = snappedPixelSpan(frame.y, frame.height, parentFrame.y, density)
+        val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
+            views[hostedParent] as? FrameLayout
+        } else {
+            null
+        }
         view.layoutParams = FrameLayout.LayoutParams(horizontal.extent, vertical.extent).apply {
-            leftMargin = if (id == rootId) 0 else horizontal.offset
-            topMargin = if (id == rootId) 0 else vertical.offset
+            // Cell frames are physical engine coordinates too; START would
+            // mirror them a second time inside an RTL holder.
+            gravity = PAM_PHYSICAL_FRAME_GRAVITY
+            leftMargin = if (id == rootId) 0 else engineFrameMargin(
+                horizontal.offset, paddedHost?.paddingLeft ?: 0,
+            )
+            topMargin = if (id == rootId) 0 else engineFrameMargin(
+                vertical.offset, paddedHost?.paddingTop ?: 0,
+            )
         }
     }
 
@@ -1455,8 +1478,17 @@ class PamRenderer(
             resize = state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW &&
                 keyboardAvoidingBehaviorReducesViewport(state.keyboardBehavior),
         )
-        var leftPx = horizontal.offset + safeLeft
-        var topPx = vertical.offset + safeTop
+        // Engine frames already include authored padding. FrameLayout adds
+        // its padding to child margins again, unlike engine-owned containers
+        // whose Android padding is zero. Preserve native host padding while
+        // expressing engine positions relative to that padded origin.
+        val paddedHost = if (hostedParentState?.kind == NodeKind.CUSTOM_VIEW) {
+            parentView as? FrameLayout
+        } else {
+            null
+        }
+        var leftPx = engineFrameMargin(horizontal.offset, paddedHost?.paddingLeft ?: 0) + safeLeft
+        var topPx = engineFrameMargin(vertical.offset, paddedHost?.paddingTop ?: 0) + safeTop
         compensateFlexParentViewportReduction(
             state = state,
             parentState = parentState,
@@ -2175,6 +2207,8 @@ class PamRenderer(
                 )
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(value.flag())
+            PropKey.SCROLL_INDICATOR_STYLE ->
+                (view as? PamScrollContainer)?.setIndicatorStyle(value.integer().toInt())
             PropKey.SCROLL_PAGING_ENABLED ->
                 (view as? PamScrollContainer)?.setPagingEnabled(value.flag())
             PropKey.SCROLL_SNAP_INTERVAL ->
@@ -2755,6 +2789,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setFadingEdgeLength(0f)
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(false)
+            PropKey.SCROLL_INDICATOR_STYLE ->
+                (view as? PamScrollContainer)?.setIndicatorStyle(ScrollIndicatorStyle.AUTO.wireValue)
             PropKey.SCROLL_PAGING_ENABLED ->
                 (view as? PamScrollContainer)?.setPagingEnabled(false)
             PropKey.SCROLL_SNAP_INTERVAL ->

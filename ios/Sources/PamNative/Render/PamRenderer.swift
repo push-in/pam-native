@@ -1798,6 +1798,9 @@ public final class PamRenderer {
             (view as? PamRefreshContainer)?.setProgressViewOffset(Float(value.decimalOrZero()))
         case PamConstants.refreshIndicatorSize:
             (view as? PamRefreshContainer)?.setIndicatorSize(Int(value.integerOrNil() ?? 1))
+        case PamConstants.scrollIndicatorStyle:
+            (view as? UIScrollView)?.indicatorStyle =
+                (PamScrollIndicatorStyle(rawValue: Int(value.integerOrNil() ?? 1)) ?? .auto).native
         case PamConstants.scrollHorizontal:
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: value.boolOrNil() ?? false)
@@ -2111,6 +2114,8 @@ public final class PamRenderer {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: false)
             }
+        case PamConstants.scrollIndicatorStyle:
+            (view as? UIScrollView)?.indicatorStyle = PamScrollIndicatorStyle.auto.native
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = false
         case PamConstants.scrollSnapInterval:

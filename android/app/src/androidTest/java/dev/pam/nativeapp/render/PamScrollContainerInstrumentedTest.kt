@@ -2,6 +2,9 @@ package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -15,6 +18,92 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamScrollContainerInstrumentedTest {
+    @Test
+    fun indicatorAppearanceChangePreservesOffsetAndDrawsOnDarkSurface() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var scroll: PamScrollContainer
+        try {
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity).apply {
+                    setHorizontal(true)
+                    setIndicatorStyle(ScrollIndicatorStyle.DARK.wireValue)
+                    setShowsScrollIndicator(true)
+                    setPersistentScrollbar(true)
+                    insert(View(activity).apply {
+                        layoutParams = FrameLayout.LayoutParams(900, 80)
+                    })
+                }
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 80))
+                activity.host.measure(exactly(300), exactly(80))
+                activity.host.layout(0, 0, 300, 80)
+                scroll.getChildAt(0).scrollTo(120, 0)
+                scroll.setIndicatorStyle(ScrollIndicatorStyle.LIGHT.wireValue)
+                activity.host.measure(exactly(300), exactly(80))
+                activity.host.layout(0, 0, 300, 80)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(120, scroll.snapshotOffsetPixels().first)
+                val bitmap = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.eraseColor(Color.BLACK)
+                    scroll.draw(Canvas(bitmap))
+                    var contrastingPixels = 0
+                    for (y in scroll.height - 12 until scroll.height) {
+                        for (x in 0 until scroll.width) {
+                            if (Color.red(bitmap.getPixel(x, y)) > 128) contrastingPixels++
+                        }
+                    }
+                    assertTrue("Light indicator must contrast against a dark surface", contrastingPixels > 100)
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun persistentHorizontalIndicatorDrawsBeforeFirstGesture() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val scroll = PamScrollContainer(activity).apply {
+                    setHorizontal(true)
+                    setShowsScrollIndicator(true)
+                    setPersistentScrollbar(true)
+                    insert(View(activity).apply {
+                        layoutParams = FrameLayout.LayoutParams(900, 80)
+                    })
+                }
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 80))
+                activity.host.measure(exactly(300), exactly(80))
+                activity.host.layout(0, 0, 300, 80)
+                val nativeScroll = scroll.getChildAt(0)
+                assertTrue("Fixture must overflow horizontally", nativeScroll.canScrollHorizontally(1))
+                val bitmap = Bitmap.createBitmap(300, 80, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.eraseColor(Color.WHITE)
+                    scroll.draw(Canvas(bitmap))
+                    var indicatorPixels = 0
+                    for (y in 60 until 80) {
+                        for (x in 0 until 300) {
+                            if (bitmap.getPixel(x, y) != Color.WHITE) indicatorPixels++
+                        }
+                    }
+                    assertTrue("A persistent indicator must draw without requiring a gesture", indicatorPixels > 0)
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun requestedOffsetIsReappliedAfterContentGrows() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

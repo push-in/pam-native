@@ -642,6 +642,7 @@ pub enum PropKey {
     GestureNativeTranslationLimitX = 462,
     GestureNativeResetOnEnd = 463,
     InputFormatLocale = 464,
+    ScrollIndicatorStyle = 465,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1113,6 +1114,7 @@ impl TryFrom<u16> for PropKey {
             462 => Ok(Self::GestureNativeTranslationLimitX),
             463 => Ok(Self::GestureNativeResetOnEnd),
             464 => Ok(Self::InputFormatLocale),
+            465 => Ok(Self::ScrollIndicatorStyle),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1988,10 +1990,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=464 {
+        for value in 1..=465 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(465).is_err());
+        assert!(PropKey::try_from(466).is_err());
     }
 
     #[test]

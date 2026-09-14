@@ -133,6 +133,7 @@ use Pam\Native\Renderable;
 use Pam\Native\SafeAreaMode;
 use Pam\Native\ScrollKeyboardDismissMode;
 use Pam\Native\ScrollOverScrollMode;
+use Pam\Native\ScrollIndicatorStyle;
 use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\ServerDriven\ServerDrivenUi;
 use Pam\Native\PositionType;
@@ -1620,7 +1621,7 @@ $assert(
 );
 $scrollViewElement = TemplateRenderer::render(
     TemplateCompiler::compile(
-        '<ScrollView horizontal="true">'
+        '<ScrollView horizontal="true" scrollIndicatorStyle="dark">'
         .'<Pressable width="66"><Text>New</Text></Pressable>'
         .'<Pressable width="76"><Text>Saved</Text></Pressable>'
         .'</ScrollView>',
@@ -1631,6 +1632,7 @@ $scrollViewElement = TemplateRenderer::render(
 $scrollContent = $scrollViewElement->children()[0] ?? null;
 $assert(
     $scrollViewElement->kind() === NodeKind::Scroll
+        && $scrollViewElement->properties()[PropKey::ScrollIndicatorStyle->value] === ScrollIndicatorStyle::Dark->value
         && $scrollContent instanceof \Pam\Native\Element
         && $scrollContent->kind() === NodeKind::Row
         && count($scrollContent->children()) === 2
@@ -1984,10 +1986,12 @@ $scrollElement = Scroll::make(Text::make('Scrollable'))
     ->scrollRequest(7, 'first-unread', 143.5, ScrollTargetAlignment::Center)
     ->scrollEnabled(false)
     ->showsIndicator()
+    ->indicatorStyle(ScrollIndicatorStyle::Dark)
     ->onScroll(static function (): void {
     });
 $assert(
     $scrollElement->properties()[PropKey::ScrollHorizontal->value] === true
+        && $scrollElement->properties()[PropKey::ScrollIndicatorStyle->value] === ScrollIndicatorStyle::Dark->value
         && $scrollElement->properties()[PropKey::ScrollContentOffsetX->value] === 24.0
         && $scrollElement->properties()[PropKey::ScrollContentOffsetY->value] === 8.0
         && $scrollElement->properties()[PropKey::ScrollFillViewport->value] === false

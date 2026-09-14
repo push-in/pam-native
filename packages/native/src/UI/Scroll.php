@@ -11,6 +11,7 @@ use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 use Pam\Native\ScrollKeyboardDismissMode;
+use Pam\Native\ScrollIndicatorStyle;
 use Pam\Native\ScrollOverScrollMode;
 use Pam\Native\ScrollTargetAlignment;
 
@@ -34,6 +35,11 @@ final class Scroll extends Element
     public function horizontal(bool $horizontal = true): self
     {
         return $this->withProperty(PropKey::ScrollHorizontal, $horizontal);
+    }
+
+    public function indicatorStyle(ScrollIndicatorStyle $style): self
+    {
+        return $this->withProperty(PropKey::ScrollIndicatorStyle, $style->value);
     }
 
     public function contentOffset(float $x = 0.0, float $y = 0.0): self
