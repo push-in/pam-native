@@ -18,3 +18,14 @@ The targeted API 36 instrumented test passed:
 `PamRendererInstrumentedTest#inactiveInputStartsAtLeadingTextAndHonorsControlledSelection`.
 Its build/test run completed in 10 seconds. No iOS execution or release approval
 is implied by this Android result.
+
+## Showcase verification
+
+API 36 optimized showcase APK
+`cc1dd39816dd6a20823e398fcca73ff01cd3b13b2d60f290a47a91acc268421e`
+includes this change. `/tmp/pam-leading-query-20260914/report.json` records the
+Search Bar editing check passing. Its raw `search-long.png` was viewed: the
+inactive long query now displays the beginning (`Search invoices, customers...`)
+instead of the trailing text. This verifies the post-layout presentation for the
+LTR search specimen, not every input or RTL. The build completed in 25 seconds
+and cleaned 96.7 MiB of regenerable development artifacts. No publication.
