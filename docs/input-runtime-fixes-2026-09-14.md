@@ -43,3 +43,12 @@ actual copy/selection gestures still need simulator/device interaction evidence.
 CI 34852153837 at `820b42d` passed its Swift/UIKit job, including the keyboard
 suppression correction, secure-toggle selection retention and text traits tests.
 This does not cover the subsequent maxLength or read-only changes.
+
+UIKit input completion follow-up maps existing autoComplete hints (including
+password/new-password/one-time-code) to UITextContentType and existing return
+key values to platform glyphs. UIKit has no previous/none glyph equivalent;
+those use its default key. This mapping does not implement previous-field focus
+navigation or guarantee that the OS offers an autofill suggestion. Tests cover
+OTP/Done, switching to new-password/Search, and clearing both properties.
+The maxLength Swift/UIKit job passed in run 34852470963 at `f8d2551`; actual
+multilingual IME interaction remains distinct from that unit coverage.

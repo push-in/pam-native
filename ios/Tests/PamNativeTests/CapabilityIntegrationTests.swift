@@ -91,6 +91,8 @@ final class CapabilityIntegrationTests: XCTestCase {
             .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
             .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
                 PamConstants.testId: .text("traits-fixture"),
+                PamConstants.autoComplete: .text("one-time-code"),
+                PamConstants.returnKeyType: .integer(2),
                 PamConstants.inputAutoCorrect: .flag(false),
                 PamConstants.inputAutoCapitalize: .integer(1),
             ])),
@@ -98,18 +100,28 @@ final class CapabilityIntegrationTests: XCTestCase {
         ]])
         let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "traits-fixture") as? UITextField)
         XCTAssertEqual(field.autocorrectionType, .no)
+        XCTAssertEqual(field.textContentType, .oneTimeCode)
+        XCTAssertEqual(field.returnKeyType, .done)
         XCTAssertEqual(field.autocapitalizationType, .none)
         renderer.commit([[
             .update(id: 2, key: PamConstants.inputAutoCorrect, value: .flag(true)),
+            .update(id: 2, key: PamConstants.autoComplete, value: .text("new-password")),
+            .update(id: 2, key: PamConstants.returnKeyType, value: .integer(5)),
             .update(id: 2, key: PamConstants.inputAutoCapitalize, value: .integer(3)),
         ]])
         XCTAssertEqual(field.autocorrectionType, .yes)
+        XCTAssertEqual(field.textContentType, .newPassword)
+        XCTAssertEqual(field.returnKeyType, .search)
         XCTAssertEqual(field.autocapitalizationType, .words)
         renderer.commit([[
             .update(id: 2, key: PamConstants.inputAutoCorrect, value: nil),
+            .update(id: 2, key: PamConstants.autoComplete, value: nil),
+            .update(id: 2, key: PamConstants.returnKeyType, value: nil),
             .update(id: 2, key: PamConstants.inputAutoCapitalize, value: nil),
         ]])
         XCTAssertEqual(field.autocorrectionType, .default)
+        XCTAssertNil(field.textContentType)
+        XCTAssertEqual(field.returnKeyType, .default)
         XCTAssertEqual(field.autocapitalizationType, .sentences)
     }
 

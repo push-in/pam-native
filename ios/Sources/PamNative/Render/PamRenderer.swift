@@ -14,6 +14,10 @@ private enum PamInputCapitalization: Int64 {
     case none = 1, sentences, words, characters
 }
 
+private enum PamReturnKey: Int64 {
+    case standard = 1, done, go, next, search, send, none, previous
+}
+
 public final class PamRenderer {
     var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     private let fontLoader = PamFontLoader()
@@ -1452,6 +1456,43 @@ public final class PamRenderer {
         )
     }
 
+    private func applyInputCompletion(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        let hint = state.properties[PamConstants.autoComplete]?.textOrNil()?.lowercased()
+        let content: UITextContentType?
+        switch hint {
+        case "email": content = .emailAddress
+        case "tel": content = .telephoneNumber
+        case "password", "current-password": content = .password
+        case "new-password", "password-new": content = .newPassword
+        case "username", "username-new": content = .username
+        case "one-time-code", "sms-otp": content = .oneTimeCode
+        case "name": content = .name
+        case "given-name": content = .givenName
+        case "family-name": content = .familyName
+        case "postal-code": content = .postalCode
+        case "street-address", "postal-address": content = .fullStreetAddress
+        case "cc-number": content = .creditCardNumber
+        default: content = nil
+        }
+        let key = (state.properties[PamConstants.returnKeyType]?.integerOrNil())
+            .flatMap(PamReturnKey.init(rawValue:)) ?? .standard
+        let action: UIReturnKeyType
+        switch key {
+        case .done: action = .done
+        case .go: action = .go
+        case .next: action = .next
+        case .search: action = .search
+        case .send: action = .send
+        // UIKit has no previous/none return-key glyph equivalents.
+        case .standard, .none, .previous: action = .default
+        }
+        let changed = field.textContentType != content || field.returnKeyType != action
+        field.textContentType = content
+        field.returnKeyType = action
+        if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
     private func applyInputTextTraits(view: UIView, nodeId: Int64) {
         guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
         let autoCorrect = state.properties[PamConstants.inputAutoCorrect]?.boolOrNil()
@@ -1548,6 +1589,8 @@ public final class PamRenderer {
             (view as? PamInputField)?.maximumLength = value.integerOrNil().map { max(0, Int(clamping: $0)) }
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
+        case PamConstants.autoComplete, PamConstants.returnKeyType:
+            applyInputCompletion(view: view, nodeId: nodeId)
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
@@ -2039,6 +2082,8 @@ public final class PamRenderer {
             (view as? PamInputField)?.maximumLength = nil
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
+        case PamConstants.autoComplete, PamConstants.returnKeyType:
+            applyInputCompletion(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.imageFit:
