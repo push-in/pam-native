@@ -342,6 +342,9 @@ public final class PamRenderer {
 
         if let value {
             applyProperty(view: view, nodeId: id, key: key, value: value)
+            if key == PamConstants.value || key == PamConstants.text || key == PamConstants.secure {
+                applyInputSelection(view: view, nodeId: id)
+            }
         } else {
             resetProperty(view: view, nodeId: id, key: key, state: state)
             if key == PamConstants.source,
@@ -419,6 +422,7 @@ public final class PamRenderer {
         for (key, value) in state.properties {
             applyProperty(view: view, nodeId: state.id, key: key, value: value)
         }
+        applyInputSelection(view: view, nodeId: state.id)
         installEvents(for: state.id)
         applyLayout(state.id)
     }
@@ -1456,6 +1460,18 @@ public final class PamRenderer {
         )
     }
 
+    private func applyInputSelection(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId],
+              let requested = state.properties[PamConstants.inputSelectionStart]?.integerOrNil() else { return }
+        let length = (field.text ?? "").utf16.count
+        let start = min(length, max(0, Int(clamping: requested)))
+        let end = min(length, max(start, Int(clamping:
+            state.properties[PamConstants.inputSelectionEnd]?.integerOrNil() ?? Int64(start))))
+        guard let from = field.position(from: field.beginningOfDocument, offset: start),
+              let to = field.position(from: field.beginningOfDocument, offset: end) else { return }
+        field.selectedTextRange = field.textRange(from: from, to: to)
+    }
+
     private func applyInputCompletion(view: UIView, nodeId: Int64) {
         guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
         let hint = state.properties[PamConstants.autoComplete]?.textOrNil()?.lowercased()
@@ -1594,6 +1610,8 @@ public final class PamRenderer {
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.autoComplete, PamConstants.returnKeyType:
             applyInputCompletion(view: view, nodeId: nodeId)
+        case PamConstants.inputSelectionStart, PamConstants.inputSelectionEnd:
+            applyInputSelection(view: view, nodeId: nodeId)
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
@@ -2089,6 +2107,8 @@ public final class PamRenderer {
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.autoComplete, PamConstants.returnKeyType:
             applyInputCompletion(view: view, nodeId: nodeId)
+        case PamConstants.inputSelectionStart, PamConstants.inputSelectionEnd:
+            applyInputSelection(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.imageFit:

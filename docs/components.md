@@ -424,6 +424,30 @@ sized or growing text keeps normal start alignment unless `text-align` is
 authored. `text-align` accepts the familiar CSS values `left`, `center`, and
 `right`, plus the logical aliases `start` and `end`.
 
+### Input candidate implementation notes
+
+The September 2026 candidate adds the following reusable input behavior. These
+notes describe candidate source and scoped tests, not a published release or
+complete cross-platform UI approval.
+
+| Capability | Candidate behavior and remaining verification |
+| --- | --- |
+| Decimal entry on Android | Accepts negative decimals; Number/Numeric remain digit-only. Native acceptance and showcase lower-bound confirmation passed. |
+| Normalized controlled text on Android | Preserves active editing, applies deferred normalization on blur and invalidates it on newer typing. Scoped cursor/isolation tests passed. |
+| iOS keyboard and text traits | Applies keyboardType/inputMode, secure entry, autocorrection and capitalization. UIKit mapping/reset tests passed. |
+| iOS read-only | Blocks mutation without disabling the field. UIKit regression passed; real selection/copy gestures remain to verify. |
+| iOS maximum length | Bounds paste without splitting Unicode characters and applies the limit after composition. UIKit regression passed; real multilingual IME sessions remain to verify. |
+| iOS autofill and action key | Maps standard hints and platform key glyphs. UIKit mapping tests passed; OS suggestions and complete form flows remain to verify. |
+| iOS submit lifecycle | Current-text payload and Submit/BlurAndSubmit fixes are in candidate validation. Do not treat a key-label test as evidence of event delivery. |
+
+The iOS single-line implementation does not provide full multiline editing.
+`Newline` must not silently become Submit; a multiline native editor still needs
+its own implementation and interaction validation. Platform autofill hints are
+requests to the operating system, not guarantees that suggestions will appear.
+
+See [input runtime evidence](input-runtime-fixes-2026-09-14.md) for revisions and
+the exact scope of the existing checks.
+
 `Input keyboardType` accepts the concise PAM values `text`, `email`, `number`,
 `phone`, `decimal`, and `url`. React Native-compatible aliases are also valid:
 `default`, `email-address`, `number-pad`, `numeric`, `phone-pad`,

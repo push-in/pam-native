@@ -66,3 +66,17 @@ Return is ignored. Newline does not become Submit; actual multiline editing is
 not implemented by this single-line UITextField change and remains a separate
 platform gap. The added unit regression covers single dispatch, no false end
 event and blocked/read-only/newline submission, pending macOS execution.
+
+Controlled selection follow-up applies InputSelectionStart/End to UIKit,
+clamps offsets to current UTF-16 length and reapplies after value/secure changes.
+Initial mounting reapplies after all properties, avoiding dictionary-order
+dependence. Removing the start releases explicit selection control. Regression
+covers initial range, secure toggle, shortened value, end removal, negative
+offset and subsequent unmanaged cursor. Pending CI.
+
+CI 34853751298 compiled but the submit-payload test failed because SwiftPM's
+hostless XCTest process had no UIApplicationMain for target/action dispatch.
+The revised unit test invokes the selectors registered for primaryActionTriggered
+and still verifies payload and target removal. This verifies registration and
+callback implementation, not actual keyboard Return delivery; hosted interaction
+coverage remains necessary and the test is not presented as its replacement.

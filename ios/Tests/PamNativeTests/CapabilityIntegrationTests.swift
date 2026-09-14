@@ -31,6 +31,42 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testControlledSelectionClampsAndSurvivesValueAndSecureUpdates() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("selection-fixture"),
+                PamConstants.value: .text("abcdef"),
+                PamConstants.inputSelectionStart: .integer(2),
+                PamConstants.inputSelectionEnd: .integer(5),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "selection-fixture") as? UITextField)
+        func assertSelection(_ start: Int, _ end: Int) throws {
+            let selection = try XCTUnwrap(field.selectedTextRange)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.start), start)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.end), end)
+        }
+        try assertSelection(2, 5)
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(true))]])
+        try assertSelection(2, 5)
+        renderer.commit([[.update(id: 2, key: PamConstants.value, value: .text("abc"))]])
+        try assertSelection(2, 3)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputSelectionEnd, value: nil)]])
+        try assertSelection(2, 2)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputSelectionStart, value: .integer(-4))]])
+        try assertSelection(0, 0)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputSelectionStart, value: nil)]])
+        let cursor = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 1))
+        field.selectedTextRange = field.textRange(from: cursor, to: cursor)
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(false))]])
+        try assertSelection(1, 1)
+    }
+
     func testSubmitBehaviorControlsActualFirstResponderLifecycle() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
@@ -98,12 +134,22 @@ final class CapabilityIntegrationTests: XCTestCase {
             .setRoot(1),
         ]])
         let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "submit-fixture") as? UITextField)
+        func invokeRegisteredSubmitTargets() {
+            // SwiftPM runs without UIApplicationMain. Exercise the registered
+            // target selectors directly instead of asking UIApplication to send.
+            for target in field.allTargets {
+                guard let object = target.base as? NSObject else { continue }
+                for action in field.actions(forTarget: object, forControlEvent: .primaryActionTriggered) ?? [] {
+                    _ = object.perform(NSSelectorFromString(action))
+                }
+            }
+        }
         field.text = "Edited value"
-        field.sendActions(for: .primaryActionTriggered)
+        invokeRegisteredSubmitTargets()
         XCTAssertEqual(payloads.count, 1)
         XCTAssertEqual(try WireMap.decode(XCTUnwrap(payloads.first))["value"], .text("Edited value"))
         renderer.commit([[.update(id: 2, key: PamConstants.onSubmit, value: nil)]])
-        field.sendActions(for: .primaryActionTriggered)
+        invokeRegisteredSubmitTargets()
         XCTAssertEqual(payloads.count, 1, "Removing submit must detach its target")
     }
 
