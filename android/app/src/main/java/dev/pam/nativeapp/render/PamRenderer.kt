@@ -1418,7 +1418,14 @@ class PamRenderer(
         } ?: 0
         val (measuredHorizontalReduction, measuredVerticalReduction) =
             measuredCrossAxisViewportReduction(
-                mainAxisHorizontal = parentMainAxisHorizontal,
+                // These dimensions belong to the materialized host, not a
+                // flattened Row between it and this child. Mixing the Row's
+                // axis with a full-height Column's viewport can subtract the
+                // system-bar/IME height from each button and collapse it to 0.
+                mainAxisHorizontal = hostedParentState?.integer(
+                    PropKey.FLEX_DIRECTION,
+                    if (hostedParentState.kind == NodeKind.ROW) 2L else 1L,
+                )?.toInt() in listOf(2, 4),
                 engineWidth = dp(parentFrame?.width ?: 0f),
                 measuredWidth = measuredParentWidth,
                 engineHeight = dp(parentFrame?.height ?: 0f),

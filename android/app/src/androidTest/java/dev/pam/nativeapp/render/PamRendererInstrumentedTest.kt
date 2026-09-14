@@ -47,6 +47,56 @@ import kotlin.math.roundToInt
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun flattenedRowButtonsKeepHeightWhenColumnViewportShrinks() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.COLUMN, mapOf(
+                            PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                        ))),
+                        Mutation.Create(node(3, 2, NodeKind.ROW)),
+                        Mutation.Create(node(4, 3, NodeKind.PRESSABLE)),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(3, Frame(0f, 100f, 360f, 48f)),
+                        Mutation.Layout(4, Frame(0f, 100f, 112f, 48f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val field = PamRenderer::class.java.getDeclaredField("views")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val views = field.get(renderer) as android.util.LongSparseArray<View>
+                    assertNull("row must be flattened for this regression", views[3])
+                    val host = requireNotNull(views[2])
+                    val button = requireNotNull(views[4])
+                    val density = activity.resources.displayMetrics.density
+                    val width = (360 * density).roundToInt()
+                    val height = (640 * density).roundToInt()
+                    host.layoutParams.height = height
+                    host.measure(
+                        View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+                    )
+                    host.layout(0, 0, width, height)
+                    renderer.commit(listOf(listOf(
+                        Mutation.Layout(4, Frame(0f, 100f, 112f, 48f)),
+                    )))
+                    assertEquals((48 * density).roundToInt(), button.layoutParams.height)
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun physicalCellFrameIsNotMirroredAgainByAnRtlHolder() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         onMain(instrumentation) {
