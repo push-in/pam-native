@@ -922,7 +922,7 @@ final class TemplateRenderer
             $inheritedStyles = [];
         }
         $attributes = [
-            ...$inheritedStyles,
+            ...self::styleAttributes($inheritedStyles, 'inherited styles'),
             ...self::scopedStyleAttributes(
                 $tag,
                 $resolvedClass,
@@ -1058,8 +1058,12 @@ final class TemplateRenderer
         $ownHandlers = [];
         foreach (self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
+                $eventRaw = $attributes[$name];
+                if (!is_string($eventRaw) && !is_bool($eventRaw)) {
+                    throw new RuntimeException("Invalid template event expression {$name}.");
+                }
                 $ownHandlers[$event->value] = self::handler(
-                    $attributes[$name],
+                    $eventRaw,
                     $event,
                     $scope,
                     $data,
@@ -1071,6 +1075,9 @@ final class TemplateRenderer
             foreach ($attributes as $name => $raw) {
                 if (!str_starts_with($name, '@')) {
                     continue;
+                }
+                if (!is_string($raw) && !is_bool($raw)) {
+                    throw new RuntimeException("Invalid component event expression {$name}.");
                 }
                 $event = substr($name, 1);
                 if (
@@ -1163,17 +1170,26 @@ final class TemplateRenderer
         }
         if ($tag === 'Animated' && isset($values['animation'])) {
             $animation = self::stringValue($values['animation'], 'Animated animation');
-            $keyframes = $data['__pamStyles']['keyframes'][$animation] ?? null;
+            $animationSheet = $data['__pamStyles'] ?? null;
+            $knownKeyframes = is_array($animationSheet) ? ($animationSheet['keyframes'] ?? null) : null;
+            $keyframes = is_array($knownKeyframes) ? ($knownKeyframes[$animation] ?? null) : null;
             if (!is_array($keyframes)) {
                 throw new RuntimeException("Unknown PAM keyframes {$animation}.");
             }
-            $values['keyframes'] = array_map(
-                static fn (array $frame): array => [
-                    'offset' => $frame['offset'] ?? 0.0,
-                    ...(is_array($frame['styles'] ?? null) ? $frame['styles'] : []),
-                ],
-                $keyframes,
-            );
+            $frames = [];
+            foreach ($keyframes as $frame) {
+                if (!is_array($frame)) throw new RuntimeException('Invalid PAM keyframe.');
+                $offset = $frame['offset'] ?? 0.0;
+                if ((!is_int($offset) && !is_float($offset)) || !is_finite((float) $offset)
+                    || $offset < 0.0 || $offset > 1.0) {
+                    throw new RuntimeException('Invalid PAM keyframe offset.');
+                }
+                $frames[] = [
+                    ...self::styleAttributes($frame['styles'] ?? [], 'keyframe styles'),
+                    'offset' => $offset,
+                ];
+            }
+            $values['keyframes'] = $frames;
             unset($values['animation']);
         }
         $contract = $factory !== null ? TemplateRegistry::tagContract($tag) : null;
@@ -1590,7 +1606,7 @@ final class TemplateRenderer
             'networkfirst' => MediaCachePolicy::NetworkFirst,
             'cacheonly' => MediaCachePolicy::CacheOnly,
             'stalewhilerevalidate' => MediaCachePolicy::StaleWhileRevalidate,
-            default => throw new RuntimeException("Unknown media cache policy {$value}."),
+            default => throw new RuntimeException("Unknown media cache policy {$normalized}."),
         };
     }
 
@@ -1604,7 +1620,7 @@ final class TemplateRenderer
             'normal' => MediaPriority::Normal,
             'visible' => MediaPriority::Visible,
             'immediate' => MediaPriority::Immediate,
-            default => throw new RuntimeException("Unknown media priority {$value}."),
+            default => throw new RuntimeException("Unknown media priority {$normalized}."),
         };
     }
 
@@ -2630,7 +2646,8 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $data
-     * @return array<string, string|int|bool>
+     * @param array<string, mixed> $rawAttributes
+     * @return array<string, string|int|float|bool>
      */
     private static function scopedStyleAttributes(
         string $tag,
@@ -2643,7 +2660,7 @@ final class TemplateRenderer
         if (!is_array($sheet)) {
             return [];
         }
-        $sheet = self::responsiveStyleSheet(self::reactiveStyleSheet($sheet), $data);
+        $sheet = self::responsiveStyleSheet(self::reactiveStyleSheet(self::styleMap($sheet, 'scoped sheet')), $data);
         $descriptor = self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
         $cascadeRules = is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : [];
         $attributes = $cascadeRules !== []
@@ -2727,7 +2744,9 @@ final class TemplateRenderer
                     self::value($rawValue, $scope, $data),
                     "recipe variant {$variant}",
                 );
-                $styles = $recipe['variants'][$variant][$choice] ?? null;
+                $recipeVariants = $recipe['variants'] ?? null;
+                $choices = is_array($recipeVariants) ? ($recipeVariants[$variant] ?? null) : null;
+                $styles = is_array($choices) ? ($choices[$choice] ?? null) : null;
                 if (!is_array($styles)) {
                     throw new RuntimeException(
                         "Unknown PAM recipe variant {$recipeName}.{$variant}={$choice}.",
@@ -2743,7 +2762,8 @@ final class TemplateRenderer
             $selectors[] = '.'.$class;
         }
         foreach ($selectors as $selector) {
-            $pressed = $stateRules[$selector]['pressed'] ?? null;
+            $selectorStates = $stateRules[$selector] ?? null;
+            $pressed = is_array($selectorStates) ? ($selectorStates['pressed'] ?? null) : null;
             if (!is_array($pressed)) {
                 continue;
             }
@@ -2758,7 +2778,9 @@ final class TemplateRenderer
             }
         }
         $nativeStates = [];
-        foreach (($sheet['stateRules'] ?? []) as $stateRule) {
+        $compiledStateRules = $sheet['stateRules'] ?? [];
+        if (!is_array($compiledStateRules)) throw new RuntimeException('Invalid compiled state rules.');
+        foreach ($compiledStateRules as $stateRule) {
             if (!is_array($stateRule)
                 || !is_array($stateRule['selector'] ?? null)
                 || !self::styleSelectorMatches(
@@ -2771,7 +2793,7 @@ final class TemplateRenderer
             $state = $stateRule['state'] ?? null;
             $declarations = $stateRule['declarations'] ?? [];
             if (!is_string($state) || !is_array($declarations)) continue;
-            $declarations = self::resolveDynamicStyles($declarations, $data);
+            $declarations = self::resolveDynamicStyles(self::styleAttributes($declarations, 'state declarations'), $data);
             if ($state === 'pressed') {
                 if (isset($declarations['opacity'])) $attributes['pressedOpacity'] = $declarations['opacity'];
                 if (isset($declarations['scaleX'], $declarations['scaleY']) && $declarations['scaleX'] === $declarations['scaleY']) {
@@ -2795,7 +2817,7 @@ final class TemplateRenderer
                 $attributes = [...$attributes, ...$declarations];
             }
             foreach ($declarations as $attribute => $value) {
-                $property = is_string($attribute) ? (self::PROPERTIES[$attribute] ?? null) : null;
+                $property = self::PROPERTIES[$attribute] ?? null;
                 if ($property !== null && in_array($property, [
                     PropKey::Opacity,
                     PropKey::ScaleX,
@@ -2818,13 +2840,13 @@ final class TemplateRenderer
             );
         }
 
-        return self::resolveDynamicStyles($attributes, $data);
+        return self::resolveDynamicStyles(self::styleAttributes($attributes, 'scoped attributes'), $data);
     }
 
     /**
      * @param array<string, mixed> $raw
      * @param array<string, mixed> $data
-     * @return array<string, mixed>
+     * @return array{tag: string, id: string|null, classes: list<string>, attributes: array<string, mixed>, pseudos: list<string>}
      */
     private static function styleNodeDescriptor(string $tag, ?string $classes, array $raw, ?object $scope, array $data): array
     {
@@ -2972,7 +2994,7 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|int|bool> $attributes
+     * @param array<string, string|int|float|bool> $attributes
      * @param array<string, mixed> $data
      * @return array<string, string|int|float|bool>
      */
@@ -3198,6 +3220,20 @@ final class TemplateRenderer
         return $sheet;
     }
 
+    /** @return array<string, string|int|float|bool> */
+    private static function styleAttributes(mixed $value, string $label): array
+    {
+        if (!is_array($value)) throw new RuntimeException("Invalid {$label}.");
+        $attributes = [];
+        foreach ($value as $key => $entry) {
+            if (!is_string($key) || !is_scalar($entry) || (is_float($entry) && !is_finite($entry))) {
+                throw new RuntimeException("Invalid {$label} attribute.");
+            }
+            $attributes[$key] = $entry;
+        }
+        return $attributes;
+    }
+
     /** @return array<string, mixed> */
     private static function styleMap(mixed $value, string $label): array
     {
@@ -3252,9 +3288,9 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|int|bool> $attributes
+     * @param array<string, string|int|float|bool> $attributes
      * @param array<string, list<array{source: string, weight: string, style: string}>> $fonts
-     * @return array<string, string|int|bool>
+     * @return array<string, string|int|float|bool>
      */
     private static function resolveScopedFont(array $attributes, array $fonts): array
     {
@@ -3475,8 +3511,8 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|bool> $attributes
-     * @return array<string, string|bool>
+     * @param array<string, string|int|bool> $attributes
+     * @return array<string, string|int|bool>
      */
     private static function nativeEventAliases(array $attributes): array
     {
@@ -3542,7 +3578,7 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|bool> $attributes
+     * @param array<string, string|int|bool> $attributes
      * @param array<string, mixed> $data
      */
     private static function classValue(

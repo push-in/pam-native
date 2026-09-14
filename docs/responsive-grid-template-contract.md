@@ -52,6 +52,11 @@ SDK typed construction, template attributes, UI migration and device visual chec
 remain pending. UIKit constants are synchronized but iOS execution is unverified.
 No publication or full responsive-grid approval is claimed.
 
+Later checkpoint: the TemplateRenderer static-analysis debt described below was
+closed by the subsequent validation batches. See
+[the file-level closure report](template-renderer-static-closure-2026-09-14.md).
+Device, iOS and full release gates remain separate and incomplete.
+
 ## SDK and UI integration — 2026-09-14
 
 The SDK now provides immutable `GridBreakpoint` and `GridTemplate` values.

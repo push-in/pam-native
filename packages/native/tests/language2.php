@@ -349,6 +349,50 @@ $assert(
 StyleVariables::replace([]);
 
 $reactiveMethod = new ReflectionMethod(TemplateRenderer::class, 'reactiveStyleSheet');
+$attributesMethod = new ReflectionMethod(TemplateRenderer::class, 'styleAttributes');
+$assert($attributesMethod->invoke(null, ['width' => 12.5, 'fontWeight' => 600, 'visible' => false], 'test')
+    === ['width' => 12.5, 'fontWeight' => 600, 'visible' => false],
+    'Style attribute validation must preserve fractional dimensions, integers and booleans.');
+foreach ([['width' => []], ['width' => new stdClass()], ['width' => INF], [0 => 'value']] as $invalidAttributes) {
+    try {
+        $attributesMethod->invoke(null, $invalidAttributes, 'test');
+        throw new LogicException('Invalid style attributes were accepted.');
+    } catch (RuntimeException) {
+        $assert(true, 'Invalid attribute maps fail before native conversion.');
+    }
+}
+$tagMethod = new ReflectionMethod(TemplateRenderer::class, 'tag');
+try {
+    $tagMethod->invoke(null, 'Button', ['on:press' => 42], [], null, []);
+    throw new LogicException('Numeric event expression was accepted.');
+} catch (RuntimeException $eventError) {
+    $assert(str_contains($eventError->getMessage(), 'event expression'), 'Invalid event metadata has an explicit diagnostic.');
+}
+$animationTemplate = TemplateCompiler::compile('<Animated animation="enter"><View /></Animated>', 'KeyframeValidation.pam', LanguageVersion::Language2);
+foreach ([null, false, ['offset' => -0.1], ['offset' => 1.1], ['offset' => '0.5'],
+    ['offset' => 0.0, 'styles' => ['opacity' => []]]] as $invalidFrame) {
+    $frames = [
+        $invalidFrame ?? ['offset' => 0.0, 'styles' => ['opacity' => 0.0, 'offset' => 0.8]],
+        ['offset' => 1.0, 'styles' => ['opacity' => 1.0]],
+    ];
+    $animationRoot = new CompiledTemplateNode(
+        kind: $animationTemplate->kind, name: $animationTemplate->name,
+        attributes: ['__pamStyles' => json_encode(['classes' => [], 'tags' => [], 'keyframes' => ['enter' => $frames]], JSON_THROW_ON_ERROR)],
+        source: $animationTemplate->source, line: $animationTemplate->line, column: $animationTemplate->column,
+    );
+    $animationRoot->children = $animationTemplate->children;
+    try {
+        $animationElement = TemplateRenderer::render($animationRoot, null, []);
+        if ($invalidFrame !== null) throw new LogicException('Malformed keyframe was accepted.');
+        $animationPayload = $animationElement->properties()[PropKey::AnimationKeyframes->value] ?? null;
+        $assert($animationPayload instanceof \Pam\Native\Internal\BinaryValue
+            && json_decode($animationPayload->bytes, true, flags: JSON_THROW_ON_ERROR)[0]['offset'] === 0.0,
+            'Valid keyframes render and frame styles cannot overwrite their timeline offset.');
+    } catch (RuntimeException $keyframeError) {
+        if ($invalidFrame === null) throw $keyframeError;
+        $assert(str_contains($keyframeError->getMessage(), 'keyframe'), 'Malformed keyframes fail with a relevant template diagnostic.');
+    }
+}
 $cascadeMethod = new ReflectionMethod(TemplateRenderer::class, 'cascadeStyleAttributes');
 $selectorMethod = new ReflectionMethod(TemplateRenderer::class, 'styleSelectorMatches');
 $specificityRules = [
