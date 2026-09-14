@@ -1490,6 +1490,7 @@ final class TemplateRenderer
         return $element;
     }
 
+    /** @param array<string, mixed> $values */
     private static function mediaCacheAttributes(
         Image|MediaPlayer $element,
         array $values,
@@ -2579,6 +2580,7 @@ final class TemplateRenderer
         ];
     }
 
+    /** @return array<array-key, mixed> */
     private static function safeStyleMetadata(mixed $value, string $source, int $depth = 0): array
     {
         if (!is_array($value) || $depth > 12 || count($value) > 10_000) {
@@ -2586,9 +2588,6 @@ final class TemplateRenderer
         }
         $safe = [];
         foreach ($value as $key => $entry) {
-            if (!is_string($key) && !is_int($key)) {
-                throw new RuntimeException("Invalid Language 2 style IR key in {$source}.");
-            }
             if (is_array($entry)) {
                 $safe[$key] = self::safeStyleMetadata($entry, $source, $depth + 1);
             } elseif (is_string($entry) || is_int($entry) || is_float($entry) || is_bool($entry) || $entry === null) {
@@ -2932,8 +2931,8 @@ final class TemplateRenderer
     private static function resolveDynamicStyles(array $attributes, array $data): array
     {
         $metrics = Runtime::windowMetrics();
-        $containerWidth = $data['__pamContainerWidth'] ?? $metrics->width;
-        $containerHeight = $data['__pamContainerHeight'] ?? $metrics->height;
+        $containerWidth = self::styleDimension($data['__pamContainerWidth'] ?? $metrics->width, 'container width');
+        $containerHeight = self::styleDimension($data['__pamContainerHeight'] ?? $metrics->height, 'container height');
         $provided = is_array($data['__pamStyleEnvironment'] ?? null)
             ? $data['__pamStyleEnvironment']
             : [];
@@ -2941,10 +2940,10 @@ final class TemplateRenderer
             'width' => $metrics->width,
             'height' => $metrics->height,
             'fontScale' => is_numeric($provided['fontScale'] ?? null)
-                ? (float) $provided['fontScale']
+                ? self::styleDimension($provided['fontScale'], 'font scale')
                 : $metrics->fontScale,
             'rootFontSize' => is_numeric($provided['rootFontSize'] ?? null)
-                ? (float) $provided['rootFontSize']
+                ? self::styleDimension($provided['rootFontSize'], 'root font size')
                 : 16.0,
             'env.safe-area-inset-top' => $metrics->safeAreaTop,
             'env.safe-area-inset-right' => $metrics->safeAreaRight,
@@ -2953,6 +2952,9 @@ final class TemplateRenderer
         ];
         foreach ($provided as $name => $value) {
             if (is_string($name) && (is_int($value) || is_float($value))) {
+                if (!is_finite((float) $value)) {
+                    throw new InvalidArgumentException("Nonfinite style environment value: {$name}.");
+                }
                 $environment[$name] = $value;
             }
         }
@@ -2973,12 +2975,20 @@ final class TemplateRenderer
                 continue;
             }
             $environment['reference'] = isset($vertical[$name])
-                ? (float) $containerHeight
-                : (float) $containerWidth;
+                ? $containerHeight
+                : $containerWidth;
             $attributes[$name] = StyleValueCompiler::resolve($value, $environment);
         }
 
         return $attributes;
+    }
+
+    private static function styleDimension(mixed $value, string $label): float
+    {
+        if (!is_numeric($value) || !is_finite((float) $value) || (float) $value < 0.0) {
+            throw new InvalidArgumentException("Invalid style {$label}: expected a finite nonnegative number.");
+        }
+        return (float) $value;
     }
 
     /** @param array<string,mixed> $sheet @return array<string,mixed> */

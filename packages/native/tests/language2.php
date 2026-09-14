@@ -251,6 +251,44 @@ $safeInset = StyleValueCompiler::encode(
     'calc(env(safe-area-inset-top) + 8dp)',
     'SafeInset.pam',
 );
+$containerStyles = ScopedStyleCompiler::compile(
+    '.relative { width: calc(50% + 8px); height: calc(25% + 4px); }',
+    'ContainerDimensions.pam',
+);
+$containerTemplate = TemplateCompiler::compile('<View class="relative" />', 'ContainerDimensions.pam', LanguageVersion::Language2);
+$containerRoot = new CompiledTemplateNode(
+    kind: $containerTemplate->kind,
+    name: $containerTemplate->name,
+    attributes: ['__pamStyles' => json_encode($containerStyles, JSON_THROW_ON_ERROR)],
+    source: $containerTemplate->source,
+    line: $containerTemplate->line,
+    column: $containerTemplate->column,
+);
+$containerRoot->children = $containerTemplate->children;
+$relativeElement = TemplateRenderer::render($containerRoot, null, [
+    '__pamContainerWidth' => '400', '__pamContainerHeight' => 800.0,
+]);
+$assert(($relativeElement->properties()[PropKey::Width->value] ?? null) === 208.0
+    && ($relativeElement->properties()[PropKey::Height->value] ?? null) === 204.0,
+    'Container math must use finite horizontal/vertical references and preserve numeric-string compatibility.');
+foreach ([[], new stdClass(), true, -1, INF, NAN, 'invalid'] as $invalidDimension) {
+    foreach (['__pamContainerWidth', '__pamContainerHeight'] as $dimensionKey) {
+        try {
+            TemplateRenderer::render($containerRoot, null, [$dimensionKey => $invalidDimension]);
+            throw new RuntimeException('Invalid container dimensions reached style evaluation.');
+        } catch (InvalidArgumentException) {
+            $assert(true, 'Malformed container dimensions fail before style evaluation.');
+        }
+    }
+}
+foreach (['fontScale', 'rootFontSize', 'env.safe-area-inset-top'] as $environmentKey) {
+    try {
+        TemplateRenderer::render($containerRoot, null, ['__pamStyleEnvironment' => [$environmentKey => INF]]);
+        throw new RuntimeException('Nonfinite style environment reached style evaluation.');
+    } catch (InvalidArgumentException) {
+        $assert(true, 'Nonfinite style environment values fail before native dispatch.');
+    }
+}
 $assert(
     StyleValueCompiler::resolve($safeInset, [
         'width' => 400.0,
