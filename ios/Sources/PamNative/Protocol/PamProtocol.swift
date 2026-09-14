@@ -323,7 +323,10 @@ public enum PamConstants {
     public static let value = 2
     public static let placeholder = 3
     public static let keyboardType = 47
+    public static let secure = 46
     public static let inputMode = 218
+    public static let inputAutoCorrect = 211
+    public static let inputAutoCapitalize = 212
     public static let source = 4
     public static let width = 5
     public static let height = 6

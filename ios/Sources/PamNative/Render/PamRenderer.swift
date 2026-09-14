@@ -10,6 +10,10 @@ private enum PamInputModeKind: Int64 {
     case text = 1, none, decimal, numeric, tel, search, email, url
 }
 
+private enum PamInputCapitalization: Int64 {
+    case none = 1, sentences, words, characters
+}
+
 public final class PamRenderer {
     var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     private let fontLoader = PamFontLoader()
@@ -1448,6 +1452,41 @@ public final class PamRenderer {
         )
     }
 
+    private func applyInputTextTraits(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        let autoCorrect = state.properties[PamConstants.inputAutoCorrect]?.boolOrNil()
+        let correction: UITextAutocorrectionType = autoCorrect.map { $0 ? .yes : .no } ?? .default
+        let mode = (state.properties[PamConstants.inputAutoCapitalize]?.integerOrNil())
+            .flatMap(PamInputCapitalization.init(rawValue:)) ?? .sentences
+        let capitalization: UITextAutocapitalizationType
+        switch mode {
+        case .none: capitalization = .none
+        case .sentences: capitalization = .sentences
+        case .words: capitalization = .words
+        case .characters: capitalization = .allCharacters
+        }
+        let changed = field.autocorrectionType != correction || field.autocapitalizationType != capitalization
+        field.autocorrectionType = correction
+        field.autocapitalizationType = capitalization
+        if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
+    private func applyInputSecurity(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField else { return }
+        let secure = nodes[nodeId]?.properties[PamConstants.secure]?.boolOrNil() ?? false
+        guard field.isSecureTextEntry != secure else { return }
+        let selection = field.selectedTextRange.map {
+            (field.offset(from: field.beginningOfDocument, to: $0.start),
+             field.offset(from: field.beginningOfDocument, to: $0.end))
+        }
+        field.isSecureTextEntry = secure
+        if let (start, end) = selection,
+           let from = field.position(from: field.beginningOfDocument, offset: start),
+           let to = field.position(from: field.beginningOfDocument, offset: end) {
+            field.selectedTextRange = field.textRange(from: from, to: to)
+        }
+    }
+
     private func applyInputKeyboard(view: UIView, nodeId: Int64) {
         guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
         let mode = (state.properties[PamConstants.inputMode]?.integerOrNil()).flatMap(PamInputModeKind.init(rawValue:))
@@ -1474,7 +1513,7 @@ public final class PamRenderer {
             case .url: type = .URL
             }
         }
-        let hideKeyboard = mode == .none
+        let hideKeyboard = mode == PamInputModeKind.none
         let changed = field.keyboardType != type || (field.inputView != nil) != hideKeyboard
         field.keyboardType = type
         if hideKeyboard {
@@ -1501,6 +1540,10 @@ public final class PamRenderer {
             }
         case PamConstants.keyboardType, PamConstants.inputMode:
             applyInputKeyboard(view: view, nodeId: nodeId)
+        case PamConstants.secure:
+            applyInputSecurity(view: view, nodeId: nodeId)
+        case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
+            applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
@@ -1986,6 +2029,10 @@ public final class PamRenderer {
             view.backgroundColor = .clear
         case PamConstants.keyboardType, PamConstants.inputMode:
             applyInputKeyboard(view: view, nodeId: nodeId)
+        case PamConstants.secure:
+            applyInputSecurity(view: view, nodeId: nodeId)
+        case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
+            applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.imageFit:

@@ -31,6 +31,67 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testInputTextTraitsApplyAndReset() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("traits-fixture"),
+                PamConstants.inputAutoCorrect: .flag(false),
+                PamConstants.inputAutoCapitalize: .integer(1),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "traits-fixture") as? UITextField)
+        XCTAssertEqual(field.autocorrectionType, .no)
+        XCTAssertEqual(field.autocapitalizationType, .none)
+        renderer.commit([[
+            .update(id: 2, key: PamConstants.inputAutoCorrect, value: .flag(true)),
+            .update(id: 2, key: PamConstants.inputAutoCapitalize, value: .integer(3)),
+        ]])
+        XCTAssertEqual(field.autocorrectionType, .yes)
+        XCTAssertEqual(field.autocapitalizationType, .words)
+        renderer.commit([[
+            .update(id: 2, key: PamConstants.inputAutoCorrect, value: nil),
+            .update(id: 2, key: PamConstants.inputAutoCapitalize, value: nil),
+        ]])
+        XCTAssertEqual(field.autocorrectionType, .default)
+        XCTAssertEqual(field.autocapitalizationType, .sentences)
+    }
+
+    func testSecureInputTogglePreservesTextAndSelection() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("secure-fixture"),
+                PamConstants.value: .text("sample-secret"),
+                PamConstants.secure: .flag(true),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "secure-fixture") as? UITextField)
+        XCTAssertTrue(field.isSecureTextEntry)
+        let start = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 2))
+        let end = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 5))
+        field.selectedTextRange = field.textRange(from: start, to: end)
+        for secure in [false, true, false] {
+            renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(secure))]])
+            XCTAssertEqual(field.isSecureTextEntry, secure)
+            XCTAssertEqual(field.text, "sample-secret")
+            let selection = try XCTUnwrap(field.selectedTextRange)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.start), 2)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.end), 5)
+        }
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(true))]])
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: nil)]])
+        XCTAssertFalse(field.isSecureTextEntry)
+    }
+
     func testInputKeyboardMappingPrecedenceAndRemoval() throws {
         let host = UIView()
         let renderer = PamRenderer(hostView: host) { _, _, _ in }
