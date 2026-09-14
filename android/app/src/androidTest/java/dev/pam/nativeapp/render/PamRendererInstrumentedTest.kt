@@ -1226,8 +1226,24 @@ class PamRendererInstrumentedTest {
                 parent.setContentOffsetY(500f)
             }
             instrumentation.waitForIdleSync()
-            SystemClock.sleep(100)
-            initialWindow = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            // Idle on the UI thread does not guarantee that the compositor has
+            // presented the newly revealed content. Wait for the gray child,
+            // never for the indicator itself, without drawing/toggling the view.
+            // Keep the final frame on timeout so the existing content assertion
+            // still fails with captured evidence if rendering never happens.
+            val initialFrameDeadline = SystemClock.uptimeMillis() + 2000L
+            val initialLocation = IntArray(2)
+            do {
+                onMain(instrumentation) { scroll.getLocationOnScreen(initialLocation) }
+                initialWindow?.recycle()
+                val frame = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                initialWindow = frame
+                val x = initialLocation[0] + 10
+                val y = initialLocation[1] + 10
+                if (x in 0 until frame.width && y in 0 until frame.height
+                    && frame.getPixel(x, y) == Color.LTGRAY) break
+                SystemClock.sleep(50)
+            } while (SystemClock.uptimeMillis() < initialFrameDeadline)
             onMain(instrumentation) {
                 assertTrue("Renderer fixture must overflow", scroll.getChildAt(0).canScrollHorizontally(1))
                 val shown = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
