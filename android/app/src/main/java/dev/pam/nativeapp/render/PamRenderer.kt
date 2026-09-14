@@ -456,10 +456,14 @@ class PamRenderer(
             }
         }
         val dirtyLayouts = LinkedHashSet<Long>()
+        val createdNodes = LinkedHashSet<Long>()
         batches.forEach { batch ->
             batch.forEach { mutation ->
                 when (mutation) {
-                    is Mutation.Create -> create(mutation.node)
+                    is Mutation.Create -> {
+                        create(mutation.node)
+                        createdNodes += mutation.node.id
+                    }
                     is Mutation.Remove -> remove(mutation.id)
                     is Mutation.Update -> update(mutation.id, mutation.key, mutation.value)
                     is Mutation.Move -> move(mutation.id, mutation.parent, mutation.index)
@@ -478,6 +482,13 @@ class PamRenderer(
         // authored StatusBar color must win at the end of every commit.
         applyMergedStatusBar()
         syncVirtualLists()
+        // A stable row ID/extent does not trigger a RecyclerView rebind when
+        // conditional descendants are inserted. Materialize only affected,
+        // already-mounted cells after all nodes and frames have arrived.
+        createdNodes.mapNotNull(::virtualCellRoot).toSet().forEach { cellRoot ->
+            val holder = virtualCellHolder(cellRoot)
+            if (holder != null) materializeCell(cellRoot, holder)
+        }
         dirtyLayouts.forEach(::applyLayout)
         retainedScrollOffsets.forEach { (id, offset) ->
             if (id !in explicitlyUpdatedScrollOffsets) {

@@ -51,6 +51,61 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun richVirtualCellMountsInsertedChildrenWithoutChangingRowExtent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST)),
+                        Mutation.Create(node(3, 2, NodeKind.PRESSABLE)),
+                        Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 300f, 400f)),
+                        Mutation.Layout(3, Frame(0f, 0f, 300f, 48f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val field = PamRenderer::class.java.getDeclaredField("views")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val views = field.get(renderer) as android.util.LongSparseArray<View>
+                    val list = views[2] as PamRecyclerList
+                    list.measure(
+                        View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(dp(list, 400f), View.MeasureSpec.EXACTLY),
+                    )
+                    list.layout(0, 0, dp(list, 300f), dp(list, 400f))
+                    val row = requireNotNull(views[3]) as ViewGroup
+                    val holder = requireNotNull(list.findViewHolderForAdapterPosition(0)).itemView
+                    repeat(2) {
+                        renderer.commit(listOf(listOf(
+                            Mutation.Create(node(4, 3, NodeKind.TEXT, mapOf(
+                                PropKey.TEXT to PropValue.Text("Selected"),
+                            ))),
+                            Mutation.Layout(4, Frame(8f, 8f, 80f, 24f)),
+                        )))
+                        val inserted = requireNotNull(views[4]) as TextView
+                        assertSame(row, inserted.parent)
+                        assertEquals("Selected", inserted.text.toString())
+                        assertEquals(dp(list, 24f), inserted.layoutParams.height)
+                        assertSame(holder, list.findViewHolderForAdapterPosition(0)?.itemView)
+                        assertEquals(1, row.childCount)
+                        renderer.commit(listOf(listOf(Mutation.Remove(4))))
+                        assertNull(views[4])
+                        assertEquals(0, row.childCount)
+                    }
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun flattenedRowButtonsKeepHeightWhenColumnViewportShrinks() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
