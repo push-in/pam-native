@@ -51,6 +51,57 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun virtualListRolesPreserveNativeAccessibilityScrollActions() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        lateinit var list: PamRecyclerList
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val mutations = mutableListOf<Mutation>(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST, mapOf(
+                        PropKey.ACCESSIBILITY_ROLE to PropValue.Integer(31),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 300f, 144f)),
+                )
+                repeat(20) { index ->
+                    val id = index.toLong() + 3
+                    mutations += Mutation.Create(node(id, 2, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("Record $index"),
+                    )))
+                    mutations += Mutation.Layout(id, Frame(0f, index * 48f, 300f, 48f))
+                }
+                mutations += Mutation.SetRoot(1)
+                renderer.commit(listOf(mutations))
+                val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
+                @Suppress("UNCHECKED_CAST")
+                val views = field.get(renderer) as android.util.LongSparseArray<View>
+                list = views[2] as PamRecyclerList
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 144f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 144f))
+                val info = list.createAccessibilityNodeInfo()
+                assertTrue(info.isScrollable)
+                assertTrue(info.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD })
+                assertTrue(list.performAccessibilityAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, null))
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(600)
+            onMain(instrumentation) {
+                val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+                assertTrue(manager.findFirstVisibleItemPosition() > 0)
+            }
+        } finally {
+            onMain(instrumentation) { renderer.close(); activity.finish() }
+        }
+    }
+
+    @Test
     fun partiallyVisibleVirtualRowsRemainAccessible() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

@@ -6767,6 +6767,7 @@ class PamRenderer(
         }
 
     private fun configureAccessibilityDelegate(view: View, state: NodeState) {
+        val nativeListDelegate = (view as? PamRecyclerList)?.compatAccessibilityDelegate
         val role = state.integer(PropKey.ACCESSIBILITY_ROLE, 1L).toInt()
         val actions = if (state.properties[PropKey.ON_ACCESSIBILITY_ACTION] != null) {
             accessibilityActions(state.textOrNull(PropKey.ACCESSIBILITY_ACTIONS))
@@ -6776,7 +6777,7 @@ class PamRenderer(
         val hint = state.textOrNull(PropKey.ACCESSIBILITY_HINT)
             ?.takeIf(String::isNotEmpty)
         if (role == 1 && actions.isEmpty() && hint == null) {
-            view.accessibilityDelegate = null
+            androidx.core.view.ViewCompat.setAccessibilityDelegate(view, nativeListDelegate)
             return
         }
         if (actions.isNotEmpty()) {
@@ -6787,8 +6788,14 @@ class PamRenderer(
                 host: View,
                 info: AccessibilityNodeInfo,
             ) {
-                super.onInitializeAccessibilityNodeInfo(host, info)
-                info.className = accessibilityClass(role)
+                if (nativeListDelegate != null) {
+                    nativeListDelegate.onInitializeAccessibilityNodeInfo(
+                        host, androidx.core.view.accessibility.AccessibilityNodeInfoCompat.wrap(info),
+                    )
+                } else {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                }
+                if (role != 1) info.className = accessibilityClass(role)
                 if (hint != null) {
                     info.hintText = hint
                 }
@@ -6817,7 +6824,8 @@ class PamRenderer(
                     )
                     return true
                 }
-                return super.performAccessibilityAction(host, actionId, arguments)
+                return nativeListDelegate?.performAccessibilityAction(host, actionId, arguments)
+                    ?: super.performAccessibilityAction(host, actionId, arguments)
             }
         }
     }
