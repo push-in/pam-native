@@ -249,6 +249,46 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun inactiveInputStartsAtLeadingTextAndHonorsControlledSelection() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("inactive-value"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(16f, 40f, 200f, 56f)),
+                    Mutation.SetRoot(1),
+                )))
+                val input = requireNotNull(activity.host.findByTransitionName("inactive-value")) as EditText
+                input.isFocusable = false
+                renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VALUE,
+                    PropValue.Text("Search invoices, customers and documents across all workspaces")))))
+                assertEquals(0, input.selectionStart)
+                assertEquals(0, input.selectionEnd)
+                input.isFocusableInTouchMode = true
+                assertTrue(input.requestFocus())
+                renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VALUE, PropValue.Text("Edited query")))))
+                assertEquals(input.text.length, input.selectionStart)
+                renderer.commit(listOf(listOf(
+                    Mutation.Update(2, PropKey.INPUT_SELECTION_START, PropValue.Integer(2)),
+                    Mutation.Update(2, PropKey.INPUT_SELECTION_END, PropValue.Integer(5)),
+                    Mutation.Update(2, PropKey.VALUE, PropValue.Text("Controlled query")),
+                )))
+                assertEquals(2, input.selectionStart)
+                assertEquals(5, input.selectionEnd)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun currencyInputKeepsNumericTypingAtTheTrailingMinorUnit() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

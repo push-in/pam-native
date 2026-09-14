@@ -4596,7 +4596,16 @@ class PamRenderer(
         }
         state.updating = true
         input.setText(formattedNext)
-        input.setSelection(input.text.length)
+        // An inactive field should reveal the beginning of its value, not scroll
+        // to a trailing cursor before the user has interacted with it.
+        val requestedStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)?.toInt()
+        val start = (requestedStart ?: if (input.hasFocus()) input.text.length else 0)
+            .coerceIn(0, input.text.length)
+        val end = if (requestedStart != null) {
+            (state.integerOrNull(PropKey.INPUT_SELECTION_END)?.toInt() ?: start)
+                .coerceIn(start, input.text.length)
+        } else start
+        input.setSelection(start, end)
         state.nativeValue = formattedNext
         state.nativeValueAcknowledged = true
         state.updating = false
