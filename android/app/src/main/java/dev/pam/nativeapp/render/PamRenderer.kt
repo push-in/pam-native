@@ -6558,7 +6558,7 @@ class PamRenderer(
             2 -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             3 -> InputType.TYPE_CLASS_NUMBER
             4 -> InputType.TYPE_CLASS_PHONE
-            5 -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            5 -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
             6 -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             else -> InputType.TYPE_CLASS_TEXT
         }
@@ -6574,7 +6574,7 @@ class PamRenderer(
         val inputMode = state.integer(PropKey.INPUT_MODE, 0L).toInt()
         var type = when (inputMode) {
             INPUT_MODE_DECIMAL ->
-                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
             INPUT_MODE_NUMERIC -> InputType.TYPE_CLASS_NUMBER
             INPUT_MODE_TEL -> InputType.TYPE_CLASS_PHONE
             INPUT_MODE_EMAIL ->

@@ -51,6 +51,40 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun decimalKeyboardAcceptsSignedValuesButDigitKeyboardDoesNot() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                            PropKey.TEST_ID to PropValue.Text("signed-decimal"),
+                            PropKey.KEYBOARD_TYPE to PropValue.Integer(5),
+                        ))),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                        Mutation.Layout(2, Frame(16f, 40f, 200f, 56f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val input = requireNotNull(activity.host.findByTransitionName("signed-decimal")) as EditText
+                    input.text.replace(0, input.text.length, "-7.5")
+                    assertEquals("-7.5", input.text.toString())
+                    renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.KEYBOARD_TYPE, PropValue.Integer(3)))))
+                    input.text.clear()
+                    input.text.replace(0, 0, "-75")
+                    assertEquals("75", input.text.toString())
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun deferredAuthoredValueAppliesOnBlurWithoutOverwritingNewerTyping() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
