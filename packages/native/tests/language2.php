@@ -348,6 +348,44 @@ $assert(
 );
 StyleVariables::replace([]);
 
+$reactiveMethod = new ReflectionMethod(TemplateRenderer::class, 'reactiveStyleSheet');
+$fontsMethod = new ReflectionMethod(TemplateRenderer::class, 'styleSheetFonts');
+$fontFaces = $fontsMethod->invoke(null, ['__pamStyles' => ['fonts' => ['Display' => [
+    4 => ['source' => 'fonts/display.ttf', 'weight' => '700', 'style' => 'normal'],
+]]]]);
+$assert($fontFaces === ['Display' => [
+    ['source' => 'fonts/display.ttf', 'weight' => '700', 'style' => 'normal'],
+]], 'Font metadata must preserve valid faces and normalize the face list.');
+foreach ([['Display' => false], ['Display' => [['source' => []]]], [0 => []]] as $invalidFonts) {
+    try {
+        $fontsMethod->invoke(null, ['__pamStyles' => ['fonts' => $invalidFonts]]);
+        throw new LogicException('Invalid font metadata was accepted.');
+    } catch (RuntimeException) {
+        $assert(true, 'Malformed font metadata fails before font resolution.');
+    }
+}
+StyleVariables::replace(['space' => '20px']);
+try {
+    $firstSheet = $reactiveStyles;
+    $firstSheet['styleFingerprint'] = '';
+    $secondSheet = $firstSheet;
+    $secondSheet['variables']['surface'] = '#222222';
+    $firstResolved = $reactiveMethod->invoke(null, $firstSheet);
+    $secondResolved = $reactiveMethod->invoke(null, $secondSheet);
+    $assert($firstResolved !== $secondResolved,
+        'Sheets without fingerprints must not share reactive results when their base variables differ.');
+    foreach ([['variables' => false], ['variables' => ['surface' => []]], ['cascadeRules' => false]] as $invalidSheetPart) {
+        try {
+            $reactiveMethod->invoke(null, [...$firstSheet, ...$invalidSheetPart]);
+            throw new LogicException('Invalid reactive metadata was accepted.');
+        } catch (RuntimeException) {
+            $assert(true, 'Malformed reactive metadata fails before cascade evaluation.');
+        }
+    }
+} finally {
+    StyleVariables::replace([]);
+}
+
 $nativeResourceStyles = ScopedStyleCompiler::compile(
     '.native-theme { -pam-native-background-color: colorSurface; -pam-native-text-color: label_primary; -pam-native-border-color: accent-color; }',
     'NativeResources.pam',

@@ -2991,18 +2991,35 @@ final class TemplateRenderer
         return (float) $value;
     }
 
-    /** @param array<string,mixed> $sheet @return array<string,mixed> */
+    /**
+     * @param array<string, mixed> $sheet
+     * @return array<string, mixed>
+     */
     private static function reactiveStyleSheet(array $sheet): array
     {
         $overrides = StyleVariables::all();
         $bindings = $sheet['variableRules'] ?? [];
         if ($overrides === [] || !is_array($bindings) || $bindings === []) return $sheet;
-        $fingerprint = is_string($sheet['styleFingerprint'] ?? null)
+        $fingerprint = is_string($sheet['styleFingerprint'] ?? null) && $sheet['styleFingerprint'] !== ''
             ? $sheet['styleFingerprint']
-            : hash('sha256', serialize($bindings));
+            : hash('sha256', serialize($sheet));
         $key = $fingerprint.':'.StyleVariables::revision();
         if (isset(self::$reactiveStyleCache[$key])) return self::$reactiveStyleCache[$key];
-        $variables = is_array($sheet['variables'] ?? null) ? $sheet['variables'] : [];
+        $variables = [];
+        $rawVariables = $sheet['variables'] ?? [];
+        if (!is_array($rawVariables)) {
+            throw new RuntimeException('Invalid reactive style variables.');
+        }
+        foreach ($rawVariables as $name => $value) {
+            if (!is_string($name) || !is_string($value)) {
+                throw new RuntimeException('Reactive style variables require string names and values.');
+            }
+            $variables[$name] = $value;
+        }
+        $rules = $sheet['cascadeRules'] ?? [];
+        if (!is_array($rules)) {
+            throw new RuntimeException('Invalid reactive style cascade rules.');
+        }
         foreach ($overrides as $name => $value) $variables[$name] = $value;
         foreach ($bindings as $binding) {
             if (!is_array($binding)
@@ -3014,15 +3031,28 @@ final class TemplateRenderer
                 $variables,
                 '<reactive-style-variable>',
             );
-            foreach (($sheet['cascadeRules'] ?? []) as $index => $rule) {
+            foreach ($rules as $index => $rule) {
                 if (!is_array($rule)
                     || ($rule['order'] ?? null) !== $binding['order']
+                    || !is_array($rule['selector'] ?? null)
                     || ($rule['selector']['source'] ?? null) !== $binding['selector']) continue;
-                foreach ($declarations as $attribute => $value) {
-                    $sheet['cascadeRules'][$index]['declarations'][$attribute]['value'] = $value;
+                $ruleDeclarations = $rule['declarations'] ?? [];
+                if (!is_array($ruleDeclarations)) {
+                    throw new RuntimeException('Invalid reactive style declarations.');
                 }
+                foreach ($declarations as $attribute => $value) {
+                    $declaration = $ruleDeclarations[$attribute] ?? [];
+                    if (!is_array($declaration)) {
+                        throw new RuntimeException('Invalid reactive style declaration.');
+                    }
+                    $declaration['value'] = $value;
+                    $ruleDeclarations[$attribute] = $declaration;
+                }
+                $rule['declarations'] = $ruleDeclarations;
+                $rules[$index] = $rule;
             }
         }
+        $sheet['cascadeRules'] = $rules;
         if (count(self::$reactiveStyleCache) >= 64) self::$reactiveStyleCache = [];
         return self::$reactiveStyleCache[$key] = $sheet;
     }
@@ -3134,7 +3164,7 @@ final class TemplateRenderer
         $sheet = $data['__pamStyles'] ?? null;
         $fonts = is_array($sheet) ? ($sheet['fonts'] ?? null) : null;
 
-        return is_array($fonts) ? $fonts : [];
+        return self::validatedFontFaces(is_array($fonts) ? $fonts : [], '<scoped-style-data>');
     }
 
     /**
