@@ -31,6 +31,35 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testSubmitEventCarriesCurrentEditorValue() throws {
+        let host = UIView()
+        var payloads: [Data] = []
+        let renderer = PamRenderer(hostView: host) { node, kind, payload in
+            if kind == EventKind.submit.rawValue {
+                XCTAssertEqual(node, 2)
+                payloads.append(payload)
+            }
+        }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("submit-fixture"),
+                PamConstants.value: .text("Original"),
+                PamConstants.onSubmit: .flag(true),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "submit-fixture") as? UITextField)
+        field.text = "Edited value"
+        field.sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(try WireMap.decode(XCTUnwrap(payloads.first))["value"], .text("Edited value"))
+        renderer.commit([[.update(id: 2, key: PamConstants.onSubmit, value: nil)]])
+        field.sendActions(for: .primaryActionTriggered)
+        XCTAssertEqual(payloads.count, 1, "Removing submit must detach its target")
+    }
+
     func testReadonlyInputRejectsMutationWithoutDisablingSelection() throws {
         let host = UIView()
         let renderer = PamRenderer(hostView: host) { _, _, _ in }

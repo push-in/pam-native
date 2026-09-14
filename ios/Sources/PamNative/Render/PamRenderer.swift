@@ -3734,6 +3734,7 @@ public final class PamRenderer {
         private var emitsTouchEnd = false
         private var lastIntersection: Bool?
         private weak var textField: PamInputField?
+        private weak var submitField: UITextField?
         private var focusField: PamInputField?
         private weak var control: UIControl?
         private weak var scrollView: UIScrollView?
@@ -3786,6 +3787,7 @@ public final class PamRenderer {
         }
 
         func attachSubmit(_ control: UIControl) {
+            self.submitField = control as? UITextField
             control.addTarget(self, action: #selector(onSubmit), for: .touchUpInside)
             control.addTarget(self, action: #selector(onSubmit), for: .primaryActionTriggered)
             self.control = control
@@ -4246,6 +4248,7 @@ public final class PamRenderer {
             self.rippleOverlay = nil
             self.directiveView = nil
             self.textField = nil
+            self.submitField = nil
             self.control = nil
             self.scrollView = nil
             self.refreshControl = nil
@@ -4775,7 +4778,7 @@ public final class PamRenderer {
 
         @objc private func onSubmit() {
             let payload = (try? WireMap.encode([
-                "value": .text(textField?.text ?? ""),
+                "value": .text(submitField?.text ?? ""),
             ])) ?? Data()
             dispatchEvent(nodeId, EventKind.submit.rawValue, payload)
         }

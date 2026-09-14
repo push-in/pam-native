@@ -52,3 +52,9 @@ navigation or guarantee that the OS offers an autofill suggestion. Tests cover
 OTP/Done, switching to new-password/Search, and clearing both properties.
 The maxLength Swift/UIKit job passed in run 34852470963 at `f8d2551`; actual
 multilingual IME interaction remains distinct from that unit coverage.
+
+Submit payload follow-up: EventBridge owns a separate weak submitField reference
+instead of reusing the input-callback owner. It reads the current editor text
+and clears the reference on detach, without clearing another bridge's input
+callbacks. The added test requires one current-value payload and no further
+submission after removing onSubmit. Pending macOS execution.
