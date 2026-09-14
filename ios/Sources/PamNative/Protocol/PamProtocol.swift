@@ -331,6 +331,7 @@ public enum PamConstants {
     public static let inputEditable = 210
     public static let autoComplete = 48
     public static let returnKeyType = 95
+    public static let inputSubmitBehavior = 224
     public static let source = 4
     public static let width = 5
     public static let height = 6

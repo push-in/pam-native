@@ -1587,6 +1587,9 @@ public final class PamRenderer {
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
             (view as? PamInputField)?.maximumLength = value.integerOrNil().map { max(0, Int(clamping: $0)) }
+        case PamConstants.inputSubmitBehavior:
+            (view as? PamInputField)?.submitBehavior = value.integerOrNil()
+                .flatMap(PamInputSubmitBehavior.init(rawValue:)) ?? .blurAndSubmit
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.autoComplete, PamConstants.returnKeyType:
@@ -2080,6 +2083,8 @@ public final class PamRenderer {
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
             (view as? PamInputField)?.maximumLength = nil
+        case PamConstants.inputSubmitBehavior:
+            (view as? PamInputField)?.submitBehavior = .blurAndSubmit
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.autoComplete, PamConstants.returnKeyType:

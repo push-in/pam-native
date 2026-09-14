@@ -707,7 +707,12 @@ final class PamSafeAreaView: UIView {
     }
 }
 
+enum PamInputSubmitBehavior: Int64 {
+    case submit = 1, blurAndSubmit, newline
+}
+
 final class PamInputField: UITextField, UITextFieldDelegate {
+    var submitBehavior: PamInputSubmitBehavior = .blurAndSubmit
     var maximumLength: Int?
     var isInputEditable = true
     private static let maxKeyBytes = 64
@@ -1002,10 +1007,12 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        if let value = textField.text {
-            onInputEndEditing?(value)
-        }
-        return true
+        guard isInputEditable, submitBehavior != .newline else { return false }
+        enforceCommittedLength()
+        sendActions(for: .primaryActionTriggered)
+        if submitBehavior == .blurAndSubmit { resignFirstResponder() }
+        // We dispatched explicitly; UIKit must not dispatch another action.
+        return false
     }
 
     func syncFontCache() {

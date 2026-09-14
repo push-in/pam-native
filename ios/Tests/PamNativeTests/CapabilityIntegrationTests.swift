@@ -31,6 +31,53 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testSubmitBehaviorControlsActualFirstResponderLifecycle() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let field = PamInputField(frame: CGRect(x: 16, y: 60, width: 300, height: 56))
+        controller.view.addSubview(field)
+        window.makeKeyAndVisible()
+        defer {
+            field.resignFirstResponder()
+            window.isHidden = true
+        }
+        var submits = 0
+        var ends = 0
+        field.onInputEndEditing = { _ in ends += 1 }
+        field.addAction(UIAction { _ in submits += 1 }, for: .primaryActionTriggered)
+        XCTAssertTrue(field.becomeFirstResponder())
+        field.submitBehavior = .submit
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertTrue(field.isFirstResponder)
+        XCTAssertEqual(submits, 1)
+        XCTAssertEqual(ends, 0)
+        field.submitBehavior = .blurAndSubmit
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertFalse(field.isFirstResponder)
+        XCTAssertEqual(submits, 2)
+        XCTAssertEqual(ends, 1)
+    }
+
+    func testSubmitOnlyDoesNotPretendEditingEnded() {
+        let field = PamInputField()
+        var submits = 0
+        var ends = 0
+        field.onInputEndEditing = { _ in ends += 1 }
+        field.addAction(UIAction { _ in submits += 1 }, for: .primaryActionTriggered)
+        field.submitBehavior = .submit
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertEqual(submits, 1)
+        XCTAssertEqual(ends, 0)
+        field.isInputEditable = false
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertEqual(submits, 1)
+        field.isInputEditable = true
+        field.submitBehavior = .newline
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertEqual(submits, 1, "Newline must not become a submit event")
+    }
+
     func testSubmitEventCarriesCurrentEditorValue() throws {
         let host = UIView()
         var payloads: [Data] = []

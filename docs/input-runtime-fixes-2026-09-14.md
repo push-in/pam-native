@@ -58,3 +58,11 @@ instead of reusing the input-callback owner. It reads the current editor text
 and clears the reference on detach, without clearing another bridge's input
 callbacks. The added test requires one current-value payload and no further
 submission after removing onSubmit. Pending macOS execution.
+
+Submit lifecycle follow-up now dispatches one primary action explicitly, keeps
+focus for Submit, and resigns for BlurAndSubmit. End-editing is emitted only
+through the actual end-editing callback rather than on every Return. Read-only
+Return is ignored. Newline does not become Submit; actual multiline editing is
+not implemented by this single-line UITextField change and remains a separate
+platform gap. The added unit regression covers single dispatch, no false end
+event and blocked/read-only/newline submission, pending macOS execution.
