@@ -17,3 +17,13 @@ rendererKeepsPersistentHorizontalIndicatorVisibleBelowContent instrumentation
 case passed on local emulator API 36 (one test, nine-second Gradle invocation).
 This is a test synchronization change, not a production renderer correction.
 Remote API 26/36 verification remains required; no CI success is claimed yet.
+
+## Remote confirmation
+
+Run https://github.com/push-in/pam-native/actions/runs/34795404445 subsequently
+passed at `46bfe50645d149345df30796793346be824b7dfc`: Android API 26 and API 36
+renderer contracts, the API 36 macrobenchmark stage, Swift/UIKit, Rust/PHP,
+Android build/unit contracts and cross-platform accessibility evidence. This
+confirms the synchronization fix on both CI API levels without removing the
+initial-indicator or contrast assertions. It does not approve every PAM Native UI
+specimen or its visual documentation; those have separate release gates.
