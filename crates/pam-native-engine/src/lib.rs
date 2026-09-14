@@ -2,6 +2,7 @@ pub mod bridge_v2;
 mod ffi;
 pub mod fiber;
 mod font_metrics;
+pub mod grid_template;
 mod layout;
 pub mod performance;
 pub mod reactive;
