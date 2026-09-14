@@ -51,6 +51,59 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun fullWindowModalChildIgnoresStaleActivityFrameAfterViewportResize() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.MODAL, mapOf(
+                            PropKey.VISIBLE to PropValue.Flag(false),
+                            PropKey.MODAL_PRESENTATION to PropValue.Integer(1),
+                        ))),
+                        Mutation.Create(node(3, 2, NodeKind.VIEW, mapOf(
+                            PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                        ))),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(3, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    // The closed modal is not in the activity view tree. Inspect
+                    // its actual renderer-owned child without exposing a public API.
+                    val field = PamRenderer::class.java.getDeclaredField("views")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val views = field.get(renderer) as android.util.LongSparseArray<View>
+                    val child = requireNotNull(views[3])
+                    val content = child.parent as ViewGroup
+                    for (viewportHeight in listOf(1930, 1177, 1930)) {
+                        renderer.commit(listOf(listOf(
+                            Mutation.Layout(3, Frame(0f, 0f, 360f, 760f)),
+                        )))
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, child.layoutParams.height)
+                        content.measure(
+                            View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(viewportHeight, View.MeasureSpec.EXACTLY),
+                        )
+                        content.layout(0, 0, 1080, viewportHeight)
+                        assertEquals(viewportHeight, child.height)
+                        assertEquals(0, child.top)
+                        assertEquals(1080, child.width)
+                    }
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun physicalCellFrameIsNotMirroredAgainByAnRtlHolder() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         onMain(instrumentation) {

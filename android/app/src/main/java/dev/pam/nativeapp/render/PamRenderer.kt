@@ -1506,6 +1506,14 @@ class PamRenderer(
                 height = (height - reduction).coerceAtLeast(0)
             },
         )
+        // Full-window modal content belongs to the Dialog viewport, not the
+        // activity's engine frame. IME resize can make those heights differ.
+        if (parentView is PamModalHost && parentView.usesWindowSizedContent()) {
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = ViewGroup.LayoutParams.MATCH_PARENT
+            leftPx = 0
+            topPx = 0
+        }
         val current = view.layoutParams as? ViewGroup.MarginLayoutParams
 
         val layoutChanged =

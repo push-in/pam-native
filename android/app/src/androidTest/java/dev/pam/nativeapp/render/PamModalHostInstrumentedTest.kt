@@ -3,12 +3,31 @@ package dev.pam.nativeapp.render
 import android.view.Gravity
 import android.view.ViewGroup
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class PamModalHostInstrumentedTest {
+    @Test
+    fun windowViewportOwnershipTracksPresentationChanges() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val host = PamModalHost(instrumentation.targetContext)
+            host.setVisible(false)
+            for (presentation in listOf(1, 2, 3, 1)) {
+                host.setPresentation(presentation)
+                assertEquals(
+                    "Window ownership for presentation $presentation",
+                    presentation == 1,
+                    host.usesWindowSizedContent(),
+                )
+            }
+            host.close()
+        }
+    }
+
     @Test
     fun dialogContentKeepsItsIntrinsicCardSizeAndIsCentered() {
         val params = modalChildLayoutParams(presentation = 2, sheetHeight = 640)

@@ -163,6 +163,8 @@ internal class PamModalHost @JvmOverloads constructor(
         updateBottomSheetChrome()
     }
 
+    internal fun usesWindowSizedContent(): Boolean = presentation != 2 && presentation != 3
+
     fun setPresentation(value: Int) {
         if (presentation == value) return
         presentation = value
