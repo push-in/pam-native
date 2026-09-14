@@ -1034,17 +1034,25 @@ fn is_grid(node: &Node) -> bool {
         || node.properties.contains_key(&PropKey::GridTemplate)
 }
 
-fn resolved_grid_plan(node: &Node, width: f32, fallback_gap: f32) -> Result<(usize, f32, f32, Option<usize>), LayoutError> {
+fn resolved_grid_plan(
+    node: &Node,
+    width: f32,
+    fallback_gap: f32,
+) -> Result<(usize, f32, f32, Option<usize>), LayoutError> {
     let (maximum, gap, row_gap, level) = match node.properties.get(&PropKey::GridTemplate) {
         Some(pam_native_protocol::PropValue::String(wire)) => {
             let template = crate::grid_template::GridTemplate::parse(wire)
                 .map_err(|_| LayoutError::InvalidGridTemplate)?;
-            let (level, plan) = template.resolve(width).map_err(|_| LayoutError::InvalidGridTemplate)?;
+            let (level, plan) = template
+                .resolve(width)
+                .map_err(|_| LayoutError::InvalidGridTemplate)?;
             (plan.columns, plan.column_gap, plan.row_gap, Some(level))
         }
         Some(_) => return Err(LayoutError::InvalidGridTemplate),
         None => (
-            integer(node, PropKey::GridColumns).unwrap_or(12).clamp(1, 64) as usize,
+            integer(node, PropKey::GridColumns)
+                .unwrap_or(12)
+                .clamp(1, 64) as usize,
             finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?,
             finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?,
             None,
@@ -1068,7 +1076,8 @@ fn layout_grid(
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
 ) -> Result<(), LayoutError> {
-    let (columns, column_gap, row_gap, level) = resolved_grid_plan(node, inner.width, fallback_gap)?;
+    let (columns, column_gap, row_gap, level) =
+        resolved_grid_plan(node, inner.width, fallback_gap)?;
     let unit =
         ((inner.width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
     let mut children = node_children
@@ -1146,12 +1155,23 @@ fn layout_grid(
             .unwrap_or_else(|| cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4)));
         let row_height = row_heights[placement.row];
         let height = if alignment == CrossAlignment::Stretch
-            && dimension(placement.child, PropKey::Height, PropKey::HeightPercent, inner.height).is_none()
+            && dimension(
+                placement.child,
+                PropKey::Height,
+                PropKey::HeightPercent,
+                inner.height,
+            )
+            .is_none()
         {
             constrained(
                 (row_height - margin_top - margin_bottom).max(0.0),
                 number(placement.child, PropKey::MinHeight),
-                dimension(placement.child, PropKey::MaxHeight, PropKey::MaxHeightPercent, inner.height),
+                dimension(
+                    placement.child,
+                    PropKey::MaxHeight,
+                    PropKey::MaxHeightPercent,
+                    inner.height,
+                ),
             )?
         } else {
             placement.height
@@ -1160,7 +1180,8 @@ fn layout_grid(
             CrossAlignment::Center => (row_height - height + margin_top - margin_bottom) / 2.0,
             CrossAlignment::End => row_height - height - margin_bottom,
             _ => margin_top,
-        }.max(0.0);
+        }
+        .max(0.0);
         let x = inner.x + placement.column as f32 * (unit + column_gap) + margin_left;
         let frame = Layout {
             x,
@@ -1215,7 +1236,13 @@ enum GridValue {
     Order,
 }
 
-fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64, template_level: Option<usize>) -> i64 {
+fn responsive_grid_value(
+    node: &Node,
+    width: f32,
+    value: GridValue,
+    default: i64,
+    template_level: Option<usize>,
+) -> i64 {
     let keys = match value {
         GridValue::Span => [
             PropKey::GridSpan,
@@ -4996,57 +5023,158 @@ mod tests {
     fn grid_template_reflows_columns_gutters_and_sixth_tier_spans() {
         let mut nodes = BTreeMap::new();
         nodes.insert(100, node(100, 0, 0, NodeKind::Column, []));
-        nodes.insert(1, node(1, 100, 0, NodeKind::Column, [
-            (PropKey::GridTemplate, PropValue::String("0,2,10,8;640,3,12,8;768,3,12,8;1024,3,12,8;1280,3,12,8;1536,4,16,8".into())),
-        ]));
+        nodes.insert(
+            1,
+            node(
+                1,
+                100,
+                0,
+                NodeKind::Column,
+                [(
+                    PropKey::GridTemplate,
+                    PropValue::String(
+                        "0,2,10,8;640,3,12,8;768,3,12,8;1024,3,12,8;1280,3,12,8;1536,4,16,8".into(),
+                    ),
+                )],
+            ),
+        );
         for id in 2..=4 {
-            nodes.insert(id, node(id, 1, (id - 2) as u32, NodeKind::View, [
-                (PropKey::GridSpan, PropValue::Integer(1)),
-                (PropKey::GridSpan2xl, PropValue::Integer(if id == 2 { 2 } else { 1 })),
-                (PropKey::Height, PropValue::Float(40.0)),
-            ]));
+            nodes.insert(
+                id,
+                node(
+                    id,
+                    1,
+                    (id - 2) as u32,
+                    NodeKind::View,
+                    [
+                        (PropKey::GridSpan, PropValue::Integer(1)),
+                        (
+                            PropKey::GridSpan2xl,
+                            PropValue::Integer(if id == 2 { 2 } else { 1 }),
+                        ),
+                        (PropKey::Height, PropValue::Float(40.0)),
+                    ],
+                ),
+            );
         }
         let mut tree = Tree { root: 100, nodes };
-        let narrow = calculate(&tree, Size { width: 639.0, height: 500.0 }).unwrap();
+        let narrow = calculate(
+            &tree,
+            Size {
+                width: 639.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
         assert_eq!(narrow[&2].width, 314.5);
         assert_eq!(narrow[&4].y, 48.0);
         assert_eq!(narrow[&1].height, 88.0);
-        let wide = calculate(&tree, Size { width: 640.0, height: 500.0 }).unwrap();
+        let wide = calculate(
+            &tree,
+            Size {
+                width: 640.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
         assert_eq!(wide[&4].y, 0.0);
         assert_eq!(wide[&1].height, 40.0);
-        let sixth = calculate(&tree, Size { width: 1536.0, height: 500.0 }).unwrap();
+        let sixth = calculate(
+            &tree,
+            Size {
+                width: 1536.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
         assert_eq!(sixth[&2].width, 760.0);
         assert_eq!(sixth[&3].x, 776.0);
         assert_eq!(sixth[&4].x, 1164.0);
-        tree.nodes.get_mut(&1).unwrap().properties.insert(PropKey::GridMinColumnWidth, PropValue::Float(500.0));
-        let fitted = calculate(&tree, Size { width: 1536.0, height: 500.0 }).unwrap();
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::GridMinColumnWidth, PropValue::Float(500.0));
+        let fitted = calculate(
+            &tree,
+            Size {
+                width: 1536.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
         assert_eq!(fitted[&4].y, 48.0);
         assert_eq!(fitted[&1].height, 88.0);
-        tree.nodes.get_mut(&1).unwrap().properties.insert(PropKey::GridTemplate, PropValue::String("broken".into()));
-        assert!(matches!(calculate(&tree, Size { width: 640.0, height: 500.0 }), Err(LayoutError::InvalidGridTemplate)));
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::GridTemplate, PropValue::String("broken".into()));
+        assert!(matches!(
+            calculate(
+                &tree,
+                Size {
+                    width: 640.0,
+                    height: 500.0
+                }
+            ),
+            Err(LayoutError::InvalidGridTemplate)
+        ));
     }
 
     #[test]
     fn minimum_grid_column_width_reflows_columns_and_intrinsic_height_together() {
         let mut nodes = BTreeMap::from([
             (1, node(1, 0, 0, NodeKind::Column, [])),
-            (2, node(2, 1, 0, NodeKind::Column, [
-                (PropKey::GridColumns, PropValue::Integer(4)),
-                (PropKey::GridMinColumnWidth, PropValue::Float(120.0)),
-                (PropKey::GridColumnGap, PropValue::Float(8.0)),
-                (PropKey::GridRowGap, PropValue::Float(8.0)),
-            ])),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Column,
+                    [
+                        (PropKey::GridColumns, PropValue::Integer(4)),
+                        (PropKey::GridMinColumnWidth, PropValue::Float(120.0)),
+                        (PropKey::GridColumnGap, PropValue::Float(8.0)),
+                        (PropKey::GridRowGap, PropValue::Float(8.0)),
+                    ],
+                ),
+            ),
         ]);
         for index in 0..4 {
             let id = index + 3;
-            nodes.insert(id, node(id, 2, index as u32, NodeKind::View, [
-                (PropKey::GridSpan, PropValue::Integer(1)),
-                (PropKey::Height, PropValue::Float(40.0)),
-            ]));
+            nodes.insert(
+                id,
+                node(
+                    id,
+                    2,
+                    index as u32,
+                    NodeKind::View,
+                    [
+                        (PropKey::GridSpan, PropValue::Integer(1)),
+                        (PropKey::Height, PropValue::Float(40.0)),
+                    ],
+                ),
+            );
         }
         let tree = Tree { root: 1, nodes };
-        for (width, columns, height) in [(100.0, 1, 184.0), (247.0, 1, 184.0), (248.0, 2, 88.0), (360.0, 2, 88.0), (600.0, 4, 40.0), (2000.0, 4, 40.0)] {
-            let frames = calculate(&tree, Size { width, height: 800.0 }).expect("auto-fit grid");
+        for (width, columns, height) in [
+            (100.0, 1, 184.0),
+            (247.0, 1, 184.0),
+            (248.0, 2, 88.0),
+            (360.0, 2, 88.0),
+            (600.0, 4, 40.0),
+            (2000.0, 4, 40.0),
+        ] {
+            let frames = calculate(
+                &tree,
+                Size {
+                    width,
+                    height: 800.0,
+                },
+            )
+            .expect("auto-fit grid");
             let cell_width = (width - (columns - 1) as f32 * 8.0) / columns as f32;
             assert_eq!(frames[&2].height, height);
             assert_eq!(frames[&3].width, cell_width);
@@ -5060,35 +5188,96 @@ mod tests {
         let tree = Tree {
             root: 1,
             nodes: BTreeMap::from([
-                (1, node(1, 0, 0, NodeKind::Column, [(PropKey::GridColumns, PropValue::Integer(5))])),
-                (2, node(2, 1, 0, NodeKind::View, [
-                    (PropKey::GridSpan, PropValue::Integer(1)),
-                    (PropKey::Height, PropValue::Float(80.0)),
-                ])),
-                (3, node(3, 1, 1, NodeKind::View, [
-                    (PropKey::GridSpan, PropValue::Integer(1)),
-                    (PropKey::MinHeight, PropValue::Float(20.0)),
-                    (PropKey::MarginTop, PropValue::Float(4.0)),
-                    (PropKey::MarginBottom, PropValue::Float(8.0)),
-                ])),
-                (4, node(4, 1, 2, NodeKind::View, [
-                    (PropKey::GridSpan, PropValue::Integer(1)),
-                    (PropKey::Height, PropValue::Float(20.0)),
-                    (PropKey::AlignSelf, PropValue::Integer(2)),
-                ])),
-                (5, node(5, 1, 3, NodeKind::View, [
-                    (PropKey::GridSpan, PropValue::Integer(1)),
-                    (PropKey::MinHeight, PropValue::Float(20.0)),
-                    (PropKey::MaxHeight, PropValue::Float(40.0)),
-                ])),
-                (6, node(6, 1, 4, NodeKind::View, [
-                    (PropKey::GridSpan, PropValue::Integer(1)),
-                    (PropKey::Height, PropValue::Float(20.0)),
-                    (PropKey::AlignSelf, PropValue::Integer(3)),
-                ])),
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::GridColumns, PropValue::Integer(5))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::Height, PropValue::Float(80.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::MinHeight, PropValue::Float(20.0)),
+                            (PropKey::MarginTop, PropValue::Float(4.0)),
+                            (PropKey::MarginBottom, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        1,
+                        2,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                            (PropKey::AlignSelf, PropValue::Integer(2)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        1,
+                        3,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::MinHeight, PropValue::Float(20.0)),
+                            (PropKey::MaxHeight, PropValue::Float(40.0)),
+                        ],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        1,
+                        4,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                            (PropKey::AlignSelf, PropValue::Integer(3)),
+                        ],
+                    ),
+                ),
             ]),
         };
-        let frames = calculate(&tree, Size { width: 500.0, height: 200.0 }).expect("grid alignment");
+        let frames = calculate(
+            &tree,
+            Size {
+                width: 500.0,
+                height: 200.0,
+            },
+        )
+        .expect("grid alignment");
         assert_eq!(frames[&2].height, 80.0);
         assert_eq!(frames[&3].height, 68.0);
         assert_eq!(frames[&3].y, 4.0);
