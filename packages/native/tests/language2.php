@@ -349,6 +349,35 @@ $assert(
 StyleVariables::replace([]);
 
 $reactiveMethod = new ReflectionMethod(TemplateRenderer::class, 'reactiveStyleSheet');
+$responsiveMethod = new ReflectionMethod(TemplateRenderer::class, 'responsiveStyleSheet');
+$responsiveSheet = [
+    'classes' => ['box' => ['width' => '20', 'fontSize' => '14']],
+    'cascadeRules' => [['order' => 9]],
+    'queries' => [[
+        'kind' => \Pam\Native\Style\StyleQueryKind::Container->value,
+        'condition' => '(min-width: 100px)',
+        'styles' => [
+            'classes' => ['box' => ['width' => '40']],
+            'cascadeRules' => [['order' => 2]],
+        ],
+    ]],
+];
+$responsiveResult = $responsiveMethod->invoke(null, $responsiveSheet, ['__pamContainerWidth' => 200.0]);
+$assert(is_array($responsiveResult)
+    && ($responsiveResult['classes']['box'] ?? null) === ['width' => '40', 'fontSize' => '14']
+    && ($responsiveResult['cascadeRules'][1]['order'] ?? null) === 12,
+    'Responsive merges preserve base declarations and order incoming rules after sparse base orders.');
+$assert($responsiveMethod->invoke(null, $responsiveSheet, ['__pamContainerWidth' => 50.0]) === $responsiveSheet,
+    'Unmatched container queries must leave the base sheet unchanged.');
+foreach ([['classes' => ['box' => false]], ['cascadeRules' => false],
+    ['cascadeRules' => [['order' => []]]], ['cascadeRules' => [['order' => PHP_INT_MAX]]]] as $invalidBase) {
+    try {
+        $responsiveMethod->invoke(null, [...$responsiveSheet, ...$invalidBase], ['__pamContainerWidth' => 200.0]);
+        throw new LogicException('Invalid responsive base metadata was accepted.');
+    } catch (RuntimeException) {
+        $assert(true, 'Invalid responsive merge metadata fails before cascade application.');
+    }
+}
 $fontsMethod = new ReflectionMethod(TemplateRenderer::class, 'styleSheetFonts');
 $fontFaces = $fontsMethod->invoke(null, ['__pamStyles' => ['fonts' => ['Display' => [
     4 => ['source' => 'fonts/display.ttf', 'weight' => '700', 'style' => 'normal'],

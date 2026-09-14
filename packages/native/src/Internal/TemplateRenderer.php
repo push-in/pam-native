@@ -3057,7 +3057,11 @@ final class TemplateRenderer
         return self::$reactiveStyleCache[$key] = $sheet;
     }
 
-    /** @param array<string, mixed> $sheet @param array<string, mixed> $data */
+    /**
+     * @param array<string, mixed> $sheet
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
     private static function responsiveStyleSheet(array $sheet, array $data): array
     {
         $queries = $sheet['queries'] ?? [];
@@ -3104,31 +3108,41 @@ final class TemplateRenderer
             if (!self::queryMatches($condition, $ast, $environment)) {
                 continue;
             }
-            $queryStyles = self::reactiveStyleSheet($query['styles']);
+            $queryStyles = self::reactiveStyleSheet(self::styleMap($query['styles'], 'responsive sheet'));
             foreach (['classes', 'tags'] as $group) {
-                $incoming = $queryStyles[$group] ?? [];
-                if (!is_array($incoming)) {
-                    continue;
-                }
+                $incoming = self::validatedStyleRules($queryStyles[$group] ?? [], '<responsive-style>');
+                $base = self::validatedStyleRules($sheet[$group] ?? [], '<base-style>');
                 foreach ($incoming as $selector => $styles) {
-                    if (is_string($selector) && is_array($styles)) {
-                        $sheet[$group][$selector] = [
-                            ...($sheet[$group][$selector] ?? []),
-                            ...$styles,
-                        ];
-                    }
+                    $base[$selector] = [...($base[$selector] ?? []), ...$styles];
                 }
+                $sheet[$group] = $base;
             }
             $incomingRules = $queryStyles['cascadeRules'] ?? [];
             if (is_array($incomingRules)) {
-                $baseOrder = count(is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : []);
+                $baseRules = $sheet['cascadeRules'] ?? [];
+                if (!is_array($baseRules)) {
+                    throw new RuntimeException('Invalid responsive base cascade.');
+                }
+                $baseOrder = 0;
+                foreach ($baseRules as $baseRule) {
+                    $order = is_array($baseRule) ? ($baseRule['order'] ?? 0) : null;
+                    if (!is_int($order) || $order < 0 || $order === PHP_INT_MAX) {
+                        throw new RuntimeException('Invalid responsive base rule order.');
+                    }
+                    $baseOrder = max($baseOrder, $order + 1);
+                }
                 foreach ($incomingRules as $incomingRule) {
                     if (!is_array($incomingRule)) {
                         continue;
                     }
-                    $incomingRule['order'] = $baseOrder + (int) ($incomingRule['order'] ?? 0);
-                    $sheet['cascadeRules'][] = $incomingRule;
+                    $order = $incomingRule['order'] ?? 0;
+                    if (!is_int($order) || $order < 0 || $order > PHP_INT_MAX - $baseOrder) {
+                        throw new RuntimeException('Invalid responsive rule order.');
+                    }
+                    $incomingRule['order'] = $baseOrder + $order;
+                    $baseRules[] = $incomingRule;
                 }
+                $sheet['cascadeRules'] = $baseRules;
             }
             // Query rules are later than base rules by definition.
             $sheet['classCascade'] = [];
@@ -3136,13 +3150,35 @@ final class TemplateRenderer
         return $sheet;
     }
 
+    /** @return array<string, mixed> */
+    private static function styleMap(mixed $value, string $label): array
+    {
+        if (!is_array($value)) throw new RuntimeException("Invalid {$label}.");
+        $map = [];
+        foreach ($value as $key => $entry) {
+            if (!is_string($key)) throw new RuntimeException("Invalid {$label} key.");
+            $map[$key] = $entry;
+        }
+        return $map;
+    }
+
+    /**
+     * @param array<array-key, mixed>|null $ast
+     * @param array<array-key, mixed> $environment
+     */
     private static function queryMatches(
         string $condition,
         ?array $ast,
         array $environment,
     ): bool {
         if ($ast !== null) {
-            return StyleQueryCompiler::matches($ast, $environment);
+            $queryEnvironment = [];
+            foreach ($environment as $key => $value) {
+                if (is_string($key) && (is_scalar($value) || $value === null)) {
+                    $queryEnvironment[$key] = $value;
+                }
+            }
+            return StyleQueryCompiler::matches($ast, $queryEnvironment);
         }
         if (preg_match('/\((min|max)-(width|height):\s*([0-9]+(?:\.[0-9]+)?)(?:dp|px)\)/D', $condition, $match) !== 1) {
             return false;
