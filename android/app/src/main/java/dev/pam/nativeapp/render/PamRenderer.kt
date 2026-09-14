@@ -2529,6 +2529,7 @@ class PamRenderer(
             PropKey.MAX_HEIGHT_PERCENT,
             PropKey.MARGIN_LEFT_AUTO,
             PropKey.GRID_COLUMNS,
+            PropKey.GRID_MIN_COLUMN_WIDTH,
             PropKey.GRID_SPAN,
             PropKey.GRID_SPAN_SM,
             PropKey.GRID_SPAN_MD,

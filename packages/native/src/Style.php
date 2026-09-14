@@ -118,6 +118,7 @@ final readonly class Style
         public ?float $shadowBlurRadius = null,
         public ?float $shadowSpreadRadius = null,
         public ?int $shadowColor = null,
+        public ?float $gridMinColumnWidth = null,
     ) {
     }
 
@@ -210,6 +211,7 @@ final readonly class Style
             PropKey::TranslationXPercent->value => $this->translationXPercent,
             PropKey::AnimationKind->value => $this->animationKind?->value,
             PropKey::GridColumns->value => $this->gridColumns,
+            PropKey::GridMinColumnWidth->value => $this->gridMinColumnWidth,
             PropKey::GridSpan->value => $this->gridSpan,
             PropKey::GridSpanSm->value => $this->gridSpanSm,
             PropKey::GridSpanMd->value => $this->gridSpanMd,

@@ -1029,6 +1029,17 @@ fn layout_wrapped_children(
     Ok(())
 }
 
+fn resolved_grid_columns(node: &Node, width: f32, gap: f32) -> Result<usize, LayoutError> {
+    let maximum = integer(node, PropKey::GridColumns).unwrap_or(12).clamp(1, 64) as usize;
+    let minimum = finite_non_negative(number(node, PropKey::GridMinColumnWidth).unwrap_or(0.0))?;
+    if minimum == 0.0 {
+        return Ok(maximum);
+    }
+    // A narrower container still gets one column; never force horizontal overflow.
+    let fitting = ((width.max(0.0) + gap) / (minimum + gap)).floor() as usize;
+    Ok(fitting.clamp(1, maximum))
+}
+
 fn layout_grid(
     context: &LayoutContext<'_>,
     node: &Node,
@@ -1038,11 +1049,9 @@ fn layout_grid(
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
 ) -> Result<(), LayoutError> {
-    let columns = integer(node, PropKey::GridColumns)
-        .unwrap_or(12)
-        .clamp(1, 64) as usize;
     let column_gap =
         finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
+    let columns = resolved_grid_columns(node, inner.width, column_gap)?;
     let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
     let unit =
         ((inner.width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
@@ -1772,12 +1781,10 @@ fn grid_intrinsic_height(
     text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
-    let columns = integer(node, PropKey::GridColumns)
-        .unwrap_or(12)
-        .clamp(1, 64) as usize;
     let fallback_gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
     let column_gap =
         finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
+    let columns = resolved_grid_columns(node, width, column_gap)?;
     let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
     let unit = ((width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
     let mut flow = node_children
@@ -4965,6 +4972,35 @@ mod tests {
         assert_eq!(tablet[&3].x, 304.0);
         assert_eq!(tablet[&4].x, 608.0);
         assert_eq!(tablet[&4].y, 0.0);
+    }
+
+    #[test]
+    fn minimum_grid_column_width_reflows_columns_and_intrinsic_height_together() {
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Column, [])),
+            (2, node(2, 1, 0, NodeKind::Column, [
+                (PropKey::GridColumns, PropValue::Integer(4)),
+                (PropKey::GridMinColumnWidth, PropValue::Float(120.0)),
+                (PropKey::GridColumnGap, PropValue::Float(8.0)),
+                (PropKey::GridRowGap, PropValue::Float(8.0)),
+            ])),
+        ]);
+        for index in 0..4 {
+            let id = index + 3;
+            nodes.insert(id, node(id, 2, index as u32, NodeKind::View, [
+                (PropKey::GridSpan, PropValue::Integer(1)),
+                (PropKey::Height, PropValue::Float(40.0)),
+            ]));
+        }
+        let tree = Tree { root: 1, nodes };
+        for (width, columns, height) in [(100.0, 1, 184.0), (247.0, 1, 184.0), (248.0, 2, 88.0), (360.0, 2, 88.0), (600.0, 4, 40.0), (2000.0, 4, 40.0)] {
+            let frames = calculate(&tree, Size { width, height: 800.0 }).expect("auto-fit grid");
+            let cell_width = (width - (columns - 1) as f32 * 8.0) / columns as f32;
+            assert_eq!(frames[&2].height, height);
+            assert_eq!(frames[&3].width, cell_width);
+            assert!(frames[&6].x + frames[&6].width <= width);
+            assert_eq!(frames[&6].y, ((4 - 1) / columns) as f32 * 48.0);
+        }
     }
 
     #[test]

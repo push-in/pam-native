@@ -2831,6 +2831,16 @@ $assert(
         && $gridElement->children()[0]->children()[1]->kind() === NodeKind::Pressable,
     'Responsive grids must compile rich cells identically from explicit properties and utility classes.',
 );
+$autoFitTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile('<Grid columns="4" gridMinColumnWidth="120"><Column span="1"><Text>Adaptive</Text></Column></Grid>'),
+    null,
+    [],
+);
+$assert(
+    $autoFitTemplate->properties()[PropKey::GridMinColumnWidth->value] === 120.0
+        && (new \Pam\Native\Style(gridMinColumnWidth: 120.0))->properties()[PropKey::GridMinColumnWidth->value] === 120.0,
+    'Auto-fit minimum width must compile through templates and typed Style.',
+);
 $virtualGridTemplate = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<VirtualGrid columns="2" rowHeight="220" prefetch="7"><Column key="photo-1"><Image source="one.webp" /><Text>One</Text></Column><Pressable key="photo-2"><Image source="two.webp" /></Pressable></VirtualGrid>',

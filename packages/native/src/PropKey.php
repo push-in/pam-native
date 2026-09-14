@@ -471,4 +471,5 @@ enum PropKey: int
     case GestureNativeResetOnEnd = 463;
     case InputFormatLocale = 464;
     case ScrollIndicatorStyle = 465;
+    case GridMinColumnWidth = 466;
 }
