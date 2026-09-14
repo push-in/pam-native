@@ -602,7 +602,11 @@ enum class PropKey(val value: Int) {
     GESTURE_NATIVE_RESET_ON_END(463),
     INPUT_FORMAT_LOCALE(464),
     SCROLL_INDICATOR_STYLE(465),
-    GRID_MIN_COLUMN_WIDTH(466);
+    GRID_MIN_COLUMN_WIDTH(466),
+    GRID_TEMPLATE(467),
+    GRID_SPAN_2XL(468),
+    GRID_OFFSET_2XL(469),
+    GRID_ORDER_2XL(470);
 
     companion object {
         fun from(value: Int): PropKey =

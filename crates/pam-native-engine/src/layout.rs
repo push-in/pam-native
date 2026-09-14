@@ -560,7 +560,7 @@ fn layout_node(
         }
         return Ok(());
     }
-    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+    if is_grid(node) {
         layout_grid(context, node, node_children, inner, gap, depth, output)?;
         return Ok(());
     }
@@ -1029,15 +1029,34 @@ fn layout_wrapped_children(
     Ok(())
 }
 
-fn resolved_grid_columns(node: &Node, width: f32, gap: f32) -> Result<usize, LayoutError> {
-    let maximum = integer(node, PropKey::GridColumns).unwrap_or(12).clamp(1, 64) as usize;
+fn is_grid(node: &Node) -> bool {
+    integer(node, PropKey::GridColumns).unwrap_or(0) > 0
+        || node.properties.contains_key(&PropKey::GridTemplate)
+}
+
+fn resolved_grid_plan(node: &Node, width: f32, fallback_gap: f32) -> Result<(usize, f32, f32, Option<usize>), LayoutError> {
+    let (maximum, gap, row_gap, level) = match node.properties.get(&PropKey::GridTemplate) {
+        Some(pam_native_protocol::PropValue::String(wire)) => {
+            let template = crate::grid_template::GridTemplate::parse(wire)
+                .map_err(|_| LayoutError::InvalidGridTemplate)?;
+            let (level, plan) = template.resolve(width).map_err(|_| LayoutError::InvalidGridTemplate)?;
+            (plan.columns, plan.column_gap, plan.row_gap, Some(level))
+        }
+        Some(_) => return Err(LayoutError::InvalidGridTemplate),
+        None => (
+            integer(node, PropKey::GridColumns).unwrap_or(12).clamp(1, 64) as usize,
+            finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?,
+            finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?,
+            None,
+        ),
+    };
     let minimum = finite_non_negative(number(node, PropKey::GridMinColumnWidth).unwrap_or(0.0))?;
     if minimum == 0.0 {
-        return Ok(maximum);
+        return Ok((maximum, gap, row_gap, level));
     }
     // A narrower container still gets one column; never force horizontal overflow.
     let fitting = ((width.max(0.0) + gap) / (minimum + gap)).floor() as usize;
-    Ok(fitting.clamp(1, maximum))
+    Ok((fitting.clamp(1, maximum), gap, row_gap, level))
 }
 
 fn layout_grid(
@@ -1049,10 +1068,7 @@ fn layout_grid(
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
 ) -> Result<(), LayoutError> {
-    let column_gap =
-        finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
-    let columns = resolved_grid_columns(node, inner.width, column_gap)?;
-    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
+    let (columns, column_gap, row_gap, level) = resolved_grid_plan(node, inner.width, fallback_gap)?;
     let unit =
         ((inner.width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
     let mut children = node_children
@@ -1066,7 +1082,7 @@ fn layout_grid(
         .collect::<Vec<_>>();
     children.sort_by_key(|child| {
         (
-            responsive_grid_value(child, inner.width, GridValue::Order, 0),
+            responsive_grid_value(child, inner.width, GridValue::Order, 0, level),
             child.index,
         )
     });
@@ -1076,9 +1092,9 @@ fn layout_grid(
     let mut cursor = 0_usize;
     let mut row_heights = Vec::<f32>::new();
     for child in children {
-        let span = responsive_grid_value(child, inner.width, GridValue::Span, columns as i64)
+        let span = responsive_grid_value(child, inner.width, GridValue::Span, columns as i64, level)
             .clamp(1, columns as i64) as usize;
-        let offset = responsive_grid_value(child, inner.width, GridValue::Offset, 0)
+        let offset = responsive_grid_value(child, inner.width, GridValue::Offset, 0, level)
             .clamp(0, columns.saturating_sub(1) as i64) as usize;
         if cursor > 0 && cursor + offset + span > columns {
             row += 1;
@@ -1199,7 +1215,7 @@ enum GridValue {
     Order,
 }
 
-fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64) -> i64 {
+fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64, template_level: Option<usize>) -> i64 {
     let keys = match value {
         GridValue::Span => [
             PropKey::GridSpan,
@@ -1207,6 +1223,7 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
             PropKey::GridSpanMd,
             PropKey::GridSpanLg,
             PropKey::GridSpanXl,
+            PropKey::GridSpan2xl,
         ],
         GridValue::Offset => [
             PropKey::GridOffset,
@@ -1214,6 +1231,7 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
             PropKey::GridOffsetMd,
             PropKey::GridOffsetLg,
             PropKey::GridOffsetXl,
+            PropKey::GridOffset2xl,
         ],
         GridValue::Order => [
             PropKey::GridOrder,
@@ -1221,9 +1239,10 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
             PropKey::GridOrderMd,
             PropKey::GridOrderLg,
             PropKey::GridOrderXl,
+            PropKey::GridOrder2xl,
         ],
     };
-    let level = if width >= 1600.0 {
+    let level = template_level.unwrap_or(if width >= 1600.0 {
         4
     } else if width >= 1200.0 {
         3
@@ -1233,7 +1252,7 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
         1
     } else {
         0
-    };
+    });
     (0..=level)
         .rev()
         .find_map(|index| integer(node, keys[index]))
@@ -1272,7 +1291,7 @@ fn natural_scroll_extent(
     if let Some(explicit) = explicit {
         return finite_non_negative(explicit);
     }
-    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+    if is_grid(node) {
         return intrinsic_extent(
             children,
             node,
@@ -1527,7 +1546,7 @@ fn intrinsic_extent(
         }
         return finite_non_negative(height + padding_top + padding_bottom);
     }
-    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+    if is_grid(node) {
         let content = match requested_axis {
             Axis::Horizontal => inner_width,
             Axis::Vertical => grid_intrinsic_height(
@@ -1782,10 +1801,7 @@ fn grid_intrinsic_height(
     depth: usize,
 ) -> Result<f32, LayoutError> {
     let fallback_gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
-    let column_gap =
-        finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
-    let columns = resolved_grid_columns(node, width, column_gap)?;
-    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
+    let (columns, column_gap, row_gap, level) = resolved_grid_plan(node, width, fallback_gap)?;
     let unit = ((width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
     let mut flow = node_children
         .iter()
@@ -1798,7 +1814,7 @@ fn grid_intrinsic_height(
         .collect::<Vec<_>>();
     flow.sort_by_key(|child| {
         (
-            responsive_grid_value(child, width, GridValue::Order, 0),
+            responsive_grid_value(child, width, GridValue::Order, 0, level),
             child.index,
         )
     });
@@ -1806,9 +1822,9 @@ fn grid_intrinsic_height(
     let mut row = 0_usize;
     let mut cursor = 0_usize;
     for child in flow {
-        let span = responsive_grid_value(child, width, GridValue::Span, columns as i64)
+        let span = responsive_grid_value(child, width, GridValue::Span, columns as i64, level)
             .clamp(1, columns as i64) as usize;
-        let offset = responsive_grid_value(child, width, GridValue::Offset, 0)
+        let offset = responsive_grid_value(child, width, GridValue::Offset, 0, level)
             .clamp(0, columns.saturating_sub(1) as i64) as usize;
         if cursor > 0 && cursor + offset + span > columns {
             row += 1;
@@ -2709,6 +2725,7 @@ fn finite(value: f32) -> Result<f32, LayoutError> {
 
 #[derive(Debug)]
 pub enum LayoutError {
+    InvalidGridTemplate,
     InvalidDimension,
     DepthExceeded,
     MissingNode(u64),
@@ -2717,6 +2734,7 @@ pub enum LayoutError {
 impl std::fmt::Display for LayoutError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidGridTemplate => formatter.write_str("invalid responsive grid template"),
             Self::InvalidDimension => {
                 formatter.write_str("layout dimensions must be finite and non-negative")
             }
@@ -4972,6 +4990,40 @@ mod tests {
         assert_eq!(tablet[&3].x, 304.0);
         assert_eq!(tablet[&4].x, 608.0);
         assert_eq!(tablet[&4].y, 0.0);
+    }
+
+    #[test]
+    fn grid_template_reflows_columns_gutters_and_sixth_tier_spans() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(100, node(100, 0, 0, NodeKind::Column, []));
+        nodes.insert(1, node(1, 100, 0, NodeKind::Column, [
+            (PropKey::GridTemplate, PropValue::String("0,2,10,8;640,3,12,8;768,3,12,8;1024,3,12,8;1280,3,12,8;1536,4,16,8".into())),
+        ]));
+        for id in 2..=4 {
+            nodes.insert(id, node(id, 1, (id - 2) as u32, NodeKind::View, [
+                (PropKey::GridSpan, PropValue::Integer(1)),
+                (PropKey::GridSpan2xl, PropValue::Integer(if id == 2 { 2 } else { 1 })),
+                (PropKey::Height, PropValue::Float(40.0)),
+            ]));
+        }
+        let mut tree = Tree { root: 100, nodes };
+        let narrow = calculate(&tree, Size { width: 639.0, height: 500.0 }).unwrap();
+        assert_eq!(narrow[&2].width, 314.5);
+        assert_eq!(narrow[&4].y, 48.0);
+        assert_eq!(narrow[&1].height, 88.0);
+        let wide = calculate(&tree, Size { width: 640.0, height: 500.0 }).unwrap();
+        assert_eq!(wide[&4].y, 0.0);
+        assert_eq!(wide[&1].height, 40.0);
+        let sixth = calculate(&tree, Size { width: 1536.0, height: 500.0 }).unwrap();
+        assert_eq!(sixth[&2].width, 760.0);
+        assert_eq!(sixth[&3].x, 776.0);
+        assert_eq!(sixth[&4].x, 1164.0);
+        tree.nodes.get_mut(&1).unwrap().properties.insert(PropKey::GridMinColumnWidth, PropValue::Float(500.0));
+        let fitted = calculate(&tree, Size { width: 1536.0, height: 500.0 }).unwrap();
+        assert_eq!(fitted[&4].y, 48.0);
+        assert_eq!(fitted[&1].height, 88.0);
+        tree.nodes.get_mut(&1).unwrap().properties.insert(PropKey::GridTemplate, PropValue::String("broken".into()));
+        assert!(matches!(calculate(&tree, Size { width: 640.0, height: 500.0 }), Err(LayoutError::InvalidGridTemplate)));
     }
 
     #[test]

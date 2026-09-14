@@ -644,6 +644,10 @@ pub enum PropKey {
     InputFormatLocale = 464,
     ScrollIndicatorStyle = 465,
     GridMinColumnWidth = 466,
+    GridTemplate = 467,
+    GridSpan2xl = 468,
+    GridOffset2xl = 469,
+    GridOrder2xl = 470,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1117,6 +1121,10 @@ impl TryFrom<u16> for PropKey {
             464 => Ok(Self::InputFormatLocale),
             465 => Ok(Self::ScrollIndicatorStyle),
             466 => Ok(Self::GridMinColumnWidth),
+            467 => Ok(Self::GridTemplate),
+            468 => Ok(Self::GridSpan2xl),
+            469 => Ok(Self::GridOffset2xl),
+            470 => Ok(Self::GridOrder2xl),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -1992,10 +2000,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=466 {
+        for value in 1..=470 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(467).is_err());
+        assert!(PropKey::try_from(471).is_err());
     }
 
     #[test]

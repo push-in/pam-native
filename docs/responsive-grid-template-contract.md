@@ -29,3 +29,25 @@ Remaining integration must be completed before public release:
    implemented; reversed/column-direction behavior still requires explicit work.
 5. Exercise resize, wrapped text, spans, offsets/order, large fonts and RTL in the
    engine and Android showcase. Do not mark this parser as responsive UI approval.
+
+## Protocol and layout integration
+
+Appended IDs 467–470 are GridTemplate, GridSpan2xl, GridOffset2xl and GridOrder2xl
+in PHP, Rust, Android and UIKit. They invalidate layout when changed. No previous
+ID was renumbered. Android treats them as engine-owned geometry properties.
+
+The shared engine now activates grid layout from GridTemplate alone, rejects
+malformed template values, and uses the same resolved plan for intrinsic height
+and final placement. Auto-fit is bounded by that level's column count. Child
+span/offset/order resolution receives the template level (including 2xl), while
+grids without templates retain their previous native breakpoint behavior.
+
+83 engine tests, 12 protocol tests, protocol parity and Android unit tests passed.
+The added integrated test covers the 639→640 boundary, six-level span resolution
+at 1536, auto-fit changing intrinsic height, and invalid templates. Its initial
+root-height assertion was corrected to use a nested auto-height grid: the screen
+root correctly fills the viewport and cannot prove intrinsic content height.
+
+SDK typed construction, template attributes, UI migration and device visual checks
+remain pending. UIKit constants are synchronized but iOS execution is unverified.
+No publication or full responsive-grid approval is claimed.

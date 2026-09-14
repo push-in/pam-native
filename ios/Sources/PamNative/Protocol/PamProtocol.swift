@@ -442,6 +442,10 @@ public enum PamConstants {
     public static let inputFormatLocale = 464
     public static let scrollIndicatorStyle = 465
     public static let gridMinColumnWidth = 466
+    public static let gridTemplate = 467
+    public static let gridSpan2xl = 468
+    public static let gridOffset2xl = 469
+    public static let gridOrder2xl = 470
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

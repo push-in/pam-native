@@ -789,6 +789,10 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::ScrollFillViewport
             | PropKey::GridColumns
             | PropKey::GridMinColumnWidth
+            | PropKey::GridTemplate
+            | PropKey::GridSpan2xl
+            | PropKey::GridOffset2xl
+            | PropKey::GridOrder2xl
             | PropKey::GridSpan
             | PropKey::GridSpanSm
             | PropKey::GridSpanMd

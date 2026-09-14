@@ -472,4 +472,8 @@ enum PropKey: int
     case InputFormatLocale = 464;
     case ScrollIndicatorStyle = 465;
     case GridMinColumnWidth = 466;
+    case GridTemplate = 467;
+    case GridSpan2xl = 468;
+    case GridOffset2xl = 469;
+    case GridOrder2xl = 470;
 }
