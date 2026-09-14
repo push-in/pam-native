@@ -4318,6 +4318,7 @@ class PamRenderer(
                         state.updating = false
                     }
                     state.nativeValue = formatted
+                    state.deferredInputValue = null
                     state.nativeValueAcknowledged = false
                     if (state.properties[PropKey.ON_CHANGE] == null) return
                     when (state.inputSyncMode()) {
@@ -4338,6 +4339,11 @@ class PamRenderer(
                 lastFocusedInput = input
                 if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)
             } else {
+                // A normalized authored value may have arrived while editing.
+                // Apply it only if no newer keystroke invalidated that value.
+                state.deferredInputValue?.let { next ->
+                    applyInputValue(input, state, next)
+                }
                 if (state.inputSyncMode() == INPUT_SYNC_NATIVE || state.inputSyncMode() == INPUT_SYNC_BLUR) {
                     dispatchInput(state)
                 }
@@ -4621,8 +4627,10 @@ class PamRenderer(
             formattedNext != state.nativeValue &&
             !state.nativeValueAcknowledged
         ) {
+            state.deferredInputValue = next
             return
         }
+        state.deferredInputValue = null
         if (input.text.toString() == formattedNext) {
             state.nativeValueAcknowledged = true
             return
@@ -7100,6 +7108,7 @@ class PamRenderer(
         var pendingChange: Runnable? = null,
         var nativeValue: String = "",
         var nativeValueAcknowledged: Boolean = true,
+        var deferredInputValue: String? = null,
         var baseText: String = "",
         var pressOpacity: Float = 0.72f,
         var pressScale: Float = 1f,
