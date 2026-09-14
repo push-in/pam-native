@@ -349,6 +349,30 @@ $assert(
 StyleVariables::replace([]);
 
 $reactiveMethod = new ReflectionMethod(TemplateRenderer::class, 'reactiveStyleSheet');
+$cascadeMethod = new ReflectionMethod(TemplateRenderer::class, 'cascadeStyleAttributes');
+$selectorMethod = new ReflectionMethod(TemplateRenderer::class, 'styleSelectorMatches');
+$specificityRules = [
+    ['selector' => ['specificity' => [1, 0, 0], 'compounds' => [['id' => 'target']]],
+        'order' => 0, 'declarations' => ['width' => ['value' => '10']]],
+    ['selector' => ['specificity' => [0, 1001, 0], 'compounds' => [['classes' => array_fill(0, 1001, 'a')]]],
+        'order' => 1, 'declarations' => ['width' => ['value' => '20']]],
+];
+$selectorNode = ['tag' => 'View', 'id' => 'target', 'classes' => ['a']];
+$assert($cascadeMethod->invoke(null, $specificityRules, $selectorNode, []) === ['width' => '10'],
+    'One ID selector must outrank any number of class selectors without packed-score collisions.');
+$specificityRules[1]['declarations']['width']['important'] = true;
+$assert($cascadeMethod->invoke(null, $specificityRules, $selectorNode, []) === ['width' => '20'],
+    'Important declarations must retain precedence over selector specificity.');
+$assert($selectorMethod->invoke(null, ['compounds' => [
+    3 => ['tag' => 'Column'], 7 => ['tag' => 'Text', 'combinator' => 'child'],
+]], ['tag' => 'Text'], [9 => ['tag' => 'Column']]) === true,
+    'Selector and ancestor lists must match correctly with sparse storage keys.');
+foreach ([['compounds' => [false]], ['compounds' => [['classes' => false]]],
+    ['compounds' => [['attributes' => [['name' => []]]]]],
+    ['compounds' => [['attributes' => [['name' => 'value', 'operator' => '=', 'value' => 'x']]]]]] as $invalidSelector) {
+    $assert($selectorMethod->invoke(null, $invalidSelector, ['attributes' => ['value' => []]], []) === false,
+        'Malformed selectors and nonscalar attribute comparisons must fail without invalid array/string operations.');
+}
 $responsiveMethod = new ReflectionMethod(TemplateRenderer::class, 'responsiveStyleSheet');
 $responsiveSheet = [
     'classes' => ['box' => ['width' => '20', 'fontSize' => '14']],

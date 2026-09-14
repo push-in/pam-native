@@ -2601,17 +2601,23 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $data
-     * @return array<string, array<string, string|bool>>
+     * @return array<string, array<string, string|int|bool>>
      */
     private static function styleSheetClasses(array $data): array
     {
         $sheet = $data['__pamStyles'] ?? null;
         $classes = is_array($sheet) ? ($sheet['classes'] ?? null) : null;
-        $known = is_array($classes) ? $classes : [];
+        $known = self::validatedStyleRules(is_array($classes) ? $classes : [], '<scoped-classes>');
         if (is_array($sheet)) {
-            foreach (($sheet['cascadeRules'] ?? []) as $rule) {
-                foreach (($rule['selector']['compounds'] ?? []) as $compound) {
-                    foreach (($compound['classes'] ?? []) as $class) {
+            $rules = $sheet['cascadeRules'] ?? [];
+            if (!is_array($rules)) throw new RuntimeException('Invalid scoped class rules.');
+            foreach ($rules as $rule) {
+                if (!is_array($rule) || !is_array($rule['selector'] ?? null)) continue;
+                $compounds = $rule['selector']['compounds'] ?? [];
+                if (!is_array($compounds)) continue;
+                foreach ($compounds as $compound) {
+                    if (!is_array($compound) || !is_array($compound['classes'] ?? null)) continue;
+                    foreach ($compound['classes'] as $class) {
                         if (is_string($class) && $class !== '') {
                             $known[$class] ??= [];
                         }
@@ -2815,7 +2821,11 @@ final class TemplateRenderer
         return self::resolveDynamicStyles($attributes, $data);
     }
 
-    /** @param array<string, mixed> $raw @param array<string, mixed> $data @return array<string,mixed> */
+    /**
+     * @param array<string, mixed> $raw
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
     private static function styleNodeDescriptor(string $tag, ?string $classes, array $raw, ?object $scope, array $data): array
     {
         $attributes = [];
@@ -2840,10 +2850,16 @@ final class TemplateRenderer
         if (($attributes['value'] ?? null) === '' || ($attributes['items'] ?? null) === []) {
             $pseudos[] = 'empty';
         }
-        return ['tag' => $tag, 'id' => isset($attributes['id']) ? (string) $attributes['id'] : null, 'classes' => $classList, 'attributes' => $attributes, 'pseudos' => $pseudos];
+        $id = $attributes['id'] ?? null;
+        return ['tag' => $tag, 'id' => is_scalar($id) ? (string) $id : null, 'classes' => $classList, 'attributes' => $attributes, 'pseudos' => $pseudos];
     }
 
-    /** @param list<mixed> $rules @param array<string,mixed> $node @param array<string,mixed> $data @return array<string,string|int|bool> */
+    /**
+     * @param array<array-key, mixed> $rules
+     * @param array<string, mixed> $node
+     * @param array<string, mixed> $data
+     * @return array<string, string|int|bool>
+     */
     private static function cascadeStyleAttributes(array $rules, array $node, array $data): array
     {
         $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
@@ -2853,29 +2869,50 @@ final class TemplateRenderer
                 continue;
             }
             $specificity = $rule['selector']['specificity'] ?? [0, 0, 0];
-            $score = ((int) ($specificity[0] ?? 0) * 1_000_000) + ((int) ($specificity[1] ?? 0) * 1_000) + (int) ($specificity[2] ?? 0);
-            foreach (($rule['declarations'] ?? []) as $attribute => $entry) {
+            if (!is_array($specificity) || count($specificity) !== 3
+                || !is_int($specificity[0] ?? null) || !is_int($specificity[1] ?? null)
+                || !is_int($specificity[2] ?? null) || min($specificity) < 0) {
+                throw new RuntimeException('Invalid selector specificity.');
+            }
+            $declarations = $rule['declarations'] ?? [];
+            $order = $rule['order'] ?? 0;
+            if (!is_array($declarations) || !is_int($order)) {
+                throw new RuntimeException('Invalid cascade declarations or order.');
+            }
+            foreach ($declarations as $attribute => $entry) {
                 if (!is_array($entry) || !array_key_exists('value', $entry)) {
                     continue;
                 }
-                $rank = [(bool) ($entry['important'] ?? false) ? 1 : 0, $score, (int) ($rule['order'] ?? 0)];
+                $value = $entry['value'];
+                if (!is_string($attribute) || (!is_string($value) && !is_int($value) && !is_bool($value))) {
+                    throw new RuntimeException('Invalid cascade declaration value.');
+                }
+                $rank = [(bool) ($entry['important'] ?? false) ? 1 : 0,
+                    $specificity[0], $specificity[1], $specificity[2], $order];
                 if (!isset($winners[$attribute]) || $rank >= $winners[$attribute]['rank']) {
-                    $winners[$attribute] = ['rank' => $rank, 'value' => $entry['value']];
+                    $winners[$attribute] = ['rank' => $rank, 'value' => $value];
                 }
             }
         }
-        return array_map(static fn (array $winner): mixed => $winner['value'], $winners);
+        return array_map(static fn (array $winner): string|int|bool => $winner['value'], $winners);
     }
 
-    /** @param array<string,mixed> $selector @param array<string,mixed> $node @param list<mixed> $ancestors */
+    /**
+     * @param array<array-key, mixed> $selector
+     * @param array<string, mixed> $node
+     * @param array<array-key, mixed> $ancestors
+     */
     private static function styleSelectorMatches(array $selector, array $node, array $ancestors): bool
     {
         $compounds = $selector['compounds'] ?? null;
         if (!is_array($compounds) || $compounds === []) return false;
+        $compounds = array_values($compounds);
+        $ancestors = array_values($ancestors);
         $index = count($compounds) - 1;
         if (!self::styleCompoundMatches($compounds[$index], $node)) return false;
         $ancestorIndex = count($ancestors) - 1;
         while ($index > 0) {
+            if (!is_array($compounds[$index])) return false;
             $relation = $compounds[$index]['combinator'] ?? 'descendant';
             $index--;
             if ($relation === 'child') {
@@ -2893,24 +2930,35 @@ final class TemplateRenderer
         return true;
     }
 
-    /** @param array<string,mixed> $compound */
-    private static function styleCompoundMatches(array $compound, mixed $node): bool
+    private static function styleCompoundMatches(mixed $compound, mixed $node): bool
     {
-        if (!is_array($node)) return false;
+        if (!is_array($compound) || !is_array($node)) return false;
         $tag = $compound['tag'] ?? null;
-        if ($tag !== null && $tag !== '*' && strcasecmp((string) ($node['tag'] ?? ''), (string) $tag) !== 0) return false;
+        $nodeTag = $node['tag'] ?? '';
+        if ($tag !== null && $tag !== '*' && (!is_string($tag) || !is_string($nodeTag) || strcasecmp($nodeTag, $tag) !== 0)) return false;
         if (($compound['id'] ?? null) !== null && ($node['id'] ?? null) !== $compound['id']) return false;
-        foreach (($compound['classes'] ?? []) as $class) if (!in_array($class, $node['classes'] ?? [], true)) return false;
-        foreach (($compound['pseudos'] ?? []) as $pseudo) {
-            if (in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $node['pseudos'] ?? [], true)) return false;
+        $classes = $compound['classes'] ?? [];
+        $nodeClasses = $node['classes'] ?? [];
+        $pseudos = $compound['pseudos'] ?? [];
+        $nodePseudos = $node['pseudos'] ?? [];
+        $conditions = $compound['attributes'] ?? [];
+        if (!is_array($classes) || !is_array($nodeClasses) || !is_array($pseudos)
+            || !is_array($nodePseudos) || !is_array($conditions)) return false;
+        foreach ($classes as $class) if (!is_string($class) || !in_array($class, $nodeClasses, true)) return false;
+        foreach ($pseudos as $pseudo) {
+            if (!is_string($pseudo) || in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $nodePseudos, true)) return false;
         }
-        foreach (($compound['attributes'] ?? []) as $condition) {
+        foreach ($conditions as $condition) {
             $nodeAttributes = $node['attributes'] ?? [];
-            if (!is_array($nodeAttributes) || !array_key_exists($condition['name'], $nodeAttributes)) return false;
+            if (!is_array($condition) || !is_string($condition['name'] ?? null)
+                || !is_array($nodeAttributes) || !array_key_exists($condition['name'], $nodeAttributes)) return false;
             $operator = $condition['operator'] ?? '';
             if ($operator === '') continue;
-            $actual = (string) $nodeAttributes[$condition['name']];
-            $expected = (string) ($condition['value'] ?? '');
+            $actualValue = $nodeAttributes[$condition['name']];
+            $expectedValue = $condition['value'] ?? '';
+            if ((!is_scalar($actualValue) && $actualValue !== null) || !is_scalar($expectedValue)) return false;
+            $actual = (string) $actualValue;
+            $expected = (string) $expectedValue;
             $matches = match ($operator) {
                 '=' => $actual === $expected,
                 '~=' => in_array($expected, preg_split('/\s+/', $actual) ?: [], true),
