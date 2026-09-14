@@ -31,6 +31,30 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testAutofocusWaitsForMountAndDoesNotStealFocusOnRelayout() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let field = PamInputField(frame: CGRect(x: 16, y: 60, width: 300, height: 56))
+        field.inputView = UIView()
+        field.autoFocusRequested = true
+        XCTAssertFalse(field.isFirstResponder)
+        controller.view.addSubview(field)
+        window.makeKeyAndVisible()
+        defer { field.resignFirstResponder(); window.isHidden = true }
+        let mounted = expectation(description: "autofocus after mounting")
+        DispatchQueue.main.async { mounted.fulfill() }
+        wait(for: [mounted], timeout: 1)
+        XCTAssertTrue(field.isFirstResponder)
+        field.resignFirstResponder()
+        field.setNeedsLayout()
+        field.layoutIfNeeded()
+        let relayout = expectation(description: "autofocus remains consumed")
+        DispatchQueue.main.async { relayout.fulfill() }
+        wait(for: [relayout], timeout: 1)
+        XCTAssertFalse(field.isFirstResponder)
+    }
+
     func testControlledSelectionClampsAndSurvivesValueAndSecureUpdates() throws {
         let host = UIView()
         let renderer = PamRenderer(hostView: host) { _, _, _ in }

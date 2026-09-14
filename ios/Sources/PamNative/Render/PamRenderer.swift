@@ -1573,6 +1573,7 @@ public final class PamRenderer {
         let editable = state.properties[PamConstants.inputEditable]?.boolOrNil() ?? true
         (field as? PamInputField)?.isInputEditable = editable
         let hideKeyboard = mode == PamInputModeKind.none || !editable
+            || state.properties[PamConstants.inputShowSoftInputOnFocus]?.boolOrNil() == false
         let changed = field.keyboardType != type || (field.inputView != nil) != hideKeyboard
         field.keyboardType = type
         if hideKeyboard {
@@ -1597,8 +1598,11 @@ public final class PamRenderer {
                     field.text = textValue
                 }
             }
-        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable:
+        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable,
+             PamConstants.inputShowSoftInputOnFocus:
             applyInputKeyboard(view: view, nodeId: nodeId)
+        case PamConstants.autoFocus:
+            (view as? PamInputField)?.autoFocusRequested = value.boolOrNil() ?? false
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:
@@ -2095,8 +2099,11 @@ public final class PamRenderer {
             view.backgroundColor = .clear
         case PamConstants.nativeBackgroundColorResource:
             view.backgroundColor = .clear
-        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable:
+        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable,
+             PamConstants.inputShowSoftInputOnFocus:
             applyInputKeyboard(view: view, nodeId: nodeId)
+        case PamConstants.autoFocus:
+            (view as? PamInputField)?.autoFocusRequested = false
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
         case PamConstants.maxLength:

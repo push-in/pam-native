@@ -334,6 +334,8 @@ public enum PamConstants {
     public static let inputSubmitBehavior = 224
     public static let inputSelectionStart = 221
     public static let inputSelectionEnd = 222
+    public static let autoFocus = 94
+    public static let inputShowSoftInputOnFocus = 223
     public static let source = 4
     public static let width = 5
     public static let height = 6

@@ -715,6 +715,36 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     var submitBehavior: PamInputSubmitBehavior = .blurAndSubmit
     var maximumLength: Int?
     var isInputEditable = true
+    var autoFocusRequested = false {
+        didSet {
+            if !autoFocusRequested { automaticFocusApplied = false }
+            scheduleAutomaticFocus()
+        }
+    }
+    private var automaticFocusApplied = false
+    private var automaticFocusScheduled = false
+
+    private func scheduleAutomaticFocus() {
+        guard autoFocusRequested, !automaticFocusApplied, !automaticFocusScheduled else { return }
+        automaticFocusScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.automaticFocusScheduled = false
+            guard self.autoFocusRequested, !self.automaticFocusApplied,
+                  self.window != nil, self.isEnabled else { return }
+            var ancestor: UIView? = self
+            while let view = ancestor {
+                guard !view.isHidden, view.alpha > 0.01, view.isUserInteractionEnabled else { return }
+                ancestor = view.superview
+            }
+            self.automaticFocusApplied = self.becomeFirstResponder()
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        scheduleAutomaticFocus()
+    }
     private static let maxKeyBytes = 64
 
     var onSelectionChange: ((Int, Int) -> Void)?
@@ -818,6 +848,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
         super.layoutSubviews()
         syncFontCache()
         scheduleContentSizeUpdate()
+        scheduleAutomaticFocus()
     }
 
     override func deleteBackward() {

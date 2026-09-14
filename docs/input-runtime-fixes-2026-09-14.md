@@ -80,3 +80,11 @@ The revised unit test invokes the selectors registered for primaryActionTriggere
 and still verifies payload and target removal. This verifies registration and
 callback implementation, not actual keyboard Return delivery; hosted interaction
 coverage remains necessary and the test is not presented as its replacement.
+
+Autofocus follow-up queues a weak field request after mounting, checks visible
+interactive ancestors and consumes successful focus once. Relayout does not
+steal focus back after the user leaves. Disabling autofocus cancels a pending
+request; keyboard suppression also respects InputShowSoftInputOnFocus without
+disabling selection. The simulator regression checks deferred mount focus and
+no refocus after relayout; it is authored but not yet executed. Conditional
+ancestor reveal and real keyboard presentation remain interaction checks.
