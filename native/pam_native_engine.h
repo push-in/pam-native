@@ -86,6 +86,14 @@ PamStatus pam_native_engine_commit(
     size_t input_length,
     PamNativeBuffer *output
 );
+/* visible is 0 or 1; child must be a direct child of the custom-view owner. */
+PamStatus pam_native_engine_set_native_child_visibility(
+    PamNativeEngineHandle *handle,
+    uint64_t owner,
+    uint64_t child,
+    uint8_t visible,
+    PamNativeBuffer *output
+);
 PamStatus pam_native_engine_last_error(
     const PamNativeEngineHandle *handle,
     PamNativeBuffer *output

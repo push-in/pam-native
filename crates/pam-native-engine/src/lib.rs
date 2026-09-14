@@ -23,8 +23,9 @@ pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
-    pam_native_engine_set_asset_root, pam_native_engine_set_refresh_rate,
-    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_asset_root, pam_native_engine_set_native_child_visibility,
+    pam_native_engine_set_refresh_rate, pam_native_engine_set_text_scale,
+    pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 
 #[derive(Debug)]
@@ -173,6 +174,39 @@ impl Engine {
         let mut output = Vec::new();
         self.commit_into(frame, &mut output)?;
         Ok(output)
+    }
+
+    /// Synchronizes a custom host's direct child with engine-owned layout.
+    /// Declarative commits remain authoritative: a later authored Visible
+    /// update or full tree replaces this native-owned value normally.
+    pub fn set_native_child_visibility(
+        &mut self,
+        owner: u64,
+        child: u64,
+        visible: bool,
+    ) -> Result<Vec<u8>, EngineError> {
+        let current = self.current.as_ref().ok_or(EngineError::PatchWithoutTree)?;
+        let host = current
+            .nodes
+            .get(&owner)
+            .ok_or(EngineError::UnknownPatchNode(owner))?;
+        let node = current
+            .nodes
+            .get(&child)
+            .ok_or(EngineError::UnknownPatchNode(child))?;
+        if host.kind != pam_native_protocol::NodeKind::CustomView || node.parent != owner {
+            return Err(EngineError::InvalidNativeChild { owner, child });
+        }
+        let patch = Patch {
+            operations: vec![PatchOperation::Update(PropertyPatch {
+                id: child,
+                key: PropKey::Visible,
+                value: Some(pam_native_protocol::PropValue::Boolean(visible)),
+            })],
+        }
+        .encode()
+        .map_err(EngineError::Protocol)?;
+        self.commit(&patch)
     }
 
     pub fn commit_into(&mut self, frame: &[u8], output: &mut Vec<u8>) -> Result<(), EngineError> {
@@ -556,6 +590,7 @@ pub enum EngineError {
     InvalidViewport,
     PatchWithoutTree,
     UnknownPatchNode(u64),
+    InvalidNativeChild { owner: u64, child: u64 },
 }
 
 impl std::fmt::Display for EngineError {
@@ -566,6 +601,12 @@ impl std::fmt::Display for EngineError {
             Self::InvalidViewport => formatter.write_str("viewport must be finite and positive"),
             Self::PatchWithoutTree => formatter.write_str("patch requires an initial tree"),
             Self::UnknownPatchNode(id) => write!(formatter, "patch references unknown node {id}"),
+            Self::InvalidNativeChild { owner, child } => {
+                write!(
+                    formatter,
+                    "node {child} is not a direct child of custom host {owner}"
+                )
+            }
         }
     }
 }
@@ -952,6 +993,48 @@ mod tests {
                 .iter()
                 .any(|item| matches!(item, Mutation::Create(Node { id: 1, .. })))
         );
+    }
+
+    #[test]
+    fn native_child_visibility_reflows_and_rejects_unowned_nodes() {
+        let mut tree = Tree::decode(&frame("A", true)).expect("tree");
+        tree.nodes.get_mut(&2).expect("host").kind = NodeKind::CustomView;
+        let mut engine = Engine::new();
+        engine
+            .commit(&tree.encode().expect("frame"))
+            .expect("initial");
+        let before = engine.layouts.clone();
+        assert!(engine.set_native_child_visibility(1, 3, false).is_err());
+        assert!(engine.set_native_child_visibility(2, 1, false).is_err());
+        assert_eq!(engine.layouts, before);
+        let hidden = engine
+            .set_native_child_visibility(2, 3, false)
+            .expect("hide");
+        let mutations = decode_batch(&hidden).expect("batch");
+        assert!(mutations.iter().any(|mutation| matches!(
+            mutation,
+            Mutation::Update {
+                id: 3,
+                key: PropKey::Visible,
+                ..
+            }
+        )));
+        assert_ne!(
+            engine.layouts.get(&4),
+            before.get(&4),
+            "sibling must reflow"
+        );
+        engine
+            .set_native_child_visibility(2, 3, true)
+            .expect("show");
+        assert_eq!(engine.layouts, before);
+        engine
+            .set_native_child_visibility(2, 3, false)
+            .expect("hide again");
+        engine
+            .commit(&tree.encode().expect("authored frame"))
+            .expect("author override");
+        assert_eq!(engine.layouts, before);
     }
 
     #[test]

@@ -248,6 +248,44 @@ pub unsafe extern "C" fn pam_native_engine_relayout(
 }
 
 #[unsafe(no_mangle)]
+/// Changes a custom host's direct child visibility and returns layout mutations.
+/// `visible` must be zero or one. Authored property commits remain authoritative.
+///
+/// # Safety
+/// `handle` must be live and exclusively borrowed. `output` must point to writable
+/// storage with no outstanding buffer lease. Release successful output normally.
+pub unsafe extern "C" fn pam_native_engine_set_native_child_visibility(
+    handle: *mut PamNativeEngineHandle,
+    owner: u64,
+    child: u64,
+    visible: u8,
+    output: *mut PamNativeBuffer,
+) -> PamStatus {
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    *output = PamNativeBuffer::default();
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    if visible > 1 {
+        return PamStatus::InvalidArgument;
+    }
+    match catch_unwind(AssertUnwindSafe(|| {
+        handle
+            .engine
+            .set_native_child_visibility(owner, child, visible == 1)
+    })) {
+        Ok(Ok(batch)) => {
+            *output = lease_buffer(batch);
+            PamStatus::Success
+        }
+        Ok(Err(_)) => PamStatus::InvalidArgument,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Changes viewport and text metrics and returns retained-tree layout mutations.
 ///
 /// # Safety
@@ -530,6 +568,88 @@ mod tests {
         assert_eq!(stats.nodes, 1);
         // SAFETY: Handle is released exactly once.
         unsafe { pam_native_engine_free(handle) };
+    }
+
+    #[test]
+    fn native_child_visibility_abi_validates_inputs_and_leases_output() {
+        let _pool_guard = lock_shared_buffer_pool();
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::CustomView,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+                (
+                    2,
+                    Node {
+                        id: 2,
+                        parent: 1,
+                        index: 0,
+                        kind: NodeKind::Column,
+                        properties: BTreeMap::new(),
+                    },
+                ),
+            ]),
+        }
+        .encode()
+        .expect("tree");
+        let handle = pam_native_engine_new();
+        let mut output = PamNativeBuffer::default();
+        // SAFETY: Live exclusive handle, valid input and uniquely owned buffers.
+        unsafe {
+            assert_eq!(
+                pam_native_engine_commit(handle, tree.as_ptr(), tree.len(), &mut output),
+                PamStatus::Success
+            );
+            pam_native_buffer_free(output);
+            output = PamNativeBuffer::default();
+            assert_eq!(
+                pam_native_engine_set_native_child_visibility(
+                    ptr::null_mut(),
+                    1,
+                    2,
+                    0,
+                    &mut output
+                ),
+                PamStatus::InvalidArgument
+            );
+            assert_eq!(
+                pam_native_engine_set_native_child_visibility(handle, 1, 2, 2, &mut output),
+                PamStatus::InvalidArgument
+            );
+            assert_eq!(
+                pam_native_engine_set_native_child_visibility(handle, 2, 1, 0, &mut output),
+                PamStatus::InvalidArgument
+            );
+            assert!(output.data.is_null());
+            assert_eq!(output.lease, 0);
+            for visible in [0, 1] {
+                assert_eq!(
+                    pam_native_engine_set_native_child_visibility(
+                        handle,
+                        1,
+                        2,
+                        visible,
+                        &mut output
+                    ),
+                    PamStatus::Success
+                );
+                assert!(output.length > 0);
+                assert_ne!(output.lease, 0);
+                let bytes = std::slice::from_raw_parts(output.data, output.length);
+                assert!(pam_native_protocol::decode_batch(bytes).is_ok());
+                pam_native_buffer_free(output);
+                output = PamNativeBuffer::default();
+            }
+            pam_native_engine_free(handle);
+        }
     }
 
     #[test]
