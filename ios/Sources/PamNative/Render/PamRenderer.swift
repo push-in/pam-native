@@ -1542,6 +1542,8 @@ public final class PamRenderer {
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
+        case PamConstants.maxLength:
+            (view as? PamInputField)?.maximumLength = value.integerOrNil().map { max(0, Int(clamping: $0)) }
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.value:
@@ -2031,6 +2033,8 @@ public final class PamRenderer {
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
+        case PamConstants.maxLength:
+            (view as? PamInputField)?.maximumLength = nil
         case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
             applyInputTextTraits(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:

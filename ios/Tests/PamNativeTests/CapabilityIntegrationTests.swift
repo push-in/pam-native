@@ -31,6 +31,31 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testInputLengthLimitTruncatesPasteWithoutSplittingUnicode() throws {
+        let field = PamInputField()
+        field.maximumLength = 4
+        field.setTextFromRenderer("12")
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 2, length: 0), replacementString: "3456"))
+        XCTAssertEqual(field.text, "1234")
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 4, length: 0), replacementString: "5"))
+        XCTAssertTrue(field.textField(field, shouldChangeCharactersIn: NSRange(location: 3, length: 1), replacementString: ""))
+        field.maximumLength = 3
+        field.setTextFromRenderer("ab")
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 2, length: 0), replacementString: "😀"))
+        XCTAssertEqual(field.text, "ab")
+        field.maximumLength = 2
+        field.setTextFromRenderer("漢字入力")
+        field.unmarkText()
+        XCTAssertEqual(field.text, "漢字")
+        field.maximumLength = 1
+        field.setTextFromRenderer("😀a")
+        field.unmarkText()
+        XCTAssertEqual(field.text, "")
+        field.maximumLength = nil
+        field.setTextFromRenderer("ab")
+        XCTAssertTrue(field.textField(field, shouldChangeCharactersIn: NSRange(location: 2, length: 0), replacementString: "long text"))
+    }
+
     func testInputTextTraitsApplyAndReset() throws {
         let host = UIView()
         let renderer = PamRenderer(hostView: host) { _, _, _ in }

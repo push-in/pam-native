@@ -708,6 +708,7 @@ final class PamSafeAreaView: UIView {
 }
 
 final class PamInputField: UITextField, UITextFieldDelegate {
+    var maximumLength: Int?
     private static let maxKeyBytes = 64
 
     var onSelectionChange: ((Int, Int) -> Void)?
@@ -818,6 +819,30 @@ final class PamInputField: UITextField, UITextFieldDelegate {
         super.deleteBackward()
     }
 
+    override func unmarkText() {
+        super.unmarkText()
+        enforceCommittedLength()
+    }
+
+    private func enforceCommittedLength() {
+        guard markedTextRange == nil, let limit = maximumLength,
+              let current = text, current.utf16.count > limit else { return }
+        var bounded = ""
+        var remaining = limit
+        for character in current {
+            let length = String(character).utf16.count
+            guard length <= remaining else { break }
+            bounded.append(character)
+            remaining -= length
+        }
+        let cursor = selectedTextRange.map { offset(from: beginningOfDocument, to: $0.start) }
+        setTextFromRenderer(bounded)
+        if let position = position(from: beginningOfDocument, offset: min(cursor ?? bounded.utf16.count, bounded.utf16.count)) {
+            selectedTextRange = textRange(from: position, to: position)
+        }
+        sendActions(for: .editingChanged)
+    }
+
     override func insertText(_ text: String) {
         if text.count > 0 {
             let key = text == "\n" ? "Enter" : String(text.prefix(Self.maxKeyBytes))
@@ -829,6 +854,29 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        if let limit = maximumLength, textField.markedTextRange == nil,
+           let current = textField.text, let editRange = Range(range, in: current) {
+            let retainedLength = current.utf16.count - range.length
+            let available = max(0, limit - retainedLength)
+            if string.utf16.count > available {
+                var accepted = ""
+                var remaining = available
+                for character in string {
+                    let length = String(character).utf16.count
+                    guard length <= remaining else { break }
+                    accepted.append(character)
+                    remaining -= length
+                }
+                guard !accepted.isEmpty else { return false }
+                let proposed = current.replacingCharacters(in: editRange, with: accepted)
+                setTextFromRenderer(formatInput(proposed))
+                if let cursor = position(from: beginningOfDocument, offset: range.location + accepted.utf16.count) {
+                    selectedTextRange = textRange(from: cursor, to: cursor)
+                }
+                sendActions(for: .editingChanged)
+                return false
+            }
+        }
         if string.isEmpty && range.length > 0 {
             onKeyPress?("Backspace")
         } else if !string.isEmpty {
@@ -940,6 +988,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     func textFieldDidEndEditing(_ textField: UITextField) {
+        enforceCommittedLength()
         onInputEndEditing?(text ?? "")
     }
 
