@@ -119,6 +119,10 @@ final readonly class Style
         public ?float $shadowSpreadRadius = null,
         public ?int $shadowColor = null,
         public ?float $gridMinColumnWidth = null,
+        public ?GridTemplate $gridTemplate = null,
+        public ?int $gridSpan2xl = null,
+        public ?int $gridOffset2xl = null,
+        public ?int $gridOrder2xl = null,
     ) {
     }
 
@@ -212,6 +216,10 @@ final readonly class Style
             PropKey::AnimationKind->value => $this->animationKind?->value,
             PropKey::GridColumns->value => $this->gridColumns,
             PropKey::GridMinColumnWidth->value => $this->gridMinColumnWidth,
+            PropKey::GridTemplate->value => $this->gridTemplate?->toWire(),
+            PropKey::GridSpan2xl->value => $this->gridSpan2xl,
+            PropKey::GridOffset2xl->value => $this->gridOffset2xl,
+            PropKey::GridOrder2xl->value => $this->gridOrder2xl,
             PropKey::GridSpan->value => $this->gridSpan,
             PropKey::GridSpanSm->value => $this->gridSpanSm,
             PropKey::GridSpanMd->value => $this->gridSpanMd,

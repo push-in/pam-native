@@ -604,9 +604,9 @@ enum class PropKey(val value: Int) {
     SCROLL_INDICATOR_STYLE(465),
     GRID_MIN_COLUMN_WIDTH(466),
     GRID_TEMPLATE(467),
-    GRID_SPAN_2XL(468),
-    GRID_OFFSET_2XL(469),
-    GRID_ORDER_2XL(470);
+    GRID_SPAN2XL(468),
+    GRID_OFFSET2XL(469),
+    GRID_ORDER2XL(470);
 
     companion object {
         fun from(value: Int): PropKey =

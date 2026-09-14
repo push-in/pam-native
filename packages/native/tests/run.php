@@ -2842,6 +2842,30 @@ $assert(
     'Auto-fit minimum width must compile through templates and typed Style.',
 );
 $virtualGridTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile('<Grid gridTemplate="0,2,8,4;640,3,12,8;768,4,16,12;1024,4,20,16;1280,5,24,20;1536,6,28,24"><Column span2xl="2" offset2xl="1" order2xl="3" /></Grid>'),
+    null,
+    [],
+);
+$gridWire = '0,2,8,4;640,3,12,8;768,4,16,12;1024,4,20,16;1280,5,24,20;1536,6,28,24';
+$typedGridPlan = \Pam\Native\GridTemplate::fromWire($gridWire);
+$typedGridStyle = new \Pam\Native\Style(gridTemplate: $typedGridPlan, gridSpan2xl: 2, gridOffset2xl: 1, gridOrder2xl: 3);
+$assert($typedGridPlan->toWire() === $gridWire
+    && $typedGridStyle->properties()[PropKey::GridTemplate->value] === $gridWire
+    && $virtualGridTemplate->properties()[PropKey::GridTemplate->value] === $gridWire
+    && $virtualGridTemplate->children()[0]->properties()[PropKey::GridSpan2xl->value] === 2
+    && $virtualGridTemplate->children()[0]->properties()[PropKey::GridOffset2xl->value] === 1
+    && $virtualGridTemplate->children()[0]->properties()[PropKey::GridOrder2xl->value] === 3,
+    'Typed and template responsive plans must preserve all six levels and sixth-tier child properties.');
+foreach (['', '1,2,0,0', '0,0,0,0', '0,65,0,0', '0,2,-1,0', '0,2,INF,0', '0,2,0,0;0,3,0,0', '0,2,0,0;',
+    '0,2,0,0;640,3,0,0;640.000001,4,0,0', '0,2,0,0;1e-100,3,0,0'] as $invalidGridWire) {
+    try {
+        \Pam\Native\GridTemplate::fromWire($invalidGridWire);
+        throw new RuntimeException('Invalid grid plan was accepted.');
+    } catch (InvalidArgumentException) {
+        $assert(true, 'Invalid grid plans fail before native dispatch.');
+    }
+}
+$virtualGridTemplate = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<VirtualGrid columns="2" rowHeight="220" prefetch="7"><Column key="photo-1"><Image source="one.webp" /><Text>One</Text></Column><Pressable key="photo-2"><Image source="two.webp" /></Pressable></VirtualGrid>',
     ),

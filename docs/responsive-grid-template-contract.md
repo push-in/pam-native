@@ -51,3 +51,41 @@ root correctly fills the viewport and cannot prove intrinsic content height.
 SDK typed construction, template attributes, UI migration and device visual checks
 remain pending. UIKit constants are synchronized but iOS execution is unverified.
 No publication or full responsive-grid approval is claimed.
+
+## SDK and UI integration — 2026-09-14
+
+The SDK now provides immutable `GridBreakpoint` and `GridTemplate` values.
+`Style(gridTemplate: ...)` serializes them; native templates accept `gridTemplate`,
+`span2xl`, `offset2xl` and `order2xl`. Threshold ordering is checked at float32
+precision, so two distinct PHP doubles cannot collapse into invalid equal engine
+thresholds. Kotlin names for the digit-bearing properties match SDK enum-name
+normalization. Existing Style positional arguments remain unchanged.
+
+```php
+$plan = new \Pam\Native\GridTemplate(
+    new \Pam\Native\GridBreakpoint(0, 2, 8, 12),
+    new \Pam\Native\GridBreakpoint(768, 3, 16, 12),
+);
+$style = new \Pam\Native\Style(gridTemplate: $plan, gridMinColumnWidth: 120);
+```
+
+UI row grids now map responsive columns, independent gutters and all six child
+span levels into this contract. Responsive auto-fit is supported. Fixed grids
+keep the existing compact properties; non-row directions retain their host path.
+Items 1–4 above are implemented for row direction, not all direction variants.
+
+SDK tests, protocol parity, 83 engine tests and 12 protocol tests passed. The
+Android release-mode candidate built and ran on API 36. Narrow-phone responsive
+2×2 labels were checked after scrolling, with raw screenshot inspection:
+`/tmp/pam-grid-template-20260914/report.json`, candidate SHA-256
+`9078f1ea97dc2613882b3e20c47496f7168e468a7693b638453408935f4551ac`.
+Samsung was authentication-locked; no unlock was attempted.
+
+Static analysis of the wider TemplateRenderer file reports 89 diagnostics outside
+the grid patch. This is a release-gate debt, not a clean-file approval. The new
+GridTemplate redundant array conversion identified in the same run was removed.
+The focused level-9 run then passed for GridBreakpoint, GridTemplate, Style,
+UI ComponentRenderer, the material matrix and the showcase route. TemplateRenderer
+was not included in that clean run and its wider debt remains open.
+Resize, RTL, large text, sixth-tier offsets/order on device and iOS execution
+remain unverified. Nothing was published.
