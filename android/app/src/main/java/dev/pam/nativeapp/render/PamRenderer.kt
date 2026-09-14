@@ -6517,6 +6517,8 @@ class PamRenderer(
         input: PamEditText,
         state: NodeState,
     ) {
+        val previousSelectionStart = input.selectionStart
+        val previousSelectionEnd = input.selectionEnd
         val multiline = state.flag(PropKey.MULTILINE, false)
         val secure = state.flag(PropKey.SECURE, false) && !multiline
         val inputMode = state.integer(PropKey.INPUT_MODE, 0L).toInt()
@@ -6660,12 +6662,15 @@ class PamRenderer(
         )
         input.setEditableValue(state.flag(PropKey.INPUT_EDITABLE, true))
 
-        val selectionStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)
-            ?.toInt()
+        val requestedStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)?.toInt()
+        val selectionStart = requestedStart
+            ?: previousSelectionStart.takeIf { it >= 0 }
             ?: return
-        val selectionEnd = state.integerOrNull(PropKey.INPUT_SELECTION_END)
-            ?.toInt()
-            ?: selectionStart
+        val selectionEnd = if (requestedStart != null) {
+            state.integerOrNull(PropKey.INPUT_SELECTION_END)?.toInt() ?: selectionStart
+        } else {
+            previousSelectionEnd
+        }
         val length = input.text.length
         val safeStart = selectionStart.coerceIn(0, length)
         val safeEnd = selectionEnd.coerceIn(safeStart, length)
