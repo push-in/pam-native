@@ -51,6 +51,42 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun partiallyVisibleVirtualRowsRemainAccessible() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val list = PamRecyclerList(activity)
+                activity.host.addView(list)
+                list.setRichItems(listOf(1L, 2L), mapOf(1L to 48f, 2L to 48f),
+                    { id, holder -> holder.addView(TextView(activity).apply { text = "Row $id" }) },
+                    { _, holder -> holder.removeAllViews() },
+                )
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 72f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 72f))
+                val second = requireNotNull(list.findViewHolderForAdapterPosition(1)).itemView
+                assertTrue(second.bottom > list.height)
+                assertTrue(second.top < list.height)
+                assertFalse(second.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
+                // A row larger than the entire viewport must remain reachable too.
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 24f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 24f))
+                val first = requireNotNull(list.findViewHolderForAdapterPosition(0)).itemView
+                assertTrue(first.height > list.height)
+                assertFalse(first.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun richVirtualCellMountsInsertedChildrenWithoutChangingRowExtent() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
