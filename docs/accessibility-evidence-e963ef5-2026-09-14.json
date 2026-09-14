@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "resultCode": 1,
+  "revision": "e963ef5dd2cdbca9ea232a030dfc2e2a1a911776",
+  "environments": [
+    {
+      "environmentCode": 1,
+      "platformCode": 1,
+      "resultCode": 1,
+      "sourceBytes": 19267,
+      "sourceSha256": "850679f714dde680880db04bb45ca3d6f0a137e5ce3bc244866384ea188323af",
+      "checks": [
+        {
+          "checkCode": 1,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 2,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 3,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 4,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 5,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 6,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 7,
+          "resultCode": 1
+        }
+      ]
+    },
+    {
+      "environmentCode": 2,
+      "platformCode": 1,
+      "resultCode": 1,
+      "sourceBytes": 20671,
+      "sourceSha256": "a65870ba5b87ede9552ec9b8798dc6d143a0587b88dbbfdb3986ddddbf526e91",
+      "checks": [
+        {
+          "checkCode": 1,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 2,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 3,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 4,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 5,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 6,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 7,
+          "resultCode": 1
+        }
+      ]
+    },
+    {
+      "environmentCode": 3,
+      "platformCode": 2,
+      "resultCode": 1,
+      "sourceBytes": 47920,
+      "sourceSha256": "76cc27f6b931df6bff2c55bf30dbe5f22044c60cef8627473c9bd7d1dbf6eda6",
+      "checks": [
+        {
+          "checkCode": 1,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 2,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 3,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 4,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 5,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 6,
+          "resultCode": 1
+        },
+        {
+          "checkCode": 7,
+          "resultCode": 1
+        }
+      ]
+    }
+  ]
+}
