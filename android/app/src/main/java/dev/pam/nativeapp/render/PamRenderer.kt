@@ -5086,7 +5086,24 @@ class PamRenderer(
                 }
             }
         }
-        view.gravity = horizontal or Gravity.CENTER_VERTICAL
+        // Intrinsic text must keep its first baseline stable when the engine's
+        // conservative wrapping estimate reserves an extra line. Explicit text
+        // boxes (button labels, badges, etc.) retain vertical centering.
+        val allocatedHeight = state.properties.containsKey(PropKey.HEIGHT) ||
+            state.properties.containsKey(PropKey.HEIGHT_PERCENT) ||
+            state.properties.containsKey(PropKey.MIN_HEIGHT)
+        val parent = nodes[state.parent]
+        val parentDirection = parent?.integer(
+            PropKey.FLEX_DIRECTION,
+            if (parent.kind == NodeKind.ROW) 2L else 1L,
+        )?.toInt() ?: 1
+        val centeredByParent = if (parentDirection == 2 || parentDirection == 4) {
+            (state.properties[PropKey.ALIGN_SELF]?.integer()
+                ?: parent?.integer(PropKey.ALIGN_ITEMS, 4L)) == 2L
+        } else {
+            parent?.integer(PropKey.JUSTIFY_CONTENT, 1L) == 2L
+        }
+        view.gravity = horizontal or if (allocatedHeight || centeredByParent) Gravity.CENTER_VERTICAL else Gravity.TOP
     }
 
     private fun applyLineHeight(view: TextView, state: NodeState) {

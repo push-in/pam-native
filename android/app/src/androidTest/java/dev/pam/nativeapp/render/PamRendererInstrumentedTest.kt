@@ -1446,6 +1446,7 @@ class PamRendererInstrumentedTest {
                                     mapOf(
                                         PropKey.TEXT to PropValue.Text("Allocated"),
                                         PropKey.WIDTH to PropValue.Decimal(120.0),
+                                        PropKey.HEIGHT to PropValue.Decimal(40.0),
                                         PropKey.TEST_ID to PropValue.Text("allocated-start"),
                                     ),
                                 ),
@@ -1473,6 +1474,8 @@ class PamRendererInstrumentedTest {
                     Gravity.START,
                     allocated.gravity and Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK,
                 )
+                assertEquals(Gravity.TOP, intrinsic.gravity and Gravity.VERTICAL_GRAVITY_MASK)
+                assertEquals(Gravity.CENTER_VERTICAL, allocated.gravity and Gravity.VERTICAL_GRAVITY_MASK)
                 renderer.close()
             }
         } finally {
