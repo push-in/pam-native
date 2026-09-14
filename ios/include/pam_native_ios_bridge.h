@@ -73,6 +73,13 @@ void pam_native_runtime_set_refresh_rate(
     double refresh_rate_hz
 );
 
+void pam_native_runtime_set_child_visibility(
+    uint64_t handle,
+    uint64_t owner,
+    uint64_t child,
+    bool visible
+);
+
 void pam_native_runtime_dispatch_event(
     uint64_t handle,
     int64_t node_id,

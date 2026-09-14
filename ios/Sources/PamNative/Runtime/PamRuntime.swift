@@ -63,6 +63,14 @@ private func pam_native_runtime_set_refresh_rate(
     _ refresh_rate_hz: Double,
 )
 
+@_silgen_name("pam_native_runtime_set_child_visibility")
+private func pam_native_runtime_set_child_visibility(
+    _ handle: UInt64,
+    _ owner: UInt64,
+    _ child: UInt64,
+    _ visible: Bool,
+)
+
 @_silgen_name("pam_native_runtime_dispatch_event")
 private func pam_native_runtime_dispatch_event(
     _ handle: UInt64,
@@ -284,6 +292,13 @@ public final class PamRuntime {
         self.modules = NativeModuleRegistry(additionalModules: nativeModules)
         self.renderer = PamRenderer(hostView: hostView, nativeViews: nativeViews) { [weak self] nodeId, kind, payload in
             self?.dispatchEvent(nodeId, kind: kind, payload: payload)
+        }
+
+        self.renderer.onNativeChildVisibility = { [weak self] owner, child, visible in
+            guard let self, owner > 0, child > 0 else { return }
+            let activeHandle = self.currentHandle()
+            guard activeHandle != 0 else { return }
+            pam_native_runtime_set_child_visibility(activeHandle, UInt64(owner), UInt64(child), visible)
         }
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)

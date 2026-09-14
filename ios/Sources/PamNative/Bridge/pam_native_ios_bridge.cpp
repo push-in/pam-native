@@ -684,6 +684,26 @@ void pam_native_runtime_relayout(
     publish_batch(state, batch);
 }
 
+void pam_native_runtime_set_child_visibility(uint64_t handle, uint64_t owner, uint64_t child, bool visible) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || owner == 0 || child == 0) {
+        return;
+    }
+    PamNativeBuffer batch{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        status = pam_native_engine_set_native_child_visibility(
+            state->engine, owner, child, visible ? 1 : 0, &batch
+        );
+    }
+    if (status == PAM_STATUS_SUCCESS) {
+        publish_batch(state, batch);
+    } else {
+        pam_native_buffer_free(batch);
+    }
+}
+
 void pam_native_runtime_set_refresh_rate(uint64_t handle, double refresh_rate_hz) {
     RuntimeState* state = from_handle(handle);
     if (state == nullptr || refresh_rate_hz <= 0) {

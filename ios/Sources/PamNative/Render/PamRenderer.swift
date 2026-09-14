@@ -3,6 +3,7 @@ import ImageIO
 import UIKit
 
 public final class PamRenderer {
+    var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     private let fontLoader = PamFontLoader()
     private let host: UIView
     private let dispatchEvent: (Int64, Int, Data) -> Void
@@ -174,7 +175,9 @@ public final class PamRenderer {
         imageSession.invalidateAndCancel()
         imageLoadContexts.removeAll()
 
+        onNativeChildVisibility = nil
         for (nodeId, view) in views {
+            (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = nil
             nativeViews.release(view: view)
             view.removeFromSuperview()
             nodes[nodeId]?.childrenNeedRethrow = nil
@@ -286,6 +289,7 @@ public final class PamRenderer {
         cancelImageLoad(for: state)
 
         if let view = views[id] {
+            (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = nil
             nativeViews.release(view: view)
             if let navigation = views[state.parent] as? PamNavigationHost {
                 navigation.removeRoute(view)
@@ -756,7 +760,7 @@ public final class PamRenderer {
 
     private func createView(for spec: NodeSpec) -> UIView {
         if spec.kind == .customView {
-            return nativeViews.create(name: hostName(for: NodeState(
+            let nativeView = nativeViews.create(name: hostName(for: NodeState(
                 id: spec.id,
                 parent: spec.parent,
                 index: spec.index,
@@ -772,6 +776,16 @@ public final class PamRenderer {
             ))) { [weak self] kind, payload in
                 self?.dispatchNativeViewEvent(nodeId: spec.id, kind: kind, payload: payload)
             }
+            (nativeView as? NativeChildVisibilityHost)?.onChildVisibilityChanged = { [weak self, weak nativeView] child, visible in
+                DispatchQueue.main.async { [weak self, weak nativeView, weak child] in
+                    guard let self, let nativeView, let child,
+                          self.views[spec.id] === nativeView,
+                          let childId = self.children[spec.id]?.first(where: { self.views[$0] === child }),
+                          self.nodes[childId]?.parent == spec.id else { return }
+                    self.onNativeChildVisibility?(spec.id, childId, visible)
+                }
+            }
+            return nativeView
         }
 
         switch spec.kind {

@@ -26,6 +26,12 @@ public protocol NativeViewEmitter {
     func emit(kind: NativeViewEventKind, payload: Data)
 }
 
+/// Optional capability for custom hosts that toggle a direct declarative child.
+/// Invoke on the main thread; the renderer schedules the engine layout update.
+public protocol NativeChildVisibilityHost: AnyObject {
+    var onChildVisibilityChanged: ((UIView, Bool) -> Void)? { get set }
+}
+
 public protocol NativeViewFactory {
     func create(context: AnyObject?, emit: @escaping (Data) -> Void) -> UIView
     func create(context: AnyObject?, emitter: NativeViewEmitter) -> UIView

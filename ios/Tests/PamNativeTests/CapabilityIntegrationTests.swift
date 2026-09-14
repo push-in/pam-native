@@ -18,7 +18,55 @@ private final class PluginFixtureViewFactory: NativeViewFactory {
 }
 
 @MainActor
+private final class VisibilityFixtureView: UIView, NativeChildVisibilityHost {
+    var onChildVisibilityChanged: ((UIView, Bool) -> Void)?
+}
+
+@MainActor
+private final class VisibilityFixtureFactory: NativeViewFactory {
+    let view = VisibilityFixtureView()
+    func create(context: AnyObject?, emit: @escaping (Data) -> Void) -> UIView { view }
+    func update(view: UIView, properties: [String: WireValue]) {}
+}
+
+@MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testNativeVisibilityRejectsForeignAndRemovedChildren() throws {
+        let host = UIView()
+        let factory = VisibilityFixtureFactory()
+        let renderer = PamRenderer(hostView: host, nativeViews: ["fixture.visibility": factory]) { _, _, _ in }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .customView,
+                             properties: [PamConstants.hostName: .text("fixture.visibility")])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .column, properties: [:])),
+            .setRoot(1),
+        ]])
+        let child = try XCTUnwrap(factory.view.subviews.first)
+        var requests: [Bool] = []
+        renderer.onNativeChildVisibility = { owner, childId, visible in
+            XCTAssertEqual(owner, 2)
+            XCTAssertEqual(childId, 3)
+            requests.append(visible)
+        }
+        let foreignChild = UIView()
+        factory.view.onChildVisibilityChanged?(foreignChild, false)
+        factory.view.onChildVisibilityChanged?(child, false)
+        factory.view.onChildVisibilityChanged?(child, true)
+        let drained = expectation(description: "queued visibility requests")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 1)
+        XCTAssertEqual(requests, [false, true])
+
+        factory.view.onChildVisibilityChanged?(child, false)
+        renderer.close()
+        XCTAssertNil(factory.view.onChildVisibilityChanged)
+        let closedQueue = expectation(description: "stale visibility request discarded")
+        DispatchQueue.main.async { closedQueue.fulfill() }
+        wait(for: [closedQueue], timeout: 1)
+        XCTAssertEqual(requests, [false, true])
+    }
+
     func testVoiceOverExposesSemanticRoleStateValueAndImportance() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let renderer = PamRenderer(hostView: host) { _, _, _ in }

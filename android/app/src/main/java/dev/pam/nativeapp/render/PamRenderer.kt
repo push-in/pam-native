@@ -81,6 +81,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
+import dev.pam.nativeapp.views.NativeChildVisibilityHost
 import org.json.JSONArray
 import java.nio.ByteOrder
 import java.math.BigDecimal
@@ -385,6 +386,7 @@ class PamRenderer(
     private val host: FrameLayout,
     private val dispatchEvent: (Long, Int, ByteArray) -> Unit,
 ) : AutoCloseable {
+    var onNativeChildVisibility: ((Long, Long, Boolean) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
     private val views = LongSparseArray<View>()
     private val nodes = LongSparseArray<NodeState>()
@@ -727,7 +729,9 @@ class PamRenderer(
 
     override fun close() {
         check(Looper.myLooper() == Looper.getMainLooper())
+        onNativeChildVisibility = null
         for (position in 0 until views.size()) {
+            (views.valueAt(position) as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
             (views.valueAt(position) as? PamModalHost)?.close()
         }
         for (position in 0 until nodes.size()) {
@@ -867,6 +871,19 @@ class PamRenderer(
                     if (eventProperty != null && custom.properties[eventProperty] != null) {
                         dispatchBytes(custom.id, kind, payload)
                     }
+                }.also { nativeView ->
+                    if (nativeView is NativeChildVisibilityHost) {
+                        nativeView.onChildVisibilityChanged = { child, visible ->
+                            main.post {
+                                if (views[custom.id] === nativeView) {
+                                    val childId = children[custom.id]?.firstOrNull { views[it] === child }
+                                    if (childId != null && nodes[childId]?.parent == custom.id) {
+                                        onNativeChildVisibility?.invoke(custom.id, childId, visible)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -875,6 +892,7 @@ class PamRenderer(
         val state = nodes[id] ?: return
         val removedStatusBar = state.kind == NodeKind.STATUS_BAR
         val view = views[id]
+        (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
         deferredViewportLayouts.remove(id)?.let { (parent, listener) ->
             parent.removeOnLayoutChangeListener(listener)
         }

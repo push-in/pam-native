@@ -48,6 +48,16 @@ class PamRuntime(
     @Volatile
     private var handle = 0L
 
+    init {
+        renderer.onNativeChildVisibility = { owner, child, visible ->
+            synchronized(handleLock) {
+                if (!closed.get() && handle != 0L) {
+                    nativeSetChildVisibility(handle, owner, child, visible)
+                }
+            }
+        }
+    }
+
     fun start(
         entry: File,
         widthDp: Float,
@@ -195,6 +205,7 @@ class PamRuntime(
 
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
+        renderer.onNativeChildVisibility = null
         synchronized(handleLock) {
             val active = handle
             handle = 0L
@@ -383,6 +394,8 @@ class PamRuntime(
         textScale: Float,
         darkAppearance: Boolean,
     )
+    private external fun nativeSetChildVisibility(handle: Long, owner: Long, child: Long, visible: Boolean)
+
     private external fun nativeSetRefreshRate(handle: Long, refreshRateHz: Double)
 
     private external fun nativeDispatchEvent(
