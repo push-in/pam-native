@@ -31,6 +31,31 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testInputKeyboardMappingPrecedenceAndRemoval() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("keyboard-fixture"),
+                PamConstants.keyboardType: .integer(5),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "keyboard-fixture") as? UITextField)
+        XCTAssertEqual(field.keyboardType, .numbersAndPunctuation)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputMode, value: .integer(4))]])
+        XCTAssertEqual(field.keyboardType, .numberPad)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputMode, value: .integer(2))]])
+        XCTAssertNotNil(field.inputView)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputMode, value: nil)]])
+        XCTAssertNil(field.inputView)
+        XCTAssertEqual(field.keyboardType, .numbersAndPunctuation)
+        renderer.commit([[.update(id: 2, key: PamConstants.keyboardType, value: nil)]])
+        XCTAssertEqual(field.keyboardType, .default)
+    }
+
     func testNativeVisibilityRejectsForeignAndRemovedChildren() throws {
         let host = UIView()
         let factory = VisibilityFixtureFactory()

@@ -2,6 +2,14 @@ import Foundation
 import ImageIO
 import UIKit
 
+private enum PamKeyboardKind: Int64 {
+    case text = 1, email, number, phone, decimal, url
+}
+
+private enum PamInputModeKind: Int64 {
+    case text = 1, none, decimal, numeric, tel, search, email, url
+}
+
 public final class PamRenderer {
     var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     private let fontLoader = PamFontLoader()
@@ -1440,6 +1448,43 @@ public final class PamRenderer {
         )
     }
 
+    private func applyInputKeyboard(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        let mode = (state.properties[PamConstants.inputMode]?.integerOrNil()).flatMap(PamInputModeKind.init(rawValue:))
+        let keyboard = (state.properties[PamConstants.keyboardType]?.integerOrNil()).flatMap(PamKeyboardKind.init(rawValue:)) ?? .text
+        let type: UIKeyboardType
+        if let mode {
+            switch mode {
+            case .text, .none: type = .default
+            case .decimal: type = .numbersAndPunctuation
+            case .numeric: type = .numberPad
+            case .tel: type = .phonePad
+            case .search: type = .webSearch
+            case .email: type = .emailAddress
+            case .url: type = .URL
+            }
+        } else {
+            switch keyboard {
+            case .text: type = .default
+            case .email: type = .emailAddress
+            case .number: type = .numberPad
+            case .phone: type = .phonePad
+            // Unlike decimalPad, this system keyboard exposes the minus sign.
+            case .decimal: type = .numbersAndPunctuation
+            case .url: type = .URL
+            }
+        }
+        let hideKeyboard = mode == .none
+        let changed = field.keyboardType != type || (field.inputView != nil) != hideKeyboard
+        field.keyboardType = type
+        if hideKeyboard {
+            if field.inputView == nil { field.inputView = UIView(frame: .zero) }
+        } else {
+            field.inputView = nil
+        }
+        if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
         switch key {
         case PamConstants.text:
@@ -1454,6 +1499,8 @@ public final class PamRenderer {
                     field.text = textValue
                 }
             }
+        case PamConstants.keyboardType, PamConstants.inputMode:
+            applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
@@ -1937,6 +1984,8 @@ public final class PamRenderer {
             view.backgroundColor = .clear
         case PamConstants.nativeBackgroundColorResource:
             view.backgroundColor = .clear
+        case PamConstants.keyboardType, PamConstants.inputMode:
+            applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.imageFit:
