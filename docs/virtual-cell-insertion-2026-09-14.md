@@ -18,3 +18,17 @@ The UI showcase select/deselect report `/tmp/pam-grid-insertion-20260914.json`
 also passed; visual inspection confirms the formerly missing check is visible.
 This does not establish all virtualization, accessibility, performance or iOS
 requirements. No release approval follows from this scoped regression.
+
+## UIKit parity review
+
+UIKit already invokes `materializeSubtree` for every visible cell during
+`syncVirtualList`. `materialize` skips existing views, but recursion still visits
+their children, so its source does not share Android's unchanged-holder bind gap.
+No speculative UIKit runtime change was made.
+
+`PamVirtualCellInsertionTests.testInsertedDescendantsMountWithoutReplacingVisibleCell`
+adds the corresponding two-cycle insertion/removal regression, checking retained
+cell identity, label content/size, parent and absence of duplicate descendants.
+It has **not been compiled or executed**: this Linux environment exposes neither
+Swift nor xcodebuild. Source review and the Android pass do not constitute an
+iOS pass. Run this UIKit test on an Apple host before asserting platform parity.
