@@ -328,6 +328,7 @@ public enum PamConstants {
     public static let inputAutoCorrect = 211
     public static let inputAutoCapitalize = 212
     public static let maxLength = 93
+    public static let inputEditable = 210
     public static let source = 4
     public static let width = 5
     public static let height = 6

@@ -1513,7 +1513,9 @@ public final class PamRenderer {
             case .url: type = .URL
             }
         }
-        let hideKeyboard = mode == PamInputModeKind.none
+        let editable = state.properties[PamConstants.inputEditable]?.boolOrNil() ?? true
+        (field as? PamInputField)?.isInputEditable = editable
+        let hideKeyboard = mode == PamInputModeKind.none || !editable
         let changed = field.keyboardType != type || (field.inputView != nil) != hideKeyboard
         field.keyboardType = type
         if hideKeyboard {
@@ -1538,7 +1540,7 @@ public final class PamRenderer {
                     field.text = textValue
                 }
             }
-        case PamConstants.keyboardType, PamConstants.inputMode:
+        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable:
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)
@@ -2029,7 +2031,7 @@ public final class PamRenderer {
             view.backgroundColor = .clear
         case PamConstants.nativeBackgroundColorResource:
             view.backgroundColor = .clear
-        case PamConstants.keyboardType, PamConstants.inputMode:
+        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable:
             applyInputKeyboard(view: view, nodeId: nodeId)
         case PamConstants.secure:
             applyInputSecurity(view: view, nodeId: nodeId)

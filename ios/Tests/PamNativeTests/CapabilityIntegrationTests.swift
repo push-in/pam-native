@@ -31,6 +31,33 @@ private final class VisibilityFixtureFactory: NativeViewFactory {
 
 @MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testReadonlyInputRejectsMutationWithoutDisablingSelection() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("readonly-fixture"),
+                PamConstants.value: .text("Reference"),
+                PamConstants.inputEditable: .flag(false),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "readonly-fixture") as? PamInputField)
+        XCTAssertTrue(field.isEnabled)
+        XCTAssertTrue(field.isUserInteractionEnabled)
+        XCTAssertNotNil(field.inputView)
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 0, length: 9), replacementString: "Changed"))
+        field.insertText("X")
+        field.deleteBackward()
+        field.setMarkedText("Changed", selectedRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(field.text, "Reference")
+        renderer.commit([[.update(id: 2, key: PamConstants.inputEditable, value: nil)]])
+        XCTAssertNil(field.inputView)
+        XCTAssertTrue(field.textField(field, shouldChangeCharactersIn: NSRange(location: 0, length: 9), replacementString: "Changed"))
+    }
+
     func testInputLengthLimitTruncatesPasteWithoutSplittingUnicode() throws {
         let field = PamInputField()
         field.maximumLength = 4

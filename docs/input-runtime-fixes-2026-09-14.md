@@ -32,3 +32,14 @@ fits, and post-composition/end-editing length enforcement. Delegate checks defer
 while marked text is active. Tests cover paste, full-capacity insertion,
 deletion, Unicode boundaries, unrestricted reset and post-unmark normalization.
 These tests have not run yet and do not simulate a real multilingual IME session.
+
+UIKit read-only follow-up: inputEditable now blocks delegate edits, direct
+insertion/deletion and marked-text composition, while keeping the field enabled
+for selection. Its keyboard is suppressed without losing keyboardType/inputMode
+configuration; resetting editable restores editing. Programmatic renderer values
+remain allowed. The new regression checks these mutation paths and property reset;
+actual copy/selection gestures still need simulator/device interaction evidence.
+
+CI 34852153837 at `820b42d` passed its Swift/UIKit job, including the keyboard
+suppression correction, secure-toggle selection retention and text traits tests.
+This does not cover the subsequent maxLength or read-only changes.

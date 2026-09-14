@@ -709,6 +709,7 @@ final class PamSafeAreaView: UIView {
 
 final class PamInputField: UITextField, UITextFieldDelegate {
     var maximumLength: Int?
+    var isInputEditable = true
     private static let maxKeyBytes = 64
 
     var onSelectionChange: ((Int, Int) -> Void)?
@@ -815,6 +816,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     override func deleteBackward() {
+        guard isInputEditable else { return }
         onKeyPress?("Backspace")
         super.deleteBackward()
     }
@@ -824,8 +826,13 @@ final class PamInputField: UITextField, UITextFieldDelegate {
         enforceCommittedLength()
     }
 
+    override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        guard isInputEditable else { return }
+        super.setMarkedText(markedText, selectedRange: selectedRange)
+    }
+
     private func enforceCommittedLength() {
-        guard markedTextRange == nil, let limit = maximumLength,
+        guard isInputEditable, markedTextRange == nil, let limit = maximumLength,
               let current = text, current.utf16.count > limit else { return }
         var bounded = ""
         var remaining = limit
@@ -844,6 +851,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     override func insertText(_ text: String) {
+        guard isInputEditable else { return }
         if text.count > 0 {
             let key = text == "\n" ? "Enter" : String(text.prefix(Self.maxKeyBytes))
             if !key.isEmpty {
@@ -854,6 +862,7 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+        guard isInputEditable else { return false }
         if let limit = maximumLength, textField.markedTextRange == nil,
            let current = textField.text, let editRange = Range(range, in: current) {
             let retainedLength = current.utf16.count - range.length
