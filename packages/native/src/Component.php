@@ -113,6 +113,16 @@ abstract class Component implements Renderable
     {
     }
 
+    /** Transient system UI (permission prompt, picker, share sheet, biometric dialog) is covering the still-visible app. */
+    public function inactive(): void
+    {
+    }
+
+    /** The transient system UI closed and the app is the foreground window again, without having been paused. */
+    public function activated(): void
+    {
+    }
+
     public function unmount(): void
     {
     }

@@ -4990,6 +4990,16 @@ final class CounterCard extends Component
         self::$lifecycle[] = 'paused';
     }
 
+    public function inactive(): void
+    {
+        self::$lifecycle[] = 'inactive';
+    }
+
+    public function activated(): void
+    {
+        self::$lifecycle[] = 'activated';
+    }
+
     public function unmount(): void
     {
         self::$lifecycle[] = 'unmount';
@@ -5528,6 +5538,34 @@ $assert(
 $assert(
     $counterClass::$lifecycle === ['boot', 'mount', 'attached', 'resumed'],
     '.pam.php component lifecycle did not mount on the committed render.',
+);
+// Transient system UI (permission prompt, picker, share sheet) reports Inactive:
+// the component stays resumed and only observes inactive()/activated().
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Inactive->value);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Inactive->value);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Active->value);
+$assert(
+    array_slice($counterClass::$lifecycle, -3) === ['resumed', 'inactive', 'activated'],
+    'Inactive app state must not pause a component; it must bracket the interruption with inactive()/activated().',
+);
+// Leaving the foreground pauses once, whether or not Inactive was reported first.
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Inactive->value);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Background->value);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Active->value);
+$assert(
+    array_slice($counterClass::$lifecycle, -3) === ['inactive', 'paused', 'resumed'],
+    'Background app state must pause the component exactly once and Active must resume it.',
+);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Background->value);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Inactive->value);
+$assert(
+    array_slice($counterClass::$lifecycle, -2) === ['paused', 'resumed'],
+    'Returning from Background through Inactive (iOS foreground transition) must resume the component.',
+);
+Runtime::dispatchEvent(0, EventKind::AppState->value, (string) AppState::Active->value);
+$assert(
+    end($counterClass::$lifecycle) === 'resumed',
+    'Active after a Background→Inactive resume must not report a spurious activated() hook.',
 );
 
 if ($pressKey === null) {

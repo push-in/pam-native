@@ -889,14 +889,24 @@ public function rendered(): void {}
 public function attached(): void {}
 public function resumed(): void {}
 public function updated(string $property): void {}
+public function inactive(): void {}
+public function activated(): void {}
 public function paused(): void {}
 public function unmount(): void {}
 ```
 
 `boot` runs once per instance. `mount` runs on its first render, `rendered`
 runs after each render pass, and `attached` runs after the first native commit.
-App state drives `resumed` and `paused`. Stable constructor prop changes invoke
-`updated`; removing a component invokes `unmount`.
+App state drives `resumed` and `paused`: a component is paused only when the
+application leaves the foreground (`AppState::Background`, Android `onStop`,
+iOS `didEnterBackground`). Transient system UI drawn over the still-visible
+app (permission prompts, document and photo pickers, share sheets, biometric
+dialogs; Android `onPause`, iOS `willResignActive`) reports
+`AppState::Inactive` and invokes `inactive()`, then `activated()` when the app
+becomes the foreground window again. Requests, pickers and prompts started by
+the component therefore survive that interruption; only `paused()` should
+discard private state. Stable constructor prop changes invoke `updated`;
+removing a component invokes `unmount`.
 
 `#[State]` marks local reactive state for tooling. Existing `Restorable`
 components continue to control process recreation persistence. The marker does
