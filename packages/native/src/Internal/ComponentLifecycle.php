@@ -25,7 +25,7 @@ final class ComponentLifecycle
     private static ?WeakMap $states = null;
 
     private static int $pass = 0;
-    private static bool $active = true;
+    private static AppState $appState = AppState::Active;
 
     private function __construct()
     {
@@ -57,6 +57,7 @@ final class ComponentLifecycle
             'mounted' => false,
             'attached' => false,
             'resumed' => false,
+            'inactive' => false,
             'seen' => 0,
         ];
 
@@ -126,7 +127,7 @@ final class ComponentLifecycle
                 $component->attached();
                 $state['attached'] = true;
             }
-            if (self::$active && !$state['resumed']) {
+            if (self::$appState !== AppState::Background && !$state['resumed']) {
                 $component->resumed();
                 $state['resumed'] = true;
             }
@@ -135,14 +136,20 @@ final class ComponentLifecycle
         }
     }
 
+    /**
+     * `paused()`/`resumed()` follow the foreground: only Background pauses a
+     * component. Inactive means transient system UI (permission prompt, picker,
+     * share sheet, biometric dialog) is drawn over the still-visible app, so
+     * components stay resumed and observe it through `inactive()`/`activated()`.
+     */
     public static function appState(AppState $appState): void
     {
-        $active = $appState === AppState::Active;
+        $previous = self::$appState;
 
-        if ($active === self::$active) {
+        if ($appState === $previous) {
             return;
         }
-        self::$active = $active;
+        self::$appState = $appState;
         $states = self::$states;
 
         if ($states === null) {
@@ -153,12 +160,22 @@ final class ComponentLifecycle
             if (!$state['mounted'] || !$state['attached']) {
                 continue;
             }
-            if ($active && !$state['resumed']) {
+            if ($appState === AppState::Background) {
+                if ($state['resumed']) {
+                    $component->paused();
+                    $state['resumed'] = false;
+                    $state['inactive'] = false;
+                }
+            } elseif (!$state['resumed']) {
                 $component->resumed();
                 $state['resumed'] = true;
-            } elseif (!$active && $state['resumed']) {
-                $component->paused();
-                $state['resumed'] = false;
+                $state['inactive'] = false;
+            } elseif ($appState === AppState::Inactive) {
+                $component->inactive();
+                $state['inactive'] = true;
+            } elseif ($state['inactive'] ?? false) {
+                $component->activated();
+                $state['inactive'] = false;
             }
             $states[$component] = $state;
         }
@@ -208,7 +225,7 @@ final class ComponentLifecycle
 
         self::$states = null;
         self::$pass = 0;
-        self::$active = true;
+        self::$appState = AppState::Active;
         DependencyTracker::reset();
     }
 }

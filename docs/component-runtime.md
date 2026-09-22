@@ -16,8 +16,9 @@ construct → boot → setup → mount → rendering → render → rendered
 ```
 
 `boot()`, `setup()` and `mount()` run once for an instance. `attached()` means
-its native nodes were committed. `resumed()`/`paused()` follow application
-lifecycle. `cleanup()` is executed from a `finally` path after effect cleanups.
+its native nodes were committed. `resumed()`/`paused()` follow the foreground:
+only `AppState::Background` pauses. `inactive()`/`activated()` bracket
+transient system UI (`AppState::Inactive`) while the component stays resumed. `cleanup()` is executed from a `finally` path after effect cleanups.
 Keep `render()` pure.
 
 ## Typed props
