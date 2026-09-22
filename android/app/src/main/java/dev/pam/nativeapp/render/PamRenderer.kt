@@ -260,6 +260,9 @@ internal fun hostedContentExtent(
 internal fun usesNativeViewGroupPadding(kind: NodeKind): Boolean =
     kind == NodeKind.CUSTOM_VIEW
 
+internal fun engineFrameMargin(offset: Int, nativeFramePadding: Int): Int =
+    offset - nativeFramePadding
+
 internal fun resolvedAndroidLetterSpacing(
     logicalSpacing: Float,
     logicalFontSize: Float,
@@ -1133,9 +1136,21 @@ class PamRenderer(
         val density = resourcesDensity()
         val horizontal = snappedPixelSpan(frame.x, frame.width, parentFrame.x, density)
         val vertical = snappedPixelSpan(frame.y, frame.height, parentFrame.y, density)
+        val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
+            views[hostedParent] as? FrameLayout
+        } else {
+            null
+        }
         view.layoutParams = FrameLayout.LayoutParams(horizontal.extent, vertical.extent).apply {
-            leftMargin = if (id == rootId) 0 else horizontal.offset
-            topMargin = if (id == rootId) 0 else vertical.offset
+            // Cell frames are physical engine coordinates too; START would
+            // mirror them a second time inside an RTL holder.
+            gravity = PAM_PHYSICAL_FRAME_GRAVITY
+            leftMargin = if (id == rootId) 0 else engineFrameMargin(
+                horizontal.offset, paddedHost?.paddingLeft ?: 0,
+            )
+            topMargin = if (id == rootId) 0 else engineFrameMargin(
+                vertical.offset, paddedHost?.paddingTop ?: 0,
+            )
         }
     }
 
@@ -1403,7 +1418,14 @@ class PamRenderer(
         } ?: 0
         val (measuredHorizontalReduction, measuredVerticalReduction) =
             measuredCrossAxisViewportReduction(
-                mainAxisHorizontal = parentMainAxisHorizontal,
+                // These dimensions belong to the materialized host, not a
+                // flattened Row between it and this child. Mixing the Row's
+                // axis with a full-height Column's viewport can subtract the
+                // system-bar/IME height from each button and collapse it to 0.
+                mainAxisHorizontal = hostedParentState?.integer(
+                    PropKey.FLEX_DIRECTION,
+                    if (hostedParentState.kind == NodeKind.ROW) 2L else 1L,
+                )?.toInt() in listOf(2, 4),
                 engineWidth = dp(parentFrame?.width ?: 0f),
                 measuredWidth = measuredParentWidth,
                 engineHeight = dp(parentFrame?.height ?: 0f),
@@ -1455,8 +1477,17 @@ class PamRenderer(
             resize = state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW &&
                 keyboardAvoidingBehaviorReducesViewport(state.keyboardBehavior),
         )
-        var leftPx = horizontal.offset + safeLeft
-        var topPx = vertical.offset + safeTop
+        // Engine frames already include authored padding. FrameLayout adds
+        // its padding to child margins again, unlike engine-owned containers
+        // whose Android padding is zero. Preserve native host padding while
+        // expressing engine positions relative to that padded origin.
+        val paddedHost = if (hostedParentState?.kind == NodeKind.CUSTOM_VIEW) {
+            parentView as? FrameLayout
+        } else {
+            null
+        }
+        var leftPx = engineFrameMargin(horizontal.offset, paddedHost?.paddingLeft ?: 0) + safeLeft
+        var topPx = engineFrameMargin(vertical.offset, paddedHost?.paddingTop ?: 0) + safeTop
         compensateFlexParentViewportReduction(
             state = state,
             parentState = parentState,
@@ -5055,7 +5086,24 @@ class PamRenderer(
                 }
             }
         }
-        view.gravity = horizontal or Gravity.CENTER_VERTICAL
+        // Intrinsic text must keep its first baseline stable when the engine's
+        // conservative wrapping estimate reserves an extra line. Explicit text
+        // boxes (button labels, badges, etc.) retain vertical centering.
+        val allocatedHeight = state.properties.containsKey(PropKey.HEIGHT) ||
+            state.properties.containsKey(PropKey.HEIGHT_PERCENT) ||
+            state.properties.containsKey(PropKey.MIN_HEIGHT)
+        val parent = nodes[state.parent]
+        val parentDirection = parent?.integer(
+            PropKey.FLEX_DIRECTION,
+            if (parent.kind == NodeKind.ROW) 2L else 1L,
+        )?.toInt() ?: 1
+        val centeredByParent = if (parentDirection == 2 || parentDirection == 4) {
+            (state.properties[PropKey.ALIGN_SELF]?.integer()
+                ?: parent?.integer(PropKey.ALIGN_ITEMS, 4L)) == 2L
+        } else {
+            parent?.integer(PropKey.JUSTIFY_CONTENT, 1L) == 2L
+        }
+        view.gravity = horizontal or if (allocatedHeight || centeredByParent) Gravity.CENTER_VERTICAL else Gravity.TOP
     }
 
     private fun applyLineHeight(view: TextView, state: NodeState) {

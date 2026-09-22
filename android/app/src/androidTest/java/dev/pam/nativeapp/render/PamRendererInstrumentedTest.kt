@@ -11,6 +11,8 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.SystemClock
+import android.text.Editable
+import android.text.TextWatcher
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -43,9 +45,113 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.roundToInt
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun flattenedRowButtonsKeepHeightWhenColumnViewportShrinks() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.COLUMN, mapOf(
+                            PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                        ))),
+                        Mutation.Create(node(3, 2, NodeKind.ROW)),
+                        Mutation.Create(node(4, 3, NodeKind.PRESSABLE)),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(3, Frame(0f, 100f, 360f, 48f)),
+                        Mutation.Layout(4, Frame(0f, 100f, 112f, 48f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val field = PamRenderer::class.java.getDeclaredField("views")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val views = field.get(renderer) as android.util.LongSparseArray<View>
+                    assertNull("row must be flattened for this regression", views[3])
+                    val host = requireNotNull(views[2])
+                    val button = requireNotNull(views[4])
+                    val density = activity.resources.displayMetrics.density
+                    val width = (360 * density).roundToInt()
+                    val height = (640 * density).roundToInt()
+                    host.layoutParams.height = height
+                    host.measure(
+                        View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+                    )
+                    host.layout(0, 0, width, height)
+                    renderer.commit(listOf(listOf(
+                        Mutation.Layout(4, Frame(0f, 100f, 112f, 48f)),
+                    )))
+                    assertEquals((48 * density).roundToInt(), button.layoutParams.height)
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun physicalCellFrameIsNotMirroredAgainByAnRtlHolder() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        onMain(instrumentation) {
+            for (direction in listOf(View.LAYOUT_DIRECTION_LTR, View.LAYOUT_DIRECTION_RTL)) {
+                val holder = FrameLayout(instrumentation.targetContext).apply {
+                    layoutDirection = direction
+                    setPadding(21, 13, 21, 13)
+                }
+                val child = View(instrumentation.targetContext)
+                holder.addView(child, FrameLayout.LayoutParams(100, 40).apply {
+                    gravity = PAM_PHYSICAL_FRAME_GRAVITY
+                    leftMargin = engineFrameMargin(51, holder.paddingLeft)
+                    topMargin = engineFrameMargin(23, holder.paddingTop)
+                })
+                holder.measure(
+                    View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(100, View.MeasureSpec.EXACTLY),
+                )
+                holder.layout(0, 0, 300, 100)
+                assertEquals("physical x in direction $direction", 51, child.left)
+                assertEquals("physical y in direction $direction", 23, child.top)
+                assertEquals(151, child.right)
+            }
+        }
+    }
+
+    @Test
+    fun engineChildCoordinatesSurviveCustomFrameLayoutPadding() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        onMain(instrumentation) {
+            val host = FrameLayout(instrumentation.targetContext)
+            host.setPadding(21, 13, 21, 13)
+            val child = View(instrumentation.targetContext)
+            host.addView(child, FrameLayout.LayoutParams(258, 54).apply {
+                gravity = Gravity.TOP or Gravity.LEFT
+                leftMargin = engineFrameMargin(21, host.paddingLeft)
+                topMargin = engineFrameMargin(13, host.paddingTop)
+            })
+            host.measure(
+                View.MeasureSpec.makeMeasureSpec(300, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(80, View.MeasureSpec.EXACTLY),
+            )
+            host.layout(0, 0, 300, 80)
+            assertEquals(21, child.left)
+            assertEquals(13, child.top)
+            assertEquals(21, host.width - child.right)
+            assertEquals(13, host.height - child.bottom)
+            assertEquals(21, host.paddingLeft)
+        }
+    }
+
     @Test
     fun currencyInputKeepsNumericTypingAtTheTrailingMinorUnit() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -126,7 +232,7 @@ class PamRendererInstrumentedTest {
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("73125")
             instrumentation.waitForIdleSync()
-            assertEquals("731,25", currency.text.toString())
+            assertInputTextArrives(instrumentation, currency, "731,25")
 
             lateinit var mask: EditText
             onMain(instrumentation) {
@@ -140,7 +246,7 @@ class PamRendererInstrumentedTest {
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("21912345678")
             instrumentation.waitForIdleSync()
-            assertEquals("(21) 91234-5678", mask.text.toString())
+            assertInputTextArrives(instrumentation, mask, "(21) 91234-5678")
             onMain(instrumentation) { renderer.close() }
         } finally {
             onMain(instrumentation) { activity.finish() }
@@ -1344,6 +1450,7 @@ class PamRendererInstrumentedTest {
                                     mapOf(
                                         PropKey.TEXT to PropValue.Text("Allocated"),
                                         PropKey.WIDTH to PropValue.Decimal(120.0),
+                                        PropKey.HEIGHT to PropValue.Decimal(40.0),
                                         PropKey.TEST_ID to PropValue.Text("allocated-start"),
                                     ),
                                 ),
@@ -1371,6 +1478,8 @@ class PamRendererInstrumentedTest {
                     Gravity.START,
                     allocated.gravity and Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK,
                 )
+                assertEquals(Gravity.TOP, intrinsic.gravity and Gravity.VERTICAL_GRAVITY_MASK)
+                assertEquals(Gravity.CENTER_VERTICAL, allocated.gravity and Gravity.VERTICAL_GRAVITY_MASK)
                 renderer.close()
             }
         } finally {
@@ -2001,6 +2110,37 @@ class PamRendererInstrumentedTest {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             },
         ) as PamTestActivity
+
+    private fun assertInputTextArrives(
+        instrumentation: Instrumentation,
+        input: EditText,
+        expected: String,
+    ) {
+        // Input injection completion and app queue idleness do not guarantee
+        // that an IME has finished updating the editor. Observe the actual
+        // value without slowing the key burst or reading Views off-main.
+        val arrived = CountDownLatch(1)
+        val watcher = object : TextWatcher {
+            override fun beforeTextChanged(text: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(text: Editable?) {
+                if (text.toString() == expected) arrived.countDown()
+            }
+        }
+        onMain(instrumentation) {
+            input.addTextChangedListener(watcher)
+            if (input.text.toString() == expected) arrived.countDown()
+        }
+        try {
+            val completed = arrived.await(2, TimeUnit.SECONDS)
+            onMain(instrumentation) {
+                assertTrue("Input did not retain the complete burst: ${input.text}", completed)
+                assertEquals(expected, input.text.toString())
+            }
+        } finally {
+            onMain(instrumentation) { input.removeTextChangedListener(watcher) }
+        }
+    }
 
     private fun onMain(instrumentation: Instrumentation, block: () -> Unit) {
         instrumentation.runOnMainSync(block)
