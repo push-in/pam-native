@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.28 - 2026-09-22
+
+- Pause components only when the application leaves the foreground
+  (`AppState::Background`). Transient system UI such as permission prompts,
+  document and photo pickers, share sheets and biometric dialogs now reports
+  `inactive()`/`activated()` while the component stays resumed, so requests,
+  pickers and prompts it started survive the interruption.
+
 ## 1.0.27 - 2026-09-12
 
 - Preserve the active Android `Editable` while applying mask and currency
