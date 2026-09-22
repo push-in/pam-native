@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.29 - 2026-09-22
+
+- Restore intrinsic row and text measurement: rows of flexible controls keep
+  their full cross size, fixed-size controls beside text columns are laid out
+  again, and the Android host preserves flattened row controls and stable
+  text baselines. Fixes the collapsed quick-action rows seen since 1.0.14.
+
 ## 1.0.28 - 2026-09-22
 
 - Pause components only when the application leaves the foreground
