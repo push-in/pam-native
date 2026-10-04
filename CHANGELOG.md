@@ -3,7 +3,8 @@
 ## 1.0.33 - 2026-10-04
 
 - Add native PhotoKit gallery pages and albums on iOS, lazy `phasset://` image
-  and video sources, and selected-asset import into the application sandbox.
+  and video sources, and 64 MiB bounded streaming import of selected assets
+  into the application sandbox.
 - Bring iOS file downloads with headers, bounded progress and cancellation,
   plus private-file preview, into line with the public PHP Files API.
 - Receive iOS App Group shares through the core `IncomingShares` API, preserving
