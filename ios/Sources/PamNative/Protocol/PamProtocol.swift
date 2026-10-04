@@ -186,30 +186,30 @@ public struct PackedStringList {
 
     public static func decode(_ source: Data) throws -> PackedStringList {
         return try BinaryReader.withSource(source) { reader in
-        let count = try reader.u32()
-        let safeCount = Int(count)
-        guard safeCount <= MAX_PACKED_LIST_ITEMS else {
-            throw PamProtocolError.invalidPayload("List contains too many items")
-        }
-        var offsets = [Int]()
-        offsets.reserveCapacity(safeCount)
-        var lengths = [Int]()
-        lengths.reserveCapacity(safeCount)
-
-        for _ in 0..<safeCount {
-            let length = try reader.u32()
-            guard length <= MAX_VALUE_BYTES else {
-                throw PamProtocolError.invalidPayload("List item is too large")
+            let count = try reader.u32()
+            let safeCount = Int(count)
+            guard safeCount <= MAX_PACKED_LIST_ITEMS else {
+                throw PamProtocolError.invalidPayload("List contains too many items")
             }
-            let offset = reader.offset
-            let value = try reader.bytes(Int(length))
-            _ = try strictUTF8(value, label: "List item")
-            offsets.append(offset)
-            lengths.append(Int(length))
-        }
-        try reader.finish()
+            var offsets = [Int]()
+            offsets.reserveCapacity(safeCount)
+            var lengths = [Int]()
+            lengths.reserveCapacity(safeCount)
 
-        return PackedStringList(source, offsets, lengths)
+            for _ in 0..<safeCount {
+                let length = try reader.u32()
+                guard length <= MAX_VALUE_BYTES else {
+                    throw PamProtocolError.invalidPayload("List item is too large")
+                }
+                let offset = reader.offset
+                let value = try reader.bytes(Int(length))
+                _ = try strictUTF8(value, label: "List item")
+                offsets.append(offset)
+                lengths.append(Int(length))
+            }
+            try reader.finish()
+
+            return PackedStringList(source, offsets, lengths)
         }
     }
 }
@@ -257,31 +257,31 @@ public struct PackedSectionList {
 
     public static func decode(_ source: Data) throws -> PackedSectionList {
         return try BinaryReader.withSource(source) { reader in
-        let sections = try reader.u32()
-        let safeSections = Int(sections)
-        guard safeSections <= MAX_PACKED_SECTIONS else {
-            throw PamProtocolError.invalidPayload("Section list contains too many sections")
-        }
+            let sections = try reader.u32()
+            let safeSections = Int(sections)
+            guard safeSections <= MAX_PACKED_SECTIONS else {
+                throw PamProtocolError.invalidPayload("Section list contains too many sections")
+            }
 
-        var entries: [Entry] = []
-        for _ in 0..<safeSections {
-            entries.append(
-                try Entry.decode(source: &reader, kind: Self.headerKind)
-            )
-            let itemCount = try reader.u32()
-            let safeItemCount = Int(itemCount)
-            guard safeItemCount <= MAX_PACKED_LIST_ITEMS,
-                  entries.count + safeItemCount <= MAX_PACKED_SECTION_ENTRIES else {
-                throw PamProtocolError.invalidPayload("Section list contains too many items")
-            }
-            for _ in 0..<safeItemCount {
+            var entries: [Entry] = []
+            for _ in 0..<safeSections {
                 entries.append(
-                    try Entry.decode(source: &reader, kind: Self.itemKind)
+                    try Entry.decode(source: &reader, kind: Self.headerKind)
                 )
+                let itemCount = try reader.u32()
+                let safeItemCount = Int(itemCount)
+                guard safeItemCount <= MAX_PACKED_LIST_ITEMS,
+                      entries.count + safeItemCount <= MAX_PACKED_SECTION_ENTRIES else {
+                    throw PamProtocolError.invalidPayload("Section list contains too many items")
+                }
+                for _ in 0..<safeItemCount {
+                    entries.append(
+                        try Entry.decode(source: &reader, kind: Self.itemKind)
+                    )
+                }
             }
-        }
-        try reader.finish()
-        return PackedSectionList(source, entries)
+            try reader.finish()
+            return PackedSectionList(source, entries)
         }
     }
 
@@ -676,69 +676,69 @@ public enum BatchDecoder {
             throw PamProtocolError.invalidProtocol("Batch exceeds 16 MiB")
         }
         return try BinaryReader.withSource(input) { reader in
-        guard try reader.ascii(4) == "PNB1" else {
-            throw PamProtocolError.invalidProtocol("Invalid batch magic")
-        }
-        let version = try reader.u16()
-        guard version == PAM_PROTOCOL_VERSION else {
-            throw PamProtocolError.invalidProtocol("Unsupported protocol version")
-        }
-        let count = try reader.u32()
-        guard count <= MAX_MUTATIONS else {
-            throw PamProtocolError.invalidPayload("Batch has too many mutations")
-        }
-
-        var mutations: [Mutation] = []
-        mutations.reserveCapacity(count)
-
-        for _ in 0..<count {
-            let kind = try reader.u8()
-            switch kind {
-            case 1:
-                let spec = try reader.node()
-                mutations.append(.create(spec))
-            case 2:
-                let id = try reader.positiveId()
-                mutations.append(.remove(id))
-            case 3:
-                let id = try reader.positiveId()
-                let key = try reader.u16()
-                let presence = try reader.u8()
-                let value: PropValue?
-                if presence == 1 {
-                    value = try reader.value(for: key)
-                } else if presence == 2 {
-                    value = nil
-                } else {
-                    throw PamProtocolError.invalidPayload("Unknown update marker")
-                }
-                mutations.append(.update(id: id, key: key, value: value))
-            case 4:
-                mutations.append(
-                    .move(
-                        id: try reader.positiveId(),
-                        parent: try reader.u64(),
-                        index: try reader.u32(),
-                    )
-                )
-            case 5:
-                let id = try reader.positiveId()
-                let frame = Frame(
-                    x: try reader.f32(),
-                    y: try reader.f32(),
-                    width: try reader.f32(),
-                    height: try reader.f32(),
-                )
-                mutations.append(.layout(id: id, frame: frame))
-            case 6:
-                mutations.append(.setRoot(try reader.positiveId()))
-            default:
-                throw PamProtocolError.invalidProtocol("Unknown mutation type")
+            guard try reader.ascii(4) == "PNB1" else {
+                throw PamProtocolError.invalidProtocol("Invalid batch magic")
             }
-        }
+            let version = try reader.u16()
+            guard version == PAM_PROTOCOL_VERSION else {
+                throw PamProtocolError.invalidProtocol("Unsupported protocol version")
+            }
+            let count = try reader.u32()
+            guard count <= MAX_MUTATIONS else {
+                throw PamProtocolError.invalidPayload("Batch has too many mutations")
+            }
 
-        try reader.finish()
-        return mutations
+            var mutations: [Mutation] = []
+            mutations.reserveCapacity(count)
+
+            for _ in 0..<count {
+                let kind = try reader.u8()
+                switch kind {
+                case 1:
+                    let spec = try reader.node()
+                    mutations.append(.create(spec))
+                case 2:
+                    let id = try reader.positiveId()
+                    mutations.append(.remove(id))
+                case 3:
+                    let id = try reader.positiveId()
+                    let key = try reader.u16()
+                    let presence = try reader.u8()
+                    let value: PropValue?
+                    if presence == 1 {
+                        value = try reader.value(for: key)
+                    } else if presence == 2 {
+                        value = nil
+                    } else {
+                        throw PamProtocolError.invalidPayload("Unknown update marker")
+                    }
+                    mutations.append(.update(id: id, key: key, value: value))
+                case 4:
+                    mutations.append(
+                        .move(
+                            id: try reader.positiveId(),
+                            parent: try reader.u64(),
+                            index: try reader.u32(),
+                        )
+                    )
+                case 5:
+                    let id = try reader.positiveId()
+                    let frame = Frame(
+                        x: try reader.f32(),
+                        y: try reader.f32(),
+                        width: try reader.f32(),
+                        height: try reader.f32(),
+                    )
+                    mutations.append(.layout(id: id, frame: frame))
+                case 6:
+                    mutations.append(.setRoot(try reader.positiveId()))
+                default:
+                    throw PamProtocolError.invalidProtocol("Unknown mutation type")
+                }
+            }
+
+            try reader.finish()
+            return mutations
         }
     }
 }
