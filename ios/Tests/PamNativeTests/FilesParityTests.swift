@@ -27,6 +27,27 @@ final class FilesParityTests: XCTestCase {
         channel.next { status, _ in XCTAssertEqual(status, .failure) }
     }
 
+    func testObservedDownloadChannelReleasesTerminalSubscriptionAfterDelivery() {
+        var delivered = 0
+        let channel = FileDownloadChannel { delivered += 1 }
+        channel.offer(Data("progress".utf8))
+        channel.offer(Data("complete".utf8), terminal: true)
+        channel.offer(Data("late progress".utf8))
+        channel.next { status, payload in
+            XCTAssertEqual(status, .success)
+            XCTAssertEqual(payload, Data("progress".utf8))
+        }
+        XCTAssertEqual(delivered, 0)
+        channel.next { status, payload in
+            XCTAssertEqual(status, .success)
+            XCTAssertEqual(payload, Data("complete".utf8))
+        }
+        XCTAssertEqual(delivered, 1)
+        channel.next { status, _ in XCTAssertEqual(status, .failure) }
+        channel.close()
+        XCTAssertEqual(delivered, 1)
+    }
+
     func testFilesRejectsUnsafeObservedDownloadAndMissingPreview() throws {
         let files = FilesModule()
         let invalidURL = try WireMap.encode([

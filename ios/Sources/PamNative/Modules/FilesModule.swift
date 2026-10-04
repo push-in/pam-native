@@ -253,7 +253,9 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             )
             let id = nextDownloadId
             nextDownloadId += 1
-            let channel = FileDownloadChannel()
+            let channel = FileDownloadChannel { [weak self] in
+                self?.queue.async { self?.downloads.removeValue(forKey: id) }
+            }
             let task = RemoteFileDownload.start(
                 url: url,
                 destination: destination,
@@ -280,7 +282,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                             "message": .text(String(decoding: payload, as: UTF8.self)),
                         ])) ?? Data()
                     }
-                    channel.offer(result)
+                    channel.offer(result, terminal: true)
                 }
             )
             downloads[id] = (task, channel)
@@ -767,9 +769,15 @@ private struct FileModuleError: LocalizedError {
 
 final class FileDownloadChannel {
     private let lock = NSLock()
-    private var events: [Data] = []
+    private var events: [(payload: Data, terminal: Bool)] = []
     private var waiter: ModuleCompletion?
     private var closed = false
+    private var terminalQueued = false
+    private let onTerminalDelivered: (() -> Void)?
+
+    init(onTerminalDelivered: (() -> Void)? = nil) {
+        self.onTerminalDelivered = onTerminalDelivered
+    }
 
     func next(_ completion: @escaping ModuleCompletion) {
         lock.lock()
@@ -778,8 +786,10 @@ final class FileDownloadChannel {
             completion(.failure, Data("Observation is closed".utf8))
         } else if !events.isEmpty {
             let event = events.removeFirst()
+            if event.terminal { closed = true }
             lock.unlock()
-            completion(.success, event)
+            completion(.success, event.payload)
+            if event.terminal { onTerminalDelivered?() }
         } else if waiter != nil {
             lock.unlock()
             completion(.failure, Data("Observation already has a pending read".utf8))
@@ -789,20 +799,24 @@ final class FileDownloadChannel {
         }
     }
 
-    func offer(_ payload: Data) {
+    func offer(_ payload: Data, terminal: Bool = false) {
         lock.lock()
-        if closed {
+        if closed || terminalQueued {
             lock.unlock()
             return
         }
+        if terminal { terminalQueued = true }
         let pending = waiter
         waiter = nil
         if pending == nil {
             if events.count >= 4 { events.removeFirst() }
-            events.append(payload)
+            events.append((payload, terminal))
+        } else if terminal {
+            closed = true
         }
         lock.unlock()
         pending?(.success, payload)
+        if pending != nil && terminal { onTerminalDelivered?() }
     }
 
     func close() {
