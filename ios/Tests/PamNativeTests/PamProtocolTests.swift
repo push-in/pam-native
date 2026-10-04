@@ -301,6 +301,28 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(decoded["height"]?.decimal, 48)
         XCTAssertEqual(decoded["intersecting"]?.flag, true)
     }
+
+    func testBinaryReaderScalarsPreserveLittleEndianAndSliceOffsets() throws {
+        var payload = Data([0xff])
+        payload.appendLittleEndian(UInt16(0x1234))
+        payload.appendLittleEndian(UInt32(0x89abcdef))
+        payload.appendLittleEndian(UInt64(bitPattern: -7))
+        payload.appendLittleEndian(Float(12.5).bitPattern)
+        payload.appendLittleEndian(Double(3.25).bitPattern)
+
+        var reader = BinaryReader(source: payload.dropFirst())
+        XCTAssertEqual(try reader.u16(), 0x1234)
+        XCTAssertEqual(try reader.u32(), 0x89abcdef)
+        XCTAssertEqual(try reader.i64(), -7)
+        XCTAssertEqual(try reader.f32(), 12.5)
+        XCTAssertEqual(try reader.d64(), 3.25)
+        XCTAssertNoThrow(try reader.finish())
+        XCTAssertThrowsError(try reader.u8())
+
+        var truncated = BinaryReader(source: Data([0x01, 0x02, 0x03]))
+        XCTAssertThrowsError(try truncated.u32())
+        XCTAssertEqual(try truncated.u16(), 0x0201)
+    }
 }
 
 private func textBatch(length: Int) -> Data {

@@ -760,18 +760,15 @@ struct BinaryReader {
     }
 
     mutating func u8() throws -> Int {
-        let value = try bytes(1).first ?? 0
-        return Int(value)
+        Int(try unsigned(1))
     }
 
     mutating func u16() throws -> Int {
-        let raw = try bytes(2)
-        return Int(UInt16(littleEndian: raw.withUnsafeBytes { $0.load(as: UInt16.self) }))
+        Int(try unsigned(2))
     }
 
     mutating func u32() throws -> Int {
-        let raw = try bytes(4)
-        let value = Int(UInt32(littleEndian: raw.withUnsafeBytes { $0.load(as: UInt32.self) }))
+        let value = Int(try unsigned(4))
         guard value >= 0 else {
             throw PamProtocolError.invalidPayload("Cannot decode u32")
         }
@@ -779,13 +776,11 @@ struct BinaryReader {
     }
 
     mutating func u64() throws -> Int64 {
-        let raw = try bytes(8)
-        return Int64(littleEndian: Int64(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) }))
+        Int64(bitPattern: try unsigned(8))
     }
 
     mutating func f32() throws -> Float {
-        let raw = try bytes(4)
-        let value = Float(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt32.self) })
+        let value = Float(bitPattern: UInt32(truncatingIfNeeded: try unsigned(4)))
         guard value.isFinite && value >= 0 else {
             throw PamProtocolError.invalidPayload("Invalid layout value")
         }
@@ -882,18 +877,35 @@ struct BinaryReader {
         return source.subdata(in: cursor..<end)
     }
 
+    // Numeric fields are read for every mutation. Avoid allocating a Data slice
+    // for each one; only variable-size values need a standalone Data value.
+    @inline(__always)
+    private mutating func unsigned(_ count: Int) throws -> UInt64 {
+        guard source.endIndex - cursor >= count else {
+            throw PamProtocolError.invalidPayload("Payload truncated")
+        }
+        let start = cursor - source.startIndex
+        let value = source.withUnsafeBytes { raw -> UInt64 in
+            var result: UInt64 = 0
+            for index in 0..<count {
+                result |= UInt64(raw[start + index]) << (index * 8)
+            }
+            return result
+        }
+        cursor += count
+        return value
+    }
+
     mutating func skip(_ count: Int) throws {
         _ = try bytes(count)
     }
 
     mutating func i64() throws -> Int64 {
-        let raw = try bytes(8)
-        return Int64(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        Int64(bitPattern: try unsigned(8))
     }
 
     mutating func d64() throws -> Double {
-        let raw = try bytes(8)
-        let value = Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        let value = Double(bitPattern: try unsigned(8))
         guard value.isFinite else {
             throw PamProtocolError.invalidPayload("Floating property must be finite")
         }
