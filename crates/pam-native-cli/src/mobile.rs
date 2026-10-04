@@ -7717,20 +7717,27 @@ fn http_response(stream: &mut TcpStream, content_type: &str, body: &[u8]) -> Res
 }
 
 fn project_fingerprint(root: &Path) -> Result<(u64, u128), String> {
-    fn visit(root: &Path, count: &mut u64, latest: &mut u128) -> Result<(), String> {
-        for entry in fs::read_dir(root).map_err(|error| error.to_string())? {
+    fn visit(
+        project_root: &Path,
+        directory: &Path,
+        count: &mut u64,
+        latest: &mut u128,
+    ) -> Result<(), String> {
+        for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
-            let relative = entry
-                .path()
-                .strip_prefix(root)
-                .unwrap_or(&entry.path())
-                .to_path_buf();
-            if ignored_project_path(&relative) {
+            let path = entry.path();
+            let relative = path.strip_prefix(project_root).unwrap_or(&path);
+            if ignored_project_path(relative)
+                || relative
+                    .components()
+                    .any(|component| component.as_os_str() == "vendor")
+                || path.extension() == Some(OsStr::new("log"))
+            {
                 continue;
             }
             let metadata = entry.metadata().map_err(|error| error.to_string())?;
             if metadata.is_dir() {
-                visit(&entry.path(), count, latest)?;
+                visit(project_root, &path, count, latest)?;
             } else if metadata.is_file() {
                 *count = count.saturating_add(metadata.len()).saturating_add(1);
                 let changed = metadata
@@ -7746,7 +7753,7 @@ fn project_fingerprint(root: &Path) -> Result<(u64, u128), String> {
     }
     let mut count = 0;
     let mut latest = 0;
-    visit(root, &mut count, &mut latest)?;
+    visit(root, root, &mut count, &mut latest)?;
     Ok((count, latest))
 }
 
@@ -7783,6 +7790,35 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hot_reload_watches_sources_without_reloading_for_logs_or_vendor() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-hot-reload-watch-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("src")).expect("source directory");
+        fs::create_dir_all(root.join("vendor/package")).expect("vendor directory");
+        fs::write(root.join("index.php"), b"<?php").expect("entry");
+
+        let original = project_fingerprint(&root).expect("initial fingerprint");
+        fs::write(root.join("community-dev.log"), b"Reload ready\n").expect("development log");
+        fs::write(root.join("vendor/package/Library.php"), b"<?php").expect("dependency");
+        assert_eq!(
+            project_fingerprint(&root).expect("ignored changes"),
+            original
+        );
+
+        fs::write(root.join("src/App.php"), b"<?php class App {}").expect("source change");
+        assert_ne!(
+            project_fingerprint(&root).expect("source fingerprint"),
+            original
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
 
     #[test]
     fn release_run_uses_the_minified_locally_installable_variant() {
