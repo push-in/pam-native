@@ -1,15 +1,21 @@
 import Foundation
+import QuickLook
 import UniformTypeIdentifiers
 import UIKit
 
 final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
-    UIDocumentPickerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+    UIDocumentPickerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate,
+    QLPreviewControllerDataSource, QLPreviewControllerDelegate {
     private let queue = DispatchQueue(label: "dev.pam.native.files")
     private let root: URL
     private var pending: ModuleCompletion?
     private var pendingMultiple = false
     private var pendingLimit = 10
     private var captureType = 1
+    private var previewURL: URL?
+    private weak var previewController: QLPreviewController?
+    private var nextDownloadId: Int64 = 1
+    private var downloads: [Int64: (RemoteFileDownload, FileDownloadChannel)] = [:]
 
     override init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -31,6 +37,14 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 queue.async { self.copyAsset(payload, completion) }
             case "download":
                 queue.async { self.download(payload, completion) }
+            case "downloadStart":
+                queue.async { self.startObservedDownload(payload, completion) }
+            case "downloadNext":
+                queue.async { self.nextObservedDownload(payload, completion) }
+            case "downloadCancel":
+                queue.async { self.cancelObservedDownload(payload, completion) }
+            case "open":
+                openFile(payload, completion: completion)
             case "stat":
                 queue.async { self.stat(payload, completion) }
             case "list":
@@ -197,6 +211,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             guard maximumBytes > 0, maximumBytes <= 256 * 1_024 * 1_024 else {
                 throw FileModuleError("Invalid download size limit")
             }
+            let headers = try downloadHeaders(values["headers"]?.textValue ?? "")
             let destination = try resolve(path)
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(),
@@ -207,9 +222,173 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 destination: destination,
                 root: root,
                 maximumBytes: maximumBytes,
+                headers: headers,
                 completion: completion
             )
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func startObservedDownload(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(rawURL)? = values["url"],
+                  let url = URL(string: rawURL),
+                  url.scheme?.lowercased() == "https",
+                  url.host?.isEmpty == false,
+                  url.user == nil, url.password == nil,
+                  case let .text(path)? = values["path"] else {
+                throw FileModuleError("Download URL must be an absolute HTTPS URL without credentials")
+            }
+            let maximumBytes = values["maximumBytes"]?.integerValue ?? 64 * 1_024 * 1_024
+            guard maximumBytes > 0, maximumBytes <= 256 * 1_024 * 1_024 else {
+                throw FileModuleError("Invalid download size limit")
+            }
+            let destination = try resolve(path)
+            let headers = try downloadHeaders(values["headers"]?.textValue ?? "")
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            let id = nextDownloadId
+            nextDownloadId += 1
+            let channel = FileDownloadChannel()
+            let task = RemoteFileDownload.start(
+                url: url,
+                destination: destination,
+                root: root,
+                maximumBytes: maximumBytes,
+                headers: headers,
+                progress: { bytes, total in
+                    channel.offer((try? WireMap.encode([
+                        "state": .integer(1),
+                        "bytesWritten": .integer(bytes),
+                        "totalBytes": .integer(total),
+                    ])) ?? Data())
+                },
+                completion: { status, payload in
+                    let result: Data
+                    if status == .success,
+                       let reference = try? WireMap.decode(payload) {
+                        var values = reference
+                        values["state"] = .integer(2)
+                        result = (try? WireMap.encode(values)) ?? Data()
+                    } else {
+                        result = (try? WireMap.encode([
+                            "state": .integer(3),
+                            "message": .text(String(decoding: payload, as: UTF8.self)),
+                        ])) ?? Data()
+                    }
+                    channel.offer(result)
+                }
+            )
+            downloads[id] = (task, channel)
+            completion(.success, try WireMap.encode(["subscription": .integer(id)]))
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func nextObservedDownload(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let id = try downloadSubscription(payload)
+            guard let (_, channel) = downloads[id] else {
+                throw FileModuleError("File download not found")
+            }
+            channel.next(completion)
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func cancelObservedDownload(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let id = try downloadSubscription(payload)
+            if let active = downloads.removeValue(forKey: id) {
+                active.1.close()
+                active.0.cancel()
+            }
+            completion(.success, Data())
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func downloadSubscription(_ payload: Data) throws -> Int64 {
+        let values = try WireMap.decode(payload)
+        guard case let .integer(id)? = values["subscription"], id > 0 else {
+            throw FileModuleError("File download subscription is required")
+        }
+        return id
+    }
+
+    private func downloadHeaders(_ raw: String) throws -> [String: String] {
+        if raw.isEmpty { return [:] }
+        guard let data = raw.data(using: .utf8),
+              let values = try JSONSerialization.jsonObject(with: data) as? [String: String],
+              values.count <= 32 else {
+            throw FileModuleError("Download request headers are invalid or unsafe")
+        }
+        let blocked: Set<String> = ["connection", "content-length", "host", "transfer-encoding"]
+        for (name, value) in values {
+            guard name.count <= 64,
+                  name.range(of: "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$", options: .regularExpression) != nil,
+                  value.utf8.count <= 8_192,
+                  !value.contains("\r"), !value.contains("\n"),
+                  !blocked.contains(name.lowercased()) else {
+                throw FileModuleError("Download request headers are invalid or unsafe")
+            }
+        }
+        return values
+    }
+
+    private func openFile(_ payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard case let .text(path)? = values["path"] else {
+                throw FileModuleError("File path is required")
+            }
+            let file = try resolve(path)
+            var directory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: file.path, isDirectory: &directory),
+                  !directory.boolValue else {
+                throw FileModuleError("File does not exist")
+            }
+            DispatchQueue.main.async {
+                guard QLPreviewController.canPreview(file as NSURL) else {
+                    completion(.failure, Data("No application can open this file type".utf8))
+                    return
+                }
+                guard self.previewController == nil,
+                      let presenter = Self.presenter() else {
+                    completion(.failure, Data("Another file preview is active".utf8))
+                    return
+                }
+                let controller = QLPreviewController()
+                self.previewURL = file
+                self.previewController = controller
+                controller.dataSource = self
+                controller.delegate = self
+                presenter.present(controller, animated: true) {
+                    completion(.success, Data())
+                }
+            }
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    func numberOfPreviewItems(in controller: QLPreviewController) -> Int {
+        previewURL == nil ? 0 : 1
+    }
+
+    func previewController(
+        _ controller: QLPreviewController, previewItemAt index: Int
+    ) -> QLPreviewItem {
+        (previewURL ?? URL(fileURLWithPath: "/dev/null")) as NSURL
+    }
+
+    func previewControllerDidDismiss(_ controller: QLPreviewController) {
+        previewURL = nil
+        previewController = nil
     }
 
     private func presentPicker(
@@ -503,7 +682,20 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     }
 
     func close() {
+        queue.async {
+            let active = Array(self.downloads.values)
+            self.downloads.removeAll()
+            for (task, channel) in active {
+                channel.close()
+                task.cancel()
+            }
+        }
         DispatchQueue.main.async { self.finishFailure("Files module closed") }
+        DispatchQueue.main.async {
+            self.previewController?.dismiss(animated: false)
+            self.previewURL = nil
+            self.previewController = nil
+        }
     }
 }
 
@@ -513,37 +705,100 @@ private struct FileModuleError: LocalizedError {
     var errorDescription: String? { message }
 }
 
+final class FileDownloadChannel {
+    private let lock = NSLock()
+    private var events: [Data] = []
+    private var waiter: ModuleCompletion?
+    private var closed = false
+
+    func next(_ completion: @escaping ModuleCompletion) {
+        lock.lock()
+        if closed {
+            lock.unlock()
+            completion(.failure, Data("Observation is closed".utf8))
+        } else if !events.isEmpty {
+            let event = events.removeFirst()
+            lock.unlock()
+            completion(.success, event)
+        } else if waiter != nil {
+            lock.unlock()
+            completion(.failure, Data("Observation already has a pending read".utf8))
+        } else {
+            waiter = completion
+            lock.unlock()
+        }
+    }
+
+    func offer(_ payload: Data) {
+        lock.lock()
+        if closed {
+            lock.unlock()
+            return
+        }
+        let pending = waiter
+        waiter = nil
+        if pending == nil {
+            if events.count >= 4 { events.removeFirst() }
+            events.append(payload)
+        }
+        lock.unlock()
+        pending?(.success, payload)
+    }
+
+    func close() {
+        lock.lock()
+        if closed {
+            lock.unlock()
+            return
+        }
+        closed = true
+        events.removeAll()
+        let pending = waiter
+        waiter = nil
+        lock.unlock()
+        pending?(.failure, Data("Observation stopped".utf8))
+    }
+}
+
 private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
     private let destination: URL
     private let root: URL
     private let maximumBytes: Int64
     private let completion: ModuleCompletion
+    private let progress: ((Int64, Int64) -> Void)?
     private var session: URLSession?
     private var finished = false
+    private let finishLock = NSLock()
+    private var lastProgressPercent: Int64 = -1
 
     private init(
         destination: URL,
         root: URL,
         maximumBytes: Int64,
+        progress: ((Int64, Int64) -> Void)?,
         completion: @escaping ModuleCompletion
     ) {
         self.destination = destination
         self.root = root
         self.maximumBytes = maximumBytes
+        self.progress = progress
         self.completion = completion
     }
 
-    static func start(
+    @discardableResult static func start(
         url: URL,
         destination: URL,
         root: URL,
         maximumBytes: Int64,
+        headers: [String: String] = [:],
+        progress: ((Int64, Int64) -> Void)? = nil,
         completion: @escaping ModuleCompletion
-    ) {
+    ) -> RemoteFileDownload {
         let delegate = RemoteFileDownload(
             destination: destination,
             root: root,
             maximumBytes: maximumBytes,
+            progress: progress,
             completion: completion
         )
         let configuration = URLSessionConfiguration.ephemeral
@@ -555,7 +810,15 @@ private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @u
         queue.maxConcurrentOperationCount = 1
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: queue)
         delegate.session = session
-        session.downloadTask(with: url).resume()
+        var request = URLRequest(url: url)
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        session.downloadTask(with: request).resume()
+        return delegate
+    }
+
+    func cancel() {
+        finish(.failure, Data("Download cancelled".utf8))
     }
 
     func urlSession(
@@ -565,10 +828,21 @@ private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @u
         totalBytesWritten: Int64,
         totalBytesExpectedToWrite: Int64
     ) {
+        finishLock.lock()
+        let alreadyFinished = finished
+        finishLock.unlock()
+        if alreadyFinished { return }
         if totalBytesWritten > maximumBytes
             || (totalBytesExpectedToWrite > maximumBytes && totalBytesExpectedToWrite > 0) {
             downloadTask.cancel()
             finish(.failure, Data("Download exceeds configured size limit".utf8))
+            return
+        }
+        let total = max(0, totalBytesExpectedToWrite)
+        let percent = total > 0 ? (totalBytesWritten * 100) / total : 0
+        if percent != lastProgressPercent {
+            lastProgressPercent = percent
+            progress?(totalBytesWritten, total)
         }
     }
 
@@ -588,7 +862,8 @@ private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @u
             finish(.failure, Data("Download redirect must use HTTPS without credentials".utf8))
             return
         }
-        completionHandler(request)
+        completionHandler(nil)
+        finish(.failure, Data("Download redirects are not allowed".utf8))
     }
 
     func urlSession(
@@ -634,11 +909,21 @@ private final class RemoteFileDownload: NSObject, URLSessionDownloadDelegate, @u
     }
 
     private func finish(_ status: ModuleResultStatus, _ data: Data) {
-        guard !finished else { return }
+        finishLock.lock()
+        guard !finished else {
+            finishLock.unlock()
+            return
+        }
         finished = true
-        completion(status, data)
-        session?.finishTasksAndInvalidate()
+        let active = session
         session = nil
+        finishLock.unlock()
+        completion(status, data)
+        if status == .success {
+            active?.finishTasksAndInvalidate()
+        } else {
+            active?.invalidateAndCancel()
+        }
     }
 }
 
