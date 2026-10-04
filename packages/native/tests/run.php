@@ -865,6 +865,16 @@ declare(strict_types=1);
 <template><Column><!-- Keep this explanation. --><Text v-if="$ready" fontSize="15">Ready</Text><Text v-else>Wait</Text></Column></template><style scoped>.ready { color: #112233; font-size: 15px; }</style>
 PAM;
 $formattedPam = PamFormatter::format($unformattedPam, 'FormatterTest.pam.php');
+$canonicalPam = PamFormatter::format(
+    "<?php\n?>\n<template><Button on:press=\"save\" v-model=\"draft\">Save</Button></template>",
+    'CanonicalFormatterTest.pam',
+);
+$assert(
+    str_contains($canonicalPam, '@press="save"')
+        && str_contains($canonicalPam, 'p-model="draft"')
+        && PamFormatter::format($canonicalPam, 'CanonicalFormatterTest.pam') === $canonicalPam,
+    'PAM formatter must canonicalize event and model aliases idempotently.',
+);
 $assert(
     str_contains($formattedPam, 'p-if="$ready"')
         && str_contains($formattedPam, '<Text p-else>Wait</Text>')
@@ -6686,8 +6696,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.0.31',
-    'The runtime SDK contract must match the 1.0.31 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.0.32',
+    'The runtime SDK contract must match the 1.0.32 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

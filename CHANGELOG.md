@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.32 - 2026-10-04
+
+- Generate complete Language 2 features with a screen, component, PHP service,
+  route module and service test. Existing generators now emit typed Language 2
+  contracts and the formatter migrates event and model aliases.
+- Preserve generated Android and iOS source files when their contents are
+  unchanged so Gradle and Xcode can reuse incremental build outputs.
+
 ## 1.0.31 - 2026-10-03
 
 - Stop hot reload from scanning Composer dependencies or reacting to app log

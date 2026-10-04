@@ -243,8 +243,13 @@ final class PamFormatter
                 'v-else-if' => 'p-else-if',
                 'v-else' => 'p-else',
                 'v-for' => 'p-for',
+                'v-model' => 'p-model',
+                'v-model:checked' => 'p-model:checked',
                 default => $name,
             };
+            if (str_starts_with($name, 'on:')) {
+                $name = '@'.substr($name, 3);
+            }
             if (array_key_exists($name, $output) && $output[$name] !== $value) {
                 throw new RuntimeException(
                     "Cannot format conflicting PAM directive {$name}.",
