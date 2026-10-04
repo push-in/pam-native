@@ -48,21 +48,36 @@ final class PamPerformanceContractTests: XCTestCase {
 
         let expected = try newPath()
         XCTAssertEqual(expected, oldPath())
+        for _ in 0..<3 {
+            XCTAssertEqual(oldPath(), expected)
+            XCTAssertEqual(try newPath(), expected)
+        }
         var oldSamples: [Double] = []
         var newSamples: [Double] = []
-        for _ in 0..<5 {
+        func measureOld() {
             let oldStart = ProcessInfo.processInfo.systemUptime
             let oldChecksum = oldPath()
             oldSamples.append(ProcessInfo.processInfo.systemUptime - oldStart)
             XCTAssertEqual(oldChecksum, expected)
+        }
+        func measureNew() throws {
             let newStart = ProcessInfo.processInfo.systemUptime
             let newChecksum = try newPath()
             newSamples.append(ProcessInfo.processInfo.systemUptime - newStart)
             XCTAssertEqual(newChecksum, expected)
         }
-        let oldMedian = oldSamples.sorted()[2]
-        let newMedian = newSamples.sorted()[2]
-        print("PAM_BINARY_READER_LAYOUT_BENCHMARK old=\(oldMedian)s new=\(newMedian)s records=\(count)")
+        for round in 0..<15 {
+            if round.isMultiple(of: 2) {
+                measureOld()
+                try measureNew()
+            } else {
+                try measureNew()
+                measureOld()
+            }
+        }
+        let oldSorted = oldSamples.sorted()
+        let newSorted = newSamples.sorted()
+        print("PAM_BINARY_READER_LAYOUT_BENCHMARK old=\(oldSorted[7])s new=\(newSorted[7])s old_iqr=\(oldSorted[3])...\(oldSorted[11])s new_iqr=\(newSorted[3])...\(newSorted[11])s records=\(count)")
     }
 
     func testHundredThousandItemVirtualWindowStaysBounded() {
