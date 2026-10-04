@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.31 - 2026-10-03
+
+- Stop hot reload from scanning Composer dependencies or reacting to app log
+  writes. Source edits still refresh immediately, while development logs can
+  no longer trigger an endless reload loop during a clean first run.
+
 ## 1.0.30 - 2026-10-03
 
 - Resolve the SDK from the installed Composer package and install the Android
