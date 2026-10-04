@@ -7,6 +7,7 @@ uint64_t pam_native_runtime_start(void) {
 void pam_native_runtime_relayout(void) {}
 
 void pam_native_runtime_set_refresh_rate(void) {}
+void pam_native_runtime_set_child_visibility(void) {}
 
 void pam_native_runtime_dispatch_event(void) {}
 

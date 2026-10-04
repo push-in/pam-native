@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.30 - 2026-10-03
+
+- Resolve the SDK from the installed Composer package and install the Android
+  renderer for the exact PAM Native version, preventing host and engine ABI
+  mismatches during clean first runs.
+- Complete iOS input editing contracts for keyboard modes, secure and readonly
+  fields, length limits, selection, submit, blur and autofocus. Preserve native
+  child visibility and responsive layout behavior across Android and iOS.
+- Reuse Gradle dependencies across projects while removing project build outputs
+  after each command. Certify both Core and official UI starters with rendered
+  screen evidence and the exact candidate Android renderer.
+
 ## 1.0.29 - 2026-09-22
 
 - Restore intrinsic row and text measurement: rows of flexible controls keep

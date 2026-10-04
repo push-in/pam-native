@@ -214,6 +214,7 @@ jobs:
           path: |
             android/app/build/reports/androidTests/connected/
             android/app/build/outputs/androidTest-results/connected/
+            android/app/build/outputs/connected_android_test_additional_output/
             android/macrobenchmark/build/reports/androidTests/connected/
             android/macrobenchmark/build/outputs/androidTest-results/connected/
             android/macrobenchmark/build/outputs/connected_android_test_additional_output/

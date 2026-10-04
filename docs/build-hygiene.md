@@ -18,6 +18,12 @@ application data, credentials, screenshots, release evidence or `dist`. A
 cleanup failure fails a successful build; when the build itself failed, PAM
 preserves that original error and also reports the cleanup failure.
 
+Gradle dependencies and its distribution are reused across projects from
+`$XDG_CACHE_HOME/pam-native/gradle` (or `$HOME/.cache/pam-native/gradle`).
+Project build outputs are still removed on exit. Set `PAM_NATIVE_GRADLE_HOME`
+or `GRADLE_USER_HOME` when a separate cache is required; Gradle manages the
+shared cache's own retention.
+
 Official packages and contributors must follow the same invariant. A workflow
 that builds native code without an unconditional cleanup step is not eligible
 to publish a release. Repository workflows use

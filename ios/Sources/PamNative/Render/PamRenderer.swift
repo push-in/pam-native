@@ -2,7 +2,24 @@ import Foundation
 import ImageIO
 import UIKit
 
+private enum PamKeyboardKind: Int64 {
+    case text = 1, email, number, phone, decimal, url
+}
+
+private enum PamInputModeKind: Int64 {
+    case text = 1, none, decimal, numeric, tel, search, email, url
+}
+
+private enum PamInputCapitalization: Int64 {
+    case none = 1, sentences, words, characters
+}
+
+private enum PamReturnKey: Int64 {
+    case standard = 1, done, go, next, search, send, none, previous
+}
+
 public final class PamRenderer {
+    var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     private let fontLoader = PamFontLoader()
     private let host: UIView
     private let dispatchEvent: (Int64, Int, Data) -> Void
@@ -174,7 +191,9 @@ public final class PamRenderer {
         imageSession.invalidateAndCancel()
         imageLoadContexts.removeAll()
 
+        onNativeChildVisibility = nil
         for (nodeId, view) in views {
+            (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = nil
             nativeViews.release(view: view)
             view.removeFromSuperview()
             nodes[nodeId]?.childrenNeedRethrow = nil
@@ -286,6 +305,7 @@ public final class PamRenderer {
         cancelImageLoad(for: state)
 
         if let view = views[id] {
+            (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = nil
             nativeViews.release(view: view)
             if let navigation = views[state.parent] as? PamNavigationHost {
                 navigation.removeRoute(view)
@@ -322,6 +342,9 @@ public final class PamRenderer {
 
         if let value {
             applyProperty(view: view, nodeId: id, key: key, value: value)
+            if key == PamConstants.value || key == PamConstants.text || key == PamConstants.secure {
+                applyInputSelection(view: view, nodeId: id)
+            }
         } else {
             resetProperty(view: view, nodeId: id, key: key, state: state)
             if key == PamConstants.source,
@@ -399,6 +422,7 @@ public final class PamRenderer {
         for (key, value) in state.properties {
             applyProperty(view: view, nodeId: state.id, key: key, value: value)
         }
+        applyInputSelection(view: view, nodeId: state.id)
         installEvents(for: state.id)
         applyLayout(state.id)
     }
@@ -756,7 +780,7 @@ public final class PamRenderer {
 
     private func createView(for spec: NodeSpec) -> UIView {
         if spec.kind == .customView {
-            return nativeViews.create(name: hostName(for: NodeState(
+            let nativeView = nativeViews.create(name: hostName(for: NodeState(
                 id: spec.id,
                 parent: spec.parent,
                 index: spec.index,
@@ -772,6 +796,16 @@ public final class PamRenderer {
             ))) { [weak self] kind, payload in
                 self?.dispatchNativeViewEvent(nodeId: spec.id, kind: kind, payload: payload)
             }
+            (nativeView as? NativeChildVisibilityHost)?.onChildVisibilityChanged = { [weak self, weak nativeView] child, visible in
+                DispatchQueue.main.async { [weak self, weak nativeView, weak child] in
+                    guard let self, let nativeView, let child,
+                          self.views[spec.id] === nativeView,
+                          let childId = self.children[spec.id]?.first(where: { self.views[$0] === child }),
+                          self.nodes[childId]?.parent == spec.id else { return }
+                    self.onNativeChildVisibility?(spec.id, childId, visible)
+                }
+            }
+            return nativeView
         }
 
         switch spec.kind {
@@ -1426,6 +1460,130 @@ public final class PamRenderer {
         )
     }
 
+    private func applyInputSelection(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId],
+              let requested = state.properties[PamConstants.inputSelectionStart]?.integerOrNil() else { return }
+        let length = (field.text ?? "").utf16.count
+        let start = min(length, max(0, Int(clamping: requested)))
+        let end = min(length, max(start, Int(clamping:
+            state.properties[PamConstants.inputSelectionEnd]?.integerOrNil() ?? Int64(start))))
+        guard let from = field.position(from: field.beginningOfDocument, offset: start),
+              let to = field.position(from: field.beginningOfDocument, offset: end) else { return }
+        field.selectedTextRange = field.textRange(from: from, to: to)
+    }
+
+    private func applyInputCompletion(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        let hint = state.properties[PamConstants.autoComplete]?.textOrNil()?.lowercased()
+        let content: UITextContentType?
+        switch hint {
+        case "email": content = .emailAddress
+        case "tel": content = .telephoneNumber
+        case "password", "current-password": content = .password
+        case "new-password", "password-new": content = .newPassword
+        case "username", "username-new": content = .username
+        case "one-time-code", "sms-otp": content = .oneTimeCode
+        case "name": content = .name
+        case "given-name": content = .givenName
+        case "family-name": content = .familyName
+        case "postal-code": content = .postalCode
+        case "street-address", "postal-address": content = .fullStreetAddress
+        case "cc-number": content = .creditCardNumber
+        default: content = nil
+        }
+        let key = (state.properties[PamConstants.returnKeyType]?.integerOrNil())
+            .flatMap(PamReturnKey.init(rawValue:)) ?? .standard
+        let action: UIReturnKeyType
+        switch key {
+        case .done: action = .done
+        case .go: action = .go
+        case .next: action = .next
+        case .search: action = .search
+        case .send: action = .send
+        // UIKit has no previous/none return-key glyph equivalents.
+        case .standard, .none, .previous: action = .default
+        }
+        let changed = field.textContentType != content || field.returnKeyType != action
+        field.textContentType = content
+        field.returnKeyType = action
+        if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
+    private func applyInputTextTraits(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        let autoCorrect = state.properties[PamConstants.inputAutoCorrect]?.boolOrNil()
+        let correction: UITextAutocorrectionType = autoCorrect.map { $0 ? .yes : .no } ?? .default
+        let mode = (state.properties[PamConstants.inputAutoCapitalize]?.integerOrNil())
+            .flatMap(PamInputCapitalization.init(rawValue:)) ?? .sentences
+        let capitalization: UITextAutocapitalizationType
+        switch mode {
+        case .none: capitalization = .none
+        case .sentences: capitalization = .sentences
+        case .words: capitalization = .words
+        case .characters: capitalization = .allCharacters
+        }
+        let changed = field.autocorrectionType != correction || field.autocapitalizationType != capitalization
+        field.autocorrectionType = correction
+        field.autocapitalizationType = capitalization
+        if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
+    private func applyInputSecurity(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField else { return }
+        let secure = nodes[nodeId]?.properties[PamConstants.secure]?.boolOrNil() ?? false
+        guard field.isSecureTextEntry != secure else { return }
+        let selection = field.selectedTextRange.map {
+            (field.offset(from: field.beginningOfDocument, to: $0.start),
+             field.offset(from: field.beginningOfDocument, to: $0.end))
+        }
+        field.isSecureTextEntry = secure
+        if let (start, end) = selection,
+           let from = field.position(from: field.beginningOfDocument, offset: start),
+           let to = field.position(from: field.beginningOfDocument, offset: end) {
+            field.selectedTextRange = field.textRange(from: from, to: to)
+        }
+    }
+
+    private func applyInputKeyboard(view: UIView, nodeId: Int64) {
+        guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
+        let mode = (state.properties[PamConstants.inputMode]?.integerOrNil()).flatMap(PamInputModeKind.init(rawValue:))
+        let keyboard = (state.properties[PamConstants.keyboardType]?.integerOrNil()).flatMap(PamKeyboardKind.init(rawValue:)) ?? .text
+        let type: UIKeyboardType
+        if let mode {
+            switch mode {
+            case .text, .none: type = .default
+            case .decimal: type = .numbersAndPunctuation
+            case .numeric: type = .numberPad
+            case .tel: type = .phonePad
+            case .search: type = .webSearch
+            case .email: type = .emailAddress
+            case .url: type = .URL
+            }
+        } else {
+            switch keyboard {
+            case .text: type = .default
+            case .email: type = .emailAddress
+            case .number: type = .numberPad
+            case .phone: type = .phonePad
+            // Unlike decimalPad, this system keyboard exposes the minus sign.
+            case .decimal: type = .numbersAndPunctuation
+            case .url: type = .URL
+            }
+        }
+        let editable = state.properties[PamConstants.inputEditable]?.boolOrNil() ?? true
+        (field as? PamInputField)?.isInputEditable = editable
+        let hideKeyboard = mode == PamInputModeKind.none || !editable
+            || state.properties[PamConstants.inputShowSoftInputOnFocus]?.boolOrNil() == false
+        let changed = field.keyboardType != type || (field.inputView != nil) != hideKeyboard
+        field.keyboardType = type
+        if hideKeyboard {
+            if field.inputView == nil { field.inputView = UIView(frame: .zero) }
+        } else {
+            field.inputView = nil
+        }
+        if changed && field.isFirstResponder { field.reloadInputViews() }
+    }
+
     private func applyProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue) {
         switch key {
         case PamConstants.text:
@@ -1440,6 +1598,24 @@ public final class PamRenderer {
                     field.text = textValue
                 }
             }
+        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable,
+             PamConstants.inputShowSoftInputOnFocus:
+            applyInputKeyboard(view: view, nodeId: nodeId)
+        case PamConstants.autoFocus:
+            (view as? PamInputField)?.autoFocusRequested = value.boolOrNil() ?? false
+        case PamConstants.secure:
+            applyInputSecurity(view: view, nodeId: nodeId)
+        case PamConstants.maxLength:
+            (view as? PamInputField)?.maximumLength = value.integerOrNil().map { max(0, Int(clamping: $0)) }
+        case PamConstants.inputSubmitBehavior:
+            (view as? PamInputField)?.submitBehavior = value.integerOrNil()
+                .flatMap(PamInputSubmitBehavior.init(rawValue:)) ?? .blurAndSubmit
+        case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
+            applyInputTextTraits(view: view, nodeId: nodeId)
+        case PamConstants.autoComplete, PamConstants.returnKeyType:
+            applyInputCompletion(view: view, nodeId: nodeId)
+        case PamConstants.inputSelectionStart, PamConstants.inputSelectionEnd:
+            applyInputSelection(view: view, nodeId: nodeId)
         case PamConstants.value:
             if let textValue = value.textOrNil(), let drawing = view as? PamDrawingCanvas {
                 drawing.setDrawing(textValue)
@@ -1798,6 +1974,9 @@ public final class PamRenderer {
             (view as? PamRefreshContainer)?.setProgressViewOffset(Float(value.decimalOrZero()))
         case PamConstants.refreshIndicatorSize:
             (view as? PamRefreshContainer)?.setIndicatorSize(Int(value.integerOrNil() ?? 1))
+        case PamConstants.scrollIndicatorStyle:
+            (view as? UIScrollView)?.indicatorStyle =
+                (PamScrollIndicatorStyle(rawValue: Int(value.integerOrNil() ?? 1)) ?? .auto).native
         case PamConstants.scrollHorizontal:
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: value.boolOrNil() ?? false)
@@ -1920,6 +2099,23 @@ public final class PamRenderer {
             view.backgroundColor = .clear
         case PamConstants.nativeBackgroundColorResource:
             view.backgroundColor = .clear
+        case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable,
+             PamConstants.inputShowSoftInputOnFocus:
+            applyInputKeyboard(view: view, nodeId: nodeId)
+        case PamConstants.autoFocus:
+            (view as? PamInputField)?.autoFocusRequested = false
+        case PamConstants.secure:
+            applyInputSecurity(view: view, nodeId: nodeId)
+        case PamConstants.maxLength:
+            (view as? PamInputField)?.maximumLength = nil
+        case PamConstants.inputSubmitBehavior:
+            (view as? PamInputField)?.submitBehavior = .blurAndSubmit
+        case PamConstants.inputAutoCorrect, PamConstants.inputAutoCapitalize:
+            applyInputTextTraits(view: view, nodeId: nodeId)
+        case PamConstants.autoComplete, PamConstants.returnKeyType:
+            applyInputCompletion(view: view, nodeId: nodeId)
+        case PamConstants.inputSelectionStart, PamConstants.inputSelectionEnd:
+            applyInputSelection(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.imageFit:
@@ -2111,6 +2307,8 @@ public final class PamRenderer {
             if let scroll = view as? UIScrollView {
                 configureScrollView(scroll, horizontal: false)
             }
+        case PamConstants.scrollIndicatorStyle:
+            (view as? UIScrollView)?.indicatorStyle = PamScrollIndicatorStyle.auto.native
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = false
         case PamConstants.scrollSnapInterval:
@@ -3568,6 +3766,7 @@ public final class PamRenderer {
         private var emitsTouchEnd = false
         private var lastIntersection: Bool?
         private weak var textField: PamInputField?
+        private weak var submitField: UITextField?
         private var focusField: PamInputField?
         private weak var control: UIControl?
         private weak var scrollView: UIScrollView?
@@ -3620,6 +3819,7 @@ public final class PamRenderer {
         }
 
         func attachSubmit(_ control: UIControl) {
+            self.submitField = control as? UITextField
             control.addTarget(self, action: #selector(onSubmit), for: .touchUpInside)
             control.addTarget(self, action: #selector(onSubmit), for: .primaryActionTriggered)
             self.control = control
@@ -4080,6 +4280,7 @@ public final class PamRenderer {
             self.rippleOverlay = nil
             self.directiveView = nil
             self.textField = nil
+            self.submitField = nil
             self.control = nil
             self.scrollView = nil
             self.refreshControl = nil
@@ -4609,7 +4810,7 @@ public final class PamRenderer {
 
         @objc private func onSubmit() {
             let payload = (try? WireMap.encode([
-                "value": .text(textField?.text ?? ""),
+                "value": .text(submitField?.text ?? ""),
             ])) ?? Data()
             dispatchEvent(nodeId, EventKind.submit.rawValue, payload)
         }

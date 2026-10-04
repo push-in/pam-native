@@ -251,6 +251,44 @@ $safeInset = StyleValueCompiler::encode(
     'calc(env(safe-area-inset-top) + 8dp)',
     'SafeInset.pam',
 );
+$containerStyles = ScopedStyleCompiler::compile(
+    '.relative { width: calc(50% + 8px); height: calc(25% + 4px); }',
+    'ContainerDimensions.pam',
+);
+$containerTemplate = TemplateCompiler::compile('<View class="relative" />', 'ContainerDimensions.pam', LanguageVersion::Language2);
+$containerRoot = new CompiledTemplateNode(
+    kind: $containerTemplate->kind,
+    name: $containerTemplate->name,
+    attributes: ['__pamStyles' => json_encode($containerStyles, JSON_THROW_ON_ERROR)],
+    source: $containerTemplate->source,
+    line: $containerTemplate->line,
+    column: $containerTemplate->column,
+);
+$containerRoot->children = $containerTemplate->children;
+$relativeElement = TemplateRenderer::render($containerRoot, null, [
+    '__pamContainerWidth' => '400', '__pamContainerHeight' => 800.0,
+]);
+$assert(($relativeElement->properties()[PropKey::Width->value] ?? null) === 208.0
+    && ($relativeElement->properties()[PropKey::Height->value] ?? null) === 204.0,
+    'Container math must use finite horizontal/vertical references and preserve numeric-string compatibility.');
+foreach ([[], new stdClass(), true, -1, INF, NAN, 'invalid'] as $invalidDimension) {
+    foreach (['__pamContainerWidth', '__pamContainerHeight'] as $dimensionKey) {
+        try {
+            TemplateRenderer::render($containerRoot, null, [$dimensionKey => $invalidDimension]);
+            throw new RuntimeException('Invalid container dimensions reached style evaluation.');
+        } catch (InvalidArgumentException) {
+            $assert(true, 'Malformed container dimensions fail before style evaluation.');
+        }
+    }
+}
+foreach (['fontScale', 'rootFontSize', 'env.safe-area-inset-top'] as $environmentKey) {
+    try {
+        TemplateRenderer::render($containerRoot, null, ['__pamStyleEnvironment' => [$environmentKey => INF]]);
+        throw new RuntimeException('Nonfinite style environment reached style evaluation.');
+    } catch (InvalidArgumentException) {
+        $assert(true, 'Nonfinite style environment values fail before native dispatch.');
+    }
+}
 $assert(
     StyleValueCompiler::resolve($safeInset, [
         'width' => 400.0,
@@ -309,6 +347,141 @@ $assert(
     'Reactive CSS variables must invalidate and recompile only dependent declarations.',
 );
 StyleVariables::replace([]);
+
+$reactiveMethod = new ReflectionMethod(TemplateRenderer::class, 'reactiveStyleSheet');
+$attributesMethod = new ReflectionMethod(TemplateRenderer::class, 'styleAttributes');
+$assert($attributesMethod->invoke(null, ['width' => 12.5, 'fontWeight' => 600, 'visible' => false], 'test')
+    === ['width' => 12.5, 'fontWeight' => 600, 'visible' => false],
+    'Style attribute validation must preserve fractional dimensions, integers and booleans.');
+foreach ([['width' => []], ['width' => new stdClass()], ['width' => INF], [0 => 'value']] as $invalidAttributes) {
+    try {
+        $attributesMethod->invoke(null, $invalidAttributes, 'test');
+        throw new LogicException('Invalid style attributes were accepted.');
+    } catch (RuntimeException) {
+        $assert(true, 'Invalid attribute maps fail before native conversion.');
+    }
+}
+$tagMethod = new ReflectionMethod(TemplateRenderer::class, 'tag');
+try {
+    $tagMethod->invoke(null, 'Button', ['on:press' => 42], [], null, []);
+    throw new LogicException('Numeric event expression was accepted.');
+} catch (RuntimeException $eventError) {
+    $assert(str_contains($eventError->getMessage(), 'event expression'), 'Invalid event metadata has an explicit diagnostic.');
+}
+$animationTemplate = TemplateCompiler::compile('<Animated animation="enter"><View /></Animated>', 'KeyframeValidation.pam', LanguageVersion::Language2);
+foreach ([null, false, ['offset' => -0.1], ['offset' => 1.1], ['offset' => '0.5'],
+    ['offset' => 0.0, 'styles' => ['opacity' => []]]] as $invalidFrame) {
+    $frames = [
+        $invalidFrame ?? ['offset' => 0.0, 'styles' => ['opacity' => 0.0, 'offset' => 0.8]],
+        ['offset' => 1.0, 'styles' => ['opacity' => 1.0]],
+    ];
+    $animationRoot = new CompiledTemplateNode(
+        kind: $animationTemplate->kind, name: $animationTemplate->name,
+        attributes: ['__pamStyles' => json_encode(['classes' => [], 'tags' => [], 'keyframes' => ['enter' => $frames]], JSON_THROW_ON_ERROR)],
+        source: $animationTemplate->source, line: $animationTemplate->line, column: $animationTemplate->column,
+    );
+    $animationRoot->children = $animationTemplate->children;
+    try {
+        $animationElement = TemplateRenderer::render($animationRoot, null, []);
+        if ($invalidFrame !== null) throw new LogicException('Malformed keyframe was accepted.');
+        $animationPayload = $animationElement->properties()[PropKey::AnimationKeyframes->value] ?? null;
+        $assert($animationPayload instanceof \Pam\Native\Internal\BinaryValue
+            && json_decode($animationPayload->bytes, true, flags: JSON_THROW_ON_ERROR)[0]['offset'] === 0.0,
+            'Valid keyframes render and frame styles cannot overwrite their timeline offset.');
+    } catch (RuntimeException $keyframeError) {
+        if ($invalidFrame === null) throw $keyframeError;
+        $assert(str_contains($keyframeError->getMessage(), 'keyframe'), 'Malformed keyframes fail with a relevant template diagnostic.');
+    }
+}
+$cascadeMethod = new ReflectionMethod(TemplateRenderer::class, 'cascadeStyleAttributes');
+$selectorMethod = new ReflectionMethod(TemplateRenderer::class, 'styleSelectorMatches');
+$specificityRules = [
+    ['selector' => ['specificity' => [1, 0, 0], 'compounds' => [['id' => 'target']]],
+        'order' => 0, 'declarations' => ['width' => ['value' => '10']]],
+    ['selector' => ['specificity' => [0, 1001, 0], 'compounds' => [['classes' => array_fill(0, 1001, 'a')]]],
+        'order' => 1, 'declarations' => ['width' => ['value' => '20']]],
+];
+$selectorNode = ['tag' => 'View', 'id' => 'target', 'classes' => ['a']];
+$assert($cascadeMethod->invoke(null, $specificityRules, $selectorNode, []) === ['width' => '10'],
+    'One ID selector must outrank any number of class selectors without packed-score collisions.');
+$specificityRules[1]['declarations']['width']['important'] = true;
+$assert($cascadeMethod->invoke(null, $specificityRules, $selectorNode, []) === ['width' => '20'],
+    'Important declarations must retain precedence over selector specificity.');
+$assert($selectorMethod->invoke(null, ['compounds' => [
+    3 => ['tag' => 'Column'], 7 => ['tag' => 'Text', 'combinator' => 'child'],
+]], ['tag' => 'Text'], [9 => ['tag' => 'Column']]) === true,
+    'Selector and ancestor lists must match correctly with sparse storage keys.');
+foreach ([['compounds' => [false]], ['compounds' => [['classes' => false]]],
+    ['compounds' => [['attributes' => [['name' => []]]]]],
+    ['compounds' => [['attributes' => [['name' => 'value', 'operator' => '=', 'value' => 'x']]]]]] as $invalidSelector) {
+    $assert($selectorMethod->invoke(null, $invalidSelector, ['attributes' => ['value' => []]], []) === false,
+        'Malformed selectors and nonscalar attribute comparisons must fail without invalid array/string operations.');
+}
+$responsiveMethod = new ReflectionMethod(TemplateRenderer::class, 'responsiveStyleSheet');
+$responsiveSheet = [
+    'classes' => ['box' => ['width' => '20', 'fontSize' => '14']],
+    'cascadeRules' => [['order' => 9]],
+    'queries' => [[
+        'kind' => \Pam\Native\Style\StyleQueryKind::Container->value,
+        'condition' => '(min-width: 100px)',
+        'styles' => [
+            'classes' => ['box' => ['width' => '40']],
+            'cascadeRules' => [['order' => 2]],
+        ],
+    ]],
+];
+$responsiveResult = $responsiveMethod->invoke(null, $responsiveSheet, ['__pamContainerWidth' => 200.0]);
+$assert(is_array($responsiveResult)
+    && ($responsiveResult['classes']['box'] ?? null) === ['width' => '40', 'fontSize' => '14']
+    && ($responsiveResult['cascadeRules'][1]['order'] ?? null) === 12,
+    'Responsive merges preserve base declarations and order incoming rules after sparse base orders.');
+$assert($responsiveMethod->invoke(null, $responsiveSheet, ['__pamContainerWidth' => 50.0]) === $responsiveSheet,
+    'Unmatched container queries must leave the base sheet unchanged.');
+foreach ([['classes' => ['box' => false]], ['cascadeRules' => false],
+    ['cascadeRules' => [['order' => []]]], ['cascadeRules' => [['order' => PHP_INT_MAX]]]] as $invalidBase) {
+    try {
+        $responsiveMethod->invoke(null, [...$responsiveSheet, ...$invalidBase], ['__pamContainerWidth' => 200.0]);
+        throw new LogicException('Invalid responsive base metadata was accepted.');
+    } catch (RuntimeException) {
+        $assert(true, 'Invalid responsive merge metadata fails before cascade application.');
+    }
+}
+$fontsMethod = new ReflectionMethod(TemplateRenderer::class, 'styleSheetFonts');
+$fontFaces = $fontsMethod->invoke(null, ['__pamStyles' => ['fonts' => ['Display' => [
+    4 => ['source' => 'fonts/display.ttf', 'weight' => '700', 'style' => 'normal'],
+]]]]);
+$assert($fontFaces === ['Display' => [
+    ['source' => 'fonts/display.ttf', 'weight' => '700', 'style' => 'normal'],
+]], 'Font metadata must preserve valid faces and normalize the face list.');
+foreach ([['Display' => false], ['Display' => [['source' => []]]], [0 => []]] as $invalidFonts) {
+    try {
+        $fontsMethod->invoke(null, ['__pamStyles' => ['fonts' => $invalidFonts]]);
+        throw new LogicException('Invalid font metadata was accepted.');
+    } catch (RuntimeException) {
+        $assert(true, 'Malformed font metadata fails before font resolution.');
+    }
+}
+StyleVariables::replace(['space' => '20px']);
+try {
+    $firstSheet = $reactiveStyles;
+    $firstSheet['styleFingerprint'] = '';
+    $secondSheet = $firstSheet;
+    $secondSheet['variables']['surface'] = '#222222';
+    $firstResolved = $reactiveMethod->invoke(null, $firstSheet);
+    $secondResolved = $reactiveMethod->invoke(null, $secondSheet);
+    $assert($firstResolved !== $secondResolved,
+        'Sheets without fingerprints must not share reactive results when their base variables differ.');
+    foreach ([['variables' => false], ['variables' => ['surface' => []]], ['cascadeRules' => false]] as $invalidSheetPart) {
+        try {
+            $reactiveMethod->invoke(null, [...$firstSheet, ...$invalidSheetPart]);
+            throw new LogicException('Invalid reactive metadata was accepted.');
+        } catch (RuntimeException) {
+            $assert(true, 'Malformed reactive metadata fails before cascade evaluation.');
+        }
+    }
+} finally {
+    StyleVariables::replace([]);
+}
 
 $nativeResourceStyles = ScopedStyleCompiler::compile(
     '.native-theme { -pam-native-background-color: colorSurface; -pam-native-text-color: label_primary; -pam-native-border-color: accent-color; }',

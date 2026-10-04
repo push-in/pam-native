@@ -790,6 +790,28 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeSetChildVisibility(
+    JNIEnv*, jobject, jlong handle, jlong owner, jlong child, jboolean visible
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || owner <= 0 || child <= 0) return;
+    PamNativeBuffer batch{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        status = pam_native_engine_set_native_child_visibility(
+            state->engine, static_cast<uint64_t>(owner), static_cast<uint64_t>(child),
+            visible == JNI_TRUE ? 1 : 0, &batch
+        );
+    }
+    if (status == PAM_STATUS_SUCCESS) {
+        publish_batch(state, batch);
+    } else {
+        pam_native_buffer_free(batch);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativeSetRefreshRate(
     JNIEnv*,
     jobject,
