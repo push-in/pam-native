@@ -164,8 +164,9 @@ transfer UI. Request headers are validated on both sides of the bridge;
 connection framing headers and CR/LF values are rejected. The progress closure
 receives a typed `FileDownloadProgress`, while completion returns the same
 `FileReference` as `download()`. Call `Files::cancelDownload()` when the owning
-screen is disposed. `Files::open()` grants a temporary read-only content URI to
-a compatible platform viewer; the sandbox path itself is never exposed.
+screen is disposed. `Files::open()` opens a compatible platform viewer: Android
+grants a temporary read-only content URI; iOS previews the private file with
+Quick Look. The sandbox path itself is never exposed to another application.
 
 The system document picker does not require broad storage permission.
 Applications that call `MediaLibrary` request `PermissionKind::Photos`;
