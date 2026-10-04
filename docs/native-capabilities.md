@@ -172,8 +172,8 @@ Applications that call `MediaLibrary` request `PermissionKind::Photos`;
 Android 13+ reports image/video access and Android 14+ selected-photo access
 as a typed `PermissionStatus::Limited` decision when appropriate. iOS hosts
 must provide the standard camera/photo usage descriptions in the application
-`Info.plist`. The direct `MediaLibrary` query is currently Android-only; the
-document picker remains the portable fallback.
+`Info.plist`. Direct `MediaLibrary` queries are available on both platforms;
+the document picker remains the fallback that does not request broad access.
 
 ## Foreground file uploads
 

@@ -141,8 +141,9 @@ Files::delete('drafts/message.txt');
 
 Returned paths are sandbox-relative `FileReference` values. Keep larger media
 on the native file path instead of reading it through the PHP bridge.
-`MediaLibrary` is Android-only in this release; keep `Files::pick()` or
-`Files::pickMany()` as the portable and permission-free picker fallback.
+`MediaLibrary` uses MediaStore on Android and PhotoKit on iOS. Keep
+`Files::pick()` or `Files::pickMany()` as the picker fallback that does not
+request broad photo access.
 
 ## SQLite with bound parameters
 
