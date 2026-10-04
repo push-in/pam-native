@@ -1,4 +1,5 @@
 import Foundation
+import Photos
 import UniformTypeIdentifiers
 import UIKit
 
@@ -46,6 +47,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 let type = values["type"]?.integerValue ?? 4
                 let limit = min(50, max(1, Int(values["limit"]?.integerValue ?? 10)))
                 presentPicker(type: Int(type), multiple: true, limit: limit, completion: completion)
+            case "importUri":
+                importPhotoAsset(payload, completion: completion)
             case "capture":
                 let values = try WireMap.decode(payload)
                 presentCapture(type: Int(values["type"]?.integerValue ?? 1), completion: completion)
@@ -329,6 +332,63 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 completion: completion
             )
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func importPhotoAsset(_ payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard [.authorized, .limited].contains(
+                PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            ) else {
+                throw FileModuleError("Photos permission is not granted")
+            }
+            guard case let .text(source)? = values["uri"],
+                  let asset = PamPhotoAssetURI.asset(source),
+                  let resource = PamPhotoAssetURI.primaryResource(for: asset) else {
+                throw FileModuleError("Photo asset URI is invalid or unavailable")
+            }
+            let safeName = resource.originalFilename.replacingOccurrences(
+                of: "[^A-Za-z0-9_.-]", with: "_", options: .regularExpression
+            ).prefix(120)
+            let name = safeName.isEmpty ? "photo-asset" : String(safeName)
+            let relative = "imports/\(UUID().uuidString)-\(name)"
+            let destination = try resolve(relative)
+            try FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
+            )
+            let options = PHAssetResourceRequestOptions()
+            options.isNetworkAccessAllowed = true
+            PHAssetResourceManager.default().writeData(
+                for: resource, toFile: destination, options: options
+            ) { error in
+                self.queue.async {
+                    do {
+                        if let error { throw error }
+                        let metadata = try destination.resourceValues(
+                            forKeys: [.isRegularFileKey, .fileSizeKey]
+                        )
+                        guard metadata.isRegularFile == true,
+                              let size = metadata.fileSize,
+                              size >= 0, size <= 64 * 1_024 * 1_024 else {
+                            throw FileModuleError("Selected file exceeds 64 MiB")
+                        }
+                        let mime = UTType(resource.uniformTypeIdentifier)?.preferredMIMEType
+                            ?? "application/octet-stream"
+                        completion(.success, try WireMap.encode([
+                            "path": .text(relative),
+                            "name": .text(resource.originalFilename),
+                            "mimeType": .text(mime),
+                            "size": .integer(Int64(size)),
+                        ]))
+                    } catch {
+                        try? FileManager.default.removeItem(at: destination)
+                        completion(.failure, Data(error.localizedDescription.utf8))
+                    }
+                }
+            }
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
     }
 
     private func importFiles(_ sources: [URL], completion: ModuleCompletion?) {
