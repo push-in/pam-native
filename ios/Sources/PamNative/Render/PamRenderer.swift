@@ -1,5 +1,6 @@
 import Foundation
 import ImageIO
+import Photos
 import UIKit
 
 private enum PamKeyboardKind: Int64 {
@@ -3349,6 +3350,10 @@ public final class PamRenderer {
             sourceSet: state.properties[PamConstants.imageSourceSet]?.textOrNil(),
             width: max(imageView.bounds.width, 1)
         )
+        if PamPhotoAssetURI.identifier(resolvedSource) != nil {
+            loadPhotoAsset(resolvedSource, into: imageView, nodeId: nodeId)
+            return
+        }
         guard let url = URL(string: resolvedSource),
               let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else {
@@ -3422,6 +3427,62 @@ public final class PamRenderer {
                     self.dispatchImageCacheOnlyError(nodeId: nodeId)
                 } else {
                     self.loadImageFromNetwork(source, into: imageView, nodeId: nodeId)
+                }
+            }
+        }
+    }
+
+    private func loadPhotoAsset(_ source: String, into imageView: UIImageView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        cancelImageLoad(for: state)
+        state.imageGeneration += 1
+        state.imageLoading = true
+        let generation = state.imageGeneration
+        guard let asset = PamPhotoAssetURI.asset(source), asset.mediaType == .image else {
+            state.imageLoading = false
+            if state.properties[PamConstants.onImageError] != nil {
+                let payload = (try? WireMap.encode([
+                    "error": .text("Photo asset is unavailable or is not an image"),
+                ])) ?? Data()
+                dispatchEvent(nodeId, EventKind.imageError.rawValue, payload)
+            }
+            return
+        }
+        if state.properties[PamConstants.onImageLoadStart] != nil {
+            dispatchEvent(nodeId, EventKind.imageLoadStart.rawValue, Data())
+        }
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        let scale = UIScreen.main.scale
+        let size = CGSize(
+            width: max(1, imageView.bounds.width * scale),
+            height: max(1, imageView.bounds.height * scale)
+        )
+        state.photoRequestId = PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: size,
+            contentMode: .aspectFit,
+            options: options
+        ) { [weak self, weak imageView] image, info in
+            if info?[PHImageResultIsDegradedKey] as? Bool == true { return }
+            DispatchQueue.main.async {
+                guard let self, let current = self.nodes[nodeId],
+                      current.imageGeneration == generation else { return }
+                current.photoRequestId = PHInvalidImageRequestID
+                current.imageLoading = false
+                if let image, let imageView {
+                    imageView.image = image
+                    self.notifyDrawingImageChanged(nodeId: nodeId)
+                    self.dispatchCachedImageLoad(nodeId: nodeId, source: source, image: image)
+                } else if current.properties[PamConstants.onImageError] != nil {
+                    let message = (info?[PHImageErrorKey] as? Error)?.localizedDescription
+                        ?? "Photo asset could not be loaded"
+                    let payload = (try? WireMap.encode(["error": .text(message)])) ?? Data()
+                    self.dispatchEvent(nodeId, EventKind.imageError.rawValue, payload)
+                }
+                if image == nil && current.properties[PamConstants.onImageLoadEnd] != nil {
+                    self.dispatchEvent(nodeId, EventKind.imageLoadEnd.rawValue, Data())
                 }
             }
         }
@@ -3718,6 +3779,10 @@ public final class PamRenderer {
     }
 
     private func cancelImageLoad(for state: NodeState) {
+        if state.photoRequestId != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(state.photoRequestId)
+            state.photoRequestId = PHInvalidImageRequestID
+        }
         if let task = state.imageTask {
             task.cancel()
             imageSessionDelegate.unregister(taskIdentifier: task.taskIdentifier)
@@ -5101,6 +5166,7 @@ private final class NodeState {
     var properties: [Int: PropValue]
     let mountOrder: Int64
     var imageTask: URLSessionTask?
+    var photoRequestId: PHImageRequestID = PHInvalidImageRequestID
     var childrenNeedRethrow: UIView?
     var imageGeneration: Int
     var imageLoading: Bool

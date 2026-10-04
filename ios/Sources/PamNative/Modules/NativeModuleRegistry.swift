@@ -19,6 +19,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let audioRecorder = AudioRecorderModule()
     private let imageEditor = ImageEditorModule()
     private let incomingShare = IncomingShareModule()
+    private let mediaLibrary = MediaLibraryModule()
     private let timers = TimersModule()
     private let modules: [String: NativeModule]
 
@@ -41,6 +42,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "audio-recorder": audioRecorder,
             "image-editor": imageEditor,
             "incoming-share": incomingShare,
+            "media-library": mediaLibrary,
             "timers": timers,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
