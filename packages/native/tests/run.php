@@ -3902,6 +3902,22 @@ $assert(
         && $importedFile->size === 4_096,
     'Files importUri must decode the sandboxed file reference.',
 );
+$photoImport = Files::importUri('phasset://asset/QUJD', static function (FileReference $file): void {});
+$photoImportCall = TestDiagnostics::$moduleCall;
+$assert(
+    $photoImportCall !== null
+        && $photoImportCall['requestId'] === $photoImport
+        && $photoImportCall['module'] === 'files'
+        && $photoImportCall['method'] === 'importUri'
+        && Wire::decodeMap($photoImportCall['payload']) === ['uri' => 'phasset://asset/QUJD'],
+    'Files importUri must also forward iOS PhotoKit asset URIs.',
+);
+Runtime::dispatchModuleResult($photoImport, ModuleResultStatus::Success->value, Wire::map([
+    'path' => 'imports/photo.jpg',
+    'name' => 'photo.jpg',
+    'mimeType' => 'image/jpeg',
+    'size' => 1_024,
+]));
 
 $missingStoredValue = 'not-dispatched';
 $storageRequest = Storage::get(

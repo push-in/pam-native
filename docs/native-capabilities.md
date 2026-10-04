@@ -115,6 +115,15 @@ photo access. Call `Files::importUri()` only after selection to copy that
 single asset into the PAM sandbox for editing, upload or durable app-owned
 storage.
 
+On iOS, the same calls use PhotoKit. Pages return stable `phasset://asset/`
+sources that `Image` and `Video` resolve on demand without copying the library.
+`Files::importUri()` exports only the selected asset into the PAM sandbox and
+enforces the 64 MiB import limit. PhotoKit does not expose resource byte sizes
+in its list metadata, so `MediaAsset::size` is `0` until the asset is imported;
+the resulting `FileReference::size` reports the copied file's size. Add
+`NSPhotoLibraryUsageDescription` to the iOS host's Info.plist before requesting
+photo permission.
+
 `MediaCapture::capture()`
 captures a full-resolution photo or video. `Files::read()` and `Files::write()`
 only accept sandbox-relative paths and bridge at most one MiB per call; imports

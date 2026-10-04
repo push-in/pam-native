@@ -308,15 +308,15 @@ final class Files
     }
 
     /**
-     * Copies a content URI granted to the application into the PAM file
+     * Copies a granted Android content URI or an iOS PhotoKit asset into the PAM file
      * sandbox so it can be uploaded, edited and retained safely.
      *
      * @param Closure(FileReference): void $callback
      */
     public static function importUri(string $uri, Closure $callback): int
     {
-        if (!str_starts_with($uri, 'content://')) {
-            throw new RuntimeException('Only content URIs can be imported.');
+        if (!str_starts_with($uri, 'content://') && !str_starts_with($uri, 'phasset://asset/')) {
+            throw new RuntimeException('Only content or PhotoKit asset URIs can be imported.');
         }
 
         return self::invoke(
