@@ -388,16 +388,14 @@ jobs:
           ref: main
           path: pam-cli
           persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          repository: push-in/pam-native-ui
-          ref: 20ae14301c019fa0ca43c6977f80e74a80eb1bf6
-          path: pam-native-ui-candidate
-          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: pam-native-cli-linux-x86_64
           path: candidate-cli
+      - uses: actions/download-artifact@v8
+        with:
+          name: pam-native-android
+          path: candidate-renderer
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -426,16 +424,25 @@ jobs:
           candidate=$(find candidate-cli -maxdepth 1 -type f -name 'pam-native-cli-*-linux-x86_64' -print -quit)
           test -n "${candidate}"
           chmod +x "${candidate}"
+          candidate_package=$(mktemp -d "${RUNNER_TEMP}/pam-native-package.XXXXXXXX")
+          git archive HEAD | tar -x -C "${candidate_package}"
+          version=${PAM_RELEASE_TAG#v}
+          renderer="pam-native-android-renderer-${version}.tar.gz"
+          (cd candidate-renderer && sha256sum --check "${renderer}.sha256")
+          tar -xzf "candidate-renderer/${renderer}" -C "${candidate_package}" \
+            --strip-components=1 \
+            "pam-native-android-renderer-${version}/target/aarch64-linux-android/release/libpam_native_engine.a" \
+            "pam-native-android-renderer-${version}/target/x86_64-linux-android/release/libpam_native_engine.a"
+          printf '%s\n' "${version}" >"${candidate_package}/target/pam-native-engine-version"
           printf 'PAM_BIN=%s\n' "${GITHUB_WORKSPACE}/pam-cli/target/release/pam" >>"${GITHUB_ENV}"
           printf 'PAM_HOME=%s\n' "${pam_home}" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_CLI=%s\n' "$(realpath "${candidate}")" >>"${GITHUB_ENV}"
+          printf 'PAM_NATIVE_PACKAGE_PATH=%s\n' "${candidate_package}" >>"${GITHUB_ENV}"
       - name: Prove every documented pam init and pam dev journey
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          PAM_NATIVE_PACKAGE_PATH: ${{ github.workspace }}/packages/native
+          PAM_NATIVE_PACKAGE_PATH: ${{ env.PAM_NATIVE_PACKAGE_PATH }}
           PAM_HOME: ${{ env.PAM_HOME }}
-          PAM_NATIVE_HOME: ${{ github.workspace }}
-          PAM_MOBILE_UI_PACKAGE_PATH: ${{ github.workspace }}/pam-native-ui-candidate
           PAM_NATIVE_CLI: ${{ env.PAM_NATIVE_CLI }}
           PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
         with:

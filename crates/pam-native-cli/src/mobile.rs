@@ -6167,6 +6167,20 @@ fn android_gradle_user_home(project_root: &Path) -> PathBuf {
     std::env::var_os("PAM_NATIVE_GRADLE_HOME")
         .or_else(|| std::env::var_os("GRADLE_USER_HOME"))
         .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("XDG_CACHE_HOME")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .filter(|cache| cache.is_absolute())
+                .map(|cache| cache.join("pam-native/gradle"))
+        })
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .filter(|home| home.is_absolute())
+                .map(|home| home.join(".cache/pam-native/gradle"))
+        })
         .unwrap_or_else(|| project_root.join(".pam-native/gradle-home"))
 }
 

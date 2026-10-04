@@ -35,20 +35,19 @@ through the production retained-tree, Rust layout and native renderer paths.
 
 ## Run it
 
-From the repository root:
+From the PAM Native repository root:
 
 ```bash
-pam composer install --working-dir pam-native/examples/showcase
-pam mobile doctor pam-native/examples/showcase
-pam mobile dev pam-native/examples/showcase
+pam composer install --working-dir examples/showcase
+pam mobile doctor examples/showcase
+pam mobile dev examples/showcase
 ```
 
 Build an installable debug APK:
 
 ```bash
-pam mobile build pam-native/examples/showcase
-adb install -r \
-  pam-native/examples/showcase/.pam-native/android/app/build/outputs/apk/debug/app-debug.apk
+pam mobile build examples/showcase
+adb install -r examples/showcase/dist/pam-native-showcase-0.1.0-android-debug.apk
 ```
 
 ## What to try
