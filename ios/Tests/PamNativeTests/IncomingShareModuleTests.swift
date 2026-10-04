@@ -19,9 +19,9 @@ final class IncomingShareModuleTests: XCTestCase {
         let fileName = UUID().uuidString
         try Data("photo bytes".utf8).write(to: inbox.appendingPathComponent(fileName))
         defaults.set([
-            ["kind": 1, "value": "Olá 🌎", "mimeType": "text/plain", "createdAtMillis": 1],
-            ["kind": 3, "value": fileName, "mimeType": "public.jpeg", "createdAtMillis": 1],
-            ["kind": 1, "value": "next share", "mimeType": "text/plain", "createdAtMillis": 2],
+            ["kind": 1, "value": "Olá 🌎", "mimeType": "text/plain", "shareId": "first", "subject": "Picture", "createdAtMillis": 1],
+            ["kind": 3, "value": fileName, "name": "original.jpg", "mimeType": "public.jpeg", "shareId": "first", "createdAtMillis": 1],
+            ["kind": 1, "value": "next share", "mimeType": "text/plain", "shareId": "second", "createdAtMillis": 1],
         ], forKey: "pam.share.items")
         let module = IncomingShareModule(
             groupName: suite, groupRoot: groupRoot, privateRoot: privateRoot
@@ -36,6 +36,7 @@ final class IncomingShareModuleTests: XCTestCase {
                 let values = try WireMap.decode(payload)
                 XCTAssertEqual(values["available"], .flag(true))
                 XCTAssertEqual(values["text"], .text("Olá 🌎"))
+                XCTAssertEqual(values["subject"], .text("Picture"))
                 let json = try XCTUnwrap(values["files"])
                 guard case let .text(rawFiles) = json,
                       let files = try JSONSerialization.jsonObject(
@@ -48,6 +49,7 @@ final class IncomingShareModuleTests: XCTestCase {
                 }
                 XCTAssertEqual(files.count, 1)
                 XCTAssertEqual(file["mimeType"] as? String, "image/jpeg")
+                XCTAssertEqual(file["name"] as? String, "original.jpg")
                 XCTAssertEqual(try Data(contentsOf: privateRoot.appendingPathComponent(path)),
                                Data("photo bytes".utf8))
                 XCTAssertFalse(FileManager.default.fileExists(

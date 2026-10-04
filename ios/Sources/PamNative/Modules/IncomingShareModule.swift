@@ -97,9 +97,11 @@ final class IncomingShareModule: NativeModule, ClosableNativeModule {
         guard let defaults,
               let rows = defaults.array(forKey: "pam.share.items") as? [[String: Any]],
               let first = rows.first else { return nil }
+        let shareID = first["shareId"] as? String
         let time = (first["createdAtMillis"] as? NSNumber)?.int64Value ?? 0
         let group = Array(rows.prefix {
-            (($0["createdAtMillis"] as? NSNumber)?.int64Value ?? 0) == time
+            if let shareID { return ($0["shareId"] as? String) == shareID }
+            return (($0["createdAtMillis"] as? NSNumber)?.int64Value ?? 0) == time
         })
         var text = ""
         var mimeType = ""
@@ -126,7 +128,11 @@ final class IncomingShareModule: NativeModule, ClosableNativeModule {
                     if mimeType.isEmpty { mimeType = normalizedType }
                 case .some(.file):
                     guard files.count < 10 else { continue }
-                    let item = try copyFile(named: value, mimeType: normalizedType)
+                    let item = try copyFile(
+                        named: value,
+                        displayName: (row["name"] as? String) ?? value,
+                        mimeType: normalizedType
+                    )
                     files.append(item.reference)
                     copied.append(item.destination)
                     sources.append(item.source)
@@ -138,7 +144,7 @@ final class IncomingShareModule: NativeModule, ClosableNativeModule {
             let payload = try WireMap.encode([
                 "available": .flag(!text.isEmpty || !files.isEmpty),
                 "text": .text(text),
-                "subject": .text(""),
+                "subject": .text(boundedText((first["subject"] as? String) ?? "", maximumBytes: 4_096)),
                 "mimeType": .text(mimeType),
                 "files": .text(try json(files)),
             ])
@@ -157,7 +163,7 @@ final class IncomingShareModule: NativeModule, ClosableNativeModule {
     }
 
     private func copyFile(
-        named name: String, mimeType: String
+        named name: String, displayName: String, mimeType: String
     ) throws -> (source: URL, destination: URL, reference: [String: Any]) {
         guard let groupRoot,
               !name.isEmpty,
@@ -190,7 +196,7 @@ final class IncomingShareModule: NativeModule, ClosableNativeModule {
         }
         return (source, destination, [
             "path": relative,
-            "name": name,
+            "name": boundedText(displayName, maximumBytes: 255),
             "mimeType": mimeType.isEmpty ? "application/octet-stream" : mimeType,
             "size": size,
         ])
