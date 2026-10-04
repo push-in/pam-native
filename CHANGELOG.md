@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.34 - 2026-10-04
+
+- Decode iOS mutation numbers from a single borrowed payload buffer instead of
+  allocating a `Data` slice for every field. Two independent Release simulator
+  microbenchmarks measured 9.1× and 13.1× faster scalar decoding across 20,000
+  layout records; this does not measure application frame time.
+- Preserve the wire format and validation rules. No app migration is required.
+
 ## 1.0.33 - 2026-10-04
 
 - Add native PhotoKit gallery pages and albums on iOS, lazy `phasset://` image
