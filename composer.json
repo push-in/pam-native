@@ -253,6 +253,11 @@
                     ],
                     "description": "Generate a PAM Native screen"
                 },
+                "make:feature": {
+                    "bin": "packages/native/bin/pam-native",
+                    "arguments": ["make:feature"],
+                    "description": "Generate a modular PAM Native feature"
+                },
                 "package": {
                     "bin": "packages/native/bin/pam-native",
                     "arguments": [

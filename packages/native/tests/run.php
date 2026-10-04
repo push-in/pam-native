@@ -865,6 +865,16 @@ declare(strict_types=1);
 <template><Column><!-- Keep this explanation. --><Text v-if="$ready" fontSize="15">Ready</Text><Text v-else>Wait</Text></Column></template><style scoped>.ready { color: #112233; font-size: 15px; }</style>
 PAM;
 $formattedPam = PamFormatter::format($unformattedPam, 'FormatterTest.pam.php');
+$canonicalPam = PamFormatter::format(
+    "<?php\n?>\n<template><Button on:press=\"save\" v-model=\"draft\">Save</Button></template>",
+    'CanonicalFormatterTest.pam',
+);
+$assert(
+    str_contains($canonicalPam, '@press="save"')
+        && str_contains($canonicalPam, 'p-model="draft"')
+        && PamFormatter::format($canonicalPam, 'CanonicalFormatterTest.pam') === $canonicalPam,
+    'PAM formatter must canonicalize event and model aliases idempotently.',
+);
 $assert(
     str_contains($formattedPam, 'p-if="$ready"')
         && str_contains($formattedPam, '<Text p-else>Wait</Text>')

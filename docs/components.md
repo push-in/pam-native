@@ -765,7 +765,9 @@ vendor/bin/pam-native-format --check src
 It accepts any number of files or directories, recursively discovers
 `*.pam.php`, preserves the PHP block for Pint/PHP-CS-Fixer, formats templates
 and scoped styles deterministically, and migrates legacy `v-*` directives to
-`p-*`. `--check` makes CI fail when a component needs formatting.
+`p-*`, `on:press` to `@press`, and `v-model` to `p-model`. It preserves
+`bind:value`, whose two-way behavior differs from `:value`. `--check` makes CI
+fail when a component needs formatting.
 
 ## Responsive grid and flex
 
@@ -1059,10 +1061,18 @@ ImageEditor::render(
 ```bash
 pam make:screen Orders
 pam make:component MetricCard
+pam make:feature Checkout
 ```
 
-These commands generate `src/Screens/Orders.pam` and
-`src/Components/MetricCard.pam` without overwriting existing files. Legacy
+The first two commands generate `src/Screens/Orders.pam` and
+`src/Components/MetricCard.pam`. All new templates use Language 2, typed
+`#[Prop]` inputs and `#[Action]` handlers. `make:feature` creates
+`src/Features/Checkout/` with a screen, summary component, pure PHP service,
+`RouteModule`, and a service test in `tests/Features/`. Register it inside a
+stack with `Route::module(new App\Features\Checkout\CheckoutRoutes())`, after
+calling `App::components(__DIR__.'/src')`. Keep state and event handlers in the
+screen and domain calculations in the service. None of the generators overwrite
+existing files. Legacy
 `.pam.php` components remain supported throughout the 1.x compatibility line.
 `pam init community-app --template native` still starts with the explicit PHP tree so the
 lowest-level model is always visible and available.

@@ -824,6 +824,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "runtime:update" => runtime_update(parse_project_only(arguments)?),
         "make:screen" => generate_screen(parse_generator(arguments)?),
         "make:component" => generate_component(parse_generator(arguments)?),
+        "make:feature" => generate_feature(parse_generator(arguments)?),
         "make:native-view" => generate_native_view(parse_generator(arguments)?),
         unknown => Err(format!(
             "unknown mobile command {unknown:?}; run `pam mobile --help`"
@@ -6772,6 +6773,7 @@ declare(strict_types=1);
 
 namespace App\Screens;
 
+use Pam\Native\Attributes\Action;
 use Pam\Native\Attributes\State;
 use Pam\Native\Component;
 
@@ -6780,6 +6782,7 @@ final class {name} extends Component
     #[State]
     public int $count = 0;
 
+    #[Action]
     public function increment(): void
     {{
         $this->count++;
@@ -6787,12 +6790,12 @@ final class {name} extends Component
 }}
 ?>
 
-<template>
+<template language="2">
     <Screen>
         <SafeAreaView class="flex-1 surface">
             <Column class="flex-1 p-6 gap-4">
                 <Text class="text-primary" height="48" fontSize="28" fontWeight="700">{title}</Text>
-                <Text class="text-muted" height="44">Native Android UI controlled by persistent PHP.</Text>
+                <Text class="text-muted" height="44">Native UI controlled by persistent PHP.</Text>
                 <Button class="accent" height="52" @press="increment" accessibilityLabel="{title} counter">
                     Count: {{{{ $count }}}}
                 </Button>
@@ -6828,26 +6831,27 @@ declare(strict_types=1);
 namespace App\Components;
 
 use Pam\Native\Component;
+use Pam\Native\Attributes\Prop;
 
 final class {name} extends Component
 {{
     public function __construct(
-        public string $title,
-        public ?string $subtitle = null,
-        public bool $elevated = false,
+        #[Prop(required: true)] public readonly string $title,
+        #[Prop] public readonly ?string $subtitle = null,
+        #[Prop] public readonly bool $elevated = false,
     ) {{
     }}
 }}
 ?>
 
-<template>
+<template language="2">
     <Column :class="['card', 'gap-2', 'elevation-2' => $elevated]">
         <Row class="items-center justify-between">
             <Column>
                 <Text class="text-primary" height="32" fontSize="18" fontWeight="700">
                     {{{{ $title }}}}
                 </Text>
-                <Text v-if="$subtitle" class="text-muted" height="28">
+                <Text p-if="$subtitle" class="text-muted" height="28">
                     {{{{ $subtitle }}}}
                 </Text>
             </Column>
@@ -6867,6 +6871,149 @@ final class {name} extends Component
         "Use it as <{name} title=\"...\"> after App::components(__DIR__.'/src').",
         name = options.name,
     );
+    Ok(0)
+}
+
+fn generate_feature(options: GeneratorOptions) -> Result<u8, String> {
+    let project = load_project(&options.project)?;
+    let name = &options.name;
+    let root = project.root.join("src/Features").join(name);
+    let screen = root.join(format!("{name}Screen.pam"));
+    let component = root.join(format!("{name}Summary.pam"));
+    let service = root.join(format!("{name}Service.php"));
+    let routes = root.join(format!("{name}Routes.php"));
+    let test = project
+        .root
+        .join("tests/Features")
+        .join(format!("{name}ServiceTest.php"));
+    ensure_available(&[&screen, &component, &service, &routes, &test])?;
+
+    let namespace = format!("App\\Features\\{name}");
+    let screen_source = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace {namespace};
+
+use Pam\Native\Attributes\Action;
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+
+final class {name}Screen extends Component
+{{
+    #[State]
+    public int $count = 0;
+
+    #[Action]
+    public function increment(): void
+    {{
+        $this->count = (new {name}Service())->increment($this->count);
+    }}
+}}
+?>
+
+<template language="2">
+    <Screen>
+        <SafeAreaView class="flex-1 surface">
+            <Column class="flex-1 p-6 gap-4">
+                <{name}Summary :count="$count" />
+                <Button @press="increment" accessibilityLabel="Increment {name} counter">
+                    Increment
+                </Button>
+            </Column>
+        </SafeAreaView>
+    </Screen>
+</template>
+"#
+    );
+    let component_source = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace {namespace};
+
+use Pam\Native\Attributes\Prop;
+use Pam\Native\Component;
+
+final class {name}Summary extends Component
+{{
+    public function __construct(
+        #[Prop(required: true)] public readonly int $count,
+    ) {{}}
+}}
+?>
+
+<template language="2">
+    <Text>{name}: {{{{ $count }}}}</Text>
+</template>
+"#
+    );
+    let service_source = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace {namespace};
+
+final class {name}Service
+{{
+    public function increment(int $current): int
+    {{
+        return $current + 1;
+    }}
+}}
+"#
+    );
+    let routes_source = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace {namespace};
+
+use Pam\Native\Routing\Route;
+use Pam\Native\Routing\RouteModule;
+
+final class {name}Routes implements RouteModule
+{{
+    public function register(): void
+    {{
+        Route::screen('{route}', {name}Screen::class);
+    }}
+}}
+"#,
+        route = kebab_case(name)
+    );
+    let test_source = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Tests\Features;
+
+use {namespace}\{name}Service;
+
+require dirname(__DIR__, 2).'/vendor/autoload.php';
+
+if ((new {name}Service())->increment(0) !== 1) {{
+    throw new \RuntimeException('{name} service must increment a value.');
+}}
+"#
+    );
+
+    for (path, contents) in [
+        (&screen, screen_source),
+        (&component, component_source),
+        (&service, service_source),
+        (&routes, routes_source),
+        (&test, test_source),
+    ] {
+        write_new_file(path, contents.as_bytes())?;
+        println!("Created {}", path.display());
+    }
+    println!("Register with Route::module(new {namespace}\\{name}Routes()) inside your stack.");
     Ok(0)
 }
 
@@ -7765,6 +7912,18 @@ fn display_abis(abis: &[AndroidAbi]) -> String {
 }
 
 fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
+    // Generated Android and iOS source files participate in Gradle/Xcode's
+    // incremental build graph. Replacing an identical file needlessly rebuilds
+    // the host and every target that imports it.
+    if let Ok(metadata) = fs::metadata(path) {
+        if metadata.is_file() && metadata.len() == contents.len() as u64 {
+            if let Ok(previous) = fs::read(path) {
+                if previous == contents {
+                    return Ok(());
+                }
+            }
+        }
+    }
     let parent = path
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
@@ -7783,7 +7942,7 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
 
 fn print_usage() {
     eprintln!(
-        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
+        "PAM Native commands:\n  doctor, audit, dev, build, run, package, release, production:certify, sign\n  devices, logs, screenshot, devtools, diagnostics\n  prepare, codegen, benchmark, profile\n  plugin:list, plugin:doctor\n  update:bundle [project] [output]\n  runtime:list, runtime:info, runtime:use, runtime:install, runtime:update\n  make:screen, make:component, make:feature, make:native-view\n  ios:prepare, ios:doctor, ios:dev, ios:build, ios:run, ios:package, ios:sign, ios:devices, ios:logs, ios:screenshot, ios:devtools, ios:diagnostics"
     );
 }
 
@@ -8273,6 +8432,35 @@ mod tests {
     }
 
     #[test]
+    fn generated_sources_keep_identity_when_contents_are_unchanged() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-generated-source-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let path = root.join("Generated.swift");
+        write_atomic(&path, b"first").expect("initial source");
+        let first = fs::metadata(&path).expect("initial metadata");
+        write_atomic(&path, b"first").expect("unchanged source");
+        let second = fs::metadata(&path).expect("unchanged metadata");
+        assert_eq!(
+            first.modified().expect("mtime"),
+            second.modified().expect("mtime")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_eq!(first.ino(), second.ino());
+        }
+        write_atomic(&path, b"second").expect("changed source");
+        assert_eq!(fs::read(&path).expect("updated source"), b"second");
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
     fn generators_create_complete_files_and_refuse_overwrites() {
         let root = std::env::temp_dir().join(format!(
             "pam-mobile-generators-{}-{}",
@@ -8319,6 +8507,37 @@ mod tests {
         })
         .expect("component");
         assert!(root.join("src/Components/MetricCard.pam").is_file());
+
+        generate_feature(GeneratorOptions {
+            name: "Checkout".to_owned(),
+            project: root.clone(),
+        })
+        .expect("feature");
+        let feature_root = root.join("src/Features/Checkout");
+        for file in [
+            "CheckoutScreen.pam",
+            "CheckoutSummary.pam",
+            "CheckoutService.php",
+            "CheckoutRoutes.php",
+        ] {
+            assert!(feature_root.join(file).is_file());
+        }
+        assert!(
+            root.join("tests/Features/CheckoutServiceTest.php")
+                .is_file()
+        );
+        assert!(
+            fs::read_to_string(feature_root.join("CheckoutScreen.pam"))
+                .expect("feature screen")
+                .contains("<template language=\"2\">")
+        );
+        assert!(
+            generate_feature(GeneratorOptions {
+                name: "Checkout".to_owned(),
+                project: root.clone(),
+            })
+            .is_err()
+        );
 
         generate_native_view(GeneratorOptions {
             name: "CameraPreview".to_owned(),
