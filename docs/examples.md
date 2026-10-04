@@ -96,7 +96,7 @@ Files::pickMany(
     limit: 10,
 );
 
-// Android custom gallery: query metadata first, import only the chosen asset.
+// Custom gallery: query metadata first, import only the chosen asset.
 Permissions::requestKind(PermissionKind::Photos, function ($decision): void {
     if (!in_array(
         $decision->status,
@@ -123,7 +123,7 @@ MediaLibrary::albums(
 );
 
 Files::importUri(
-    'content://media/external/images/media/42',
+    $this->gallery[0]->uri, // content:// on Android, phasset:// on iOS
     function ($file): void {
         // $file->path is now app-owned and ready for edit/upload.
         $this->selectedImageSource = $file->uri();

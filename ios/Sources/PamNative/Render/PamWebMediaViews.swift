@@ -1,6 +1,7 @@
 import AVFoundation
 import AVKit
 import Foundation
+import Photos
 import UIKit
 import WebKit
 
@@ -167,6 +168,7 @@ final class PamMediaView: UIView {
     private var playbackRate: Float = 1
     private var resumeAfterPause = false
     private var sourceGeneration: UInt64 = 0
+    private var photoVideoRequestId: PHImageRequestID = PHInvalidImageRequestID
     private var cachePolicy = 1
     private var cacheKey: String?
     private var cacheMaxAgeMs: Int64 = 0
@@ -204,6 +206,30 @@ final class PamMediaView: UIView {
         sourceGeneration &+= 1
         releasePlayer()
         guard !value.isEmpty else { return }
+        if PamPhotoAssetURI.identifier(value) != nil {
+            guard let asset = PamPhotoAssetURI.asset(value), asset.mediaType == .video else {
+                onError?("Photo asset is unavailable or is not a video")
+                return
+            }
+            let generation = sourceGeneration
+            let options = PHVideoRequestOptions()
+            options.isNetworkAccessAllowed = true
+            photoVideoRequestId = PHImageManager.default().requestAVAsset(
+                forVideo: asset, options: options
+            ) { [weak self] video, _, info in
+                DispatchQueue.main.async {
+                    guard let self, self.sourceGeneration == generation else { return }
+                    self.photoVideoRequestId = PHInvalidImageRequestID
+                    if let video {
+                        self.installPlayer(AVPlayerItem(asset: video))
+                    } else {
+                        self.onError?((info?[PHImageErrorKey] as? Error)?.localizedDescription
+                            ?? "Photo video could not be loaded")
+                    }
+                }
+            }
+            return
+        }
         let url: URL
         if let candidate = URL(string: value), candidate.scheme != nil {
             url = candidate
@@ -284,8 +310,11 @@ final class PamMediaView: UIView {
     }
 
     private func installPlayer(_ url: URL) {
+        installPlayer(AVPlayerItem(url: url))
+    }
+
+    private func installPlayer(_ item: AVPlayerItem) {
         releasePlayer()
-        let item = AVPlayerItem(url: url)
         let next = AVPlayer(playerItem: item)
         player = next
         controller.player = next
@@ -381,6 +410,10 @@ final class PamMediaView: UIView {
     }
 
     private func releasePlayer() {
+        if photoVideoRequestId != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(photoVideoRequestId)
+            photoVideoRequestId = PHInvalidImageRequestID
+        }
         if let observer, let player { player.removeTimeObserver(observer) }
         if let endToken { NotificationCenter.default.removeObserver(endToken) }
         observer = nil
