@@ -408,6 +408,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: x86_64-linux-android
+      - name: Enable KVM for the community emulator
+        run: |
+          sudo usermod -aG kvm "$USER"
+          sudo chmod 666 /dev/kvm
       - name: Assemble the candidate PAM entrypoint and public runtime payload
         run: |
           curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
