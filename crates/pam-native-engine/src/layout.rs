@@ -560,7 +560,7 @@ fn layout_node(
         }
         return Ok(());
     }
-    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+    if is_grid(node) {
         layout_grid(context, node, node_children, inner, gap, depth, output)?;
         return Ok(());
     }
@@ -1029,6 +1029,44 @@ fn layout_wrapped_children(
     Ok(())
 }
 
+fn is_grid(node: &Node) -> bool {
+    integer(node, PropKey::GridColumns).unwrap_or(0) > 0
+        || node.properties.contains_key(&PropKey::GridTemplate)
+}
+
+fn resolved_grid_plan(
+    node: &Node,
+    width: f32,
+    fallback_gap: f32,
+) -> Result<(usize, f32, f32, Option<usize>), LayoutError> {
+    let (maximum, gap, row_gap, level) = match node.properties.get(&PropKey::GridTemplate) {
+        Some(pam_native_protocol::PropValue::String(wire)) => {
+            let template = crate::grid_template::GridTemplate::parse(wire)
+                .map_err(|_| LayoutError::InvalidGridTemplate)?;
+            let (level, plan) = template
+                .resolve(width)
+                .map_err(|_| LayoutError::InvalidGridTemplate)?;
+            (plan.columns, plan.column_gap, plan.row_gap, Some(level))
+        }
+        Some(_) => return Err(LayoutError::InvalidGridTemplate),
+        None => (
+            integer(node, PropKey::GridColumns)
+                .unwrap_or(12)
+                .clamp(1, 64) as usize,
+            finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?,
+            finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?,
+            None,
+        ),
+    };
+    let minimum = finite_non_negative(number(node, PropKey::GridMinColumnWidth).unwrap_or(0.0))?;
+    if minimum == 0.0 {
+        return Ok((maximum, gap, row_gap, level));
+    }
+    // A narrower container still gets one column; never force horizontal overflow.
+    let fitting = ((width.max(0.0) + gap) / (minimum + gap)).floor() as usize;
+    Ok((fitting.clamp(1, maximum), gap, row_gap, level))
+}
+
 fn layout_grid(
     context: &LayoutContext<'_>,
     node: &Node,
@@ -1038,12 +1076,8 @@ fn layout_grid(
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
 ) -> Result<(), LayoutError> {
-    let columns = integer(node, PropKey::GridColumns)
-        .unwrap_or(12)
-        .clamp(1, 64) as usize;
-    let column_gap =
-        finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
-    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
+    let (columns, column_gap, row_gap, level) =
+        resolved_grid_plan(node, inner.width, fallback_gap)?;
     let unit =
         ((inner.width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
     let mut children = node_children
@@ -1057,7 +1091,7 @@ fn layout_grid(
         .collect::<Vec<_>>();
     children.sort_by_key(|child| {
         (
-            responsive_grid_value(child, inner.width, GridValue::Order, 0),
+            responsive_grid_value(child, inner.width, GridValue::Order, 0, level),
             child.index,
         )
     });
@@ -1067,9 +1101,9 @@ fn layout_grid(
     let mut cursor = 0_usize;
     let mut row_heights = Vec::<f32>::new();
     for child in children {
-        let span = responsive_grid_value(child, inner.width, GridValue::Span, columns as i64)
+        let span = responsive_grid_value(child, inner.width, GridValue::Span, columns as i64, level)
             .clamp(1, columns as i64) as usize;
-        let offset = responsive_grid_value(child, inner.width, GridValue::Offset, 0)
+        let offset = responsive_grid_value(child, inner.width, GridValue::Offset, 0, level)
             .clamp(0, columns.saturating_sub(1) as i64) as usize;
         if cursor > 0 && cursor + offset + span > columns {
             row += 1;
@@ -1114,14 +1148,46 @@ fn layout_grid(
         y += *height + row_gap;
     }
     for placement in placements {
-        let (margin_top, _) = margin_main(placement.child, Axis::Vertical);
+        let (margin_top, margin_bottom) = margin_main(placement.child, Axis::Vertical);
         let (margin_left, margin_right) = margin_cross(placement.child, Axis::Vertical);
+        let alignment = integer(placement.child, PropKey::AlignSelf)
+            .map(cross_alignment)
+            .unwrap_or_else(|| cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4)));
+        let row_height = row_heights[placement.row];
+        let height = if alignment == CrossAlignment::Stretch
+            && dimension(
+                placement.child,
+                PropKey::Height,
+                PropKey::HeightPercent,
+                inner.height,
+            )
+            .is_none()
+        {
+            constrained(
+                (row_height - margin_top - margin_bottom).max(0.0),
+                number(placement.child, PropKey::MinHeight),
+                dimension(
+                    placement.child,
+                    PropKey::MaxHeight,
+                    PropKey::MaxHeightPercent,
+                    inner.height,
+                ),
+            )?
+        } else {
+            placement.height
+        };
+        let offset = match alignment {
+            CrossAlignment::Center => (row_height - height + margin_top - margin_bottom) / 2.0,
+            CrossAlignment::End => row_height - height - margin_bottom,
+            _ => margin_top,
+        }
+        .max(0.0);
         let x = inner.x + placement.column as f32 * (unit + column_gap) + margin_left;
         let frame = Layout {
             x,
-            y: inner.y + row_offsets[placement.row] + margin_top,
+            y: inner.y + row_offsets[placement.row] + offset,
             width: (placement.width - margin_left - margin_right).max(0.0),
-            height: placement.height,
+            height,
         };
         layout_node(context, placement.child.id, frame, false, depth + 1, output)?;
     }
@@ -1170,7 +1236,13 @@ enum GridValue {
     Order,
 }
 
-fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64) -> i64 {
+fn responsive_grid_value(
+    node: &Node,
+    width: f32,
+    value: GridValue,
+    default: i64,
+    template_level: Option<usize>,
+) -> i64 {
     let keys = match value {
         GridValue::Span => [
             PropKey::GridSpan,
@@ -1178,6 +1250,7 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
             PropKey::GridSpanMd,
             PropKey::GridSpanLg,
             PropKey::GridSpanXl,
+            PropKey::GridSpan2xl,
         ],
         GridValue::Offset => [
             PropKey::GridOffset,
@@ -1185,6 +1258,7 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
             PropKey::GridOffsetMd,
             PropKey::GridOffsetLg,
             PropKey::GridOffsetXl,
+            PropKey::GridOffset2xl,
         ],
         GridValue::Order => [
             PropKey::GridOrder,
@@ -1192,9 +1266,10 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
             PropKey::GridOrderMd,
             PropKey::GridOrderLg,
             PropKey::GridOrderXl,
+            PropKey::GridOrder2xl,
         ],
     };
-    let level = if width >= 1600.0 {
+    let level = template_level.unwrap_or(if width >= 1600.0 {
         4
     } else if width >= 1200.0 {
         3
@@ -1204,7 +1279,7 @@ fn responsive_grid_value(node: &Node, width: f32, value: GridValue, default: i64
         1
     } else {
         0
-    };
+    });
     (0..=level)
         .rev()
         .find_map(|index| integer(node, keys[index]))
@@ -1243,7 +1318,7 @@ fn natural_scroll_extent(
     if let Some(explicit) = explicit {
         return finite_non_negative(explicit);
     }
-    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+    if is_grid(node) {
         return intrinsic_extent(
             children,
             node,
@@ -1282,7 +1357,9 @@ fn natural_scroll_extent(
             if axis == Axis::Vertical {
                 available_cross
             } else {
-                available_main
+                // The scrolling axis is unconstrained. Measuring a text leaf
+                // at viewport width would wrap it before computing overflow.
+                f32::INFINITY
             },
             if axis == Axis::Vertical {
                 available_main
@@ -1323,6 +1400,9 @@ fn natural_scroll_extent(
         }
     };
     let mut extents = Vec::with_capacity(visible_children.len());
+    let mut grow_total = 0.0_f32;
+    let mut grow_unit = 0.0_f32;
+    let mut fixed_extent = 0.0_f32;
     for child in visible_children {
         let extent = natural_scroll_extent(
             children,
@@ -1336,10 +1416,25 @@ fn natural_scroll_extent(
         )?;
         let (before, after) = margin_main(child, axis);
         extents.push(extent + before + after);
+        let grow = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
+        if grow > 0.0 {
+            grow_total += grow;
+            grow_unit = grow_unit.max((extent + before + after) / grow);
+        } else {
+            fixed_extent += extent + before + after;
+        }
     }
     let content = if node_axis == axis {
         let gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
-        extents.iter().sum::<f32>() + gap * extents.len().saturating_sub(1) as f32
+        // Zero-basis grow items share the content width by weight. A sum of
+        // their different intrinsic widths would give the widest item too
+        // little space, even inside an unconstrained horizontal scroller.
+        let main = if axis == Axis::Horizontal && grow_total > 0.0 {
+            fixed_extent + grow_unit * grow_total
+        } else {
+            extents.iter().sum::<f32>()
+        };
+        main + gap * extents.len().saturating_sub(1) as f32
     } else {
         extents.into_iter().fold(0.0, f32::max)
     };
@@ -1414,7 +1509,10 @@ fn intrinsic_extent(
                 && integer(child, PropKey::PositionType).unwrap_or(1) != 2
         })
         .collect::<Vec<_>>();
-    if node_children.is_empty() || !content_sized(node) {
+    let horizontal_scroll_height = node.kind == NodeKind::Scroll
+        && boolean(node, PropKey::ScrollHorizontal)
+        && requested_axis == Axis::Vertical;
+    if node_children.is_empty() || (!content_sized(node) && !horizontal_scroll_height) {
         return finite_non_negative(leaf_intrinsic(
             node,
             requested_axis,
@@ -1438,7 +1536,44 @@ fn intrinsic_extent(
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
     let inner_width = (available_width - padding_left - padding_right).max(0.0);
     let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
-    if integer(node, PropKey::GridColumns).unwrap_or(0) > 0 {
+    if horizontal_scroll_height {
+        // Measure at the same natural content width used by layout_node, not
+        // the viewport width: scrolling content must not wrap to fit the view.
+        let fill_viewport = !matches!(
+            node.properties.get(&PropKey::ScrollFillViewport),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        );
+        let mut height = 0.0_f32;
+        for child in node_children {
+            let natural_width = natural_scroll_extent(
+                children,
+                child,
+                Axis::Horizontal,
+                inner_width,
+                inner_height,
+                text_scale,
+                text_metrics,
+                depth + 1,
+            )?;
+            let width = if fill_viewport {
+                natural_width.max(inner_width)
+            } else {
+                natural_width
+            };
+            height = height.max(constrained_intrinsic_extent(
+                children,
+                child,
+                Axis::Vertical,
+                width,
+                inner_height,
+                text_scale,
+                text_metrics,
+                depth + 1,
+            )?);
+        }
+        return finite_non_negative(height + padding_top + padding_bottom);
+    }
+    if is_grid(node) {
         let content = match requested_axis {
             Axis::Horizontal => inner_width,
             Axis::Vertical => grid_intrinsic_height(
@@ -1692,13 +1827,8 @@ fn grid_intrinsic_height(
     text_metrics: &TextMetrics,
     depth: usize,
 ) -> Result<f32, LayoutError> {
-    let columns = integer(node, PropKey::GridColumns)
-        .unwrap_or(12)
-        .clamp(1, 64) as usize;
     let fallback_gap = finite(number(node, PropKey::Gap).unwrap_or(0.0))?;
-    let column_gap =
-        finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(fallback_gap))?;
-    let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(fallback_gap))?;
+    let (columns, column_gap, row_gap, level) = resolved_grid_plan(node, width, fallback_gap)?;
     let unit = ((width - column_gap * columns.saturating_sub(1) as f32).max(0.0)) / columns as f32;
     let mut flow = node_children
         .iter()
@@ -1711,7 +1841,7 @@ fn grid_intrinsic_height(
         .collect::<Vec<_>>();
     flow.sort_by_key(|child| {
         (
-            responsive_grid_value(child, width, GridValue::Order, 0),
+            responsive_grid_value(child, width, GridValue::Order, 0, level),
             child.index,
         )
     });
@@ -1719,9 +1849,9 @@ fn grid_intrinsic_height(
     let mut row = 0_usize;
     let mut cursor = 0_usize;
     for child in flow {
-        let span = responsive_grid_value(child, width, GridValue::Span, columns as i64)
+        let span = responsive_grid_value(child, width, GridValue::Span, columns as i64, level)
             .clamp(1, columns as i64) as usize;
-        let offset = responsive_grid_value(child, width, GridValue::Offset, 0)
+        let offset = responsive_grid_value(child, width, GridValue::Offset, 0, level)
             .clamp(0, columns.saturating_sub(1) as i64) as usize;
         if cursor > 0 && cursor + offset + span > columns {
             row += 1;
@@ -2622,6 +2752,7 @@ fn finite(value: f32) -> Result<f32, LayoutError> {
 
 #[derive(Debug)]
 pub enum LayoutError {
+    InvalidGridTemplate,
     InvalidDimension,
     DepthExceeded,
     MissingNode(u64),
@@ -2630,6 +2761,7 @@ pub enum LayoutError {
 impl std::fmt::Display for LayoutError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::InvalidGridTemplate => formatter.write_str("invalid responsive grid template"),
             Self::InvalidDimension => {
                 formatter.write_str("layout dimensions must be finite and non-negative")
             }
@@ -3595,6 +3727,156 @@ mod tests {
 
         assert!(!layouts.contains_key(&2));
         assert_eq!(layouts[&3].x, 0.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_auto_height_follows_content_and_padding() {
+        let mut tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Column, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Scroll,
+                        [
+                            (PropKey::ScrollHorizontal, PropValue::Boolean(true)),
+                            (PropKey::PaddingVertical, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (3, node(3, 2, 0, NodeKind::Row, [])),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(400.0)),
+                            (PropKey::Height, PropValue::Float(56.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(24.0))],
+                    ),
+                ),
+            ]),
+        };
+        let viewport = Size {
+            width: 300.0,
+            height: 500.0,
+        };
+        let layouts = calculate(&tree, viewport).expect("auto horizontal scroll");
+        assert_eq!(layouts[&2].height, 72.0);
+        assert_eq!(layouts[&3].width, 400.0);
+        assert_eq!(layouts[&3].height, 56.0);
+        assert_eq!(layouts[&5].y, 72.0);
+        tree.nodes
+            .get_mut(&2)
+            .unwrap()
+            .properties
+            .insert(PropKey::Height, PropValue::Float(100.0));
+        let layouts = calculate(&tree, viewport).expect("explicit horizontal scroll");
+        assert_eq!(layouts[&2].height, 100.0);
+        assert_eq!(layouts[&5].y, 100.0);
+        tree.nodes
+            .get_mut(&2)
+            .unwrap()
+            .properties
+            .remove(&PropKey::Height);
+        tree.nodes.insert(
+            4,
+            node(
+                4,
+                3,
+                0,
+                NodeKind::Text,
+                [
+                    (
+                        PropKey::Text,
+                        PropValue::String(
+                            "A long scrolling label that must not wrap to the viewport width"
+                                .to_owned(),
+                        ),
+                    ),
+                    (PropKey::FontSize, PropValue::Float(14.0)),
+                    (PropKey::LineHeight, PropValue::Float(20.0)),
+                ],
+            ),
+        );
+        let layouts = calculate(&tree, viewport).expect("natural text width in horizontal scroll");
+        assert!(layouts[&3].width > viewport.width);
+        assert_eq!(layouts[&4].height, 20.0);
+        assert_eq!(layouts[&2].height, 36.0);
+    }
+
+    #[test]
+    fn horizontal_scroll_reserves_widest_grow_share() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Scroll,
+                        [(PropKey::ScrollHorizontal, PropValue::Boolean(true))],
+                    ),
+                ),
+                (2, node(2, 1, 0, NodeKind::Row, [])),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(120.0)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::Width, PropValue::Float(180.0)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 200.0,
+                height: 56.0,
+            },
+        )
+        .expect("equal grow content remains readable");
+        assert_eq!(layouts[&2].width, 360.0);
+        assert_eq!(layouts[&3].width, 180.0);
+        assert_eq!(layouts[&4].width, 180.0);
     }
 
     #[test]
@@ -4735,6 +5017,274 @@ mod tests {
         assert_eq!(tablet[&3].x, 304.0);
         assert_eq!(tablet[&4].x, 608.0);
         assert_eq!(tablet[&4].y, 0.0);
+    }
+
+    #[test]
+    fn grid_template_reflows_columns_gutters_and_sixth_tier_spans() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(100, node(100, 0, 0, NodeKind::Column, []));
+        nodes.insert(
+            1,
+            node(
+                1,
+                100,
+                0,
+                NodeKind::Column,
+                [(
+                    PropKey::GridTemplate,
+                    PropValue::String(
+                        "0,2,10,8;640,3,12,8;768,3,12,8;1024,3,12,8;1280,3,12,8;1536,4,16,8".into(),
+                    ),
+                )],
+            ),
+        );
+        for id in 2..=4 {
+            nodes.insert(
+                id,
+                node(
+                    id,
+                    1,
+                    (id - 2) as u32,
+                    NodeKind::View,
+                    [
+                        (PropKey::GridSpan, PropValue::Integer(1)),
+                        (
+                            PropKey::GridSpan2xl,
+                            PropValue::Integer(if id == 2 { 2 } else { 1 }),
+                        ),
+                        (PropKey::Height, PropValue::Float(40.0)),
+                    ],
+                ),
+            );
+        }
+        let mut tree = Tree { root: 100, nodes };
+        let narrow = calculate(
+            &tree,
+            Size {
+                width: 639.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(narrow[&2].width, 314.5);
+        assert_eq!(narrow[&4].y, 48.0);
+        assert_eq!(narrow[&1].height, 88.0);
+        let wide = calculate(
+            &tree,
+            Size {
+                width: 640.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(wide[&4].y, 0.0);
+        assert_eq!(wide[&1].height, 40.0);
+        let sixth = calculate(
+            &tree,
+            Size {
+                width: 1536.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(sixth[&2].width, 760.0);
+        assert_eq!(sixth[&3].x, 776.0);
+        assert_eq!(sixth[&4].x, 1164.0);
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::GridMinColumnWidth, PropValue::Float(500.0));
+        let fitted = calculate(
+            &tree,
+            Size {
+                width: 1536.0,
+                height: 500.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(fitted[&4].y, 48.0);
+        assert_eq!(fitted[&1].height, 88.0);
+        tree.nodes
+            .get_mut(&1)
+            .unwrap()
+            .properties
+            .insert(PropKey::GridTemplate, PropValue::String("broken".into()));
+        assert!(matches!(
+            calculate(
+                &tree,
+                Size {
+                    width: 640.0,
+                    height: 500.0
+                }
+            ),
+            Err(LayoutError::InvalidGridTemplate)
+        ));
+    }
+
+    #[test]
+    fn minimum_grid_column_width_reflows_columns_and_intrinsic_height_together() {
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Column, [])),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Column,
+                    [
+                        (PropKey::GridColumns, PropValue::Integer(4)),
+                        (PropKey::GridMinColumnWidth, PropValue::Float(120.0)),
+                        (PropKey::GridColumnGap, PropValue::Float(8.0)),
+                        (PropKey::GridRowGap, PropValue::Float(8.0)),
+                    ],
+                ),
+            ),
+        ]);
+        for index in 0..4 {
+            let id = index + 3;
+            nodes.insert(
+                id,
+                node(
+                    id,
+                    2,
+                    index as u32,
+                    NodeKind::View,
+                    [
+                        (PropKey::GridSpan, PropValue::Integer(1)),
+                        (PropKey::Height, PropValue::Float(40.0)),
+                    ],
+                ),
+            );
+        }
+        let tree = Tree { root: 1, nodes };
+        for (width, columns, height) in [
+            (100.0, 1, 184.0),
+            (247.0, 1, 184.0),
+            (248.0, 2, 88.0),
+            (360.0, 2, 88.0),
+            (600.0, 4, 40.0),
+            (2000.0, 4, 40.0),
+        ] {
+            let frames = calculate(
+                &tree,
+                Size {
+                    width,
+                    height: 800.0,
+                },
+            )
+            .expect("auto-fit grid");
+            let cell_width = (width - (columns - 1) as f32 * 8.0) / columns as f32;
+            assert_eq!(frames[&2].height, height);
+            assert_eq!(frames[&3].width, cell_width);
+            assert!(frames[&6].x + frames[&6].width <= width);
+            assert_eq!(frames[&6].y, ((4 - 1) / columns) as f32 * 48.0);
+        }
+    }
+
+    #[test]
+    fn grid_rows_stretch_auto_height_and_respect_explicit_alignment_and_limits() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::GridColumns, PropValue::Integer(5))],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::Height, PropValue::Float(80.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::MinHeight, PropValue::Float(20.0)),
+                            (PropKey::MarginTop, PropValue::Float(4.0)),
+                            (PropKey::MarginBottom, PropValue::Float(8.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        1,
+                        2,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                            (PropKey::AlignSelf, PropValue::Integer(2)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        1,
+                        3,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::MinHeight, PropValue::Float(20.0)),
+                            (PropKey::MaxHeight, PropValue::Float(40.0)),
+                        ],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        1,
+                        4,
+                        NodeKind::View,
+                        [
+                            (PropKey::GridSpan, PropValue::Integer(1)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                            (PropKey::AlignSelf, PropValue::Integer(3)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+        let frames = calculate(
+            &tree,
+            Size {
+                width: 500.0,
+                height: 200.0,
+            },
+        )
+        .expect("grid alignment");
+        assert_eq!(frames[&2].height, 80.0);
+        assert_eq!(frames[&3].height, 68.0);
+        assert_eq!(frames[&3].y, 4.0);
+        assert_eq!(frames[&4].height, 20.0);
+        assert_eq!(frames[&4].y, 30.0);
+        assert_eq!(frames[&5].height, 40.0);
+        assert_eq!(frames[&6].y, 60.0);
     }
 
     #[test]

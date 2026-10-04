@@ -38,6 +38,7 @@ use Pam\Native\ImageResizeMethod;
 use Pam\Native\InputAutoCapitalize;
 use Pam\Native\InputAutofillImportance;
 use Pam\Native\InputFormat;
+use Pam\Native\ScrollIndicatorStyle;
 use Pam\Native\InputMode;
 use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputSyncMode;
@@ -258,6 +259,7 @@ final class TemplateRenderer
         'refreshIndicatorSize' => PropKey::RefreshIndicatorSize,
         'scrollEnabled' => PropKey::ScrollEnabled,
         'showsScrollIndicator' => PropKey::ShowsScrollIndicator,
+        'scrollIndicatorStyle' => PropKey::ScrollIndicatorStyle,
         'showsHorizontalScrollIndicator' => PropKey::ShowsScrollIndicator,
         'showsVerticalScrollIndicator' => PropKey::ShowsScrollIndicator,
         'contentOffsetX' => PropKey::ScrollContentOffsetX,
@@ -443,6 +445,11 @@ final class TemplateRenderer
         'keyboardVerticalOffset' => PropKey::KeyboardVerticalOffset,
         'keyboardAvoidingEnabled' => PropKey::KeyboardAvoidingEnabled,
         'columns' => PropKey::GridColumns,
+        'gridMinColumnWidth' => PropKey::GridMinColumnWidth,
+        'gridTemplate' => PropKey::GridTemplate,
+        'span2xl' => PropKey::GridSpan2xl,
+        'offset2xl' => PropKey::GridOffset2xl,
+        'order2xl' => PropKey::GridOrder2xl,
         'span' => PropKey::GridSpan,
         'spanSm' => PropKey::GridSpanSm,
         'spanMd' => PropKey::GridSpanMd,
@@ -915,7 +922,7 @@ final class TemplateRenderer
             $inheritedStyles = [];
         }
         $attributes = [
-            ...$inheritedStyles,
+            ...self::styleAttributes($inheritedStyles, 'inherited styles'),
             ...self::scopedStyleAttributes(
                 $tag,
                 $resolvedClass,
@@ -1051,8 +1058,12 @@ final class TemplateRenderer
         $ownHandlers = [];
         foreach (self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
+                $eventRaw = $attributes[$name];
+                if (!is_string($eventRaw) && !is_bool($eventRaw)) {
+                    throw new RuntimeException("Invalid template event expression {$name}.");
+                }
                 $ownHandlers[$event->value] = self::handler(
-                    $attributes[$name],
+                    $eventRaw,
                     $event,
                     $scope,
                     $data,
@@ -1064,6 +1075,9 @@ final class TemplateRenderer
             foreach ($attributes as $name => $raw) {
                 if (!str_starts_with($name, '@')) {
                     continue;
+                }
+                if (!is_string($raw) && !is_bool($raw)) {
+                    throw new RuntimeException("Invalid component event expression {$name}.");
                 }
                 $event = substr($name, 1);
                 if (
@@ -1156,17 +1170,26 @@ final class TemplateRenderer
         }
         if ($tag === 'Animated' && isset($values['animation'])) {
             $animation = self::stringValue($values['animation'], 'Animated animation');
-            $keyframes = $data['__pamStyles']['keyframes'][$animation] ?? null;
+            $animationSheet = $data['__pamStyles'] ?? null;
+            $knownKeyframes = is_array($animationSheet) ? ($animationSheet['keyframes'] ?? null) : null;
+            $keyframes = is_array($knownKeyframes) ? ($knownKeyframes[$animation] ?? null) : null;
             if (!is_array($keyframes)) {
                 throw new RuntimeException("Unknown PAM keyframes {$animation}.");
             }
-            $values['keyframes'] = array_map(
-                static fn (array $frame): array => [
-                    'offset' => $frame['offset'] ?? 0.0,
-                    ...(is_array($frame['styles'] ?? null) ? $frame['styles'] : []),
-                ],
-                $keyframes,
-            );
+            $frames = [];
+            foreach ($keyframes as $frame) {
+                if (!is_array($frame)) throw new RuntimeException('Invalid PAM keyframe.');
+                $offset = $frame['offset'] ?? 0.0;
+                if ((!is_int($offset) && !is_float($offset)) || !is_finite((float) $offset)
+                    || $offset < 0.0 || $offset > 1.0) {
+                    throw new RuntimeException('Invalid PAM keyframe offset.');
+                }
+                $frames[] = [
+                    ...self::styleAttributes($frame['styles'] ?? [], 'keyframe styles'),
+                    'offset' => $offset,
+                ];
+            }
+            $values['keyframes'] = $frames;
             unset($values['animation']);
         }
         $contract = $factory !== null ? TemplateRegistry::tagContract($tag) : null;
@@ -1483,6 +1506,7 @@ final class TemplateRenderer
         return $element;
     }
 
+    /** @param array<string, mixed> $values */
     private static function mediaCacheAttributes(
         Image|MediaPlayer $element,
         array $values,
@@ -1582,7 +1606,7 @@ final class TemplateRenderer
             'networkfirst' => MediaCachePolicy::NetworkFirst,
             'cacheonly' => MediaCachePolicy::CacheOnly,
             'stalewhilerevalidate' => MediaCachePolicy::StaleWhileRevalidate,
-            default => throw new RuntimeException("Unknown media cache policy {$value}."),
+            default => throw new RuntimeException("Unknown media cache policy {$normalized}."),
         };
     }
 
@@ -1596,7 +1620,7 @@ final class TemplateRenderer
             'normal' => MediaPriority::Normal,
             'visible' => MediaPriority::Visible,
             'immediate' => MediaPriority::Immediate,
-            default => throw new RuntimeException("Unknown media priority {$value}."),
+            default => throw new RuntimeException("Unknown media priority {$normalized}."),
         };
     }
 
@@ -1976,6 +2000,11 @@ final class TemplateRenderer
     private static function propertyValue(PropKey $key, mixed $value): string|int|float|bool|null
     {
         return match ($key) {
+            PropKey::ScrollIndicatorStyle => self::named($value, [
+                'auto' => ScrollIndicatorStyle::Auto->value,
+                'dark' => ScrollIndicatorStyle::Dark->value,
+                'light' => ScrollIndicatorStyle::Light->value,
+            ]),
             PropKey::BackgroundColor,
             PropKey::TextColor,
             PropKey::BorderColor,
@@ -2336,26 +2365,35 @@ final class TemplateRenderer
                 'none' => AnimationKind::None->value,
                 'pulse' => AnimationKind::Pulse->value,
             ]),
+            PropKey::GridTemplate => ($value instanceof \Pam\Native\GridTemplate
+                ? $value
+                : \Pam\Native\GridTemplate::fromWire(is_string($value)
+                    ? $value
+                    : throw new InvalidArgumentException('gridTemplate requires a GridTemplate or serialized string.')))->toWire(),
             PropKey::GridColumns,
             PropKey::GridSpan,
             PropKey::GridSpanSm,
             PropKey::GridSpanMd,
             PropKey::GridSpanLg,
             PropKey::GridSpanXl,
+            PropKey::GridSpan2xl,
             => max(1, min(64, (int) self::floatValue($value, "Grid {$key->name}"))),
             PropKey::GridOffset,
             PropKey::GridOffsetSm,
             PropKey::GridOffsetMd,
             PropKey::GridOffsetLg,
             PropKey::GridOffsetXl,
+            PropKey::GridOffset2xl,
             PropKey::GridOrder,
             PropKey::GridOrderSm,
             PropKey::GridOrderMd,
             PropKey::GridOrderLg,
             PropKey::GridOrderXl,
+            PropKey::GridOrder2xl,
             => max(0, (int) self::floatValue($value, "Grid {$key->name}")),
             PropKey::GridColumnGap,
             PropKey::GridRowGap,
+            PropKey::GridMinColumnWidth,
             => max(0.0, self::floatValue($value, "Grid {$key->name}")),
             PropKey::PressAndroidDisableSound,
             PropKey::RippleBorderless,
@@ -2558,6 +2596,7 @@ final class TemplateRenderer
         ];
     }
 
+    /** @return array<array-key, mixed> */
     private static function safeStyleMetadata(mixed $value, string $source, int $depth = 0): array
     {
         if (!is_array($value) || $depth > 12 || count($value) > 10_000) {
@@ -2565,9 +2604,6 @@ final class TemplateRenderer
         }
         $safe = [];
         foreach ($value as $key => $entry) {
-            if (!is_string($key) && !is_int($key)) {
-                throw new RuntimeException("Invalid Language 2 style IR key in {$source}.");
-            }
             if (is_array($entry)) {
                 $safe[$key] = self::safeStyleMetadata($entry, $source, $depth + 1);
             } elseif (is_string($entry) || is_int($entry) || is_float($entry) || is_bool($entry) || $entry === null) {
@@ -2581,17 +2617,23 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $data
-     * @return array<string, array<string, string|bool>>
+     * @return array<string, array<string, string|int|bool>>
      */
     private static function styleSheetClasses(array $data): array
     {
         $sheet = $data['__pamStyles'] ?? null;
         $classes = is_array($sheet) ? ($sheet['classes'] ?? null) : null;
-        $known = is_array($classes) ? $classes : [];
+        $known = self::validatedStyleRules(is_array($classes) ? $classes : [], '<scoped-classes>');
         if (is_array($sheet)) {
-            foreach (($sheet['cascadeRules'] ?? []) as $rule) {
-                foreach (($rule['selector']['compounds'] ?? []) as $compound) {
-                    foreach (($compound['classes'] ?? []) as $class) {
+            $rules = $sheet['cascadeRules'] ?? [];
+            if (!is_array($rules)) throw new RuntimeException('Invalid scoped class rules.');
+            foreach ($rules as $rule) {
+                if (!is_array($rule) || !is_array($rule['selector'] ?? null)) continue;
+                $compounds = $rule['selector']['compounds'] ?? [];
+                if (!is_array($compounds)) continue;
+                foreach ($compounds as $compound) {
+                    if (!is_array($compound) || !is_array($compound['classes'] ?? null)) continue;
+                    foreach ($compound['classes'] as $class) {
                         if (is_string($class) && $class !== '') {
                             $known[$class] ??= [];
                         }
@@ -2604,7 +2646,8 @@ final class TemplateRenderer
 
     /**
      * @param array<string, mixed> $data
-     * @return array<string, string|int|bool>
+     * @param array<string, mixed> $rawAttributes
+     * @return array<string, string|int|float|bool>
      */
     private static function scopedStyleAttributes(
         string $tag,
@@ -2617,7 +2660,7 @@ final class TemplateRenderer
         if (!is_array($sheet)) {
             return [];
         }
-        $sheet = self::responsiveStyleSheet(self::reactiveStyleSheet($sheet), $data);
+        $sheet = self::responsiveStyleSheet(self::reactiveStyleSheet(self::styleMap($sheet, 'scoped sheet')), $data);
         $descriptor = self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
         $cascadeRules = is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : [];
         $attributes = $cascadeRules !== []
@@ -2701,7 +2744,9 @@ final class TemplateRenderer
                     self::value($rawValue, $scope, $data),
                     "recipe variant {$variant}",
                 );
-                $styles = $recipe['variants'][$variant][$choice] ?? null;
+                $recipeVariants = $recipe['variants'] ?? null;
+                $choices = is_array($recipeVariants) ? ($recipeVariants[$variant] ?? null) : null;
+                $styles = is_array($choices) ? ($choices[$choice] ?? null) : null;
                 if (!is_array($styles)) {
                     throw new RuntimeException(
                         "Unknown PAM recipe variant {$recipeName}.{$variant}={$choice}.",
@@ -2717,7 +2762,8 @@ final class TemplateRenderer
             $selectors[] = '.'.$class;
         }
         foreach ($selectors as $selector) {
-            $pressed = $stateRules[$selector]['pressed'] ?? null;
+            $selectorStates = $stateRules[$selector] ?? null;
+            $pressed = is_array($selectorStates) ? ($selectorStates['pressed'] ?? null) : null;
             if (!is_array($pressed)) {
                 continue;
             }
@@ -2732,7 +2778,9 @@ final class TemplateRenderer
             }
         }
         $nativeStates = [];
-        foreach (($sheet['stateRules'] ?? []) as $stateRule) {
+        $compiledStateRules = $sheet['stateRules'] ?? [];
+        if (!is_array($compiledStateRules)) throw new RuntimeException('Invalid compiled state rules.');
+        foreach ($compiledStateRules as $stateRule) {
             if (!is_array($stateRule)
                 || !is_array($stateRule['selector'] ?? null)
                 || !self::styleSelectorMatches(
@@ -2745,7 +2793,7 @@ final class TemplateRenderer
             $state = $stateRule['state'] ?? null;
             $declarations = $stateRule['declarations'] ?? [];
             if (!is_string($state) || !is_array($declarations)) continue;
-            $declarations = self::resolveDynamicStyles($declarations, $data);
+            $declarations = self::resolveDynamicStyles(self::styleAttributes($declarations, 'state declarations'), $data);
             if ($state === 'pressed') {
                 if (isset($declarations['opacity'])) $attributes['pressedOpacity'] = $declarations['opacity'];
                 if (isset($declarations['scaleX'], $declarations['scaleY']) && $declarations['scaleX'] === $declarations['scaleY']) {
@@ -2769,7 +2817,7 @@ final class TemplateRenderer
                 $attributes = [...$attributes, ...$declarations];
             }
             foreach ($declarations as $attribute => $value) {
-                $property = is_string($attribute) ? (self::PROPERTIES[$attribute] ?? null) : null;
+                $property = self::PROPERTIES[$attribute] ?? null;
                 if ($property !== null && in_array($property, [
                     PropKey::Opacity,
                     PropKey::ScaleX,
@@ -2792,10 +2840,14 @@ final class TemplateRenderer
             );
         }
 
-        return self::resolveDynamicStyles($attributes, $data);
+        return self::resolveDynamicStyles(self::styleAttributes($attributes, 'scoped attributes'), $data);
     }
 
-    /** @param array<string, mixed> $raw @param array<string, mixed> $data @return array<string,mixed> */
+    /**
+     * @param array<string, mixed> $raw
+     * @param array<string, mixed> $data
+     * @return array{tag: string, id: string|null, classes: list<string>, attributes: array<string, mixed>, pseudos: list<string>}
+     */
     private static function styleNodeDescriptor(string $tag, ?string $classes, array $raw, ?object $scope, array $data): array
     {
         $attributes = [];
@@ -2820,10 +2872,16 @@ final class TemplateRenderer
         if (($attributes['value'] ?? null) === '' || ($attributes['items'] ?? null) === []) {
             $pseudos[] = 'empty';
         }
-        return ['tag' => $tag, 'id' => isset($attributes['id']) ? (string) $attributes['id'] : null, 'classes' => $classList, 'attributes' => $attributes, 'pseudos' => $pseudos];
+        $id = $attributes['id'] ?? null;
+        return ['tag' => $tag, 'id' => is_scalar($id) ? (string) $id : null, 'classes' => $classList, 'attributes' => $attributes, 'pseudos' => $pseudos];
     }
 
-    /** @param list<mixed> $rules @param array<string,mixed> $node @param array<string,mixed> $data @return array<string,string|int|bool> */
+    /**
+     * @param array<array-key, mixed> $rules
+     * @param array<string, mixed> $node
+     * @param array<string, mixed> $data
+     * @return array<string, string|int|bool>
+     */
     private static function cascadeStyleAttributes(array $rules, array $node, array $data): array
     {
         $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
@@ -2833,29 +2891,50 @@ final class TemplateRenderer
                 continue;
             }
             $specificity = $rule['selector']['specificity'] ?? [0, 0, 0];
-            $score = ((int) ($specificity[0] ?? 0) * 1_000_000) + ((int) ($specificity[1] ?? 0) * 1_000) + (int) ($specificity[2] ?? 0);
-            foreach (($rule['declarations'] ?? []) as $attribute => $entry) {
+            if (!is_array($specificity) || count($specificity) !== 3
+                || !is_int($specificity[0] ?? null) || !is_int($specificity[1] ?? null)
+                || !is_int($specificity[2] ?? null) || min($specificity) < 0) {
+                throw new RuntimeException('Invalid selector specificity.');
+            }
+            $declarations = $rule['declarations'] ?? [];
+            $order = $rule['order'] ?? 0;
+            if (!is_array($declarations) || !is_int($order)) {
+                throw new RuntimeException('Invalid cascade declarations or order.');
+            }
+            foreach ($declarations as $attribute => $entry) {
                 if (!is_array($entry) || !array_key_exists('value', $entry)) {
                     continue;
                 }
-                $rank = [(bool) ($entry['important'] ?? false) ? 1 : 0, $score, (int) ($rule['order'] ?? 0)];
+                $value = $entry['value'];
+                if (!is_string($attribute) || (!is_string($value) && !is_int($value) && !is_bool($value))) {
+                    throw new RuntimeException('Invalid cascade declaration value.');
+                }
+                $rank = [(bool) ($entry['important'] ?? false) ? 1 : 0,
+                    $specificity[0], $specificity[1], $specificity[2], $order];
                 if (!isset($winners[$attribute]) || $rank >= $winners[$attribute]['rank']) {
-                    $winners[$attribute] = ['rank' => $rank, 'value' => $entry['value']];
+                    $winners[$attribute] = ['rank' => $rank, 'value' => $value];
                 }
             }
         }
-        return array_map(static fn (array $winner): mixed => $winner['value'], $winners);
+        return array_map(static fn (array $winner): string|int|bool => $winner['value'], $winners);
     }
 
-    /** @param array<string,mixed> $selector @param array<string,mixed> $node @param list<mixed> $ancestors */
+    /**
+     * @param array<array-key, mixed> $selector
+     * @param array<string, mixed> $node
+     * @param array<array-key, mixed> $ancestors
+     */
     private static function styleSelectorMatches(array $selector, array $node, array $ancestors): bool
     {
         $compounds = $selector['compounds'] ?? null;
         if (!is_array($compounds) || $compounds === []) return false;
+        $compounds = array_values($compounds);
+        $ancestors = array_values($ancestors);
         $index = count($compounds) - 1;
         if (!self::styleCompoundMatches($compounds[$index], $node)) return false;
         $ancestorIndex = count($ancestors) - 1;
         while ($index > 0) {
+            if (!is_array($compounds[$index])) return false;
             $relation = $compounds[$index]['combinator'] ?? 'descendant';
             $index--;
             if ($relation === 'child') {
@@ -2873,24 +2952,35 @@ final class TemplateRenderer
         return true;
     }
 
-    /** @param array<string,mixed> $compound */
-    private static function styleCompoundMatches(array $compound, mixed $node): bool
+    private static function styleCompoundMatches(mixed $compound, mixed $node): bool
     {
-        if (!is_array($node)) return false;
+        if (!is_array($compound) || !is_array($node)) return false;
         $tag = $compound['tag'] ?? null;
-        if ($tag !== null && $tag !== '*' && strcasecmp((string) ($node['tag'] ?? ''), (string) $tag) !== 0) return false;
+        $nodeTag = $node['tag'] ?? '';
+        if ($tag !== null && $tag !== '*' && (!is_string($tag) || !is_string($nodeTag) || strcasecmp($nodeTag, $tag) !== 0)) return false;
         if (($compound['id'] ?? null) !== null && ($node['id'] ?? null) !== $compound['id']) return false;
-        foreach (($compound['classes'] ?? []) as $class) if (!in_array($class, $node['classes'] ?? [], true)) return false;
-        foreach (($compound['pseudos'] ?? []) as $pseudo) {
-            if (in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $node['pseudos'] ?? [], true)) return false;
+        $classes = $compound['classes'] ?? [];
+        $nodeClasses = $node['classes'] ?? [];
+        $pseudos = $compound['pseudos'] ?? [];
+        $nodePseudos = $node['pseudos'] ?? [];
+        $conditions = $compound['attributes'] ?? [];
+        if (!is_array($classes) || !is_array($nodeClasses) || !is_array($pseudos)
+            || !is_array($nodePseudos) || !is_array($conditions)) return false;
+        foreach ($classes as $class) if (!is_string($class) || !in_array($class, $nodeClasses, true)) return false;
+        foreach ($pseudos as $pseudo) {
+            if (!is_string($pseudo) || in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $nodePseudos, true)) return false;
         }
-        foreach (($compound['attributes'] ?? []) as $condition) {
+        foreach ($conditions as $condition) {
             $nodeAttributes = $node['attributes'] ?? [];
-            if (!is_array($nodeAttributes) || !array_key_exists($condition['name'], $nodeAttributes)) return false;
+            if (!is_array($condition) || !is_string($condition['name'] ?? null)
+                || !is_array($nodeAttributes) || !array_key_exists($condition['name'], $nodeAttributes)) return false;
             $operator = $condition['operator'] ?? '';
             if ($operator === '') continue;
-            $actual = (string) $nodeAttributes[$condition['name']];
-            $expected = (string) ($condition['value'] ?? '');
+            $actualValue = $nodeAttributes[$condition['name']];
+            $expectedValue = $condition['value'] ?? '';
+            if ((!is_scalar($actualValue) && $actualValue !== null) || !is_scalar($expectedValue)) return false;
+            $actual = (string) $actualValue;
+            $expected = (string) $expectedValue;
             $matches = match ($operator) {
                 '=' => $actual === $expected,
                 '~=' => in_array($expected, preg_split('/\s+/', $actual) ?: [], true),
@@ -2904,15 +2994,15 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|int|bool> $attributes
+     * @param array<string, string|int|float|bool> $attributes
      * @param array<string, mixed> $data
      * @return array<string, string|int|float|bool>
      */
     private static function resolveDynamicStyles(array $attributes, array $data): array
     {
         $metrics = Runtime::windowMetrics();
-        $containerWidth = $data['__pamContainerWidth'] ?? $metrics->width;
-        $containerHeight = $data['__pamContainerHeight'] ?? $metrics->height;
+        $containerWidth = self::styleDimension($data['__pamContainerWidth'] ?? $metrics->width, 'container width');
+        $containerHeight = self::styleDimension($data['__pamContainerHeight'] ?? $metrics->height, 'container height');
         $provided = is_array($data['__pamStyleEnvironment'] ?? null)
             ? $data['__pamStyleEnvironment']
             : [];
@@ -2920,10 +3010,10 @@ final class TemplateRenderer
             'width' => $metrics->width,
             'height' => $metrics->height,
             'fontScale' => is_numeric($provided['fontScale'] ?? null)
-                ? (float) $provided['fontScale']
+                ? self::styleDimension($provided['fontScale'], 'font scale')
                 : $metrics->fontScale,
             'rootFontSize' => is_numeric($provided['rootFontSize'] ?? null)
-                ? (float) $provided['rootFontSize']
+                ? self::styleDimension($provided['rootFontSize'], 'root font size')
                 : 16.0,
             'env.safe-area-inset-top' => $metrics->safeAreaTop,
             'env.safe-area-inset-right' => $metrics->safeAreaRight,
@@ -2932,6 +3022,9 @@ final class TemplateRenderer
         ];
         foreach ($provided as $name => $value) {
             if (is_string($name) && (is_int($value) || is_float($value))) {
+                if (!is_finite((float) $value)) {
+                    throw new InvalidArgumentException("Nonfinite style environment value: {$name}.");
+                }
                 $environment[$name] = $value;
             }
         }
@@ -2952,26 +3045,51 @@ final class TemplateRenderer
                 continue;
             }
             $environment['reference'] = isset($vertical[$name])
-                ? (float) $containerHeight
-                : (float) $containerWidth;
+                ? $containerHeight
+                : $containerWidth;
             $attributes[$name] = StyleValueCompiler::resolve($value, $environment);
         }
 
         return $attributes;
     }
 
-    /** @param array<string,mixed> $sheet @return array<string,mixed> */
+    private static function styleDimension(mixed $value, string $label): float
+    {
+        if (!is_numeric($value) || !is_finite((float) $value) || (float) $value < 0.0) {
+            throw new InvalidArgumentException("Invalid style {$label}: expected a finite nonnegative number.");
+        }
+        return (float) $value;
+    }
+
+    /**
+     * @param array<string, mixed> $sheet
+     * @return array<string, mixed>
+     */
     private static function reactiveStyleSheet(array $sheet): array
     {
         $overrides = StyleVariables::all();
         $bindings = $sheet['variableRules'] ?? [];
         if ($overrides === [] || !is_array($bindings) || $bindings === []) return $sheet;
-        $fingerprint = is_string($sheet['styleFingerprint'] ?? null)
+        $fingerprint = is_string($sheet['styleFingerprint'] ?? null) && $sheet['styleFingerprint'] !== ''
             ? $sheet['styleFingerprint']
-            : hash('sha256', serialize($bindings));
+            : hash('sha256', serialize($sheet));
         $key = $fingerprint.':'.StyleVariables::revision();
         if (isset(self::$reactiveStyleCache[$key])) return self::$reactiveStyleCache[$key];
-        $variables = is_array($sheet['variables'] ?? null) ? $sheet['variables'] : [];
+        $variables = [];
+        $rawVariables = $sheet['variables'] ?? [];
+        if (!is_array($rawVariables)) {
+            throw new RuntimeException('Invalid reactive style variables.');
+        }
+        foreach ($rawVariables as $name => $value) {
+            if (!is_string($name) || !is_string($value)) {
+                throw new RuntimeException('Reactive style variables require string names and values.');
+            }
+            $variables[$name] = $value;
+        }
+        $rules = $sheet['cascadeRules'] ?? [];
+        if (!is_array($rules)) {
+            throw new RuntimeException('Invalid reactive style cascade rules.');
+        }
         foreach ($overrides as $name => $value) $variables[$name] = $value;
         foreach ($bindings as $binding) {
             if (!is_array($binding)
@@ -2983,20 +3101,37 @@ final class TemplateRenderer
                 $variables,
                 '<reactive-style-variable>',
             );
-            foreach (($sheet['cascadeRules'] ?? []) as $index => $rule) {
+            foreach ($rules as $index => $rule) {
                 if (!is_array($rule)
                     || ($rule['order'] ?? null) !== $binding['order']
+                    || !is_array($rule['selector'] ?? null)
                     || ($rule['selector']['source'] ?? null) !== $binding['selector']) continue;
-                foreach ($declarations as $attribute => $value) {
-                    $sheet['cascadeRules'][$index]['declarations'][$attribute]['value'] = $value;
+                $ruleDeclarations = $rule['declarations'] ?? [];
+                if (!is_array($ruleDeclarations)) {
+                    throw new RuntimeException('Invalid reactive style declarations.');
                 }
+                foreach ($declarations as $attribute => $value) {
+                    $declaration = $ruleDeclarations[$attribute] ?? [];
+                    if (!is_array($declaration)) {
+                        throw new RuntimeException('Invalid reactive style declaration.');
+                    }
+                    $declaration['value'] = $value;
+                    $ruleDeclarations[$attribute] = $declaration;
+                }
+                $rule['declarations'] = $ruleDeclarations;
+                $rules[$index] = $rule;
             }
         }
+        $sheet['cascadeRules'] = $rules;
         if (count(self::$reactiveStyleCache) >= 64) self::$reactiveStyleCache = [];
         return self::$reactiveStyleCache[$key] = $sheet;
     }
 
-    /** @param array<string, mixed> $sheet @param array<string, mixed> $data */
+    /**
+     * @param array<string, mixed> $sheet
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
     private static function responsiveStyleSheet(array $sheet, array $data): array
     {
         $queries = $sheet['queries'] ?? [];
@@ -3043,31 +3178,41 @@ final class TemplateRenderer
             if (!self::queryMatches($condition, $ast, $environment)) {
                 continue;
             }
-            $queryStyles = self::reactiveStyleSheet($query['styles']);
+            $queryStyles = self::reactiveStyleSheet(self::styleMap($query['styles'], 'responsive sheet'));
             foreach (['classes', 'tags'] as $group) {
-                $incoming = $queryStyles[$group] ?? [];
-                if (!is_array($incoming)) {
-                    continue;
-                }
+                $incoming = self::validatedStyleRules($queryStyles[$group] ?? [], '<responsive-style>');
+                $base = self::validatedStyleRules($sheet[$group] ?? [], '<base-style>');
                 foreach ($incoming as $selector => $styles) {
-                    if (is_string($selector) && is_array($styles)) {
-                        $sheet[$group][$selector] = [
-                            ...($sheet[$group][$selector] ?? []),
-                            ...$styles,
-                        ];
-                    }
+                    $base[$selector] = [...($base[$selector] ?? []), ...$styles];
                 }
+                $sheet[$group] = $base;
             }
             $incomingRules = $queryStyles['cascadeRules'] ?? [];
             if (is_array($incomingRules)) {
-                $baseOrder = count(is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : []);
+                $baseRules = $sheet['cascadeRules'] ?? [];
+                if (!is_array($baseRules)) {
+                    throw new RuntimeException('Invalid responsive base cascade.');
+                }
+                $baseOrder = 0;
+                foreach ($baseRules as $baseRule) {
+                    $order = is_array($baseRule) ? ($baseRule['order'] ?? 0) : null;
+                    if (!is_int($order) || $order < 0 || $order === PHP_INT_MAX) {
+                        throw new RuntimeException('Invalid responsive base rule order.');
+                    }
+                    $baseOrder = max($baseOrder, $order + 1);
+                }
                 foreach ($incomingRules as $incomingRule) {
                     if (!is_array($incomingRule)) {
                         continue;
                     }
-                    $incomingRule['order'] = $baseOrder + (int) ($incomingRule['order'] ?? 0);
-                    $sheet['cascadeRules'][] = $incomingRule;
+                    $order = $incomingRule['order'] ?? 0;
+                    if (!is_int($order) || $order < 0 || $order > PHP_INT_MAX - $baseOrder) {
+                        throw new RuntimeException('Invalid responsive rule order.');
+                    }
+                    $incomingRule['order'] = $baseOrder + $order;
+                    $baseRules[] = $incomingRule;
                 }
+                $sheet['cascadeRules'] = $baseRules;
             }
             // Query rules are later than base rules by definition.
             $sheet['classCascade'] = [];
@@ -3075,13 +3220,49 @@ final class TemplateRenderer
         return $sheet;
     }
 
+    /** @return array<string, string|int|float|bool> */
+    private static function styleAttributes(mixed $value, string $label): array
+    {
+        if (!is_array($value)) throw new RuntimeException("Invalid {$label}.");
+        $attributes = [];
+        foreach ($value as $key => $entry) {
+            if (!is_string($key) || !is_scalar($entry) || (is_float($entry) && !is_finite($entry))) {
+                throw new RuntimeException("Invalid {$label} attribute.");
+            }
+            $attributes[$key] = $entry;
+        }
+        return $attributes;
+    }
+
+    /** @return array<string, mixed> */
+    private static function styleMap(mixed $value, string $label): array
+    {
+        if (!is_array($value)) throw new RuntimeException("Invalid {$label}.");
+        $map = [];
+        foreach ($value as $key => $entry) {
+            if (!is_string($key)) throw new RuntimeException("Invalid {$label} key.");
+            $map[$key] = $entry;
+        }
+        return $map;
+    }
+
+    /**
+     * @param array<array-key, mixed>|null $ast
+     * @param array<array-key, mixed> $environment
+     */
     private static function queryMatches(
         string $condition,
         ?array $ast,
         array $environment,
     ): bool {
         if ($ast !== null) {
-            return StyleQueryCompiler::matches($ast, $environment);
+            $queryEnvironment = [];
+            foreach ($environment as $key => $value) {
+                if (is_string($key) && (is_scalar($value) || $value === null)) {
+                    $queryEnvironment[$key] = $value;
+                }
+            }
+            return StyleQueryCompiler::matches($ast, $queryEnvironment);
         }
         if (preg_match('/\((min|max)-(width|height):\s*([0-9]+(?:\.[0-9]+)?)(?:dp|px)\)/D', $condition, $match) !== 1) {
             return false;
@@ -3103,13 +3284,13 @@ final class TemplateRenderer
         $sheet = $data['__pamStyles'] ?? null;
         $fonts = is_array($sheet) ? ($sheet['fonts'] ?? null) : null;
 
-        return is_array($fonts) ? $fonts : [];
+        return self::validatedFontFaces(is_array($fonts) ? $fonts : [], '<scoped-style-data>');
     }
 
     /**
-     * @param array<string, string|int|bool> $attributes
+     * @param array<string, string|int|float|bool> $attributes
      * @param array<string, list<array{source: string, weight: string, style: string}>> $fonts
-     * @return array<string, string|int|bool>
+     * @return array<string, string|int|float|bool>
      */
     private static function resolveScopedFont(array $attributes, array $fonts): array
     {
@@ -3330,8 +3511,8 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|bool> $attributes
-     * @return array<string, string|bool>
+     * @param array<string, string|int|bool> $attributes
+     * @return array<string, string|int|bool>
      */
     private static function nativeEventAliases(array $attributes): array
     {
@@ -3397,7 +3578,7 @@ final class TemplateRenderer
     }
 
     /**
-     * @param array<string, string|bool> $attributes
+     * @param array<string, string|int|bool> $attributes
      * @param array<string, mixed> $data
      */
     private static function classValue(

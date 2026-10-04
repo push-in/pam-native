@@ -81,6 +81,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.views.NativeViewRegistry
+import dev.pam.nativeapp.views.NativeChildVisibilityHost
 import org.json.JSONArray
 import java.nio.ByteOrder
 import java.math.BigDecimal
@@ -385,6 +386,7 @@ class PamRenderer(
     private val host: FrameLayout,
     private val dispatchEvent: (Long, Int, ByteArray) -> Unit,
 ) : AutoCloseable {
+    var onNativeChildVisibility: ((Long, Long, Boolean) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
     private val views = LongSparseArray<View>()
     private val nodes = LongSparseArray<NodeState>()
@@ -456,10 +458,14 @@ class PamRenderer(
             }
         }
         val dirtyLayouts = LinkedHashSet<Long>()
+        val createdNodes = LinkedHashSet<Long>()
         batches.forEach { batch ->
             batch.forEach { mutation ->
                 when (mutation) {
-                    is Mutation.Create -> create(mutation.node)
+                    is Mutation.Create -> {
+                        create(mutation.node)
+                        createdNodes += mutation.node.id
+                    }
                     is Mutation.Remove -> remove(mutation.id)
                     is Mutation.Update -> update(mutation.id, mutation.key, mutation.value)
                     is Mutation.Move -> move(mutation.id, mutation.parent, mutation.index)
@@ -478,6 +484,13 @@ class PamRenderer(
         // authored StatusBar color must win at the end of every commit.
         applyMergedStatusBar()
         syncVirtualLists()
+        // A stable row ID/extent does not trigger a RecyclerView rebind when
+        // conditional descendants are inserted. Materialize only affected,
+        // already-mounted cells after all nodes and frames have arrived.
+        createdNodes.mapNotNull(::virtualCellRoot).toSet().forEach { cellRoot ->
+            val holder = virtualCellHolder(cellRoot)
+            if (holder != null) materializeCell(cellRoot, holder)
+        }
         dirtyLayouts.forEach(::applyLayout)
         retainedScrollOffsets.forEach { (id, offset) ->
             if (id !in explicitlyUpdatedScrollOffsets) {
@@ -716,7 +729,9 @@ class PamRenderer(
 
     override fun close() {
         check(Looper.myLooper() == Looper.getMainLooper())
+        onNativeChildVisibility = null
         for (position in 0 until views.size()) {
+            (views.valueAt(position) as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
             (views.valueAt(position) as? PamModalHost)?.close()
         }
         for (position in 0 until nodes.size()) {
@@ -801,7 +816,15 @@ class PamRenderer(
             }
             NodeKind.IMAGE -> PamImageView(context)
             NodeKind.IMAGE_BACKGROUND -> PamImageBackground(context)
-            NodeKind.SCROLL -> PamScrollContainer(context)
+            NodeKind.SCROLL -> PamScrollContainer(
+                context,
+                initialHorizontal = state?.flag(PropKey.SCROLL_HORIZONTAL, false) ?: false,
+                initialPersistentScrollbar = state?.flag(PropKey.SCROLL_PERSISTENT_SCROLLBAR, false) ?: false,
+                initialIndicatorStyle = ScrollIndicatorStyle.fromWire(
+                    state?.integer(PropKey.SCROLL_INDICATOR_STYLE, ScrollIndicatorStyle.AUTO.wireValue.toLong())
+                        ?.toInt() ?: ScrollIndicatorStyle.AUTO.wireValue,
+                ),
+            )
             NodeKind.LIST,
             NodeKind.SECTION_LIST,
             NodeKind.VIRTUAL_LIST,
@@ -848,6 +871,19 @@ class PamRenderer(
                     if (eventProperty != null && custom.properties[eventProperty] != null) {
                         dispatchBytes(custom.id, kind, payload)
                     }
+                }.also { nativeView ->
+                    if (nativeView is NativeChildVisibilityHost) {
+                        nativeView.onChildVisibilityChanged = { child, visible ->
+                            main.post {
+                                if (views[custom.id] === nativeView) {
+                                    val childId = children[custom.id]?.firstOrNull { views[it] === child }
+                                    if (childId != null && nodes[childId]?.parent == custom.id) {
+                                        onNativeChildVisibility?.invoke(custom.id, childId, visible)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -856,6 +892,7 @@ class PamRenderer(
         val state = nodes[id] ?: return
         val removedStatusBar = state.kind == NodeKind.STATUS_BAR
         val view = views[id]
+        (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
         deferredViewportLayouts.remove(id)?.let { (parent, listener) ->
             parent.removeOnLayoutChangeListener(listener)
         }
@@ -1505,6 +1542,14 @@ class PamRenderer(
                 height = (height - reduction).coerceAtLeast(0)
             },
         )
+        // Full-window modal content belongs to the Dialog viewport, not the
+        // activity's engine frame. IME resize can make those heights differ.
+        if (parentView is PamModalHost && parentView.usesWindowSizedContent()) {
+            width = ViewGroup.LayoutParams.MATCH_PARENT
+            height = ViewGroup.LayoutParams.MATCH_PARENT
+            leftPx = 0
+            topPx = 0
+        }
         val current = view.layoutParams as? ViewGroup.MarginLayoutParams
 
         val layoutChanged =
@@ -2206,6 +2251,8 @@ class PamRenderer(
                 )
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(value.flag())
+            PropKey.SCROLL_INDICATOR_STYLE ->
+                (view as? PamScrollContainer)?.setIndicatorStyle(value.integer().toInt())
             PropKey.SCROLL_PAGING_ENABLED ->
                 (view as? PamScrollContainer)?.setPagingEnabled(value.flag())
             PropKey.SCROLL_SNAP_INTERVAL ->
@@ -2511,6 +2558,11 @@ class PamRenderer(
             PropKey.MAX_HEIGHT_PERCENT,
             PropKey.MARGIN_LEFT_AUTO,
             PropKey.GRID_COLUMNS,
+            PropKey.GRID_MIN_COLUMN_WIDTH,
+            PropKey.GRID_TEMPLATE,
+            PropKey.GRID_SPAN2XL,
+            PropKey.GRID_OFFSET2XL,
+            PropKey.GRID_ORDER2XL,
             PropKey.GRID_SPAN,
             PropKey.GRID_SPAN_SM,
             PropKey.GRID_SPAN_MD,
@@ -2786,6 +2838,8 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setFadingEdgeLength(0f)
             PropKey.SCROLL_PERSISTENT_SCROLLBAR ->
                 (view as? PamScrollContainer)?.setPersistentScrollbar(false)
+            PropKey.SCROLL_INDICATOR_STYLE ->
+                (view as? PamScrollContainer)?.setIndicatorStyle(ScrollIndicatorStyle.AUTO.wireValue)
             PropKey.SCROLL_PAGING_ENABLED ->
                 (view as? PamScrollContainer)?.setPagingEnabled(false)
             PropKey.SCROLL_SNAP_INTERVAL ->
@@ -4264,6 +4318,7 @@ class PamRenderer(
                         state.updating = false
                     }
                     state.nativeValue = formatted
+                    state.deferredInputValue = null
                     state.nativeValueAcknowledged = false
                     if (state.properties[PropKey.ON_CHANGE] == null) return
                     when (state.inputSyncMode()) {
@@ -4284,6 +4339,11 @@ class PamRenderer(
                 lastFocusedInput = input
                 if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)
             } else {
+                // A normalized authored value may have arrived while editing.
+                // Apply it only if no newer keystroke invalidated that value.
+                state.deferredInputValue?.let { next ->
+                    applyInputValue(input, state, next)
+                }
                 if (state.inputSyncMode() == INPUT_SYNC_NATIVE || state.inputSyncMode() == INPUT_SYNC_BLUR) {
                     dispatchInput(state)
                 }
@@ -4567,15 +4627,26 @@ class PamRenderer(
             formattedNext != state.nativeValue &&
             !state.nativeValueAcknowledged
         ) {
+            state.deferredInputValue = next
             return
         }
+        state.deferredInputValue = null
         if (input.text.toString() == formattedNext) {
             state.nativeValueAcknowledged = true
             return
         }
         state.updating = true
         input.setText(formattedNext)
-        input.setSelection(input.text.length)
+        // An inactive field should reveal the beginning of its value, not scroll
+        // to a trailing cursor before the user has interacted with it.
+        val requestedStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)?.toInt()
+        val start = (requestedStart ?: if (input.hasFocus()) input.text.length else 0)
+            .coerceIn(0, input.text.length)
+        val end = if (requestedStart != null) {
+            (state.integerOrNull(PropKey.INPUT_SELECTION_END)?.toInt() ?: start)
+                .coerceIn(start, input.text.length)
+        } else start
+        input.setSelection(start, end)
         state.nativeValue = formattedNext
         state.nativeValueAcknowledged = true
         state.updating = false
@@ -6487,7 +6558,7 @@ class PamRenderer(
             2 -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             3 -> InputType.TYPE_CLASS_NUMBER
             4 -> InputType.TYPE_CLASS_PHONE
-            5 -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            5 -> InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
             6 -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             else -> InputType.TYPE_CLASS_TEXT
         }
@@ -6496,12 +6567,14 @@ class PamRenderer(
         input: PamEditText,
         state: NodeState,
     ) {
+        val previousSelectionStart = input.selectionStart
+        val previousSelectionEnd = input.selectionEnd
         val multiline = state.flag(PropKey.MULTILINE, false)
         val secure = state.flag(PropKey.SECURE, false) && !multiline
         val inputMode = state.integer(PropKey.INPUT_MODE, 0L).toInt()
         var type = when (inputMode) {
             INPUT_MODE_DECIMAL ->
-                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL or InputType.TYPE_NUMBER_FLAG_SIGNED
             INPUT_MODE_NUMERIC -> InputType.TYPE_CLASS_NUMBER
             INPUT_MODE_TEL -> InputType.TYPE_CLASS_PHONE
             INPUT_MODE_EMAIL ->
@@ -6639,12 +6712,15 @@ class PamRenderer(
         )
         input.setEditableValue(state.flag(PropKey.INPUT_EDITABLE, true))
 
-        val selectionStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)
-            ?.toInt()
+        val requestedStart = state.integerOrNull(PropKey.INPUT_SELECTION_START)?.toInt()
+        val selectionStart = requestedStart
+            ?: previousSelectionStart.takeIf { it >= 0 }
             ?: return
-        val selectionEnd = state.integerOrNull(PropKey.INPUT_SELECTION_END)
-            ?.toInt()
-            ?: selectionStart
+        val selectionEnd = if (requestedStart != null) {
+            state.integerOrNull(PropKey.INPUT_SELECTION_END)?.toInt() ?: selectionStart
+        } else {
+            previousSelectionEnd
+        }
         val length = input.text.length
         val safeStart = selectionStart.coerceIn(0, length)
         val safeEnd = selectionEnd.coerceIn(safeStart, length)
@@ -6717,6 +6793,7 @@ class PamRenderer(
         }
 
     private fun configureAccessibilityDelegate(view: View, state: NodeState) {
+        val nativeListDelegate = (view as? PamRecyclerList)?.compatAccessibilityDelegate
         val role = state.integer(PropKey.ACCESSIBILITY_ROLE, 1L).toInt()
         val actions = if (state.properties[PropKey.ON_ACCESSIBILITY_ACTION] != null) {
             accessibilityActions(state.textOrNull(PropKey.ACCESSIBILITY_ACTIONS))
@@ -6726,7 +6803,7 @@ class PamRenderer(
         val hint = state.textOrNull(PropKey.ACCESSIBILITY_HINT)
             ?.takeIf(String::isNotEmpty)
         if (role == 1 && actions.isEmpty() && hint == null) {
-            view.accessibilityDelegate = null
+            androidx.core.view.ViewCompat.setAccessibilityDelegate(view, nativeListDelegate)
             return
         }
         if (actions.isNotEmpty()) {
@@ -6737,8 +6814,14 @@ class PamRenderer(
                 host: View,
                 info: AccessibilityNodeInfo,
             ) {
-                super.onInitializeAccessibilityNodeInfo(host, info)
-                info.className = accessibilityClass(role)
+                if (nativeListDelegate != null) {
+                    nativeListDelegate.onInitializeAccessibilityNodeInfo(
+                        host, androidx.core.view.accessibility.AccessibilityNodeInfoCompat.wrap(info),
+                    )
+                } else {
+                    super.onInitializeAccessibilityNodeInfo(host, info)
+                }
+                if (role != 1) info.className = accessibilityClass(role)
                 if (hint != null) {
                     info.hintText = hint
                 }
@@ -6767,7 +6850,8 @@ class PamRenderer(
                     )
                     return true
                 }
-                return super.performAccessibilityAction(host, actionId, arguments)
+                return nativeListDelegate?.performAccessibilityAction(host, actionId, arguments)
+                    ?: super.performAccessibilityAction(host, actionId, arguments)
             }
         }
     }
@@ -7024,6 +7108,7 @@ class PamRenderer(
         var pendingChange: Runnable? = null,
         var nativeValue: String = "",
         var nativeValueAcknowledged: Boolean = true,
+        var deferredInputValue: String? = null,
         var baseText: String = "",
         var pressOpacity: Float = 0.72f,
         var pressScale: Float = 1f,

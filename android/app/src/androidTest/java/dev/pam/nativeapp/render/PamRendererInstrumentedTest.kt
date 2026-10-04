@@ -51,6 +51,232 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun decimalKeyboardAcceptsSignedValuesButDigitKeyboardDoesNot() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                            PropKey.TEST_ID to PropValue.Text("signed-decimal"),
+                            PropKey.KEYBOARD_TYPE to PropValue.Integer(5),
+                        ))),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                        Mutation.Layout(2, Frame(16f, 40f, 200f, 56f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val input = requireNotNull(activity.host.findByTransitionName("signed-decimal")) as EditText
+                    input.text.replace(0, input.text.length, "-7.5")
+                    assertEquals("-7.5", input.text.toString())
+                    renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.KEYBOARD_TYPE, PropValue.Integer(3)))))
+                    input.text.clear()
+                    input.text.replace(0, 0, "-75")
+                    assertEquals("75", input.text.toString())
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun deferredAuthoredValueAppliesOnBlurWithoutOverwritingNewerTyping() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                            PropKey.TEST_ID to PropValue.Text("deferred-value"),
+                            PropKey.VALUE to PropValue.Text("8"),
+                        ))),
+                        Mutation.Create(node(3, 1, NodeKind.INPUT, mapOf(
+                            PropKey.TEST_ID to PropValue.Text("sibling-value"),
+                            PropKey.VALUE to PropValue.Text("3"),
+                        ))),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                        Mutation.Layout(2, Frame(16f, 40f, 200f, 56f)),
+                        Mutation.Layout(3, Frame(16f, 112f, 200f, 56f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val input = requireNotNull(activity.host.findByTransitionName("deferred-value")) as EditText
+                    val sibling = requireNotNull(activity.host.findByTransitionName("sibling-value")) as EditText
+                    assertTrue(input.requestFocus())
+                    input.setText("731")
+                    input.setSelection(1)
+                    renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VALUE, PropValue.Text("20")))))
+                    assertEquals("731", input.text.toString())
+                    assertEquals(1, input.selectionStart)
+                    assertTrue(sibling.requestFocus())
+                    assertEquals("20", input.text.toString())
+                    assertEquals("3", sibling.text.toString())
+
+                    assertTrue(input.requestFocus())
+                    input.setText("732")
+                    renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VALUE, PropValue.Text("21")))))
+                    input.setText("12")
+                    assertTrue(sibling.requestFocus())
+                    assertEquals("12", input.text.toString())
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun virtualListRolesPreserveNativeAccessibilityScrollActions() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        lateinit var list: PamRecyclerList
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val mutations = mutableListOf<Mutation>(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST, mapOf(
+                        PropKey.ACCESSIBILITY_ROLE to PropValue.Integer(31),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 300f, 144f)),
+                )
+                repeat(20) { index ->
+                    val id = index.toLong() + 3
+                    mutations += Mutation.Create(node(id, 2, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("Record $index"),
+                    )))
+                    mutations += Mutation.Layout(id, Frame(0f, index * 48f, 300f, 48f))
+                }
+                mutations += Mutation.SetRoot(1)
+                renderer.commit(listOf(mutations))
+                val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
+                @Suppress("UNCHECKED_CAST")
+                val views = field.get(renderer) as android.util.LongSparseArray<View>
+                list = views[2] as PamRecyclerList
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 144f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 144f))
+                val info = list.createAccessibilityNodeInfo()
+                assertTrue(info.isScrollable)
+                assertTrue(info.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD })
+                assertTrue(list.performAccessibilityAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD, null))
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(600)
+            onMain(instrumentation) {
+                val manager = list.layoutManager as androidx.recyclerview.widget.LinearLayoutManager
+                assertTrue(manager.findFirstVisibleItemPosition() > 0)
+            }
+        } finally {
+            onMain(instrumentation) { renderer.close(); activity.finish() }
+        }
+    }
+
+    @Test
+    fun partiallyVisibleVirtualRowsRemainAccessible() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val list = PamRecyclerList(activity)
+                activity.host.addView(list)
+                list.setRichItems(listOf(1L, 2L), mapOf(1L to 48f, 2L to 48f),
+                    { id, holder -> holder.addView(TextView(activity).apply { text = "Row $id" }) },
+                    { _, holder -> holder.removeAllViews() },
+                )
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 72f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 72f))
+                val second = requireNotNull(list.findViewHolderForAdapterPosition(1)).itemView
+                assertTrue(second.bottom > list.height)
+                assertTrue(second.top < list.height)
+                assertFalse(second.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
+                // A row larger than the entire viewport must remain reachable too.
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 24f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 24f))
+                val first = requireNotNull(list.findViewHolderForAdapterPosition(0)).itemView
+                assertTrue(first.height > list.height)
+                assertFalse(first.importantForAccessibility == View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS)
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun richVirtualCellMountsInsertedChildrenWithoutChangingRowExtent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST)),
+                        Mutation.Create(node(3, 2, NodeKind.PRESSABLE)),
+                        Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 300f, 400f)),
+                        Mutation.Layout(3, Frame(0f, 0f, 300f, 48f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val field = PamRenderer::class.java.getDeclaredField("views")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val views = field.get(renderer) as android.util.LongSparseArray<View>
+                    val list = views[2] as PamRecyclerList
+                    list.measure(
+                        View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                        View.MeasureSpec.makeMeasureSpec(dp(list, 400f), View.MeasureSpec.EXACTLY),
+                    )
+                    list.layout(0, 0, dp(list, 300f), dp(list, 400f))
+                    val row = requireNotNull(views[3]) as ViewGroup
+                    val holder = requireNotNull(list.findViewHolderForAdapterPosition(0)).itemView
+                    repeat(2) {
+                        renderer.commit(listOf(listOf(
+                            Mutation.Create(node(4, 3, NodeKind.TEXT, mapOf(
+                                PropKey.TEXT to PropValue.Text("Selected"),
+                            ))),
+                            Mutation.Layout(4, Frame(8f, 8f, 80f, 24f)),
+                        )))
+                        val inserted = requireNotNull(views[4]) as TextView
+                        assertSame(row, inserted.parent)
+                        assertEquals("Selected", inserted.text.toString())
+                        assertEquals(dp(list, 24f), inserted.layoutParams.height)
+                        assertSame(holder, list.findViewHolderForAdapterPosition(0)?.itemView)
+                        assertEquals(1, row.childCount)
+                        renderer.commit(listOf(listOf(Mutation.Remove(4))))
+                        assertNull(views[4])
+                        assertEquals(0, row.childCount)
+                    }
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun flattenedRowButtonsKeepHeightWhenColumnViewportShrinks() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -91,6 +317,59 @@ class PamRendererInstrumentedTest {
                         Mutation.Layout(4, Frame(0f, 100f, 112f, 48f)),
                     )))
                     assertEquals((48 * density).roundToInt(), button.layoutParams.height)
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun fullWindowModalChildIgnoresStaleActivityFrameAfterViewportResize() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.MODAL, mapOf(
+                            PropKey.VISIBLE to PropValue.Flag(false),
+                            PropKey.MODAL_PRESENTATION to PropValue.Integer(1),
+                        ))),
+                        Mutation.Create(node(3, 2, NodeKind.VIEW, mapOf(
+                            PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                        ))),
+                        Mutation.Layout(1, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.Layout(3, Frame(0f, 0f, 360f, 760f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    // The closed modal is not in the activity view tree. Inspect
+                    // its actual renderer-owned child without exposing a public API.
+                    val field = PamRenderer::class.java.getDeclaredField("views")
+                    field.isAccessible = true
+                    @Suppress("UNCHECKED_CAST")
+                    val views = field.get(renderer) as android.util.LongSparseArray<View>
+                    val child = requireNotNull(views[3])
+                    val content = child.parent as ViewGroup
+                    for (viewportHeight in listOf(1930, 1177, 1930)) {
+                        renderer.commit(listOf(listOf(
+                            Mutation.Layout(3, Frame(0f, 0f, 360f, 760f)),
+                        )))
+                        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, child.layoutParams.height)
+                        content.measure(
+                            View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(viewportHeight, View.MeasureSpec.EXACTLY),
+                        )
+                        content.layout(0, 0, 1080, viewportHeight)
+                        assertEquals(viewportHeight, child.height)
+                        assertEquals(0, child.top)
+                        assertEquals(1080, child.width)
+                    }
                 } finally {
                     renderer.close()
                 }
@@ -149,6 +428,89 @@ class PamRendererInstrumentedTest {
             assertEquals(21, host.width - child.right)
             assertEquals(13, host.height - child.bottom)
             assertEquals(21, host.paddingLeft)
+        }
+    }
+
+    @Test
+    fun passwordVisibilityPreservesCursorAndSelectionUnlessExplicitlyControlled() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.SECURE to PropValue.Flag(true),
+                        PropKey.TEST_ID to PropValue.Text("password-selection"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(16f, 40f, 328f, 56f)),
+                    Mutation.SetRoot(1),
+                )))
+                val input = requireNotNull(activity.host.findByTransitionName("password-selection")) as EditText
+                input.requestFocus()
+                input.setText("PAM_AUDIT_2026")
+                for ((start, end) in listOf(13 to 13, 4 to 9)) {
+                    input.setSelection(start, end)
+                    for (secure in listOf(false, true)) {
+                        renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.SECURE, PropValue.Flag(secure)))))
+                        assertEquals("PAM_AUDIT_2026", input.text.toString())
+                        assertEquals(start, input.selectionStart)
+                        assertEquals(end, input.selectionEnd)
+                    }
+                }
+                renderer.commit(listOf(listOf(
+                    Mutation.Update(2, PropKey.INPUT_SELECTION_START, PropValue.Integer(2)),
+                    Mutation.Update(2, PropKey.INPUT_SELECTION_END, PropValue.Integer(5)),
+                    Mutation.Update(2, PropKey.SECURE, PropValue.Flag(false)),
+                )))
+                assertEquals(2, input.selectionStart)
+                assertEquals(5, input.selectionEnd)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
+    fun inactiveInputStartsAtLeadingTextAndHonorsControlledSelection() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("inactive-value"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(2, Frame(16f, 40f, 200f, 56f)),
+                    Mutation.SetRoot(1),
+                )))
+                val input = requireNotNull(activity.host.findByTransitionName("inactive-value")) as EditText
+                input.isFocusable = false
+                renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VALUE,
+                    PropValue.Text("Search invoices, customers and documents across all workspaces")))))
+                assertEquals(0, input.selectionStart)
+                assertEquals(0, input.selectionEnd)
+                input.isFocusableInTouchMode = true
+                assertTrue(input.requestFocus())
+                renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VALUE, PropValue.Text("Edited query")))))
+                assertEquals(input.text.length, input.selectionStart)
+                renderer.commit(listOf(listOf(
+                    Mutation.Update(2, PropKey.INPUT_SELECTION_START, PropValue.Integer(2)),
+                    Mutation.Update(2, PropKey.INPUT_SELECTION_END, PropValue.Integer(5)),
+                    Mutation.Update(2, PropKey.VALUE, PropValue.Text("Controlled query")),
+                )))
+                assertEquals(2, input.selectionStart)
+                assertEquals(5, input.selectionEnd)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
         }
     }
 
@@ -1214,6 +1576,188 @@ class PamRendererInstrumentedTest {
                 renderer.close()
             }
         } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun rendererKeepsPersistentHorizontalIndicatorVisibleBelowContent() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        lateinit var scroll: PamScrollContainer
+        var initialWindow: Bitmap? = null
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN, mapOf(
+                        // Keep the canvas distinct from the gray child. The
+                        // renderer otherwise inherits its first descendant's
+                        // background, making the child-pixel check vacuous.
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.WHITE.toLong()),
+                    ))),
+                    Mutation.Create(node(5, 1, NodeKind.SCROLL, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("indicator-parent-scroll"),
+                    ))),
+                    Mutation.Create(node(6, 5, NodeKind.COLUMN)),
+                    Mutation.Create(node(2, 6, NodeKind.SCROLL, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("indicator-scroll"),
+                        PropKey.SHOWS_SCROLL_INDICATOR to PropValue.Flag(true),
+                        PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true),
+                        PropKey.SCROLL_FILL_VIEWPORT to PropValue.Flag(true),
+                        PropKey.SCROLL_NESTED_ENABLED to PropValue.Flag(true),
+                        PropKey.SCROLL_FADING_EDGE_LENGTH to PropValue.Decimal(12.0),
+                        PropKey.SCROLL_PERSISTENT_SCROLLBAR to PropValue.Flag(true),
+                        PropKey.SCROLL_INDICATOR_STYLE to PropValue.Integer(ScrollIndicatorStyle.DARK.wireValue.toLong()),
+                    ))),
+                    Mutation.Create(node(3, 2, NodeKind.ROW)),
+                    Mutation.Create(node(4, 3, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(Color.LTGRAY.toLong()),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(5, Frame(0f, 0f, 360f, 720f)),
+                    Mutation.Layout(6, Frame(0f, 0f, 360f, 1400f)),
+                    Mutation.Layout(2, Frame(16f, 980f, 300f, 52f)),
+                    Mutation.Layout(3, Frame(16f, 980f, 900f, 52f)),
+                    Mutation.Layout(4, Frame(16f, 980f, 900f, 48f)),
+                    Mutation.SetRoot(1),
+                )))
+                scroll = activity.host.findByTransitionName("indicator-scroll") as PamScrollContainer
+            }
+            instrumentation.waitForIdleSync()
+            // Showcase samples start outside the vertical viewport. Reveal the
+            // row without ever touching its horizontal scroll or drawing it in
+            // software first.
+            // Outlive the platform's initial fade delay: a persistent indicator
+            // must remain available when users reach a later showcase sample.
+            SystemClock.sleep(1800)
+            requireNotNull(instrumentation.uiAutomation.takeScreenshot()).recycle()
+            onMain(instrumentation) {
+                val parent = activity.host.findByTransitionName("indicator-parent-scroll") as PamScrollContainer
+                parent.setContentOffsetY(500f)
+            }
+            instrumentation.waitForIdleSync()
+            // Idle on the UI thread does not guarantee that the compositor has
+            // presented the newly revealed content. Wait for the gray child,
+            // never for the indicator itself, without drawing/toggling the view.
+            // Keep the final frame on timeout so the existing content assertion
+            // still fails with captured evidence if rendering never happens.
+            val initialFrameDeadline = SystemClock.uptimeMillis() + 2000L
+            val initialLocation = IntArray(2)
+            do {
+                onMain(instrumentation) { scroll.getLocationOnScreen(initialLocation) }
+                initialWindow?.recycle()
+                val frame = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                initialWindow = frame
+                val x = initialLocation[0] + 10
+                val y = initialLocation[1] + 10
+                if (x in 0 until frame.width && y in 0 until frame.height
+                    && frame.getPixel(x, y) == Color.LTGRAY) break
+                SystemClock.sleep(50)
+            } while (SystemClock.uptimeMillis() < initialFrameDeadline)
+            onMain(instrumentation) {
+                assertTrue("Renderer fixture must overflow", scroll.getChildAt(0).canScrollHorizontally(1))
+                val shown = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                val hidden = Bitmap.createBitmap(scroll.width, scroll.height, Bitmap.Config.ARGB_8888)
+                try {
+                    shown.eraseColor(Color.WHITE)
+                    hidden.eraseColor(Color.WHITE)
+                    scroll.draw(Canvas(shown))
+                    scroll.setShowsScrollIndicator(false)
+                    scroll.draw(Canvas(hidden))
+                    var difference = 0
+                    for (y in dp(scroll, 48f) until scroll.height) {
+                        for (x in 0 until scroll.width) {
+                            if (shown.getPixel(x, y) != hidden.getPixel(x, y)) difference++
+                        }
+                    }
+                    assertTrue("Persistent indicator must occupy the reserved strip", difference > 0)
+                } finally {
+                    shown.recycle()
+                    hidden.recycle()
+                }
+            }
+            val location = IntArray(2)
+            var width = 0
+            var height = 0
+            var trackTop = 0
+            onMain(instrumentation) {
+                scroll.setShowsScrollIndicator(true)
+                scroll.getLocationOnScreen(location)
+                width = scroll.width
+                height = scroll.height
+                trackTop = dp(scroll, 48f)
+            }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            val screenShown = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            onMain(instrumentation) { scroll.setShowsScrollIndicator(false) }
+            instrumentation.waitForIdleSync()
+            SystemClock.sleep(100)
+            val screenHidden = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                // Gradle collects this directory before uninstalling test APKs.
+                // Keep all three frames even on success so collection itself
+                // can be verified without intentionally breaking the renderer.
+                val directory = InstrumentationRegistry.getArguments()
+                    .getString("additionalTestOutputDir")
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { java.io.File(it) }
+                    ?: requireNotNull(instrumentation.context.getExternalFilesDir("renderer-evidence"))
+                check(directory.isDirectory || directory.mkdirs())
+                mapOf(
+                    "indicator-initial.png" to requireNotNull(initialWindow),
+                    "indicator-shown.png" to screenShown,
+                    "indicator-hidden.png" to screenHidden,
+                ).forEach { (name, bitmap) ->
+                    java.io.File(directory, name).outputStream().use { output ->
+                        check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
+                    }
+                }
+                assertEquals(
+                    "Window capture must include the rendered fixture",
+                    Color.LTGRAY,
+                    screenShown.getPixel(location[0] + 10, location[1] + 10),
+                )
+                var difference = 0
+                var initialDifference = 0
+                val initial = requireNotNull(initialWindow)
+                assertEquals("Fixture canvas must be distinct from the child", Color.WHITE,
+                    initial.getPixel(location[0] - 1, location[1] + 10))
+                assertEquals(Color.LTGRAY, initial.getPixel(location[0] + 10, location[1] + 10))
+                for (y in location[1] + trackTop until location[1] + height) {
+                    for (x in location[0] until location[0] + width) {
+                        if (screenShown.getPixel(x, y) != screenHidden.getPixel(x, y)) difference++
+                        if (initial.getPixel(x, y) != screenHidden.getPixel(x, y)) initialDifference++
+                    }
+                }
+                assertTrue("Indicator must also appear in the actual window capture", difference > 0)
+                assertTrue("Indicator must appear before any software draw or toggle", initialDifference > 0)
+                var contrastingPixels = 0
+                for (y in location[1] + trackTop until location[1] + height) {
+                    for (x in location[0] until location[0] + width) {
+                        val pixel = initial.getPixel(x, y)
+                        if (Color.red(pixel) < 128 && Color.green(pixel) < 128 && Color.blue(pixel) < 128) {
+                            contrastingPixels++
+                        }
+                    }
+                }
+                assertTrue("Dark indicator must have visible contrast, not just a pixel difference", contrastingPixels > width)
+            } catch (failure: AssertionError) {
+                throw AssertionError(
+                    "${failure.message}; fixture=${location.contentToString()} " +
+                        "size=${width}x$height trackTop=$trackTop " +
+                        "capture=${screenShown.width}x${screenShown.height}",
+                    failure,
+                )
+            } finally {
+                screenShown.recycle()
+                screenHidden.recycle()
+                onMain(instrumentation) { renderer.close() }
+            }
+        } finally {
+            initialWindow?.recycle()
             activity.finish()
         }
     }

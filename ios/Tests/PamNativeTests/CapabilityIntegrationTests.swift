@@ -18,7 +18,351 @@ private final class PluginFixtureViewFactory: NativeViewFactory {
 }
 
 @MainActor
+private final class VisibilityFixtureView: UIView, NativeChildVisibilityHost {
+    var onChildVisibilityChanged: ((UIView, Bool) -> Void)?
+}
+
+@MainActor
+private final class VisibilityFixtureFactory: NativeViewFactory {
+    let view = VisibilityFixtureView()
+    func create(context: AnyObject?, emit: @escaping (Data) -> Void) -> UIView { view }
+    func update(view: UIView, properties: [String: WireValue]) {}
+}
+
+@MainActor
 final class CapabilityIntegrationTests: XCTestCase {
+    func testAutofocusWaitsForMountAndDoesNotStealFocusOnRelayout() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let field = PamInputField(frame: CGRect(x: 16, y: 60, width: 300, height: 56))
+        field.inputView = UIView()
+        field.autoFocusRequested = true
+        XCTAssertFalse(field.isFirstResponder)
+        controller.view.addSubview(field)
+        window.makeKeyAndVisible()
+        defer { field.resignFirstResponder(); window.isHidden = true }
+        let mounted = expectation(description: "autofocus after mounting")
+        DispatchQueue.main.async { mounted.fulfill() }
+        wait(for: [mounted], timeout: 1)
+        XCTAssertTrue(field.isFirstResponder)
+        field.resignFirstResponder()
+        field.setNeedsLayout()
+        field.layoutIfNeeded()
+        let relayout = expectation(description: "autofocus remains consumed")
+        DispatchQueue.main.async { relayout.fulfill() }
+        wait(for: [relayout], timeout: 1)
+        XCTAssertFalse(field.isFirstResponder)
+    }
+
+    func testControlledSelectionClampsAndSurvivesValueAndSecureUpdates() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("selection-fixture"),
+                PamConstants.value: .text("abcdef"),
+                PamConstants.inputSelectionStart: .integer(2),
+                PamConstants.inputSelectionEnd: .integer(5),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "selection-fixture") as? UITextField)
+        func assertSelection(_ start: Int, _ end: Int) throws {
+            let selection = try XCTUnwrap(field.selectedTextRange)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.start), start)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.end), end)
+        }
+        try assertSelection(2, 5)
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(true))]])
+        try assertSelection(2, 5)
+        renderer.commit([[.update(id: 2, key: PamConstants.value, value: .text("abc"))]])
+        try assertSelection(2, 3)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputSelectionEnd, value: nil)]])
+        try assertSelection(2, 2)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputSelectionStart, value: .integer(-4))]])
+        try assertSelection(0, 0)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputSelectionStart, value: nil)]])
+        let cursor = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 1))
+        field.selectedTextRange = field.textRange(from: cursor, to: cursor)
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(false))]])
+        try assertSelection(1, 1)
+    }
+
+    func testSubmitBehaviorControlsActualFirstResponderLifecycle() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        let field = PamInputField(frame: CGRect(x: 16, y: 60, width: 300, height: 56))
+        controller.view.addSubview(field)
+        window.makeKeyAndVisible()
+        defer {
+            field.resignFirstResponder()
+            window.isHidden = true
+        }
+        var submits = 0
+        var ends = 0
+        field.onInputEndEditing = { _ in ends += 1 }
+        field.addAction(UIAction { _ in submits += 1 }, for: .primaryActionTriggered)
+        XCTAssertTrue(field.becomeFirstResponder())
+        field.submitBehavior = .submit
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertTrue(field.isFirstResponder)
+        XCTAssertEqual(submits, 1)
+        XCTAssertEqual(ends, 0)
+        field.submitBehavior = .blurAndSubmit
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertFalse(field.isFirstResponder)
+        XCTAssertEqual(submits, 2)
+        XCTAssertEqual(ends, 1)
+    }
+
+    func testSubmitOnlyDoesNotPretendEditingEnded() {
+        let field = PamInputField()
+        var submits = 0
+        var ends = 0
+        field.onInputEndEditing = { _ in ends += 1 }
+        field.addAction(UIAction { _ in submits += 1 }, for: .primaryActionTriggered)
+        field.submitBehavior = .submit
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertEqual(submits, 1)
+        XCTAssertEqual(ends, 0)
+        field.isInputEditable = false
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertEqual(submits, 1)
+        field.isInputEditable = true
+        field.submitBehavior = .newline
+        XCTAssertFalse(field.textFieldShouldReturn(field))
+        XCTAssertEqual(submits, 1, "Newline must not become a submit event")
+    }
+
+    func testSubmitEventCarriesCurrentEditorValue() throws {
+        let host = UIView()
+        var payloads: [Data] = []
+        let renderer = PamRenderer(hostView: host) { node, kind, payload in
+            if kind == EventKind.submit.rawValue {
+                XCTAssertEqual(node, 2)
+                payloads.append(payload)
+            }
+        }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("submit-fixture"),
+                PamConstants.value: .text("Original"),
+                PamConstants.onSubmit: .flag(true),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "submit-fixture") as? UITextField)
+        func invokeRegisteredSubmitTargets() {
+            // SwiftPM runs without UIApplicationMain. Exercise the registered
+            // target selectors directly instead of asking UIApplication to send.
+            for target in field.allTargets {
+                guard let object = target.base as? NSObject else { continue }
+                for action in field.actions(forTarget: object, forControlEvent: .primaryActionTriggered) ?? [] {
+                    _ = object.perform(NSSelectorFromString(action))
+                }
+            }
+        }
+        field.text = "Edited value"
+        invokeRegisteredSubmitTargets()
+        XCTAssertEqual(payloads.count, 1)
+        XCTAssertEqual(try WireMap.decode(XCTUnwrap(payloads.first))["value"], .text("Edited value"))
+        renderer.commit([[.update(id: 2, key: PamConstants.onSubmit, value: nil)]])
+        invokeRegisteredSubmitTargets()
+        XCTAssertEqual(payloads.count, 1, "Removing submit must detach its target")
+    }
+
+    func testReadonlyInputRejectsMutationWithoutDisablingSelection() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("readonly-fixture"),
+                PamConstants.value: .text("Reference"),
+                PamConstants.inputEditable: .flag(false),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "readonly-fixture") as? PamInputField)
+        XCTAssertTrue(field.isEnabled)
+        XCTAssertTrue(field.isUserInteractionEnabled)
+        XCTAssertNotNil(field.inputView)
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 0, length: 9), replacementString: "Changed"))
+        field.insertText("X")
+        field.deleteBackward()
+        field.setMarkedText("Changed", selectedRange: NSRange(location: 0, length: 0))
+        XCTAssertEqual(field.text, "Reference")
+        renderer.commit([[.update(id: 2, key: PamConstants.inputEditable, value: nil)]])
+        XCTAssertNil(field.inputView)
+        XCTAssertTrue(field.textField(field, shouldChangeCharactersIn: NSRange(location: 0, length: 9), replacementString: "Changed"))
+    }
+
+    func testInputLengthLimitTruncatesPasteWithoutSplittingUnicode() throws {
+        let field = PamInputField()
+        field.maximumLength = 4
+        field.setTextFromRenderer("12")
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 2, length: 0), replacementString: "3456"))
+        XCTAssertEqual(field.text, "1234")
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 4, length: 0), replacementString: "5"))
+        XCTAssertTrue(field.textField(field, shouldChangeCharactersIn: NSRange(location: 3, length: 1), replacementString: ""))
+        field.maximumLength = 3
+        field.setTextFromRenderer("ab")
+        XCTAssertFalse(field.textField(field, shouldChangeCharactersIn: NSRange(location: 2, length: 0), replacementString: "😀"))
+        XCTAssertEqual(field.text, "ab")
+        field.maximumLength = 2
+        field.setTextFromRenderer("漢字入力")
+        field.unmarkText()
+        XCTAssertEqual(field.text, "漢字")
+        field.maximumLength = 1
+        field.setTextFromRenderer("😀a")
+        field.unmarkText()
+        XCTAssertEqual(field.text, "")
+        field.maximumLength = nil
+        field.setTextFromRenderer("ab")
+        XCTAssertTrue(field.textField(field, shouldChangeCharactersIn: NSRange(location: 2, length: 0), replacementString: "long text"))
+    }
+
+    func testInputTextTraitsApplyAndReset() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("traits-fixture"),
+                PamConstants.autoComplete: .text("one-time-code"),
+                PamConstants.returnKeyType: .integer(2),
+                PamConstants.inputAutoCorrect: .flag(false),
+                PamConstants.inputAutoCapitalize: .integer(1),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "traits-fixture") as? UITextField)
+        XCTAssertEqual(field.autocorrectionType, .no)
+        XCTAssertEqual(field.textContentType, .oneTimeCode)
+        XCTAssertEqual(field.returnKeyType, .done)
+        XCTAssertEqual(field.autocapitalizationType, .none)
+        renderer.commit([[
+            .update(id: 2, key: PamConstants.inputAutoCorrect, value: .flag(true)),
+            .update(id: 2, key: PamConstants.autoComplete, value: .text("new-password")),
+            .update(id: 2, key: PamConstants.returnKeyType, value: .integer(5)),
+            .update(id: 2, key: PamConstants.inputAutoCapitalize, value: .integer(3)),
+        ]])
+        XCTAssertEqual(field.autocorrectionType, .yes)
+        XCTAssertEqual(field.textContentType, .newPassword)
+        XCTAssertEqual(field.returnKeyType, .search)
+        XCTAssertEqual(field.autocapitalizationType, .words)
+        renderer.commit([[
+            .update(id: 2, key: PamConstants.inputAutoCorrect, value: nil),
+            .update(id: 2, key: PamConstants.autoComplete, value: nil),
+            .update(id: 2, key: PamConstants.returnKeyType, value: nil),
+            .update(id: 2, key: PamConstants.inputAutoCapitalize, value: nil),
+        ]])
+        XCTAssertEqual(field.autocorrectionType, .default)
+        XCTAssertNil(field.textContentType)
+        XCTAssertEqual(field.returnKeyType, .default)
+        XCTAssertEqual(field.autocapitalizationType, .sentences)
+    }
+
+    func testSecureInputTogglePreservesTextAndSelection() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("secure-fixture"),
+                PamConstants.value: .text("sample-secret"),
+                PamConstants.secure: .flag(true),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "secure-fixture") as? UITextField)
+        XCTAssertTrue(field.isSecureTextEntry)
+        let start = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 2))
+        let end = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 5))
+        field.selectedTextRange = field.textRange(from: start, to: end)
+        for secure in [false, true, false] {
+            renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(secure))]])
+            XCTAssertEqual(field.isSecureTextEntry, secure)
+            XCTAssertEqual(field.text, "sample-secret")
+            let selection = try XCTUnwrap(field.selectedTextRange)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.start), 2)
+            XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.end), 5)
+        }
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(true))]])
+        renderer.commit([[.update(id: 2, key: PamConstants.secure, value: nil)]])
+        XCTAssertFalse(field.isSecureTextEntry)
+    }
+
+    func testInputKeyboardMappingPrecedenceAndRemoval() throws {
+        let host = UIView()
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("keyboard-fixture"),
+                PamConstants.keyboardType: .integer(5),
+            ])),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "keyboard-fixture") as? UITextField)
+        XCTAssertEqual(field.keyboardType, .numbersAndPunctuation)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputMode, value: .integer(4))]])
+        XCTAssertEqual(field.keyboardType, .numberPad)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputMode, value: .integer(2))]])
+        XCTAssertNotNil(field.inputView)
+        renderer.commit([[.update(id: 2, key: PamConstants.inputMode, value: nil)]])
+        XCTAssertNil(field.inputView)
+        XCTAssertEqual(field.keyboardType, .numbersAndPunctuation)
+        renderer.commit([[.update(id: 2, key: PamConstants.keyboardType, value: nil)]])
+        XCTAssertEqual(field.keyboardType, .default)
+    }
+
+    func testNativeVisibilityRejectsForeignAndRemovedChildren() throws {
+        let host = UIView()
+        let factory = VisibilityFixtureFactory()
+        let renderer = PamRenderer(hostView: host, nativeViews: ["fixture.visibility": factory]) { _, _, _ in }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .customView,
+                             properties: [PamConstants.hostName: .text("fixture.visibility")])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .column, properties: [:])),
+            .setRoot(1),
+        ]])
+        let child = try XCTUnwrap(factory.view.subviews.first)
+        var requests: [Bool] = []
+        renderer.onNativeChildVisibility = { owner, childId, visible in
+            XCTAssertEqual(owner, 2)
+            XCTAssertEqual(childId, 3)
+            requests.append(visible)
+        }
+        let foreignChild = UIView()
+        factory.view.onChildVisibilityChanged?(foreignChild, false)
+        factory.view.onChildVisibilityChanged?(child, false)
+        factory.view.onChildVisibilityChanged?(child, true)
+        let drained = expectation(description: "queued visibility requests")
+        DispatchQueue.main.async { drained.fulfill() }
+        wait(for: [drained], timeout: 1)
+        XCTAssertEqual(requests, [false, true])
+
+        factory.view.onChildVisibilityChanged?(child, false)
+        renderer.close()
+        XCTAssertNil(factory.view.onChildVisibilityChanged)
+        let closedQueue = expectation(description: "stale visibility request discarded")
+        DispatchQueue.main.async { closedQueue.fulfill() }
+        wait(for: [closedQueue], timeout: 1)
+        XCTAssertEqual(requests, [false, true])
+    }
+
     func testVoiceOverExposesSemanticRoleStateValueAndImportance() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let renderer = PamRenderer(hostView: host) { _, _, _ in }

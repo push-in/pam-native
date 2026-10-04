@@ -75,7 +75,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     override fun onChildDetachedFromWindow(child: View) {
-        accessibilityModes.remove(child)
+        accessibilityModes.remove(child)?.let { child.importantForAccessibility = it }
         super.onChildDetachedFromWindow(child)
     }
 
@@ -88,8 +88,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
      * RecyclerView deliberately lays out prefetched rows beyond its clipped
      * viewport. Android's accessibility snapshot can otherwise intersect a
      * descendant with the clip and publish an inverted rectangle. Keep those
-     * rows mounted for performance, but expose semantics only after the whole
-     * row is visible; scrolling restores the holder's original mode.
+     * rows mounted for performance, but hide only fully offscreen rows.
+     * Partially visible rows must remain reachable, including rows taller than
+     * the viewport. Restore the original mode before a holder is recycled.
      */
     private fun updateAccessibilityVisibility() {
         val viewportLeft = paddingLeft
@@ -101,11 +102,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             val original = accessibilityModes[child] ?: child.importantForAccessibility.also {
                 accessibilityModes[child] = it
             }
-            val fullyVisible = child.left >= viewportLeft &&
-                child.top >= viewportTop &&
-                child.right <= viewportRight &&
-                child.bottom <= viewportBottom
-            val desired = if (fullyVisible) {
+            val intersectsViewport = child.right > viewportLeft &&
+                child.bottom > viewportTop &&
+                child.left < viewportRight &&
+                child.top < viewportBottom
+            val desired = if (intersectsViewport) {
                 original
             } else {
                 View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
