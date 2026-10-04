@@ -1040,7 +1040,7 @@ pam make:component MetricCard
 These commands generate `src/Screens/Orders.pam` and
 `src/Components/MetricCard.pam` without overwriting existing files. Legacy
 `.pam.php` components remain supported throughout the 1.x compatibility line.
-`pam init --template mobile` still starts with the explicit PHP tree so the
+`pam init community-app --template native` still starts with the explicit PHP tree so the
 lowest-level model is always visible and available.
 
 ## Switch sizing

@@ -19,6 +19,32 @@ if ($platform === null) {
     exit(69);
 }
 
+// The Composer distribution includes the native SDK beside this wrapper.
+// A downloaded CLI has no reliable compile-time path back to that package.
+$nativeHome = dirname(__DIR__, 3);
+$configuredNativeHome = getenv('PAM_NATIVE_HOME');
+$configuredPamHome = getenv('PAM_HOME');
+$bundledNativeHome = is_string($configuredPamHome) && $configuredPamHome !== ''
+    ? realpath($configuredPamHome . '/native') : false;
+$selectedNativeHome = is_string($configuredNativeHome) && $configuredNativeHome !== ''
+    ? realpath($configuredNativeHome) : false;
+// Older PAM launchers inject their bundled SDK even when Composer resolved a
+// newer Native package. Prefer the package version over that automatic default.
+$usesBundledDefault = is_string($bundledNativeHome) && $selectedNativeHome === $bundledNativeHome;
+if ((!is_string($configuredNativeHome) || $configuredNativeHome === '' || $usesBundledDefault)
+    && is_file($nativeHome . '/android/settings.gradle.kts')) {
+    putenv('PAM_NATIVE_HOME=' . $nativeHome);
+}
+
+$pamBinary = getenv('PAM_BINARY');
+if ((!is_string($configuredPamHome) || $configuredPamHome === '')
+    && is_string($pamBinary) && $pamBinary !== '') {
+    $runtimeHome = dirname($pamBinary) . '/../share/pam';
+    if (is_file($runtimeHome . '/runtime/catalog.json')) {
+        putenv('PAM_HOME=' . (realpath($runtimeHome) ?: $runtimeHome));
+    }
+}
+
 $extension = PHP_OS_FAMILY === 'Windows' ? '.exe' : '';
 $version = Protocol::SDK_VERSION;
 $artifact = "pam-native-cli-{$version}-{$platform}{$extension}";
