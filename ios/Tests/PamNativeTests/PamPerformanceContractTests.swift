@@ -33,16 +33,17 @@ final class PamPerformanceContractTests: XCTestCase {
         }
 
         func newPath() throws -> Double {
-            var reader = BinaryReader(source: payload)
-            var sum = 0.0
-            for _ in 0..<count {
-                sum += Double(try reader.u64())
-                for _ in 0..<4 {
-                    sum += Double(try reader.f32())
+            try BinaryReader.withSource(payload) { reader in
+                var sum = 0.0
+                for _ in 0..<count {
+                    sum += Double(try reader.u64())
+                    for _ in 0..<4 {
+                        sum += Double(try reader.f32())
+                    }
                 }
+                try reader.finish()
+                return sum
             }
-            try reader.finish()
-            return sum
         }
 
         let expected = try newPath()

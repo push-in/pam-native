@@ -185,7 +185,7 @@ public struct PackedStringList {
     }
 
     public static func decode(_ source: Data) throws -> PackedStringList {
-        var reader = BinaryReader(source: source)
+        return try BinaryReader.withSource(source) { reader in
         let count = try reader.u32()
         let safeCount = Int(count)
         guard safeCount <= MAX_PACKED_LIST_ITEMS else {
@@ -210,6 +210,7 @@ public struct PackedStringList {
         try reader.finish()
 
         return PackedStringList(source, offsets, lengths)
+        }
     }
 }
 
@@ -255,7 +256,7 @@ public struct PackedSectionList {
     }
 
     public static func decode(_ source: Data) throws -> PackedSectionList {
-        var reader = BinaryReader(source: source)
+        return try BinaryReader.withSource(source) { reader in
         let sections = try reader.u32()
         let safeSections = Int(sections)
         guard safeSections <= MAX_PACKED_SECTIONS else {
@@ -281,6 +282,7 @@ public struct PackedSectionList {
         }
         try reader.finish()
         return PackedSectionList(source, entries)
+        }
     }
 
 }
@@ -673,7 +675,7 @@ public enum BatchDecoder {
         guard input.count <= MAX_FRAME_BYTES else {
             throw PamProtocolError.invalidProtocol("Batch exceeds 16 MiB")
         }
-        var reader = BinaryReader(source: input)
+        return try BinaryReader.withSource(input) { reader in
         guard try reader.ascii(4) == "PNB1" else {
             throw PamProtocolError.invalidProtocol("Invalid batch magic")
         }
@@ -737,18 +739,28 @@ public enum BatchDecoder {
 
         try reader.finish()
         return mutations
+        }
     }
 }
 
 struct BinaryReader {
     private let source: Data
+    private let raw: UnsafeRawBufferPointer
     private var cursor: Data.Index
 
     var offset: Int { cursor }
 
-    init(source: Data) {
+    private init(source: Data, raw: UnsafeRawBufferPointer) {
         self.source = source
+        self.raw = raw
         self.cursor = source.startIndex
+    }
+
+    static func withSource<T>(_ source: Data, _ body: (inout BinaryReader) throws -> T) rethrows -> T {
+        try source.withUnsafeBytes { raw in
+            var reader = BinaryReader(source: source, raw: raw)
+            return try body(&reader)
+        }
     }
 
     mutating func ascii(_ length: Int) throws -> String {
@@ -885,12 +897,18 @@ struct BinaryReader {
             throw PamProtocolError.invalidPayload("Payload truncated")
         }
         let start = cursor - source.startIndex
-        let value = source.withUnsafeBytes { raw -> UInt64 in
-            var result: UInt64 = 0
-            for index in 0..<count {
-                result |= UInt64(raw[start + index]) << (index * 8)
-            }
-            return result
+        let value: UInt64
+        switch count {
+        case 1:
+            value = UInt64(raw[start])
+        case 2:
+            value = UInt64(UInt16(littleEndian: raw.loadUnaligned(fromByteOffset: start, as: UInt16.self)))
+        case 4:
+            value = UInt64(UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: start, as: UInt32.self)))
+        case 8:
+            value = UInt64(littleEndian: raw.loadUnaligned(fromByteOffset: start, as: UInt64.self))
+        default:
+            preconditionFailure("Unsupported scalar length")
         }
         cursor += count
         return value

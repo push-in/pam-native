@@ -310,18 +310,20 @@ final class PamProtocolTests: XCTestCase {
         payload.appendLittleEndian(Float(12.5).bitPattern)
         payload.appendLittleEndian(Double(3.25).bitPattern)
 
-        var reader = BinaryReader(source: payload.dropFirst())
-        XCTAssertEqual(try reader.u16(), 0x1234)
-        XCTAssertEqual(try reader.u32(), 0x89abcdef)
-        XCTAssertEqual(try reader.i64(), -7)
-        XCTAssertEqual(try reader.f32(), 12.5)
-        XCTAssertEqual(try reader.d64(), 3.25)
-        XCTAssertNoThrow(try reader.finish())
-        XCTAssertThrowsError(try reader.u8())
+        try BinaryReader.withSource(payload.dropFirst()) { reader in
+            XCTAssertEqual(try reader.u16(), 0x1234)
+            XCTAssertEqual(try reader.u32(), 0x89abcdef)
+            XCTAssertEqual(try reader.i64(), -7)
+            XCTAssertEqual(try reader.f32(), 12.5)
+            XCTAssertEqual(try reader.d64(), 3.25)
+            XCTAssertNoThrow(try reader.finish())
+            XCTAssertThrowsError(try reader.u8())
+        }
 
-        var truncated = BinaryReader(source: Data([0x01, 0x02, 0x03]))
-        XCTAssertThrowsError(try truncated.u32())
-        XCTAssertEqual(try truncated.u16(), 0x0201)
+        try BinaryReader.withSource(Data([0x01, 0x02, 0x03])) { truncated in
+            XCTAssertThrowsError(try truncated.u32())
+            XCTAssertEqual(try truncated.u16(), 0x0201)
+        }
     }
 }
 
