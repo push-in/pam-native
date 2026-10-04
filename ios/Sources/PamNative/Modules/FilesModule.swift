@@ -537,36 +537,34 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             try FileManager.default.createDirectory(
                 at: destination.deletingLastPathComponent(), withIntermediateDirectories: true
             )
+            let export = try BoundedPhotoAssetExport(destination: destination)
             let options = PHAssetResourceRequestOptions()
             options.isNetworkAccessAllowed = true
-            PHAssetResourceManager.default().writeData(
-                for: resource, toFile: destination, options: options
-            ) { error in
-                self.queue.async {
-                    do {
-                        if let error { throw error }
-                        let metadata = try destination.resourceValues(
-                            forKeys: [.isRegularFileKey, .fileSizeKey]
-                        )
-                        guard metadata.isRegularFile == true,
-                              let size = metadata.fileSize,
-                              size >= 0, size <= 64 * 1_024 * 1_024 else {
-                            throw FileModuleError("Selected file exceeds 64 MiB")
+            let manager = PHAssetResourceManager.default()
+            let requestID = manager.requestData(
+                for: resource,
+                options: options,
+                dataReceivedHandler: { chunk in export.append(chunk) },
+                completionHandler: { error in
+                    self.queue.async {
+                        do {
+                            let size = try export.finish(error: error)
+                            let mime = UTType(resource.uniformTypeIdentifier)?.preferredMIMEType
+                                ?? "application/octet-stream"
+                            completion(.success, try WireMap.encode([
+                                "path": .text(relative),
+                                "name": .text(resource.originalFilename),
+                                "mimeType": .text(mime),
+                                "size": .integer(Int64(size)),
+                            ]))
+                        } catch {
+                            try? FileManager.default.removeItem(at: destination)
+                            completion(.failure, Data(error.localizedDescription.utf8))
                         }
-                        let mime = UTType(resource.uniformTypeIdentifier)?.preferredMIMEType
-                            ?? "application/octet-stream"
-                        completion(.success, try WireMap.encode([
-                            "path": .text(relative),
-                            "name": .text(resource.originalFilename),
-                            "mimeType": .text(mime),
-                            "size": .integer(Int64(size)),
-                        ]))
-                    } catch {
-                        try? FileManager.default.removeItem(at: destination)
-                        completion(.failure, Data(error.localizedDescription.utf8))
                     }
                 }
-            }
+            )
+            export.setRequestID(requestID)
         } catch {
             completion(.failure, Data(error.localizedDescription.utf8))
         }
@@ -765,6 +763,78 @@ private struct FileModuleError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+final class BoundedPhotoAssetExport: @unchecked Sendable {
+    private let lock = NSLock()
+    private let manager: PHAssetResourceManager
+    private let handle: FileHandle
+    private let maximumBytes: Int
+    private var requestID: PHAssetResourceDataRequestID?
+    private var bytesWritten = 0
+    private var exceeded = false
+    private var writeError: Error?
+    private var finished = false
+
+    init(
+        destination: URL,
+        maximumBytes: Int = 64 * 1_024 * 1_024,
+        manager: PHAssetResourceManager = .default()
+    ) throws {
+        guard maximumBytes > 0,
+              FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+            throw FileModuleError("Cannot create photo import file")
+        }
+        do {
+            handle = try FileHandle(forWritingTo: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
+        self.maximumBytes = maximumBytes
+        self.manager = manager
+    }
+
+    func setRequestID(_ id: PHAssetResourceDataRequestID) {
+        lock.lock()
+        requestID = id
+        let cancel = exceeded || writeError != nil
+        lock.unlock()
+        if cancel { manager.cancelDataRequest(id) }
+    }
+
+    func append(_ chunk: Data) {
+        lock.lock()
+        guard !finished, !exceeded, writeError == nil else {
+            lock.unlock()
+            return
+        }
+        if chunk.count > maximumBytes - bytesWritten {
+            exceeded = true
+        } else {
+            do {
+                try handle.write(contentsOf: chunk)
+                bytesWritten += chunk.count
+            } catch {
+                writeError = error
+            }
+        }
+        let cancel = exceeded || writeError != nil
+        let id = requestID
+        lock.unlock()
+        if cancel, let id { manager.cancelDataRequest(id) }
+    }
+
+    func finish(error: Error?) throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        finished = true
+        try handle.close()
+        if exceeded { throw FileModuleError("Selected file exceeds 64 MiB") }
+        if let writeError { throw writeError }
+        if let error { throw error }
+        return bytesWritten
+    }
 }
 
 final class FileDownloadChannel {

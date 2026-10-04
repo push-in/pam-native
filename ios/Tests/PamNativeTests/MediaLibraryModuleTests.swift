@@ -38,4 +38,26 @@ final class MediaLibraryModuleTests: XCTestCase {
         }
         wait(for: [completed], timeout: 1)
     }
+
+    func testPhotoAssetExportWritesChunksAndStopsBeforeExceedingLimit() throws {
+        let healthy = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pam-photo-export-\(UUID().uuidString)")
+        let oversized = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pam-photo-export-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: healthy)
+            try? FileManager.default.removeItem(at: oversized)
+        }
+        let accepted = try BoundedPhotoAssetExport(destination: healthy, maximumBytes: 5)
+        accepted.append(Data("ab".utf8))
+        accepted.append(Data("cde".utf8))
+        XCTAssertEqual(try accepted.finish(error: nil), 5)
+        XCTAssertEqual(try Data(contentsOf: healthy), Data("abcde".utf8))
+
+        let rejected = try BoundedPhotoAssetExport(destination: oversized, maximumBytes: 5)
+        rejected.append(Data("abc".utf8))
+        rejected.append(Data("def".utf8))
+        XCTAssertThrowsError(try rejected.finish(error: nil))
+        XCTAssertEqual(try Data(contentsOf: oversized), Data("abc".utf8))
+    }
 }
