@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.33 - 2026-10-04
+
+- Add native PhotoKit gallery pages and albums on iOS, lazy `phasset://` image
+  and video sources, and 64 MiB bounded streaming import of selected assets
+  into the application sandbox.
+- Bring iOS file downloads with headers, bounded progress and cancellation,
+  plus private-file preview, into line with the public PHP Files API.
+- Receive iOS App Group shares through the core `IncomingShares` API, preserving
+  source titles and filenames when the share extension supplies them.
+- Bound PhotoKit image requests to rendered size and release completed download
+  observations after their terminal event is delivered.
+
 ## 1.0.32 - 2026-10-04
 
 - Generate complete Language 2 features with a screen, component, PHP service,
