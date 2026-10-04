@@ -185,31 +185,32 @@ public struct PackedStringList {
     }
 
     public static func decode(_ source: Data) throws -> PackedStringList {
-        var reader = BinaryReader(source: source)
-        let count = try reader.u32()
-        let safeCount = Int(count)
-        guard safeCount <= MAX_PACKED_LIST_ITEMS else {
-            throw PamProtocolError.invalidPayload("List contains too many items")
-        }
-        var offsets = [Int]()
-        offsets.reserveCapacity(safeCount)
-        var lengths = [Int]()
-        lengths.reserveCapacity(safeCount)
-
-        for _ in 0..<safeCount {
-            let length = try reader.u32()
-            guard length <= MAX_VALUE_BYTES else {
-                throw PamProtocolError.invalidPayload("List item is too large")
+        return try BinaryReader.withSource(source) { reader in
+            let count = try reader.u32()
+            let safeCount = Int(count)
+            guard safeCount <= MAX_PACKED_LIST_ITEMS else {
+                throw PamProtocolError.invalidPayload("List contains too many items")
             }
-            let offset = reader.offset
-            let value = try reader.bytes(Int(length))
-            _ = try strictUTF8(value, label: "List item")
-            offsets.append(offset)
-            lengths.append(Int(length))
-        }
-        try reader.finish()
+            var offsets = [Int]()
+            offsets.reserveCapacity(safeCount)
+            var lengths = [Int]()
+            lengths.reserveCapacity(safeCount)
 
-        return PackedStringList(source, offsets, lengths)
+            for _ in 0..<safeCount {
+                let length = try reader.u32()
+                guard length <= MAX_VALUE_BYTES else {
+                    throw PamProtocolError.invalidPayload("List item is too large")
+                }
+                let offset = reader.offset
+                let value = try reader.bytes(Int(length))
+                _ = try strictUTF8(value, label: "List item")
+                offsets.append(offset)
+                lengths.append(Int(length))
+            }
+            try reader.finish()
+
+            return PackedStringList(source, offsets, lengths)
+        }
     }
 }
 
@@ -255,32 +256,33 @@ public struct PackedSectionList {
     }
 
     public static func decode(_ source: Data) throws -> PackedSectionList {
-        var reader = BinaryReader(source: source)
-        let sections = try reader.u32()
-        let safeSections = Int(sections)
-        guard safeSections <= MAX_PACKED_SECTIONS else {
-            throw PamProtocolError.invalidPayload("Section list contains too many sections")
-        }
+        return try BinaryReader.withSource(source) { reader in
+            let sections = try reader.u32()
+            let safeSections = Int(sections)
+            guard safeSections <= MAX_PACKED_SECTIONS else {
+                throw PamProtocolError.invalidPayload("Section list contains too many sections")
+            }
 
-        var entries: [Entry] = []
-        for _ in 0..<safeSections {
-            entries.append(
-                try Entry.decode(source: &reader, kind: Self.headerKind)
-            )
-            let itemCount = try reader.u32()
-            let safeItemCount = Int(itemCount)
-            guard safeItemCount <= MAX_PACKED_LIST_ITEMS,
-                  entries.count + safeItemCount <= MAX_PACKED_SECTION_ENTRIES else {
-                throw PamProtocolError.invalidPayload("Section list contains too many items")
-            }
-            for _ in 0..<safeItemCount {
+            var entries: [Entry] = []
+            for _ in 0..<safeSections {
                 entries.append(
-                    try Entry.decode(source: &reader, kind: Self.itemKind)
+                    try Entry.decode(source: &reader, kind: Self.headerKind)
                 )
+                let itemCount = try reader.u32()
+                let safeItemCount = Int(itemCount)
+                guard safeItemCount <= MAX_PACKED_LIST_ITEMS,
+                      entries.count + safeItemCount <= MAX_PACKED_SECTION_ENTRIES else {
+                    throw PamProtocolError.invalidPayload("Section list contains too many items")
+                }
+                for _ in 0..<safeItemCount {
+                    entries.append(
+                        try Entry.decode(source: &reader, kind: Self.itemKind)
+                    )
+                }
             }
+            try reader.finish()
+            return PackedSectionList(source, entries)
         }
-        try reader.finish()
-        return PackedSectionList(source, entries)
     }
 
 }
@@ -673,82 +675,92 @@ public enum BatchDecoder {
         guard input.count <= MAX_FRAME_BYTES else {
             throw PamProtocolError.invalidProtocol("Batch exceeds 16 MiB")
         }
-        var reader = BinaryReader(source: input)
-        guard try reader.ascii(4) == "PNB1" else {
-            throw PamProtocolError.invalidProtocol("Invalid batch magic")
-        }
-        let version = try reader.u16()
-        guard version == PAM_PROTOCOL_VERSION else {
-            throw PamProtocolError.invalidProtocol("Unsupported protocol version")
-        }
-        let count = try reader.u32()
-        guard count <= MAX_MUTATIONS else {
-            throw PamProtocolError.invalidPayload("Batch has too many mutations")
-        }
-
-        var mutations: [Mutation] = []
-        mutations.reserveCapacity(count)
-
-        for _ in 0..<count {
-            let kind = try reader.u8()
-            switch kind {
-            case 1:
-                let spec = try reader.node()
-                mutations.append(.create(spec))
-            case 2:
-                let id = try reader.positiveId()
-                mutations.append(.remove(id))
-            case 3:
-                let id = try reader.positiveId()
-                let key = try reader.u16()
-                let presence = try reader.u8()
-                let value: PropValue?
-                if presence == 1 {
-                    value = try reader.value(for: key)
-                } else if presence == 2 {
-                    value = nil
-                } else {
-                    throw PamProtocolError.invalidPayload("Unknown update marker")
-                }
-                mutations.append(.update(id: id, key: key, value: value))
-            case 4:
-                mutations.append(
-                    .move(
-                        id: try reader.positiveId(),
-                        parent: try reader.u64(),
-                        index: try reader.u32(),
-                    )
-                )
-            case 5:
-                let id = try reader.positiveId()
-                let frame = Frame(
-                    x: try reader.f32(),
-                    y: try reader.f32(),
-                    width: try reader.f32(),
-                    height: try reader.f32(),
-                )
-                mutations.append(.layout(id: id, frame: frame))
-            case 6:
-                mutations.append(.setRoot(try reader.positiveId()))
-            default:
-                throw PamProtocolError.invalidProtocol("Unknown mutation type")
+        return try BinaryReader.withSource(input) { reader in
+            guard try reader.ascii(4) == "PNB1" else {
+                throw PamProtocolError.invalidProtocol("Invalid batch magic")
             }
-        }
+            let version = try reader.u16()
+            guard version == PAM_PROTOCOL_VERSION else {
+                throw PamProtocolError.invalidProtocol("Unsupported protocol version")
+            }
+            let count = try reader.u32()
+            guard count <= MAX_MUTATIONS else {
+                throw PamProtocolError.invalidPayload("Batch has too many mutations")
+            }
 
-        try reader.finish()
-        return mutations
+            var mutations: [Mutation] = []
+            mutations.reserveCapacity(count)
+
+            for _ in 0..<count {
+                let kind = try reader.u8()
+                switch kind {
+                case 1:
+                    let spec = try reader.node()
+                    mutations.append(.create(spec))
+                case 2:
+                    let id = try reader.positiveId()
+                    mutations.append(.remove(id))
+                case 3:
+                    let id = try reader.positiveId()
+                    let key = try reader.u16()
+                    let presence = try reader.u8()
+                    let value: PropValue?
+                    if presence == 1 {
+                        value = try reader.value(for: key)
+                    } else if presence == 2 {
+                        value = nil
+                    } else {
+                        throw PamProtocolError.invalidPayload("Unknown update marker")
+                    }
+                    mutations.append(.update(id: id, key: key, value: value))
+                case 4:
+                    mutations.append(
+                        .move(
+                            id: try reader.positiveId(),
+                            parent: try reader.u64(),
+                            index: try reader.u32(),
+                        )
+                    )
+                case 5:
+                    let id = try reader.positiveId()
+                    let frame = Frame(
+                        x: try reader.f32(),
+                        y: try reader.f32(),
+                        width: try reader.f32(),
+                        height: try reader.f32(),
+                    )
+                    mutations.append(.layout(id: id, frame: frame))
+                case 6:
+                    mutations.append(.setRoot(try reader.positiveId()))
+                default:
+                    throw PamProtocolError.invalidProtocol("Unknown mutation type")
+                }
+            }
+
+            try reader.finish()
+            return mutations
+        }
     }
 }
 
 struct BinaryReader {
     private let source: Data
+    private let raw: UnsafeRawBufferPointer
     private var cursor: Data.Index
 
     var offset: Int { cursor }
 
-    init(source: Data) {
+    private init(source: Data, raw: UnsafeRawBufferPointer) {
         self.source = source
+        self.raw = raw
         self.cursor = source.startIndex
+    }
+
+    static func withSource<T>(_ source: Data, _ body: (inout BinaryReader) throws -> T) rethrows -> T {
+        try source.withUnsafeBytes { raw in
+            var reader = BinaryReader(source: source, raw: raw)
+            return try body(&reader)
+        }
     }
 
     mutating func ascii(_ length: Int) throws -> String {
@@ -760,18 +772,15 @@ struct BinaryReader {
     }
 
     mutating func u8() throws -> Int {
-        let value = try bytes(1).first ?? 0
-        return Int(value)
+        Int(try unsigned(1))
     }
 
     mutating func u16() throws -> Int {
-        let raw = try bytes(2)
-        return Int(UInt16(littleEndian: raw.withUnsafeBytes { $0.load(as: UInt16.self) }))
+        Int(try unsigned(2))
     }
 
     mutating func u32() throws -> Int {
-        let raw = try bytes(4)
-        let value = Int(UInt32(littleEndian: raw.withUnsafeBytes { $0.load(as: UInt32.self) }))
+        let value = Int(try unsigned(4))
         guard value >= 0 else {
             throw PamProtocolError.invalidPayload("Cannot decode u32")
         }
@@ -779,13 +788,11 @@ struct BinaryReader {
     }
 
     mutating func u64() throws -> Int64 {
-        let raw = try bytes(8)
-        return Int64(littleEndian: Int64(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) }))
+        Int64(bitPattern: try unsigned(8))
     }
 
     mutating func f32() throws -> Float {
-        let raw = try bytes(4)
-        let value = Float(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt32.self) })
+        let value = Float(bitPattern: UInt32(truncatingIfNeeded: try unsigned(4)))
         guard value.isFinite && value >= 0 else {
             throw PamProtocolError.invalidPayload("Invalid layout value")
         }
@@ -882,18 +889,41 @@ struct BinaryReader {
         return source.subdata(in: cursor..<end)
     }
 
+    // Numeric fields are read for every mutation. Avoid allocating a Data slice
+    // for each one; only variable-size values need a standalone Data value.
+    @inline(__always)
+    private mutating func unsigned(_ count: Int) throws -> UInt64 {
+        guard source.endIndex - cursor >= count else {
+            throw PamProtocolError.invalidPayload("Payload truncated")
+        }
+        let start = cursor - source.startIndex
+        let value: UInt64
+        switch count {
+        case 1:
+            value = UInt64(raw[start])
+        case 2:
+            value = UInt64(UInt16(littleEndian: raw.loadUnaligned(fromByteOffset: start, as: UInt16.self)))
+        case 4:
+            value = UInt64(UInt32(littleEndian: raw.loadUnaligned(fromByteOffset: start, as: UInt32.self)))
+        case 8:
+            value = UInt64(littleEndian: raw.loadUnaligned(fromByteOffset: start, as: UInt64.self))
+        default:
+            preconditionFailure("Unsupported scalar length")
+        }
+        cursor += count
+        return value
+    }
+
     mutating func skip(_ count: Int) throws {
         _ = try bytes(count)
     }
 
     mutating func i64() throws -> Int64 {
-        let raw = try bytes(8)
-        return Int64(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        Int64(bitPattern: try unsigned(8))
     }
 
     mutating func d64() throws -> Double {
-        let raw = try bytes(8)
-        let value = Double(bitPattern: raw.withUnsafeBytes { $0.load(as: UInt64.self) })
+        let value = Double(bitPattern: try unsigned(8))
         guard value.isFinite else {
             throw PamProtocolError.invalidPayload("Floating property must be finite")
         }
