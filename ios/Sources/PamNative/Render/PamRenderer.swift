@@ -702,6 +702,18 @@ public final class PamRenderer {
         )
         let layoutChanged = view.frame != nextFrame
         view.frame = nextFrame
+        if layoutChanged,
+           let source = state.properties[PamConstants.source]?.textOrNil(),
+           PamPhotoAssetURI.identifier(source) != nil,
+           let imageView = imageView(for: view) {
+            let scale = UIScreen.main.scale
+            let requiredWidth = min(4_096, nextFrame.width * scale)
+            let requiredHeight = min(4_096, nextFrame.height * scale)
+            if requiredWidth > state.photoTargetPixels.width * 1.5
+                || requiredHeight > state.photoTargetPixels.height * 1.5 {
+                loadPhotoAsset(source, into: imageView, nodeId: id)
+            }
+        }
         if layoutChanged {
             children[state.id]?.forEach { applyLayout($0) }
         }
@@ -3455,10 +3467,12 @@ public final class PamRenderer {
         options.isNetworkAccessAllowed = true
         options.deliveryMode = .highQualityFormat
         let scale = UIScreen.main.scale
+        let layout = frames[nodeId]
         let size = CGSize(
-            width: max(1, imageView.bounds.width * scale),
-            height: max(1, imageView.bounds.height * scale)
+            width: min(4_096, max(256, max(imageView.bounds.width, CGFloat(layout?.width ?? 0)) * scale)),
+            height: min(4_096, max(256, max(imageView.bounds.height, CGFloat(layout?.height ?? 0)) * scale))
         )
+        state.photoTargetPixels = size
         state.photoRequestId = PHImageManager.default().requestImage(
             for: asset,
             targetSize: size,
@@ -3793,6 +3807,7 @@ public final class PamRenderer {
         state.imageProgressTotal = 0
         state.imageProgressScheduled = false
         state.imageLoading = false
+        state.photoTargetPixels = .zero
         imageLoadContexts = imageLoadContexts.filter { _, context in
             context.nodeId != state.id
         }
@@ -5167,6 +5182,7 @@ private final class NodeState {
     let mountOrder: Int64
     var imageTask: URLSessionTask?
     var photoRequestId: PHImageRequestID = PHInvalidImageRequestID
+    var photoTargetPixels: CGSize = .zero
     var childrenNeedRethrow: UIView?
     var imageGeneration: Int
     var imageLoading: Bool

@@ -18,6 +18,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let location = LocationModule()
     private let audioRecorder = AudioRecorderModule()
     private let imageEditor = ImageEditorModule()
+    private let incomingShare = IncomingShareModule()
     private let mediaLibrary = MediaLibraryModule()
     private let timers = TimersModule()
     private let modules: [String: NativeModule]
@@ -40,6 +41,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "location": location,
             "audio-recorder": audioRecorder,
             "image-editor": imageEditor,
+            "incoming-share": incomingShare,
             "media-library": mediaLibrary,
             "timers": timers,
         ]

@@ -141,9 +141,8 @@ final class MediaLibraryModule: NativeModule {
             options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
         case 2:
             options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
-        case 3:
-            options.predicate = NSPredicate(value: false)
         default:
+            // Match Android's media-library query: other picker types include visual media.
             options.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
                 NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue),
                 NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue),

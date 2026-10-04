@@ -255,14 +255,16 @@ interpreter does not use `eval`.
 Conditional component roots may use `p-if`; a false root becomes an inert
 invisible placeholder with no layout footprint.
 
-For a custom Android gallery, `System\MediaLibrary::assets()` reads paginated
-image/video metadata and `System\MediaLibrary::albums()` reads album summaries
-on a native worker. Recent assets use descending added time and then descending
-modified time, matching Android CameraRoll ordering when captures share the
-same added timestamp. Thumbnail `content://` sources are not copied. After the
-user selects one, `System\Files::importUri()` materializes only that asset as a
+For a custom Android or iOS gallery, `System\MediaLibrary::assets()` reads
+paginated image/video metadata and `System\MediaLibrary::albums()` reads album
+summaries on a native worker. Android sorts recent assets by added and modified
+time and returns uncopied `content://` sources. iOS uses PhotoKit and returns
+uncopied `phasset://asset/` sources; PhotoKit list metadata does not include
+byte size, so iOS reports `MediaAsset::size` as `0` until import. After the user
+selects an asset, `System\Files::importUri()` materializes only that asset as a
 sandboxed `FileReference`. Request `PermissionKind::Photos` first and accept
-both granted and limited access; use `Files::pick()` as the portable fallback.
+both granted and limited access; use `Files::pick()` when broad photo access
+is unnecessary.
 
 `UI\DrawingCanvas` captures freehand brush and eraser strokes directly in the
 native view. Pointer moves never enter PHP; one bounded, normalized drawing
