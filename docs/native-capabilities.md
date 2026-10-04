@@ -231,6 +231,14 @@ private application cache before notifying PHP. The resulting
 after the source activity and its temporary URI grant are gone. Incoming
 events are bounded to 10 files, 16 queued shares and 64 KiB of text.
 
+On iOS, install the official `pam-native-share-extension` package to generate
+the Share Extension and shared App Group. The same `IncomingShares` API consumes
+one extension delivery at startup and delivers queued items when the app
+becomes active. Received files are copied into PAM's private file sandbox
+before PHP receives their relative paths. Choose either `IncomingShares` or
+the plugin's `ShareInbox::drain()` for a given application; both consume the
+same extension inbox.
+
 ```php
 use Pam\Native\IncomingShare;
 use Pam\Native\System\IncomingShares;
