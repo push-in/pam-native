@@ -58,15 +58,15 @@ final class MediaLibraryModule: NativeModule {
         queue.async {
             do {
                 let values = try WireMap.decode(payload)
-                let type = Int(values["type"]?.integerValue ?? 5)
+                let type = Int(self.integer(values, "type", fallback: 5))
                 let result: [String: WireValue]
                 switch method {
                 case "assets":
                     result = try self.assets(
                         type: type,
-                        albumId: values["albumId"]?.textValue ?? "",
-                        offset: max(0, Int(values["offset"]?.integerValue ?? 0)),
-                        limit: min(self.maximumPageSize, max(1, Int(values["limit"]?.integerValue ?? 80)))
+                        albumId: self.text(values, "albumId"),
+                        offset: max(0, Int(self.integer(values, "offset", fallback: 0))),
+                        limit: min(self.maximumPageSize, max(1, Int(self.integer(values, "limit", fallback: 80))))
                     )
                 default:
                     result = try self.albums(type: type)
@@ -187,5 +187,15 @@ final class MediaLibraryModule: NativeModule {
     private func json(_ rows: [[String: Any]]) throws -> String {
         let data = try JSONSerialization.data(withJSONObject: rows)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private func integer(_ values: [String: WireValue], _ key: String, fallback: Int64) -> Int64 {
+        if case let .integer(value)? = values[key] { return value }
+        return fallback
+    }
+
+    private func text(_ values: [String: WireValue], _ key: String) -> String {
+        if case let .text(value)? = values[key] { return value }
+        return ""
     }
 }
