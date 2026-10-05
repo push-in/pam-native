@@ -146,9 +146,30 @@ class PamActivity : FragmentActivity() {
         PamIncomingShares.captureInitial(this, intent)
         reportNotificationOpen(intent)
 
-        runCatching {
-            val embeddedEntry = AssetInstaller(this).install()
-            val entry = ActiveUpdateInstaller(this).resolve(embeddedEntry)
+        // Bundle extraction/verification and OTA resolution touch the disk
+        // (a full copy + hash on first launch); keep them off the main thread
+        // so the first frame and input are never blocked (ANR on cold start).
+        Thread(
+            {
+                val resolved = runCatching {
+                    val embeddedEntry = AssetInstaller(this).install()
+                    ActiveUpdateInstaller(this).resolve(embeddedEntry)
+                }
+                runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    resolved.mapCatching { entry -> startRuntime(entry) }.onFailure {
+                        errors.showError(it.message ?: "Pam Native failed to start")
+                    }
+                }
+            },
+            "pam-asset-install",
+        ).start()
+    }
+
+    private fun startRuntime(entry: java.io.File) {
+        val windowWidth = viewportWidth
+        val windowHeight = viewportHeight
+        run {
             runtimeEntryPath = entry.absolutePath
             val density = resources.displayMetrics.density
             val widthDp = windowWidth / density
@@ -179,8 +200,9 @@ class PamActivity : FragmentActivity() {
                     onError = { message -> runOnUiThread { errors.showError(message) } },
                 ).also { it.start() }
             }
-        }.onFailure {
-            errors.showError(it.message ?: "Pam Native failed to start")
+        }
+        if (lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            runtime.onHostResume()
         }
     }
 

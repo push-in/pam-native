@@ -1,4 +1,5 @@
 #include <jni.h>
+#include <sys/stat.h>
 #include <android/log.h>
 
 #include <sapi/embed/php_embed.h>
@@ -37,6 +38,9 @@ enum class EventType : std::uint8_t {
     Ui = 1,
     ModuleResult = 2,
     Reload = 3,
+    // Engine-only work (no PHP): applied on the worker so the UI thread never
+    // waits on the engine lock or decodes a batch synchronously.
+    ChildVisibility = 4,
 };
 
 struct Event {
@@ -476,38 +480,44 @@ void dispatch_event(const Event& event) {
     }
 }
 
+void set_ini(HashTable* configuration, const char* name, const std::string& value) {
+    zval entry;
+    ZVAL_STRINGL(&entry, value.data(), value.size());
+    zend_hash_str_update(configuration, name, std::strlen(name), &entry);
+}
+
 void apply_php_ini_defaults(HashTable* configuration) {
-    zval value;
-
-    ZVAL_STRING(&value, "0");
-    zend_hash_str_update(configuration, "opcache.enable", sizeof("opcache.enable") - 1, &value);
-
-    ZVAL_STRING(&value, "0");
-    zend_hash_str_update(
-        configuration,
-        "opcache.enable_cli",
-        sizeof("opcache.enable_cli") - 1,
-        &value
-    );
-
-    if (active_runtime != nullptr) {
-        ZVAL_STRINGL(
-            &value,
-            active_runtime->state_dir.data(),
-            active_runtime->state_dir.size()
-        );
-        zend_hash_str_update(
-            configuration,
-            "opcache.lockfile_path",
-            sizeof("opcache.lockfile_path") - 1,
-            &value
-        );
+    // OPcache keeps compiled scripts in shared memory for the life of the
+    // process and in a file cache under the app state directory, so a cold
+    // start reuses the opcodes compiled by the previous launch instead of
+    // recompiling the framework and app sources. JIT stays off (W^X).
+    const bool has_state_dir = active_runtime != nullptr && !active_runtime->state_dir.empty();
+    set_ini(configuration, "opcache.enable", has_state_dir ? "1" : "0");
+    set_ini(configuration, "opcache.enable_cli", has_state_dir ? "1" : "0");
+    set_ini(configuration, "opcache.jit", "disable");
+    set_ini(configuration, "opcache.jit_buffer_size", "0");
+    set_ini(configuration, "opcache.memory_consumption", "48");
+    set_ini(configuration, "opcache.interned_strings_buffer", "8");
+    set_ini(configuration, "opcache.max_accelerated_files", "8000");
+    // Release bundles are content-addressed; hot reload writes new files, so
+    // revalidate on every include (a stat) rather than serving stale code.
+    set_ini(configuration, "opcache.validate_timestamps", "1");
+    set_ini(configuration, "opcache.revalidate_freq", "0");
+    set_ini(configuration, "opcache.enable_file_override", "1");
+    if (has_state_dir) {
+        set_ini(configuration, "opcache.lockfile_path", active_runtime->state_dir);
+        set_ini(configuration, "opcache.file_cache", active_runtime->state_dir + "/opcache");
+        set_ini(configuration, "opcache.file_cache_consistency_checks", "1");
     }
 }
 
 bool initialize_php(RuntimeState* state) {
     log_debug("Initializing embedded PHP.");
     setenv("PAM_NATIVE_STATE_DIR", state->state_dir.c_str(), 1);
+    if (!state->state_dir.empty()) {
+        const std::string cache = state->state_dir + "/opcache";
+        mkdir(cache.c_str(), 0700);
+    }
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
     php_embed_module.ini_defaults = apply_php_ini_defaults;
     state->php_entry_argument = state->entry;
@@ -528,6 +538,28 @@ bool initialize_php(RuntimeState* state) {
     zend_unset_timeout();
     log_debug("Embedded PHP initialized.");
     return true;
+}
+
+void apply_child_visibility(RuntimeState* state, const Event& event) {
+    if (event.payload.size() != sizeof(jlong)) {
+        return;
+    }
+    jlong child = 0;
+    std::memcpy(&child, event.payload.data(), sizeof(jlong));
+    PamNativeBuffer batch{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        status = pam_native_engine_set_native_child_visibility(
+            state->engine, static_cast<uint64_t>(event.first), static_cast<uint64_t>(child),
+            event.second != 0 ? 1 : 0, &batch
+        );
+    }
+    if (status == PAM_STATUS_SUCCESS) {
+        publish_batch(state, batch);
+    } else {
+        pam_native_buffer_free(batch);
+    }
 }
 
 bool runtime_has_method(const char* method) {
@@ -606,7 +638,11 @@ bool run_php_request(RuntimeState* state) {
             draining = true;
             drain_started = now;
         }
-        dispatch_event(event);
+        if (event.type == EventType::ChildVisibility) {
+            apply_child_visibility(state, event);
+        } else {
+            dispatch_event(event);
+        }
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");
             zend_clear_exception();
@@ -896,20 +932,13 @@ Java_dev_pam_nativeapp_PamRuntime_nativeSetChildVisibility(
 ) {
     RuntimeState* state = from_handle(handle);
     if (state == nullptr || owner <= 0 || child <= 0) return;
-    PamNativeBuffer batch{nullptr, 0, 0};
-    PamStatus status;
-    {
-        std::lock_guard<std::mutex> lock(state->engine_mutex);
-        status = pam_native_engine_set_native_child_visibility(
-            state->engine, static_cast<uint64_t>(owner), static_cast<uint64_t>(child),
-            visible == JNI_TRUE ? 1 : 0, &batch
-        );
-    }
-    if (status == PAM_STATUS_SUCCESS) {
-        publish_batch(state, batch);
-    } else {
-        pam_native_buffer_free(batch);
-    }
+    std::string payload(sizeof(jlong), '\0');
+    std::memcpy(payload.data(), &child, sizeof(jlong));
+    enqueue(
+        state,
+        Event{EventType::ChildVisibility, owner, visible == JNI_TRUE ? 1 : 0, std::move(payload)},
+        false
+    );
 }
 
 extern "C" JNIEXPORT void JNICALL

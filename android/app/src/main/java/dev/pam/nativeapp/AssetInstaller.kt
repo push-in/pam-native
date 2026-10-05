@@ -88,10 +88,13 @@ internal class AssetInstaller(private val context: Context) {
     }
 
     private fun verifyManifest(directory: File, expected: String) {
-        val canonical = manifestDigest(directory, legacyComponentOrder = false)
-        if (canonical == expected) return
-        val legacy = manifestDigest(directory, legacyComponentOrder = true)
-        require(legacy == expected) { "Pam Native application bundle failed integrity verification" }
+        // The CLI (Rust `Path` ordering) hashes in path-component order, so
+        // check that first; plain string order is kept for older bundles.
+        // Matching the producer avoids a second full hash on every install.
+        val cli = manifestDigest(directory, legacyComponentOrder = true)
+        if (cli == expected) return
+        val plain = manifestDigest(directory, legacyComponentOrder = false)
+        require(plain == expected) { "Pam Native application bundle failed integrity verification" }
     }
 
     private fun manifestDigest(directory: File, legacyComponentOrder: Boolean): String {
