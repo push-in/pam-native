@@ -2106,7 +2106,8 @@ public final class PamRenderer {
              PamConstants.filterColorMatrix,
              PamConstants.backdropBlurRadius,
              PamConstants.backdropColorMatrix,
-             PamConstants.borderGradient:
+             PamConstants.borderGradient,
+             PamConstants.shimmerEnabled:
             PamUnsupportedEffects.report(key: key, value: value)
         default:
             break

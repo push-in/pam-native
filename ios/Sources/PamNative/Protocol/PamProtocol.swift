@@ -489,6 +489,9 @@ public enum PamConstants {
     public static let backdropBlurRadius = 495
     public static let backdropColorMatrix = 496
     public static let borderGradient = 497
+    public static let shimmerGradientColor = 498
+    public static let shimmerDurationMs = 499
+    public static let shimmerEnabled = 500
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

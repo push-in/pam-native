@@ -675,6 +675,9 @@ pub enum PropKey {
     BackdropBlurRadius = 495,
     BackdropColorMatrix = 496,
     BorderGradient = 497,
+    ShimmerGradientColor = 498,
+    ShimmerDurationMs = 499,
+    ShimmerEnabled = 500,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1179,6 +1182,9 @@ impl TryFrom<u16> for PropKey {
             495 => Ok(Self::BackdropBlurRadius),
             496 => Ok(Self::BackdropColorMatrix),
             497 => Ok(Self::BorderGradient),
+            498 => Ok(Self::ShimmerGradientColor),
+            499 => Ok(Self::ShimmerDurationMs),
+            500 => Ok(Self::ShimmerEnabled),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2054,10 +2060,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=497 {
+        for value in 1..=500 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(498).is_err());
+        assert!(PropKey::try_from(501).is_err());
     }
 
     #[test]

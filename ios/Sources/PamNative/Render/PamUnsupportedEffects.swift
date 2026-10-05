@@ -13,6 +13,7 @@ enum PamUnsupportedEffects {
         case let .text(text): active = !text.isEmpty
         case let .decimal(number): active = number > 0
         case let .integer(number): active = number > 0
+        case let .flag(flag): active = flag
         default: active = false
         }
         guard active, !reported.contains(key) else { return }
@@ -24,6 +25,7 @@ enum PamUnsupportedEffects {
         case PamConstants.filterColorMatrix: name = "filter color functions"
         case PamConstants.backdropBlurRadius, PamConstants.backdropColorMatrix: name = "backdrop-filter"
         case PamConstants.borderGradient: name = "gradient border-image"
+        case PamConstants.shimmerEnabled: name = "<Shimmer> sweep (base color is painted)"
         default: name = "property \(key)"
         }
         NSLog("[PamNative] CSS %@ is not painted on iOS yet (Android only).", name)

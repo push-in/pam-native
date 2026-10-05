@@ -229,6 +229,58 @@ class PamCssEffectsInstrumentedTest {
         assertTrue("outside the glass stays sharp: ${hex(outside)}", Color.red(outside) > 240 || Color.blue(outside) > 240)
     }
 
+    @Test
+    fun imageBlurRadiusBlursTheBitmapWithOpaqueEdgesOnEveryApi() {
+        val source = Bitmap.createBitmap(200, 100, Bitmap.Config.ARGB_8888)
+        Canvas(source).apply {
+            drawColor(Color.RED)
+            clipRect(100, 0, 200, 100)
+            drawColor(Color.BLUE)
+        }
+        val blurred = PamBitmapBlur.blur(source, 20f)
+        val center = blurred.getPixel(blurred.width / 2, blurred.height / 2)
+        val edge = blurred.getPixel(0, blurred.height / 2)
+        assertTrue("center mixes: ${hex(center)}", Color.red(center) in 70..190 && Color.blue(center) in 70..190)
+        assertEquals("edges stay opaque like React Native blurRadius", 255, Color.alpha(edge))
+        assertTrue("far edge keeps its color: ${hex(edge)}", Color.red(edge) > 200)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val image = PamImageView(instrumentation.targetContext)
+            image.setBlur(20f)
+            val drawable = image.bitmapDrawable(source, false)
+            assertEquals("intrinsic size is preserved", 200, drawable.intrinsicWidth)
+            assertEquals(100, drawable.intrinsicHeight)
+        }
+    }
+
+    @Test
+    fun shimmerSweepsAHighlightOverTheBackground() {
+        render(
+            listOf(
+                child(
+                    2,
+                    Frame(0f, 0f, 240f, 60f),
+                    mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF000000),
+                        PropKey.SHIMMER_GRADIENT_COLOR to PropValue.Integer(0xFFFFFFFF),
+                        PropKey.SHIMMER_DURATION_MS to PropValue.Integer(1200),
+                        PropKey.SHIMMER_ENABLED to PropValue.Flag(true),
+                    ),
+                ),
+            ),
+        ) { _, _ -> }
+        Thread.sleep(500)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        var brightest = 0
+        instrumentation.runOnMainSync {
+            val bitmap = software(viewsById.getValue(2))
+            for (x in 0 until bitmap.width step 4) {
+                brightest = maxOf(brightest, Color.red(bitmap.getPixel(x, bitmap.height / 2)))
+            }
+        }
+        assertTrue("a highlight is visible mid-sweep: $brightest", brightest > 60)
+    }
+
     private var activity: PamTestActivity? = null
     private val viewsById = HashMap<Long, View>()
 

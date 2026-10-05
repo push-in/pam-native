@@ -129,6 +129,21 @@ bitmap draw per shadow and never re-blur on scroll.
 fractions, default top-center → bottom-center) and `locations` (fractions)
 compile to the same native gradient; children render on top like `<View>`.
 
+### React Native parity primitives
+
+* `<Shimmer baseColor gradientColor duration enabled>` — skeleton sweep
+  matching Zé Chat's native shimmer (highlight strip 1.25× the width,
+  stops 0/.35/.5/.65/1, default `gradientColor` `#FFFFFF59`, 1200 ms).
+  `baseColor` is the background; children render above the sweep; it clips
+  to `border-radius` and pauses when detached, hidden or off screen (one
+  shared Choreographer callback for every shimmer).
+* `<Image blurRadius="28">` (and `filter: blur()` on images) blurs the
+  decoded bitmap once, like React Native: every API level, opaque edges,
+  no per-frame GPU work (σ = the radius in dp).
+* `text-shadow: x y <blur> <color>` maps the blur to Android's
+  `setShadowLayer` radius exactly like React Native `textShadowRadius`.
+* Modal/BottomSheet scrims: `backdropColor="rgba(0,0,0,.28)"`.
+
 ### Filters and backdrop
 
 `filter` color functions are composed at compile time into one 4×5 color

@@ -21,6 +21,7 @@ internal open class PamContainer(context: Context) :
     private val boxShadowPath = Path()
     private val boxShadowBounds = RectF()
     private var backdrop: PamBackdrop? = null
+    private var shimmer: PamShimmer? = null
 
     init {
         clipChildren = false
@@ -79,6 +80,12 @@ internal open class PamContainer(context: Context) :
         }
     }
 
+    /** `<Shimmer>` skeleton sweep drawn over the background, under the children. */
+    fun setShimmer(enabled: Boolean, color: Int, durationMs: Long) {
+        val effect = shimmer ?: if (enabled) PamShimmer(this).also { shimmer = it } else return
+        effect.configure(enabled, color, durationMs)
+    }
+
     override fun draw(canvas: Canvas) {
         backdrop?.draw(canvas, overflowClipRadii)
         super.draw(canvas)
@@ -87,14 +94,25 @@ internal open class PamContainer(context: Context) :
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         backdrop?.attach()
+        shimmer?.update()
     }
 
     override fun onDetachedFromWindow() {
         backdrop?.detach()
         super.onDetachedFromWindow()
+        shimmer?.update()
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        shimmer?.update()
     }
 
     override fun dispatchDraw(canvas: Canvas) {
+        shimmer?.takeIf { it.enabled }?.let {
+            updateOverflowClipPath()
+            it.draw(canvas, overflowClipPath)
+        }
         if (!overflowClipEnabled) {
             super.dispatchDraw(canvas)
             return
@@ -126,6 +144,7 @@ internal open class PamContainer(context: Context) :
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         if (width != oldWidth || height != oldHeight) {
             overflowClipPathDirty = true
+            shimmer?.update()
         }
     }
 

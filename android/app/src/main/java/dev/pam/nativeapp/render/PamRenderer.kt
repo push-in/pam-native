@@ -1987,6 +1987,14 @@ class PamRenderer(
             PropKey.BACKDROP_BLUR_RADIUS,
             PropKey.BACKDROP_COLOR_MATRIX,
             -> applyBackdrop(view, state)
+            PropKey.SHIMMER_GRADIENT_COLOR,
+            PropKey.SHIMMER_DURATION_MS,
+            PropKey.SHIMMER_ENABLED,
+            -> (view as? PamContainer)?.setShimmer(
+                state.properties[PropKey.SHIMMER_ENABLED]?.let { (it as? PropValue.Flag)?.value } ?: false,
+                state.integer(PropKey.SHIMMER_GRADIENT_COLOR, 0x59FFFFFF).toInt(),
+                state.integer(PropKey.SHIMMER_DURATION_MS, 1200L),
+            )
             PropKey.SHADOW_OFFSET_X,
             PropKey.SHADOW_OFFSET_Y,
             PropKey.SHADOW_BLUR_RADIUS,
@@ -2829,6 +2837,14 @@ class PamRenderer(
             PropKey.BACKDROP_BLUR_RADIUS,
             PropKey.BACKDROP_COLOR_MATRIX,
             -> applyBackdrop(view, state)
+            PropKey.SHIMMER_GRADIENT_COLOR,
+            PropKey.SHIMMER_DURATION_MS,
+            PropKey.SHIMMER_ENABLED,
+            -> (view as? PamContainer)?.setShimmer(
+                state.properties[PropKey.SHIMMER_ENABLED]?.let { (it as? PropValue.Flag)?.value } ?: false,
+                state.integer(PropKey.SHIMMER_GRADIENT_COLOR, 0x59FFFFFF).toInt(),
+                state.integer(PropKey.SHIMMER_DURATION_MS, 1200L),
+            )
             PropKey.TEXT_COLOR -> when (view) {
                 is TextView -> view.setTextColor(Color.BLACK)
                 is PamRecyclerList -> view.setTextColor(Color.BLACK)
@@ -5609,8 +5625,14 @@ class PamRenderer(
      * hue-rotate) via RenderEffect or, before API 31, a hardware layer paint.
      */
     private fun applyFilter(view: View, state: NodeState) {
-        val sigma = state.number(PropKey.BLUR_RADIUS, 0.0).toFloat().coerceAtLeast(0f) * resourcesDensity()
+        var sigma = state.number(PropKey.BLUR_RADIUS, 0.0).toFloat().coerceAtLeast(0f) * resourcesDensity()
         val matrix = PamBackdrop.colorMatrix(state.properties[PropKey.FILTER_COLOR_MATRIX]?.textOrNull())
+        // Images blur their bitmap like React Native's blurRadius: every API
+        // level, opaque clamped edges, no per-frame GPU blur.
+        pamImageView(view)?.let { image ->
+            image.setBlur(sigma)
+            sigma = 0f
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             var effect: RenderEffect? = if (sigma > 0f) {
                 val radius = ((sigma - 0.5f) / 0.57735f).coerceAtLeast(0.1f)
@@ -7792,6 +7814,7 @@ class PamRenderer(
             PropKey.FILTER_COLOR_MATRIX,
             PropKey.BACKDROP_BLUR_RADIUS,
             PropKey.BACKDROP_COLOR_MATRIX,
+            PropKey.SHIMMER_ENABLED,
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
             PropKey.SCALE_X,

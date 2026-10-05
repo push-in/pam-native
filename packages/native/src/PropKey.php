@@ -503,4 +503,7 @@ enum PropKey: int
     case BackdropBlurRadius = 495;
     case BackdropColorMatrix = 496;
     case BorderGradient = 497;
+    case ShimmerGradientColor = 498;
+    case ShimmerDurationMs = 499;
+    case ShimmerEnabled = 500;
 }

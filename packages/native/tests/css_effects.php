@@ -215,3 +215,26 @@ $assert(
     ],
     'Golden IR: <LinearGradient> maps expo-linear-gradient props.',
 );
+
+// RN parity primitives: <Shimmer>, Image blurRadius and sheet backdrop color.
+$parity = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<Column><Shimmer baseColor="#EEEEEE" gradientColor="rgba(255, 255, 255, .22)" duration="1200"/>'
+        .'<Image source="https://example.com/a.jpg" blurRadius="28"/></Column>',
+    ),
+    null,
+    [],
+);
+[$shimmer, $blurredImage] = $parity->children();
+$assert(
+    $shimmer->properties()[PropKey::BackgroundColor->value] === 0xFFEEEEEE
+        && $shimmer->properties()[PropKey::ShimmerGradientColor->value] === 0x38FFFFFF
+        && $shimmer->properties()[PropKey::ShimmerDurationMs->value] === 1200
+        && $shimmer->properties()[PropKey::ShimmerEnabled->value] === true
+        && $shimmer->properties()[PropKey::Overflow->value] === 2,
+    '<Shimmer> must map the Zé shimmer props.',
+);
+$assert(
+    $blurredImage->properties()[PropKey::BlurRadius->value] == 28,
+    'Image blurRadius must reach the native blur property.',
+);

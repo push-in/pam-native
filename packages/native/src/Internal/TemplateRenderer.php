@@ -540,6 +540,9 @@ final class TemplateRenderer
         'backdropBlurRadius' => PropKey::BackdropBlurRadius,
         'backdropColorMatrix' => PropKey::BackdropColorMatrix,
         'borderGradient' => PropKey::BorderGradient,
+        'shimmerGradientColor' => PropKey::ShimmerGradientColor,
+        'shimmerDurationMs' => PropKey::ShimmerDurationMs,
+        'shimmerEnabled' => PropKey::ShimmerEnabled,
         'transformOriginX' => PropKey::TransformOriginX,
         'transformOriginY' => PropKey::TransformOriginY,
         'translationYPercent' => PropKey::TranslationYPercent,
@@ -1298,6 +1301,9 @@ final class TemplateRenderer
         if ($factory === null && $tag === 'LinearGradient') {
             $values = self::linearGradientAttributes($values);
         }
+        if ($factory === null && $tag === 'Shimmer') {
+            $values = self::shimmerAttributes($values);
+        }
         $element = $factory !== null
             ? $factory($componentValues, $children, $scope)->toElement()
             : match ($tag) {
@@ -1305,7 +1311,7 @@ final class TemplateRenderer
             'Column' => Column::make(...$children),
             'Row' => Row::make(...$children),
             'Grid' => Grid::make(...$children),
-            'View', 'LinearGradient' => NativeView::make(...$children),
+            'View', 'LinearGradient', 'Shimmer' => NativeView::make(...$children),
             'Text' => Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
             'Button' => Button::make(self::stringValue(
                 $values['label'] ?? $values['text'] ?? $text,
@@ -2114,6 +2120,7 @@ final class TemplateRenderer
             PropKey::BorderBottomColor,
             PropKey::BorderLeftColor,
             PropKey::TextShadowColor,
+            PropKey::ShimmerGradientColor,
             => self::colorValue($value, "Template {$key->name}"),
             PropKey::AlignContent => self::named($value, [
                 'start' => 1, 'flex-start' => 1, 'normal' => 1, 'center' => 2,
@@ -2617,6 +2624,28 @@ final class TemplateRenderer
             self::floatValue($value[0], "LinearGradient {$label}.x"),
             self::floatValue($value[1], "LinearGradient {$label}.y"),
         ];
+    }
+
+    /**
+     * Skeleton shimmer matching the Zé Chat native shimmer: `baseColor`
+     * fills the box, a `gradientColor` highlight sweeps left to right every
+     * `duration` ms; children render on top. Clips to its radius.
+     *
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private static function shimmerAttributes(array $values): array
+    {
+        if (array_key_exists('baseColor', $values)) {
+            $values['backgroundColor'] ??= $values['baseColor'];
+        }
+        $values['shimmerGradientColor'] = $values['gradientColor'] ?? 0x59FFFFFF;
+        $values['shimmerDurationMs'] = max(1, self::intValue($values['duration'] ?? 1200, 'Shimmer duration'));
+        $values['shimmerEnabled'] = self::boolValue($values['enabled'] ?? true, 'Shimmer enabled');
+        $values['overflow'] ??= 'hidden';
+        unset($values['baseColor'], $values['gradientColor'], $values['duration'], $values['enabled']);
+
+        return $values;
     }
 
     /** @return list<string> */

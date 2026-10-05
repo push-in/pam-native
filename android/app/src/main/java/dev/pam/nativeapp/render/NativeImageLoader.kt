@@ -4,9 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
-import android.graphics.Shader
 import android.graphics.drawable.AnimatedImageDrawable
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.TransitionDrawable
 import android.os.Build
 import android.os.Handler
@@ -490,11 +488,7 @@ internal class NativeImageLoader(
         repeat: Boolean,
         fadeDurationMs: Int,
     ) {
-        val next = BitmapDrawable(context.resources, bitmap).apply {
-            if (repeat) {
-                setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
-            }
-        }
+        val next = view.bitmapDrawable(bitmap, repeat)
         val previous = view.drawable
         if (fadeDurationMs > 0 && previous != null) {
             val transition = TransitionDrawable(arrayOf(previous, next)).apply {

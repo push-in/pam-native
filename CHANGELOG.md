@@ -27,9 +27,15 @@ Native CSS visual effects on top of the 1.2.0 complete-CSS compiler and the
   instead of a fake elevation.
 - `backdrop-filter` on containers (Android 12+): GPU blur/color matrix of
   the content behind the element, clipped to its radius.
-- Protocol: append-only property IDs 492–497 (`BackgroundGradient`,
+- `<Shimmer baseColor gradientColor duration enabled>` skeleton primitive
+  (Zé Chat shimmer port, shared frame clock, pauses off screen).
+- `<Image blurRadius>` / `filter: blur()` on images now blur the bitmap once
+  with opaque edges on every API level (React Native semantics) instead of
+  a GPU blur that needed API 31.
+- Protocol: append-only property IDs 492–500 (`BackgroundGradient`,
   `BoxShadows`, `FilterColorMatrix`, `BackdropBlurRadius`,
-  `BackdropColorMatrix`, `BorderGradient`).
+  `BackdropColorMatrix`, `BorderGradient`, `ShimmerGradientColor`,
+  `ShimmerDurationMs`, `ShimmerEnabled`).
 - Still diagnosed at compile time: `conic-gradient()`, gradient color hints,
   `url()` backgrounds, `drop-shadow()`/`url()` filters, non-neutral
   `background-size/position/clip`. iOS paints colors and the first outer

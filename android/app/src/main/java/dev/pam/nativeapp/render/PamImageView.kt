@@ -1,7 +1,11 @@
 package dev.pam.nativeapp.render
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Shader
+import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.Path
 import android.graphics.RectF
 import android.widget.ImageView
@@ -11,6 +15,41 @@ internal class PamImageView(context: Context) : ImageView(context) {
     private val clipPath = Path()
     private val clipBounds = RectF()
     private var cornerRadii = FloatArray(8)
+    private var sourceBitmap: Bitmap? = null
+    private var sourceRepeat = false
+    private var blurSigma = 0f
+
+    /** RN `blurRadius` / CSS `filter: blur()` on an image, σ in px. */
+    fun setBlur(sigma: Float) {
+        val normalized = sigma.coerceAtLeast(0f)
+        if (normalized == blurSigma) return
+        blurSigma = normalized
+        sourceBitmap?.let { bitmap -> setImageDrawable(bitmapDrawable(bitmap, sourceRepeat)) }
+    }
+
+    /** Drawable for a decoded bitmap, blurred when a blur radius is set. */
+    fun bitmapDrawable(bitmap: Bitmap, repeat: Boolean): Drawable {
+        sourceBitmap = bitmap
+        sourceRepeat = repeat
+        if (blurSigma <= 0f) {
+            return BitmapDrawable(resources, bitmap).apply {
+                if (repeat) setTileModeXY(Shader.TileMode.REPEAT, Shader.TileMode.REPEAT)
+            }
+        }
+        val blurred = PamBitmapBlur.blur(bitmap, blurSigma)
+        val width = bitmap.width
+        val height = bitmap.height
+        // Keep the source's intrinsic size so scale types lay out identically.
+        return object : BitmapDrawable(resources, blurred) {
+            override fun getIntrinsicWidth(): Int = width
+            override fun getIntrinsicHeight(): Int = height
+        }
+    }
+
+    override fun setImageDrawable(drawable: Drawable?) {
+        if (drawable == null) sourceBitmap = null
+        super.setImageDrawable(drawable)
+    }
 
     init {
         // PAM's layout engine is authoritative for both dimensions. Letting

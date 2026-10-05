@@ -642,7 +642,10 @@ enum class PropKey(val value: Int) {
     FILTER_COLOR_MATRIX(494),
     BACKDROP_BLUR_RADIUS(495),
     BACKDROP_COLOR_MATRIX(496),
-    BORDER_GRADIENT(497);
+    BORDER_GRADIENT(497),
+    SHIMMER_GRADIENT_COLOR(498),
+    SHIMMER_DURATION_MS(499),
+    SHIMMER_ENABLED(500);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }
