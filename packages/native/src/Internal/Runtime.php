@@ -342,6 +342,7 @@ final class Runtime
     {
         try {
             if ($eventKind === EventKind::Back->value) {
+                DependencyTracker::invalidateAll();
                 self::$backHandler?->__invoke();
                 self::afterDispatch();
 
@@ -350,6 +351,7 @@ final class Runtime
             if ($eventKind === EventKind::AppState->value) {
                 $appState = AppState::from((int) $payload);
                 ComponentLifecycle::appState($appState);
+                DependencyTracker::invalidateAll();
                 self::$appStateHandler?->__invoke($appState);
                 self::afterDispatch();
 
@@ -389,6 +391,7 @@ final class Runtime
                 return;
             }
             if ($eventKind === EventKind::MemoryPressure->value) {
+                DependencyTracker::invalidateAll();
                 self::$memoryPressureHandler?->__invoke(MemoryPressure::from((int) $payload));
                 self::afterDispatch();
 
@@ -398,6 +401,11 @@ final class Runtime
             $callback = self::$eventCallbacks[$nodeId.':'.$eventKind] ?? null;
             if ($callback === null) {
                 return;
+            }
+            if (!self::marksItsScope($callback)) {
+                // Arbitrary element closures may mutate any state: re-render
+                // everything. Template handlers mark their component dirty.
+                DependencyTracker::invalidateAll();
             }
             self::$dispatchingEvent = true;
             try {
@@ -409,6 +417,12 @@ final class Runtime
         } catch (Throwable $error) {
             self::reportError($error);
         }
+    }
+
+    private static function marksItsScope(Closure $callback): bool
+    {
+        return (new \ReflectionFunction($callback))->getClosureScopeClass()?->getName()
+            === TemplateRenderer::class;
     }
 
     private static function styleEnvironmentKeyword(mixed $value, string $fallback): string

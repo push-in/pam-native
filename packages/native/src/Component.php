@@ -458,6 +458,35 @@ abstract class Component implements Renderable
             unset($values["\0".self::class."\0".$name]);
         }
 
+        return self::pamExpandObjects($values, 0);
+    }
+
+    /**
+     * Plain objects held by a component (services, view models, records) are
+     * captured with their own properties, two levels deep, so in-place
+     * mutations such as `$this->model->draft = ...` are detected. Components
+     * track themselves; closures, enums and elements compare by identity.
+     *
+     * @param array<array-key, mixed> $values
+     * @return array<array-key, mixed>
+     */
+    private static function pamExpandObjects(array $values, int $depth): array
+    {
+        foreach ($values as $key => $value) {
+            if (
+                is_object($value)
+                && !$value instanceof Component
+                && !$value instanceof Closure
+                && !$value instanceof \UnitEnum
+                && !$value instanceof Element
+            ) {
+                $values[$key] = [
+                    $value,
+                    $depth < 1 ? self::pamExpandObjects((array) $value, $depth + 1) : (array) $value,
+                ];
+            }
+        }
+
         return $values;
     }
 

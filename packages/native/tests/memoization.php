@@ -52,11 +52,19 @@ final class MemoTestParent extends Component
     public int $count = 0;
     public MemoTestChild $child;
     public MemoTestVolatile $volatile;
+    private stdClass $model;
 
     public function __construct()
     {
         $this->child = new MemoTestChild();
         $this->volatile = new MemoTestVolatile();
+        $this->model = new stdClass();
+        $this->model->title = 'model-one';
+    }
+
+    public function model(): stdClass
+    {
+        return $this->model;
     }
 
     public function render(): Element
@@ -65,6 +73,7 @@ final class MemoTestParent extends Component
 
         return Screen::make(Column::make(
             Text::make("count-{$this->count}"),
+            Text::make($this->model->title),
             $this->child,
             $this->volatile,
         ))->toElement();
@@ -135,9 +144,19 @@ $assert(Runtime::flush() && MemoTestParent::$renders === 5
     'flush() must render a coalesced burst exactly once.');
 Runtime::deferRendering(false);
 
+$beforeModel = MemoTestParent::$renders;
+$memoResult(static function () use ($memoParent): void {
+    $memoParent->model()->title = 'model-two';
+});
+$assert(
+    MemoTestParent::$renders === $beforeModel + 1
+        && str_contains((string) Runtime::lastFrame(), 'model-two'),
+    'In-place writes to plain objects held by a component must re-render it.',
+);
+
 \Pam\Native\Internal\DependencyTracker::memoization(false);
 $memoResult(static function (): void {});
-$assert(MemoTestParent::$renders === 6, 'Disabling memoization must restore full re-renders.');
+$assert(MemoTestParent::$renders === $beforeModel + 2, 'Disabling memoization must restore full re-renders.');
 \Pam\Native\Internal\DependencyTracker::memoization(true);
 $assert(MemoTestChild::$unmounts === 0, 'Memoized subtrees must never be unmounted while displayed.');
 Runtime::shutdown();
