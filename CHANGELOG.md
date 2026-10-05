@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.5.2 - 2026-10-05
+
+Virtual list layout and scroll fixes (chat timelines).
+
+- **Behaviour change:** single-column `VirtualizedList` cells without an
+  authored `height` are now content-sized, like React Native `FlatList`
+  cells. `rowHeight`/`estimatedRowHeight` remains the prefetch estimate and
+  the extent of empty cells or cells whose content has no definite intrinsic
+  height (e.g. percentage-sized media). Previously every such cell was
+  clamped to the estimate, so variable rows (chat bubbles, comments) were
+  clipped and overlapped. Multi-column grids keep the previous behaviour.
+- Intrinsic and flex measurement wrap a column child's text at the child's
+  own cross size (its horizontal margins and `min-width`/`max-width`), so
+  capped content-sized boxes no longer clip their wrapped lines.
+- Android: explicit scroll targets inside rich virtual cells are aligned with
+  the adapter's per-cell pixel extents and the list's real native viewport
+  (no accumulated rounding drift, no hidden end rows when host insets shrink
+  the list). An `initialScrollIndex` applied in the same commit no longer
+  overrides an explicit scroll request, and a list resting at its end stays
+  there when its cells are re-measured or its viewport shrinks.
+- CLI: a linked `git worktree` (whose `.git` is a file) is treated as a
+  source checkout, so its locally built engine is no longer replaced by the
+  release archive.
+
 ## 1.5.1 - 2026-10-05
 
 Render pipeline performance, part 3 (from a Galaxy S10 cold-start trace and
