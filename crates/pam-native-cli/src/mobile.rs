@@ -2746,6 +2746,15 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
             project.manifest.name, project.manifest.application_id
         ),
     );
+    let debug_id = ensure_isolated_debug_application_id(&project);
+    healthy &= debug_id.is_ok();
+    check(
+        "Debug application ID",
+        debug_id.is_ok(),
+        debug_id
+            .map(|id| id.to_string())
+            .unwrap_or_else(|error| error),
+    );
     let java_version = tool_version("java", &["-version"]);
     let java_ready =
         command_exists("java") && java_major_version(&java_version).is_some_and(|v| v >= 17);
@@ -6172,8 +6181,11 @@ struct BuiltApk {
 }
 
 fn build_intermediate(options: MobileOptions, installable: bool) -> Result<BuiltApk, String> {
-    repair_android(&options.project)?;
     let project = load_project(&options.project)?;
+    if options.mode == BuildMode::Debug {
+        ensure_isolated_debug_application_id(&project)?;
+    }
+    repair_android(&options.project)?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home()?)?;
     install_android_packages(&project, &runtime, false)?;
@@ -7582,6 +7594,16 @@ fn debug_application_id(project: &Project) -> String {
     debug_application_id_for(&project.root, &project.manifest)
 }
 
+fn ensure_isolated_debug_application_id(project: &Project) -> Result<String, String> {
+    let debug_id = debug_application_id(project);
+    if debug_id == project.manifest.application_id {
+        return Err(format!(
+            "debug application ID {debug_id} matches the production ID; set android.debugApplicationIdSuffix in pam-native.json (for example .pamqa) and add the matching Android client to google-services.json before building a debug app"
+        ));
+    }
+    Ok(debug_id)
+}
+
 fn debug_application_id_for(root: &Path, manifest: &NativeManifest) -> String {
     if let Some(suffix) = &manifest.android.debug_application_id_suffix {
         return format!("{}{}", manifest.application_id, suffix);
@@ -8623,6 +8645,7 @@ mod tests {
         fs::create_dir_all(root.join(".pam")).expect("pam state");
         fs::write(root.join(".pam/google-services.json"), "{}").expect("firebase config");
         assert_eq!(debug_application_id(&project), "app.pam.generated");
+        assert!(ensure_isolated_debug_application_id(&project).is_err());
 
         let mut manifest: serde_json::Value =
             serde_json::from_slice(&fs::read(root.join(MANIFEST_NAME)).expect("read manifest"))
@@ -8635,6 +8658,10 @@ mod tests {
         .expect("manifest");
         let project = load_project(&root).expect("project with debug suffix");
         assert_eq!(debug_application_id(&project), "app.pam.generated.qa");
+        assert_eq!(
+            ensure_isolated_debug_application_id(&project).expect("isolated debug ID"),
+            "app.pam.generated.qa",
+        );
         assert!(validate_manifest(&root, &project.manifest).is_ok());
 
         manifest["android"]["debugApplicationIdSuffix"] = serde_json::json!(".bad-suffix");

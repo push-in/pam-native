@@ -121,12 +121,13 @@ notification-opening intents are forwarded automatically. Custom native
 integrations may still call `PamPushNotifications.reportReceived(...)` or
 `reportOpened(...)`.
 
-To install a debug build beside a production app, set
-`android.debugApplicationIdSuffix` in `pam-native.json`, for example `.pamqa`.
-PAM applies that suffix to the Android debug package even when Firebase is
-enabled, and uses the same package for launch, logs and diagnostics. Release
-builds keep `applicationId`. When Firebase is enabled, the Google services file
-must contain an Android client for the suffixed debug package.
+Debug builds must use a package ID separate from production. Without Firebase,
+PAM appends `.debug` automatically. When a Firebase client file is present,
+set `android.debugApplicationIdSuffix` in `pam-native.json`, for example
+`.pamqa`. PAM refuses a debug build that would reuse the production package ID
+and `pam doctor` reports the same issue. The suffix applies to launch, logs and
+diagnostics; release builds keep `applicationId`. The Google services file must
+contain an Android client for the suffixed debug package.
 
 iOS notification delegates forward foreground delivery with
 `PamPushNotifications.didReceive(notification:)` and opening with
