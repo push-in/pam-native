@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.12.1 - 2026-10-05
+
+- Android: taps inside a Pressable nested in another Pressable reach the
+  view under the finger again. Hit-slop delegates (every Pressable registers
+  a minimum-touch-target delegate, routed before child hit testing) used the
+  platform `TouchDelegate`, which re-centres each event in its target: a
+  Pressable panel inside a Pressable backdrop sent every tap to the child at
+  its centre, so all tiles of Zé's message-actions overlay fired the 5th
+  ("react"). Delegates now keep the touch position (clamped onto the target
+  only for slop points) and large-enough targets are not delegated at all.
+  `PamNestedPressableInstrumentedTest` taps 12 tiles in nested Pressables and
+  in a re-opened Modal and expects 12 distinct ids.
+- Bottom sheets (Android and iOS) start drag-to-close only when the
+  scrollable under the finger is at its top (gorhom semantics), instead of
+  checking the sheet's non-scrolling direct child; a downward drag inside a
+  scrolled list scrolls it. `PamSheetNestedScrollInstrumentedTest`.
+- iOS needed no hit-test change (UIKit hit testing never re-centres); the new
+  `PamNestedPressableTests` and the sheet change are **uncompiled and need Mac
+  validation**.
+
 ## 1.12.0 - 2026-10-05
 
 Keyboard, safe-area, input and text-fit fixes from Zé Chat device QA
