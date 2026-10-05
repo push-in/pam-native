@@ -726,7 +726,10 @@ final class TemplateRenderer
                         'p-for source must resolve to an integer, array, or Traversable.',
                     );
                 }
-                $keyExpression = $attributes['p-key'] ?? null;
+                // `:key` / `key` on a loop child is the item identity exactly
+                // like `p-key` (component instance, slot and native id).
+                $keyExpression = $attributes['p-key'] ?? $attributes[':key'] ?? null;
+                $staticKey = $keyExpression === null ? ($attributes['key'] ?? null) : null;
                 $indexName = $attributes['p-index'] ?? $match[1].'Index';
                 if (!is_string($indexName) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', ltrim($indexName, '$')) !== 1) {
                     throw new RuntimeException('p-index must be a safe variable name.');
@@ -735,8 +738,7 @@ final class TemplateRenderer
                 $loopNode = self::withoutAttributes($node, ['p-for', 'p-key', 'p-index']);
                 if (
                     $keyExpression === null
-                    && !isset($attributes['key'])
-                    && !isset($attributes[':key'])
+                    && $staticKey === null
                     && count($items) > 1
                 ) {
                     DevWarnings::warn(
@@ -752,8 +754,10 @@ final class TemplateRenderer
                         $indexName => $itemIndex,
                     ];
                     $identity = $itemIndex;
-                    if ($keyExpression !== null) {
-                        $identity = self::dynamicValue($keyExpression, $scope, $iterationData);
+                    if ($keyExpression !== null || $staticKey !== null) {
+                        $identity = $keyExpression !== null
+                            ? self::dynamicValue($keyExpression, $scope, $iterationData)
+                            : self::value($staticKey, $scope, $iterationData);
                         if (!is_string($identity) && !is_int($identity)) {
                             throw new RuntimeException('p-key must resolve to a string or integer.');
                         }

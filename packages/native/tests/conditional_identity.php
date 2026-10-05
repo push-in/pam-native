@@ -2,7 +2,11 @@
 
 declare(strict_types=1);
 
+use Pam\Native\App;
 use Pam\Native\Element;
+use Pam\Native\EventKind;
+use Pam\Native\Internal\Runtime;
+use Pam\Native\PropKey;
 use Pam\Native\Internal\DevWarnings;
 use Pam\Native\Internal\EncodedNode;
 use Pam\Native\Internal\TemplateCompiler;
@@ -16,6 +20,243 @@ use Pam\Native\UI\Modal;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\View as NativeView;
 use Pam\Native\UI\VirtualizedList;
+
+// Device path: p-for of components, events resolved by the native node ids
+// carried in the committed frames (not by calling PHP callbacks directly).
+if (!function_exists('pam_native_commit')) {
+    function pam_native_commit(string $frame): bool
+    {
+        $GLOBALS['pamIdentityFrames'][] = $frame;
+
+        return true;
+    }
+}
+$GLOBALS['pamIdentityFrames'] = [];
+$nativeTree = new class {
+    /** @var array<int, array{parent: int, index: int, kind: int, props: array<int, string>}> */
+    public array $nodes = [];
+    public int $root = 0;
+    private string $bytes = '';
+    private int $offset = 0;
+
+    public function apply(string $frame): void
+    {
+        $this->bytes = $frame;
+        $this->offset = 6;
+        if (str_starts_with($frame, 'PNT1')) {
+            $this->nodes = [];
+            $this->root = $this->int('P', 8);
+            for ($count = $this->int('V', 4); $count > 0; $count--) {
+                $this->node();
+            }
+
+            return;
+        }
+        for ($count = $this->int('V', 4); $count > 0; $count--) {
+            $operation = ord($this->bytes[$this->offset++]);
+            if ($operation === 1) {
+                $this->node();
+            } elseif ($operation === 2) {
+                unset($this->nodes[$this->int('P', 8)]);
+            } elseif ($operation === 3) {
+                $id = $this->int('P', 8);
+                $key = $this->int('v', 2);
+                if (ord($this->bytes[$this->offset++]) === 1) {
+                    $this->nodes[$id]['props'][$key] = $this->value();
+                } else {
+                    unset($this->nodes[$id]['props'][$key]);
+                }
+            } elseif ($operation === 4) {
+                $id = $this->int('P', 8);
+                $this->nodes[$id]['parent'] = $this->int('P', 8);
+                $this->nodes[$id]['index'] = $this->int('V', 4);
+            } elseif ($operation === 5) {
+                $this->root = $this->int('P', 8);
+            } else {
+                throw new RuntimeException("Unknown patch operation {$operation}.");
+            }
+        }
+    }
+
+    /** @return list<int> node ids in native tree order */
+    public function order(?int $id = null): array
+    {
+        $id ??= $this->root;
+        $children = [];
+        foreach ($this->nodes as $child => $node) {
+            if ($node['parent'] === $id && $child !== $id) {
+                $children[$node['index']] = $child;
+            }
+        }
+        ksort($children);
+        $ordered = [$id];
+        foreach ($children as $child) {
+            array_push($ordered, ...$this->order($child));
+        }
+
+        return $ordered;
+    }
+
+    private function int(string $format, int $size): int
+    {
+        $value = unpack($format, $this->bytes, $this->offset)[1];
+        $this->offset += $size;
+
+        return $value;
+    }
+
+    private function value(): string
+    {
+        $start = $this->offset;
+        $type = ord($this->bytes[$this->offset++]);
+        $this->offset += match ($type) {
+            1, 5 => 4 + unpack('V', $this->bytes, $this->offset)[1],
+            2, 3 => 8,
+            4 => 1,
+        };
+
+        return substr($this->bytes, $start, $this->offset - $start);
+    }
+
+    private function node(): void
+    {
+        $id = $this->int('P', 8);
+        $parent = $this->int('P', 8);
+        $index = $this->int('V', 4);
+        $kind = ord($this->bytes[$this->offset++]);
+        $props = [];
+        for ($count = $this->int('v', 2); $count > 0; $count--) {
+            $key = $this->int('v', 2);
+            $props[$key] = $this->value();
+        }
+        $this->nodes[$id] = ['parent' => $parent, 'index' => $index, 'kind' => $kind, 'props' => $props];
+    }
+};
+$loopDirectory = sys_get_temp_dir().'/pam-native-loop-identity-'.getmypid();
+if (!is_dir($loopDirectory) && !mkdir($loopDirectory, 0o755, true) && !is_dir($loopDirectory)) {
+    throw new RuntimeException('Cannot create the loop identity fixture directory.');
+}
+file_put_contents($loopDirectory.'/LoopIdentityTile.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\LoopIdentity;
+
+use Pam\Native\Component;
+
+final class LoopIdentityTile extends Component
+{
+    public function __construct(public string $action, public string $group)
+    {
+    }
+
+    public function activate(): void
+    {
+        $this->emit('activate', $this->group.':'.$this->action.':'.spl_object_id($this));
+    }
+}
+?>
+
+<template>
+    <Pressable :accessibilityLabel="$group.':'.$action" @press="activate">
+        <Text>{{ $action }}</Text>
+    </Pressable>
+</template>
+PAM);
+file_put_contents($loopDirectory.'/LoopIdentityHost.pam.php', <<<'PAM'
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Tests\LoopIdentity;
+
+use Pam\Native\Component;
+
+final class LoopIdentityHost extends Component
+{
+    /** @var list<string> */
+    public array $actions = ['reply', 'forward', 'readers', 'copy', 'react'];
+
+    public bool $banner = false;
+
+    /** @var list<string> */
+    public array $log = [];
+
+    public function ran(string $action): void
+    {
+        $this->log[] = $action;
+    }
+}
+?>
+
+<template>
+    <Column>
+        <Text p-if="$banner">Banner</Text>
+        <Column>
+            <LoopIdentityTile p-for="$action in $actions" :key="$action" :action="$action" group="key" @activate="ran" />
+        </Column>
+        <Column>
+            <LoopIdentityTile p-for="$action in $actions" p-key="$action" :action="$action" group="pkey" @activate="ran" />
+        </Column>
+        <Column>
+            <LoopIdentityTile p-for="$action in $actions" :action="$action" group="none" @activate="ran" />
+        </Column>
+    </Column>
+</template>
+PAM);
+App::components($loopDirectory, $loopDirectory.'/.cache');
+$loopHost = App::make('Pam\\Native\\Tests\\LoopIdentity\\LoopIdentityHost');
+App::run($loopHost);
+$syncNative = static function () use ($nativeTree): void {
+    foreach ($GLOBALS['pamIdentityFrames'] as $frame) {
+        $nativeTree->apply($frame);
+    }
+    $GLOBALS['pamIdentityFrames'] = [];
+};
+$syncNative();
+$pointer = \Pam\Native\Internal\Wire::map([
+    'x' => 4.0, 'y' => 4.0, 'pageX' => 4.0, 'pageY' => 4.0, 'timestamp' => 1, 'pointerId' => 0,
+]);
+foreach ([
+    ['reply', 'forward', 'readers', 'copy', 'react'],
+    ['copy', 'react', 'reply'],
+    ['react', 'reply', 'forward', 'readers', 'copy', 'star'],
+] as $round => $actions) {
+    $loopHost->actions = $actions;
+    $loopHost->banner = $round === 1;
+    Runtime::requestRender();
+    Runtime::render();
+    $syncNative();
+    $tiles = [];
+    foreach ($nativeTree->order() as $nodeId) {
+        $props = $nativeTree->nodes[$nodeId]['props'];
+        if (isset($props[PropKey::OnPress->value], $props[PropKey::AccessibilityLabel->value])) {
+            $tiles[$nodeId] = substr($props[PropKey::AccessibilityLabel->value], 5);
+        }
+    }
+    $assert(count($tiles) === 3 * count($actions), 'Every loop iteration must mount its own native pressable.');
+    $instances = [];
+    foreach ($tiles as $nodeId => $label) {
+        $loopHost->log = [];
+        Runtime::dispatchEvent($nodeId, EventKind::Press->value, $pointer);
+        $syncNative();
+        [$group, $action, $instance] = explode(':', $loopHost->log[0] ?? '::');
+        $assert(
+            count($loopHost->log) === 1 && $group.':'.$action === $label,
+            "Native press on {$label} must run its own iteration's callback (got ".implode(',', $loopHost->log).').',
+        );
+        $instances[$group][$instance] = true;
+    }
+    foreach (['key', 'pkey', 'none'] as $group) {
+        $assert(
+            count($instances[$group] ?? []) === count($actions),
+            "p-for iterations ({$group}) must get distinct component instances.",
+        );
+    }
+}
+Runtime::shutdown();
+$GLOBALS['pamIdentityFrames'] = [];
 
 // Unkeyed siblings are identified by their static slot, not their output
 // index: a conditional sibling that renders nothing leaves a hole.
