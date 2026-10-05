@@ -68,6 +68,9 @@
         <receiver
             android:name="dev.pam.nativeapp.modules.NotificationReceiver"
             android:exported="false" />
+        <receiver
+            android:name="dev.pam.nativeapp.modules.PamNotificationActionReceiver"
+            android:exported="false" />
         <service
             android:name="${pamFirebaseMessagingService}"
             android:enabled="${pamFirebaseMessagingEnabled}"

@@ -7684,5 +7684,6 @@ require __DIR__.'/singularity.php';
 require __DIR__.'/signals.php';
 require __DIR__.'/visual_dom.php';
 require __DIR__.'/appearance.php';
+require __DIR__.'/native_capabilities.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

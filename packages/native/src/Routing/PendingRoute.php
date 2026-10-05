@@ -56,6 +56,15 @@ final class PendingRoute
         return $this->options(ScreenOptionsPatch::one('presentation', $presentation));
     }
 
+    /**
+     * Blocks screenshots and screen recording (Android FLAG_SECURE) while this
+     * route is the active entry of its navigator. Popping it clears the flag.
+     */
+    public function secure(bool $enabled = true): self
+    {
+        return $this->options(ScreenOptionsPatch::one('secure', $enabled));
+    }
+
     public function guard(Closure $guard): self
     {
         $this->definition->guard = $guard;

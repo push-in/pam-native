@@ -49,6 +49,18 @@ public object PamPushNotifications {
         report(1, id, title, body, dataJson, deepLink)
     }
 
+    /** Reports a received push that a PushRendering rule already displayed natively. */
+    @JvmStatic
+    public fun reportRendered(
+        id: String,
+        title: String = "",
+        body: String = "",
+        dataJson: String = "{}",
+        deepLink: String = "",
+    ) {
+        report(1, id, title, body, dataJson, deepLink, rendered = true)
+    }
+
     @JvmStatic
     public fun reportOpened(
         id: String,
@@ -95,6 +107,7 @@ public object PamPushNotifications {
         body: String,
         dataJson: String,
         deepLink: String,
+        rendered: Boolean = false,
     ) {
         val payload = WireMap.encode(
             mapOf(
@@ -107,6 +120,7 @@ public object PamPushNotifications {
                         .getOrDefault("{}"),
                 ),
                 "deepLink" to WireValue.Text(deepLink.take(8_192)),
+                "rendered" to WireValue.Flag(rendered),
             ),
         )
         val pending = synchronized(lock) {

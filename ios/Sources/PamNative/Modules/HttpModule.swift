@@ -29,6 +29,14 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
             return
         }
 
+        if method == "transferStart" || method == "transferNext" || method == "transferCancel" {
+            // Streamed multipart transfers are Android-only in this release.
+            completion(
+                method == "transferCancel" ? .success : .failure,
+                method == "transferCancel" ? Data() : Data("Streamed HTTP transfers are not available on iOS yet".utf8)
+            )
+            return
+        }
         if method != "get" && method != "request" && method != "upload" {
             completion(.failure, "Unknown HTTP method".data(using: .utf8) ?? Data())
             return
@@ -163,10 +171,19 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
                         return
                     }
                     let body = String(data: bodyData, encoding: .utf8) ?? ""
+                    var headers: [String: String] = [:]
+                    for (name, value) in (response as? HTTPURLResponse)?.allHeaderFields ?? [:] {
+                        if let name = name as? String, headers.count < 64 {
+                            headers[name.lowercased()] = "\(value)"
+                        }
+                    }
+                    let headersJson = (try? JSONSerialization.data(withJSONObject: headers))
+                        .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                     do {
                         let responsePayload = try WireMap.encode([
                             "statusCode": .integer(Int64(statusCode)),
-                            "body": .text(body)
+                            "body": .text(body),
+                            "headers": .text(headersJson),
                         ])
                         completion(.success, responsePayload)
                     } catch {

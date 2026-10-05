@@ -213,6 +213,8 @@ struct AndroidOptions {
     target_sdk: u32,
     #[serde(default)]
     debug_application_id_suffix: Option<String>,
+    #[serde(default = "default_debug_firebase")]
+    debug_firebase: bool,
     #[serde(default)]
     permissions: Vec<String>,
     #[serde(default)]
@@ -221,12 +223,17 @@ struct AndroidOptions {
     share_targets: Vec<String>,
 }
 
+fn default_debug_firebase() -> bool {
+    true
+}
+
 impl Default for AndroidOptions {
     fn default() -> Self {
         Self {
             min_sdk: default_min_sdk(),
             target_sdk: default_target_sdk(),
             debug_application_id_suffix: None,
+            debug_firebase: true,
             permissions: Vec::new(),
             deep_links: Vec::new(),
             share_targets: Vec::new(),
@@ -707,7 +714,12 @@ struct ReleaseOptions {
 }
 
 pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
-    let mut arguments = arguments.into_iter();
+    let mut arguments = arguments.into_iter().peekable();
+    // `pam mobile <command>` and `pam-native mobile <command>` are documented
+    // aliases of `pam-native <command>`.
+    if arguments.peek().is_some_and(|first| first == "mobile") {
+        arguments.next();
+    }
     let Some(command) = arguments.next() else {
         print_usage();
         return Ok(0);
@@ -4584,6 +4596,7 @@ fn audit_android_permission(owner: &str, permission: &str, findings: &mut Vec<Mo
         || name.contains("HEALTH")
         || name.contains("BODY_SENSORS")
         || name.contains("READ_MEDIA")
+        || name.contains("PHONE")
         || matches!(
             name,
             "CAMERA"
@@ -4994,7 +5007,7 @@ fn configure_android(
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
     )?;
     let properties = format!(
-        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
+        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\ndebugFirebase={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
         property_value(&native_home.to_string_lossy()),
         property_value(&runtime.root.to_string_lossy()),
         property_value(&project.root.to_string_lossy()),
@@ -5005,6 +5018,7 @@ fn configure_android(
             .debug_application_id_suffix
             .as_deref()
             .unwrap_or(""),
+        project.manifest.android.debug_firebase,
         property_value(&project.manifest.name),
         project.manifest.android.min_sdk,
         project.manifest.android.target_sdk,
@@ -5100,13 +5114,28 @@ fn sync_permissions(manifest: &Path, permissions: &[String]) -> Result<(), Strin
     let mut declarations = String::new();
     for permission in permissions {
         if !contents.contains(&format!("android:name=\"{permission}\"")) {
-            declarations.push_str(&format!(
-                "    <uses-permission android:name=\"{permission}\" />\n"
-            ));
+            declarations.push_str(&android_permission_declaration(permission));
         }
     }
     contents.insert_str(position, &declarations);
     write_atomic(manifest, contents.as_bytes())
+}
+
+/// Legacy storage permissions are only meaningful on the Android versions that
+/// still enforce them, so PAM caps them instead of granting broad access on
+/// modern devices.
+fn android_permission_declaration(permission: &str) -> String {
+    let max_sdk = match permission {
+        "android.permission.WRITE_EXTERNAL_STORAGE" => Some(28),
+        "android.permission.BLUETOOTH" | "android.permission.BLUETOOTH_ADMIN" => Some(30),
+        _ => None,
+    };
+    match max_sdk {
+        Some(version) => format!(
+            "    <uses-permission\n        android:name=\"{permission}\"\n        android:maxSdkVersion=\"{version}\" />\n"
+        ),
+        None => format!("    <uses-permission android:name=\"{permission}\" />\n"),
+    }
 }
 
 fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), String> {
@@ -7608,12 +7637,13 @@ fn debug_application_id_for(root: &Path, manifest: &NativeManifest) -> String {
     if let Some(suffix) = &manifest.android.debug_application_id_suffix {
         return format!("{}{}", manifest.application_id, suffix);
     }
-    let firebase_enabled = [
-        root.join(".pam/google-services.json"),
-        root.join("google-services.json"),
-    ]
-    .into_iter()
-    .any(|path| path.is_file());
+    let firebase_enabled = manifest.android.debug_firebase
+        && [
+            root.join(".pam/google-services.json"),
+            root.join("google-services.json"),
+        ]
+        .into_iter()
+        .any(|path| path.is_file());
 
     if firebase_enabled {
         manifest.application_id.clone()
@@ -8664,6 +8694,17 @@ mod tests {
         );
         assert!(validate_manifest(&root, &project.manifest).is_ok());
 
+        manifest["android"] = serde_json::json!({ "debugFirebase": false });
+        fs::write(
+            root.join(MANIFEST_NAME),
+            serde_json::to_vec(&manifest).expect("json"),
+        )
+        .expect("manifest");
+        let project = load_project(&root).expect("project without debug Firebase");
+        assert!(!project.manifest.android.debug_firebase);
+        assert_eq!(debug_application_id(&project), "app.pam.generated.debug");
+        manifest["android"] = serde_json::json!({ "debugApplicationIdSuffix": ".qa" });
+
         manifest["android"]["debugApplicationIdSuffix"] = serde_json::json!(".bad-suffix");
         fs::write(
             root.join(MANIFEST_NAME),
@@ -9202,6 +9243,57 @@ mod tests {
             }
             assert!(!generated.contains(permission), "retained {permission}");
         }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn generated_android_manifest_declares_communication_permissions() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-communication-permissions-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        fs::write(
+            &manifest,
+            include_str!("../../../android/app/src/main/AndroidManifest.xml"),
+        )
+        .expect("manifest");
+
+        sync_permissions(
+            &manifest,
+            &[
+                "android.permission.BLUETOOTH_CONNECT".to_owned(),
+                "android.permission.READ_PHONE_STATE".to_owned(),
+                "android.permission.USE_FULL_SCREEN_INTENT".to_owned(),
+                "android.permission.WRITE_EXTERNAL_STORAGE".to_owned(),
+            ],
+        )
+        .expect("synchronize permissions");
+
+        let generated = fs::read_to_string(&manifest).expect("generated manifest");
+        for permission in [
+            "android.permission.BLUETOOTH_CONNECT",
+            "android.permission.READ_PHONE_STATE",
+            "android.permission.USE_FULL_SCREEN_INTENT",
+        ] {
+            assert!(
+                generated.contains(&format!(
+                    "<uses-permission android:name=\"{permission}\" />"
+                )),
+                "missing {permission}"
+            );
+        }
+        assert!(generated.contains(
+            "android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\"\n        android:maxSdkVersion=\"28\""
+        ));
+        assert!(!generated.contains("android.permission.CAMERA"));
+        let mut findings = Vec::new();
+        audit_android_permission("app", "android.permission.READ_PHONE_STATE", &mut findings);
+        assert_eq!(findings[0].rule, "android.sensitive-permission");
         fs::remove_dir_all(root).expect("cleanup");
     }
 

@@ -45,6 +45,10 @@ final class MediaLibraryModule: NativeModule {
     private let maximumPageSize = 200
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        if method == "save" {
+            save(payload, completion)
+            return
+        }
         guard method == "assets" || method == "albums" else {
             completion(.failure, Data("Unknown media-library method \(method)".utf8))
             return
@@ -196,5 +200,74 @@ final class MediaLibraryModule: NativeModule {
     private func text(_ values: [String: WireValue], _ key: String) -> String {
         if case let .text(value)? = values[key] { return value }
         return ""
+    }
+
+    /// Adds a private image or video to Photos with add-only access, optionally into an album.
+    private func save(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        let values: [String: WireValue]
+        do { values = try WireMap.decode(payload) } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+            return
+        }
+        let path = text(values, "path")
+        let album = text(values, "album").trimmingCharacters(in: .whitespaces)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("pam-files", isDirectory: true).standardizedFileURL
+        let file = base.appendingPathComponent(path).standardizedFileURL
+        guard !path.isEmpty, !path.hasPrefix("/"), file.path.hasPrefix(base.path + "/"),
+              FileManager.default.fileExists(atPath: file.path) else {
+            completion(.failure, Data("File does not exist".utf8))
+            return
+        }
+        var mime = text(values, "mimeType")
+        if mime.isEmpty { mime = UTType(filenameExtension: file.pathExtension)?.preferredMIMEType ?? "" }
+        let video = mime.hasPrefix("video/")
+        guard video || mime.hasPrefix("image/") else {
+            completion(.failure, Data("Only images and videos can be saved to the media library".utf8))
+            return
+        }
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                completion(.failure, Data("Photos add permission was denied".utf8))
+                return
+            }
+            var identifier: String?
+            PHPhotoLibrary.shared().performChanges({
+                let request = video
+                    ? PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: file)
+                    : PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: file)
+                identifier = request?.placeholderForCreatedAsset?.localIdentifier
+                guard !album.isEmpty, let placeholder = request?.placeholderForCreatedAsset else { return }
+                let options = PHFetchOptions()
+                options.predicate = NSPredicate(format: "title = %@", album)
+                let existing = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: options).firstObject
+                let collection = existing.flatMap { PHAssetCollectionChangeRequest(for: $0) }
+                    ?? PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: album)
+                collection?.addAssets([placeholder] as NSArray)
+            }) { success, error in
+                guard success, let identifier else {
+                    completion(.failure, Data((error?.localizedDescription ?? "Cannot save to Photos").utf8))
+                    return
+                }
+                let now = Int64(Date().timeIntervalSince1970 * 1_000)
+                let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let item: [String: Any] = [
+                    "id": identifier,
+                    "uri": PamPhotoAssetURI.make(identifier),
+                    "name": file.lastPathComponent,
+                    "mimeType": mime,
+                    "size": size,
+                    "createdAt": now,
+                    "modifiedAt": now,
+                    "albumTitle": album,
+                ]
+                do {
+                    let data = try JSONSerialization.data(withJSONObject: item)
+                    completion(.success, try WireMap.encode(["item": .text(String(decoding: data, as: UTF8.self))]))
+                } catch {
+                    completion(.failure, Data(error.localizedDescription.utf8))
+                }
+            }
+        }
     }
 }

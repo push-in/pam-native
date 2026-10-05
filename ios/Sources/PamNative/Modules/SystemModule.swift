@@ -1,4 +1,5 @@
 import Foundation
+import os
 import UIKit
 import AVFoundation
 import Photos
@@ -134,6 +135,10 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                         "safeAreaRight": .decimal(Double(insets.right)),
                         "safeAreaBottom": .decimal(Double(insets.bottom)),
                         "safeAreaLeft": .decimal(Double(insets.left)),
+                        // iOS has no heap class; report the process memory budget instead.
+                        "memoryClassMb": .integer(Int64(os_proc_available_memory() / 1_048_576)),
+                        "lowRamDevice": .flag(ProcessInfo.processInfo.physicalMemory < 3 * 1_073_741_824),
+                        "powerSaveMode": .flag(ProcessInfo.processInfo.isLowPowerModeEnabled),
                     ])
                     completion(.success, payload)
                 } catch {

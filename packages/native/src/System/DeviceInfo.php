@@ -26,7 +26,18 @@ final readonly class DeviceInfo
         public float $safeAreaBottom = 0.0,
         public float $safeAreaLeft = 0.0,
         public string $timeZone = 'UTC',
+        public int $memoryClassMb = 0,
+        public bool $lowRamDevice = false,
+        public bool $powerSaveMode = false,
     ) {
+    }
+
+    /** True when the device should run reduced caches, prefetching and animations. */
+    public function constrained(): bool
+    {
+        return $this->lowRamDevice
+            || $this->powerSaveMode
+            || ($this->memoryClassMb > 0 && $this->memoryClassMb <= 128);
     }
 
     /** @param Closure(self): void $callback */
@@ -52,6 +63,9 @@ final readonly class DeviceInfo
                     safeAreaBottom: (float) ($values['safeAreaBottom'] ?? 0.0),
                     safeAreaLeft: (float) ($values['safeAreaLeft'] ?? 0.0),
                     timeZone: (string) ($values['timeZone'] ?? 'UTC'),
+                    memoryClassMb: max(0, (int) ($values['memoryClassMb'] ?? 0)),
+                    lowRamDevice: (bool) ($values['lowRamDevice'] ?? false),
+                    powerSaveMode: (bool) ($values['powerSaveMode'] ?? false),
                 ));
             },
         );

@@ -26,6 +26,14 @@ table, see the [capability cookbook](examples.md).
 | Advanced images | `UI\Image` |
 | Clipboard, drag/drop and menus | `System\Clipboard`, `UI\InteractionRegion` |
 | Sensors and device state | `System\Sensors`, `System\DeviceStatus` |
+| Multipart uploads with progress | `Http\Http::multipart()`, `Http\Http::uploadWithProgress()` |
+| Sharing files | `System\Share::files()` |
+| Saving to Photos/Gallery | `System\MediaLibrary::save()` |
+| Screenshot protection | `System\Screen::secure()`, `Route::screen(...)->secure()` |
+| Conversation notifications | `System\Notifications::conversation()`, `Notifications\PushRendering` |
+| Screen-reader announcements | `System\Accessibility::announce()` |
+| Cancellable timers | `System\Timers::timeout()`, `Timers::every()` |
+| App lifecycle | `App::onStateChange()` |
 
 ## Web and media
 
@@ -229,12 +237,103 @@ the content length: `Host`, `Content-Length`, `Transfer-Encoding`,
 Use only headers required by the upload destination; an API bearer token
 should not be copied to an unrelated storage URL.
 
-Uploads are foreground operations with no automatic retry, progress callback,
-per-request cancellation, or process-restart recovery. Closing the native HTTP
+Pass `progress:` (or call `Http::uploadWithProgress()`, which returns an
+`HttpTransfer` handle with `cancel()`) to receive `TransferProgress` events;
+the deadline then applies per socket read/write instead of to the whole
+request. Without progress, uploads are foreground operations with no automatic
+retry, per-request cancellation, or process-restart recovery. Closing the native HTTP
 module interrupts active requests. A timeout does not establish whether the
 server received the file: query the application's upload status before
 retrying or completing a business operation. HTTP response bodies retain the
 normal transport limit of 900 KiB.
+
+### Multipart uploads
+
+`Http::multipart()` builds a `multipart/form-data` request whose file parts are
+streamed natively from private files with a fixed `Content-Length`:
+
+```php
+use Pam\Native\Http\Http;
+use Pam\Native\Http\HttpResponse;
+use Pam\Native\Http\TransferProgress;
+
+$upload = Http::multipart('https://api.example.com/media')
+    ->file('media', $file->path, $file->mimeType)
+    ->field('caption', $caption)
+    ->bearer($token)
+    ->onProgress(fn (TransferProgress $p) => $this->progress->set($p->fraction()))
+    ->send(fn (HttpResponse $response) => $this->uploaded($response));
+
+$upload->cancel(); // e.g. when the user removes the attachment
+```
+
+Up to 64 parts and 2 GiB per request; fields are limited to 1 MiB. The
+builder owns `Content-Type`; transport headers cannot be overridden. Progress
+is throttled to whole percents or 256 KiB. A cancelled transfer never invokes
+its callback. Transport failures arrive as `HttpResponse::transportFailed()`.
+Android streams through `HttpURLConnection`; iOS reports the transfer as not
+yet available.
+
+`HttpResponse::$headers` (lower-case names), `header($name)` and `date()`
+expose response headers for every request, e.g. to correct client clock skew
+with the server `Date`.
+
+## Sharing, moving and saving files
+
+```php
+Share::files(['exports/photo.jpg', 'exports/clip.mp4'], title: 'Send');
+Files::move('drafts/a.jpg', 'sent/a.jpg', fn (FileReference $file) => ...);
+Files::copy('sent/a.jpg', 'backup/a.jpg', overwrite: true);
+Files::makeDirectory('media/cache');
+MediaLibrary::save('exports/photo.jpg', album: 'My App', callback: fn (MediaAsset $asset) => ...);
+```
+
+`Share::files()` grants temporary read access through the PAM FileProvider
+(`ACTION_SEND` / `ACTION_SEND_MULTIPLE`) or presents `UIActivityViewController`.
+The MIME type defaults to the narrowest type shared by every file. Copies are
+staged and published atomically; moves never replace a destination unless
+`overwrite: true`.
+
+`MediaLibrary::save()` publishes an image or video into
+`Pictures/<album>` or `Movies/<album>` through MediaStore on Android 10+
+without any permission. Android 8–9 request `WRITE_EXTERNAL_STORAGE`, which
+the app must declare in `pam-native.json`; PAM caps it with
+`maxSdkVersion="28"`. iOS requests add-only Photos access
+(`NSPhotoLibraryAddUsageDescription`).
+
+## Screen privacy and accessibility
+
+```php
+Route::screen('wallet', WalletScreen::class)->secure(); // scoped to the route
+Screen::secure(true);                                   // explicit app-wide claim
+Accessibility::announce('Message sent');
+```
+
+Route-scoped secure mode sets `FLAG_SECURE` while the route is the active entry
+of its navigator and clears it when the route is popped or replaced. The
+effective state is the union of route claims and the explicit claim. iOS has
+no public equivalent and reports `false` to the `Screen::secure()` callback.
+
+`Accessibility::announce()` sends a polite TalkBack/VoiceOver announcement and
+is a no-op when no screen reader runs; `screenReaderEnabled()` reports state.
+
+## Images, timers and lifecycle
+
+`Image::prefetch($urls, MediaPriority::Visible, $headers)` downloads remote
+images into the renderer disk cache (`pam-images-v1`) using the same key as
+`Image::make()`, so later renders and notification avatars load from disk.
+Pass the same headers and `cacheKeys` the `Image` will use. Android only.
+
+`Timers::timeout()` and `Timers::every()` return a `TimerHandle` with
+`cancel()`; `Timers::cancel($id)` also cancels ids returned by
+`Timers::after()`. `App::onStateChange(fn (AppState $state) => ...)` subscribes
+any number of listeners to Active/Inactive/Background transitions
+(`offStateChange()` unsubscribes, `App::state()` returns the latest).
+
+`ScrollView::make(...)->onEndReached($handler, threshold: 0.5)` (template:
+`on:endReached`) fires when the remaining content is within the threshold
+fraction of the viewport, and re-arms after the content grows or the user
+scrolls back (Android).
 
 ## Incoming shares
 
@@ -352,6 +451,75 @@ transport and server-side delivery remain application configuration. See the
 [production capability guide](production-capabilities.md) for FCM/APNs setup
 and automatic deep-link routing.
 
+### Conversation notifications
+
+```php
+Notifications::conversation('chat:42')
+    ->title('Weekend trip')->group()
+    ->self(Person::make('You'))
+    ->message(Person::make('Ana', $avatarUrl, 'user-7'), 'See you there?', $sentAtMs, 'msg-1')
+    ->reply('Reply', ActionEndpoint::post('https://api.example.com/chats/42/messages')
+        ->bearerFromStorage('auth.token')->json(['body' => '{reply}', 'client_id' => '{uuid}']))
+    ->markRead('Mark as read')
+    ->deepLink('myapp://chat/42')
+    ->show();
+
+Notifications::onAction(function (NotificationAction $action): void {
+    if ($action->isReply() && !$action->delivered()) {
+        $this->sendMessage($action->conversation, $action->text);
+    }
+});
+
+Notifications::cancelGroup('chat:42');
+```
+
+Android renders `MessagingStyle` with `Person` avatars (HTTPS, private file or
+`pam-file:///`), a `RemoteInput` reply action and a mark-as-read action.
+Messages merge into a bounded native history (25 messages, deduplicated by id),
+so each push adds only the new message. Replies are appended as the user's own
+message so Android stops the reply spinner. Actions are persisted in a native
+queue and delivered to `Notifications::onAction()` (one listener; a new
+listener replaces the previous one), even when they happened while PHP was not
+running. An optional `ActionEndpoint` performs the HTTP request natively at tap
+time; `NotificationAction::delivered()` reports its 2xx result. Endpoint
+templates accept push data fields, `{reply}`, `{conversation}`, `{uuid}`,
+`{now}` and `{storage:key}` (a value saved with `Storage`). iOS shows a
+threaded notification with the latest message; actions are Android-only.
+
+### Declarative push rendering
+
+Rules render data-only Firebase pushes natively while PHP is suspended or the
+process was started just for the push. Register them at every boot:
+
+```php
+PushRendering::forType('chat.message')
+    ->conversation('{chat_id}', title: '{chat_title}', group: '{is_group}')
+    ->message(sender: '{sender_name}', text: '{body}', avatar: '{sender_avatar}',
+        timestamp: '{sent_at}', id: '{message_id}')
+    ->self('You')
+    ->reply('Reply', $replyEndpoint)
+    ->markRead('Mark as read')
+    ->deepLink('myapp://chat/{chat_id}')
+    ->channel('messages', 'Messages')
+    ->suppressWhenRoute('chat/{chat_id}')          // deep-link path pattern
+    ->suppressWhenRoute(AppRoute::Chat, ['chatId' => '{chat_id}'])
+    ->register();
+
+PushRendering::forType('chat.read')->dismissConversation('{chat_id}')->register();
+PushRendering::forType('promo')->notification('{_title}', '{_body}')->register();
+```
+
+A rule matches when `data[$field]` (default `type`) equals the type.
+Placeholders read top-level data fields; `{_title}`, `{_body}` and `{_id}`
+expose the push envelope; timestamps accept seconds, milliseconds or ISO 8601.
+Suppression applies only while the app is in the foreground and the focused
+route matches (navigators report focused routes once a rule uses
+`suppressWhenRoute`). Rendered pushes still reach `PushNotifications::listen()`
+with `PushMessage::$rendered = true`, so PHP must not display them again.
+Pushes that carry a `notification` payload are displayed by the OS and bypass
+rules; send data-only messages. Android only; on iOS `register()` reports an
+unsupported failure (use a Notification Service Extension).
+
 ## SQLite
 
 `Database\SQLite` opens databases under the private application directory.
@@ -375,4 +543,16 @@ RTL direction, velocity completion and cancellation.
 `Sensors::read()` and `Sensors::watch()` support accelerometer (1), gyroscope
 (2), magnetometer (3) and device motion/attitude (4).
 `System\DeviceStatus::read()`/`watch()` return battery, charging, low-power and
-network state with `NetworkType`.
+network state with `NetworkType` (`powerSaveMode()` aliases `lowPowerMode`).
+`DeviceInfo` adds `memoryClassMb` (Android heap class; iOS available process
+memory), `lowRamDevice`, `powerSaveMode` and `constrained()` to scale caches,
+prefetching and animation down on weak devices.
+
+## Permissions
+
+`PermissionKind` adds `BluetoothConnect` (7, Android 12+ `BLUETOOTH_CONNECT`,
+iOS Bluetooth), `FullScreenIntent` (8, Android 14+ special access opened in
+Settings) and `PhoneState` (9, `READ_PHONE_STATE`). `PermissionStatus::Unavailable`
+(5) marks permissions that do not exist on the platform (`FullScreenIntent` and
+`PhoneState` on iOS). Declare the Android permissions in `pam-native.json`
+`android.permissions`; generation adds only declared permissions.

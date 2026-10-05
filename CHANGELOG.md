@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.1.0 - 2026-10-05
+
+- Add `Http::multipart()` with fluent fields, private-file parts, headers,
+  bearer auth, `onProgress(TransferProgress)` and a cancellable `HttpTransfer`;
+  add byte progress and cancellation to `Http::upload(progress: ...)` /
+  `Http::uploadWithProgress()`. `HttpResponse` now exposes response headers,
+  `header()` and the server `date()`.
+- Add `Share::files()`, `Files::move()`, `Files::copy()`,
+  `Files::makeDirectory()` and `MediaLibrary::save()` (MediaStore on Android
+  10+, `WRITE_EXTERNAL_STORAGE` with `maxSdkVersion=28` on Android 8–9,
+  add-only Photos on iOS).
+- Add `Screen::secure()` and route-scoped `->secure()` / `ScreenOptions::$secure`
+  (Android `FLAG_SECURE`, cleared when the route is popped).
+- Add conversation notifications (`Notifications::conversation()`, `Person`,
+  MessagingStyle, inline `RemoteInput` replies, mark-as-read,
+  `Notifications::cancelGroup()`), a persistent `Notifications::onAction()`
+  stream, native `ActionEndpoint` delivery while PHP is suspended, and
+  declarative `PushRendering` rules with `suppressWhenRoute()` for data-only
+  Firebase pushes. `PushMessage::$rendered` marks pushes already displayed.
+- Add `Accessibility::announce()`/`screenReaderEnabled()`, `Image::prefetch()`
+  into the renderer disk cache, `DeviceInfo::$memoryClassMb`, `$lowRamDevice`,
+  `$powerSaveMode`, cancellable `Timers::timeout()`/`every()`/`cancel()`,
+  `App::onStateChange()` and `ScrollView` `on:endReached`.
+- Add `PermissionKind::BluetoothConnect`, `FullScreenIntent`, `PhoneState` and
+  `PermissionStatus::Unavailable`; mark `READ_PHONE_STATE` as sensitive in
+  audits.
+- Add `android.debugFirebase: false` to build debug variants without Firebase
+  (for debug application-id suffixes missing from `google-services.json`) and
+  accept `pam-native mobile <command>` as an alias.
+- Android API 36 instrumented and unit suites, PHP SDK and Rust CLI tests
+  passed locally. iOS sources were updated without an Xcode build; multipart
+  transfers, image prefetch, notification actions and push rendering report
+  "not available on iOS yet".
 ## 1.0.37 - 2026-10-05
 
 - Add `Appearance` and the int-backed `AppearanceMode` enum (`System = 1`,

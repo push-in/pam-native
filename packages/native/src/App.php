@@ -16,6 +16,15 @@ final class App
 {
     private static ?Theme $activeTheme = null;
 
+    private static ?Closure $appStateHandler = null;
+
+    /** @var array<int, Closure(AppState): void> */
+    private static array $stateListeners = [];
+
+    private static int $nextStateListener = 1;
+
+    private static ?AppState $currentState = null;
+
     private function __construct()
     {
     }
@@ -104,7 +113,46 @@ final class App
 
     public static function onAppState(Closure $handler): void
     {
-        Runtime::onAppState($handler);
+        self::$appStateHandler = $handler;
+        self::installStateDispatcher();
+    }
+
+    /**
+     * Subscribes to foreground/background transitions, like React Native AppState.
+     * Active = foreground and interactive, Inactive = transitioning or covered by
+     * system UI, Background = not visible. Returns an id for offStateChange().
+     *
+     * @param Closure(AppState): void $listener
+     */
+    public static function onStateChange(Closure $listener): int
+    {
+        $id = self::$nextStateListener++;
+        self::$stateListeners[$id] = $listener;
+        self::installStateDispatcher();
+
+        return $id;
+    }
+
+    public static function offStateChange(int $subscription): void
+    {
+        unset(self::$stateListeners[$subscription]);
+    }
+
+    /** Last state reported by the host, or null before the first transition. */
+    public static function state(): ?AppState
+    {
+        return self::$currentState;
+    }
+
+    private static function installStateDispatcher(): void
+    {
+        Runtime::onAppState(static function (AppState $state): void {
+            self::$currentState = $state;
+            self::$appStateHandler?->__invoke($state);
+            foreach (self::$stateListeners as $listener) {
+                $listener($state);
+            }
+        });
     }
 
     public static function onDimensions(Closure $handler): void

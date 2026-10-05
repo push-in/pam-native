@@ -117,13 +117,115 @@ final class Http
         array $headers = [],
         int $timeoutMs = 120_000,
         ?OutboundTraceContext $trace = null,
+        ?Closure $progress = null,
     ): int {
         if ($path === '' || strlen($path) > 4096 || str_starts_with($path, '/')
             || str_contains($path, '\\') || preg_match('/[\x00-\x1f\x7f]/', $path)
             || array_intersect(explode('/', $path), ['', '.', '..']) !== []) {
             throw new RuntimeException('Upload source must be a relative private file path.');
         }
+        if ($progress !== null) {
+            return self::uploadWithProgress($url, $path, $callback, $progress, $headers, $timeoutMs, $trace)->id;
+        }
         return self::send('PUT', $url, $callback, $headers, null, $timeoutMs, $trace, $path);
+    }
+
+    /**
+     * PUT a private file with streamed byte progress. Cancel through the returned handle.
+     *
+     * @param Closure(HttpResponse): void $callback
+     * @param Closure(TransferProgress): void $progress
+     * @param array<string, string> $headers
+     */
+    public static function uploadWithProgress(
+        string $url,
+        string $path,
+        Closure $callback,
+        Closure $progress,
+        array $headers = [],
+        int $timeoutMs = 120_000,
+        ?OutboundTraceContext $trace = null,
+    ): HttpTransfer {
+        self::assertTransferUrl($url);
+        if ($trace !== null && !$trace->allows($url)) {
+            throw new RuntimeException('Trace context origin does not match the HTTP request origin.');
+        }
+        $payload = [
+            'kind' => 2,
+            'url' => $url,
+            'method' => 'PUT',
+            'path' => \Pam\Native\System\Files::privatePath($path, 'Upload source'),
+            'headers' => json_encode((object) self::normalizeHeaders($headers, transport: true), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            'timeoutMs' => max(1_000, min(600_000, $timeoutMs)),
+        ];
+        if ($trace !== null) {
+            $payload['traceparent'] = $trace->traceparent;
+            $payload['traceOrigin'] = $trace->origin;
+        }
+
+        return HttpTransfers::start($payload, $callback, $progress);
+    }
+
+    /** Starts a fluent multipart/form-data upload. */
+    public static function multipart(string $url): MultipartRequest
+    {
+        return new MultipartRequest($url);
+    }
+
+    /** Cancels a transfer started with progress; its callback is not invoked. */
+    public static function cancelTransfer(HttpTransfer|int $transfer): void
+    {
+        HttpTransfers::cancel($transfer instanceof HttpTransfer ? $transfer->id : $transfer);
+    }
+
+    /** @internal */
+    public static function assertTransferUrl(string $url): void
+    {
+        $parts = parse_url($url);
+        if (
+            strlen($url) > 8_192
+            || !is_array($parts)
+            || !in_array(strtolower((string) ($parts['scheme'] ?? '')), ['https', 'http'], true)
+            || ($parts['host'] ?? '') === ''
+            || isset($parts['user'])
+            || isset($parts['pass'])
+        ) {
+            throw new RuntimeException('Transfer URL must be an absolute HTTPS URL without credentials.');
+        }
+    }
+
+    /**
+     * @internal
+     * @param array<array-key, mixed> $headers
+     * @return array<string, string>
+     */
+    public static function normalizeHeaders(array $headers, bool $transport = false): array
+    {
+        if (count($headers) > 32) {
+            throw new RuntimeException('HTTP requests support at most 32 headers.');
+        }
+        $normalizedHeaders = [];
+        foreach ($headers as $name => $value) {
+            if (
+                !is_string($name)
+                || !is_string($value)
+                || preg_match('/^[A-Za-z0-9-]{1,64}$/', $name) !== 1
+                || str_contains($value, "\r")
+                || str_contains($value, "\n")
+                || strlen($value) > 8_192
+            ) {
+                throw new RuntimeException('HTTP headers must use safe names and bounded single-line values.');
+            }
+            if (in_array(strtolower($name), ['traceparent', 'tracestate'], true)) {
+                throw new RuntimeException('Trace headers require an origin-scoped OutboundTraceContext.');
+            }
+            if ($transport && in_array(strtolower($name), ['host', 'content-length', 'transfer-encoding', 'connection', 'trailer', 'upgrade'], true)) {
+                throw new RuntimeException('File upload headers cannot override HTTP transport fields.');
+            }
+            $normalizedHeaders[$name] = $value;
+        }
+
+        return $normalizedHeaders;
     }
 
     /** @param Closure(HttpResponse): void $callback
@@ -146,30 +248,7 @@ final class Http
         if ($body !== null && strlen($body) > self::MAX_BODY_BYTES) {
             throw new RuntimeException('HTTP request body cannot exceed one MiB.');
         }
-        if (count($headers) > 32) {
-            throw new RuntimeException('HTTP requests support at most 32 headers.');
-        }
-
-        $normalizedHeaders = [];
-        foreach ($headers as $name => $value) {
-            if (
-                !is_string($name)
-                || !is_string($value)
-                || preg_match('/^[A-Za-z0-9-]{1,64}$/', $name) !== 1
-                || str_contains($value, "\r")
-                || str_contains($value, "\n")
-                || strlen($value) > 8_192
-            ) {
-                throw new RuntimeException('HTTP headers must use safe names and bounded single-line values.');
-            }
-            if (in_array(strtolower($name), ['traceparent', 'tracestate'], true)) {
-                throw new RuntimeException('Trace headers require an origin-scoped OutboundTraceContext.');
-            }
-            if ($source !== null && in_array(strtolower($name), ['host', 'content-length', 'transfer-encoding', 'connection', 'trailer', 'upgrade'], true)) {
-                throw new RuntimeException('File upload headers cannot override HTTP transport fields.');
-            }
-            $normalizedHeaders[$name] = $value;
-        }
+        $normalizedHeaders = self::normalizeHeaders($headers, transport: $source !== null);
 
         if ($trace !== null && !$trace->allows($url)) {
             throw new RuntimeException('Trace context origin does not match the HTTP request origin.');
@@ -243,12 +322,7 @@ final class Http
                 return;
             }
 
-            $values = Wire::decodeMap($payload);
-            $callback(new HttpResponse(
-                statusCode: (int) ($values['statusCode'] ?? 0),
-                body: (string) ($values['body'] ?? ''),
-                error: '',
-            ));
+            $callback(HttpResponse::fromNative(Wire::decodeMap($payload)));
         };
     }
 }

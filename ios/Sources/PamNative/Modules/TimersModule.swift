@@ -2,6 +2,11 @@ import Foundation
 
 final class TimersModule: NativeModule {
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        if method == "cancel" {
+            // PHP drops cancelled timers; the pending dispatch completes harmlessly.
+            completion(.success, Data())
+            return
+        }
         guard method == "after" else {
             completion(.failure, Data("Unknown timers method \(method)".utf8))
             return

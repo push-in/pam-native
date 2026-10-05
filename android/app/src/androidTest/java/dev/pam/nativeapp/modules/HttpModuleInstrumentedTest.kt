@@ -148,8 +148,10 @@ class HttpModuleInstrumentedTest {
                     "statusCode" to WireValue.Integer(202),
                     "body" to WireValue.Text("""{"accepted":true}"""),
                 ),
-                WireMap.decode(response),
+                WireMap.decode(response) - "headers",
             )
+            val headers = org.json.JSONObject((WireMap.decode(response)["headers"] as WireValue.Text).value)
+            assertEquals("application/json", headers.getString("content-type"))
         }
     }
 }

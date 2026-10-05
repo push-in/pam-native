@@ -4531,11 +4531,26 @@ class PamRenderer(
     }
 
     private fun installScrollEvents(scroll: PamScrollContainer, state: NodeState) {
-        if (state.properties[PropKey.ON_SCROLL] == null) {
+        val onScroll = state.properties[PropKey.ON_SCROLL] != null
+        val endReached = state.properties[PropKey.ON_END_REACHED] != null
+        if (!onScroll && !endReached) {
             scroll.setOnViewportChanged(null)
             return
         }
         scroll.setOnViewportChanged { scrollX, scrollY ->
+            if (endReached) {
+                val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, 1.0)
+                val trigger = scroll.primaryViewportPixels() * threshold
+                val remaining = scroll.remainingPrimaryPixels()
+                if (remaining <= trigger && !state.endReachedSent) {
+                    state.endReachedSent = true
+                    dispatch(state.id, EVENT_END_REACHED)
+                } else if (remaining > trigger) {
+                    // Content grew or the user scrolled back: allow the next page request.
+                    state.endReachedSent = false
+                }
+            }
+            if (!onScroll) return@setOnViewportChanged
             state.pendingScrollOffset = scroll.primaryOffset(scrollX, scrollY)
             if (!state.scrollScheduled) {
                 state.scrollScheduled = true

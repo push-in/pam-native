@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreBluetooth
 import CoreLocation
 import Contacts
 import Foundation
@@ -6,8 +7,11 @@ import Photos
 import UIKit
 import UserNotifications
 
-final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLLocationManagerDelegate {
+final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLLocationManagerDelegate,
+    CBCentralManagerDelegate {
     private let location = CLLocationManager()
+    private var bluetooth: CBCentralManager?
+    private var bluetoothCompletions: [ModuleCompletion] = []
     private var locationCompletion: ModuleCompletion?
     private var locationRequestGeneration = 0
 
@@ -69,6 +73,11 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
             finish(location.authorizationStatus, completion)
         case 6:
             finishContacts(CNContactStore.authorizationStatus(for: .contacts), completion)
+        case 7:
+            finishBluetooth(completion)
+        case 8, 9:
+            // Full-screen intents and phone state are Android-only concepts.
+            finish(status: 5, canAskAgain: false, completion)
         default:
             completion(.failure, Data("Unknown permission kind \(kind)".utf8))
         }
@@ -111,8 +120,42 @@ final class PermissionsModule: NSObject, NativeModule, ClosableNativeModule, CLL
             CNContactStore().requestAccess(for: .contacts) { _, _ in
                 self.status(kind, completion)
             }
+        case 7:
+            DispatchQueue.main.async {
+                guard CBManager.authorization == .notDetermined else {
+                    self.finishBluetooth(completion)
+                    return
+                }
+                self.bluetoothCompletions.append(completion)
+                if self.bluetooth == nil {
+                    // Creating a central manager shows the Bluetooth prompt once.
+                    self.bluetooth = CBCentralManager(
+                        delegate: self,
+                        queue: nil,
+                        options: [CBCentralManagerOptionShowPowerAlertKey: false]
+                    )
+                }
+            }
+        case 8, 9:
+            finish(status: 5, canAskAgain: false, completion)
         default:
             completion(.failure, Data("Unknown permission kind \(kind)".utf8))
+        }
+    }
+
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        guard CBManager.authorization != .notDetermined else { return }
+        let pending = bluetoothCompletions
+        bluetoothCompletions.removeAll()
+        for completion in pending { finishBluetooth(completion) }
+    }
+
+    private func finishBluetooth(_ completion: @escaping ModuleCompletion) {
+        switch CBManager.authorization {
+        case .allowedAlways: finish(status: 1, canAskAgain: false, completion)
+        case .notDetermined: finish(status: 2, canAskAgain: true, completion)
+        case .denied, .restricted: finish(status: 3, canAskAgain: false, completion)
+        @unknown default: finish(status: 2, canAskAgain: false, completion)
         }
     }
 

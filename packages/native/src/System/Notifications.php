@@ -11,11 +11,100 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NotificationImportance;
 use RuntimeException;
 use InvalidArgumentException;
+use Pam\Native\Notifications\ConversationNotification;
+use Pam\Native\Notifications\NotificationAction;
+use Pam\Native\Notifications\NotificationActionType;
 
 final class Notifications
 {
+    private static int $nextActionSubscription = 1;
+
+    /** @var array<int, Closure(NotificationAction): void> */
+    private static array $actionSubscriptions = [];
+
     private function __construct()
     {
+    }
+
+    /** Starts a MessagingStyle conversation notification identified by $key. */
+    public static function conversation(string $key): ConversationNotification
+    {
+        return new ConversationNotification($key);
+    }
+
+    /** Removes a conversation notification and forgets its message history. */
+    public static function cancelGroup(string $key, ?Closure $callback = null): int
+    {
+        new ConversationNotification($key);
+
+        return self::call(
+            'cancelConversation',
+            ['key' => $key],
+            static fn (array $_): mixed => $callback?->__invoke(),
+        );
+    }
+
+    /**
+     * Receives inline replies and mark-as-read taps. Actions performed while
+     * PHP was not running are queued natively and delivered on subscription.
+     *
+     * @param Closure(NotificationAction): void $callback
+     */
+    public static function onAction(Closure $callback): int
+    {
+        // A single native queue feeds one listener; a new listener (for example
+        // after hot reload) replaces the previous one.
+        self::$actionSubscriptions = [];
+        $subscription = self::$nextActionSubscription++;
+        self::$actionSubscriptions[$subscription] = $callback;
+        self::armActions($subscription);
+
+        return $subscription;
+    }
+
+    public static function offAction(int $subscription): void
+    {
+        unset(self::$actionSubscriptions[$subscription]);
+    }
+
+    /** @internal */
+    public static function resetRuntime(): void
+    {
+        self::$actionSubscriptions = [];
+        self::$nextActionSubscription = 1;
+    }
+
+    private static function armActions(int $subscription): void
+    {
+        if (!isset(self::$actionSubscriptions[$subscription])) {
+            return;
+        }
+        NativeModules::call('notifications', 'nextAction', [], static function ($result) use ($subscription): void {
+            if (!isset(self::$actionSubscriptions[$subscription])) {
+                return;
+            }
+            if ($result->status === ModuleResultStatus::Failure) {
+                unset(self::$actionSubscriptions[$subscription]);
+
+                return;
+            }
+            $values = Wire::decodeMap($result->payload);
+            $type = NotificationActionType::tryFrom((int) ($values['type'] ?? 0));
+            if ($type !== null) {
+                $data = json_decode((string) ($values['data'] ?? '{}'), true);
+                self::$actionSubscriptions[$subscription](new NotificationAction(
+                    type: $type,
+                    conversation: (string) ($values['conversation'] ?? ''),
+                    text: (string) ($values['text'] ?? ''),
+                    data: is_array($data) ? $data : [],
+                    deepLink: ($values['deepLink'] ?? '') !== '' ? (string) $values['deepLink'] : null,
+                    handledNatively: (bool) ($values['handledNatively'] ?? false),
+                    statusCode: (int) ($values['statusCode'] ?? 0),
+                    timestamp: (int) ($values['timestamp'] ?? 0),
+                ));
+            }
+            self::armActions($subscription);
+        });
     }
 
     /**

@@ -1,0 +1,44 @@
+{
+    "schemaVersion": 1,
+    "default": "8.5",
+    "channels": {
+        "8.4": "8.4.23-r1",
+        "8.5": "8.5.8-r1"
+    },
+    "releases": {
+        "8.4.23-r1": {
+            "phpVersion": "8.4.23",
+            "runtimeRevision": 1,
+            "sourceUrl": "https://www.php.net/distributions/php-8.4.23.tar.xz",
+            "sourceSha256": "1ab9f52008414e43bb2427ffa288eff2a4de39e1a830f957e800ba368d887a72",
+            "androidApi": 26,
+            "ndkVersion": "27.1.12297006",
+            "iosMinimumVersion": "15.0",
+            "extensions": [
+                "ctype",
+                "filter",
+                "phar",
+                "session",
+                "tokenizer"
+            ]
+        },
+        "8.5.8-r1": {
+            "phpVersion": "8.5.8",
+            "runtimeRevision": 1,
+            "sourceUrl": "https://www.php.net/distributions/php-8.5.8.tar.xz",
+            "sourceSha256": "58910198d19e873048fe87cdfe16bc790025417ede3d1651bfa1c4b533d573f2",
+            "androidApi": 26,
+            "ndkVersion": "27.1.12297006",
+            "iosMinimumVersion": "15.0",
+            "extensions": [
+                "ctype",
+                "filter",
+                "opcache",
+                "phar",
+                "session",
+                "tokenizer",
+                "uri"
+            ]
+        }
+    }
+}

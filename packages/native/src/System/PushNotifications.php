@@ -145,6 +145,7 @@ final class PushNotifications
                 body: (string) ($values['body'] ?? ''),
                 data: is_array($data) ? $data : [],
                 deepLink: ($values['deepLink'] ?? '') !== '' ? (string) $values['deepLink'] : null,
+                rendered: (bool) ($values['rendered'] ?? false),
             );
             self::$subscriptions[$subscription]($message);
             self::arm($subscription);

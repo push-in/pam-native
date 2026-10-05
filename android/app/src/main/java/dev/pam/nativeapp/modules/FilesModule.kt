@@ -50,6 +50,10 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "stat" -> executor.execute { stat(payload, completion) }
                 "list" -> executor.execute { list(payload, completion) }
                 "delete" -> executor.execute { delete(payload, completion) }
+                "move" -> executor.execute { transfer(payload, completion, move = true) }
+                "copy" -> executor.execute { transfer(payload, completion, move = false) }
+                "makeDirectory" -> executor.execute { makeDirectory(payload, completion) }
+                "share" -> share(payload, completion)
                 "pick" -> pick(payload, completion)
                 "pickMany" -> pickMany(payload, completion)
                 "importUri" -> executor.execute { importContentUri(payload, completion) }
@@ -106,6 +110,52 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             require(file.delete()) { "Unable to delete file" }
             completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
         }.onFailure { completion.failure(it) }
+    }
+
+    private fun transfer(payload: ByteArray, completion: ModuleCompletion, move: Boolean) {
+        runCatching {
+            val values = WireMap.decode(payload)
+            val source = resolve(values.requiredText("from"))
+            val target = resolve(values.requiredText("to"))
+            val overwrite = (values["overwrite"] as? WireValue.Flag)?.value ?: false
+            transferPrivateFile(source, target, move, overwrite)
+            completion.success(target, mimeFor(target))
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun makeDirectory(payload: ByteArray, completion: ModuleCompletion) {
+        runCatching {
+            val directory = resolve(WireMap.decode(payload).requiredText("path"))
+            require(!directory.isFile) { "A file already exists at this path" }
+            require(directory.isDirectory || directory.mkdirs()) { "Unable to create directory" }
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf("path" to WireValue.Text(relativeSandboxPath(root, directory)))),
+            )
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun share(payload: ByteArray, completion: ModuleCompletion) {
+        val values = WireMap.decode(payload)
+        val paths = JSONArray(values.requiredText("paths"))
+        require(paths.length() in 1..MAX_SHARE_FILES) { "Share between 1 and $MAX_SHARE_FILES files" }
+        val files = (0 until paths.length()).map { index ->
+            resolve(paths.getString(index)).also { require(it.isFile) { "File does not exist" } }
+        }
+        val requestedMime = (values["mimeType"] as? WireValue.Text)?.value?.trim().orEmpty()
+        val mime = requestedMime.ifEmpty { sharedMimeType(files.map(::mimeFor)) }
+        val authority = "${activity.packageName}.pam.files"
+        val uris = files.map { FileProvider.getUriForFile(activity, authority, it) }
+        val intent = shareFilesIntent(uris, mime)
+        val title = (values["title"] as? WireValue.Text)?.value?.takeIf(String::isNotBlank)
+        val chooser = Intent.createChooser(intent, title).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        activity.runOnUiThread {
+            runCatching { activity.startActivity(chooser) }
+                .onSuccess { completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0)) }
+                .onFailure { completion.failure(it) }
+        }
     }
 
     private fun read(payload: ByteArray, completion: ModuleCompletion) {
@@ -648,6 +698,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         val PICKER_MIME = Regex("^[a-zA-Z0-9!#\\$&^_.+-]+/[a-zA-Z0-9!#\\$&^_.+*-]+$")
         const val MAX_DOWNLOAD_BYTES = 256L * 1024L * 1024L
         const val MAX_MULTI_IMPORT_BYTES = 256L * 1024L * 1024L
+        const val MAX_SHARE_FILES = 50
     }
 
     private data class DownloadTask(
@@ -692,4 +743,73 @@ internal fun relativeSandboxPath(root: File, file: File): String {
         "File path escapes sandbox"
     }
     return canonicalFile.relativeTo(canonicalRoot).path
+}
+
+/** Moves or copies one private sandbox entry; copies are staged and published atomically. */
+internal fun transferPrivateFile(source: File, target: File, move: Boolean, overwrite: Boolean) {
+    require(source.exists()) { "Source does not exist" }
+    require(source.canonicalPath != target.canonicalPath) { "Source and destination are the same" }
+    require(move || source.isFile) { "Only files can be copied" }
+    require(!target.path.startsWith(source.path + File.separator)) {
+        "Cannot move a directory inside itself"
+    }
+    if (target.exists()) {
+        require(overwrite) { "Destination already exists" }
+        require(target.isFile && source.isFile) { "Only files can replace an existing destination" }
+    }
+    val parent = target.parentFile ?: error("Destination has no parent directory")
+    require(parent.isDirectory || parent.mkdirs()) { "Unable to create destination directory" }
+    if (move) {
+        val options = if (overwrite) {
+            arrayOf(StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } else {
+            arrayOf(StandardCopyOption.ATOMIC_MOVE)
+        }
+        runCatching { Files.move(source.toPath(), target.toPath(), *options) }.getOrElse {
+            if (overwrite) {
+                Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            } else {
+                Files.move(source.toPath(), target.toPath())
+            }
+        }
+        return
+    }
+    val temporary = File(parent, ".${target.name}.tmp-${UUID.randomUUID()}")
+    try {
+        source.inputStream().use { input -> temporary.outputStream().use { input.copyTo(it) } }
+        require(temporary.length() == source.length()) { "Source changed during copy" }
+        Files.move(
+            temporary.toPath(),
+            target.toPath(),
+            StandardCopyOption.ATOMIC_MOVE,
+            StandardCopyOption.REPLACE_EXISTING,
+        )
+    } finally {
+        temporary.delete()
+    }
+}
+
+/** Returns the narrowest MIME type that describes every shared file. */
+internal fun sharedMimeType(types: List<String>): String {
+    val normalized = types.map { it.lowercase().substringBefore(';').trim() }.filter { '/' in it }
+    if (normalized.isEmpty() || normalized.size != types.size) return "*/*"
+    if (normalized.distinct().size == 1) return normalized.first()
+    val families = normalized.map { it.substringBefore('/') }.distinct()
+    return if (families.size == 1) "${families.first()}/*" else "*/*"
+}
+
+internal fun shareFilesIntent(uris: List<Uri>, mime: String): Intent {
+    require(uris.isNotEmpty()) { "At least one file is required" }
+    val intent = if (uris.size == 1) {
+        Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
+    } else {
+        Intent(Intent.ACTION_SEND_MULTIPLE)
+            .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
+    }
+    intent.type = mime
+    intent.clipData = android.content.ClipData.newRawUri(null, uris.first()).apply {
+        uris.drop(1).forEach { addItem(android.content.ClipData.Item(it)) }
+    }
+    intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    return intent
 }

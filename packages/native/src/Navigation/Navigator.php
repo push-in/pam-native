@@ -389,6 +389,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         );
 
         $activeOptions = $this->currentOptions();
+        \Pam\Native\System\Screen::claimForRoute($this->navigationKey, $activeOptions->secure);
         return NavigationHost::make(
             $this->operation,
             $this->actionTransition ?? (
@@ -705,6 +706,18 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             }
         }
         return $this->activeChildLinkHandler()?->currentPath();
+    }
+
+    /** @param array{name: string, params: array<string, mixed>} $entry */
+    private function pathFor(array $entry): ?string
+    {
+        foreach ($this->deepLinks as $link) {
+            if ($link->route === $entry['name']) {
+                return $link->build($entry['params']);
+            }
+        }
+
+        return null;
     }
 
     public function currentUrl(): ?string
@@ -1081,6 +1094,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $key = $this->entryKey($entry);
         if ($key !== $this->entryKey($this->currentEntry()) || $this->focusedEntryKey === $key) return;
         $this->focusedEntryKey = $key;
+        \Pam\Native\Notifications\PushRendering::routeFocused($entry['name'], $entry['params'], $this->pathFor($entry));
         if ($instance instanceof NavigationLifecycleAware) {
             $instance->navigationFocused($this->contextFor($entry));
         }

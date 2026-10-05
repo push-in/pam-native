@@ -13,6 +13,7 @@ use Pam\Native\MediaAssetPage;
 use Pam\Native\MediaPickerType;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
+use InvalidArgumentException;
 use RuntimeException;
 
 final class MediaLibrary
@@ -68,6 +69,66 @@ final class MediaLibrary
                 ),
                 self::decodeList((string) ($values['items'] ?? '[]')),
             )),
+        );
+    }
+
+    /**
+     * Saves a private image or video into the shared photo library.
+     *
+     * Android 10+ needs no permission. Android 8-9 asks for
+     * WRITE_EXTERNAL_STORAGE, which the app must declare in pam-native.json.
+     * iOS requests add-only Photos access.
+     *
+     * @param null|Closure(MediaAsset): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function save(
+        string $path,
+        ?string $album = null,
+        ?Closure $callback = null,
+        ?Closure $failure = null,
+        ?string $mimeType = null,
+        ?string $name = null,
+    ): int {
+        $album = trim((string) $album);
+        if ($album !== '' && preg_match("/^[\\p{L}\\p{N} _.()'-]{1,64}$/uD", $album) !== 1) {
+            throw new InvalidArgumentException('Album names may contain letters, numbers, spaces and . _ - ( ) \' (max 64).');
+        }
+        $mimeType = strtolower(trim((string) $mimeType));
+        if ($mimeType !== '' && preg_match('#^(image|video)/[a-z0-9!\#$&^_.+-]{1,127}$#D', $mimeType) !== 1) {
+            throw new InvalidArgumentException('Only image/* or video/* MIME types can be saved.');
+        }
+        $name = trim((string) $name);
+        if (strlen($name) > 128 || preg_match('#[\x00-\x1f/\\\\]#', $name) === 1) {
+            throw new InvalidArgumentException('Media file name is invalid.');
+        }
+
+        return NativeModules::call(
+            'media-library',
+            'save',
+            [
+                'path' => Files::privatePath($path, 'Media source'),
+                'album' => $album,
+                'mimeType' => $mimeType,
+                'name' => $name,
+            ],
+            static function ($result) use ($callback, $failure): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
+                    throw new RuntimeException($result->payload);
+                }
+                $values = Wire::decodeMap($result->payload);
+                try {
+                    $item = json_decode((string) ($values['item'] ?? '{}'), true, flags: JSON_THROW_ON_ERROR);
+                } catch (JsonException $error) {
+                    throw new RuntimeException('Native media-library payload is invalid.', previous: $error);
+                }
+                $callback?->__invoke(self::asset(is_array($item) ? $item : []));
+            },
         );
     }
 

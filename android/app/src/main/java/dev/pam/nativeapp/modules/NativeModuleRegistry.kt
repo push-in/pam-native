@@ -31,6 +31,9 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val imageEditor = ImageEditorModule(context)
     private val timers = TimersModule()
     private val appearance = AppearanceModule(context)
+    private val window = (context as? android.app.Activity)?.let(::WindowModule)
+    private val accessibility = AccessibilityModule(context)
+    private val image = ImagePrefetchModule(context)
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
         put("storage", storage)
@@ -52,6 +55,9 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         put("image-editor", imageEditor)
         put("timers", timers)
         put("appearance", appearance)
+        window?.let { put("window", it) }
+        put("accessibility", accessibility)
+        put("image", image)
         putAll(GeneratedPamModules.create(context))
     }
 
@@ -112,6 +118,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         PamDeepLinks.prepareReload()
         PamIncomingShares.prepareReload()
         PamPushNotifications.prepareReload()
+        PamNotificationActions.prepareReload()
     }
 
     override fun close() {

@@ -8,6 +8,7 @@ import android.database.Cursor
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import java.io.File
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.util.concurrent.Executors
@@ -23,6 +24,10 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
     private val closed = AtomicBoolean()
 
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
+        if (method == "save") {
+            save(payload, completion)
+            return
+        }
         if (method != "assets" && method != "albums") {
             completion.failure("Unknown media-library method $method")
             return
@@ -49,6 +54,65 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
             completion.failure("Media-library module is closed")
         }
     }
+
+    private fun save(payload: ByteArray, completion: ModuleCompletion) {
+        val run = {
+            try {
+                executor.execute {
+                    runCatching {
+                        check(!closed.get()) { "Media-library module is closed" }
+                        val values = WireMap.decode(payload)
+                        val source = resolvePrivateFile(
+                            File(context.filesDir, "pam-files"),
+                            values.text("path") ?: error("Media path is required"),
+                        )
+                        val mime = values.text("mimeType")?.takeIf(String::isNotBlank)
+                            ?: java.net.URLConnection.guessContentTypeFromName(source.name)
+                            ?: error("Cannot determine the media type; pass a MIME type")
+                        val saved = MediaStoreSaver(context).save(
+                            source,
+                            mime,
+                            values.text("album"),
+                            values.text("name")?.takeIf(String::isNotBlank) ?: source.name,
+                        )
+                        WireMap.encode(mapOf("item" to WireValue.Text(saved.toString())))
+                    }.fold(
+                        onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
+                        onFailure = { completion.failure(it.message ?: "Cannot save to the media library") },
+                    )
+                }
+            } catch (_: RejectedExecutionException) {
+                completion.failure("Media-library module is closed")
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q || granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+            run()
+            return
+        }
+        if (!declaresPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+            completion.failure(
+                "Saving media on Android 9 and older requires android.permission.WRITE_EXTERNAL_STORAGE " +
+                    "in pam-native.json android.permissions",
+            )
+            return
+        }
+        val activity = context as? dev.pam.nativeapp.PamActivity
+        if (activity == null) {
+            completion.failure("Media library write permission is not granted")
+            return
+        }
+        activity.runOnUiThread {
+            activity.requestPamPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) { allowed ->
+                if (allowed) run() else completion.failure("Media library write permission was denied")
+            }
+        }
+    }
+
+    private fun declaresPermission(permission: String): Boolean = runCatching {
+        @Suppress("DEPRECATION")
+        context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_PERMISSIONS)
+            .requestedPermissions.orEmpty().contains(permission)
+    }.getOrDefault(false)
 
     private fun assets(payload: ByteArray): ByteArray {
         check(!closed.get()) { "Media-library module is closed" }

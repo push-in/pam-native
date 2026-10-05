@@ -33,6 +33,10 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
     }
 
     private fun request(kind: Int, completion: ModuleCompletion) {
+        if (kind == KIND_FULL_SCREEN_INTENT) {
+            requestFullScreenIntent(completion)
+            return
+        }
         if (kind == KIND_PHOTOS) {
             history.edit().putBoolean("photos", true).apply()
             activity.requestPamPermissions(photoPermissions()) {
@@ -60,6 +64,10 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
     }
 
     private fun result(kind: Int, completion: ModuleCompletion) {
+        if (kind == KIND_FULL_SCREEN_INTENT) {
+            fullScreenIntentResult(completion)
+            return
+        }
         if (kind == KIND_PHOTOS) {
             photosResult(completion)
             return
@@ -95,6 +103,46 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
         }
         completion.decision(status, canAskAgain)
     }
+
+    private fun requestFullScreenIntent(completion: ModuleCompletion) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE || canUseFullScreenIntent()) {
+            fullScreenIntentResult(completion)
+            return
+        }
+        history.edit().putBoolean("fullScreenIntent", true).apply()
+        val settings = Intent(
+            Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+            Uri.fromParts("package", activity.packageName, null),
+        )
+        activity.runOnUiThread {
+            runCatching {
+                activity.launchForResult(settings) { _, _ -> fullScreenIntentResult(completion) }
+            }.onFailure { fullScreenIntentResult(completion) }
+        }
+    }
+
+    private fun fullScreenIntentResult(completion: ModuleCompletion) {
+        if (!declares(Manifest.permission.USE_FULL_SCREEN_INTENT)) {
+            completion.decision(STATUS_BLOCKED, false)
+            return
+        }
+        if (canUseFullScreenIntent()) {
+            completion.decision(STATUS_GRANTED, false)
+        } else {
+            // Special app access is toggled in Settings, so it can always be requested again.
+            completion.decision(STATUS_DENIED, true)
+        }
+    }
+
+    private fun canUseFullScreenIntent(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+            activity.getSystemService(android.app.NotificationManager::class.java).canUseFullScreenIntent()
+
+    private fun declares(permission: String): Boolean = runCatching {
+        @Suppress("DEPRECATION")
+        activity.packageManager.getPackageInfo(activity.packageName, PackageManager.GET_PERMISSIONS)
+            .requestedPermissions.orEmpty().contains(permission)
+    }.getOrDefault(false)
 
     private fun photosResult(completion: ModuleCompletion) {
         val permissions = photoPermissions()
@@ -146,6 +194,14 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
             }
         KIND_LOCATION -> error("Location uses a grouped permission request")
         KIND_CONTACTS -> Manifest.permission.READ_CONTACTS
+        KIND_BLUETOOTH_CONNECT ->
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                Manifest.permission.BLUETOOTH_CONNECT
+            } else {
+                null
+            }
+        KIND_FULL_SCREEN_INTENT -> error("Full-screen intents use special app access")
+        KIND_PHONE_STATE -> Manifest.permission.READ_PHONE_STATE
         else -> error("Unknown permission kind $kind")
     }
 
@@ -174,6 +230,9 @@ internal class PermissionsModule(private val activity: PamActivity) : NativeModu
         const val KIND_NOTIFICATIONS = 4
         const val KIND_LOCATION = 5
         const val KIND_CONTACTS = 6
+        const val KIND_BLUETOOTH_CONNECT = 7
+        const val KIND_FULL_SCREEN_INTENT = 8
+        const val KIND_PHONE_STATE = 9
         const val STATUS_GRANTED = 1
         const val STATUS_DENIED = 2
         const val STATUS_BLOCKED = 3

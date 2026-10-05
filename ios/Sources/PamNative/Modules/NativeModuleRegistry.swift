@@ -22,6 +22,9 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let mediaLibrary = MediaLibraryModule()
     private let timers = TimersModule()
     private let appearance = AppearanceModule()
+    private let window = WindowModule()
+    private let accessibility = AccessibilityModule()
+    private let image = ImagePrefetchModule()
     private let modules: [String: NativeModule]
 
     public init(additionalModules: [String: NativeModule] = [:]) {
@@ -46,6 +49,9 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "media-library": mediaLibrary,
             "timers": timers,
             "appearance": appearance,
+            "window": window,
+            "accessibility": accessibility,
+            "image": image,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
         additionalModules.forEach { name, module in

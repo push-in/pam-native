@@ -53,6 +53,14 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 queue.async { self.list(payload, completion) }
             case "delete":
                 queue.async { self.delete(payload, completion) }
+            case "move":
+                queue.async { self.transfer(payload, move: true, completion) }
+            case "copy":
+                queue.async { self.transfer(payload, move: false, completion) }
+            case "makeDirectory":
+                queue.async { self.makeDirectory(payload, completion) }
+            case "share":
+                shareFiles(payload, completion: completion)
             case "pick":
                 let values = try WireMap.decode(payload)
                 let type = values["type"]?.integerValue ?? 4
@@ -153,6 +161,92 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             }
             try FileManager.default.removeItem(at: file)
             completion(.success, Data())
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func transfer(_ payload: Data, move: Bool, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard let from = values["from"]?.textValue, let to = values["to"]?.textValue else {
+                throw FileModuleError("Source and destination are required")
+            }
+            var overwrite = false
+            if case let .flag(value)? = values["overwrite"] { overwrite = value }
+            let source = try resolve(from)
+            let target = try resolve(to)
+            let manager = FileManager.default
+            var sourceIsDirectory: ObjCBool = false
+            guard manager.fileExists(atPath: source.path, isDirectory: &sourceIsDirectory) else {
+                throw FileModuleError("Source does not exist")
+            }
+            guard source.path != target.path else { throw FileModuleError("Source and destination are the same") }
+            guard move || !sourceIsDirectory.boolValue else { throw FileModuleError("Only files can be copied") }
+            guard !target.path.hasPrefix(source.path + "/") else {
+                throw FileModuleError("Cannot move a directory inside itself")
+            }
+            try manager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if manager.fileExists(atPath: target.path) {
+                guard overwrite else { throw FileModuleError("Destination already exists") }
+                guard !sourceIsDirectory.boolValue else {
+                    throw FileModuleError("Only files can replace an existing destination")
+                }
+                let staged = target.deletingLastPathComponent()
+                    .appendingPathComponent(".\(target.lastPathComponent).tmp-\(UUID().uuidString)")
+                if move {
+                    try manager.moveItem(at: source, to: staged)
+                } else {
+                    try manager.copyItem(at: source, to: staged)
+                }
+                _ = try manager.replaceItemAt(target, withItemAt: staged)
+            } else if move {
+                try manager.moveItem(at: source, to: target)
+            } else {
+                try manager.copyItem(at: source, to: target)
+            }
+            completion(.success, try WireMap.encode(reference(target)))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func makeDirectory(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let directory = try requiredPath(payload)
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory), !isDirectory.boolValue {
+                throw FileModuleError("A file already exists at this path")
+            }
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            completion(.success, try WireMap.encode(["path": .text(relativePath(directory))]))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func shareFiles(_ payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard let raw = values["paths"]?.textValue,
+                  let paths = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String],
+                  (1...50).contains(paths.count) else {
+                throw FileModuleError("Share between 1 and 50 files")
+            }
+            let files = try paths.map { path -> URL in
+                let file = try resolve(path)
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
+                      !isDirectory.boolValue else { throw FileModuleError("File does not exist") }
+                return file
+            }
+            DispatchQueue.main.async {
+                guard let presenter = Self.presenter() else {
+                    completion(.failure, Data("No window is available for sharing".utf8))
+                    return
+                }
+                let activity = UIActivityViewController(activityItems: files, applicationActivities: nil)
+                if let popover = activity.popoverPresentationController {
+                    popover.sourceView = presenter.view
+                    popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
+                    popover.permittedArrowDirections = []
+                }
+                presenter.present(activity, animated: true) { completion(.success, Data()) }
+            }
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 

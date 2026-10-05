@@ -39,6 +39,7 @@ final readonly class ScreenOptions
         public bool $sheetGrabberVisible = false,
         public ?float $sheetCornerRadius = null,
         public bool $sheetExpandsWhenScrolledToEdge = true,
+        public bool $secure = false,
     ) {
         if ($title !== null && strlen($title) > 512) {
             throw new InvalidArgumentException('Navigation titles cannot exceed 512 bytes.');
@@ -96,6 +97,7 @@ final readonly class ScreenOptions
             'sheetGrabberVisible' => $this->sheetGrabberVisible,
             'sheetCornerRadius' => $this->sheetCornerRadius,
             'sheetExpandsWhenScrolledToEdge' => $this->sheetExpandsWhenScrolledToEdge,
+            'secure' => $this->secure,
         ];
     }
 }

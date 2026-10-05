@@ -14,12 +14,33 @@ import android.os.Looper
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
+import org.json.JSONObject
 
 internal class NotificationsModule(private val activity: PamActivity) : NativeModule, AutoCloseable {
     private val main = Handler(Looper.getMainLooper())
 
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+        Thread(runnable, "pam-notifications").apply { isDaemon = true }
+    }
+
     init {
         PamPushNotifications.attach(activity.applicationContext)
+        PamNotificationActions.attach(activity.applicationContext)
+    }
+
+    private fun background(completion: ModuleCompletion, work: () -> ByteArray) {
+        try {
+            worker.execute {
+                runCatching(work).fold(
+                    onSuccess = { completion.complete(ModuleResultStatus.SUCCESS, it) },
+                    onFailure = {
+                        completion.complete(ModuleResultStatus.FAILURE, (it.message ?: "Notification failed").toByteArray())
+                    },
+                )
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            completion.complete(ModuleResultStatus.FAILURE, "Notifications module is closed".toByteArray())
+        }
     }
 
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
@@ -31,6 +52,38 @@ internal class NotificationsModule(private val activity: PamActivity) : NativeMo
                 "registerPush" -> registerPush(completion)
                 "unregisterPush" -> unregisterPush(completion)
                 "nextPushEvent" -> PamPushNotifications.next(completion)
+                "showConversation" -> background(completion) {
+                    val spec = ConversationSpec.from(JSONObject(WireMap.decode(payload).text("spec")))
+                    PamConversationNotifications.show(activity.applicationContext, spec)
+                    WireMap.encode(mapOf("key" to WireValue.Text(spec.key)))
+                }
+                "cancelConversation" -> {
+                    PamConversationNotifications.cancel(activity.applicationContext, WireMap.decode(payload).text("key"))
+                    completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                }
+                "nextAction" -> PamNotificationActions.next(completion)
+                "registerPushRendering" -> {
+                    PamPushRendering.register(activity.applicationContext, WireMap.decode(payload).text("rule"))
+                    completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                }
+                "forgetPushRendering" -> {
+                    val values = WireMap.decode(payload)
+                    if ((values["all"] as? WireValue.Flag)?.value == true) {
+                        PamPushRendering.clear(activity.applicationContext)
+                    } else {
+                        PamPushRendering.forget(activity.applicationContext, values.text("field"), values.text("type"))
+                    }
+                    completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                }
+                "setActiveRoute" -> {
+                    val values = WireMap.decode(payload)
+                    PamActiveRoute.update(
+                        values.text("name"),
+                        (values["params"] as? WireValue.Text)?.value ?: "{}",
+                        (values["path"] as? WireValue.Text)?.value.orEmpty(),
+                    )
+                    completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
+                }
                 else -> error("Unknown notifications method $method")
             }
         }.onFailure { error ->
@@ -40,7 +93,9 @@ internal class NotificationsModule(private val activity: PamActivity) : NativeMo
 
     override fun close() {
         main.removeCallbacksAndMessages(null)
+        worker.shutdownNow()
         PamPushNotifications.close("Notifications module closed")
+        PamNotificationActions.close("Notifications module closed")
     }
 
     private fun registerPush(completion: ModuleCompletion) {

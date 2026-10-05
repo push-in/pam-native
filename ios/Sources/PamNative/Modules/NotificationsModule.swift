@@ -101,6 +101,53 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
                 }
             case "nextPushEvent":
                 PushTokenRegistry.shared.nextEvent(completion: completion)
+            case "showConversation":
+                // iOS fallback: one threaded notification per conversation with the
+                // latest message. Inline replies need a host notification category.
+                let values = try WireMap.decode(payload)
+                guard case let .text(specJSON)? = values["spec"],
+                      let spec = try JSONSerialization.jsonObject(with: Data(specJSON.utf8)) as? [String: Any],
+                      let key = spec["key"] as? String,
+                      let last = (spec["messages"] as? [[String: Any]])?.last,
+                      let text = last["text"] as? String else {
+                    throw NotificationsError("Invalid conversation payload")
+                }
+                let sender = (last["sender"] as? [String: Any])?["name"] as? String ?? ""
+                let title = spec["title"] as? String ?? ""
+                let content = UNMutableNotificationContent()
+                content.threadIdentifier = key
+                content.title = title.isEmpty ? sender : title
+                content.body = title.isEmpty || sender.isEmpty ? text : "\(sender): \(text)"
+                content.sound = (spec["silent"] as? Bool) == true ? nil : .default
+                var userInfo: [AnyHashable: Any] = ["pam.conversation": key]
+                if let dataJSON = spec["data"] as? String,
+                   let object = try? JSONSerialization.jsonObject(with: Data(dataJSON.utf8)) {
+                    userInfo["pam.data"] = object
+                }
+                if let deepLink = spec["deepLink"] as? String, !deepLink.isEmpty {
+                    userInfo["pam.deepLink"] = deepLink
+                }
+                content.userInfo = userInfo
+                center.add(UNNotificationRequest(identifier: "pam-conversation-\(key)", content: content, trigger: nil)) {
+                    if let error = $0 {
+                        completion(.failure, Data(error.localizedDescription.utf8))
+                    } else {
+                        completion(.success, (try? WireMap.encode(["key": .text(key)])) ?? Data())
+                    }
+                }
+            case "cancelConversation":
+                let values = try WireMap.decode(payload)
+                guard case let .text(key)? = values["key"] else {
+                    throw NotificationsError("Missing conversation key")
+                }
+                center.removeDeliveredNotifications(withIdentifiers: ["pam-conversation-\(key)"])
+                completion(.success, Data())
+            case "setActiveRoute", "forgetPushRendering":
+                completion(.success, Data())
+            case "nextAction", "registerPushRendering":
+                throw NotificationsError(
+                    "Notification actions and declarative push rendering are not available on iOS yet"
+                )
             default:
                 throw NotificationsError("Unknown notifications method \(method)")
             }

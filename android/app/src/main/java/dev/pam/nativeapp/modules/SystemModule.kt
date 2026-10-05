@@ -246,6 +246,15 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
                         "appearance" to WireValue.Integer(appearance.toLong()),
                         "appState" to WireValue.Integer(appState.toLong()),
                         "timeZone" to WireValue.Text(TimeZone.getDefault().id),
+                        "memoryClassMb" to WireValue.Integer(
+                            (context.getSystemService(android.app.ActivityManager::class.java)?.memoryClass ?: 0).toLong(),
+                        ),
+                        "lowRamDevice" to WireValue.Flag(
+                            context.getSystemService(android.app.ActivityManager::class.java)?.isLowRamDevice == true,
+                        ),
+                        "powerSaveMode" to WireValue.Flag(
+                            context.getSystemService(android.os.PowerManager::class.java)?.isPowerSaveMode == true,
+                        ),
                         "safeAreaTop" to WireValue.Decimal(
                             safeTop / density.toDouble(),
                         ),

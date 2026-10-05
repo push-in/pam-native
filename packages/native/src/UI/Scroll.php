@@ -148,4 +148,15 @@ final class Scroll extends Element
     {
         return $this->withEvent(EventKind::Scroll, $handler);
     }
+
+    /**
+     * Fires once when the remaining content is within $threshold viewports of
+     * the end, and again after the content grows or the user scrolls back.
+     */
+    public function onEndReached(Closure $handler, float $threshold = 0.5): self
+    {
+        return $this
+            ->withProperty(PropKey::EndReachedThreshold, min(1.0, max(0.0, $threshold)))
+            ->withEvent(EventKind::EndReached, $handler);
+    }
 }

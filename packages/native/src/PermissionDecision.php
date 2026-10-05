@@ -13,6 +13,11 @@ final readonly class PermissionDecision
     ) {
     }
 
+    public function unavailable(): bool
+    {
+        return $this->status === PermissionStatus::Unavailable;
+    }
+
     public function granted(): bool
     {
         return $this->status === PermissionStatus::Granted

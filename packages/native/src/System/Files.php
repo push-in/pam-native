@@ -223,6 +223,86 @@ final class Files
         );
     }
 
+    /**
+     * Moves a private file or directory without sending its bytes through PHP.
+     *
+     * @param null|Closure(FileReference): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function move(
+        string $from,
+        string $to,
+        ?Closure $callback = null,
+        ?Closure $failure = null,
+        bool $overwrite = false,
+    ): int {
+        return self::transfer('move', $from, $to, $callback, $failure, $overwrite);
+    }
+
+    /**
+     * Copies a private file natively and publishes the destination atomically.
+     *
+     * @param null|Closure(FileReference): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function copy(
+        string $from,
+        string $to,
+        ?Closure $callback = null,
+        ?Closure $failure = null,
+        bool $overwrite = false,
+    ): int {
+        return self::transfer('copy', $from, $to, $callback, $failure, $overwrite);
+    }
+
+    /**
+     * Creates a private directory and any missing parents.
+     *
+     * @param null|Closure(string): void $callback Receives the normalized relative path.
+     * @param null|Closure(string): void $failure
+     */
+    public static function makeDirectory(string $path, ?Closure $callback = null, ?Closure $failure = null): int
+    {
+        return self::invokeOptionalFailure(
+            'makeDirectory',
+            ['path' => self::privatePath($path, 'Directory')],
+            static fn (array $values): mixed => $callback?->__invoke((string) ($values['path'] ?? $path)),
+            $failure,
+        );
+    }
+
+    /** @internal Validates a sandbox-relative path before it crosses the bridge. */
+    public static function privatePath(string $path, string $label = 'File'): string
+    {
+        if (trim($path) === '' || strlen($path) > 4096 || str_starts_with($path, '/')
+            || str_contains($path, '\\') || preg_match('/[\x00-\x1f\x7f]/', $path)
+            || array_intersect(explode('/', $path), ['', '.', '..']) !== []) {
+            throw new InvalidArgumentException("{$label} must be a relative private file path.");
+        }
+
+        return $path;
+    }
+
+    private static function transfer(
+        string $method,
+        string $from,
+        string $to,
+        ?Closure $callback,
+        ?Closure $failure,
+        bool $overwrite,
+    ): int {
+        return self::invokeOptionalFailure(
+            $method,
+            [
+                'from' => self::privatePath($from, 'Source'),
+                'to' => self::privatePath($to, 'Destination'),
+                'overwrite' => $overwrite,
+            ],
+            static fn (array $values): mixed => $callback?->__invoke(self::reference($values)),
+            $failure,
+        );
+    }
+
     private static function assetPath(string $path): string
     {
         $path = str_replace('\\', '/', trim($path));

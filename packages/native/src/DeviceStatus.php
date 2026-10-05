@@ -14,4 +14,10 @@ final readonly class DeviceStatus
         public bool $lowPowerMode,
     ) {
     }
+
+    /** Android battery saver / iOS Low Power Mode. Alias of $lowPowerMode. */
+    public function powerSaveMode(): bool
+    {
+        return $this->lowPowerMode;
+    }
 }

@@ -134,7 +134,7 @@ internal class NativeImageLoader(
     private val connections =
         ConcurrentHashMap.newKeySet<HttpURLConnection>()
     private val diskDirectory = File(context.cacheDir, DISK_DIRECTORY)
-    private val diskLock = Any()
+    private val diskLock = DISK_LOCK
 
     fun load(
         request: NativeImageRequest,
@@ -176,6 +176,20 @@ internal class NativeImageLoader(
             showPlaceholder(view, pending)
         }
         begin(view, token, view.width, view.height)
+    }
+
+    /**
+     * Warms the shared disk cache for a remote image without decoding it.
+     * Returns the cached byte count. Used by Image::prefetch().
+     */
+    fun prefetch(source: String, requestHeaders: String? = null, cacheKey: String? = null): Long {
+        check(!closed.get()) { "Image loader is closed" }
+        val request = NativeImageRequest(
+            source = source,
+            requestHeaders = requestHeaders,
+            mediaCacheKey = cacheKey,
+        )
+        return loadRemote(source, request, { _, _ -> }, {}).size.toLong()
     }
 
     fun cancel(view: PamImageView) {
@@ -1059,6 +1073,8 @@ internal class NativeImageLoader(
     )
 
     private companion object {
+        /** Shared by every loader instance so prefetch and rendering never race on one file. */
+        val DISK_LOCK = Any()
         const val MEMORY_CACHE_BYTES = 32 * 1024 * 1024
         const val DISK_CACHE_BYTES = 96L * 1024 * 1024
         const val MAX_DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024

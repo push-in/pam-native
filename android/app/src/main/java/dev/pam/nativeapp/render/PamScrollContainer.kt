@@ -376,6 +376,11 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun primaryOffset(x: Float, y: Float): Float = if (horizontal) x else y
 
+    /** Pixels left before the end of the content along the scroll axis. */
+    fun remainingPrimaryPixels(): Int = primaryMaxOffset() - primaryCurrentOffset()
+
+    fun primaryViewportPixels(): Int = if (horizontal) activeScroll.width else activeScroll.height
+
     fun snapshotOffsetPixels(): Pair<Int, Int> =
         scrollXOf(activeScroll) to scrollYOf(activeScroll)
 

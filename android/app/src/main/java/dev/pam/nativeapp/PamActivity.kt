@@ -186,6 +186,7 @@ class PamActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
+        dev.pam.nativeapp.modules.PamActiveRoute.setForeground(true)
         if (runtimeStarted) {
             runtime.onHostResume()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_ACTIVE.toString().toByteArray())
@@ -201,6 +202,7 @@ class PamActivity : FragmentActivity() {
     }
 
     override fun onPause() {
+        dev.pam.nativeapp.modules.PamActiveRoute.setForeground(false)
         if (runtimeStarted) {
             runtime.onHostPause()
             runtime.dispatchLifecycle(EVENT_APP_STATE, APP_STATE_INACTIVE.toString().toByteArray())

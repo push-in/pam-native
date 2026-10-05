@@ -14,6 +14,8 @@ final readonly class PushMessage
         public string $body,
         public array $data,
         public ?string $deepLink,
+        /** True when a PushRendering rule already displayed this push natively. */
+        public bool $rendered = false,
     ) {
     }
 }
