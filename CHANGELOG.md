@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.7.0 - 2026-10-05
+
+LogBox-style runtime error overlay. See [docs/error-overlay.md](docs/error-overlay.md).
+
+- **Dismiss fixed**: the old overlay grew with the stack until its Dismiss
+  button was pushed under the navigation bar, and any committed frame
+  silently cleared it. Dismiss now always closes the error, Back closes the
+  inspector, a dismissed error is not re-shown until the runtime reloads (no
+  re-show loop), and the overlay never swallows touches outside its toast.
+- **Debug builds**: non-fatal errors show a compact bottom toast that
+  expands into a full-screen, scrollable inspector: exception class and
+  message in large text, app frame first with app-relative paths
+  (`/data/user/0/<pkg>/files/pam/releases/<hash>/` stripped), source
+  snippet, collapsible framework/vendor frames, wrapped monospace stack,
+  Dismiss / Copy / Reload, and `‹ 1 / N ›` for queued errors (repeats count
+  as `×N`). Fatal render/boot errors open the inspector directly. Respects
+  safe areas and the light/dark appearance.
+- **Release builds never show stacks**: non-fatal errors are logged only;
+  fatal errors retry with a fresh runtime and then show a localized
+  "Something went wrong" / "Algo deu errado" screen with **Try again**
+  (event-handler errors no longer reload the whole app). `pam-native.json`
+  `devErrorOverlay`: `true` (default, debug only), `false`, or `"always"`.
+- `App::onError(Closure(Throwable, RuntimeError))` / `offError()`: crash
+  reporting hook (Sentry, observability) for every uncaught error, with
+  `phase` (boot, render, event, module), `fatal()`, classified frames and a
+  fingerprint.
+- **Module failures reach the caller**: `SQLite::execute/query/executeMany/
+  transaction` and `Storage::get/set` accept `onError`, and
+  `NativeModules::call/callRaw` accept `onFailure`, so failures such as
+  "Native module value is too large" go to that callback instead of the
+  overlay. Without one they surface as a non-fatal
+  `Pam\Native\Modules\NativeModuleException` (a `RuntimeException`).
+- SQLite results over the 1 MiB bridge limit fail with an explicit size and
+  paging hint; a native module that throws synchronously now completes with
+  a failure instead of crashing.
+- Diagnostics payload version 2 (`phase`, `fatal`, `frames`, `appFrame`,
+  `snippet`, `fingerprint`); version 1 and plain-text errors still render.
+- Android strings are translated to Portuguese (`values-pt`).
+
 ## 1.6.1 - 2026-10-05
 
 Fixes for the React Native parity releases (1.4.0+), found on a Galaxy S10.
