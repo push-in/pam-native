@@ -12,6 +12,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     private var pending: ModuleCompletion?
     private var pendingMultiple = false
     private var pendingLimit = 10
+    private var pendingMaximumBytes = 64 * 1_024 * 1_024
     private var captureType = 1
     private var previewURL: URL?
     private weak var previewController: QLPreviewController?
@@ -55,12 +56,30 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             case "pick":
                 let values = try WireMap.decode(payload)
                 let type = values["type"]?.integerValue ?? 4
-                presentPicker(type: Int(type), multiple: false, limit: 1, completion: completion)
+                let mimeType = values["mimeType"]?.textValue ?? ""
+                let maximumBytes = values["maximumBytes"]?.integerValue ?? 64 * 1_024 * 1_024
+                guard (1...8_589_934_592).contains(maximumBytes), maximumBytes <= Int64(Int.max) else {
+                    throw FileModuleError("Picker import limit must be between 1 byte and 8 GiB")
+                }
+                let requestedType: UTType?
+                if mimeType.isEmpty {
+                    requestedType = nil
+                } else {
+                    guard let resolved = UTType(mimeType: mimeType) else {
+                        throw FileModuleError("Picker MIME type is invalid")
+                    }
+                    requestedType = resolved
+                }
+                presentPicker(type: Int(type), multiple: false, limit: 1,
+                              requestedType: requestedType, maximumBytes: Int(maximumBytes),
+                              completion: completion)
             case "pickMany":
                 let values = try WireMap.decode(payload)
                 let type = values["type"]?.integerValue ?? 4
                 let limit = min(50, max(1, Int(values["limit"]?.integerValue ?? 10)))
-                presentPicker(type: Int(type), multiple: true, limit: limit, completion: completion)
+                presentPicker(type: Int(type), multiple: true, limit: limit,
+                              requestedType: nil, maximumBytes: 64 * 1_024 * 1_024,
+                              completion: completion)
             case "importUri":
                 importPhotoAsset(payload, completion: completion)
             case "capture":
@@ -400,6 +419,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         type: Int,
         multiple: Bool,
         limit: Int,
+        requestedType: UTType?,
+        maximumBytes: Int,
         completion: @escaping ModuleCompletion
     ) {
         DispatchQueue.main.async {
@@ -407,16 +428,22 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 completion(.failure, Data("Another picker is active".utf8))
                 return
             }
-            let types: [UTType] = switch type {
-            case 1: [.image]
-            case 2: [.movie]
-            case 3: [.audio]
-            case 5: [.image, .movie]
-            default: [.item]
+            let types: [UTType]
+            if let requestedType {
+                types = [requestedType]
+            } else {
+                types = switch type {
+                case 1: [.image]
+                case 2: [.movie]
+                case 3: [.audio]
+                case 5: [.image, .movie]
+                default: [.item]
+                }
             }
             self.pending = completion
             self.pendingMultiple = multiple
             self.pendingLimit = limit
+            self.pendingMaximumBytes = maximumBytes
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
             picker.delegate = self
             picker.allowsMultipleSelection = multiple
@@ -448,12 +475,13 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     ) {
         guard !urls.isEmpty else { return finishFailure("No document was selected") }
         let multiple = pendingMultiple
+        let maximumBytes = pendingMaximumBytes
         let selected = Array(urls.prefix(pendingLimit))
         queue.async {
             if multiple {
                 self.importFiles(selected, completion: self.takePending())
             } else if let source = selected.first {
-                self.importFile(source, completion: self.takePending())
+                self.importFile(source, maximumBytes: maximumBytes, completion: self.takePending())
             }
         }
     }
@@ -492,26 +520,21 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         takePending()?(.success, Data())
     }
 
-    private func importFile(_ source: URL, completion: ModuleCompletion?) {
+    private func importFile(_ source: URL, maximumBytes: Int, completion: ModuleCompletion?) {
         guard let completion else { return }
-        let accessing = source.startAccessingSecurityScopedResource()
-        defer { if accessing { source.stopAccessingSecurityScopedResource() } }
         do {
-            let values = try source.resourceValues(forKeys: [.fileSizeKey])
-            if let size = values.fileSize, size > 64 * 1_024 * 1_024 {
-                throw FileModuleError("Selected file exceeds 64 MiB")
+            let item = try importFileReference(source, maximumBytes: maximumBytes)
+            do {
+                completion(.success, try WireMap.encode([
+                    "path": .text(item.reference["path"] as? String ?? ""),
+                    "name": .text(item.reference["name"] as? String ?? ""),
+                    "mimeType": .text(item.reference["mimeType"] as? String ?? "application/octet-stream"),
+                    "size": .integer(Int64(item.size)),
+                ]))
+            } catch {
+                try? FileManager.default.removeItem(at: item.url)
+                throw error
             }
-            let data = try Data(contentsOf: source)
-            guard data.count <= 64 * 1_024 * 1_024 else {
-                throw FileModuleError("Selected file exceeds 64 MiB")
-            }
-            store(
-                data,
-                name: source.lastPathComponent,
-                mime: UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
-                    ?? "application/octet-stream",
-                completion: completion
-            )
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 
@@ -606,11 +629,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         defer { if accessing { source.stopAccessingSecurityScopedResource() } }
         let values = try source.resourceValues(forKeys: [.fileSizeKey])
         if let size = values.fileSize, size > maximumBytes {
-            throw FileModuleError(
-                maximumBytes < 64 * 1_024 * 1_024
-                    ? "Selected files exceed 256 MiB"
-                    : "Selected file exceeds 64 MiB"
-            )
+            throw FileModuleError("Selected file exceeds \(maximumBytes / 1_024 / 1_024) MiB")
         }
         let safe = source.lastPathComponent.replacingOccurrences(
             of: "[^A-Za-z0-9_.-]",
@@ -633,11 +652,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         let importedSize = importedValues.fileSize ?? 0
         guard importedSize <= maximumBytes else {
             try? FileManager.default.removeItem(at: destination)
-            throw FileModuleError(
-                maximumBytes < 64 * 1_024 * 1_024
-                    ? "Selected files exceed 256 MiB"
-                    : "Selected file exceeds 64 MiB"
-            )
+            throw FileModuleError("Selected file exceeds \(maximumBytes / 1_024 / 1_024) MiB")
         }
         let mime = UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
             ?? "application/octet-stream"
@@ -726,6 +741,7 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             pending = nil
             pendingMultiple = false
             pendingLimit = 10
+            pendingMaximumBytes = 64 * 1_024 * 1_024
         }
         return pending
     }

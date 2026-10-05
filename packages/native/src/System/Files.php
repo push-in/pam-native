@@ -246,19 +246,38 @@ final class Files
      *
      * A user-cancelled platform picker resolves with null. Cancellation is a
      * normal UI outcome and is never surfaced as a native-module exception.
+     * The default import limit remains 64 MiB. Larger documents are copied
+     * directly into the private file sandbox without loading them into PHP.
+     *
+     * @param null|Closure(string): void $failure
      */
     public static function pick(
         MediaPickerType $type,
         Closure $callback,
+        ?string $mimeType = null,
+        ?Closure $failure = null,
+        int $maximumBytes = 67_108_864,
     ): int {
-        return self::invoke(
+        if ($mimeType !== null && preg_match('~^[a-zA-Z0-9!#$&^_.+-]+/[a-zA-Z0-9!#$&^_.+*-]+$~D', $mimeType) !== 1) {
+            throw new InvalidArgumentException('Picker MIME type is invalid.');
+        }
+        if ($maximumBytes < 1 || $maximumBytes > 8_589_934_592) {
+            throw new InvalidArgumentException('Picker import limit must be between 1 byte and 8 GiB.');
+        }
+
+        return self::invokeOptionalFailure(
             'pick',
-            ['type' => $type->value],
+            [
+                'type' => $type->value,
+                'mimeType' => $mimeType ?? '',
+                'maximumBytes' => $maximumBytes,
+            ],
             static function (array $values) use ($callback): mixed {
                 $reference = self::reference($values);
 
                 return $callback($reference->path === '' ? null : $reference);
             },
+            $failure,
         );
     }
 

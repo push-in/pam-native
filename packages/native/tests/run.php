@@ -3616,6 +3616,56 @@ $assert(
     'Files pick must resolve user cancellation with null instead of throwing.',
 );
 
+$largePickFailure = null;
+$largePickRequest = Files::pick(
+    MediaPickerType::Any,
+    static function (?FileReference $file): void {
+        throw new RuntimeException('Failed document pick must not invoke success.');
+    },
+    mimeType: 'application/zip',
+    failure: static function (string $message) use (&$largePickFailure): void {
+        $largePickFailure = $message;
+    },
+    maximumBytes: 2_147_483_648,
+);
+$largePickCall = TestDiagnostics::$moduleCall;
+$largePickPayload = $largePickCall === null ? [] : Wire::decodeMap($largePickCall['payload']);
+$assert(
+    $largePickCall !== null
+        && $largePickCall['method'] === 'pick'
+        && ($largePickPayload['type'] ?? null) === MediaPickerType::Any->value
+        && ($largePickPayload['mimeType'] ?? null) === 'application/zip'
+        && ($largePickPayload['maximumBytes'] ?? null) === 2_147_483_648,
+    'Files pick must forward a typed MIME filter and explicit streaming import limit.',
+);
+Runtime::dispatchModuleResult(
+    $largePickRequest,
+    ModuleResultStatus::Failure->value,
+    'Selected file exceeds 2048 MiB',
+);
+$assert(
+    $largePickFailure === 'Selected file exceeds 2048 MiB',
+    'Files pick must deliver native import errors to the optional failure callback.',
+);
+foreach (['application/zip\n', 'not-a-mime'] as $invalidMime) {
+    $rejected = false;
+    try {
+        Files::pick(MediaPickerType::Any, static function (): void {}, mimeType: $invalidMime);
+    } catch (InvalidArgumentException) {
+        $rejected = true;
+    }
+    $assert($rejected, 'Files pick must reject malformed MIME filters before calling native code.');
+}
+foreach ([0, 8_589_934_593] as $invalidLimit) {
+    $rejected = false;
+    try {
+        Files::pick(MediaPickerType::Any, static function (): void {}, maximumBytes: $invalidLimit);
+    } catch (InvalidArgumentException) {
+        $rejected = true;
+    }
+    $assert($rejected, 'Files pick must reject unsafe import limits before calling native code.');
+}
+
 $cancelledMany = [new FileReference('unexpected', 'unexpected', 'text/plain', 1)];
 $cancelledManyRequest = Files::pickMany(
     MediaPickerType::Media,

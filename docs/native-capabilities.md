@@ -103,7 +103,22 @@ passed directly to `Image` and rendered immediately without copying bytes
 through PHP or exposing an absolute device path. Image reads and decoding stay
 off the UI thread, and both renderers reject authority and path traversal.
 If any import fails, files already copied by that selection are removed.
-Each file is bounded to 64 MiB and a multi-selection is bounded to 256 MiB.
+By default, each file is bounded to 64 MiB and a multi-selection is bounded to
+256 MiB. A single document can request a MIME filter and a larger import limit:
+
+```php
+Files::pick(
+    MediaPickerType::Any,
+    function (?FileReference $archive): void { /* use the private file path */ },
+    mimeType: 'application/zip',
+    failure: function (string $message): void { /* show a recoverable error */ },
+    maximumBytes: 2_147_483_648,
+);
+```
+
+The maximum explicit limit is 8 GiB. Android streams the selected document to
+the app sandbox; iOS copies the security-scoped document without loading it
+into application memory. Partial files are removed when an import fails.
 
 On Android, `MediaLibrary::assets()` queries the device gallery directly with
 bounded offset pagination, an optional album filter and an image/video type
