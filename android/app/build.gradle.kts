@@ -69,6 +69,10 @@ val pamGoogleServicesSource = listOf(
 ).firstOrNull(File::isFile) ?: file("$pamProjectRoot/.pam/google-services.json")
 val pamFirebaseMessagingEnabled = pamProjectRoot.isNotBlank()
     && pamGoogleServicesSource.isFile
+// android.debugFirebase=false keeps Firebase out of debug builds, e.g. when a
+// debugApplicationIdSuffix has no matching client in google-services.json.
+val pamDebugFirebaseEnabled = pamFirebaseMessagingEnabled
+    && pamProperties.getProperty("debugFirebase", "true") != "false"
 
 if (pamFirebaseMessagingEnabled) {
     apply(plugin = "com.google.gms.google-services")
@@ -81,6 +85,9 @@ if (pamFirebaseMessagingEnabled) {
         it.name.startsWith("process") && it.name.endsWith("GoogleServices")
     }.configureEach {
         dependsOn(syncPamGoogleServices)
+        if (!pamDebugFirebaseEnabled && name == "processDebugGoogleServices") {
+            enabled = false
+        }
     }
 }
 
@@ -142,9 +149,16 @@ android {
         debug {
             if (pamDebugApplicationIdSuffix != null) {
                 applicationIdSuffix = pamDebugApplicationIdSuffix
-            } else if (!pamFirebaseMessagingEnabled) {
+            } else if (!pamDebugFirebaseEnabled) {
                 applicationIdSuffix = ".debug"
             }
+            manifestPlaceholders["pamFirebaseMessagingEnabled"] = pamDebugFirebaseEnabled.toString()
+            manifestPlaceholders["pamFirebaseMessagingService"] =
+                if (pamDebugFirebaseEnabled) {
+                    "dev.pam.nativeapp.modules.PamFirebaseMessagingService"
+                } else {
+                    "dev.pam.nativeapp.modules.PamDisabledFirebaseMessagingService"
+                }
             isJniDebuggable = true
         }
         release {

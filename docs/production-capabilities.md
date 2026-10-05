@@ -128,6 +128,10 @@ set `android.debugApplicationIdSuffix` in `pam-native.json`, for example
 and `pam doctor` reports the same issue. The suffix applies to launch, logs and
 diagnostics; release builds keep `applicationId`. The Google services file must
 contain an Android client for the suffixed debug package.
+If that client does not exist, set `"debugFirebase": false` under `android`
+instead: debug builds then omit Firebase Messaging, use the `.debug` suffix
+(push registration reports an actionable failure) and release builds keep
+Firebase.
 
 iOS notification delegates forward foreground delivery with
 `PamPushNotifications.didReceive(notification:)` and opening with

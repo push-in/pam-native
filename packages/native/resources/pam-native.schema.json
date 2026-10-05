@@ -79,6 +79,11 @@
                     "type": "string",
                     "pattern": "^\\.[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$"
                 },
+                "debugFirebase": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Set to false to build debug variants without Firebase Messaging, e.g. when google-services.json has no client for the debug application id."
+                },
                 "permissions": {
                     "type": "array",
                     "uniqueItems": true,

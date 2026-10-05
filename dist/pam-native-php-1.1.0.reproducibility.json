@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "resultCode": 1,
+  "artifacts": [
+    {
+      "artifactCode": 4,
+      "resultCode": 1,
+      "bytes": 367108,
+      "sha256": "f9ff57314cbd13784e1d09304f7f5165e461119b16d5c702181160e6a08754c4"
+    }
+  ]
+}
