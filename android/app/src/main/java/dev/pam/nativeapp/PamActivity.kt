@@ -48,7 +48,8 @@ class PamActivity : FragmentActivity() {
     private var hotReload: HotReloadClient? = null
     private var backCallback: OnBackInvokedCallback? = null
     private var suppressBackUntil = 0L
-    private lateinit var errors: ErrorOverlay
+    internal lateinit var errors: ErrorOverlay
+        private set
     private val permissionCallbacks = HashMap<Int, (Boolean) -> Unit>()
     private val activityResultCallbacks = HashMap<Int, (Int, Intent?) -> Unit>()
     private var nextPermissionRequest = 40_000
@@ -97,7 +98,14 @@ class PamActivity : FragmentActivity() {
         applyDefaultSystemBars()
         PamAppearance.exportEnvironment(this)
         val host = PamRootHost(this).also { rootHost = it }
-        errors = ErrorOverlay(this)
+        errors = ErrorOverlay(
+            context = this,
+            developerMode = ErrorOverlay.developerMode(this, BuildConfig.DEBUG),
+            safeArea = ::currentSafeAreaInsets,
+            dark = ::isDarkAppearance,
+            onReload = ::reloadAfterError,
+            onExit = ::finish,
+        )
         devTools = PamDevToolsOverlay(this)
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->
             runtime.dispatchEvent(nodeId, kind, payload)
@@ -108,7 +116,7 @@ class PamActivity : FragmentActivity() {
             reportError = { message -> handleRuntimeError(message) },
             onFrameCommitted = {
                 devTools.update(it)
-                errors.clearError()
+                errors.onFrameCommitted()
                 recoveryAttempts = 0
                 recoveryRunnable?.let(window.decorView::removeCallbacks)
                 recoveryRunnable = null
@@ -158,7 +166,7 @@ class PamActivity : FragmentActivity() {
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
                     resolved.mapCatching { entry -> startRuntime(entry) }.onFailure {
-                        errors.showError(it.message ?: "Pam Native failed to start")
+                        handleRuntimeError(it.message ?: "Pam Native failed to start")
                     }
                 }
             },
@@ -203,13 +211,20 @@ class PamActivity : FragmentActivity() {
                     context = this,
                     onReload = { receipt -> runOnUiThread {
                         errors.clearError()
+                        runtimeEntryPath = receipt.entryPath
                         runtime.reload(
                             receipt.entryPath,
                             receipt.confirmedAtNanos,
                             receipt.bundleBytes,
                         )
                     } },
-                    onError = { message -> runOnUiThread { errors.showError(message) } },
+                    onError = { message ->
+                        runOnUiThread {
+                            errors.report(
+                                RuntimeErrorReport.native(message, fatal = false, phase = "hot-reload"),
+                            )
+                        }
+                    },
                 ).also { it.start() }
             }
         }
@@ -289,6 +304,7 @@ class PamActivity : FragmentActivity() {
     @SuppressLint("GestureBackNavigation")
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (errors.consumeBack()) return true
             if (consumeSuppressedBack()) return true
             if (runtime.consumePresentedModalBack()) return true
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -302,6 +318,7 @@ class PamActivity : FragmentActivity() {
     @Suppress("DEPRECATION")
     @SuppressLint("GestureBackNavigation")
     override fun onBackPressed() {
+        if (errors.consumeBack()) return
         if (!runtimeStarted) {
             super.onBackPressed()
             return
@@ -345,15 +362,24 @@ class PamActivity : FragmentActivity() {
         super.onDestroy()
     }
 
+    /**
+     * Debug builds (or `devErrorOverlay: "always"`) queue every error in the
+     * LogBox-style overlay. Production never shows stacks: non-fatal errors
+     * are logged only (PHP App::onError() listeners already received them);
+     * fatal ones retry with backoff and then show the friendly fallback.
+     */
     private fun handleRuntimeError(message: String) {
-        devTools.record(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, message.take(160)))
-        if (BuildConfig.DEBUG) {
-            errors.showError(message)
+        val report = RuntimeErrorReport.parse(message)
+        devTools.record(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, "${report.shortType}: ${report.message}".take(160)))
+        Log.e(ERROR_TAG, report.copyText().take(4_000))
+        if (errors.developerMode) {
+            errors.report(report)
             return
         }
+        if (!report.fatal) return
         val entry = runtimeEntryPath
         if (entry == null || recoveryAttempts >= MAX_RUNTIME_RECOVERY_ATTEMPTS) {
-            errors.showError(message)
+            errors.showFallback()
             return
         }
         if (recoveryRunnable != null) return
@@ -368,6 +394,20 @@ class PamActivity : FragmentActivity() {
                     }
             }
         }.also { window.decorView.postDelayed(it, delay) }
+    }
+
+    /** Reload / "Try again" from the error overlay: a fresh PHP runtime on the active entry. */
+    private fun reloadAfterError() {
+        recoveryRunnable?.let(window.decorView::removeCallbacks)
+        recoveryRunnable = null
+        recoveryAttempts = 0
+        val entry = runtimeEntryPath
+        if (!runtimeStarted || entry == null) {
+            recreate()
+            return
+        }
+        runCatching { runtime.reload(entry) }
+            .onFailure { handleRuntimeError(it.message ?: "Pam Native reload failed") }
     }
 
     @SuppressLint("InlinedApi")
@@ -462,7 +502,7 @@ class PamActivity : FragmentActivity() {
                 private var interactive = false
 
                 override fun onBackStarted(backEvent: BackEvent) {
-                    interactive = if (runtime.hasPresentedModal()) {
+                    interactive = if (errors.isBlocking || runtime.hasPresentedModal()) {
                         false
                     } else {
                         rootHost.startPredictiveBack()
@@ -479,6 +519,11 @@ class PamActivity : FragmentActivity() {
                 }
 
                 override fun onBackInvoked() {
+                    if (errors.consumeBack()) {
+                        if (interactive) rootHost.cancelPredictiveBack()
+                        interactive = false
+                        return
+                    }
                     if (consumeSuppressedBack()) {
                         if (interactive) rootHost.cancelPredictiveBack()
                         interactive = false
@@ -497,7 +542,8 @@ class PamActivity : FragmentActivity() {
         } else {
             OnBackInvokedCallback {
                 if (
-                    !consumeSuppressedBack()
+                    !errors.consumeBack()
+                    && !consumeSuppressedBack()
                     && !runtime.consumePresentedModalBack()
                 ) {
                     runtime.dispatchBack()
@@ -778,6 +824,7 @@ class PamActivity : FragmentActivity() {
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
+        const val ERROR_TAG = "PamNativeErrors"
         const val BACK_SUPPRESSION_WINDOW_MS = 1_000L
     }
 }

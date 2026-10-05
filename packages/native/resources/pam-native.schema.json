@@ -151,6 +151,14 @@
                 }
             }
         },
+        "devErrorOverlay": {
+            "description": "Runtime error overlay (LogBox-style). true: debug builds only (default). false: never, debug builds show the release fallback. \"always\": also in release builds, for internal QA builds. Release builds otherwise never show stacks: fatal errors show a friendly retry screen and every error reaches App::onError().",
+            "oneOf": [
+                { "type": "boolean" },
+                { "enum": ["debug", "off", "always"] }
+            ],
+            "default": true
+        },
         "appearance": {
             "type": "object",
             "additionalProperties": false,

@@ -110,7 +110,16 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
             )
             return
         }
-        implementation.invoke(method, payload, reloadSafeCompletion)
+        try {
+            implementation.invoke(method, payload, reloadSafeCompletion)
+        } catch (error: RuntimeException) {
+            // A module that throws synchronously must still complete through
+            // the caller's failure path instead of crashing the host.
+            reloadSafeCompletion.complete(
+                ModuleResultStatus.FAILURE,
+                (error.message ?: "Native module $module.$method failed").toByteArray(),
+            )
+        }
     }
 
     fun prepareReload() {

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="pam_error_dismiss">Fechar</string>
+    <string name="pam_error_dismiss_description">Fechar erro</string>
+    <string name="pam_error_dismiss_all_description">Fechar todos os erros</string>
+    <string name="pam_error_open_description">Abrir detalhes do erro</string>
+    <string name="pam_error_previous">Erro anterior</string>
+    <string name="pam_error_next">Próximo erro</string>
+    <string name="pam_error_minimize">Minimizar</string>
+    <string name="pam_error_source">Código</string>
+    <string name="pam_error_call_stack">Pilha de chamadas</string>
+    <string name="pam_error_copy">Copiar</string>
+    <string name="pam_error_copied">Erro copiado</string>
+    <string name="pam_error_reload">Recarregar</string>
+    <plurals name="pam_error_collapsed_frames">
+        <item quantity="one">%d frame do framework</item>
+        <item quantity="many">%d frames do framework</item>
+        <item quantity="other">%d frames do framework</item>
+    </plurals>
+    <string name="pam_error_fallback_title">Algo deu errado</string>
+    <string name="pam_error_fallback_message">O app encontrou um problema inesperado. Tente novamente para continuar.</string>
+    <string name="pam_error_fallback_retry">Tentar novamente</string>
+    <string name="pam_accessibility_busy">Ocupado</string>
+    <string name="pam_accessibility_collapsed">Recolhido</string>
+    <string name="pam_accessibility_expanded">Expandido</string>
+    <string name="pam_accessibility_mixed">Misto</string>
+    <string name="pam_accessibility_role_alert">Alerta</string>
+    <string name="pam_accessibility_role_combobox">Caixa de combinação</string>
+    <string name="pam_accessibility_role_link">Link</string>
+    <string name="pam_accessibility_role_listitem">Item de lista</string>
+    <string name="pam_accessibility_role_menu">Menu</string>
+    <string name="pam_accessibility_role_menubar">Barra de menus</string>
+    <string name="pam_accessibility_role_menuitem">Item de menu</string>
+    <string name="pam_accessibility_role_progressbar">Barra de progresso</string>
+    <string name="pam_accessibility_role_radiogroup">Grupo de opções</string>
+    <string name="pam_accessibility_role_scrollbar">Barra de rolagem</string>
+    <string name="pam_accessibility_role_spinbutton">Botão de ajuste</string>
+    <string name="pam_accessibility_role_summary">Resumo</string>
+    <string name="pam_accessibility_role_tab">Guia</string>
+    <string name="pam_accessibility_role_tablist">Lista de guias</string>
+    <string name="pam_accessibility_role_timer">Temporizador</string>
+    <string name="pam_accessibility_role_toolbar">Barra de ferramentas</string>
+</resources>

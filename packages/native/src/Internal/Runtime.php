@@ -19,7 +19,10 @@ use Pam\Native\NativeOperation;
 use Pam\Native\Renderable;
 use Pam\Native\State;
 use Pam\Native\Store\Stores;
+use Pam\Native\Diagnostics\ErrorReporter;
 use Pam\Native\Diagnostics\Profiler;
+use Pam\Native\Diagnostics\RuntimeError;
+use Pam\Native\Diagnostics\RuntimeErrorPhase;
 use Pam\Native\Scheduling\Scheduler;
 use Pam\Native\Scheduling\TaskPriority;
 use Pam\Native\System\IncomingShares;
@@ -55,6 +58,7 @@ final class Runtime
     private static bool $rendering = false;
     private static bool $renderRequested = false;
     private static bool $dispatchingEvent = false;
+    private static ?Throwable $renderFailure = null;
     private static WindowMetrics $windowMetrics;
     /** When true the native bridge drains its queue and calls flush() once. */
     private static bool $deferred = false;
@@ -82,7 +86,7 @@ final class Runtime
         try {
             self::render();
         } catch (Throwable $error) {
-            self::reportError($error);
+            self::reportError($error, RuntimeErrorPhase::Boot);
         }
     }
 
@@ -271,6 +275,10 @@ final class Runtime
                 }
                 ComponentLifecycle::commit();
             } while (self::$renderRequested);
+        } catch (Throwable $error) {
+            self::$renderFailure = $error;
+
+            throw $error;
         } finally {
             self::$rendering = false;
         }
@@ -343,7 +351,7 @@ final class Runtime
         try {
             self::render();
         } catch (Throwable $error) {
-            self::reportError($error);
+            self::reportError($error, RuntimeErrorPhase::Render);
         }
 
         return true;
@@ -441,7 +449,7 @@ final class Runtime
             }
             self::afterDispatch();
         } catch (Throwable $error) {
-            self::reportError($error);
+            self::reportError($error, RuntimeErrorPhase::Event);
         }
     }
 
@@ -474,7 +482,7 @@ final class Runtime
             $callback(ModuleResultStatus::from($status), $payload);
             self::afterDispatch();
         } catch (Throwable $error) {
-            self::reportError($error);
+            self::reportError($error, RuntimeErrorPhase::ModuleResult);
         }
     }
 
@@ -543,27 +551,51 @@ final class Runtime
         return $requestId;
     }
 
-    public static function reportError(Throwable $error): void
+    /**
+     * Reports an uncaught error to App::onError() listeners and the native
+     * host. Errors raised by a render pass are always reported as fatal
+     * (Render) whatever path triggered that render.
+     */
+    public static function reportError(Throwable $error, ?RuntimeErrorPhase $phase = null): void
     {
+        if ($error === self::$renderFailure) {
+            $phase = $phase === RuntimeErrorPhase::Boot ? $phase : RuntimeErrorPhase::Render;
+            self::$renderFailure = null;
+        }
+        $phase ??= RuntimeErrorPhase::Other;
         RuntimeSupervisor::failed($error);
-        if (function_exists('pam_native_error')) {
-            try {
-                $template = $error instanceof TemplateException ? $error->template : null;
-                $line = $error instanceof TemplateException ? $error->templateLine : $error->getLine();
-                $column = $error instanceof TemplateException ? $error->templateColumn : 1;
-                $payload = json_encode([
-                    'version' => 1,
+        try {
+            $report = RuntimeError::from(
+                $error,
+                $phase,
+                withSnippet: BuildConfiguration::mode() !== BuildMode::Production,
+            );
+        } catch (Throwable) {
+            $report = null;
+        }
+        if ($report !== null) {
+            ErrorReporter::notify($error, $report);
+        }
+        if (!function_exists('pam_native_error')) {
+            return;
+        }
+        try {
+            $payload = json_encode([
+                'version' => 2,
+                ...($report?->toArray() ?? [
                     'type' => $error::class,
                     'message' => $error->getMessage(),
-                    'file' => $template ?? $error->getFile(),
-                    'line' => $line,
-                    'column' => $column,
-                    'trace' => substr($error->getTraceAsString(), 0, 12_000),
-                ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-                pam_native_error("PAMERR1\n".$payload);
-            } catch (JsonException) {
-                pam_native_error($error::class.': '.$error->getMessage());
-            }
+                    'file' => $error->getFile(),
+                    'line' => $error->getLine(),
+                    'column' => 1,
+                    'phase' => $phase->value,
+                    'fatal' => $phase->fatal(),
+                ]),
+                'trace' => substr($report?->traceAsString() ?? $error->getTraceAsString(), 0, 12_000),
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+            pam_native_error("PAMERR1\n".$payload);
+        } catch (JsonException) {
+            pam_native_error($error::class.': '.$error->getMessage());
         }
     }
 
@@ -598,6 +630,8 @@ final class Runtime
         Scheduler::reset();
         Profiler::reset();
         RuntimeSupervisor::reset();
+        ErrorReporter::reset();
+        self::$renderFailure = null;
         Linking::resetRuntime();
         IncomingShares::resetRuntime();
         PushNotifications::resetRuntime();

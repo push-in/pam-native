@@ -2,6 +2,26 @@
 <resources>
     <string name="pam_error_dismiss">Dismiss</string>
     <string name="pam_error_dismiss_description">Dismiss error</string>
+    <string name="pam_error_dismiss_all_description">Dismiss all errors</string>
+    <string name="pam_error_open_description">Open error details</string>
+    <string name="pam_error_close_symbol" translatable="false">×</string>
+    <string name="pam_error_previous">Previous error</string>
+    <string name="pam_error_next">Next error</string>
+    <string name="pam_error_minimize">Minimize</string>
+    <string name="pam_error_source">Source</string>
+    <string name="pam_error_call_stack">Call stack</string>
+    <string name="pam_error_copy">Copy</string>
+    <string name="pam_error_copied">Error copied to clipboard</string>
+    <string name="pam_error_reload">Reload</string>
+    <string name="pam_error_counter" translatable="false">%1$d / %2$d</string>
+    <string name="pam_error_frames_toggle" translatable="false">%1$s %2$s</string>
+    <plurals name="pam_error_collapsed_frames">
+        <item quantity="one">%d framework frame</item>
+        <item quantity="other">%d framework frames</item>
+    </plurals>
+    <string name="pam_error_fallback_title">Something went wrong</string>
+    <string name="pam_error_fallback_message">The app hit an unexpected problem. Try again to continue.</string>
+    <string name="pam_error_fallback_retry">Try again</string>
     <string name="pam_accessibility_busy">Busy</string>
     <string name="pam_accessibility_collapsed">Collapsed</string>
     <string name="pam_accessibility_expanded">Expanded</string>

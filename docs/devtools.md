@@ -4,7 +4,8 @@ Debug builds include an on-device performance overlay. It reports smoothed frame
 rate, decode and mount time, rendered node and batch counts, patch versus full
 commits, native heap use and the last eight capability diagnostics. Diagnostics
 include module latency, failures, semantic events, lifecycle changes and
-runtime errors.
+runtime errors. Uncaught runtime errors use the LogBox-style error overlay
+described in [error-overlay.md](error-overlay.md).
 
 Start the application and toggle the overlay from another terminal:
 

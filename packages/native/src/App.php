@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Pam\Native;
 
 use Closure;
+use Pam\Native\Diagnostics\ErrorReporter;
+use Pam\Native\Diagnostics\RuntimeError;
+use Pam\Native\Diagnostics\RuntimeErrorPhase;
 use Pam\Native\Internal\PamPhpRegistry;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Dom\Document;
@@ -38,7 +41,7 @@ final class App
             }
             Runtime::boot($root);
         } catch (Throwable $error) {
-            Runtime::reportError($error);
+            Runtime::reportError($error, RuntimeErrorPhase::Boot);
 
             throw $error;
         }
@@ -68,7 +71,7 @@ final class App
                 $cachePath ?? getcwd().'/.pam/components',
             );
         } catch (Throwable $error) {
-            Runtime::reportError($error);
+            Runtime::reportError($error, RuntimeErrorPhase::Boot);
 
             throw $error;
         }
@@ -115,6 +118,24 @@ final class App
     public static function component(string $tag, string $view): void
     {
         TemplateRegistry::view($tag, $view);
+    }
+
+    /**
+     * Subscribes to every uncaught runtime error (render, event, module result
+     * and boot failures) in all build modes, e.g. to forward them to Sentry.
+     * The report carries app-relative frames and whether the error was fatal.
+     * Returns an id for offError().
+     *
+     * @param Closure(Throwable, RuntimeError): void $listener
+     */
+    public static function onError(Closure $listener): int
+    {
+        return ErrorReporter::listen($listener);
+    }
+
+    public static function offError(int $subscription): void
+    {
+        ErrorReporter::unsubscribe($subscription);
     }
 
     public static function onBack(Closure $handler): void

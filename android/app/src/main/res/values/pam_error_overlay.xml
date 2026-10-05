@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "devErrorOverlay" by the PAM Native CLI. -->
+<resources>
+    <integer name="pam_dev_error_overlay">1</integer>
+</resources>

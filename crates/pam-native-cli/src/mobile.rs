@@ -128,6 +128,11 @@ struct NativeManifest {
     ios: IosOptions,
     #[serde(default)]
     appearance: crate::appearance::AppearanceOptions,
+    /// LogBox-style runtime error overlay: `true` (debug builds only, the
+    /// default), `false` (never; debug builds use the release fallback) or
+    /// `"always"` (also in release builds, for internal QA builds).
+    #[serde(default)]
+    dev_error_overlay: DevErrorOverlay,
     #[serde(default)]
     modules: Vec<NativeModule>,
     #[serde(default)]
@@ -225,6 +230,54 @@ struct AndroidOptions {
     /// Native apps' `getBottomSafeInset()` fallback. 0 disables it.
     #[serde(default)]
     safe_area_bottom_fallback: u32,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum DevErrorOverlay {
+    Off,
+    #[default]
+    Debug,
+    Always,
+}
+
+impl DevErrorOverlay {
+    /// Value of `R.integer.pam_dev_error_overlay` read by the Android host.
+    fn resource_value(self) -> u8 {
+        match self {
+            Self::Off => 0,
+            Self::Debug => 1,
+            Self::Always => 2,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for DevErrorOverlay {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Flag(bool),
+            Text(String),
+        }
+        match Raw::deserialize(deserializer)? {
+            Raw::Flag(true) => Ok(Self::Debug),
+            Raw::Flag(false) => Ok(Self::Off),
+            Raw::Text(text) if text == "always" => Ok(Self::Always),
+            Raw::Text(text) if text == "debug" => Ok(Self::Debug),
+            Raw::Text(text) if text == "off" => Ok(Self::Off),
+            Raw::Text(text) => Err(serde::de::Error::custom(format!(
+                "devErrorOverlay must be true, false, \"debug\", \"off\" or \"always\", got \"{text}\""
+            ))),
+        }
+    }
+}
+
+/// `res/values/pam_error_overlay.xml` (bundled default: debug builds only).
+fn error_overlay_resources(mode: DevErrorOverlay) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Generated from pam-native.json \"devErrorOverlay\" by the PAM Native CLI. -->\n<resources>\n    <integer name=\"pam_dev_error_overlay\">{}</integer>\n</resources>\n",
+        mode.resource_value()
+    )
 }
 
 /// `res/values/pam_safe_area.xml` (bundled default: fallback 0).
@@ -5085,6 +5138,10 @@ fn configure_android(
         &workspace.join("app/src/main/res/values/pam_safe_area.xml"),
         safe_area_resources(project.manifest.android.safe_area_bottom_fallback).as_bytes(),
     )?;
+    write_atomic(
+        &workspace.join("app/src/main/res/values/pam_error_overlay.xml"),
+        error_overlay_resources(project.manifest.dev_error_overlay).as_bytes(),
+    )?;
     generate_plugin_projects(project, workspace)?;
     write_plugin_lock(project)?;
     write_ios_plugin_plan(project)?;
@@ -8120,6 +8177,40 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn dev_error_overlay_accepts_flags_and_always() {
+        let parse = |value: &str| {
+            serde_json::from_str::<NativeManifest>(&format!(
+                r#"{{"version":1,"applicationId":"dev.pam.errors","name":"Errors","entry":"index.php","devErrorOverlay":{value}}}"#
+            ))
+            .map(|manifest| manifest.dev_error_overlay)
+        };
+        assert_eq!(parse("true").expect("true"), DevErrorOverlay::Debug);
+        assert_eq!(parse("false").expect("false"), DevErrorOverlay::Off);
+        assert_eq!(
+            parse("\"always\"").expect("always"),
+            DevErrorOverlay::Always
+        );
+        assert!(parse("\"sometimes\"").is_err());
+        let default: NativeManifest = serde_json::from_str(
+            r#"{"version":1,"applicationId":"dev.pam.errors","name":"Errors","entry":"index.php"}"#,
+        )
+        .expect("default manifest");
+        assert_eq!(default.dev_error_overlay, DevErrorOverlay::Debug);
+        assert!(
+            error_overlay_resources(DevErrorOverlay::Always)
+                .contains("<integer name=\"pam_dev_error_overlay\">2</integer>")
+        );
+        assert_eq!(
+            error_overlay_resources(DevErrorOverlay::Debug),
+            fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../android/app/src/main/res/values/pam_error_overlay.xml")
+            )
+            .expect("bundled overlay resource"),
+        );
+    }
 
     #[test]
     fn worktree_native_homes_are_source_checkouts() {

@@ -36,9 +36,15 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
                         val arguments = decodeArguments(values.requiredText("arguments"))
                         val rows = database.rawQuery(sql, arguments.map(::stringArgument).toTypedArray())
                             .use(::encodeRows)
+                        val json = rows.toString()
+                        val bytes = json.toByteArray(Charsets.UTF_8).size
+                        require(bytes <= MAX_RESULT_BYTES) {
+                            "Native module value is too large: SQLite query result is $bytes bytes " +
+                                "(limit $MAX_RESULT_BYTES); page it with LIMIT/OFFSET or select fewer columns"
+                        }
                         completion.complete(
                             ModuleResultStatus.SUCCESS,
-                            WireMap.encode(mapOf("rows" to WireValue.Text(rows.toString()))),
+                            WireMap.encode(mapOf("rows" to WireValue.Text(json))),
                         )
                     }
                     "executeMany" -> {
@@ -231,5 +237,7 @@ internal class SQLiteModule(private val context: Context) : NativeModule, AutoCl
         const val MAX_QUERY_COLUMNS = 256
         const val MAX_BATCH_ROWS = 10_000
         const val MAX_SQL_BYTES = 1_048_576
+        /** One MiB bridge payload minus the `rows` envelope. */
+        const val MAX_RESULT_BYTES = 1_048_576 - 64
     }
 }

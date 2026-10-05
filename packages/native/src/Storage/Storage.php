@@ -9,7 +9,7 @@ use Pam\Native\Internal\Runtime;
 use Pam\Native\Internal\Wire;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\NativeOperation;
-use RuntimeException;
+use Pam\Native\Modules\NativeModuleException;
 
 final class Storage
 {
@@ -17,15 +17,24 @@ final class Storage
     {
     }
 
-    /** @param Closure(?string): void $callback */
-    public static function get(string $key, Closure $callback): int
+    /**
+     * @param Closure(?string): void $callback
+     * @param (Closure(NativeModuleException): void)|null $onError
+     */
+    public static function get(string $key, Closure $callback, ?Closure $onError = null): int
     {
         return Runtime::callNative(
             operation: NativeOperation::StorageGet,
             payload: Wire::map(['key' => $key]),
-            callback: static function (ModuleResultStatus $status, string $payload) use ($callback): void {
+            callback: static function (ModuleResultStatus $status, string $payload) use ($callback, $onError): void {
                 if ($status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($payload);
+                    $failure = new NativeModuleException('storage', 'get', $payload);
+                    if ($onError === null) {
+                        throw $failure;
+                    }
+                    $onError($failure);
+
+                    return;
                 }
 
                 if ($payload === '') {
@@ -39,15 +48,24 @@ final class Storage
         );
     }
 
-    /** @param Closure(): void|null $callback */
-    public static function set(string $key, string $value, ?Closure $callback = null): int
+    /**
+     * @param Closure(): void|null $callback
+     * @param (Closure(NativeModuleException): void)|null $onError
+     */
+    public static function set(string $key, string $value, ?Closure $callback = null, ?Closure $onError = null): int
     {
         return Runtime::callNative(
             operation: NativeOperation::StorageSet,
             payload: Wire::map(['key' => $key, 'value' => $value]),
-            callback: static function (ModuleResultStatus $status, string $payload) use ($callback): void {
+            callback: static function (ModuleResultStatus $status, string $payload) use ($callback, $onError): void {
                 if ($status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($payload);
+                    $failure = new NativeModuleException('storage', 'set', $payload);
+                    if ($onError === null) {
+                        throw $failure;
+                    }
+                    $onError($failure);
+
+                    return;
                 }
 
                 $callback?->__invoke();

@@ -9,8 +9,9 @@ use InvalidArgumentException;
 use JsonException;
 use Pam\Native\Internal\Wire;
 use Pam\Native\ModuleResultStatus;
+use Pam\Native\Modules\NativeModuleException;
 use Pam\Native\Modules\NativeModules;
-use RuntimeException;
+use Throwable;
 
 final class SQLite
 {
@@ -24,21 +25,26 @@ final class SQLite
         string $sql,
         array $arguments = [],
         ?Closure $callback = null,
+        ?Closure $onError = null,
     ): int {
-        return self::call('execute', $database, $sql, $arguments, $callback);
+        return self::call('execute', $database, $sql, $arguments, $callback, $onError);
     }
 
     /**
      * @param list<string|int|float|bool|null> $arguments
      * @param Closure(list<array<string, string|int|float|bool|null>>): void $callback
+     * @param (Closure(NativeModuleException): void)|null $onError Receives native
+     *        failures (SQL errors, results over the 1 MiB bridge limit) instead
+     *        of the runtime error overlay.
      */
     public static function query(
         string $database,
         string $sql,
         array $arguments,
         Closure $callback,
+        ?Closure $onError = null,
     ): int {
-        return self::call('query', $database, $sql, $arguments, $callback);
+        return self::call('query', $database, $sql, $arguments, $callback, $onError);
     }
 
     /**
@@ -51,6 +57,7 @@ final class SQLite
         string $sql,
         array $argumentSets,
         ?Closure $callback = null,
+        ?Closure $onError = null,
     ): int {
         if ($argumentSets === [] || count($argumentSets) > 10_000) {
             throw new InvalidArgumentException(
@@ -58,7 +65,7 @@ final class SQLite
             );
         }
 
-        return self::call('executeMany', $database, $sql, $argumentSets, $callback);
+        return self::call('executeMany', $database, $sql, $argumentSets, $callback, $onError);
     }
 
     /**
@@ -74,6 +81,7 @@ final class SQLite
         string $database,
         array $statements,
         ?Closure $callback = null,
+        ?Closure $onError = null,
     ): int {
         self::validateName($database);
         if ($statements === [] || count($statements) > 10_000) {
@@ -135,10 +143,11 @@ final class SQLite
             ],
             static function ($result) use ($callback): void {
                 if ($result->status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($result->payload);
+                    throw new NativeModuleException('sqlite', 'transaction', $result->payload);
                 }
                 $callback?->__invoke();
             },
+            $onError,
         );
     }
 
@@ -151,6 +160,7 @@ final class SQLite
         string $sql,
         array $arguments,
         ?Closure $callback,
+        ?Closure $onError,
     ): int {
         self::validateName($database);
         if ($sql === '' || strlen($sql) > 1_048_576) {
@@ -170,9 +180,9 @@ final class SQLite
             'sqlite',
             $method,
             ['database' => $database, 'sql' => $sql, 'arguments' => $encodedArguments],
-            static function ($result) use ($callback, $method): void {
+            static function ($result) use ($callback, $method, $onError): void {
                 if ($result->status === ModuleResultStatus::Failure) {
-                    throw new RuntimeException($result->payload);
+                    throw new NativeModuleException('sqlite', $method, $result->payload);
                 }
                 if ($callback === null) {
                     return;
@@ -182,15 +192,31 @@ final class SQLite
 
                     return;
                 }
-                $values = Wire::decodeMap($result->payload);
-                $rows = json_decode(
-                    (string) ($values['rows'] ?? '[]'),
-                    true,
-                    512,
-                    JSON_THROW_ON_ERROR,
-                );
+                try {
+                    $values = Wire::decodeMap($result->payload);
+                    $rows = json_decode(
+                        (string) ($values['rows'] ?? '[]'),
+                        true,
+                        512,
+                        JSON_THROW_ON_ERROR,
+                    );
+                } catch (Throwable $error) {
+                    $failure = new NativeModuleException(
+                        'sqlite',
+                        $method,
+                        'SQLite query result could not be decoded: '.$error->getMessage(),
+                        $error,
+                    );
+                    if ($onError === null) {
+                        throw $failure;
+                    }
+                    $onError($failure);
+
+                    return;
+                }
                 $callback(is_array($rows) ? $rows : []);
             },
+            $onError,
         );
     }
 
