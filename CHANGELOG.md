@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.12.0 - 2026-10-05
+
+Keyboard, safe-area, input and text-fit fixes from Zé Chat device QA
+(Galaxy S10, Android 12, three-button navigation).
+
+- Keyboard avoidance is laid out by the engine. Hosts report the visible IME
+  height (`pam_native_engine_set_keyboard_inset`; Android `WindowInsets` IME,
+  iOS `keyboardWillChangeFrame`) and a `KeyboardAvoidingView
+  behavior="pan"` that ends a vertical container (a chat composer after a
+  flexible timeline) is laid out directly above the keyboard while the
+  flexible siblings shrink, like `adjustResize` / react-native-keyboard-
+  controller. The composer is visible, tappable and reported at its real
+  bounds; the timeline keeps its last rows above the composer. Modal content
+  is excluded (modal windows resize themselves). See
+  [docs/android-safe-area.md](docs/android-safe-area.md).
+- Android: a translated keyboard-avoiding container is lifted above siblings
+  with a higher `z-index` (the composer was drawn under a `z-index: 1`
+  timeline); the root host's inset handling keeps running while a KAV is
+  mounted; the IME height is reconciled from the settled window insets.
+- Closing the keyboard with Back or the IME key while an input keeps focus
+  blurs it, so `on:blur` handlers restore resting layout (the composer went
+  under the navigation bar).
+- A window covered by a dialog, BottomSheet or permission prompt keeps its
+  safe-area insets and ignores that window's IME.
+- Controlled inputs: a rendered value echoing an older change event never
+  overwrites newer IME text (React Native `mostRecentEventCount`; dropped
+  characters such as "qa teste" -> "qa test"); authored values still apply.
+  Plain inputs no longer remove a digit on Backspace ("J6pKK..." -> "JpK"):
+  the masked-input digit rule now applies only to formatted inputs. iOS has
+  the same echo guard.
+- Text keeps its measured (ceiled) pixel width and height when frames are
+  snapped, and a parent snapped one pixel narrower than its fractional frame
+  is no longer treated as a reduced viewport. Fixes clipped avatar initials
+  ("QA" drawn as "Q") and ellipsized bold labels ("Curtir" -> "Cur...",
+  "Salvar" -> "Salv...").
+- Modals: the dialog is tracked before it is shown, Back (down and up) is
+  owned by the modal window, legacy cancellation suppresses the navigator
+  Back, and a sheet opened while the keyboard hides settles at the bottom.
+- PHP `error_log()` and logged errors reach logcat (tag `PamPHP`) for the
+  whole process lifetime, including re-attached Activities.
+- Tests: `PamKeyboardInstrumentedTest` (composer above the IME, Back blur,
+  stale echoes, Backspace burst, unfocused window insets, overlay -> sheet in
+  one commit), `PamTextClipInstrumentedTest` (pixel tests), engine layout
+  tests, JVM and XCTest echo tests. iOS changes are not compiled here and
+  need Mac validation.
+
 ## 1.11.1 - 2026-10-05
 
 - `:key` (or `key`) on a `p-for` child is the loop identity exactly like
