@@ -30,6 +30,11 @@ parameters:
     reportUnmatchedIgnoredErrors: true
     scanFiles:
         - src/State.php
+        - src/UserInterfaceAppearance.php
+        - src/Internal/Runtime.php
+        - src/Modules/NativeModules.php
+        - src/Modules/NativeModuleResult.php
+        - src/WindowMetrics.php
         - src/Plugin/PluginException.php
         - src/Scheduling/CancellationToken.php
         - src/Scheduling/Scheduler.php
