@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Closure;
 use Pam\Native\GestureEvent;
 use ReflectionMethod;
 use ReflectionNamedType;
@@ -11,24 +12,55 @@ use ReflectionProperty;
 use RuntimeException;
 use Stringable;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function is_array;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_object;
+use function is_string;
+use function property_exists;
+
+/**
+ * Template expressions are compiled once per source string into a closure
+ * tree and evaluated against the render scope/data afterwards. The grammar and
+ * evaluation order (eager operands, coalescing "missing" semantics) match the
+ * original token-walking interpreter exactly; only the parse is hoisted out of
+ * the render loop.
+ */
 final class TemplateExpression
 {
+    private const CACHE_LIMIT = 8192;
+
+    /** @var array<string, Closure(array<string, mixed>, ?object): mixed> */
+    private static array $compiled = [];
+
+    /** @var array<string, string|list<string|array{0: string}>> */
+    private static array $interpolations = [];
+
+    /** @var array<string, ReflectionProperty> */
+    private static array $properties = [];
+
+    /** @var array<string, array{public: bool, gestures: list<int>}> */
+    private static array $methods = [];
+
+    /** @var array<string, string|false> */
+    private static array $enumClasses = [];
+
+    private static ?object $missingSentinel = null;
+
     /** @var list<array{type: int|string, text: string}> */
     private array $tokens;
     private int $position = 0;
     private int $coalescingDepth = 0;
     private readonly object $missing;
 
-    /**
-     * @param array<string, mixed> $data
-     */
-    private function __construct(
-        string $expression,
-        private readonly ?object $scope,
-        private readonly array $data,
-    ) {
+    private function __construct(string $expression)
+    {
         $this->tokens = self::tokenize($expression);
-        $this->missing = new \stdClass();
+        $this->missing = self::missing();
     }
 
     /** @param array<string, mixed> $data */
@@ -37,16 +69,9 @@ final class TemplateExpression
         ?object $scope,
         array $data,
     ): mixed {
-        $parser = new self($expression, $scope, $data);
-        $value = $parser->ternary();
+        $compiled = self::$compiled[$expression] ?? self::compile($expression);
 
-        if ($parser->peek() !== null) {
-            throw new RuntimeException(
-                "Unexpected token {$parser->peek()['text']} in template expression.",
-            );
-        }
-
-        return $value;
+        return $compiled($data, $scope);
     }
 
     /** @param array<string, mixed> $data */
@@ -55,95 +80,216 @@ final class TemplateExpression
         ?object $scope,
         array $data,
     ): string {
-        return preg_replace_callback(
-            '/\{\{\s*(.*?)\s*\}\}/s',
-            static function (array $match) use ($scope, $data): string {
-                $resolved = self::evaluate($match[1], $scope, $data);
+        $parts = self::$interpolations[$value] ?? null;
+        if ($parts === null) {
+            $parts = self::interpolationParts($value);
+            if (count(self::$interpolations) >= self::CACHE_LIMIT) {
+                self::$interpolations = [];
+            }
+            self::$interpolations[$value] = $parts;
+        }
+        if (is_string($parts)) {
+            return $parts;
+        }
+        $result = '';
+        foreach ($parts as $part) {
+            if (is_string($part)) {
+                $result .= $part;
+                continue;
+            }
+            $resolved = self::evaluate($part[0], $scope, $data);
+            if (
+                !is_string($resolved)
+                && !is_int($resolved)
+                && !is_float($resolved)
+                && !is_bool($resolved)
+                && !$resolved instanceof Stringable
+            ) {
+                throw new RuntimeException(
+                    "Template expression {$part[0]} is not printable.",
+                );
+            }
+            $result .= (string) $resolved;
+        }
 
-                if (
-                    !is_string($resolved)
-                    && !is_int($resolved)
-                    && !is_float($resolved)
-                    && !is_bool($resolved)
-                    && !$resolved instanceof Stringable
-                ) {
-                    throw new RuntimeException(
-                        "Template expression {$match[1]} is not printable.",
-                    );
-                }
-
-                return (string) $resolved;
-            },
-            $value,
-        ) ?? $value;
+        return $result;
     }
 
-    private function ternary(): mixed
+    /** @return string|list<string|array{0: string}> */
+    private static function interpolationParts(string $value): string|array
+    {
+        if (
+            !str_contains($value, '{{')
+            || preg_match_all(
+                '/\{\{\s*(.*?)\s*\}\}/s',
+                $value,
+                $matches,
+                PREG_SET_ORDER | PREG_OFFSET_CAPTURE,
+            ) < 1
+        ) {
+            return $value;
+        }
+        $parts = [];
+        $offset = 0;
+        foreach ($matches as $match) {
+            [$whole, $start] = $match[0];
+            if ($start > $offset) {
+                $parts[] = substr($value, $offset, $start - $offset);
+            }
+            $parts[] = [$match[1][0]];
+            $offset = $start + strlen($whole);
+        }
+        if ($offset < strlen($value)) {
+            $parts[] = substr($value, $offset);
+        }
+
+        return $parts;
+    }
+
+    /** @return Closure(array<string, mixed>, ?object): mixed */
+    private static function compile(string $expression): Closure
+    {
+        $parser = new self($expression);
+        $compiled = $parser->ternary();
+
+        if ($parser->peek() !== null) {
+            throw new RuntimeException(
+                "Unexpected token {$parser->peek()['text']} in template expression.",
+            );
+        }
+        if (count(self::$compiled) >= self::CACHE_LIMIT) {
+            self::$compiled = [];
+        }
+
+        return self::$compiled[$expression] = $compiled;
+    }
+
+    private static function missing(): object
+    {
+        return self::$missingSentinel ??= new \stdClass();
+    }
+
+    private static function constant(mixed $value): Closure
+    {
+        return static fn (array $data, ?object $scope): mixed => $value;
+    }
+
+    private function ternary(): Closure
     {
         $condition = $this->coalescing();
 
         if (!$this->take('?')) {
             return $condition;
         }
-        if ($this->take(':')) {
-            $truthy = $condition;
-        } else {
+        $truthy = null;
+        if (!$this->take(':')) {
             $truthy = $this->ternary();
             $this->expect(':');
         }
         $falsy = $this->ternary();
 
-        return (bool) $condition ? $truthy : $falsy;
+        if ($truthy === null) {
+            return static function (array $data, ?object $scope) use ($condition, $falsy): mixed {
+                $value = $condition($data, $scope);
+                $otherwise = $falsy($data, $scope);
+
+                return (bool) $value ? $value : $otherwise;
+            };
+        }
+
+        return static function (array $data, ?object $scope) use ($condition, $truthy, $falsy): mixed {
+            $value = $condition($data, $scope);
+            $whenTrue = $truthy($data, $scope);
+            $whenFalse = $falsy($data, $scope);
+
+            return (bool) $value ? $whenTrue : $whenFalse;
+        };
     }
 
-    private function coalescing(): mixed
+    private function coalescing(): Closure
     {
         $this->coalescingDepth++;
         try {
-            $value = $this->logicalOr();
+            $left = $this->logicalOr();
         } finally {
             $this->coalescingDepth--;
         }
+        $missing = $this->missing;
 
         if ($this->take(T_COALESCE)) {
             $right = $this->coalescing();
 
-            return $value === $this->missing || $value === null ? $right : $value;
+            return static function (array $data, ?object $scope) use ($left, $right, $missing): mixed {
+                $value = $left($data, $scope);
+                $fallback = $right($data, $scope);
+
+                return $value === $missing || $value === null ? $fallback : $value;
+            };
         }
-        if ($value === $this->missing && $this->coalescingDepth === 0) {
-            throw new RuntimeException('Cannot resolve template value.');
+        if ($this->coalescingDepth === 0) {
+            return static function (array $data, ?object $scope) use ($left, $missing): mixed {
+                $value = $left($data, $scope);
+                if ($value === $missing) {
+                    throw new RuntimeException('Cannot resolve template value.');
+                }
+
+                return $value;
+            };
         }
 
-        return $value;
+        return $left;
     }
 
-    private function logicalOr(): mixed
+    private function logicalOr(): Closure
     {
-        $value = $this->logicalAnd();
+        $first = $this->logicalAnd();
+        $rest = [];
 
         while ($this->take(T_BOOLEAN_OR) || $this->take('||')) {
-            $right = $this->logicalAnd();
-            $value = (bool) $value || (bool) $right;
+            $rest[] = $this->logicalAnd();
+        }
+        if ($rest === []) {
+            return $first;
         }
 
-        return $value;
+        return static function (array $data, ?object $scope) use ($first, $rest): bool {
+            $value = $first($data, $scope);
+            foreach ($rest as $operand) {
+                $right = $operand($data, $scope);
+                $value = (bool) $value || (bool) $right;
+            }
+
+            return $value;
+        };
     }
 
-    private function logicalAnd(): mixed
+    private function logicalAnd(): Closure
     {
-        $value = $this->equality();
+        $first = $this->equality();
+        $rest = [];
 
         while ($this->take(T_BOOLEAN_AND) || $this->take('&&')) {
-            $right = $this->equality();
-            $value = (bool) $value && (bool) $right;
+            $rest[] = $this->equality();
+        }
+        if ($rest === []) {
+            return $first;
         }
 
-        return $value;
+        return static function (array $data, ?object $scope) use ($first, $rest): bool {
+            $value = $first($data, $scope);
+            foreach ($rest as $operand) {
+                $right = $operand($data, $scope);
+                $value = (bool) $value && (bool) $right;
+            }
+
+            return $value;
+        };
     }
 
-    private function equality(): mixed
+    private function equality(): Closure
     {
-        $value = $this->comparison();
+        $first = $this->comparison();
+        $rest = [];
 
         while (true) {
             $operator = $this->takeOne([
@@ -153,24 +299,37 @@ final class TemplateExpression
                 T_IS_NOT_EQUAL,
             ]);
             if ($operator === null) {
-                return $value;
+                break;
             }
-            $right = $this->comparison();
-            $value = match ($operator) {
-                T_IS_IDENTICAL => $value === $right,
-                T_IS_NOT_IDENTICAL => $value !== $right,
-                T_IS_EQUAL => $value == $right,
-                T_IS_NOT_EQUAL => $value != $right,
-                default => throw new RuntimeException(
-                    'Unsupported equality operator.',
-                ),
-            };
+            $rest[] = [$operator, $this->comparison()];
         }
+        if ($rest === []) {
+            return $first;
+        }
+
+        return static function (array $data, ?object $scope) use ($first, $rest): bool {
+            $value = $first($data, $scope);
+            foreach ($rest as [$operator, $operand]) {
+                $right = $operand($data, $scope);
+                $value = match ($operator) {
+                    T_IS_IDENTICAL => $value === $right,
+                    T_IS_NOT_IDENTICAL => $value !== $right,
+                    T_IS_EQUAL => $value == $right,
+                    T_IS_NOT_EQUAL => $value != $right,
+                    default => throw new RuntimeException(
+                        'Unsupported equality operator.',
+                    ),
+                };
+            }
+
+            return $value;
+        };
     }
 
-    private function comparison(): mixed
+    private function comparison(): Closure
     {
-        $value = $this->concatenation();
+        $first = $this->concatenation();
+        $rest = [];
 
         while (true) {
             $operator = $this->takeOne([
@@ -180,91 +339,142 @@ final class TemplateExpression
                 '<',
             ]);
             if ($operator === null) {
-                return $value;
+                break;
             }
-            $right = $this->concatenation();
-            $value = match ($operator) {
-                T_IS_GREATER_OR_EQUAL => $value >= $right,
-                T_IS_SMALLER_OR_EQUAL => $value <= $right,
-                '>' => $value > $right,
-                '<' => $value < $right,
-                default => throw new RuntimeException(
-                    'Unsupported comparison operator.',
-                ),
-            };
+            $rest[] = [$operator, $this->concatenation()];
         }
+        if ($rest === []) {
+            return $first;
+        }
+
+        return static function (array $data, ?object $scope) use ($first, $rest): bool {
+            $value = $first($data, $scope);
+            foreach ($rest as [$operator, $operand]) {
+                $right = $operand($data, $scope);
+                $value = match ($operator) {
+                    T_IS_GREATER_OR_EQUAL => $value >= $right,
+                    T_IS_SMALLER_OR_EQUAL => $value <= $right,
+                    '>' => $value > $right,
+                    '<' => $value < $right,
+                    default => throw new RuntimeException(
+                        'Unsupported comparison operator.',
+                    ),
+                };
+            }
+
+            return $value;
+        };
     }
 
-    private function concatenation(): mixed
+    private function concatenation(): Closure
     {
-        $value = $this->additive();
+        $first = $this->additive();
+        $rest = [];
 
         while ($this->take('.')) {
-            $right = $this->additive();
-            $value = self::stringOperand($value).self::stringOperand($right);
+            $rest[] = $this->additive();
+        }
+        if ($rest === []) {
+            return $first;
         }
 
-        return $value;
+        return static function (array $data, ?object $scope) use ($first, $rest): string {
+            $value = $first($data, $scope);
+            foreach ($rest as $operand) {
+                $right = $operand($data, $scope);
+                $value = self::stringOperand($value).self::stringOperand($right);
+            }
+
+            return $value;
+        };
     }
 
-    private function additive(): mixed
+    private function additive(): Closure
     {
-        $value = $this->multiplicative();
+        $first = $this->multiplicative();
+        $rest = [];
 
         while (($operator = $this->takeOne(['+', '-'])) !== null) {
-            $right = $this->multiplicative();
-            self::requireNumeric($value, $operator);
-            self::requireNumeric($right, $operator);
-            $value = $operator === '+' ? $value + $right : $value - $right;
+            $rest[] = [$operator, $this->multiplicative()];
+        }
+        if ($rest === []) {
+            return $first;
         }
 
-        return $value;
+        return static function (array $data, ?object $scope) use ($first, $rest): int|float {
+            $value = $first($data, $scope);
+            foreach ($rest as [$operator, $operand]) {
+                $right = $operand($data, $scope);
+                self::requireNumeric($value, $operator);
+                self::requireNumeric($right, $operator);
+                $value = $operator === '+' ? $value + $right : $value - $right;
+            }
+
+            return $value;
+        };
     }
 
-    private function multiplicative(): mixed
+    private function multiplicative(): Closure
     {
-        $value = $this->unary();
+        $first = $this->unary();
+        $rest = [];
 
         while (($operator = $this->takeOne(['*', '/', '%'])) !== null) {
-            $right = $this->unary();
-            self::requireNumeric($value, $operator);
-            self::requireNumeric($right, $operator);
-            if (($operator === '/' || $operator === '%') && $right == 0) {
-                throw new RuntimeException('Division by zero in template expression.');
-            }
-            if ($operator === '%' && (!is_int($value) || !is_int($right))) {
-                throw new RuntimeException(
-                    'Template modulo requires integer operands.',
-                );
-            }
-            $value = match ($operator) {
-                '*' => $value * $right,
-                '/' => $value / $right,
-                '%' => $value % $right,
-            };
+            $rest[] = [$operator, $this->unary()];
+        }
+        if ($rest === []) {
+            return $first;
         }
 
-        return $value;
+        return static function (array $data, ?object $scope) use ($first, $rest): int|float {
+            $value = $first($data, $scope);
+            foreach ($rest as [$operator, $operand]) {
+                $right = $operand($data, $scope);
+                self::requireNumeric($value, $operator);
+                self::requireNumeric($right, $operator);
+                if (($operator === '/' || $operator === '%') && $right == 0) {
+                    throw new RuntimeException('Division by zero in template expression.');
+                }
+                if ($operator === '%' && (!is_int($value) || !is_int($right))) {
+                    throw new RuntimeException(
+                        'Template modulo requires integer operands.',
+                    );
+                }
+                $value = match ($operator) {
+                    '*' => $value * $right,
+                    '/' => $value / $right,
+                    '%' => $value % $right,
+                };
+            }
+
+            return $value;
+        };
     }
 
-    private function unary(): mixed
+    private function unary(): Closure
     {
         if ($this->take('!')) {
-            return !$this->unary();
+            $operand = $this->unary();
+
+            return static fn (array $data, ?object $scope): bool => !$operand($data, $scope);
         }
         if ($this->take('-')) {
-            $value = $this->unary();
-            if (!is_int($value) && !is_float($value)) {
-                throw new RuntimeException('Unary minus requires a numeric expression.');
-            }
+            $operand = $this->unary();
 
-            return -$value;
+            return static function (array $data, ?object $scope) use ($operand): int|float {
+                $value = $operand($data, $scope);
+                if (!is_int($value) && !is_float($value)) {
+                    throw new RuntimeException('Unary minus requires a numeric expression.');
+                }
+
+                return -$value;
+            };
         }
 
         return $this->primary();
     }
 
-    private function primary(): mixed
+    private function primary(): Closure
     {
         $token = $this->peek();
 
@@ -283,43 +493,41 @@ final class TemplateExpression
         if ($token['type'] === T_VARIABLE) {
             $this->position++;
 
-            return $this->resolveVariable(substr($token['text'], 1));
+            return $this->variable(substr($token['text'], 1));
         }
         if ($token['type'] === T_LNUMBER) {
             $this->position++;
 
-            return (int) str_replace('_', '', $token['text']);
+            return self::constant((int) str_replace('_', '', $token['text']));
         }
         if ($token['type'] === T_DNUMBER) {
             $this->position++;
 
-            return (float) str_replace('_', '', $token['text']);
+            return self::constant((float) str_replace('_', '', $token['text']));
         }
         if ($token['type'] === T_CONSTANT_ENCAPSED_STRING) {
             $this->position++;
 
-            return self::stringLiteral($token['text']);
+            return self::constant(self::stringLiteral($token['text']));
         }
         if ($token['type'] === T_STRING) {
             $this->position++;
             $name = $token['text'];
             $lower = strtolower($name);
             if ($lower === 'true') {
-                return true;
+                return self::constant(true);
             }
             if ($lower === 'false') {
-                return false;
+                return self::constant(false);
             }
             if ($lower === 'null') {
-                return null;
+                return self::constant(null);
             }
             if ($this->take('(')) {
-                $arguments = $this->arguments();
-
-                return $this->invoke($name, $arguments);
+                return $this->call($name, $this->arguments());
             }
             if ($this->take(T_DOUBLE_COLON)) {
-                return $this->resolveStaticEnumCase($name);
+                return $this->staticEnumCase($name);
             }
         }
 
@@ -328,37 +536,48 @@ final class TemplateExpression
         );
     }
 
-    /** @return array<array-key, mixed> */
-    private function array(): array
+    private function array(): Closure
     {
-        $values = [];
+        /** @var list<array{0: Closure, 1: Closure|null}> $entries */
+        $entries = [];
 
-        if ($this->take(']')) {
-            return $values;
+        if (!$this->take(']')) {
+            while (true) {
+                $first = $this->ternary();
+                $entries[] = $this->take(T_DOUBLE_ARROW)
+                    ? [$first, $this->ternary()]
+                    : [$first, null];
+                if ($this->take(']')) {
+                    break;
+                }
+                $this->expect(',');
+                if ($this->take(']')) {
+                    break;
+                }
+            }
         }
-        while (true) {
-            $first = $this->ternary();
-            if ($this->take(T_DOUBLE_ARROW)) {
-                if (!is_string($first) && !is_int($first)) {
+
+        return static function (array $data, ?object $scope) use ($entries): array {
+            $values = [];
+            foreach ($entries as [$first, $second]) {
+                $key = $first($data, $scope);
+                if ($second === null) {
+                    $values[] = $key;
+                    continue;
+                }
+                if (!is_string($key) && !is_int($key)) {
                     throw new RuntimeException(
                         'Template array keys must be strings or integers.',
                     );
                 }
-                $values[$first] = $this->ternary();
-            } else {
-                $values[] = $first;
+                $values[$key] = $second($data, $scope);
             }
-            if ($this->take(']')) {
-                return $values;
-            }
-            $this->expect(',');
-            if ($this->take(']')) {
-                return $values;
-            }
-        }
+
+            return $values;
+        };
     }
 
-    /** @return list<mixed> */
+    /** @return list<Closure> */
     private function arguments(): array
     {
         $arguments = [];
@@ -375,27 +594,39 @@ final class TemplateExpression
         }
     }
 
-    private function resolveVariable(string $name): mixed
+    private function variable(string $name): Closure
     {
-        if (array_key_exists($name, $this->data)) {
-            $value = $this->data[$name];
-        } elseif ($this->scope !== null && property_exists($this->scope, $name)) {
-            $property = new ReflectionProperty($this->scope, $name);
-            if (!$property->isInitialized($this->scope)) {
-                throw new RuntimeException("Template property \${$name} is not initialized.");
-            }
-            $value = $property->getValue($this->scope);
-        } elseif ($this->coalescingDepth > 0) {
-            $value = $this->missing;
-        } else {
-            throw new RuntimeException("Template expression \${$name} is undefined.");
-        }
+        $lenient = $this->coalescingDepth > 0;
+        $missing = $this->missing;
+        $postfix = $this->postfix();
 
-        return $this->resolvePostfix($value);
+        return static function (array $data, ?object $scope) use ($name, $lenient, $missing, $postfix): mixed {
+            if (array_key_exists($name, $data)) {
+                $value = $data[$name];
+            } elseif ($scope !== null && property_exists($scope, $name)) {
+                $property = self::property($scope, $name);
+                if (!$property->isInitialized($scope)) {
+                    throw new RuntimeException("Template property \${$name} is not initialized.");
+                }
+                $value = $property->getValue($scope);
+            } elseif ($lenient) {
+                $value = $missing;
+            } else {
+                throw new RuntimeException("Template expression \${$name} is undefined.");
+            }
+
+            return $postfix === null ? $value : $postfix($value, $data, $scope);
+        };
     }
 
-    private function resolvePostfix(mixed $value): mixed
+    /** @return (Closure(mixed, array<string, mixed>, ?object): mixed)|null */
+    private function postfix(): ?Closure
     {
+        $lenient = $this->coalescingDepth > 0;
+        $missing = $this->missing;
+        /** @var list<array{0: bool, 1: string|Closure}> $steps */
+        $steps = [];
+
         while (true) {
             if ($this->take(T_OBJECT_OPERATOR) || $this->takePropertyDot()) {
                 $segment = $this->peek();
@@ -403,23 +634,38 @@ final class TemplateExpression
                     throw new RuntimeException('Template property path is invalid.');
                 }
                 $this->position++;
-                $value = match (true) {
-                    $value === $this->missing => $this->missing,
-                    is_array($value) && array_key_exists($segment['text'], $value) =>
-                        $value[$segment['text']],
-                    is_object($value) && property_exists($value, $segment['text']) =>
-                        (new ReflectionProperty($value, $segment['text']))->getValue($value),
-                    $this->coalescingDepth > 0 => $this->missing,
-                    default => throw new RuntimeException(
-                        "Cannot resolve template property {$segment['text']}.",
-                    ),
-                };
+                $steps[] = [true, $segment['text']];
                 continue;
             }
             if ($this->take('[')) {
                 $index = $this->ternary();
                 $this->expect(']');
-                if ($value === $this->missing) {
+                $steps[] = [false, $index];
+                continue;
+            }
+            break;
+        }
+        if ($steps === []) {
+            return null;
+        }
+
+        return static function (mixed $value, array $data, ?object $scope) use ($steps, $lenient, $missing): mixed {
+            foreach ($steps as [$isProperty, $step]) {
+                if ($isProperty) {
+                    $value = match (true) {
+                        $value === $missing => $missing,
+                        is_array($value) && array_key_exists($step, $value) => $value[$step],
+                        is_object($value) && property_exists($value, $step) =>
+                            self::property($value, $step)->getValue($value),
+                        $lenient => $missing,
+                        default => throw new RuntimeException(
+                            "Cannot resolve template property {$step}.",
+                        ),
+                    };
+                    continue;
+                }
+                $index = $step($data, $scope);
+                if ($value === $missing) {
                     continue;
                 }
                 if (
@@ -427,53 +673,82 @@ final class TemplateExpression
                     || !is_array($value)
                     || !array_key_exists($index, $value)
                 ) {
-                    if (
-                        $this->coalescingDepth > 0
-                        && (is_string($index) || is_int($index))
-                    ) {
-                        $value = $this->missing;
+                    if ($lenient && (is_string($index) || is_int($index))) {
+                        $value = $missing;
 
                         continue;
                     }
                     throw new RuntimeException('Cannot resolve template array index.');
                 }
                 $value = $value[$index];
-                continue;
             }
-            break;
-        }
 
-        return $value;
+            return $value;
+        };
     }
 
-    private function resolveStaticEnumCase(string $name): mixed
+    private static function property(object $target, string $name): ReflectionProperty
+    {
+        $key = $target::class.'::'.$name;
+        $property = self::$properties[$key] ?? null;
+        if ($property !== null) {
+            return $property;
+        }
+        $property = new ReflectionProperty($target, $name);
+        if ($property->isDefault()) {
+            self::$properties[$key] = $property;
+        }
+
+        return $property;
+    }
+
+    private function staticEnumCase(string $name): Closure
     {
         $case = $this->peek();
         if ($case === null || $case['type'] !== T_STRING) {
             throw new RuntimeException('Template enum case is invalid.');
         }
         $this->position++;
-        $class = $this->resolveScopedClassName($name);
-        if ($class === null || !enum_exists($class)) {
-            throw new RuntimeException("Template enum {$name} does not exist.");
-        }
-        $constant = $class.'::'.$case['text'];
-        if (!defined($constant)) {
-            throw new RuntimeException("Template enum case {$constant} does not exist.");
-        }
+        $caseName = $case['text'];
+        $postfix = $this->postfix();
 
-        return $this->resolvePostfix(constant($constant));
+        return static function (array $data, ?object $scope) use ($name, $caseName, $postfix): mixed {
+            $class = self::resolveScopedClassName($name, $scope);
+            if ($class === null || !enum_exists($class)) {
+                throw new RuntimeException("Template enum {$name} does not exist.");
+            }
+            $constant = $class.'::'.$caseName;
+            if (!defined($constant)) {
+                throw new RuntimeException("Template enum case {$constant} does not exist.");
+            }
+            $value = constant($constant);
+
+            return $postfix === null ? $value : $postfix($value, $data, $scope);
+        };
     }
 
-    private function resolveScopedClassName(string $name): ?string
+    private static function resolveScopedClassName(string $name, ?object $scope): ?string
+    {
+        $key = ($scope === null ? '' : $scope::class).'|'.$name;
+        $cached = self::$enumClasses[$key] ?? null;
+        if ($cached !== null) {
+            return $cached === false ? null : $cached;
+        }
+        $resolved = self::locateScopedClassName($name, $scope);
+        self::$enumClasses[$key] = $resolved ?? false;
+
+        return $resolved;
+    }
+
+    private static function locateScopedClassName(string $name, ?object $scope): ?string
     {
         if (enum_exists($name)) {
             return $name;
         }
-        if ($this->scope === null) {
+        if ($scope === null) {
             return null;
         }
-        $reflection = new \ReflectionClass($this->scope);
+        $reflection = new \ReflectionClass($scope);
         $local = $reflection->getNamespaceName().'\\'.$name;
         if (enum_exists($local)) {
             return $local;
@@ -522,10 +797,24 @@ final class TemplateExpression
         return true;
     }
 
-    /** @param list<mixed> $arguments */
-    private function invoke(string $name, array $arguments): mixed
+    /** @param list<Closure> $arguments */
+    private function call(string $name, array $arguments): Closure
     {
         $builtIn = strtolower($name);
+
+        return static function (array $data, ?object $scope) use ($name, $builtIn, $arguments): mixed {
+            $values = [];
+            foreach ($arguments as $argument) {
+                $values[] = $argument($data, $scope);
+            }
+
+            return self::invoke($name, $builtIn, $values, $scope);
+        };
+    }
+
+    /** @param list<mixed> $arguments */
+    private static function invoke(string $name, string $builtIn, array $arguments, ?object $scope): mixed
+    {
         if ($builtIn === 'count') {
             if (count($arguments) !== 1 || (!is_array($arguments[0]) && !$arguments[0] instanceof \Countable)) {
                 throw new RuntimeException('Template count() expects exactly one countable value.');
@@ -550,46 +839,57 @@ final class TemplateExpression
                 $arguments[2] ?? false,
             );
         }
-        if (in_array($builtIn, [
-            'trim',
-            'ltrim',
-            'rtrim',
-            'strlen',
-            'mb_strlen',
-            'substr',
-            'mb_substr',
-            'strtolower',
-            'strtoupper',
-            'mb_strtolower',
-            'mb_strtoupper',
-        ], true)) {
+        if (isset(self::STRING_HELPERS[$builtIn])) {
             return self::invokeStringHelper($builtIn, $arguments);
         }
-        if ($this->scope === null || !method_exists($this->scope, $name)) {
+        if ($scope === null || !method_exists($scope, $name)) {
             throw new RuntimeException("Template method {$name} does not exist.");
         }
-        $method = new ReflectionMethod($this->scope, $name);
-        if (!$method->isPublic()) {
+        $key = $scope::class.'::'.$name;
+        $method = self::$methods[$key] ?? null;
+        if ($method === null) {
+            $reflection = new ReflectionMethod($scope, $name);
+            $gestures = [];
+            foreach ($reflection->getParameters() as $index => $parameter) {
+                $type = $parameter->getType();
+                if (
+                    $type instanceof ReflectionNamedType
+                    && !$type->isBuiltin()
+                    && $type->getName() === GestureEvent::class
+                ) {
+                    $gestures[] = $index;
+                }
+            }
+            $method = self::$methods[$key] = [
+                'public' => $reflection->isPublic(),
+                'gestures' => $gestures,
+            ];
+        }
+        if (!$method['public']) {
             throw new RuntimeException("Template method {$name} must be public.");
         }
-
-        foreach ($method->getParameters() as $index => $parameter) {
-            if (!array_key_exists($index, $arguments)) {
-                break;
-            }
-            $type = $parameter->getType();
-            if (
-                $type instanceof ReflectionNamedType
-                && !$type->isBuiltin()
-                && $type->getName() === GestureEvent::class
-                && is_string($arguments[$index])
-            ) {
+        foreach ($method['gestures'] as $index) {
+            if (array_key_exists($index, $arguments) && is_string($arguments[$index])) {
                 $arguments[$index] = GestureEvent::fromPayload($arguments[$index]);
             }
         }
 
-        return $method->invokeArgs($this->scope, $arguments);
+        return $scope->{$name}(...$arguments);
     }
+
+    private const STRING_HELPERS = [
+        'trim' => true,
+        'ltrim' => true,
+        'rtrim' => true,
+        'strlen' => true,
+        'mb_strlen' => true,
+        'substr' => true,
+        'mb_substr' => true,
+        'strtolower' => true,
+        'strtoupper' => true,
+        'mb_strtolower' => true,
+        'mb_strtoupper' => true,
+    ];
 
     /** @param list<mixed> $arguments */
     private static function invokeStringHelper(string $name, array $arguments): mixed

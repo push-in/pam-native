@@ -112,6 +112,17 @@ use RuntimeException;
 use Stringable;
 use Traversable;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function is_array;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_scalar;
+use function is_string;
+use function strlen;
+
 final class TemplateRenderer
 {
     /** @var list<string> */
@@ -140,6 +151,37 @@ final class TemplateRenderer
 
     /** @var array<string,array<string,mixed>> */
     private static array $reactiveStyleCache = [];
+
+    /** @var array<string, array<string, mixed>> Decoded and validated sheets by compiled source. */
+    private static array $styleSheets = [];
+    private static int $styleSheetSequence = 0;
+
+    /** @var array<string, array<string, mixed>> Prepared (indexed) effective sheets. */
+    private static array $preparedStyles = [];
+
+    /** @var array<int, array<string, array<string, string|int|bool>>> */
+    private static array $sheetClasses = [];
+
+    /** @var array<int, array<string, true>> */
+    private static array $sheetObserved = [];
+
+    /** @var array<int, array<string, list<array{source: string, weight: string, style: string}>>> */
+    private static array $sheetFonts = [];
+
+    /** @var array<string, array{attribute: string, value: string|int|float|bool}|false> */
+    private static array $styleUtilities = [];
+
+    /** @var array<string, array{0: int, 1: mixed}> Classified static attribute values. */
+    private static array $valueKinds = [];
+
+    /** @var array<string, list<string>> */
+    private static array $pathSegments = [];
+
+    /** @var array<string, string>|null Template "@event" aliases keyed to native event attributes. */
+    private static ?array $eventAliases = null;
+
+    /** @var array<int, array<int, bool>> */
+    private static array $appliesToKind = [];
 
     /** @var array<string, PropKey> */
     private const PROPERTIES = [
@@ -943,6 +985,7 @@ final class TemplateRenderer
         }
         $declaredAttributes = $attributes;
         $resolvedClass = self::classValue($attributes, $scope, $data);
+        $styleDescriptor = self::styleNodeDescriptor($tag, $resolvedClass, $attributes, $scope, $data);
         $inheritedStyles = $data['__pamInheritedStyles'] ?? [];
         if (!is_array($inheritedStyles)) {
             $inheritedStyles = [];
@@ -955,6 +998,7 @@ final class TemplateRenderer
                 $data,
                 $attributes,
                 $scope,
+                $styleDescriptor,
             ),
             ...$attributes,
         ];
@@ -1137,7 +1181,7 @@ final class TemplateRenderer
             ...$data,
             '__pamStyleAncestors' => [
                 ...(is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : []),
-                self::styleNodeDescriptor($tag, $resolvedClass, $declaredAttributes, $scope, $data),
+                $styleDescriptor,
             ],
             '__pamContainerWidth' => is_numeric($values['width'] ?? null)
                 ? (float) $values['width']
@@ -1849,10 +1893,8 @@ final class TemplateRenderer
             );
         }
 
-        foreach (self::PROPERTIES as $name => $key) {
-            if (!array_key_exists($name, $attributes)) {
-                continue;
-            }
+        // array_intersect_key keeps PROPERTIES order, so alias precedence is unchanged.
+        foreach (array_intersect_key(self::PROPERTIES, $attributes) as $name => $key) {
             if (
                 ($element instanceof Image || $element instanceof MediaPlayer)
                 && in_array($name, [
@@ -1908,6 +1950,14 @@ final class TemplateRenderer
     }
 
     private static function propertyAppliesToKind(
+        PropKey $key,
+        NodeKind $kind,
+    ): bool {
+        return self::$appliesToKind[$key->value][$kind->value]
+            ??= self::computePropertyAppliesToKind($key, $kind);
+    }
+
+    private static function computePropertyAppliesToKind(
         PropKey $key,
         NodeKind $kind,
     ): bool {
@@ -2606,6 +2656,10 @@ final class TemplateRenderer
                 'fonts' => [],
             ];
         }
+        $cached = self::$styleSheets[$encoded] ?? null;
+        if ($cached !== null) {
+            return $cached;
+        }
         try {
             $decoded = json_decode($encoded, true, 64, JSON_THROW_ON_ERROR);
         } catch (JsonException $error) {
@@ -2625,7 +2679,7 @@ final class TemplateRenderer
         );
         $fonts = self::validatedFontFaces($decoded['fonts'] ?? [], $tree->source);
 
-        return [
+        $sheet = [
             'classes' => $classes,
             'tags' => $tags,
             'classCascade' => $classCascade,
@@ -2650,7 +2704,13 @@ final class TemplateRenderer
                 : '',
             'styleSourceMap' => self::safeStyleMetadata($decoded['styleSourceMap'] ?? [], $tree->source),
             'styleCompatibility' => self::safeStyleMetadata($decoded['styleCompatibility'] ?? [], $tree->source),
+            '__pamSheetId' => ++self::$styleSheetSequence,
         ];
+        if (count(self::$styleSheets) >= 256) {
+            self::$styleSheets = [];
+        }
+
+        return self::$styleSheets[$encoded] = $sheet;
     }
 
     /** @return array<array-key, mixed> */
@@ -2679,6 +2739,10 @@ final class TemplateRenderer
     private static function styleSheetClasses(array $data): array
     {
         $sheet = $data['__pamStyles'] ?? null;
+        $id = is_array($sheet) ? ($sheet['__pamSheetId'] ?? null) : null;
+        if (is_int($id) && isset(self::$sheetClasses[$id])) {
+            return self::$sheetClasses[$id];
+        }
         $classes = is_array($sheet) ? ($sheet['classes'] ?? null) : null;
         $known = self::validatedStyleRules(is_array($classes) ? $classes : [], '<scoped-classes>');
         if (is_array($sheet)) {
@@ -2698,6 +2762,12 @@ final class TemplateRenderer
                 }
             }
         }
+        if (is_int($id)) {
+            if (count(self::$sheetClasses) >= 512) {
+                self::$sheetClasses = [];
+            }
+            self::$sheetClasses[$id] = $known;
+        }
         return $known;
     }
 
@@ -2712,31 +2782,31 @@ final class TemplateRenderer
         array $data,
         array $rawAttributes,
         ?object $scope,
+        ?array $descriptor = null,
     ): array {
         $sheet = $data['__pamStyles'] ?? null;
         if (!is_array($sheet)) {
             return [];
         }
-        $sheet = self::responsiveStyleSheet(self::reactiveStyleSheet(self::styleMap($sheet, 'scoped sheet')), $data);
-        $descriptor = self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
-        $cascadeRules = is_array($sheet['cascadeRules'] ?? null) ? $sheet['cascadeRules'] : [];
-        $attributes = $cascadeRules !== []
-            ? self::cascadeStyleAttributes($cascadeRules, $descriptor, $data)
+        $prepared = self::preparedStyleSheet($sheet, $data);
+        $sheet = $prepared['sheet'];
+        $descriptor ??= self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
+        $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
+        $hasCascade = $prepared['hasCascade'];
+        $attributes = $hasCascade
+            ? self::indexedCascadeStyleAttributes($prepared, $descriptor, $ancestors)
             : [];
         $classCascade = is_array($sheet['classCascade'] ?? null)
             ? $sheet['classCascade']
             : [];
-        $classNames = array_fill_keys(
-            array_filter(preg_split('/\s+/', trim($classes ?? '')) ?: []),
-            true,
-        );
+        $classNames = $descriptor['uniqueClasses'];
         $tags = is_array($sheet['tags'] ?? null) ? $sheet['tags'] : [];
-        if ($cascadeRules === []) {
+        if (!$hasCascade) {
             $attributes = is_array($tags[$tag] ?? null) ? $tags[$tag] : [];
         }
-        if ($cascadeRules === [] && $classCascade !== []) {
+        if (!$hasCascade && $classCascade !== []) {
             $winners = [];
-            foreach (array_keys($classNames) as $class) {
+            foreach ($classNames as $class) {
                 $declarations = $classCascade[$class] ?? null;
                 if (!is_array($declarations)) {
                     continue;
@@ -2760,23 +2830,32 @@ final class TemplateRenderer
             foreach ($winners as $attribute => $entry) {
                 $attributes[$attribute] = $entry['value'];
             }
-        } elseif ($cascadeRules === []) {
+        } elseif (!$hasCascade) {
             // Backward compatibility for templates compiled before cascade indexes.
             $classRules = is_array($sheet['classes'] ?? null) ? $sheet['classes'] : [];
-            foreach (array_keys($classNames) as $class) {
+            foreach ($classNames as $class) {
                 if (is_array($classRules[$class] ?? null)) {
                     $attributes = [...$attributes, ...$classRules[$class]];
                 }
             }
         }
         $utilityAttributes = [];
-        foreach (array_keys($classNames) as $class) {
-            $utility = StyleUtilityCompiler::compile($class);
-            if ($utility !== null) {
+        foreach ($classNames as $class) {
+            $utility = self::$styleUtilities[$class] ?? null;
+            if ($utility === null) {
+                $utility = StyleUtilityCompiler::compile($class) ?? false;
+                if (count(self::$styleUtilities) >= 4096) {
+                    self::$styleUtilities = [];
+                }
+                self::$styleUtilities[$class] = $utility;
+            }
+            if ($utility !== false) {
                 $utilityAttributes[$utility['attribute']] = $utility['value'];
             }
         }
-        $attributes = [...$utilityAttributes, ...$attributes];
+        if ($utilityAttributes !== []) {
+            $attributes = [...$utilityAttributes, ...$attributes];
+        }
 
         $recipeName = $rawAttributes['recipe'] ?? null;
         if ($recipeName !== null) {
@@ -2814,41 +2893,36 @@ final class TemplateRenderer
         }
 
         $stateRules = is_array($sheet['states'] ?? null) ? $sheet['states'] : [];
-        $selectors = [$tag];
-        foreach (array_keys($classNames) as $class) {
-            $selectors[] = '.'.$class;
-        }
-        foreach ($selectors as $selector) {
-            $selectorStates = $stateRules[$selector] ?? null;
-            $pressed = is_array($selectorStates) ? ($selectorStates['pressed'] ?? null) : null;
-            if (!is_array($pressed)) {
-                continue;
+        if ($stateRules !== []) {
+            $selectors = [$tag];
+            foreach ($classNames as $class) {
+                $selectors[] = '.'.$class;
             }
-            if (isset($pressed['opacity'])) {
-                $attributes['pressedOpacity'] = $pressed['opacity'];
-            }
-            if (
-                isset($pressed['scaleX'], $pressed['scaleY'])
-                && $pressed['scaleX'] === $pressed['scaleY']
-            ) {
-                $attributes['pressedScale'] = $pressed['scaleX'];
+            foreach ($selectors as $selector) {
+                $selectorStates = $stateRules[$selector] ?? null;
+                $pressed = is_array($selectorStates) ? ($selectorStates['pressed'] ?? null) : null;
+                if (!is_array($pressed)) {
+                    continue;
+                }
+                if (isset($pressed['opacity'])) {
+                    $attributes['pressedOpacity'] = $pressed['opacity'];
+                }
+                if (
+                    isset($pressed['scaleX'], $pressed['scaleY'])
+                    && $pressed['scaleX'] === $pressed['scaleY']
+                ) {
+                    $attributes['pressedScale'] = $pressed['scaleX'];
+                }
             }
         }
         $nativeStates = [];
-        $compiledStateRules = $sheet['stateRules'] ?? [];
-        if (!is_array($compiledStateRules)) throw new RuntimeException('Invalid compiled state rules.');
-        foreach ($compiledStateRules as $stateRule) {
-            if (!is_array($stateRule)
-                || !is_array($stateRule['selector'] ?? null)
-                || !self::styleSelectorMatches(
-                    $stateRule['selector'],
-                    $descriptor,
-                    is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [],
-                )) {
+        foreach (self::candidateStyleRules($prepared['stateBuckets'], $descriptor) as $position) {
+            $stateRule = $prepared['stateRules'][$position];
+            if (!self::compiledSelectorMatches($stateRule['compounds'], $descriptor, $ancestors)) {
                 continue;
             }
-            $state = $stateRule['state'] ?? null;
-            $declarations = $stateRule['declarations'] ?? [];
+            $state = $stateRule['state'];
+            $declarations = $stateRule['declarations'];
             if (!is_string($state) || !is_array($declarations)) continue;
             $declarations = self::resolveDynamicStyles(self::styleAttributes($declarations, 'state declarations'), $data);
             if ($state === 'pressed') {
@@ -2870,7 +2944,7 @@ final class TemplateRenderer
                 default => null,
             };
             if ($stateKind === null) continue;
-            if (in_array($state, $descriptor['pseudos'], true)) {
+            if (isset($descriptor['pseudoSet'][$state])) {
                 $attributes = [...$attributes, ...$declarations];
             }
             foreach ($declarations as $attribute => $value) {
@@ -2896,30 +2970,63 @@ final class TemplateRenderer
                 JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION,
             );
         }
+        if ($attributes === []) {
+            return [];
+        }
 
         return self::resolveDynamicStyles(self::styleAttributes($attributes, 'scoped attributes'), $data);
     }
 
     /**
+     * Describes one element for selector matching. Only attributes that some
+     * selector of the active sheet can observe are evaluated: descriptors are
+     * built for every element, and evaluating every attribute expression just
+     * to discard it dominated render time.
+     *
      * @param array<string, mixed> $raw
      * @param array<string, mixed> $data
-     * @return array{tag: string, id: string|null, classes: list<string>, attributes: array<string, mixed>, pseudos: list<string>}
+     * @return array{
+     *     tag: string,
+     *     tagLower: string,
+     *     id: string|null,
+     *     classes: list<string>,
+     *     uniqueClasses: list<string>,
+     *     classSet: array<array-key, true>,
+     *     attributes: array<string, mixed>,
+     *     pseudos: list<string>,
+     *     pseudoSet: array<string, true>
+     * }
      */
     private static function styleNodeDescriptor(string $tag, ?string $classes, array $raw, ?object $scope, array $data): array
     {
+        $observed = self::observedStyleAttributes($data);
         $attributes = [];
-        foreach ($raw as $name => $value) {
-            if (str_starts_with($name, '@') || str_starts_with($name, 'on:')) {
-                continue;
-            }
-            try {
-                $attributes[ltrim($name, ':')] = str_starts_with($name, ':')
-                    ? self::dynamicValue($value, $scope, $data)
-                    : self::value($value, $scope, $data);
-            } catch (RuntimeException) {
+        if ($observed !== []) {
+            foreach ($raw as $name => $value) {
+                if (str_starts_with($name, '@') || str_starts_with($name, 'on:')) {
+                    continue;
+                }
+                $attribute = ltrim($name, ':');
+                if (!isset($observed[$attribute])) {
+                    continue;
+                }
+                try {
+                    $attributes[$attribute] = str_starts_with($name, ':')
+                        ? self::dynamicValue($value, $scope, $data)
+                        : self::value($value, $scope, $data);
+                } catch (RuntimeException) {
+                }
             }
         }
-        $classList = array_values(array_filter(preg_split('/\s+/', trim($classes ?? '')) ?: []));
+        $classList = ($classes === null || $classes === '')
+            ? []
+            : array_values(array_filter(preg_split('/\s+/', trim($classes)) ?: []));
+        $unique = [];
+        $classSet = [];
+        foreach ($classList as $class) {
+            $unique[$class] = $class;
+            $classSet[$class] = true;
+        }
         $pseudos = [];
         foreach (['disabled', 'checked', 'selected', 'active', 'loading', 'error'] as $pseudo) {
             if (($attributes[$pseudo] ?? false) === true) {
@@ -2930,10 +3037,373 @@ final class TemplateRenderer
             $pseudos[] = 'empty';
         }
         $id = $attributes['id'] ?? null;
-        return ['tag' => $tag, 'id' => is_scalar($id) ? (string) $id : null, 'classes' => $classList, 'attributes' => $attributes, 'pseudos' => $pseudos];
+        return [
+            'tag' => $tag,
+            'tagLower' => strtolower($tag),
+            'id' => is_scalar($id) ? (string) $id : null,
+            'classes' => $classList,
+            'uniqueClasses' => array_values($unique),
+            'classSet' => $classSet,
+            'attributes' => $attributes,
+            'pseudos' => $pseudos,
+            'pseudoSet' => array_fill_keys($pseudos, true),
+        ];
     }
 
     /**
+     * Attribute names any selector of the sheet (including responsive
+     * variants) can observe through attribute conditions, ids or pseudos.
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, true>
+     */
+    private static function observedStyleAttributes(array $data): array
+    {
+        $sheet = $data['__pamStyles'] ?? null;
+        if (!is_array($sheet)) {
+            return [];
+        }
+        $id = $sheet['__pamSheetId'] ?? null;
+        if (is_int($id) && isset(self::$sheetObserved[$id])) {
+            return self::$sheetObserved[$id];
+        }
+        $groups = [$sheet['cascadeRules'] ?? [], $sheet['stateRules'] ?? []];
+        $queries = $sheet['queries'] ?? [];
+        foreach (is_array($queries) ? $queries : [] as $query) {
+            $styles = is_array($query) ? ($query['styles'] ?? null) : null;
+            if (is_array($styles)) {
+                $groups[] = $styles['cascadeRules'] ?? [];
+                $groups[] = $styles['stateRules'] ?? [];
+            }
+        }
+        $observed = [];
+        $pseudoAttributes = false;
+        $empty = false;
+        foreach ($groups as $rules) {
+            if (!is_array($rules)) {
+                continue;
+            }
+            foreach ($rules as $rule) {
+                if (!is_array($rule)) {
+                    continue;
+                }
+                if (is_string($rule['state'] ?? null)) {
+                    $pseudoAttributes = true;
+                }
+                $selector = $rule['selector'] ?? null;
+                $compounds = is_array($selector) ? ($selector['compounds'] ?? null) : null;
+                if (!is_array($compounds)) {
+                    continue;
+                }
+                for ($queue = array_values($compounds); $queue !== [];) {
+                    $compound = array_pop($queue);
+                    if (!is_array($compound)) {
+                        continue;
+                    }
+                    if (is_array($compound['nots'] ?? null)) {
+                        array_push($queue, ...array_values($compound['nots']));
+                    }
+                    if (($compound['id'] ?? null) !== null) {
+                        $observed['id'] = true;
+                    }
+                    $pseudos = $compound['pseudos'] ?? [];
+                    foreach (is_array($pseudos) ? $pseudos : [] as $pseudo) {
+                        if ($pseudo === 'empty') {
+                            $empty = true;
+                        } else {
+                            $pseudoAttributes = true;
+                        }
+                    }
+                    $conditions = $compound['attributes'] ?? [];
+                    foreach (is_array($conditions) ? $conditions : [] as $condition) {
+                        if (is_array($condition) && is_string($condition['name'] ?? null)) {
+                            $observed[$condition['name']] = true;
+                        }
+                    }
+                }
+            }
+        }
+        if ($pseudoAttributes) {
+            foreach (['disabled', 'checked', 'selected', 'active', 'loading', 'error'] as $name) {
+                $observed[$name] = true;
+            }
+        }
+        if ($empty) {
+            $observed['value'] = true;
+            $observed['items'] = true;
+        }
+        if (is_int($id)) {
+            if (count(self::$sheetObserved) >= 512) {
+                self::$sheetObserved = [];
+            }
+            self::$sheetObserved[$id] = $observed;
+        }
+
+        return $observed;
+    }
+
+    /**
+     * Resolves the effective (reactive + responsive) sheet for an element and
+     * returns it with selector indexes. Results are cached per base sheet,
+     * style-variable revision and matched query set, so the per-element cost
+     * is the query evaluation plus one array lookup.
+     *
+     * @param array<string, mixed> $sheet
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function preparedStyleSheet(array $sheet, array $data): array
+    {
+        $id = $sheet['__pamSheetId'] ?? null;
+        $matched = self::matchedStyleQueries($sheet, $data);
+        $key = is_int($id)
+            ? $id.':'.StyleVariables::revision().':'.implode(',', $matched)
+            : null;
+        if ($key !== null && isset(self::$preparedStyles[$key])) {
+            return self::$preparedStyles[$key];
+        }
+        $effective = self::applyStyleQueries(
+            self::reactiveStyleSheet(self::styleMap($sheet, 'scoped sheet')),
+            $matched,
+        );
+        $cascade = $effective['cascadeRules'] ?? [];
+        $cascade = is_array($cascade) ? $cascade : [];
+        $stateRules = $effective['stateRules'] ?? [];
+        if (!is_array($stateRules)) throw new RuntimeException('Invalid compiled state rules.');
+        [$compiledCascade, $cascadeBuckets] = self::indexStyleRules($cascade, true);
+        [$compiledStates, $stateBuckets] = self::indexStyleRules($stateRules, false);
+        $prepared = [
+            'sheet' => $effective,
+            'hasCascade' => $cascade !== [],
+            'cascade' => $compiledCascade,
+            'cascadeBuckets' => $cascadeBuckets,
+            'stateRules' => $compiledStates,
+            'stateBuckets' => $stateBuckets,
+        ];
+        if ($key !== null) {
+            if (count(self::$preparedStyles) >= 512) {
+                self::$preparedStyles = [];
+            }
+            self::$preparedStyles[$key] = $prepared;
+        }
+
+        return $prepared;
+    }
+
+    /**
+     * Indexes rules by their subject (rightmost) compound: id, first class,
+     * tag, or universal. Rules that can never match are dropped; validation
+     * errors are kept and raised only when the rule matches, as before.
+     *
+     * @param array<array-key, mixed> $rules
+     * @return array{0: array<int, array<string, mixed>>, 1: array{id: array<string, list<int>>, class: array<array-key, list<int>>, tag: array<string, list<int>>, any: list<int>}}
+     */
+    private static function indexStyleRules(array $rules, bool $cascade): array
+    {
+        $compiled = [];
+        $buckets = ['id' => [], 'class' => [], 'tag' => [], 'any' => []];
+        $position = 0;
+        foreach ($rules as $rule) {
+            $position++;
+            if (!is_array($rule) || !is_array($rule['selector'] ?? null)) {
+                continue;
+            }
+            $compounds = $rule['selector']['compounds'] ?? null;
+            if (!is_array($compounds) || $compounds === []) {
+                continue;
+            }
+            $normalized = [];
+            foreach ($compounds as $compound) {
+                $compound = self::compileStyleCompound($compound);
+                if ($compound === null) {
+                    continue 2;
+                }
+                $normalized[] = $compound;
+            }
+            $entry = ['compounds' => $normalized];
+            if ($cascade) {
+                $entry += self::compileCascadeDeclarations($rule);
+            } else {
+                $entry['state'] = $rule['state'] ?? null;
+                $entry['declarations'] = $rule['declarations'] ?? [];
+            }
+            $compiled[$position] = $entry;
+            $subject = $normalized[count($normalized) - 1];
+            if ($subject['id'] !== null) {
+                $buckets['id'][$subject['id']][] = $position;
+            } elseif ($subject['classes'] !== []) {
+                $buckets['class'][$subject['classes'][0]][] = $position;
+            } elseif ($subject['tag'] !== null) {
+                $buckets['tag'][$subject['tag']][] = $position;
+            } else {
+                $buckets['any'][] = $position;
+            }
+        }
+
+        return [$compiled, $buckets];
+    }
+
+    /**
+     * @return array{tag: string|null, id: string|null, classes: list<string>, pseudos: list<string>, conditions: list<array{0: string, 1: mixed, 2: string}>, combinator: mixed}|null
+     *         null when the compound can never match.
+     */
+    private static function compileStyleCompound(mixed $compound): ?array
+    {
+        if (!is_array($compound)) return null;
+        $tag = $compound['tag'] ?? null;
+        if ($tag === '*') $tag = null;
+        if ($tag !== null && !is_string($tag)) return null;
+        $id = $compound['id'] ?? null;
+        if ($id !== null && !is_string($id)) return null;
+        $classes = $compound['classes'] ?? [];
+        $pseudos = $compound['pseudos'] ?? [];
+        $conditions = $compound['attributes'] ?? [];
+        if (!is_array($classes) || !is_array($pseudos) || !is_array($conditions)) return null;
+        foreach ($classes as $class) {
+            if (!is_string($class)) return null;
+        }
+        foreach ($pseudos as $pseudo) {
+            if (!is_string($pseudo) || in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true)) {
+                return null;
+            }
+        }
+        $compiledConditions = [];
+        foreach ($conditions as $condition) {
+            if (!is_array($condition) || !is_string($condition['name'] ?? null)) return null;
+            $operator = $condition['operator'] ?? '';
+            if ($operator === '') {
+                $compiledConditions[] = [$condition['name'], '', ''];
+                continue;
+            }
+            $expected = $condition['value'] ?? '';
+            if (!is_scalar($expected)) return null;
+            $compiledConditions[] = [$condition['name'], $operator, (string) $expected];
+        }
+
+        // :not() compounds; one that can never match excludes nothing.
+        $nots = [];
+        $negations = $compound['nots'] ?? [];
+        if (is_array($negations)) {
+            foreach ($negations as $negated) {
+                $negated = self::compileStyleCompound($negated);
+                if ($negated !== null) {
+                    $nots[] = $negated;
+                }
+            }
+        }
+
+        return [
+            'tag' => $tag === null ? null : strtolower($tag),
+            'id' => $id,
+            'nots' => $nots,
+            'classes' => array_values($classes),
+            'pseudos' => array_values($pseudos),
+            'conditions' => $compiledConditions,
+            'combinator' => $compound['combinator'] ?? 'descendant',
+        ];
+    }
+
+    /**
+     * @param array<array-key, mixed> $rule
+     * @return array{error: string|null, declarations: list<array{0: string, 1: string|int|bool, 2: list<int>}>}
+     */
+    private static function compileCascadeDeclarations(array $rule): array
+    {
+        $specificity = $rule['selector']['specificity'] ?? [0, 0, 0];
+        if (!is_array($specificity) || count($specificity) !== 3
+            || !is_int($specificity[0] ?? null) || !is_int($specificity[1] ?? null)
+            || !is_int($specificity[2] ?? null) || min($specificity) < 0) {
+            return ['error' => 'Invalid selector specificity.', 'declarations' => []];
+        }
+        $declarations = $rule['declarations'] ?? [];
+        $order = $rule['order'] ?? 0;
+        if (!is_array($declarations) || !is_int($order)) {
+            return ['error' => 'Invalid cascade declarations or order.', 'declarations' => []];
+        }
+        $compiled = [];
+        foreach ($declarations as $attribute => $entry) {
+            if (!is_array($entry) || !array_key_exists('value', $entry)) {
+                continue;
+            }
+            $value = $entry['value'];
+            if (!is_string($attribute) || (!is_string($value) && !is_int($value) && !is_bool($value))) {
+                return ['error' => 'Invalid cascade declaration value.', 'declarations' => []];
+            }
+            $compiled[] = [
+                $attribute,
+                $value,
+                [(bool) ($entry['important'] ?? false) ? 1 : 0,
+                    $specificity[0], $specificity[1], $specificity[2], $order],
+            ];
+        }
+
+        return ['error' => null, 'declarations' => $compiled];
+    }
+
+    /**
+     * @param array{id: array<string, list<int>>, class: array<array-key, list<int>>, tag: array<string, list<int>>, any: list<int>} $buckets
+     * @param array<string, mixed> $node
+     * @return list<int>
+     */
+    private static function candidateStyleRules(array $buckets, array $node): array
+    {
+        $positions = $buckets['any'];
+        $sources = 0;
+        if ($node['id'] !== null && isset($buckets['id'][$node['id']])) {
+            $positions = [...$positions, ...$buckets['id'][$node['id']]];
+            $sources++;
+        }
+        foreach ($node['uniqueClasses'] as $class) {
+            if (isset($buckets['class'][$class])) {
+                $positions = [...$positions, ...$buckets['class'][$class]];
+                $sources++;
+            }
+        }
+        if (isset($buckets['tag'][$node['tagLower']])) {
+            $positions = [...$positions, ...$buckets['tag'][$node['tagLower']]];
+            $sources++;
+        }
+        if ($sources > 1 || ($sources === 1 && $buckets['any'] !== [])) {
+            sort($positions);
+        }
+
+        return $positions;
+    }
+
+    /**
+     * @param array<string, mixed> $prepared
+     * @param array<string, mixed> $node
+     * @param list<array<string, mixed>> $ancestors
+     * @return array<string, string|int|bool>
+     */
+    private static function indexedCascadeStyleAttributes(array $prepared, array $node, array $ancestors): array
+    {
+        $winners = [];
+        foreach (self::candidateStyleRules($prepared['cascadeBuckets'], $node) as $position) {
+            $rule = $prepared['cascade'][$position];
+            if (!self::compiledSelectorMatches($rule['compounds'], $node, $ancestors)) {
+                continue;
+            }
+            if ($rule['error'] !== null) {
+                throw new RuntimeException($rule['error']);
+            }
+            foreach ($rule['declarations'] as [$attribute, $value, $rank]) {
+                if (!isset($winners[$attribute]) || $rank >= $winners[$attribute][0]) {
+                    $winners[$attribute] = [$rank, $value];
+                }
+            }
+        }
+        $attributes = [];
+        foreach ($winners as $attribute => $winner) {
+            $attributes[$attribute] = $winner[1];
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * Unindexed cascade over raw rules (kept for direct callers and tests).
+     *
      * @param array<array-key, mixed> $rules
      * @param array<string, mixed> $node
      * @param array<string, mixed> $data
@@ -2941,67 +3411,104 @@ final class TemplateRenderer
      */
     private static function cascadeStyleAttributes(array $rules, array $node, array $data): array
     {
+        [$compiled, $buckets] = self::indexStyleRules($rules, true);
         $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
-        $winners = [];
-        foreach ($rules as $rule) {
-            if (!is_array($rule) || !is_array($rule['selector'] ?? null) || !self::styleSelectorMatches($rule['selector'], $node, $ancestors)) {
-                continue;
-            }
-            $specificity = $rule['selector']['specificity'] ?? [0, 0, 0];
-            if (!is_array($specificity) || count($specificity) !== 3
-                || !is_int($specificity[0] ?? null) || !is_int($specificity[1] ?? null)
-                || !is_int($specificity[2] ?? null) || min($specificity) < 0) {
-                throw new RuntimeException('Invalid selector specificity.');
-            }
-            $declarations = $rule['declarations'] ?? [];
-            $order = $rule['order'] ?? 0;
-            if (!is_array($declarations) || !is_int($order)) {
-                throw new RuntimeException('Invalid cascade declarations or order.');
-            }
-            foreach ($declarations as $attribute => $entry) {
-                if (!is_array($entry) || !array_key_exists('value', $entry)) {
-                    continue;
-                }
-                $value = $entry['value'];
-                if (!is_string($attribute) || (!is_string($value) && !is_int($value) && !is_bool($value))) {
-                    throw new RuntimeException('Invalid cascade declaration value.');
-                }
-                $rank = [(bool) ($entry['important'] ?? false) ? 1 : 0,
-                    $specificity[0], $specificity[1], $specificity[2], $order];
-                if (!isset($winners[$attribute]) || $rank >= $winners[$attribute]['rank']) {
-                    $winners[$attribute] = ['rank' => $rank, 'value' => $value];
-                }
-            }
-        }
-        return array_map(static fn (array $winner): string|int|bool => $winner['value'], $winners);
+
+        return self::indexedCascadeStyleAttributes(
+            ['cascade' => $compiled, 'cascadeBuckets' => $buckets],
+            self::normalizedStyleNode($node),
+            array_map(self::normalizedStyleNode(...), array_values($ancestors)),
+        );
     }
 
     /**
      * @param array<array-key, mixed> $selector
-     * @param array<string, mixed> $node
+     * @param array<array-key, mixed> $node
      * @param array<array-key, mixed> $ancestors
      */
     private static function styleSelectorMatches(array $selector, array $node, array $ancestors): bool
     {
         $compounds = $selector['compounds'] ?? null;
         if (!is_array($compounds) || $compounds === []) return false;
-        $compounds = array_values($compounds);
-        $ancestors = array_values($ancestors);
+        $normalized = [];
+        foreach ($compounds as $compound) {
+            $compound = self::compileStyleCompound($compound);
+            if ($compound === null) return false;
+            $normalized[] = $compound;
+        }
+
+        return self::compiledSelectorMatches(
+            $normalized,
+            self::normalizedStyleNode($node),
+            array_map(self::normalizedStyleNode(...), array_values($ancestors)),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private static function normalizedStyleNode(mixed $node): array
+    {
+        $node = is_array($node) ? $node : [];
+        if (isset($node['tagLower'], $node['classSet'], $node['pseudoSet'], $node['uniqueClasses'])) {
+            return $node;
+        }
+        $tag = is_string($node['tag'] ?? null) ? $node['tag'] : '';
+        $classes = array_values(array_filter(
+            is_array($node['classes'] ?? null) ? $node['classes'] : [],
+            static fn (mixed $class): bool => is_string($class),
+        ));
+        $pseudos = array_values(array_filter(
+            is_array($node['pseudos'] ?? null) ? $node['pseudos'] : [],
+            static fn (mixed $pseudo): bool => is_string($pseudo),
+        ));
+        $unique = [];
+        foreach ($classes as $class) {
+            $unique[$class] = $class;
+        }
+
+        return [
+            'tag' => $tag,
+            'tagLower' => strtolower($tag),
+            'id' => is_string($node['id'] ?? null) ? $node['id'] : null,
+            'classes' => $classes,
+            'uniqueClasses' => array_values($unique),
+            'classSet' => array_fill_keys($classes, true),
+            'attributes' => is_array($node['attributes'] ?? null) ? $node['attributes'] : [],
+            'pseudos' => $pseudos,
+            'pseudoSet' => array_fill_keys($pseudos, true),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $sheet
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function responsiveStyleSheet(array $sheet, array $data): array
+    {
+        return self::applyStyleQueries($sheet, self::matchedStyleQueries($sheet, $data));
+    }
+
+    /**
+     * @param list<array<string, mixed>> $compounds
+     * @param array<string, mixed> $node
+     * @param list<array<string, mixed>> $ancestors
+     */
+    private static function compiledSelectorMatches(array $compounds, array $node, array $ancestors): bool
+    {
         $index = count($compounds) - 1;
-        if (!self::styleCompoundMatches($compounds[$index], $node)) return false;
+        if (!self::compiledCompoundMatches($compounds[$index], $node)) return false;
         $ancestorIndex = count($ancestors) - 1;
         while ($index > 0) {
-            if (!is_array($compounds[$index])) return false;
-            $relation = $compounds[$index]['combinator'] ?? 'descendant';
+            $relation = $compounds[$index]['combinator'];
             $index--;
             if ($relation === 'child') {
-                if ($ancestorIndex < 0 || !self::styleCompoundMatches($compounds[$index], $ancestors[$ancestorIndex])) return false;
+                if ($ancestorIndex < 0 || !self::compiledCompoundMatches($compounds[$index], $ancestors[$ancestorIndex])) return false;
                 $ancestorIndex--;
                 continue;
             }
             $found = false;
             while ($ancestorIndex >= 0) {
-                if (self::styleCompoundMatches($compounds[$index], $ancestors[$ancestorIndex])) { $found = true; $ancestorIndex--; break; }
+                if (self::compiledCompoundMatches($compounds[$index], $ancestors[$ancestorIndex])) { $found = true; $ancestorIndex--; break; }
                 $ancestorIndex--;
             }
             if (!$found) return false;
@@ -3009,41 +3516,30 @@ final class TemplateRenderer
         return true;
     }
 
-    private static function styleCompoundMatches(mixed $compound, mixed $node): bool
+    /**
+     * @param array<string, mixed> $compound
+     * @param array<string, mixed> $node
+     */
+    private static function compiledCompoundMatches(array $compound, array $node): bool
     {
-        if (!is_array($compound) || !is_array($node)) return false;
-        $tag = $compound['tag'] ?? null;
-        $nodeTag = $node['tag'] ?? '';
-        if ($tag !== null && $tag !== '*' && (!is_string($tag) || !is_string($nodeTag) || strcasecmp($nodeTag, $tag) !== 0)) return false;
-        if (($compound['id'] ?? null) !== null && ($node['id'] ?? null) !== $compound['id']) return false;
-        $classes = $compound['classes'] ?? [];
-        $nodeClasses = $node['classes'] ?? [];
-        $pseudos = $compound['pseudos'] ?? [];
-        $nodePseudos = $node['pseudos'] ?? [];
-        $conditions = $compound['attributes'] ?? [];
-        if (!is_array($classes) || !is_array($nodeClasses) || !is_array($pseudos)
-            || !is_array($nodePseudos) || !is_array($conditions)) return false;
-        foreach ($classes as $class) if (!is_string($class) || !in_array($class, $nodeClasses, true)) return false;
-        $negations = $compound['nots'] ?? [];
-        if (is_array($negations)) {
-            foreach ($negations as $negated) {
-                if (self::styleCompoundMatches($negated, $node)) return false;
-            }
+        if ($compound['tag'] !== null && $compound['tag'] !== $node['tagLower']) return false;
+        if ($compound['id'] !== null && $node['id'] !== $compound['id']) return false;
+        foreach ($compound['classes'] as $class) {
+            if (!isset($node['classSet'][$class])) return false;
         }
-        foreach ($pseudos as $pseudo) {
-            if (!is_string($pseudo) || in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $nodePseudos, true)) return false;
+        foreach ($compound['nots'] as $negated) {
+            if (self::compiledCompoundMatches($negated, $node)) return false;
         }
-        foreach ($conditions as $condition) {
-            $nodeAttributes = $node['attributes'] ?? [];
-            if (!is_array($condition) || !is_string($condition['name'] ?? null)
-                || !is_array($nodeAttributes) || !array_key_exists($condition['name'], $nodeAttributes)) return false;
-            $operator = $condition['operator'] ?? '';
+        foreach ($compound['pseudos'] as $pseudo) {
+            if (!isset($node['pseudoSet'][$pseudo])) return false;
+        }
+        foreach ($compound['conditions'] as [$name, $operator, $expected]) {
+            $nodeAttributes = $node['attributes'];
+            if (!array_key_exists($name, $nodeAttributes)) return false;
             if ($operator === '') continue;
-            $actualValue = $nodeAttributes[$condition['name']];
-            $expectedValue = $condition['value'] ?? '';
-            if ((!is_scalar($actualValue) && $actualValue !== null) || !is_scalar($expectedValue)) return false;
+            $actualValue = $nodeAttributes[$name];
+            if (!is_scalar($actualValue) && $actualValue !== null) return false;
             $actual = (string) $actualValue;
-            $expected = (string) $expectedValue;
             $matches = match ($operator) {
                 '=' => $actual === $expected,
                 '~=' => in_array($expected, preg_split('/\s+/', $actual) ?: [], true),
@@ -3063,6 +3559,16 @@ final class TemplateRenderer
      */
     private static function resolveDynamicStyles(array $attributes, array $data): array
     {
+        $dynamic = array_key_exists('lineHeightMultiplier', $attributes);
+        foreach ($attributes as $value) {
+            if (is_string($value) && StyleValueCompiler::encoded($value)) {
+                $dynamic = true;
+                break;
+            }
+        }
+        if (!$dynamic) {
+            return $attributes;
+        }
         $metrics = Runtime::windowMetrics();
         $containerWidth = self::styleDimension($data['__pamContainerWidth'] ?? $metrics->width, 'container width');
         $containerHeight = self::styleDimension($data['__pamContainerHeight'] ?? $metrics->height, 'container height');
@@ -3218,13 +3724,14 @@ final class TemplateRenderer
      * @param array<string, mixed> $data
      * @return array<string, mixed>
      */
-    private static function responsiveStyleSheet(array $sheet, array $data): array
+    private static function matchedStyleQueries(array $sheet, array $data): array
     {
         $queries = $sheet['queries'] ?? [];
-        if (!is_array($queries)) {
-            return $sheet;
+        if (!is_array($queries) || $queries === []) {
+            return [];
         }
-        foreach ($queries as $query) {
+        $matched = [];
+        foreach ($queries as $index => $query) {
             if (!is_array($query) || !is_array($query['styles'] ?? null)) {
                 continue;
             }
@@ -3261,9 +3768,27 @@ final class TemplateRenderer
                 'performanceTier' => $metrics->performanceTier,
             ];
             $ast = is_array($query['ast'] ?? null) ? $query['ast'] : null;
-            if (!self::queryMatches($condition, $ast, $environment)) {
-                continue;
+            if (self::queryMatches($condition, $ast, $environment)) {
+                $matched[] = $index;
             }
+        }
+
+        return $matched;
+    }
+
+    /**
+     * @param array<string, mixed> $sheet
+     * @param list<array-key> $matched
+     * @return array<string, mixed>
+     */
+    private static function applyStyleQueries(array $sheet, array $matched): array
+    {
+        if ($matched === []) {
+            return $sheet;
+        }
+        $queries = $sheet['queries'];
+        foreach ($matched as $index) {
+            $query = $queries[$index];
             $queryStyles = self::reactiveStyleSheet(self::styleMap($query['styles'], 'responsive sheet'));
             foreach (['classes', 'tags'] as $group) {
                 $incoming = self::validatedStyleRules($queryStyles[$group] ?? [], '<responsive-style>');
@@ -3368,9 +3893,20 @@ final class TemplateRenderer
     private static function styleSheetFonts(array $data): array
     {
         $sheet = $data['__pamStyles'] ?? null;
+        $id = is_array($sheet) ? ($sheet['__pamSheetId'] ?? null) : null;
+        if (is_int($id) && isset(self::$sheetFonts[$id])) {
+            return self::$sheetFonts[$id];
+        }
         $fonts = is_array($sheet) ? ($sheet['fonts'] ?? null) : null;
+        $validated = self::validatedFontFaces(is_array($fonts) ? $fonts : [], '<scoped-style-data>');
+        if (is_int($id)) {
+            if (count(self::$sheetFonts) >= 512) {
+                self::$sheetFonts = [];
+            }
+            self::$sheetFonts[$id] = $validated;
+        }
 
-        return self::validatedFontFaces(is_array($fonts) ? $fonts : [], '<scoped-style-data>');
+        return $validated;
     }
 
     /**
@@ -3602,12 +4138,15 @@ final class TemplateRenderer
      */
     private static function nativeEventAliases(array $attributes): array
     {
-        foreach (self::EVENTS as $native => $_kind) {
-            $alias = '@'.substr($native, 3);
-            if (array_key_exists($alias, $attributes)) {
-                $attributes[$native] ??= $attributes[$alias];
-                unset($attributes[$alias]);
+        if (self::$eventAliases === null) {
+            self::$eventAliases = [];
+            foreach (self::EVENTS as $native => $_kind) {
+                self::$eventAliases['@'.substr($native, 3)] = $native;
             }
+        }
+        foreach (array_intersect_key(self::$eventAliases, $attributes) as $alias => $native) {
+            $attributes[$native] ??= $attributes[$alias];
+            unset($attributes[$alias]);
         }
 
         return $attributes;
@@ -4024,27 +4563,50 @@ final class TemplateRenderer
         if (!is_string($raw)) {
             return $raw;
         }
+        $kind = self::$valueKinds[$raw] ?? self::classifyValue($raw);
 
-        if (preg_match('/^\\$[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)*$/', $raw) === 1) {
-            return self::path($raw, $scope, $data);
-        }
-        if (preg_match('/^(?:rgba?|hsla?)\(/Di', trim($raw)) === 1) {
-            return trim($raw);
-        }
-
-        return match ($raw) {
-            'true' => true,
-            'false' => false,
-            'null' => null,
-            default => (
-                preg_match(
-                    '/^[A-Za-z_][A-Za-z0-9_]*\s*\(/D',
-                    $raw,
-                ) === 1
-                    ? TemplateExpression::evaluate($raw, $scope, $data)
-                    : self::literal($raw, $scope, $data)
-            ),
+        return match ($kind[0]) {
+            0 => self::path($raw, $scope, $data),
+            1 => $kind[1],
+            2 => TemplateExpression::evaluate($raw, $scope, $data),
+            default => TemplateExpression::interpolate($raw, $scope, $data),
         };
+    }
+
+    /**
+     * Static attribute values are classified once per source string: plain
+     * literals become constants, and only paths, calls and interpolations are
+     * evaluated per render.
+     *
+     * @return array{0: int, 1: mixed}
+     */
+    private static function classifyValue(string $raw): array
+    {
+        if (preg_match('/^\\$[A-Za-z_][A-Za-z0-9_]*(?:(?:\\.|->)[A-Za-z_][A-Za-z0-9_]*)*$/', $raw) === 1) {
+            $kind = [0, null];
+        } elseif (preg_match('/^(?:rgba?|hsla?)\(/Di', trim($raw)) === 1) {
+            $kind = [1, trim($raw)];
+        } elseif ($raw === 'true' || $raw === 'false' || $raw === 'null') {
+            $kind = [1, match ($raw) { 'true' => true, 'false' => false, default => null }];
+        } elseif (preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*\(/D', $raw) === 1) {
+            $kind = [2, null];
+        } elseif (preg_match('/^-?\\d+$/', $raw) === 1) {
+            $kind = [1, (int) $raw];
+        } elseif (preg_match('/^-?\\d+\\.\\d+$/', $raw) === 1) {
+            $kind = [1, (float) $raw];
+        } elseif (preg_match('/^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/', $raw, $color) === 1) {
+            $hex = strlen($color[1]) === 6 ? 'FF'.$color[1] : $color[1];
+            $kind = [1, (int) hexdec($hex)];
+        } elseif (str_contains($raw, '{{')) {
+            $kind = [3, null];
+        } else {
+            $kind = [1, $raw];
+        }
+        if (count(self::$valueKinds) >= 16384) {
+            self::$valueKinds = [];
+        }
+
+        return self::$valueKinds[$raw] = $kind;
     }
 
     /** @param array<string, mixed> $data */
@@ -4089,7 +4651,7 @@ final class TemplateRenderer
     /** @param array<string, mixed> $data */
     private static function path(string $path, ?object $scope, array $data): mixed
     {
-        $segments = preg_split('/\\.|->/', ltrim($path, '$')) ?: [];
+        $segments = self::$pathSegments[$path] ??= (preg_split('/\\.|->/', ltrim($path, '$')) ?: []);
         $first = array_shift($segments);
 
         if ($first === null) {
