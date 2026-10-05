@@ -266,6 +266,8 @@ final class PamMotionCoordinator {
     // MARK: Text layout and marquee
 
     func scheduleTextLayout(nodeId: Int64, label: UILabel) {
+        // PamTextView reports `onTextLayout` from its own CoreText layout.
+        guard !(label is PamTextView) else { return }
         guard wants(nodeId, PamConstants.onTextLayout) else {
             nodes[nodeId]?.textLayoutSignature = ""
             return
@@ -298,6 +300,8 @@ final class PamMotionCoordinator {
     }
 
     func applyEllipsizeMode(label: UILabel, mode: Int64?) {
+        // PamTextView draws its own marquee; only plain labels are re-classed.
+        guard !(label is PamTextView) else { return }
         PamMarqueeLabel.setMarquee(mode == PamMotionKeys.textEllipsizeMarquee, on: label)
     }
 }

@@ -4,6 +4,9 @@ import SQLite3
 final class SQLiteModule: NativeModule, ClosableNativeModule {
     private let queue = DispatchQueue(label: "dev.pam.native.sqlite")
     private var databases: [String: OpaquePointer] = [:]
+    /// Compiled statements per database, reused across calls like Android's
+    /// SQLiteDatabase statement cache (LRU, finalized on close/eviction).
+    private var statements: [String: SQLiteStatementCache] = [:]
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         queue.async {
@@ -18,8 +21,8 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
                 switch method {
                 case "execute":
                     let arguments = try self.decodeArguments(argumentsJSON)
-                    let statement = try self.prepare(database, sql)
-                    defer { sqlite3_finalize(statement) }
+                    let statement = try self.prepare(database, sql, cache: name)
+                    defer { sqlite3_reset(statement) }
                     try self.bind(arguments, to: statement)
                     guard sqlite3_step(statement) == SQLITE_DONE else {
                         throw SQLiteError(String(cString: sqlite3_errmsg(database)))
@@ -27,17 +30,17 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
                     completion(.success, Data())
                 case "query":
                     let arguments = try self.decodeArguments(argumentsJSON)
-                    let rows = try self.query(database, sql, arguments)
+                    let rows = try self.query(database, sql, arguments, cache: name)
                     let json = try JSONSerialization.data(withJSONObject: rows)
                     let text = String(data: json, encoding: .utf8) ?? "[]"
                     completion(.success, try WireMap.encode(["rows": .text(text)]))
                 case "executeMany":
                     let argumentSets = try self.decodeArgumentSets(argumentsJSON)
-                    try self.executeMany(database, sql, argumentSets)
+                    try self.executeMany(database, sql, argumentSets, cache: name)
                     completion(.success, Data())
                 case "transaction":
                     let statements = try self.decodeStatements(argumentsJSON)
-                    try self.executeTransaction(database, statements)
+                    try self.executeTransaction(database, statements, cache: name)
                     completion(.success, Data())
                 default:
                     throw SQLiteError("Unknown SQLite method \(method)")
@@ -75,6 +78,21 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
         }
     }
 
+    /// Cached statement for [sql] (reset and unbound), preparing it on a miss.
+    /// Callers reset it after use instead of finalizing it.
+    private func prepare(_ database: OpaquePointer, _ sql: String, cache name: String) throws -> OpaquePointer {
+        let cache = statements[name] ?? SQLiteStatementCache()
+        statements[name] = cache
+        if let cached = cache.take(sql) {
+            sqlite3_reset(cached)
+            sqlite3_clear_bindings(cached)
+            return cached
+        }
+        let statement = try prepare(database, sql)
+        cache.put(sql, statement)
+        return statement
+    }
+
     private func prepare(_ database: OpaquePointer, _ sql: String) throws -> OpaquePointer {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK,
@@ -104,10 +122,11 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
     private func executeMany(
         _ database: OpaquePointer,
         _ sql: String,
-        _ argumentSets: [[Any]]
+        _ argumentSets: [[Any]],
+        cache name: String
     ) throws {
-        let statement = try prepare(database, sql)
-        defer { sqlite3_finalize(statement) }
+        let statement = try prepare(database, sql, cache: name)
+        defer { sqlite3_reset(statement) }
         try execute(database, "BEGIN IMMEDIATE")
         do {
             for arguments in argumentSets {
@@ -150,13 +169,14 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
 
     private func executeTransaction(
         _ database: OpaquePointer,
-        _ statements: [(String, [[Any]])]
+        _ statements: [(String, [[Any]])],
+        cache name: String
     ) throws {
         try execute(database, "BEGIN IMMEDIATE")
         do {
             for (sql, argumentSets) in statements {
-                let statement = try prepare(database, sql)
-                defer { sqlite3_finalize(statement) }
+                let statement = try prepare(database, sql, cache: name)
+                defer { sqlite3_reset(statement) }
                 for arguments in argumentSets {
                     sqlite3_reset(statement)
                     sqlite3_clear_bindings(statement)
@@ -196,10 +216,12 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
     private func query(
         _ database: OpaquePointer,
         _ sql: String,
-        _ arguments: [Any]
+        _ arguments: [Any],
+        cache name: String
     ) throws -> [[String: Any]] {
-        let statement = try prepare(database, sql)
-        defer { sqlite3_finalize(statement) }
+        let statement = try prepare(database, sql, cache: name)
+        // Reset releases the read snapshot (WAL) as soon as rows are copied.
+        defer { sqlite3_reset(statement) }
         try bind(arguments, to: statement)
         var rows: [[String: Any]] = []
         while sqlite3_step(statement) == SQLITE_ROW {
@@ -234,6 +256,8 @@ final class SQLiteModule: NativeModule, ClosableNativeModule {
 
     func close() {
         queue.sync {
+            statements.values.forEach { $0.finalizeAll() }
+            statements.removeAll()
             databases.values.forEach { database in
                 _ = sqlite3_close(database)
             }
@@ -249,3 +273,46 @@ private struct SQLiteError: LocalizedError {
 }
 
 private let SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+
+/// LRU of compiled statements keyed by SQL text. Large one-off statements
+/// (> 16 KiB, e.g. generated multi-row inserts) are not cached.
+final class SQLiteStatementCache {
+    static let capacity = 32
+    static let maxSqlBytes = 16 * 1_024
+    private var entries: [String: OpaquePointer] = [:]
+    private var order: [String] = []
+    private var transient: Set<OpaquePointer> = []
+
+    /// Returns the cached statement and marks it most recently used.
+    func take(_ sql: String) -> OpaquePointer? {
+        guard let statement = entries[sql] else { return nil }
+        if let index = order.firstIndex(of: sql) { order.remove(at: index) }
+        order.append(sql)
+        return statement
+    }
+
+    func put(_ sql: String, _ statement: OpaquePointer) {
+        guard sql.utf8.count <= Self.maxSqlBytes else {
+            // Finalize the previous oversized one-off before keeping this one.
+            transient.forEach { sqlite3_finalize($0) }
+            transient = [statement]
+            return
+        }
+        entries[sql] = statement
+        order.append(sql)
+        while order.count > Self.capacity {
+            let evicted = order.removeFirst()
+            if let old = entries.removeValue(forKey: evicted) { sqlite3_finalize(old) }
+        }
+    }
+
+    var count: Int { entries.count }
+
+    func finalizeAll() {
+        entries.values.forEach { sqlite3_finalize($0) }
+        transient.forEach { sqlite3_finalize($0) }
+        entries.removeAll()
+        order.removeAll()
+        transient.removeAll()
+    }
+}
