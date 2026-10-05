@@ -38,6 +38,10 @@ val pamPluginProperties = Properties().apply {
 val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp")
 val pamDebugApplicationIdSuffix = pamProperties.getProperty("debugApplicationIdSuffix")
     ?.takeIf(String::isNotBlank)
+// Installable release-optimized (benchmark) builds may use their own package
+// so a profiling install never replaces production; they then omit Firebase.
+val pamBenchmarkApplicationIdSuffix = pamProperties.getProperty("benchmarkApplicationIdSuffix")
+    ?.takeIf(String::isNotBlank)
 val pamApplicationName = pamProperties.getProperty("applicationName", "Pam Native")
 val pamNativeHome = providers.gradleProperty("pamNativeRoot")
     .orElse(providers.environmentVariable("PAM_NATIVE_ROOT"))
@@ -73,6 +77,8 @@ val pamFirebaseMessagingEnabled = pamProjectRoot.isNotBlank()
 // debugApplicationIdSuffix has no matching client in google-services.json.
 val pamDebugFirebaseEnabled = pamFirebaseMessagingEnabled
     && pamProperties.getProperty("debugFirebase", "true") != "false"
+val pamBenchmarkFirebaseEnabled = pamFirebaseMessagingEnabled
+    && pamBenchmarkApplicationIdSuffix == null
 
 if (pamFirebaseMessagingEnabled) {
     apply(plugin = "com.google.gms.google-services")
@@ -86,6 +92,9 @@ if (pamFirebaseMessagingEnabled) {
     }.configureEach {
         dependsOn(syncPamGoogleServices)
         if (!pamDebugFirebaseEnabled && name == "processDebugGoogleServices") {
+            enabled = false
+        }
+        if (!pamBenchmarkFirebaseEnabled && name == "processBenchmarkGoogleServices") {
             enabled = false
         }
     }
@@ -176,6 +185,16 @@ android {
             initWith(getByName("release"))
             signingConfig = signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
+            if (pamBenchmarkApplicationIdSuffix != null) {
+                applicationIdSuffix = pamBenchmarkApplicationIdSuffix
+            }
+            manifestPlaceholders["pamFirebaseMessagingEnabled"] = pamBenchmarkFirebaseEnabled.toString()
+            manifestPlaceholders["pamFirebaseMessagingService"] =
+                if (pamBenchmarkFirebaseEnabled) {
+                    "dev.pam.nativeapp.modules.PamFirebaseMessagingService"
+                } else {
+                    "dev.pam.nativeapp.modules.PamDisabledFirebaseMessagingService"
+                }
         }
     }
 

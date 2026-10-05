@@ -104,6 +104,9 @@ final class ScopedStyleCompiler
      */
     private static int $compileDepth = 0;
 
+    /** @var ?array<string, true> stylesheet files read while collecting */
+    private static ?array $importedFiles = null;
+
     public static function compile(
         string $source,
         string $name,
@@ -360,6 +363,32 @@ final class ScopedStyleCompiler
         return self::declarations($source, $variables, $name);
     }
 
+    /**
+     * Starts recording the stylesheet files that resolveImports() reads, so a
+     * compiled component can be invalidated when any of them changes.
+     *
+     * @return ?array<string, true> the previous recording, for nesting
+     */
+    public static function collectImports(): ?array
+    {
+        $previous = self::$importedFiles;
+        self::$importedFiles = [];
+
+        return $previous;
+    }
+
+    /**
+     * @param ?array<string, true> $previous
+     * @return list<string> files read since collectImports()
+     */
+    public static function finishCollectingImports(?array $previous): array
+    {
+        $files = array_keys(self::$importedFiles ?? []);
+        self::$importedFiles = $previous === null ? null : $previous + array_fill_keys($files, true);
+
+        return $files;
+    }
+
     public static function resolveImports(string $source, string $name): string
     {
         if (!str_contains($source, '@import')) {
@@ -460,6 +489,9 @@ final class ScopedStyleCompiler
                 $contents = file_get_contents($path);
                 if ($contents === false) {
                     throw new RuntimeException("Cannot read CSS import {$path}.");
+                }
+                if (self::$importedFiles !== null) {
+                    self::$importedFiles[$path] = true;
                 }
                 $bytes += strlen($contents);
                 if ($bytes > self::MAX_IMPORTED_BYTES) {

@@ -9,3 +9,5 @@ HSPLdev/pam/nativeapp/render/PamRenderer;->commit(Ljava/util/List;)V
 HSPLdev/pam/nativeapp/render/PamRenderer;->materializeCell(JLandroid/widget/FrameLayout;)V
 HSPLdev/pam/nativeapp/render/PamRenderer;->dematerializeSubtree(J)V
 HSPLdev/pam/nativeapp/render/PamRecyclerList;->setRichItems(Ljava/util/List;Lkotlin/jvm/functions/Function2;Lkotlin/jvm/functions/Function2;)V
+HSPLdev/pam/nativeapp/**;->**(**)**
+Ldev/pam/nativeapp/**;

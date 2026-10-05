@@ -79,6 +79,11 @@
                     "type": "string",
                     "pattern": "^\\.[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$"
                 },
+                "benchmarkApplicationIdSuffix": {
+                    "type": "string",
+                    "pattern": "^\\.[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*$",
+                    "description": "Package suffix for the installable release-optimized build (`pam-native build --benchmark`, `run --release`, benchmark/profile). Such builds omit Firebase Messaging."
+                },
                 "debugFirebase": {
                     "type": "boolean",
                     "default": true,

@@ -9,6 +9,7 @@ use FilesystemIterator;
 use JsonException;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
+use ReflectionClass;
 use RuntimeException;
 use SplFileInfo;
 use Pam\Native\BuildConfiguration;
@@ -19,6 +20,21 @@ final class PamPhpCompiler
 {
     private const MAX_COMPONENTS = 10_000;
     private const MAX_SOURCE_BYTES = 2_097_152;
+    private const CACHE_VERSION = 5;
+
+    /**
+     * Content fingerprints of stylesheets read during one compileDirectory()
+     * pass; every component shares src/app.css, so it is hashed once.
+     *
+     * @var array<string, string>
+     */
+    private static array $dependencyFingerprints = [];
+
+    /** @var array<string, ?string> app.css location per component directory */
+    private static array $appStylePaths = [];
+
+    /** Memoizes the two maps above only within one directory pass. */
+    private static bool $directoryPass = false;
 
     private function __construct()
     {
@@ -85,11 +101,20 @@ final class PamPhpCompiler
 
         sort($sources, SORT_STRING);
 
-        return array_map(
-            static fn (string $source): PamPhpComponent =>
-                self::compileFile($source, $cachePath),
-            $sources,
-        );
+        self::$dependencyFingerprints = [];
+        self::$appStylePaths = [];
+        self::$directoryPass = true;
+        try {
+            return array_map(
+                static fn (string $source): PamPhpComponent =>
+                    self::compileFile($source, $cachePath),
+                $sources,
+            );
+        } finally {
+            self::$dependencyFingerprints = [];
+            self::$appStylePaths = [];
+            self::$directoryPass = false;
+        }
     }
 
     private static function isComponentFile(string $filename): bool
@@ -113,11 +138,6 @@ final class PamPhpCompiler
             );
         }
 
-        [$php, $template, $templateLine, $style, $language, $styleScope] =
-            self::split($contents, $source);
-        $style = self::resolvedStyleSheet($style, $source, $contents);
-        self::validateHotPath($php, $source);
-        [$className, $tag] = self::classIdentity($php, $source);
         $cacheKey = hash('sha256', $source);
         $classFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
             .DIRECTORY_SEPARATOR.$cacheKey.'.class.php';
@@ -125,7 +145,38 @@ final class PamPhpCompiler
             .DIRECTORY_SEPARATOR.$cacheKey.'.template.json';
         $metadataFile = rtrim($cachePath, DIRECTORY_SEPARATOR)
             .DIRECTORY_SEPARATOR.$cacheKey.'.json';
+        $sourceFingerprint = hash('xxh128', $contents);
+
+        // Boot fast path: an unchanged source (and unchanged stylesheets it
+        // pulled in) reuses its compiled identity without tokenizing the
+        // component again; the template tree is decoded on first render.
+        $fresh = self::freshComponent(
+            $source,
+            $sourceFingerprint,
+            $metadataFile,
+            $templateFile,
+            $classFile,
+        );
+        if ($fresh !== null) {
+            return $fresh;
+        }
+
+        [$php, $template, $templateLine, $style, $language, $styleScope] =
+            self::split($contents, $source);
+        $imports = ScopedStyleCompiler::collectImports();
+        try {
+            $style = self::resolvedStyleSheet($style, $source, $contents);
+        } finally {
+            $imported = ScopedStyleCompiler::finishCollectingImports($imports);
+        }
+        self::validateHotPath($php, $source);
+        [$className, $tag] = self::classIdentity($php, $source);
         $hash = hash('sha256', $contents."\0".$style."\0".$styleScope->value);
+        $dependencies = [];
+        $appStyle = self::appStylePath($source);
+        foreach (array_unique([...($appStyle === null ? [] : [$appStyle]), ...$imported]) as $dependency) {
+            $dependencies[$dependency] = self::dependencyFingerprint($dependency);
+        }
         $tree = self::cachedTree(
             $metadataFile,
             $templateFile,
@@ -133,8 +184,17 @@ final class PamPhpCompiler
             $hash,
             $className,
         );
+        $fingerprint = [
+            'sourceFingerprint' => $sourceFingerprint,
+            'appStyle' => $appStyle,
+            'dependencies' => $dependencies,
+        ];
 
-        if ($tree === null) {
+        if ($tree !== null) {
+            // Same compiled output, e.g. after the bundle was re-extracted:
+            // record the fingerprint so the next boot takes the fast path.
+            self::writeMetadata($metadataFile, $source, $hash, $className, $tag, $language, $fingerprint);
+        } else {
             $tree = TemplateCompiler::compile(
                 str_repeat("\n", max(0, $templateLine - 1)).$template,
                 $source,
@@ -152,15 +212,6 @@ final class PamPhpCompiler
                     $tree->toArray(),
                     JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
                 );
-                $encodedMetadata = json_encode([
-                    'version' => 4,
-                    'language' => $language->value,
-                    'uiIr' => UiIr::manifest($language),
-                    'hash' => $hash,
-                    'class' => $className,
-                    'tag' => $tag,
-                    'strict' => BuildConfiguration::strict(),
-                ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             } catch (JsonException $error) {
                 throw new RuntimeException(
                     "Cannot encode PAM component cache for {$source}.",
@@ -168,7 +219,7 @@ final class PamPhpCompiler
                 );
             }
             self::writeAtomic($templateFile, $encodedTree."\n");
-            self::writeAtomic($metadataFile, $encodedMetadata."\n");
+            self::writeMetadata($metadataFile, $source, $hash, $className, $tag, $language, $fingerprint);
         }
 
         return new PamPhpComponent(
@@ -179,6 +230,133 @@ final class PamPhpCompiler
             template: $tree,
             language: $language,
         );
+    }
+
+    /**
+     * @param array{sourceFingerprint: string, appStyle: ?string, dependencies: array<string, ?string>} $fingerprint
+     */
+    private static function writeMetadata(
+        string $metadataFile,
+        string $source,
+        string $hash,
+        string $className,
+        string $tag,
+        LanguageVersion $language,
+        array $fingerprint,
+    ): void {
+        try {
+            $encodedMetadata = json_encode([
+                'version' => self::CACHE_VERSION,
+                'language' => $language->value,
+                'uiIr' => UiIr::manifest($language),
+                'hash' => $hash,
+                'class' => $className,
+                'tag' => $tag,
+                'strict' => BuildConfiguration::strict(),
+                ...$fingerprint,
+            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        } catch (JsonException $error) {
+            throw new RuntimeException(
+                "Cannot encode PAM component cache for {$source}.",
+                previous: $error,
+            );
+        }
+        self::writeAtomic($metadataFile, $encodedMetadata."\n");
+    }
+
+    /**
+     * Returns the cached component when its source, the project stylesheet
+     * location and every stylesheet it imported still have the fingerprints
+     * recorded at compile time, under the same compiler settings.
+     */
+    private static function freshComponent(
+        string $source,
+        string $sourceFingerprint,
+        string $metadataFile,
+        string $templateFile,
+        string $classFile,
+    ): ?PamPhpComponent {
+        $encoded = @file_get_contents($metadataFile);
+        if ($encoded === false) {
+            return null;
+        }
+        try {
+            $metadata = json_decode($encoded, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+        if (
+            !is_array($metadata)
+            || ($metadata['version'] ?? null) !== self::CACHE_VERSION
+            || ($metadata['sourceFingerprint'] ?? null) !== $sourceFingerprint
+            || ($metadata['strict'] ?? null) !== BuildConfiguration::strict()
+            || !is_string($metadata['class'] ?? null)
+            || !is_string($metadata['tag'] ?? null)
+            || !is_int($metadata['language'] ?? null)
+            || !is_array($metadata['dependencies'] ?? null)
+            || !array_key_exists('appStyle', $metadata)
+            || $metadata['appStyle'] !== self::appStylePath($source)
+        ) {
+            return null;
+        }
+        $language = LanguageVersion::tryFrom($metadata['language']);
+        if ($language === null || ($metadata['uiIr'] ?? null) !== UiIr::manifest($language)) {
+            return null;
+        }
+        foreach ($metadata['dependencies'] as $dependency => $fingerprint) {
+            if (self::dependencyFingerprint((string) $dependency) !== $fingerprint) {
+                return null;
+            }
+        }
+        if (!is_file($classFile) || !is_file($templateFile)) {
+            return null;
+        }
+
+        return new PamPhpComponent(
+            className: $metadata['class'],
+            tag: $metadata['tag'],
+            source: $source,
+            classFile: $classFile,
+            template: self::lazyTemplate($templateFile, $source),
+            language: $language,
+        );
+    }
+
+    private static function lazyTemplate(string $templateFile, string $source): CompiledTemplateNode
+    {
+        return (new ReflectionClass(CompiledTemplateNode::class))->newLazyProxy(
+            static function () use ($templateFile, $source): CompiledTemplateNode {
+                try {
+                    $tree = CompiledTemplateNode::hydrate(json_decode(
+                        (string) file_get_contents($templateFile),
+                        true,
+                        512,
+                        JSON_THROW_ON_ERROR,
+                    ));
+                } catch (JsonException $error) {
+                    throw new RuntimeException("PAM component cache for {$source} is corrupt.", previous: $error);
+                }
+                if ($tree === null) {
+                    throw new RuntimeException("PAM component cache for {$source} is corrupt.");
+                }
+
+                return $tree;
+            },
+        );
+    }
+
+    private static function dependencyFingerprint(string $path): ?string
+    {
+        if (array_key_exists($path, self::$dependencyFingerprints)) {
+            return self::$dependencyFingerprints[$path];
+        }
+        $contents = is_file($path) ? file_get_contents($path) : false;
+        $fingerprint = $contents === false ? null : hash('xxh128', $contents);
+        if (self::$directoryPass) {
+            self::$dependencyFingerprints[$path] = $fingerprint;
+        }
+
+        return $fingerprint;
     }
 
     /**
@@ -235,6 +413,20 @@ final class PamPhpCompiler
     private static function appStylePath(string $component): ?string
     {
         $directory = dirname($component);
+        if (array_key_exists($directory, self::$appStylePaths)) {
+            return self::$appStylePaths[$directory];
+        }
+
+        $path = self::locateAppStyle($directory);
+        if (self::$directoryPass) {
+            self::$appStylePaths[$directory] = $path;
+        }
+
+        return $path;
+    }
+
+    private static function locateAppStyle(string $directory): ?string
+    {
         while (true) {
             $manifest = $directory.DIRECTORY_SEPARATOR.'composer.json';
             if (is_file($manifest)) {
@@ -527,7 +719,7 @@ final class PamPhpCompiler
 
         if (
             !is_array($metadata)
-            || ($metadata['version'] ?? null) !== 4
+            || ($metadata['version'] ?? null) !== self::CACHE_VERSION
             || ($metadata['hash'] ?? null) !== $hash
             || ($metadata['class'] ?? null) !== $className
         ) {

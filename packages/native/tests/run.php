@@ -747,6 +747,17 @@ $assert(
         && $secondImportedStyles['tags']['Text']['textColor'] === 0xFF245E42,
     'Changing an imported CSS dependency must invalidate the compiled component cache.',
 );
+$freshImportedComponent = PamPhpCompiler::compileFile(
+    $cssImportComponent,
+    $cssImportCache,
+);
+$assert(
+    (new ReflectionClass(CompiledTemplateNode::class))->isUninitializedLazyObject($freshImportedComponent->template)
+        && $freshImportedComponent->className === $secondImportedComponent->className
+        && $freshImportedComponent->tag === $secondImportedComponent->tag
+        && $freshImportedComponent->template->toArray() === $secondImportedComponent->template->toArray(),
+    'An unchanged component must reuse its compiled identity and decode its template lazily.',
+);
 file_put_contents(
     $cssImportRoot.'/src/app.css',
     <<<'CSS'

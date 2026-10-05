@@ -60,11 +60,8 @@ impl BuildMode {
         }
     }
 
-    fn artifact_label(self) -> &'static str {
-        match self {
-            Self::Debug => "debug",
-            Self::Release => "release",
-        }
+    fn artifact_label(self, installable: bool) -> &'static str {
+        self.directory(installable)
     }
 }
 
@@ -220,6 +217,10 @@ struct AndroidOptions {
     debug_application_id_suffix: Option<String>,
     #[serde(default = "default_debug_firebase")]
     debug_firebase: bool,
+    /// Suffix for the installable release-optimized (`benchmark`) variant, so
+    /// profiling builds install beside production. Such builds omit Firebase.
+    #[serde(default)]
+    benchmark_application_id_suffix: Option<String>,
     #[serde(default)]
     permissions: Vec<String>,
     #[serde(default)]
@@ -332,6 +333,7 @@ impl Default for AndroidOptions {
             target_sdk: default_target_sdk(),
             debug_application_id_suffix: None,
             debug_firebase: true,
+            benchmark_application_id_suffix: None,
             permissions: Vec::new(),
             deep_links: Vec::new(),
             share_targets: Vec::new(),
@@ -887,8 +889,22 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "ios:screenshot" => screenshot_ios(parse_screenshot_options(arguments, "ios.png")?),
         "ios:devtools" => toggle_devtools_ios(parse_project_only(arguments)?),
         "build" => {
-            let options = parse_options(arguments, true)?;
-            build(options).map(|_| 0)
+            let mut forwarded = Vec::new();
+            let mut benchmark = false;
+            for argument in arguments {
+                if argument == "--benchmark" {
+                    benchmark = true;
+                } else {
+                    forwarded.push(argument);
+                }
+            }
+            let mut options = parse_options(forwarded.into_iter(), true)?;
+            if benchmark {
+                // Release-optimized (R8, non-debuggable, baseline profile) and
+                // debug-signed, installable without the release keystore.
+                options.mode = BuildMode::Release;
+            }
+            build(options, benchmark).map(|_| 0)
         }
         "package" => {
             let mut options = parse_options(arguments, true)?;
@@ -1396,6 +1412,18 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
         })
     {
         return Err("android.debugApplicationIdSuffix must start with a dot and contain valid Java package segments".to_owned());
+    }
+    if manifest
+        .android
+        .benchmark_application_id_suffix
+        .as_ref()
+        .is_some_and(|suffix| {
+            !suffix.starts_with('.')
+                || !valid_application_id(&format!("{}{}", manifest.application_id, suffix))
+                || manifest.android.debug_application_id_suffix.as_deref() == Some(suffix.as_str())
+        })
+    {
+        return Err("android.benchmarkApplicationIdSuffix must start with a dot, contain valid Java package segments and differ from android.debugApplicationIdSuffix".to_owned());
     }
     if manifest.name.trim().is_empty() || manifest.name.chars().count() > 80 {
         return Err("application name must contain between 1 and 80 characters".to_owned());
@@ -5256,7 +5284,7 @@ fn configure_android(
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
     )?;
     let properties = format!(
-        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\ndebugFirebase={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
+        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\ndebugFirebase={}\nbenchmarkApplicationIdSuffix={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
         property_value(&native_home.to_string_lossy()),
         property_value(&runtime.root.to_string_lossy()),
         property_value(&project.root.to_string_lossy()),
@@ -5268,6 +5296,12 @@ fn configure_android(
             .as_deref()
             .unwrap_or(""),
         project.manifest.android.debug_firebase,
+        project
+            .manifest
+            .android
+            .benchmark_application_id_suffix
+            .as_deref()
+            .unwrap_or(""),
         property_value(&project.manifest.name),
         project.manifest.android.min_sdk,
         project.manifest.android.target_sdk,
@@ -6465,6 +6499,7 @@ struct BuiltApk {
     project: Project,
     path: PathBuf,
     mode: BuildMode,
+    installable: bool,
 }
 
 fn build_intermediate(options: MobileOptions, installable: bool) -> Result<BuiltApk, String> {
@@ -6522,6 +6557,7 @@ fn build_intermediate(options: MobileOptions, installable: bool) -> Result<Built
         project,
         path: apk,
         mode: options.mode,
+        installable,
     })
 }
 
@@ -6572,7 +6608,7 @@ fn persist_built_apk(mut built: BuiltApk) -> Result<BuiltApk, String> {
         "{}-{}-android-{}.apk",
         android_artifact_stem(&built.project),
         built.project.manifest.version_name,
-        built.mode.artifact_label()
+        built.mode.artifact_label(built.installable)
     ));
     fs::copy(&built.path, &destination)
         .map_err(|error| format!("cannot copy {}: {error}", destination.display()))?;
@@ -6581,10 +6617,10 @@ fn persist_built_apk(mut built: BuiltApk) -> Result<BuiltApk, String> {
     Ok(built)
 }
 
-fn build(options: MobileOptions) -> Result<BuiltApk, String> {
+fn build(options: MobileOptions, installable: bool) -> Result<BuiltApk, String> {
     let project_root = options.project.clone();
     with_android_build_cleanup(&project_root, || {
-        persist_built_apk(build_intermediate(options, false)?)
+        persist_built_apk(build_intermediate(options, installable)?)
     })
 }
 
@@ -6715,7 +6751,7 @@ fn certify(options: ReleaseOptions) -> Result<u8, String> {
                 project: options.project,
                 mode: BuildMode::Release,
                 abis: default_abis(),
-            })?;
+            }, false)?;
         }
         ReleasePlatform::Ios => {
             build_ios(options.project, true)?;
@@ -6730,7 +6766,7 @@ fn certify(options: ReleaseOptions) -> Result<u8, String> {
                 project: options.project.clone(),
                 mode: BuildMode::Release,
                 abis: default_abis(),
-            })?;
+            }, false)?;
             build_ios(options.project, true)?;
         }
     }
@@ -7636,7 +7672,7 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
     install_apk(apk)?;
     let application_id = match mode {
         BuildMode::Debug => debug_application_id(project),
-        BuildMode::Release => project.manifest.application_id.clone(),
+        BuildMode::Release => benchmark_application_id(project),
     };
     launch_android_activity(&application_id)?;
     println!("Started {application_id}");
@@ -7881,6 +7917,20 @@ fn transient_adb_launch_failure(diagnostic: &str) -> bool {
         || diagnostic.contains("broken pipe")
         || diagnostic.contains("too early to start activity")
         || package_manager_startup_failure
+}
+
+/// Package of the installable release-optimized (`benchmark`) variant.
+fn benchmark_application_id(project: &Project) -> String {
+    format!(
+        "{}{}",
+        project.manifest.application_id,
+        project
+            .manifest
+            .android
+            .benchmark_application_id_suffix
+            .as_deref()
+            .unwrap_or("")
+    )
 }
 
 fn debug_application_id(project: &Project) -> String {
@@ -8450,7 +8500,8 @@ mod tests {
     fn release_run_uses_the_minified_locally_installable_variant() {
         assert_eq!(BuildMode::Release.gradle_task(true), "assembleBenchmark");
         assert_eq!(BuildMode::Release.directory(true), "benchmark");
-        assert_eq!(BuildMode::Release.artifact_label(), "release");
+        assert_eq!(BuildMode::Release.artifact_label(false), "release");
+        assert_eq!(BuildMode::Release.artifact_label(true), "benchmark");
         assert_eq!(BuildMode::Release.gradle_task(false), "assembleRelease");
         assert_eq!(BuildMode::Release.directory(false), "release");
     }
@@ -9723,6 +9774,7 @@ mod tests {
                 project,
                 path: intermediate,
                 mode: BuildMode::Debug,
+                installable: false,
             })
         })
         .expect("persist and clean");

@@ -12,6 +12,18 @@ internal class ActiveUpdateInstaller(private val context: Context) {
         val bundle = File(updates, "active.bundle")
         val metadata = File(updates, "active.json")
         if (!bundle.isFile || !metadata.isFile) return embeddedEntry
+        // An OTA slot patches the APK bundle it was activated over. Once a
+        // newer APK ships a different embedded bundle, that bundle wins: the
+        // slot is discarded instead of masking the install until `pm clear`.
+        val embeddedRelease = embeddedEntry.parentFile?.name.orEmpty()
+        val base = File(updates, BASE_STAMP)
+        val recordedBase = if (base.isFile) base.readText(Charsets.UTF_8).trim() else ""
+        if (recordedBase.isEmpty()) {
+            runCatching { base.writeText(embeddedRelease, Charsets.UTF_8) }
+        } else if (recordedBase != embeddedRelease) {
+            discardSupersededUpdates(updates)
+            return embeddedEntry
+        }
 
         return runCatching {
             require(bundle.length() in 1..MAX_BUNDLE_BYTES.toLong()) { "OTA bundle size is invalid" }
@@ -32,6 +44,11 @@ internal class ActiveUpdateInstaller(private val context: Context) {
             quarantine(updates)
             embeddedEntry
         }
+    }
+
+    private fun discardSupersededUpdates(updates: File) {
+        updates.listFiles().orEmpty().forEach { it.deleteRecursively() }
+        File(context.filesDir, "pam/ota-releases").deleteRecursively()
     }
 
     private fun quarantine(updates: File) {
@@ -58,5 +75,6 @@ internal class ActiveUpdateInstaller(private val context: Context) {
 
     private companion object {
         const val MAX_BUNDLE_BYTES = 256 * 1024 * 1024
+        const val BASE_STAMP = "active.base"
     }
 }

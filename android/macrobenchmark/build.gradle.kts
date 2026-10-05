@@ -7,7 +7,8 @@ plugins {
 val pamProperties = Properties().apply {
     rootProject.file("pam-native.properties").inputStream().use(::load)
 }
-val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp")
+val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp") +
+    pamProperties.getProperty("benchmarkApplicationIdSuffix", "")
 
 android {
     namespace = "dev.pam.nativeapp.benchmark"

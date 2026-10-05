@@ -133,6 +133,13 @@ instead: debug builds then omit Firebase Messaging, use the `.debug` suffix
 (push registration reports an actionable failure) and release builds keep
 Firebase.
 
+`pam-native build --benchmark` produces the installable release-optimized
+variant (R8, non-debuggable, baseline profile, signed with the local debug key)
+in `dist/<name>-<version>-android-benchmark.apk`; `run --release`, `benchmark`
+and `profile` use the same variant. Set `android.benchmarkApplicationIdSuffix`
+(for example `.perf`) to install it beside production for cold-start and
+profiling measurements; such builds omit Firebase Messaging.
+
 iOS notification delegates forward foreground delivery with
 `PamPushNotifications.didReceive(notification:)` and opening with
 `PamPushNotifications.didOpen(response:)`.
