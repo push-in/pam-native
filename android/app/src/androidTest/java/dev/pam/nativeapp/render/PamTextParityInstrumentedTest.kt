@@ -141,6 +141,46 @@ class PamTextParityInstrumentedTest {
         renderText(properties("Aa", style(pad = false)), 100f, 40f) { view -> assertFalse(view.includeFontPadding) }
     }
 
+    @Test
+    fun onLayoutReportsTheFrameRelativeToItsParentOnce() {
+        val events = mutableListOf<Pair<Int, ByteArray>>()
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as PamTestActivity
+        try {
+            lateinit var renderer: PamRenderer
+            instrumentation.runOnMainSync {
+                renderer = PamRenderer(activity, activity.host) { _, kind, payload -> events += kind to payload }
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(NodeSpec(1, 0, 0, NodeKind.SCREEN, emptyMap())),
+                            Mutation.Create(NodeSpec(2, 1, 0, NodeKind.VIEW, emptyMap())),
+                            Mutation.Create(NodeSpec(3, 2, 0, NodeKind.VIEW, mapOf(PropKey.ON_LAYOUT to PropValue.Flag(true)))),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(10f, 20f, 300f, 300f)),
+                            Mutation.Layout(3, Frame(15.5f, 32f, 100f, 40.25f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                renderer.commit(listOf(listOf(Mutation.Layout(3, Frame(15.5f, 32f, 100f, 40.25f)))))
+            }
+            instrumentation.waitForIdleSync()
+            val layouts = events.filter { it.first == EventKind.LAYOUT.value }
+            assertEquals(1, layouts.size)
+            val values = dev.pam.nativeapp.protocol.WireMap.decode(layouts.single().second)
+            assertEquals(5.5, (values["x"] as dev.pam.nativeapp.protocol.WireValue.Decimal).value, 0.001)
+            assertEquals(12.0, (values["y"] as dev.pam.nativeapp.protocol.WireValue.Decimal).value, 0.001)
+            assertEquals(40.25, (values["height"] as dev.pam.nativeapp.protocol.WireValue.Decimal).value, 0.001)
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     private fun renderText(
         properties: Map<PropKey, PropValue>,
         width: Float,

@@ -4571,6 +4571,8 @@ final class TemplateRenderer
                 ], true)
             ) {
                 $value = GestureEvent::fromPayload($payload);
+            } elseif ($kind === EventKind::Layout && is_string($payload)) {
+                $value = \Pam\Native\LayoutEvent::fromPayload($payload);
             } elseif ($kind === EventKind::Toggle) {
                 $value = $payload === true || $payload === '1';
             } elseif (is_array($payload)) {

@@ -133,3 +133,22 @@ applied:
 @font-face { font-family: "Space Grotesk"; src: url(asset://fonts/SpaceGrotesk-SemiBold.ttf); font-weight: 600; }
 @font-face { font-family: "Space Grotesk"; src: url(asset://fonts/SpaceGrotesk-Bold.ttf); font-weight: 700; }
 ```
+
+## onLayout
+
+`on:layout` (template) or `Element::onLayout()` (PHP) receives a
+`Pam\Native\LayoutEvent` with `x`, `y`, `width` and `height` in points,
+relative to the parent, exactly like React Native's `onLayout`: once after
+mount and again whenever the frame changes, coalesced to one event per element
+per frame.
+
+```html
+<View on:layout="measured">…</View>
+```
+
+```php
+public function measured(LayoutEvent $layout): void
+{
+    $this->bubbleWidth = $layout->width;
+}
+```

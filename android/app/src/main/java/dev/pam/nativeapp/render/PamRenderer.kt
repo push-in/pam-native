@@ -616,6 +616,7 @@ class PamRenderer(
             if (holder != null) materializeCell(cellRoot, holder)
         }
         dirtyLayouts.forEach(::applyLayout)
+        dirtyLayouts.forEach(::queueLayoutEvent)
         retainedScrollOffsets.forEach { (id, offset) ->
             if (id !in explicitlyUpdatedScrollOffsets) {
                 (views[id] as? PamScrollContainer)?.restoreOffsetPixels(
@@ -1968,6 +1969,10 @@ class PamRenderer(
             PropKey.ON_SPAN_PRESS,
             -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
             PropKey.INCLUDE_FONT_PADDING -> (view as? TextView)?.includeFontPadding = value.flag()
+            PropKey.ON_LAYOUT -> {
+                lastLayoutEvents.remove(state.id)
+                queueLayoutEvent(state.id)
+            }
             PropKey.VALUE -> when (view) {
                 is EditText -> applyInputValue(view, state, value.text(key))
                 is PamDrawingCanvas -> view.setDrawing(value.text(key))
@@ -2658,7 +2663,6 @@ class PamRenderer(
             PropKey.MARGIN_BOTTOM_AUTO,
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
-            PropKey.ON_LAYOUT,
             PropKey.STICKY_HEADER,
             PropKey.ON_MEDIA_BUFFERING,
             PropKey.ON_MEDIA_LOAD_START,
@@ -3313,7 +3317,7 @@ class PamRenderer(
             PropKey.ON_SPAN_PRESS,
             -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
             PropKey.INCLUDE_FONT_PADDING -> (view as? TextView)?.includeFontPadding = view !is EditText
-            PropKey.ON_LAYOUT,
+            PropKey.ON_LAYOUT -> lastLayoutEvents.remove(state.id)
             PropKey.STICKY_HEADER,
             PropKey.ON_MEDIA_BUFFERING,
             PropKey.ON_MEDIA_LOAD_START,
@@ -5671,6 +5675,53 @@ class PamRenderer(
             TEXT_BREAK_SIMPLE -> ANDROID_BREAK_SIMPLE
             TEXT_BREAK_BALANCED -> ANDROID_BREAK_BALANCED
             else -> ANDROID_BREAK_HIGH_QUALITY
+        }
+    }
+
+    private val lastLayoutEvents = HashMap<Long, Frame>()
+    private val pendingLayoutEvents = LinkedHashSet<Long>()
+    private var layoutEventsPosted = false
+
+    /** React Native onLayout: frame relative to the parent, coalesced per frame. */
+    private fun queueLayoutEvent(id: Long) {
+        val state = nodes[id] ?: return
+        if (state.properties[PropKey.ON_LAYOUT] == null) return
+        pendingLayoutEvents += id
+        if (!layoutEventsPosted) {
+            layoutEventsPosted = true
+            main.post(::flushLayoutEvents)
+        }
+    }
+
+    private fun flushLayoutEvents() {
+        layoutEventsPosted = false
+        val ids = pendingLayoutEvents.toList()
+        pendingLayoutEvents.clear()
+        for (id in ids) {
+            val state = nodes[id] ?: continue
+            if (state.properties[PropKey.ON_LAYOUT] == null) continue
+            val frame = frames[id] ?: continue
+            val parent = frames[state.parent]
+            val relative = Frame(
+                frame.x - (parent?.x ?: 0f),
+                frame.y - (parent?.y ?: 0f),
+                frame.width,
+                frame.height,
+            )
+            if (lastLayoutEvents[id] == relative) continue
+            lastLayoutEvents[id] = relative
+            dispatchBytes(
+                id,
+                EventKind.LAYOUT.value,
+                WireMap.encode(
+                    mapOf(
+                        "x" to WireValue.Decimal(relative.x.toDouble()),
+                        "y" to WireValue.Decimal(relative.y.toDouble()),
+                        "width" to WireValue.Decimal(relative.width.toDouble()),
+                        "height" to WireValue.Decimal(relative.height.toDouble()),
+                    ),
+                ),
+            )
         }
     }
 

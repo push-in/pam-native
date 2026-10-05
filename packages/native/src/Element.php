@@ -279,6 +279,22 @@ abstract class Element implements Renderable
         return $this->withEvent($kind, $handler);
     }
 
+    /**
+     * React Native `onLayout`: receives a {@see LayoutEvent} with the frame
+     * relative to the parent on mount and after every frame change.
+     *
+     * @param Closure(LayoutEvent): void $handler
+     */
+    final public function onLayout(Closure $handler): static
+    {
+        return $this->withEvent(
+            EventKind::Layout,
+            static function (mixed $payload = '') use ($handler): void {
+                $handler(LayoutEvent::fromPayload(is_string($payload) ? $payload : ''));
+            },
+        );
+    }
+
     final public function toElement(): Element
     {
         return $this;
