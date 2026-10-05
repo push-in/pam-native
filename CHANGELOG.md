@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.10.0 - 2026-10-05
+
+Lifecycle and mount-cost fixes from Zé Chat device QA.
+
+- Android relaunch after Back at the root no longer stays on the splash/dark
+  window. Embedded PHP is now process scoped: a destroyed `PamActivity` only
+  detaches its surface and the next Activity re-attaches to the live runtime
+  (renderer, modules and callbacks rebound) while the engine replays the
+  retained tree as a full mount (`pam_native_engine_remount`), in order with
+  the worker's batches. PHP state survives; nothing re-executes. Relaunch
+  renders in ~60 ms on the API 36 emulator
+  (`PamActivityRelaunchInstrumentedTest`, budget 1 s).
+- Root cause of the 1.7.0 Scudo abort ("corrupted chunk header" on the PHP
+  worker after the Activity stopped): the bridge stored request-allocated
+  (`emalloc`) strings in PHP's persistent ini configuration hash and
+  `php_embed_shutdown` freed them with `free()`
+  (`zend_hash_destroy` ← `php_shutdown_config`). The ini defaults are now
+  persistent strings, and shutting the runtime down never blocks the UI
+  thread.
+- `CloseApp` (Back at the root of a stack) follows React Native's
+  `invokeDefaultOnBackPressed()`: Android 12+ moves the root task to the
+  background instead of finishing it; older releases finish and re-attach.
+- Native module results above the bridge limit (raised from 1 MiB to
+  32 MiB) reach PHP as a `Failure` with a clear message instead of being
+  dropped, on Android and iOS.
+- Android mount: no full-tree passes per commit. Hosted insertion indexes
+  walk the host's children instead of every node, sibling lists use binary
+  insertion (prepends were quadratic), only changed virtual lists are
+  re-synced, StatusBar merging scans status-bar nodes only and touches the
+  window/insets controller only when the merged state changed, host
+  background is written on change, local modal triggers skip plain
+  pressables, unmaterialized list rows skip layout work. Debug builds on the
+  emulator: inline-keyboard tap 2.4 → 1.7 ms, timestamp refresh 1.9 → 1.6 ms
+  (p50); release builds were already ~0.6 ms / ~0.8 ms. Batch decode stays on
+  the PHP worker thread; prepending a 30-row page mounts no off-screen views
+  and keeps the scroll anchor.
+- Regression tests: virtual lists never draw a blank viewport when every
+  visible cell changes props, is promoted to a host view, resized at the end
+  or re-keyed in one commit (`PamVirtualListRebindInstrumentedTest`).
+- iOS (written on Linux, bridge syntax-checked, **Swift needs Mac
+  validation**): same remount bridge (`pam_native_runtime_remount`),
+  `PamRuntime.attach(hostView:)`/`detach()`, `PamNativeViewController`
+  re-attaches to the live runtime; renderer uses binary sibling insertion,
+  dirty-list syncing and re-binds modal triggers only on structural or marker
+  changes.
+
 ## 1.9.1 - 2026-10-05
 
 - iOS SQLite reuses compiled statements per database (32-entry LRU keyed by
