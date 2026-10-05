@@ -130,6 +130,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         applyInitialPosition()
     }
 
+    /** Holder container bound to virtual cell [id], or null when it is off screen. */
+    fun boundContainer(id: Long): FrameLayout? =
+        (adapter as? RichRecyclerAdapter)?.boundContainer(id)
+
     fun setRichItems(
         ids: List<Long>,
         extents: Map<Long, Float>,
@@ -778,6 +782,10 @@ private class RichRecyclerAdapter(
 
     private fun dp(value: Float): Int =
         (value * context.resources.displayMetrics.density + 0.5f).toInt()
+
+    /** Container currently bound to cell [id], if that cell is on screen. */
+    fun boundContainer(id: Long): FrameLayout? =
+        boundHolders.firstOrNull { it.boundId == id }?.container
 
     class RichHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container) {
         var boundId: Long = RecyclerView.NO_ID

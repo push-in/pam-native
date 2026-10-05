@@ -102,6 +102,8 @@ import kotlin.math.roundToInt
 internal const val PAM_PHYSICAL_FRAME_GRAVITY: Int = Gravity.TOP or Gravity.LEFT
 
 private const val LOCAL_MODAL_SELECTION_BEHAVIOR = 24L
+private const val MAX_POOLED_CELL_VIEWS_PER_SHAPE = 24
+private val POOLED_CELL_KINDS = setOf(NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT)
 private const val KEYBOARD_VIEWPORT_RECONCILE_RETRIES = 8
 private const val KEYBOARD_VIEWPORT_RECONCILE_RETRY_MS = 100L
 
@@ -395,6 +397,9 @@ class PamRenderer(
     private val pressableIds = LinkedHashSet<Long>()
     private val inputIds = LinkedHashSet<Long>()
     private val nodes = LongSparseArray<NodeState>()
+
+    /** True while [id] is part of the committed tree (events for removed nodes are stale). */
+    fun hasNode(id: Long): Boolean = nodes.indexOfKey(id) >= 0
     private val frames = LongSparseArray<Frame>()
     private val children = LongSparseArray<MutableList<Long>>()
     private val imageLoader = NativeImageLoader(context)
@@ -407,6 +412,56 @@ class PamRenderer(
     private var statusBarColorAnimator: ValueAnimator? = null
     private var lastFocusedInput: EditText? = null
     private val deferredViewportLayouts = HashMap<Long, Pair<View, View.OnLayoutChangeListener>>()
+
+    /**
+     * Views of scrolled-out list cells, reused for cells with the same node
+     * kind and the same set of authored properties. With an identical key set
+     * every property is re-applied on reuse, so no stale value can survive.
+     */
+    private val cellViewPool = HashMap<String, ArrayDeque<View>>()
+    private val cellViewShapes = java.util.WeakHashMap<View, String>()
+    private var recyclingCell = false
+
+    private fun cellViewShape(state: NodeState): String? {
+        if (state.kind !in POOLED_CELL_KINDS) return null
+        val keys = state.properties.keys.map(PropKey::value).sorted()
+        return state.kind.value.toString() + ":" + keys.joinToString(",")
+    }
+
+    private fun takePooledCellView(state: NodeState): View? {
+        val shape = cellViewShape(state) ?: return null
+        val pool = cellViewPool[shape] ?: return null
+        val view = pool.removeLastOrNull() ?: return null
+        cellViewShapes.remove(view)
+        return view
+    }
+
+    private fun poolCellView(id: Long, state: NodeState, view: View) {
+        if (!recyclingCell || deferredViewportLayouts.containsKey(id)) return
+        if (view.javaClass != PamContainer::class.java && view.javaClass != TextView::class.java) return
+        val shape = cellViewShape(state) ?: return
+        val pool = cellViewPool.getOrPut(shape) { ArrayDeque() }
+        if (pool.size >= MAX_POOLED_CELL_VIEWS_PER_SHAPE) return
+        view.animate().cancel()
+        view.alpha = 1f
+        view.translationX = 0f
+        view.translationY = 0f
+        view.scaleX = 1f
+        view.scaleY = 1f
+        view.rotation = 0f
+        view.visibility = View.VISIBLE
+        cellViewShapes[view] = shape
+        pool.addLast(view)
+    }
+
+    private fun recycleCell(id: Long) {
+        recyclingCell = true
+        try {
+            dematerializeSubtree(id)
+        } finally {
+            recyclingCell = false
+        }
+    }
 
     private fun putView(id: Long, view: View) {
         views.put(id, view)
@@ -848,7 +903,7 @@ class PamRenderer(
         nodes.put(spec.id, state)
         if (state.kind == NodeKind.VIRTUAL_LIST) virtualListIds.add(spec.id)
         if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
-        addChild(state.parent, state.id)
+        addChild(state.parent, state.id, fresh = true)
         if (!state.virtual && virtualListAncestor(state.parent) == null) {
             val view = createView(spec.kind, state)
             if (view is TextView) {
@@ -1076,9 +1131,21 @@ class PamRenderer(
         }
     }
 
-    private fun addChild(parent: Long, id: Long) {
+    private fun addChild(parent: Long, id: Long, fresh: Boolean = false) {
         if (parent == 0L) return
         val siblings = children[parent] ?: ArrayList<Long>().also { children.put(parent, it) }
+        val index = nodes[id]?.index ?: Int.MAX_VALUE
+        if (fresh) {
+            // Creation streams arrive in sibling order: append without the
+            // O(n) contains + O(n log n) sort per insert (quadratic for long
+            // lists); fall back to a full sort only when out of order.
+            val last = siblings.lastOrNull()
+            siblings += id
+            if (last != null && (nodes[last]?.index ?: Int.MAX_VALUE) > index) {
+                siblings.sortBy { child -> nodes[child]?.index ?: Int.MAX_VALUE }
+            }
+            return
+        }
         if (!siblings.contains(id)) siblings += id
         siblings.sortBy { child -> nodes[child]?.index ?: Int.MAX_VALUE }
     }
@@ -1108,7 +1175,7 @@ class PamRenderer(
                 ids = itemIds,
                 extents = itemExtents,
                 mount = { id, holder -> materializeCell(id, holder) },
-                unmount = { id, _ -> dematerializeSubtree(id) },
+                unmount = { id, _ -> recycleCell(id) },
             )
         }
     }
@@ -1199,7 +1266,7 @@ class PamRenderer(
     ) {
         val state = nodes[id] ?: return
         if (!state.virtual && views[id] == null) {
-            val view = createView(state.kind, state)
+            val view = takePooledCellView(state) ?: createView(state.kind, state)
             if (view is TextView) state.defaultHighlightColor = view.highlightColor
             putView(id, view)
             attachCellView(view, state, rootId, holder)
@@ -1286,6 +1353,7 @@ class PamRenderer(
         if (navigationParent != null) navigationParent.removeRoute(view)
         else (view.parent as? ViewGroup)?.removeView(view)
         removeView(id)
+        poolCellView(id, state, view)
     }
 
     private fun attach(view: View, parentId: Long, index: Int) {
@@ -1846,6 +1914,13 @@ class PamRenderer(
     }
 
     private fun virtualCellHolder(rootId: Long): FrameLayout? {
+        // Fast path: ask the owning list for the holder bound to this cell
+        // instead of scanning every materialized view.
+        val listId = nodes[rootId]?.parent
+        val list = listId?.let { views[it] } as? PamRecyclerList
+        if (list != null && nodes[listId]?.kind == NodeKind.VIRTUAL_LIST) {
+            return list.boundContainer(rootId)
+        }
         for (position in 0 until views.size()) {
             val id = views.keyAt(position)
             if (id != rootId && virtualCellRoot(id) != rootId) continue

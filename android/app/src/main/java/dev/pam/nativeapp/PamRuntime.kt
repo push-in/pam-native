@@ -439,7 +439,11 @@ class PamRuntime(
             val active = handle
             if (active == 0L) return
             current.forEach { (identity, payload) ->
-                nativeDispatchEvent(active, identity.nodeId, identity.kind, payload)
+                // Coalesced events wait for the next frame; drop those whose
+                // node was removed meanwhile instead of waking PHP for them.
+                if (identity.nodeId == 0L || renderer.hasNode(identity.nodeId)) {
+                    nativeDispatchEvent(active, identity.nodeId, identity.kind, payload)
+                }
             }
         }
     }
