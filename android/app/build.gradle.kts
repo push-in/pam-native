@@ -36,6 +36,8 @@ val pamPluginProperties = Properties().apply {
     }
 }
 val pamApplicationId = pamProperties.getProperty("applicationId", "dev.pam.nativeapp")
+val pamDebugApplicationIdSuffix = pamProperties.getProperty("debugApplicationIdSuffix")
+    ?.takeIf(String::isNotBlank)
 val pamApplicationName = pamProperties.getProperty("applicationName", "Pam Native")
 val pamNativeHome = providers.gradleProperty("pamNativeRoot")
     .orElse(providers.environmentVariable("PAM_NATIVE_ROOT"))
@@ -138,7 +140,9 @@ android {
 
     buildTypes {
         debug {
-            if (!pamFirebaseMessagingEnabled) {
+            if (pamDebugApplicationIdSuffix != null) {
+                applicationIdSuffix = pamDebugApplicationIdSuffix
+            } else if (!pamFirebaseMessagingEnabled) {
                 applicationIdSuffix = ".debug"
             }
             isJniDebuggable = true

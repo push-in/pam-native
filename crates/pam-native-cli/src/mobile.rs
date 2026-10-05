@@ -210,6 +210,8 @@ struct AndroidOptions {
     #[serde(default = "default_target_sdk")]
     target_sdk: u32,
     #[serde(default)]
+    debug_application_id_suffix: Option<String>,
+    #[serde(default)]
     permissions: Vec<String>,
     #[serde(default)]
     deep_links: Vec<AndroidDeepLink>,
@@ -222,6 +224,7 @@ impl Default for AndroidOptions {
         Self {
             min_sdk: default_min_sdk(),
             target_sdk: default_target_sdk(),
+            debug_application_id_suffix: None,
             permissions: Vec::new(),
             deep_links: Vec::new(),
             share_targets: Vec::new(),
@@ -1268,6 +1271,17 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
     }
     if !valid_application_id(&manifest.application_id) {
         return Err("applicationId must be a dot-separated Java package name".to_owned());
+    }
+    if manifest
+        .android
+        .debug_application_id_suffix
+        .as_ref()
+        .is_some_and(|suffix| {
+            !suffix.starts_with('.')
+                || !valid_application_id(&format!("{}{}", manifest.application_id, suffix))
+        })
+    {
+        return Err("android.debugApplicationIdSuffix must start with a dot and contain valid Java package segments".to_owned());
     }
     if manifest.name.trim().is_empty() || manifest.name.chars().count() > 80 {
         return Err("application name must contain between 1 and 80 characters".to_owned());
@@ -4933,11 +4947,17 @@ fn configure_android(
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
     )?;
     let properties = format!(
-        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
+        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\ndebugApplicationIdSuffix={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
         property_value(&native_home.to_string_lossy()),
         property_value(&runtime.root.to_string_lossy()),
         property_value(&project.root.to_string_lossy()),
         project.manifest.application_id,
+        project
+            .manifest
+            .android
+            .debug_application_id_suffix
+            .as_deref()
+            .unwrap_or(""),
         property_value(&project.manifest.name),
         project.manifest.android.min_sdk,
         project.manifest.android.target_sdk,
@@ -7521,6 +7541,9 @@ fn debug_application_id(project: &Project) -> String {
 }
 
 fn debug_application_id_for(root: &Path, manifest: &NativeManifest) -> String {
+    if let Some(suffix) = &manifest.android.debug_application_id_suffix {
+        return format!("{}{}", manifest.application_id, suffix);
+    }
     let firebase_enabled = [
         root.join(".pam/google-services.json"),
         root.join("google-services.json"),
@@ -7915,14 +7938,11 @@ fn write_atomic(path: &Path, contents: &[u8]) -> Result<(), String> {
     // Generated Android and iOS source files participate in Gradle/Xcode's
     // incremental build graph. Replacing an identical file needlessly rebuilds
     // the host and every target that imports it.
-    if let Ok(metadata) = fs::metadata(path) {
-        if metadata.is_file() && metadata.len() == contents.len() as u64 {
-            if let Ok(previous) = fs::read(path) {
-                if previous == contents {
-                    return Ok(());
-                }
-            }
-        }
+    if fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.len() == contents.len() as u64)
+        && fs::read(path).is_ok_and(|previous| previous == contents)
+    {
+        return Ok(());
     }
     let parent = path
         .parent()
@@ -8561,6 +8581,30 @@ mod tests {
         fs::create_dir_all(root.join(".pam")).expect("pam state");
         fs::write(root.join(".pam/google-services.json"), "{}").expect("firebase config");
         assert_eq!(debug_application_id(&project), "app.pam.generated");
+
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.join(MANIFEST_NAME)).expect("read manifest"))
+                .expect("json");
+        manifest["android"] = serde_json::json!({ "debugApplicationIdSuffix": ".qa" });
+        fs::write(
+            root.join(MANIFEST_NAME),
+            serde_json::to_vec(&manifest).expect("json"),
+        )
+        .expect("manifest");
+        let project = load_project(&root).expect("project with debug suffix");
+        assert_eq!(debug_application_id(&project), "app.pam.generated.qa");
+        assert!(validate_manifest(&root, &project.manifest).is_ok());
+
+        manifest["android"]["debugApplicationIdSuffix"] = serde_json::json!(".bad-suffix");
+        fs::write(
+            root.join(MANIFEST_NAME),
+            serde_json::to_vec(&manifest).expect("json"),
+        )
+        .expect("manifest");
+        let invalid = load_project_manifest(&root)
+            .expect("parse invalid suffix")
+            .1;
+        assert!(validate_manifest(&root, &invalid).is_err());
 
         fs::remove_dir_all(root).expect("cleanup");
     }
