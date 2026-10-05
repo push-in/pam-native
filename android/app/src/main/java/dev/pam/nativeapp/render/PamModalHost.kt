@@ -108,6 +108,10 @@ internal class PamModalHost @JvmOverloads constructor(
     private var bottomSheetCornerRadius = 20f
     private var bottomSheetKeyboardBehavior = KEYBOARD_INTERACTIVE
     private var bottomSheetKeyboardInset = 0
+    private var sheetKeyboardTranslation = 0f
+    private var lastSheetHeight = 0
+    private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
+    private var backdropAnimator: android.animation.ValueAnimator? = null
     private var onBottomSheetChange: ((Int, Float) -> Unit)? = null
     private var onBottomSheetDismiss: (() -> Unit)? = null
     private var dragStartY = 0f
@@ -584,7 +588,23 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     private fun applyWindowLayout(modal: Dialog) {
-        val availableHeight = resources.displayMetrics.heightPixels
+        // @gorhom/bottom-sheet: percentage snap points resolve against the
+        // container minus the top safe-area inset.
+        val containerHeight = content.height.takeIf { it > 0 }
+            ?: modal.window?.decorView?.height?.takeIf { it > 0 }
+            ?: resources.displayMetrics.heightPixels
+        val topInset = content.rootWindowInsets?.let { insets ->
+            androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(insets)
+                .getInsets(
+                    androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                        androidx.core.view.WindowInsetsCompat.Type.displayCutout(),
+                ).top
+        } ?: 0
+        val availableHeight = if (presentation == PRESENTATION_SHEET) {
+            (containerHeight - topInset).coerceAtLeast(1)
+        } else {
+            resources.displayMetrics.heightPixels
+        }
         val baseSheetHeight = (availableHeight * bottomSheetSnapPoints[bottomSheetIndex])
             .toInt()
             .coerceAtLeast(1)
@@ -599,13 +619,16 @@ internal class PamModalHost @JvmOverloads constructor(
         } else {
             baseSheetHeight to 0f
         }
+        lastSheetHeight = sheetHeight
+        val sheetAnimating = presentation == PRESENTATION_SHEET && backdropAnimator?.isRunning == true
+        sheetKeyboardTranslation = keyboardTranslation
         repeat(content.childCount) { index ->
             val child = content.getChildAt(index)
             if (child === handle) return@repeat
             child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
-            child.translationY = keyboardTranslation
+            if (!sheetAnimating) child.translationY = keyboardTranslation
         }
-        handle.translationY = keyboardTranslation
+        if (!sheetAnimating) handle.translationY = keyboardTranslation
         modal.window?.setLayout(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -767,7 +790,47 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     private fun applyBackdrop() {
-        content.setBackgroundColor(backdropColor)
+        backdropDrawable.color = backdropColor
+        if (content.background !== backdropDrawable) content.background = backdropDrawable
+    }
+
+    /**
+     * Sheets animate like @gorhom/bottom-sheet: the backdrop fades while the
+     * sheet (and its handle) slide by their own height, independently.
+     */
+    private fun animateSheet(entering: Boolean, endAction: (() -> Unit)? = null) {
+        val distance = (lastSheetHeight.takeIf { it > 0 } ?: sheetChild()?.height ?: 0).toFloat() + dp(24f)
+        val movers = sheetChildren() + handle
+        backdropAnimator?.cancel()
+        content.alpha = 1f
+        content.translationY = 0f
+        val from = if (entering) 0 else backdropDrawable.alpha
+        val to = if (entering) 255 else 0
+        movers.forEach { view ->
+            view.animate().cancel()
+            if (entering) view.translationY = sheetKeyboardTranslation + distance
+            view.animate()
+                .translationY(if (entering) sheetKeyboardTranslation else sheetKeyboardTranslation + distance)
+                .setDuration(if (entering) SHEET_ENTER_DURATION_MS else SHEET_EXIT_DURATION_MS)
+                .setInterpolator(android.view.animation.DecelerateInterpolator(1.6f))
+                .start()
+        }
+        backdropAnimator = android.animation.ValueAnimator.ofInt(from, to).apply {
+            duration = if (entering) SHEET_ENTER_DURATION_MS else SHEET_EXIT_DURATION_MS
+            addUpdateListener { backdropDrawable.alpha = it.animatedValue as Int }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private var cancelled = false
+
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    cancelled = true
+                }
+
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (!cancelled) endAction?.invoke()
+                }
+            })
+            start()
+        }
     }
 
     /**
@@ -823,6 +886,17 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     private fun animateEntrance() {
+        backdropAnimator?.cancel()
+        backdropDrawable.alpha = 255
+        if (
+            presentation == PRESENTATION_SHEET &&
+            animationType != ANIMATION_NONE &&
+            !PamMotionPolicy.isReduced(context)
+        ) {
+            content.post { animateSheet(entering = true) }
+            backdropDrawable.alpha = 0
+            return
+        }
         content.animate().cancel()
         resetSlideFade()
         if (animationType == ANIMATION_NONE || PamMotionPolicy.isReduced(context)) {
@@ -859,6 +933,14 @@ internal class PamModalHost @JvmOverloads constructor(
             !PamMotionPolicy.isReduced(context)
         ) {
             val generation = ++dialogGeneration
+            if (presentation == PRESENTATION_SHEET) {
+                animateSheet(entering = false) {
+                    if (dialogGeneration == generation && dialog === modal && !desiredVisible) {
+                        dismissNow(modal, notify)
+                    }
+                }
+                return
+            }
             content.animate().cancel()
             if (animationType == ANIMATION_SLIDE_FADE) {
                 animateSlideFade(entering = false) {
@@ -896,6 +978,8 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun dismissNow(modal: Dialog, notify: Boolean) {
         if (dialog !== modal) return
         ++dialogGeneration
+        backdropAnimator?.cancel()
+        backdropDrawable.alpha = 255
         content.animate().cancel()
         resetSlideFade()
         content.alpha = 1f
@@ -991,6 +1075,8 @@ internal class PamModalHost @JvmOverloads constructor(
         const val KEYBOARD_FILL_PARENT = 3
         const val MODAL_ENTER_DURATION_MS = 225L
         const val MODAL_EXIT_DURATION_MS = 125L
+        const val SHEET_ENTER_DURATION_MS = 250L
+        const val SHEET_EXIT_DURATION_MS = 200L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
     }
 }

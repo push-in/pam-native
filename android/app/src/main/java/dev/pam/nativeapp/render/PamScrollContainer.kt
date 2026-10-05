@@ -66,10 +66,59 @@ internal class PamScrollContainer @JvmOverloads constructor(
         applyRequestedOffset()
     }
     private var viewportChanged: ((Float, Float) -> Unit)? = null
-    private val content = FrameLayout(context).apply {
+    private val stickyChildren = LinkedHashSet<View>()
+    private val content = object : FrameLayout(context) {
+        init {
+            isChildrenDrawingOrderEnabled = true
+        }
+
+        // Sticky headers draw above the rows that scroll underneath them.
+        override fun getChildDrawingOrder(childCount: Int, drawingPosition: Int): Int {
+            if (stickyChildren.isEmpty()) return drawingPosition
+            val regular = (0 until childCount).filter { getChildAt(it) !in stickyChildren }
+            val sticky = (0 until childCount).filter { getChildAt(it) in stickyChildren }
+            return (regular + sticky).getOrElse(drawingPosition) { drawingPosition }
+        }
+
+        override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+            super.onLayout(changed, left, top, right, bottom)
+            updateStickyChildren()
+        }
+    }.apply {
         clipChildren = false
         clipToPadding = false
         setBackgroundColor(Color.TRANSPARENT)
+    }
+
+    /**
+     * React Native sticky headers (`stickyHeaderIndices`): a sticky child stays
+     * pinned to the top of the viewport after it scrolls past it until the
+     * next sticky child pushes it away.
+     */
+    fun setSticky(child: View, sticky: Boolean) {
+        val changed = if (sticky) stickyChildren.add(child) else stickyChildren.remove(child)
+        if (!sticky) child.translationY = 0f
+        if (changed) {
+            content.invalidate()
+            updateStickyChildren()
+        }
+    }
+
+    private fun updateStickyChildren() {
+        if (stickyChildren.isEmpty()) return
+        stickyChildren.retainAll { it.parent === content }
+        val offset = if (horizontal) 0 else scrollYOf(activeScroll)
+        val ordered = stickyChildren.sortedBy(View::getTop)
+        ordered.forEachIndexed { index, child ->
+            val top = child.top
+            val nextTop = ordered.getOrNull(index + 1)?.top ?: Int.MAX_VALUE
+            val pinned = if (horizontal || offset <= top) {
+                0
+            } else {
+                minOf(offset - top, (nextTop - top - child.height).coerceAtLeast(0))
+            }
+            if (child.translationY != pinned.toFloat()) child.translationY = pinned.toFloat()
+        }
     }
     private var activeScroll: ViewGroup = if (horizontal) createHorizontalScroll() else createVerticalScroll()
 
@@ -471,6 +520,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private fun createVerticalScroll(): ViewGroup =
         PamVerticalScrollView(indicatorContext(), ::dismissKeyboard).apply {
             setOnScrollChangeListener { _, scrollX, scrollY, _, _ ->
+                updateStickyChildren()
                 dispatchViewport(scrollX, scrollY)
             }
         }

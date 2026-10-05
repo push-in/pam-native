@@ -83,6 +83,11 @@ internal class PamMediaView(
     private var mediaController: MediaController? = null
     private var resumeAfterPause = false
     var onReady: (() -> Unit)? = null
+
+    /** Ready with natural video size (px) and duration (s). */
+    var onReadyDetails: ((Int, Int, Double) -> Unit)? = null
+    var onLoadStart: (() -> Unit)? = null
+    var onBuffering: ((Boolean) -> Unit)? = null
     var onProgress: ((Double, Double) -> Unit)? = null
     var onEnd: (() -> Unit)? = null
     var onError: ((String) -> Unit)? = null
@@ -273,6 +278,14 @@ internal class PamMediaView(
             applyVideoTransform()
             if (autoPlay) it.start()
             onReady?.invoke()
+            onReadyDetails?.invoke(it.videoWidth, it.videoHeight, it.duration.coerceAtLeast(0) / 1_000.0)
+        }
+        player.setOnInfoListener { _, what, _ ->
+            when (what) {
+                MediaPlayer.MEDIA_INFO_BUFFERING_START -> onBuffering?.invoke(true)
+                MediaPlayer.MEDIA_INFO_BUFFERING_END -> onBuffering?.invoke(false)
+            }
+            false
         }
         player.setOnCompletionListener {
             onEnd?.invoke()
@@ -288,6 +301,7 @@ internal class PamMediaView(
             onError?.invoke("Media playback failed ($what/$extra)")
             true
         }
+        onLoadStart?.invoke()
         runCatching {
             if (mediaDataSourceUsesNetworkString(uri.scheme)) {
                 player.setDataSource(uri.toString())

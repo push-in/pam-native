@@ -56,8 +56,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var richIds: List<Long> = emptyList()
     private var richExtents: Map<Long, Int> = emptyMap()
     private val accessibilityModes = IdentityHashMap<View, Int>()
+    private var stickyIds: Set<Long> = emptySet()
+    private val stickySnapshots = HashMap<Long, android.graphics.Bitmap>()
 
     init {
+        addItemDecoration(StickyHeaderDecoration())
         itemAnimator = null
         // PamScrollContainer coordinates ownership explicitly so a bounded
         // list and its page never consume the same drag simultaneously.
@@ -114,6 +117,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     override fun onChildDetachedFromWindow(child: View) {
+        val id = getChildItemId(child)
+        if (id in stickyIds) snapshot(child)?.let { stickySnapshots[id] = it }
         accessibilityModes.remove(child)?.let { child.importantForAccessibility = it }
         super.onChildDetachedFromWindow(child)
     }
@@ -263,6 +268,63 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         )
         dispatchViewport()
         return true
+    }
+
+    /**
+     * React Native sticky headers for virtualized lists: the last sticky row at
+     * or above the top edge is drawn pinned there until the next sticky row
+     * pushes it away. Rows recycle normally; the pinned copy is visual.
+     */
+    private var fullSpanIds: Set<Long> = emptySet()
+
+    /** ListHeaderComponent/ListFooterComponent-style rows spanning every column. */
+    fun setFullSpanIds(ids: Set<Long>) {
+        if (fullSpanIds == ids) return
+        fullSpanIds = ids
+        updateHeaderSpans()
+    }
+
+    fun setStickyIds(ids: Set<Long>) {
+        if (stickyIds == ids) return
+        stickyIds = ids
+        stickySnapshots.keys.retainAll(ids)
+        invalidateItemDecorations()
+    }
+
+    private fun snapshot(view: View): android.graphics.Bitmap? {
+        if (view.width <= 0 || view.height <= 0) return null
+        return android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+            .also { view.draw(android.graphics.Canvas(it)) }
+    }
+
+    private inner class StickyHeaderDecoration : ItemDecoration() {
+        override fun onDrawOver(canvas: android.graphics.Canvas, parent: RecyclerView, state: State) {
+            if (stickyIds.isEmpty() || horizontal || inverted || childCount == 0) return
+            val positions = richIds
+            var topPosition = Int.MAX_VALUE
+            for (index in 0 until childCount) {
+                val child = getChildAt(index)
+                if (child.bottom <= 0) continue
+                val position = getChildAdapterPosition(child)
+                if (position in 0 until topPosition) topPosition = position
+            }
+            if (topPosition == Int.MAX_VALUE) return
+            val stickyPosition = (topPosition downTo 0).firstOrNull { positions.getOrNull(it) in stickyIds } ?: return
+            val stickyId = positions[stickyPosition]
+            val attached = (0 until childCount).map(::getChildAt).firstOrNull { getChildItemId(it) == stickyId }
+            if (attached != null && attached.top >= 0) return
+            val bitmap = attached?.let(::snapshot)?.also { stickySnapshots[stickyId] = it }
+                ?: stickySnapshots[stickyId]
+                ?: return
+            val nextTop = (0 until childCount).map(::getChildAt)
+                .filter { child ->
+                    val position = getChildAdapterPosition(child)
+                    position > stickyPosition && positions.getOrNull(position) in stickyIds
+                }
+                .minOfOrNull(View::getTop)
+            val y = if (nextTop != null && nextTop < bitmap.height) (nextTop - bitmap.height).toFloat() else 0f
+            canvas.drawBitmap(bitmap, paddingLeft.toFloat(), y, null)
+        }
     }
 
     fun scrollToLogicalOffset(value: Float) {
@@ -623,6 +685,13 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     private fun updateHeaderSpans() {
         val grid = layoutManager as? GridLayoutManager ?: return
+        if (adapter is RichRecyclerAdapter) {
+            grid.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+                override fun getSpanSize(position: Int): Int =
+                    if (richIds.getOrNull(position) in fullSpanIds) grid.spanCount else 1
+            }
+            return
+        }
         val rows = adapter as? PackedRowAdapter ?: return
         grid.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
             override fun getSpanSize(position: Int): Int =

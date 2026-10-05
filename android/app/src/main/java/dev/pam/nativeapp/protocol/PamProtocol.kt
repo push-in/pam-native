@@ -677,7 +677,8 @@ enum class PropKey(val value: Int) {
     ON_SCROLL_BEGIN_DRAG(519),
     ON_SCROLL_END_DRAG(520),
     ON_MOMENTUM_SCROLL_END(521),
-    ON_TEXT_LAYOUT(522);
+    ON_TEXT_LAYOUT(522),
+    LIST_FULL_SPAN(523);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

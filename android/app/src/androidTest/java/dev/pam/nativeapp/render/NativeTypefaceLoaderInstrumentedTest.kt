@@ -32,4 +32,17 @@ class NativeTypefaceLoaderInstrumentedTest {
             assertTrue("Expected nondecreasing widths, got $widths", heavier >= lighter)
         }
     }
+
+    @Test
+    fun bareFamilyNamesResolveBundledFilesByReactNativeConvention() {
+        val context = InstrumentationRegistry.getInstrumentation().context
+        val loader = NativeTypefaceLoader(context)
+        fun width(face: android.graphics.Typeface) =
+            Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face; textSize = 64f }.measureText("linkinpay")
+        val packaged = width(loader.resolve("asset://fonts/Inter.ttf", 400, false))
+        val conventional = width(loader.resolve("Inter", 400, false))
+        val system = width(loader.resolve(null, 400, false))
+        assertEquals(packaged, conventional, 0.01f)
+        assertTrue("Inter must not fall back to the system font", kotlin.math.abs(conventional - system) > 0.5f)
+    }
 }

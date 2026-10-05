@@ -102,6 +102,33 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
     private fun toast(payload: ByteArray, completion: ModuleCompletion) {
         val values = WireMap.decode(payload)
         val message = values.text("message")
+        val activity = context as? Activity
+        if (values.containsKey("title") && activity != null) {
+            fun color(key: String, fallback: Long): Int =
+                ((values[key] as? WireValue.Integer)?.value ?: fallback).toInt()
+            fun number(key: String, fallback: Double): Double =
+                (values[key] as? WireValue.Decimal)?.value ?: (values[key] as? WireValue.Integer)?.value?.toDouble() ?: fallback
+            val spec = PamInAppToastSpec(
+                title = values.text("title"),
+                message = message,
+                accentColor = color("accentColor", 0xFF87CEFA),
+                backgroundColor = color("backgroundColor", 0xFFFFFFFF),
+                titleColor = color("titleColor", 0xFF000000),
+                messageColor = color("messageColor", 0xFF979797),
+                bottom = values.flag("bottom", false),
+                offsetDp = number("offset", 40.0).toFloat(),
+                durationMs = number("durationMs", 4_000.0).toLong(),
+                titleSize = number("titleSize", 12.0).toFloat(),
+                messageSize = number("messageSize", 10.0).toFloat(),
+                fontFamily = values.textOrNull("fontFamily"),
+            )
+            val typefaces = dev.pam.nativeapp.render.NativeTypefaceLoader.shared(activity)
+            main.post {
+                PamInAppToast.show(activity, spec) { family, weight -> typefaces.resolve(family, weight, false) }
+                completion.success()
+            }
+            return
+        }
         val duration = if (values.flag("long", false)) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
         main.post {
             Toast.makeText(context, message, duration).show()

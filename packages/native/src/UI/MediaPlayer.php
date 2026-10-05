@@ -109,9 +109,34 @@ final class MediaPlayer extends Element
         return $this->withProperty(PropKey::MediaThumbnailSource, $source);
     }
 
+    /** @param Closure(): void|Closure(\Pam\Native\MediaReadyEvent): void $handler */
     public function onReady(Closure $handler): self
     {
-        return $this->withEvent(EventKind::MediaReady, $handler);
+        $wantsEvent = (new \ReflectionFunction($handler))->getNumberOfParameters() > 0;
+
+        return $this->withEvent(
+            EventKind::MediaReady,
+            static fn (mixed $payload = ''): mixed => $wantsEvent
+                ? $handler(\Pam\Native\MediaReadyEvent::fromPayload(is_string($payload) ? $payload : ''))
+                : $handler(),
+        );
+    }
+
+    /** Playback started (true) or finished (false) waiting for data. @param Closure(bool): void $handler */
+    public function onBuffering(Closure $handler): self
+    {
+        return $this->withEvent(
+            EventKind::MediaBuffering,
+            static fn (mixed $payload = ''): mixed => $handler(
+                is_string($payload) && $payload !== '' && (bool) (Wire::decodeMap($payload)['buffering'] ?? false),
+            ),
+        );
+    }
+
+    /** The source started loading. */
+    public function onLoadStart(Closure $handler): self
+    {
+        return $this->withEvent(EventKind::MediaLoadStart, static fn (mixed $payload = ''): mixed => $handler());
     }
 
     /** @param Closure(float, float): void $handler */

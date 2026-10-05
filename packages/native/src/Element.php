@@ -331,6 +331,22 @@ abstract class Element implements Renderable
     }
 
     /**
+     * Sticky header inside a ScrollView or VirtualizedList (React Native
+     * `stickyHeaderIndices`): pinned to the top once scrolled past, until the
+     * next sticky sibling pushes it away.
+     */
+    final public function stickyHeader(bool $sticky = true): static
+    {
+        return $this->withProperty(PropKey::StickyHeader, $sticky);
+    }
+
+    /** VirtualizedList item spanning all columns (list header/footer). */
+    final public function fullSpan(bool $fullSpan = true): static
+    {
+        return $this->withProperty(PropKey::ListFullSpan, $fullSpan);
+    }
+
+    /**
      * React Native `onLayout`: receives a {@see LayoutEvent} with the frame
      * relative to the parent on mount and after every frame change.
      *

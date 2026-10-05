@@ -38,6 +38,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var onPressIn: ((PamPressPointer) -> Unit)? = null
     private var onPressOut: ((PamPressPointer) -> Unit)? = null
     private var onPressMove: ((PamPressPointer) -> Unit)? = null
+    /** Notified when the visual pressed state changes (CSS :pressed/:active styles). */
+    var onPressedStateChanged: ((Boolean) -> Unit)? = null
     private var pressOpacity = DEFAULT_PRESS_OPACITY
     private var pressScale = 1f
     private var targetOpacity = 1f
@@ -113,6 +115,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 .scaleY(targetScaleY)
                 .setDuration(PRESS_OUT_ANIMATION_MS)
                 .start()
+            onPressedStateChanged?.invoke(false)
             onPressOut?.invoke(lastPointer)
         }
     }
@@ -643,6 +646,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             .scaleY(targetScaleY * pressScale)
             .setDuration(PRESS_IN_ANIMATION_MS)
             .start()
+        onPressedStateChanged?.invoke(true)
         onPressIn?.invoke(pointer)
     }
 

@@ -480,6 +480,7 @@ final class TemplateRenderer
         'includeFontPadding' => PropKey::IncludeFontPadding,
         'stickyHeader' => PropKey::StickyHeader,
         'keyboardInset' => PropKey::ScrollKeyboardInset,
+        'fullSpan' => PropKey::ListFullSpan,
         'textTransform' => PropKey::TextTransform,
         'fontStyle' => PropKey::FontStyle,
         'widthPercent' => PropKey::WidthPercent,
@@ -1371,6 +1372,12 @@ final class TemplateRenderer
                 $values['value'] ?? self::modelValue($values, $scope),
                 'Input value',
             )),
+            'Icon' => \Pam\Native\UI\Icon::make(
+                self::stringValue($values['name'] ?? '', 'Icon name'),
+                self::stringValue($values['font'] ?? 'Ionicons', 'Icon font'),
+                isset($values['size']) ? self::floatValue($values['size'], 'Icon size') : 12.0,
+                isset($values['color']) ? self::colorValue($values['color'], 'Icon color') : 0xFF000000,
+            ),
             'Image' => Image::make(self::stringValue($values['source'] ?? '', 'Image source')),
             'DrawingCanvas' => DrawingCanvas::make(
                 self::stringValue($values['source'] ?? '', 'DrawingCanvas source'),
@@ -1543,6 +1550,10 @@ final class TemplateRenderer
 
         if ($factory === null && ($element instanceof Image || $element instanceof MediaPlayer)) {
             $element = self::mediaCacheAttributes($element, $values);
+        }
+
+        if ($factory === null && $tag === 'Icon') {
+            unset($values['name'], $values['font'], $values['size'], $values['color']);
         }
 
         if ($resolvedClass !== null) {
@@ -2653,6 +2664,7 @@ final class TemplateRenderer
             PropKey::IncludeFontPadding,
             PropKey::StickyHeader,
             PropKey::ScrollKeyboardInset,
+            PropKey::ListFullSpan,
             => self::boolValue($value, "Template {$key->name}"),
             PropKey::AnimationProgram => $value instanceof Animation
                 ? $value->encode()
@@ -3184,20 +3196,20 @@ final class TemplateRenderer
             $declarations = $stateRule['declarations'];
             if (!is_string($state) || !is_array($declarations)) continue;
             $declarations = self::resolveDynamicStyles(self::styleAttributes($declarations, 'state declarations'), $data);
-            if ($state === 'pressed') {
+            // CSS :active is the touch-down state, i.e. React Native's pressed style.
+            if ($state === 'pressed' || $state === 'active') {
                 if (isset($declarations['opacity'])) $attributes['pressedOpacity'] = $declarations['opacity'];
                 if (isset($declarations['scaleX'], $declarations['scaleY']) && $declarations['scaleX'] === $declarations['scaleY']) {
                     $attributes['pressedScale'] = $declarations['scaleX'];
                 }
             }
             $stateKind = match ($state) {
-                'pressed' => StyleInteractionState::Pressed,
+                'pressed', 'active' => StyleInteractionState::Pressed,
                 'focus', 'focus-visible' => StyleInteractionState::Focused,
                 'hover' => StyleInteractionState::Hovered,
                 'disabled' => StyleInteractionState::Disabled,
                 'checked' => StyleInteractionState::Checked,
                 'selected' => StyleInteractionState::Selected,
-                'active' => StyleInteractionState::Active,
                 'loading' => StyleInteractionState::Loading,
                 'error' => StyleInteractionState::Error,
                 default => null,
@@ -4675,6 +4687,10 @@ final class TemplateRenderer
                 $value = GestureEvent::fromPayload($payload);
             } elseif ($kind === EventKind::Layout && is_string($payload)) {
                 $value = \Pam\Native\LayoutEvent::fromPayload($payload);
+            } elseif ($kind === EventKind::MediaReady && is_string($payload)) {
+                $value = \Pam\Native\MediaReadyEvent::fromPayload($payload);
+            } elseif ($kind === EventKind::MediaBuffering && is_string($payload)) {
+                $value = (bool) (Wire::decodeMap($payload)['buffering'] ?? false);
             } elseif ($kind === EventKind::Toggle) {
                 $value = $payload === true || $payload === '1';
             } elseif (is_array($payload)) {
@@ -4694,6 +4710,15 @@ final class TemplateRenderer
                 throw new RuntimeException(
                     'Template event payload must be scalar, stringable, an object, or an array.',
                 );
+            }
+            if (
+                in_array($kind, [EventKind::Layout, EventKind::MediaReady], true)
+                && is_object($value)
+                && ($type = $method->getParameters()[0]->getType()) instanceof \ReflectionNamedType
+                && $type->getName() === 'string'
+            ) {
+                // Handlers written before typed payloads keep the raw string.
+                $value = is_string($payload) ? $payload : '';
             }
             $method->invoke($scope, $value);
         };

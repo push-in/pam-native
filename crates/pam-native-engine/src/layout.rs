@@ -564,9 +564,11 @@ fn layout_node(
                 .unwrap_or(1)
                 .clamp(1, 64) as usize
         };
-        let row_height = number(node, PropKey::ListRowHeight)
-            .unwrap_or(DEFAULT_CONTROL_HEIGHT)
-            .max(1.0);
+        // Vertical cells are content-sized (React Native FlatList); rowHeight
+        // is the estimate for unpopulated cells and the fixed width of
+        // horizontal cells, which are otherwise content-sized too.
+        let authored_row = number(node, PropKey::ListRowHeight).map(|height| height.max(1.0));
+        let row_height = authored_row.unwrap_or(DEFAULT_CONTROL_HEIGHT);
         let cell_width = if horizontal {
             row_height
         } else {
@@ -580,7 +582,20 @@ fn layout_node(
         if horizontal {
             let mut cursor = inner.x;
             for child in visible_children {
-                let item_width = number(child, PropKey::Width).unwrap_or(row_height).max(1.0);
+                let item_width = match (number(child, PropKey::Width), authored_row) {
+                    (Some(width), _) | (None, Some(width)) => width,
+                    (None, None) => intrinsic_extent(
+                        context.children,
+                        child,
+                        Axis::Horizontal,
+                        f32::INFINITY,
+                        inner.height,
+                        context.text_scale,
+                        context.text_metrics,
+                        depth + 1,
+                    )?,
+                }
+                .max(1.0);
                 let item_frame = Layout {
                     x: cursor,
                     y: inner.y,
@@ -592,40 +607,65 @@ fn layout_node(
             }
         } else {
             let mut cursor = inner.y;
-            for row in visible_children.chunks(columns) {
+            // ListHeaderComponent/ListFooterComponent-style full-span items
+            // occupy a whole row; the others fill `columns` per row.
+            let mut rows: Vec<Vec<&Node>> = Vec::new();
+            let mut pending: Vec<&Node> = Vec::new();
+            for child in visible_children.iter().copied() {
+                if boolean(child, PropKey::ListFullSpan) {
+                    if !pending.is_empty() {
+                        rows.push(std::mem::take(&mut pending));
+                    }
+                    rows.push(vec![child]);
+                } else {
+                    pending.push(child);
+                    if pending.len() == columns {
+                        rows.push(std::mem::take(&mut pending));
+                    }
+                }
+            }
+            if !pending.is_empty() {
+                rows.push(pending);
+            }
+            for row in &rows {
+                let full_span = row.len() == 1 && boolean(row[0], PropKey::ListFullSpan);
+                let cell_width = if full_span { inner.width } else { cell_width };
                 let authored = row
                     .iter()
                     .filter_map(|child| number(child, PropKey::Height))
                     .reduce(f32::max);
                 let item_height = match authored {
                     Some(height) => height,
-                    // A single-column cell without an authored height is
-                    // content-sized, like a React Native FlatList cell. The
-                    // estimate only remains for cells whose content has no
-                    // definite intrinsic extent (e.g. percentage-sized media)
-                    // and for empty cells that have not been populated yet.
-                    None if columns == 1
-                        && context
-                            .children
-                            .get(&row[0].id)
-                            .is_some_and(|cell| cell.iter().any(|child| visible(child))) =>
-                    {
-                        let measured = constrained_intrinsic_extent(
-                            context.children,
-                            row[0],
-                            Axis::Vertical,
-                            cell_width,
-                            inner.height,
-                            context.text_scale,
-                            context.text_metrics,
-                            depth + 1,
-                        )?;
-                        if measured > 0.0 { measured } else { row_height }
+                    // Cells without an authored height are content-sized, like
+                    // React Native FlatList cells (the tallest cell of a
+                    // multi-column row). The estimate only remains for cells
+                    // without a definite intrinsic extent or not populated yet.
+                    None => {
+                        let mut tallest = 0.0_f32;
+                        for child in row.iter().copied() {
+                            let populated = context
+                                .children
+                                .get(&child.id)
+                                .is_some_and(|cell| cell.iter().any(|grandchild| visible(grandchild)));
+                            if !populated {
+                                continue;
+                            }
+                            tallest = tallest.max(constrained_intrinsic_extent(
+                                context.children,
+                                child,
+                                Axis::Vertical,
+                                cell_width,
+                                inner.height,
+                                context.text_scale,
+                                context.text_metrics,
+                                depth + 1,
+                            )?);
+                        }
+                        if tallest > 0.0 { tallest } else { row_height }
                     }
-                    None => row_height,
                 }
                 .max(1.0);
-                for (column, child) in row.iter().enumerate() {
+                for (column, child) in row.iter().copied().enumerate() {
                     let item_frame = Layout {
                         x: inner.x + column as f32 * cell_width,
                         y: cursor,
@@ -6476,6 +6516,57 @@ mod css_flex_tests {
             legacy[&3].height, 56.0,
             "without host insets the legacy renderer owns safe areas"
         );
+    }
+
+    #[test]
+    fn virtual_list_cells_without_row_height_use_their_content_extent() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::VirtualList, vec![])),
+                (2, node(2, 1, 0, NodeKind::Column, vec![(PropKey::Padding, f(5.0))])),
+                (3, node(3, 2, 0, NodeKind::View, vec![(PropKey::Height, f(30.0))])),
+                (4, node(4, 1, 1, NodeKind::Column, vec![])),
+                (5, node(5, 4, 0, NodeKind::View, vec![(PropKey::Height, f(72.0))])),
+            ]),
+        };
+        let layouts = calculate(&tree, Size { width: 300.0, height: 600.0 }).unwrap();
+        assert_eq!(layouts[&2].height, 40.0);
+        assert_eq!(layouts[&4].y, 40.0);
+        assert_eq!(layouts[&4].height, 72.0);
+    }
+
+    #[test]
+    fn full_span_list_items_take_a_whole_row_in_multi_column_lists() {
+        let node = |id, index, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent: 1,
+            index,
+            kind: NodeKind::View,
+            properties: properties.into_iter().collect(),
+        };
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, Node { id: 1, parent: 0, index: 0, kind: NodeKind::VirtualList, properties: BTreeMap::from([(PropKey::ListNumColumns, i(2)), (PropKey::ListRowHeight, f(50.0))]) }),
+                (2, node(2, 0, vec![(PropKey::ListFullSpan, PropValue::Boolean(true)), (PropKey::Height, f(80.0))])),
+                (3, node(3, 1, vec![])),
+                (4, node(4, 2, vec![])),
+                (5, node(5, 3, vec![])),
+            ]),
+        };
+        let layouts = calculate(&tree, Size { width: 300.0, height: 600.0 }).unwrap();
+        assert_eq!((layouts[&2].width, layouts[&2].height), (300.0, 80.0));
+        assert_eq!((layouts[&3].x, layouts[&3].y, layouts[&3].width), (0.0, 80.0, 150.0));
+        assert_eq!((layouts[&4].x, layouts[&4].y), (150.0, 80.0));
+        assert_eq!((layouts[&5].x, layouts[&5].y), (0.0, 130.0));
     }
 
     #[test]

@@ -1212,6 +1212,12 @@ class PamRenderer(
                 mount = { id, holder -> materializeCell(id, holder) },
                 unmount = { id, _ -> recycleCell(id) },
             )
+            list.setFullSpanIds(
+                itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.LIST_FULL_SPAN, false) == true },
+            )
+            list.setStickyIds(
+                itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.STICKY_HEADER, false) == true },
+            )
         }
     }
 
@@ -2029,6 +2035,9 @@ class PamRenderer(
                 lastLayoutEvents.remove(state.id)
                 queueLayoutEvent(state.id)
             }
+            PropKey.STICKY_HEADER -> applyStickyHeader(view, value.flag())
+            PropKey.SCROLL_KEYBOARD_INSET ->
+                (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, value.flag()) }
             PropKey.VALUE -> when (view) {
                 is EditText -> applyInputValue(view, state, value.text(key))
                 is PamDrawingCanvas -> view.setDrawing(value.text(key))
@@ -2738,10 +2747,7 @@ class PamRenderer(
             PropKey.MARGIN_BOTTOM_AUTO,
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
-            PropKey.STICKY_HEADER,
-            PropKey.ON_MEDIA_BUFFERING,
-            PropKey.ON_MEDIA_LOAD_START,
-            PropKey.SCROLL_KEYBOARD_INSET,
+            PropKey.LIST_FULL_SPAN,
             -> Unit
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
             PropKey.ANIMATION_DURATION_MS -> {
@@ -2854,6 +2860,8 @@ class PamRenderer(
             PropKey.ON_MEDIA_PROGRESS,
             PropKey.ON_MEDIA_END,
             PropKey.ON_MEDIA_ERROR,
+            PropKey.ON_MEDIA_BUFFERING,
+            PropKey.ON_MEDIA_LOAD_START,
             PropKey.ON_DRAG_START,
             PropKey.ON_DRAG_END,
             PropKey.ON_DROP,
@@ -3402,16 +3410,16 @@ class PamRenderer(
             PropKey.MARGIN_BOTTOM_AUTO,
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
+            PropKey.LIST_FULL_SPAN,
+            -> Unit
             PropKey.TEXT_SPANS,
             PropKey.ON_SPAN_PRESS,
             -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
             PropKey.INCLUDE_FONT_PADDING -> (view as? TextView)?.includeFontPadding = view !is EditText
             PropKey.ON_LAYOUT -> lastLayoutEvents.remove(state.id)
-            PropKey.STICKY_HEADER,
-            PropKey.ON_MEDIA_BUFFERING,
-            PropKey.ON_MEDIA_LOAD_START,
-            PropKey.SCROLL_KEYBOARD_INSET,
-            -> Unit
+            PropKey.STICKY_HEADER -> applyStickyHeader(view, false)
+            PropKey.SCROLL_KEYBOARD_INSET ->
+                (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, false) }
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, 1)
             PropKey.ANIMATION_DURATION_MS -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -3693,9 +3701,34 @@ class PamRenderer(
             } else null
         }
         if (view is PamMediaView) {
-            view.onReady = state.callback(PropKey.ON_MEDIA_READY) {
-                dispatch(state.id, EventKind.MEDIA_READY.value)
+            view.onReady = null
+            view.onReadyDetails = if (state.properties[PropKey.ON_MEDIA_READY] != null) {
+                { width, height, duration ->
+                    dispatchBytes(
+                        state.id,
+                        EventKind.MEDIA_READY.value,
+                        WireMap.encode(
+                            mapOf(
+                                "naturalWidth" to WireValue.Integer(width.toLong()),
+                                "naturalHeight" to WireValue.Integer(height.toLong()),
+                                "duration" to WireValue.Decimal(duration),
+                            ),
+                        ),
+                    )
+                }
+            } else null
+            view.onLoadStart = state.callback(PropKey.ON_MEDIA_LOAD_START) {
+                dispatch(state.id, EventKind.MEDIA_LOAD_START.value)
             }
+            view.onBuffering = if (state.properties[PropKey.ON_MEDIA_BUFFERING] != null) {
+                { buffering ->
+                    dispatchBytes(
+                        state.id,
+                        EventKind.MEDIA_BUFFERING.value,
+                        WireMap.encode(mapOf("buffering" to WireValue.Flag(buffering))),
+                    )
+                }
+            } else null
             view.onProgress = if (state.properties[PropKey.ON_MEDIA_PROGRESS] != null) {
                 { current, duration ->
                     dispatchBytes(
@@ -4420,8 +4453,8 @@ class PamRenderer(
             view.alpha = state.targetAlpha()
             view.scaleX = state.targetScaleX()
             view.scaleY = state.targetScaleY()
-            view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat()
-            view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()
+            view.translationX = state.number(PropKey.TRANSLATION_X, 0.0).toFloat() * resourcesDensity()
+            view.translationY = state.number(PropKey.TRANSLATION_Y, 0.0).toFloat() * resourcesDensity()
             view.elevation = dp(state.number(PropKey.ELEVATION, 0.0).toFloat()).toFloat()
             updateBackground(view, state)
             state.properties[PropKey.TEXT_COLOR]?.let { color ->
@@ -4439,8 +4472,13 @@ class PamRenderer(
                 PropKey.OPACITY -> view.alpha = styles.optDouble(rawKey, view.alpha.toDouble()).toFloat()
                 PropKey.SCALE_X -> view.scaleX = styles.optDouble(rawKey, view.scaleX.toDouble()).toFloat()
                 PropKey.SCALE_Y -> view.scaleY = styles.optDouble(rawKey, view.scaleY.toDouble()).toFloat()
-                PropKey.TRANSLATION_X -> view.translationX = styles.optDouble(rawKey, view.translationX.toDouble()).toFloat()
-                PropKey.TRANSLATION_Y -> view.translationY = styles.optDouble(rawKey, view.translationY.toDouble()).toFloat()
+                // Translations are authored in points (React Native transform).
+                PropKey.TRANSLATION_X -> styles.optDouble(rawKey).takeIf { !it.isNaN() }?.let {
+                    view.translationX = it.toFloat() * resourcesDensity()
+                }
+                PropKey.TRANSLATION_Y -> styles.optDouble(rawKey).takeIf { !it.isNaN() }?.let {
+                    view.translationY = it.toFloat() * resourcesDensity()
+                }
                 PropKey.BACKGROUND_COLOR -> backgroundColorOverride = styles.optLong(rawKey).toInt()
                 PropKey.BORDER_COLOR -> borderColorOverride = styles.optLong(rawKey).toInt()
                 PropKey.TEXT_COLOR -> (view as? TextView)?.let {
@@ -4716,6 +4754,11 @@ class PamRenderer(
 
     private fun configurePressable(view: View, state: NodeState) {
         val pressable = view as? PamPressable ?: return
+        pressable.onPressedStateChanged = if (state.properties[PropKey.NATIVE_STATE_STYLES] != null) {
+            { pressed -> applyNativeStyleState(pressable, state, NativeStyleState.PRESSED, pressed) }
+        } else {
+            null
+        }
         pressable.configure(
             pressOpacity = state.pressOpacity,
             pressScale = state.pressScale,
@@ -5553,9 +5596,18 @@ class PamRenderer(
             bottomLeft,
             bottomLeft,
         )
+        val clipBorder = state.number(PropKey.BORDER_WIDTH, 0.0).toFloat().coerceAtLeast(0f)
+        fun clipEdge(key: PropKey) =
+            state.number(key, clipBorder.toDouble()).toFloat().coerceAtLeast(0f) * resourcesDensity()
         (view as? PamContainer)?.setOverflowClip(
             state.integer(PropKey.OVERFLOW, OVERFLOW_VISIBLE) == OVERFLOW_HIDDEN,
             radii,
+            floatArrayOf(
+                clipEdge(PropKey.BORDER_LEFT_WIDTH),
+                clipEdge(PropKey.BORDER_TOP_WIDTH),
+                clipEdge(PropKey.BORDER_RIGHT_WIDTH),
+                clipEdge(PropKey.BORDER_BOTTOM_WIDTH),
+            ),
         )
         val density = resourcesDensity()
         val gradientLayers = PamGradientLayer.parse(
@@ -6036,6 +6088,41 @@ class PamRenderer(
             TEXT_BREAK_BALANCED -> ANDROID_BREAK_BALANCED
             else -> ANDROID_BREAK_HIGH_QUALITY
         }
+    }
+
+    /**
+     * KeyboardAwareScrollView: the visible IME overlap becomes bottom content
+     * inset inside the scroll content and the focused input stays revealed.
+     */
+    private fun configureScrollKeyboardInset(scroll: PamScrollContainer, enabled: Boolean) {
+        if (!enabled) {
+            scroll.setOnApplyWindowInsetsListener(null)
+            scroll.setKeyboardAvoidanceInset(0)
+            return
+        }
+        scroll.setOnApplyWindowInsetsListener { target, insets ->
+            val ime = androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(insets, target)
+                .getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom
+            val location = IntArray(2)
+            target.getLocationInWindow(location)
+            val below = (target.rootView.height - (location[1] + target.height)).coerceAtLeast(0)
+            val overlap = (ime - below).coerceAtLeast(0)
+            scroll.setKeyboardAvoidanceInset(overlap)
+            if (overlap > 0) {
+                target.findFocus()?.let { focused -> target.post { scroll.ensureKeyboardTargetVisible(focused) } }
+            }
+            insets
+        }
+        scroll.requestApplyInsets()
+    }
+
+    /** Materialized native view of a node (instrumentation and diagnostics). */
+    internal fun viewForNode(id: Long): View? = views[id]
+
+    private fun applyStickyHeader(view: View, sticky: Boolean) {
+        var parent = view.parent
+        while (parent != null && parent !is PamScrollContainer) parent = parent.parent
+        (parent as? PamScrollContainer)?.setSticky(view, sticky)
     }
 
     private val lastLayoutEvents = HashMap<Long, Frame>()
@@ -8315,6 +8402,8 @@ class PamRenderer(
         )
 
         val HOST_PROPERTIES = setOf(
+            // Sticky headers are positioned natively while scrolling.
+            PropKey.STICKY_HEADER,
             // A semantic value on a layout container is also its Android tag.
             // Native compound hosts query these tagged descendants for
             // calendars, accordions, tabs, overlays, file trees and pagers;
@@ -8516,6 +8605,8 @@ class PamRenderer(
             PropKey.ON_MEDIA_PROGRESS,
             PropKey.ON_MEDIA_END,
             PropKey.ON_MEDIA_ERROR,
+            PropKey.ON_MEDIA_BUFFERING,
+            PropKey.ON_MEDIA_LOAD_START,
             PropKey.ON_DRAG_START,
             PropKey.ON_DRAG_END,
             PropKey.ON_DROP,

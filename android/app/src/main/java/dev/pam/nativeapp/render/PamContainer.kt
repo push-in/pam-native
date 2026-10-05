@@ -16,6 +16,7 @@ internal open class PamContainer(context: Context) :
     private val overflowClipPath = Path()
     private val overflowClipBounds = RectF()
     private var overflowClipRadii = FloatArray(CORNER_RADII_SIZE)
+    private var overflowClipInsets = FloatArray(4)
     private var overflowClipPathDirty = true
     private val boxShadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
     private val boxShadowPath = Path()
@@ -119,7 +120,7 @@ internal open class PamContainer(context: Context) :
         }
         val checkpoint = canvas.save()
         updateOverflowClipPath()
-        if (overflowClipRadii.any { it > 0f }) {
+        if (overflowClipRadii.any { it > 0f } && overflowClipPath.isEmpty.not()) {
             canvas.clipPath(overflowClipPath)
         } else {
             canvas.clipRect(overflowClipBounds)
@@ -152,7 +153,16 @@ internal open class PamContainer(context: Context) :
         pointerEvents = mode.coerceIn(POINTER_EVENTS_AUTO, POINTER_EVENTS_BOX_ONLY)
     }
 
-    fun setOverflowClip(enabled: Boolean, radii: FloatArray) {
+    /**
+     * React Native clips overflow to the padding box: inside the border, with
+     * inner radii `max(radius - border, 0)`, so a border ring stays visible
+     * around clipped content (avatars). [insets] are left, top, right, bottom.
+     */
+    fun setOverflowClip(enabled: Boolean, radii: FloatArray, insets: FloatArray = FloatArray(4)) {
+        if (!overflowClipInsets.contentEquals(insets)) {
+            overflowClipInsets = insets.copyOf()
+            overflowClipPathDirty = true
+        }
         require(radii.size == CORNER_RADII_SIZE) {
             "Expected $CORNER_RADII_SIZE corner radius values, received ${radii.size}"
         }
@@ -178,11 +188,17 @@ internal open class PamContainer(context: Context) :
 
     private fun updateOverflowClipPath() {
         if (!overflowClipPathDirty) return
-        overflowClipBounds.set(0f, 0f, width.toFloat(), height.toFloat())
+        val (left, top, right, bottom) = overflowClipInsets.toList()
+        overflowClipBounds.set(left, top, width - right, height - bottom)
+        val inner = FloatArray(CORNER_RADII_SIZE) { index ->
+            val horizontalInset = if (index == 0 || index == 6) left else if (index == 2 || index == 4) right else 0f
+            val verticalInset = if (index == 1 || index == 3) top else if (index == 5 || index == 7) bottom else 0f
+            (overflowClipRadii[index] - horizontalInset - verticalInset).coerceAtLeast(0f)
+        }
         overflowClipPath.reset()
         overflowClipPath.addRoundRect(
             overflowClipBounds,
-            overflowClipRadii,
+            inner,
             Path.Direction.CW,
         )
         overflowClipPath.close()

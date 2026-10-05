@@ -528,4 +528,5 @@ enum PropKey: int
     case OnScrollEndDrag = 520;
     case OnMomentumScrollEnd = 521;
     case OnTextLayout = 522;
+    case ListFullSpan = 523;
 }

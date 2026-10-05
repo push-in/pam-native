@@ -158,3 +158,81 @@ $assert(
         && $bootMetrics->safeAreaTop === 24.0 && $bootMetrics->safeAreaBottom === 48.0,
     'Boot window metrics must include host safe areas before the first Dimensions event.',
 );
+
+// Pressed transforms: :active/:pressed translate like React Native buttons.
+$pressed = $typographyRender(
+    '<Pressable class="primary"><Text>Enviar</Text></Pressable>',
+    '.primary { background-color: #1B7A4E; } .primary:active { transform: translateY(1.1px); opacity: 0.9; }',
+);
+$pressedStates = json_decode((string) ($pressed->properties()[PropKey::NativeStateStyles->value] ?? '{}'), true);
+$assert(
+    abs((float) ($pressedStates[(string) \Pam\Native\Style\StyleInteractionState::Pressed->value][(string) PropKey::TranslationY->value] ?? 0) - 1.1) < 1e-9
+        && (float) ($pressed->properties()[PropKey::PressOpacity->value] ?? 0) === 0.9,
+    'A :active translateY must become a native pressed-state translation: '.json_encode($pressedStates),
+);
+
+// Vector icons: react-native-vector-icons glyph maps rendered as icon-font text.
+$iconProject = sys_get_temp_dir().'/pam-icon-'.bin2hex(random_bytes(4));
+mkdir($iconProject.'/assets/fonts', 0o777, true);
+file_put_contents($iconProject.'/assets/fonts/Ionicons.ttf', 'ttf');
+file_put_contents($iconProject.'/assets/fonts/Ionicons.json', '{"heart":61744,"chatbubble-ellipses":61695}');
+$previousDirectory = getcwd();
+chdir($iconProject);
+try {
+    $icon = $typographyRender('<Icon name="heart" size="24" class="accent" />', '.accent { color: #1B7A4E; }');
+    $iconProperties = $icon->properties();
+    $assert(
+        $iconProperties[PropKey::Text->value] === mb_chr(61744, 'UTF-8')
+            && $iconProperties[PropKey::FontFamily->value] === 'asset://assets/fonts/Ionicons.ttf'
+            && (float) $iconProperties[PropKey::FontSize->value] === 24.0
+            && $iconProperties[PropKey::TextColor->value] === 0xFF1B7A4E
+            && $iconProperties[PropKey::TextAllowFontScaling->value] === false,
+        'Icon must render its glyph with the icon font, size and CSS color.',
+    );
+    $assert(\Pam\Native\UI\Icon::make('missing')->properties()[PropKey::Text->value] === '?', 'Unknown glyphs render "?" like React Native.');
+    \Pam\Native\UI\Icon::register('Brand', 'asset://assets/fonts/Brand.ttf', ['logo' => 0xE001]);
+    $assert(\Pam\Native\UI\Icon::has('logo', 'Brand') && !\Pam\Native\UI\Icon::has('heart', 'Brand'), 'Registered icon fonts use their own glyph maps.');
+} finally {
+    chdir((string) $previousDirectory);
+    array_map('unlink', glob($iconProject.'/assets/fonts/*') ?: []);
+    rmdir($iconProject.'/assets/fonts');
+    rmdir($iconProject.'/assets');
+    rmdir($iconProject);
+}
+
+// Media events: ready carries the natural size; buffering/load start events.
+$mediaLog = [];
+$player = \Pam\Native\UI\MediaPlayer::make('https://example.test/video.mp4')
+    ->onReady(static function (\Pam\Native\MediaReadyEvent $event) use (&$mediaLog): void { $mediaLog[] = "ready:{$event->naturalWidth}x{$event->naturalHeight}"; })
+    ->onBuffering(static function (bool $buffering) use (&$mediaLog): void { $mediaLog[] = $buffering ? 'buffering' : 'playing'; })
+    ->onLoadStart(static function () use (&$mediaLog): void { $mediaLog[] = 'load'; });
+$player->events()[EventKind::MediaLoadStart->value]('');
+$player->events()[EventKind::MediaReady->value](\Pam\Native\Internal\Wire::map(['naturalWidth' => 1080, 'naturalHeight' => 1920, 'duration' => 12.5]));
+$player->events()[EventKind::MediaBuffering->value](\Pam\Native\Internal\Wire::map(['buffering' => true]));
+$assert($mediaLog === ['load', 'ready:1080x1920', 'buffering'], 'Media lifecycle events must decode their payloads: '.implode(',', $mediaLog));
+$legacyReady = false;
+\Pam\Native\UI\MediaPlayer::make('x.mp4')->onReady(static function () use (&$legacyReady): void { $legacyReady = true; })
+    ->events()[EventKind::MediaReady->value](\Pam\Native\Internal\Wire::map(['naturalWidth' => 1]));
+$assert($legacyReady, 'Parameterless onReady handlers keep working.');
+
+// In-app toast with title and message.
+\Pam\Native\System\Toast::message('Mensagem enviada', 'Seu convite foi entregue.', \Pam\Native\System\ToastType::Success, \Pam\Native\System\ToastPosition::Bottom);
+$toastPayload = \Pam\Native\Internal\Wire::decodeMap(TestDiagnostics::$typedCall['payload'] ?? '');
+$assert(
+    ($toastPayload['title'] ?? null) === 'Mensagem enviada' && ($toastPayload['bottom'] ?? null) === true
+        && ($toastPayload['accentColor'] ?? null) === 0xFF69C779,
+    'Toast::message must send the in-app toast contract.',
+);
+
+// Sticky headers, full-span list rows and keyboard-aware scroll attributes.
+$listTemplate = $typographyRender(
+    '<VirtualizedList numColumns="2"><Column fullSpan="true" stickyHeader="true"><Text>Header</Text></Column><Column><Text>A</Text></Column></VirtualizedList>',
+    '',
+);
+$listHeader = $listTemplate->children()[0]->properties();
+$assert(
+    ($listHeader[PropKey::ListFullSpan->value] ?? null) === true && ($listHeader[PropKey::StickyHeader->value] ?? null) === true,
+    'List header attributes must compile to native booleans.',
+);
+$keyboardScroll = $typographyRender('<ScrollView keyboardInset="true"><Column /></ScrollView>', '');
+$assert(($keyboardScroll->properties()[PropKey::ScrollKeyboardInset->value] ?? null) === true, 'keyboardInset must reach the scroll view.');
