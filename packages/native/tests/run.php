@@ -7686,6 +7686,7 @@ require __DIR__.'/style_conformance.php';
 require __DIR__.'/singularity.php';
 require __DIR__.'/signals.php';
 require __DIR__.'/visual_dom.php';
+require __DIR__.'/memoization.php';
 require __DIR__.'/appearance.php';
 require __DIR__.'/native_capabilities.php';
 
