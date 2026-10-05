@@ -13,6 +13,8 @@ final class RouteDefinition
 {
     /** @var list<ScreenOptions|ScreenOptionsPatch|Closure> */
     public array $groupOptions = [];
+    /** @var list<Closure> */
+    public array $groupGuards = [];
     /** @var list<ScreenOptions|ScreenOptionsPatch|Closure> */
     public array $options = [];
     public ?Closure $guard = null;

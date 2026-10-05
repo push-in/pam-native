@@ -8,6 +8,7 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\Navigator;
+use Pam\Native\Navigation\RouteContext;
 use Pam\Native\Navigation\Router;
 use Pam\Native\Navigation\ScreenOptionLayer;
 use Pam\Native\Navigation\ScreenOptions;
@@ -24,6 +25,8 @@ final class RouteRegistrar
     private ScreenOptions|Closure|null $defaultOptions = null;
     /** @var list<ScreenOptionsPatch|Closure> */
     private array $activeGroups = [];
+    /** @var list<Closure> */
+    private array $activeGuards = [];
 
     public function __construct(
         private readonly string $name,
@@ -45,6 +48,7 @@ final class RouteRegistrar
 
         $definition = new RouteDefinition($name, $factory);
         $definition->groupOptions = $this->activeGroups;
+        $definition->groupGuards = $this->activeGuards;
         $this->routes[$name] = $definition;
         return new PendingRoute($definition);
     }
@@ -62,6 +66,16 @@ final class RouteRegistrar
     public function endGroup(): void
     {
         array_pop($this->activeGroups);
+    }
+
+    public function beginGuard(Closure $guard): void
+    {
+        $this->activeGuards[] = $guard;
+    }
+
+    public function endGuard(): void
+    {
+        array_pop($this->activeGuards);
     }
 
     public function transitions(NavigationTransition $transition, int $durationMs): void
@@ -92,7 +106,8 @@ final class RouteRegistrar
             }
             $options = self::composeOptions($route->options);
             $router = $router->route($route->name, $route->factory, $options, $route->getId);
-            if ($route->guard !== null) $router = $router->guard($route->name, $route->guard);
+            $guard = self::composeGuards($route->groupGuards, $route->guard);
+            if ($guard !== null) $router = $router->guard($route->name, $guard);
             foreach ($route->deepLinks as $pattern) {
                 $router = $router->deepLink($pattern, $route->name);
             }
@@ -117,6 +132,24 @@ final class RouteRegistrar
             }
 
             return $resolved;
+        };
+    }
+
+    /**
+     * @param list<Closure> $groups
+     * @return (Closure(RouteContext): bool)|null
+     */
+    private static function composeGuards(array $groups, ?Closure $routeGuard): ?Closure
+    {
+        if ($groups === []) return $routeGuard;
+        if ($routeGuard !== null) $groups[] = $routeGuard;
+
+        return static function (RouteContext $route) use ($groups): bool {
+            foreach ($groups as $guard) {
+                if ($guard($route) !== true) return false;
+            }
+
+            return true;
         };
     }
 }

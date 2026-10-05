@@ -5910,6 +5910,78 @@ $assert(
         && $namedRouteNavigator->currentOptions()->animation === NavigationTransition::FadeFromBottom,
     'Reusable route presets must compose identically in groups and individual destinations.',
 );
+$sessionOpen = false;
+$chatAllowed = false;
+$threadAllowed = false;
+$guardCalls = [];
+$guardedRoutes = Route::stack('guarded-routes-test', 'home', static function () use (
+    &$sessionOpen,
+    &$chatAllowed,
+    &$threadAllowed,
+    &$guardCalls,
+): void {
+    Route::screen('home', static fn () => Screen::make(Text::make('Home')));
+    Route::guard(
+        static function (RouteContext $route) use (&$sessionOpen, &$guardCalls): bool {
+            $guardCalls[] = 'session:'.$route->name;
+            return $sessionOpen;
+        },
+        static function () use (&$chatAllowed, &$threadAllowed, &$guardCalls): void {
+            Route::screen('inbox', static fn () => Screen::make(Text::make('Inbox')));
+            Route::guard(
+                static function (RouteContext $route) use (&$chatAllowed, &$guardCalls): bool {
+                    $guardCalls[] = 'chat:'.$route->name;
+                    return $chatAllowed;
+                },
+                static function () use (&$threadAllowed, &$guardCalls): void {
+                    Route::screen('thread', static fn () => Screen::make(Text::make('Thread')))
+                        ->guard(static function (RouteContext $route) use (&$threadAllowed, &$guardCalls): bool {
+                            $guardCalls[] = 'thread:'.$route->name;
+                            return $threadAllowed;
+                        })
+                        ->deepLink('/thread/{id}');
+                },
+            );
+        },
+    );
+    Route::screen('about', static fn () => Screen::make(Text::make('About')));
+});
+$assert(
+    !$guardedRoutes->dispatch(NavigationAction::push('thread'))
+        && $guardCalls === ['session:thread']
+        && $guardedRoutes->currentRoute() === 'home',
+    'Grouped guards must short-circuit before nested and route guards.',
+);
+$sessionOpen = true;
+$guardCalls = [];
+$assert(
+    !$guardedRoutes->open('pam://app/thread/42')
+        && $guardCalls === ['session:thread', 'chat:thread'],
+    'Grouped guards must protect deep links in declaration order.',
+);
+$chatAllowed = true;
+$guardCalls = [];
+$assert(
+    !$guardedRoutes->dispatch(NavigationAction::push('thread'))
+        && $guardCalls === ['session:thread', 'chat:thread', 'thread:thread'],
+    'A route guard must add to its enclosing group guards.',
+);
+$threadAllowed = true;
+$guardCalls = [];
+$guardedRoutes->push('thread');
+$assert(
+    $guardCalls === ['session:thread', 'chat:thread', 'thread:thread']
+        && $guardedRoutes->currentRoute() === 'thread',
+    'A destination must open after all enclosing and route guards pass.',
+);
+$sessionOpen = false;
+$guardCalls = [];
+$assert(
+    $guardedRoutes->dispatch(NavigationAction::push('about'))
+        && $guardCalls === []
+        && $guardedRoutes->currentRoute() === 'about',
+    'Grouped guards must not leak onto later ungrouped routes.',
+);
 $namedTabs = Route::tabs('named-tabs-test', 'home', static function (): void {
     Route::tab('home', Screen::make(Text::make('Home')), label: 'Home');
     Route::tab('settings', Screen::make(Text::make('Settings')), label: 'Settings', badge: '2');

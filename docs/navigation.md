@@ -100,6 +100,29 @@ final class ProductScreen extends Component
 }
 ```
 
+For a protected area, declare its access check once around the destinations.
+Nested guards and a destination's own `guard()` are evaluated from outermost to
+innermost, then per destination. The first denied check stops navigation,
+including deep links and restored routes. Keep an unguarded initial route, such
+as `login`, available for a denied destination.
+
+```php
+use Pam\Native\Navigation\RouteContext;
+
+Route::stack('main', 'login', static function () use ($session): void {
+    Route::screen('login', LoginScreen::class);
+
+    Route::guard(
+        static fn (RouteContext $route): bool => $session->isSignedIn(),
+        static function (): void {
+            Route::screen('inbox', InboxScreen::class);
+            Route::screen('thread', ThreadScreen::class)
+                ->guard(static fn (RouteContext $route): bool => $route->integer('id') !== null);
+        },
+    );
+});
+```
+
 Deep links remain explicit and optional:
 
 ```php
