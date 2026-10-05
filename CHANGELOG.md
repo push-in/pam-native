@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.13.0 - 2026-10-05
+
+Cold start (Zé Chat on a Galaxy S10, release build): first PAM frame
+870 ms -> 290-370 ms; the logged-in inbox shows its rows ~470 ms after launch.
+
+- Component discovery no longer re-tokenizes every `.pam` file on each boot.
+  An unchanged component (xxh128 of its source, the `src/app.css` location
+  and every stylesheet it imported) reuses its cached class/tag, and its
+  template tree is decoded lazily on first render. Zé Chat (103
+  components, 4.3 MB of source): 590 ms -> 16 ms per cold start. Editing a
+  component or any CSS it imports still recompiles it.
+- An unchanged dimensions event (hosts re-send the window on every surface
+  bind, including right after boot) keeps the `WindowMetrics` instance and
+  no longer invalidates and re-renders the whole tree. Android exports the
+  full style environment in `PAM_BOOT_METRICS` so the first event matches.
+- `android.benchmarkApplicationIdSuffix` and `pam-native build --benchmark`:
+  the installable release-optimized variant (R8, non-debuggable, baseline
+  profile, signed with the local debug key) is written to
+  `dist/<name>-<version>-android-benchmark.apk` and can install beside
+  production for cold-start measurements; such builds omit Firebase.
+  `run --release`, `benchmark` and `profile` use the same package.
+- The Android baseline profile covers the whole `dev.pam.nativeapp` host.
+- Android: an OTA slot activated over an older APK bundle is discarded when
+  a new APK ships a different embedded bundle, so a reinstall never keeps
+  running the previous PHP release until `pm clear`.
+- iOS parity: the component cache and lazy templates are shared PHP; the
+  stale OTA slot rule (keyed on the embedded `manifest.sha256`) and the full
+  `PAM_BOOT_METRICS` environment are ported. **Uncompiled; needs Mac
+  validation.**
+
 ## 1.12.2 - 2026-10-05
 
 - Android: a BottomSheet with `keyboardBehavior="interactive"` (Zé's "Editar
