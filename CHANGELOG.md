@@ -25,7 +25,9 @@
 - Add `scripts/android-appearance-first-frame.py`, a cold-start screen
   recording gate proving a dark app never shows a light frame and that the
   override survives a process restart.
-- Android API 36 instrumented and emulator cold-start gates passed locally.
+- Avoid global Android renderer work on idle commits.
+- Android API 26 and API 36 instrumented appearance suites and the emulator
+  cold-start gates passed locally.
   iOS Xcode, simulator and device gates were not run.
 
 ## 1.0.36 - 2026-10-05
