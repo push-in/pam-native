@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.2.1 - 2026-10-05
+
+Render pipeline performance. On the host, a Zé-sized chat screen (32
+messages, real templates) renders a state change in ~10 ms instead of
+~170 ms, and an event or module result that changes nothing costs ~0.02 ms
+instead of a full ~180 ms re-render.
+
+- Template expressions are compiled once per source string into closure trees
+  (same grammar, eager evaluation and `??` semantics); reflection lookups for
+  properties, methods and enum imports are cached.
+- Scoped stylesheets are decoded and validated once per compiled template.
+  Cascade and state rules are indexed by their subject compound (id, class,
+  tag, universal) while preserving source order, element descriptors are
+  computed once per element and only evaluate attributes a selector
+  (including `:not()`) can observe, and static attribute values, utility
+  classes and font faces are cached.
+- Component render memoization: a component is reused when its own
+  properties (public, protected and private; arrays by value, plain objects
+  two levels deep, components/closures by identity), props, slots, tracked
+  state/stores/signals and injected providers are unchanged and no template
+  event handler ran on it. Writes from module-result or timer callbacks are
+  detected before each render and re-render only the changed component and
+  its ancestors. Element closures that are not template handlers, back,
+  app-state and memory-pressure handlers still re-render the whole tree.
+  Subtrees of reused components stay mounted. Use `#[AlwaysRender]` for
+  components whose templates read mutable external services,
+  `$this->markForRender()` to invalidate explicitly, or
+  `App::memoization(false)` to restore whole-tree re-renders.
+- `Runtime::requestRender()` keeps its meaning (untracked change, everything
+  re-renders); tracked changes use the new `Runtime::scheduleRender()`.
+- No encode or commit happens when the rendered tree is identical; theme
+  defaults are applied once per element instead of cloning the whole tree on
+  every render.
+- Android bridge: events and module results are drained and rendered once
+  (`Runtime::deferRendering()`/`flush()`) within a 12 ms budget instead of one
+  full render per item; interactive input (press, change, back, submit,
+  toggle, key press, menu, modal close, navigation gesture) has its own
+  priority lane ahead of module results and scroll/progress traffic; cycle
+  collection runs when idle instead of after every event; the PHP worker
+  attaches to the JVM once; `stats()` no longer blocks the UI thread behind a
+  PHP commit. Older PHP SDKs keep the per-event behaviour; iOS keeps
+  per-event rendering in this release.
+
 ## 1.2.0 - 2026-10-05
 
 - Complete the CSS compiler: `flex-basis` (length, %, `auto`, `content`) and
