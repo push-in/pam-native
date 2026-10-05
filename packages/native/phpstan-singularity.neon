@@ -1,6 +1,8 @@
 parameters:
     level: 9
     paths:
+        - src/Appearance.php
+        - src/AppearanceMode.php
         - src/Bridge
         - src/Diagnostics/ReplayTimeline.php
         - src/HotReload

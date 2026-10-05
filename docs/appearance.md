@@ -1,0 +1,126 @@
+# Appearance (light/dark)
+
+PAM Native owns the light/dark preference natively, so an app in dark mode
+never shows a light frame: not in the system starting window, not in the
+splash screen, not in the native window before PHP renders, and not in PHP's
+first frame.
+
+## Configure the native window colours
+
+`pam-native.json`:
+
+```json
+{
+  "appearance": {
+    "defaultMode": "system",
+    "light": { "background": "#F7F6F2" },
+    "dark": { "background": "#111511" }
+  }
+}
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `defaultMode` | `system` | Preference used until the app calls `Appearance::set()` (`system`, `light`, `dark`). |
+| `light.background` / `dark.background` | `#FFFFFF` / `#121212` | Window background painted before the first PHP frame. |
+| `*.statusBar`, `*.navigationBar` | `background` | Bar colours before edge-to-edge content. Icon contrast follows their luminance. |
+| `*.splashBackground` | `background` | Android 12+ SplashScreen background. |
+| `legacyStartingWindow` | `theme` | `none` skips the Android 8–11 starting window (see below). |
+
+Colours are opaque `#RGB` or `#RRGGBB`. The mobile build generates
+`res/values/pam_appearance.xml` and `res/values-night/pam_appearance.xml` for
+the Android DayNight theme and adds `PamAppearanceDefaultMode`,
+`PamAppearanceLightBackground` and `PamAppearanceDarkBackground` to the iOS
+`Info.plist`. Match these colours to your CSS root background.
+
+## PHP API
+
+```php
+use Pam\Native\Appearance;
+use Pam\Native\AppearanceMode;
+use Pam\Native\UserInterfaceAppearance;
+
+Appearance::mode();      // AppearanceMode::System | Light | Dark (persisted)
+Appearance::current();   // UserInterfaceAppearance::Light | Dark (effective)
+Appearance::isDark();    // bool
+Appearance::system();    // ?UserInterfaceAppearance, the OS scheme when observable
+
+Appearance::set(AppearanceMode::Dark);            // restyles now, persists natively
+Appearance::set(AppearanceMode::System, static function (bool $persisted): void {});
+
+$subscription = Appearance::onChange(
+    static function (UserInterfaceAppearance $current, AppearanceMode $mode): void {},
+);
+Appearance::unsubscribe($subscription);
+```
+
+`AppearanceMode` is an int-backed enum (`System = 1`, `Light = 2`,
+`Dark = 3`). Every read is synchronous: the host exports the persisted mode and
+the effective scheme (`PAM_APPEARANCE_MODE`, `PAM_SYSTEM_APPEARANCE`,
+`PAM_SYSTEM_DARK`) before PHP starts, so `Appearance::current()`,
+`App::appearance()`, `WindowMetrics::$appearance` and CSS
+`@media (prefers-color-scheme: dark)` already describe the effective scheme
+during the first render. No storage round-trip is needed at boot.
+
+`Appearance::set()` updates `WindowMetrics::$appearance`, invalidates the tree
+and re-renders it in place (components are not remounted), notifies
+`onChange()` listeners, and asks the host to persist the mode. Host metrics
+that arrive before the host confirmed the write cannot revert it.
+
+## Pure-CSS theming
+
+Prefer CSS over passing a `$darkTheme` flag through every screen:
+
+```css
+.screen { background-color: #F7F6F2; }
+.title { color: #111511; }
+
+@media (prefers-color-scheme: dark) {
+  .screen { background-color: #111511; }
+  .title { color: #F7F6F2; }
+}
+```
+
+Declare the dark overrides directly inside the media block; custom properties
+are resolved when the stylesheet compiles, so redefining a `--variable` inside
+`@media` does not change rules outside it.
+
+The query follows the effective appearance: the persisted override when one is
+set, otherwise the system. System changes restyle at runtime without remounting.
+
+## Verifying on a device
+
+`scripts/android-appearance-first-frame.py` records a cold start on an emulator
+and fails if any frame shows light content before or after the dark window, and
+optionally asserts the persisted mode after the forced process restart:
+
+```bash
+python3 scripts/android-appearance-first-frame.py --serial emulator-5558 \
+  --package com.example.app --dark '#111511' --light '#F7F6F2' --expect-mode 3
+```
+
+## Platform behaviour
+
+**Android.** `Theme.PamNative` is a DayNight theme (`values` / `values-night`)
+whose window background, bar colours, bar icon contrast and Android 12+
+splash background come from `pam-native.json`. The mode is stored in
+SharedPreferences (`pam.appearance`) with a synchronous commit.
+
+- Android 12+ (API 31+): the mode is also registered with
+  `UiModeManager.setApplicationNightMode()`, so the system starting window and
+  splash screen use the chosen scheme after a process restart. Runtime changes
+  arrive as a handled `uiMode` configuration change; the activity is not
+  recreated.
+- Android 8–11 (API 26–30): the mode is applied as an override configuration in
+  `attachBaseContext()`, before the theme and `setContentView()`. A runtime
+  change restyles the window, bars and PHP in place; framework widgets themed
+  by the activity pick up the new scheme on the next launch. The system draws
+  the starting window before the app process exists, from the system theme,
+  so with an override opposite to the system it shows the other scheme for a
+  few frames. Set `"legacyStartingWindow": "none"` to skip that window on
+  Android 8–11: the launcher stays visible until the correctly themed window
+  is ready, and no mismatched frame is ever drawn.
+
+**iOS.** The mode is stored in `UserDefaults` (`pam.appearance.mode`) and
+applied as the window's `overrideUserInterfaceStyle` before
+`makeKeyAndVisible()`. The launch storyboard follows the system scheme.

@@ -139,6 +139,86 @@
                 }
             }
         },
+        "appearance": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Native light/dark window colours applied before the first PHP frame and the default Appearance mode.",
+            "properties": {
+                "defaultMode": {
+                    "enum": [
+                        "system",
+                        "light",
+                        "dark"
+                    ],
+                    "default": "system",
+                    "description": "Preference used until the app calls Appearance::set()."
+                },
+                "legacyStartingWindow": {
+                    "enum": [
+                        "theme",
+                        "none"
+                    ],
+                    "default": "theme",
+                    "description": "Android 8-11 draw the starting window from the system scheme before the app process starts, so it cannot follow a persisted override. \"none\" skips it so a mismatched scheme is never shown; Android 12+ always keeps its splash screen."
+                },
+                "light": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "Colours for the light scheme.",
+                    "properties": {
+                        "background": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "default": "#FFFFFF",
+                            "description": "Window background painted before the first PHP frame."
+                        },
+                        "statusBar": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "description": "Status bar colour before edge-to-edge content; defaults to background. Icon contrast is derived from its luminance."
+                        },
+                        "navigationBar": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "description": "Navigation bar colour before edge-to-edge content; defaults to background. Icon contrast is derived from its luminance."
+                        },
+                        "splashBackground": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "description": "Android 12+ splash screen background; defaults to background."
+                        }
+                    }
+                },
+                "dark": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "Colours for the dark scheme.",
+                    "properties": {
+                        "background": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "default": "#121212",
+                            "description": "Window background painted before the first PHP frame."
+                        },
+                        "statusBar": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "description": "Status bar colour before edge-to-edge content; defaults to background. Icon contrast is derived from its luminance."
+                        },
+                        "navigationBar": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "description": "Navigation bar colour before edge-to-edge content; defaults to background. Icon contrast is derived from its luminance."
+                        },
+                        "splashBackground": {
+                            "type": "string",
+                            "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
+                            "description": "Android 12+ splash screen background; defaults to background."
+                        }
+                    }
+                }
+            }
+        },
         "modules": {
             "$ref": "#/$defs/nativeBindings"
         },

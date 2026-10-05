@@ -357,6 +357,7 @@ public final class PamRuntime {
             return
         }
         runtimeEntry = normalizedEntry
+        PamAppearance.exportEnvironment()
 
         let stateDirectory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
             .map { $0.appendingPathComponent("pam/state").path } ?? NSTemporaryDirectory().appending("pam/state")
@@ -420,6 +421,8 @@ public final class PamRuntime {
     public func updateViewport(widthDp: Float, heightDp: Float, textScale: Float, darkAppearance: Bool) {
         let currentHandle = currentHandle()
         guard currentHandle != 0 else { return }
+        let appearanceMode = PamAppearance.storedMode()
+        PamAppearance.exportEnvironment(mode: appearanceMode)
         pam_native_runtime_relayout(
             currentHandle,
             widthDp,
@@ -450,6 +453,8 @@ public final class PamRuntime {
             "height": .decimal(Double(heightDp)),
             "density": .decimal(Double(screen.scale)),
             "appearance": .integer(darkAppearance ? 2 : 1),
+            "appearanceMode": .integer(Int64(appearanceMode)),
+            "systemAppearance": .integer(PamAppearance.systemDark ? 2 : 1),
             "fontScale": .decimal(Double(textScale)),
             "safeAreaTop": .decimal(Double(insets.top)),
             "safeAreaRight": .decimal(Double(insets.right)),

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "appearance" by the PAM Native CLI. -->
+<resources>
+    <color name="pam_window_background">#FF121212</color>
+    <color name="pam_status_bar">#FF121212</color>
+    <color name="pam_navigation_bar">#FF121212</color>
+    <color name="pam_splash_background">#FF121212</color>
+    <bool name="pam_light_status_bar">false</bool>
+    <bool name="pam_light_navigation_bar">false</bool>
+</resources>

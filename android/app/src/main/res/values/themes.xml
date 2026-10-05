@@ -1,15 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <style name="Theme.PamNative" parent="android:style/Theme.Material.Light.NoActionBar">
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- DayNight: values-night redefines the platform parent. Colours come
+         from pam_appearance.xml, generated from pam-native.json. -->
+    <style name="Theme.PamNative.Base" parent="android:style/Theme.Material.Light.NoActionBar" />
+
+    <style name="Theme.PamNative" parent="Theme.PamNative.Base">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:statusBarColor">#FFFFFFFF</item>
-        <item name="android:navigationBarColor">#FFFFFFFF</item>
+        <item name="android:windowBackground">@color/pam_window_background</item>
+        <item name="android:colorBackground">@color/pam_window_background</item>
+        <item name="android:windowLightStatusBar">@bool/pam_light_status_bar</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/pam_light_navigation_bar</item>
+        <item name="android:statusBarColor">@color/pam_status_bar</item>
+        <item name="android:navigationBarColor">@color/pam_navigation_bar</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/pam_splash_background</item>
+        <item name="android:windowDisablePreview">@bool/pam_disable_starting_window</item>
         <item name="android:windowNoTitle">true</item>
     </style>
 
-    <style name="Theme.PamNative.Modal" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.PamNative.Modal" parent="Theme.PamNative.Base">
         <item name="android:windowIsFloating">false</item>
         <item name="android:windowIsTranslucent">true</item>
         <item name="android:windowNoTitle">true</item>

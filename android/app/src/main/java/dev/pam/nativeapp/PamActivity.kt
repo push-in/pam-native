@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.util.DisplayMetrics
 import android.os.Build
 import android.os.Bundle
@@ -66,8 +67,16 @@ class PamActivity : FragmentActivity() {
     private var viewportUpdateReplayRequested = false
     private var forceScheduledViewportUpdate = false
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(newBase)
+        // Below Android 12 the persisted appearance must reach the activity
+        // configuration before resources and the DayNight theme are created.
+        PamAppearance.overrideConfiguration(newBase)?.let(::applyOverrideConfiguration)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        PamAppearance.applyPlatformNightMode(this)
         // Keep one deterministic edge-to-edge contract on every supported
         // Android version. Insets are consumed by PAM views, never implicitly
         // by the decor view or an OEM-specific compatibility path.
@@ -82,6 +91,11 @@ class PamActivity : FragmentActivity() {
                     }
             }
         }
+        // Paint the window in the effective scheme before any content exists,
+        // even when the system theme and the persisted override disagree, and
+        // export the same scheme to PHP before its first frame.
+        applyDefaultSystemBars()
+        PamAppearance.exportEnvironment(this)
         val host = PamRootHost(this).also { rootHost = it }
         errors = ErrorOverlay(this)
         devTools = PamDevToolsOverlay(this)
@@ -482,9 +496,20 @@ class PamActivity : FragmentActivity() {
         intent.removeExtra("pam.notification.opened")
     }
 
-    private fun isDarkAppearance(): Boolean =
-        resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-            Configuration.UI_MODE_NIGHT_YES
+    private fun isDarkAppearance(): Boolean = PamAppearance.isDark(this)
+
+    /**
+     * Applies a preference chosen at runtime without recreating the activity:
+     * the window, system bars and PHP metrics restyle in place, and Android
+     * 12+ delivers the per-app night mode as a handled `uiMode` change.
+     */
+    internal fun setAppearanceMode(mode: Int): Boolean {
+        if (!PamAppearance.persist(this, mode)) return false
+        PamAppearance.applyPlatformNightMode(this, mode)
+        applyDefaultSystemBars()
+        if (runtimeStarted) scheduleViewportUpdate(force = true)
+        return true
+    }
 
     @Suppress("DEPRECATION")
     private fun fullWindowSize(): Pair<Int, Int> {
@@ -567,6 +592,8 @@ class PamActivity : FragmentActivity() {
             memoryClass >= 256 -> 2L
             else -> 1L
         }
+        val appearanceMode = PamAppearance.storedMode(this)
+        PamAppearance.exportEnvironment(this, appearanceMode)
         runtime.updateViewport(
             widthDp,
             heightDp,
@@ -581,6 +608,10 @@ class PamActivity : FragmentActivity() {
                     "height" to WireValue.Decimal(heightDp.toDouble()),
                     "density" to WireValue.Decimal(density.toDouble()),
                     "appearance" to WireValue.Integer(appearanceValue()),
+                    "appearanceMode" to WireValue.Integer(appearanceMode.toLong()),
+                    "systemAppearance" to WireValue.Integer(
+                        PamAppearance.systemAppearance(this, appearanceMode).toLong(),
+                    ),
                     "fontScale" to WireValue.Decimal(configuration.fontScale.toDouble()),
                     "safeAreaTop" to WireValue.Decimal(((insets?.top ?: 0) / density).toDouble()),
                     "safeAreaRight" to WireValue.Decimal(((insets?.right ?: 0) / density).toDouble()),
@@ -607,6 +638,9 @@ class PamActivity : FragmentActivity() {
     @Suppress("DEPRECATION")
     private fun applyDefaultSystemBars() {
         val dark = isDarkAppearance()
+        window.setBackgroundDrawable(
+            ColorDrawable(PamAppearance.color(this, R.color.pam_window_background, dark)),
+        )
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -614,21 +648,29 @@ class PamActivity : FragmentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
 
+        val lightStatus = PamAppearance.bool(this, R.bool.pam_light_status_bar, dark)
+        val lightNavigation = PamAppearance.bool(this, R.bool.pam_light_navigation_bar, dark)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-                WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+            val lightStatusMask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+            val lightNavigationMask = WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
             window.insetsController?.setSystemBarsAppearance(
-                if (dark) 0 else lightBars,
-                lightBars,
+                (if (lightStatus) lightStatusMask else 0) or
+                    (if (lightNavigation) lightNavigationMask else 0),
+                lightStatusMask or lightNavigationMask,
             )
         } else {
-            val lightBars = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or
-                View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-            window.decorView.systemUiVisibility = if (dark) {
-                window.decorView.systemUiVisibility and lightBars.inv()
+            var flags = window.decorView.systemUiVisibility
+            flags = if (lightStatus) {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
             } else {
-                window.decorView.systemUiVisibility or lightBars
+                flags and View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR.inv()
             }
+            flags = if (lightNavigation) {
+                flags or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            } else {
+                flags and View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR.inv()
+            }
+            window.decorView.systemUiVisibility = flags
         }
     }
 

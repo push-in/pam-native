@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "appearance" by the PAM Native CLI. -->
+<resources>
+    <integer name="pam_appearance_default_mode">1</integer>
+    <bool name="pam_disable_starting_window">false</bool>
+    <color name="pam_window_background">#FFFFFFFF</color>
+    <color name="pam_status_bar">#FFFFFFFF</color>
+    <color name="pam_navigation_bar">#FFFFFFFF</color>
+    <color name="pam_splash_background">#FFFFFFFF</color>
+    <bool name="pam_light_status_bar">true</bool>
+    <bool name="pam_light_navigation_bar">true</bool>
+</resources>

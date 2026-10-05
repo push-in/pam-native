@@ -21,6 +21,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let incomingShare = IncomingShareModule()
     private let mediaLibrary = MediaLibraryModule()
     private let timers = TimersModule()
+    private let appearance = AppearanceModule()
     private let modules: [String: NativeModule]
 
     public init(additionalModules: [String: NativeModule] = [:]) {
@@ -44,6 +45,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "incoming-share": incomingShare,
             "media-library": mediaLibrary,
             "timers": timers,
+            "appearance": appearance,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
         additionalModules.forEach { name, module in

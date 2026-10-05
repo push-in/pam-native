@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.37 - 2026-10-05
+
+- Add `Appearance` and the int-backed `AppearanceMode` enum (`System = 1`,
+  `Light = 2`, `Dark = 3`): `Appearance::set()`, synchronous `mode()`,
+  `current()`, `isDark()` and `system()`, and `onChange()`/`unsubscribe()`.
+  The preference is persisted natively (Android SharedPreferences, iOS
+  UserDefaults) and restyles the tree in place without remounting.
+- Deliver the effective appearance to PHP before the first render, so
+  `WindowMetrics::$appearance`, `App::appearance()` and CSS
+  `@media (prefers-color-scheme)` match the native window from the first frame
+  instead of defaulting to light until the first dimensions event.
+- Make the Android host theme DayNight. Window background, status and
+  navigation bar colours, bar icon contrast and the Android 12+ splash
+  background come from the new `pam-native.json` `appearance` section
+  (`defaultMode`, `light`, `dark`), generated into `values` and `values-night`
+  resources by the mobile build. The persisted preference is applied before
+  `setContentView()` (override configuration below Android 12,
+  `UiModeManager.setApplicationNightMode()` on 12+) and runtime changes are
+  handled as `uiMode` configuration changes without activity recreation.
+- iOS applies the persisted preference as the window's
+  `overrideUserInterfaceStyle` before it becomes visible and reports trait
+  changes from the host root controller.
+- Add `scripts/android-appearance-first-frame.py`, a cold-start screen
+  recording gate proving a dark app never shows a light frame and that the
+  override survives a process restart.
+- Android API 36 instrumented and emulator cold-start gates passed locally.
+  iOS Xcode, simulator and device gates were not run.
+
 ## 1.0.36 - 2026-10-05
 
 - Add MIME filtering, an optional failure callback and an explicit import

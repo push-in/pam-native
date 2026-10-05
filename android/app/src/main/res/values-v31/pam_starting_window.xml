@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ starting windows and splash screens follow the persisted
+         per-app night mode, so they are never skipped. -->
+    <bool name="pam_disable_starting_window">false</bool>
+</resources>

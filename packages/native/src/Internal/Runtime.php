@@ -9,6 +9,7 @@ use JsonException;
 use LogicException;
 use Pam\Native\AppState;
 use Pam\Native\App;
+use Pam\Native\Appearance;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\MemoryPressure;
@@ -76,7 +77,54 @@ final class Runtime
 
     public static function windowMetrics(): WindowMetrics
     {
-        return self::$windowMetrics ??= new WindowMetrics(0.0, 0.0, 1.0);
+        return self::$windowMetrics ??= self::bootMetrics();
+    }
+
+    /**
+     * Restyles the tree for an appearance chosen in PHP (or reconciled from a
+     * host event) without remounting it.
+     */
+    public static function replaceAppearance(UserInterfaceAppearance $appearance, bool $render = true): void
+    {
+        $metrics = self::windowMetrics();
+        if ($metrics->appearance === $appearance) {
+            return;
+        }
+        self::$windowMetrics = new WindowMetrics(
+            width: $metrics->width,
+            height: $metrics->height,
+            density: $metrics->density,
+            appearance: $appearance,
+            fontScale: $metrics->fontScale,
+            safeAreaTop: $metrics->safeAreaTop,
+            safeAreaRight: $metrics->safeAreaRight,
+            safeAreaBottom: $metrics->safeAreaBottom,
+            safeAreaLeft: $metrics->safeAreaLeft,
+            refreshRate: $metrics->refreshRate,
+            reducedMotion: $metrics->reducedMotion,
+            deviceType: $metrics->deviceType,
+            pointer: $metrics->pointer,
+            inputMode: $metrics->inputMode,
+            dynamicRange: $metrics->dynamicRange,
+            displayMode: $metrics->displayMode,
+            foldPosture: $metrics->foldPosture,
+            memoryClass: $metrics->memoryClass,
+            performanceTier: $metrics->performanceTier,
+        );
+        DependencyTracker::invalidateAll();
+        if ($render) {
+            self::requestRender();
+        }
+    }
+
+    /**
+     * The host exports the effective appearance before PHP starts, so the
+     * first frame already matches the native window instead of defaulting to
+     * light and correcting itself after the first dimensions event.
+     */
+    private static function bootMetrics(): WindowMetrics
+    {
+        return new WindowMetrics(0.0, 0.0, 1.0, Appearance::bootAppearance());
     }
 
     public static function render(): void
@@ -205,6 +253,7 @@ final class Runtime
             }
             if ($eventKind === EventKind::Dimensions->value) {
                 $values = Wire::decodeMap($payload);
+                $previousAppearance = self::windowMetrics()->appearance;
                 self::$windowMetrics = new WindowMetrics(
                     width: (float) ($values['width'] ?? 0.0),
                     height: (float) ($values['height'] ?? 0.0),
@@ -228,6 +277,7 @@ final class Runtime
                     memoryClass: (float) ($values['memoryClass'] ?? 0.0),
                     performanceTier: (float) ($values['performanceTier'] ?? 1.0),
                 );
+                Appearance::synchronize($values, $previousAppearance);
                 DependencyTracker::invalidateAll();
                 self::$dimensionsHandler?->__invoke(self::$windowMetrics);
                 self::render();
@@ -389,7 +439,8 @@ final class Runtime
         self::$rendering = false;
         self::$renderRequested = false;
         self::$dispatchingEvent = false;
-        self::$windowMetrics = new WindowMetrics(0.0, 0.0, 1.0);
+        Appearance::resetRuntime();
+        self::$windowMetrics = self::bootMetrics();
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();
         Stores::resetRuntime();

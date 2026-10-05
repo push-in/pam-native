@@ -127,6 +127,8 @@ struct NativeManifest {
     #[serde(default)]
     ios: IosOptions,
     #[serde(default)]
+    appearance: crate::appearance::AppearanceOptions,
+    #[serde(default)]
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
@@ -1272,6 +1274,7 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
     if !valid_application_id(&manifest.application_id) {
         return Err("applicationId must be a dot-separated Java package name".to_owned());
     }
+    manifest.appearance.validate()?;
     if manifest
         .android
         .debug_application_id_suffix
@@ -3196,6 +3199,7 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
         }
     }
 
+    merge_ios_appearance(project, &mut info, &info_path)?;
     write_apple_plist(&info_path, &info)?;
     if has_entitlements {
         write_apple_plist(
@@ -3204,6 +3208,40 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
         )?;
     }
     Ok(has_entitlements)
+}
+
+/// Exposes the configured appearance to the iOS host, which applies the
+/// persisted preference through `overrideUserInterfaceStyle` before the first
+/// PHP frame and paints the window with the configured background.
+fn merge_ios_appearance(
+    project: &Project,
+    info: &mut serde_json::Value,
+    info_path: &Path,
+) -> Result<(), String> {
+    let appearance = &project.manifest.appearance;
+    let object = info.as_object_mut().ok_or_else(|| {
+        format!(
+            "{} must contain a top-level dictionary",
+            info_path.display()
+        )
+    })?;
+    object.insert(
+        "PamAppearanceDefaultMode".to_owned(),
+        serde_json::Value::from(appearance.default_mode.value()),
+    );
+    object.insert(
+        "PamAppearanceLightBackground".to_owned(),
+        serde_json::Value::String(crate::appearance::hex(
+            appearance.light_palette()?.background,
+        )),
+    );
+    object.insert(
+        "PamAppearanceDarkBackground".to_owned(),
+        serde_json::Value::String(crate::appearance::hex(
+            appearance.dark_palette()?.background,
+        )),
+    );
+    Ok(())
 }
 
 fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), String> {
@@ -4969,6 +5007,10 @@ fn configure_android(
         &workspace.join("pam-native.properties"),
         properties.as_bytes(),
     )?;
+    project
+        .manifest
+        .appearance
+        .write_android_resources(&workspace.join("app/src/main/res"), write_atomic)?;
     generate_plugin_projects(project, workspace)?;
     write_plugin_lock(project)?;
     write_ios_plugin_plan(project)?;

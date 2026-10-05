@@ -7,7 +7,6 @@ import android.content.ClipboardManager
 import android.content.ClipData
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.Configuration
 import android.net.Uri
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -186,11 +185,10 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
             runCatching {
                 val metrics = context.resources.displayMetrics
                 val density = metrics.density
-                val appearance = when (
-                    context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-                ) {
-                    Configuration.UI_MODE_NIGHT_YES -> APPEARANCE_DARK
-                    else -> APPEARANCE_LIGHT
+                val appearance = if (dev.pam.nativeapp.PamAppearance.isDark(context)) {
+                    APPEARANCE_DARK
+                } else {
+                    APPEARANCE_LIGHT
                 }
                 val activity = context as? PamActivity
                 val appState = if (activity?.hasWindowFocus() == true) {

@@ -19,8 +19,11 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         let window = UIWindow(frame: UIScreen.main.bounds)
-        let controller = UIViewController()
-        controller.view.backgroundColor = .systemBackground
+        let controller = PamHostViewController()
+        // Apply the persisted appearance before the window is visible so the
+        // first frame (native and PHP) already uses the effective scheme.
+        PamAppearance.apply(to: window)
+        controller.view.backgroundColor = PamAppearance.backgroundColor
         window.rootViewController = controller
         window.makeKeyAndVisible()
         self.window = window
@@ -66,6 +69,15 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
             },
         )
         self.runtime = runtime
+        controller.onAppearanceChange = { [weak runtime, weak controller] in
+            guard let runtime, let controller else { return }
+            runtime.updateViewport(
+                widthDp: Float(controller.view.bounds.width),
+                heightDp: Float(controller.view.bounds.height),
+                textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+                darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
+            )
+        }
         runtime.start(
             entry: entry.path,
             widthDp: Float(controller.view.bounds.width),
@@ -134,5 +146,18 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
         let alert = UIAlertController(title: "PAM Native", message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "Close", style: .cancel))
         controller.present(alert, animated: true)
+    }
+}
+
+/// Root controller that reports system or override appearance changes to PHP
+/// so CSS `prefers-color-scheme` restyles without remounting.
+final class PamHostViewController: UIViewController {
+    var onAppearanceChange: (() -> Void)?
+
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        if previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle {
+            onAppearanceChange?()
+        }
     }
 }
