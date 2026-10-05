@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.11.1 - 2026-10-05
+
+- `:key` (or `key`) on a `p-for` child is the loop identity exactly like
+  `p-key`: the component instance, identity slot and native id follow the
+  item, and duplicate keys are reported. Unkeyed loops keep one identity per
+  iteration index.
+- New device-path tests drive `p-for` loops of components (`:key`, `p-key`,
+  unkeyed) through the runtime, decode the committed frames like a native
+  host and dispatch presses by native node id with a pointer payload: every
+  iteration runs its own callback on its own component instance across
+  reorders and conditional siblings.
+
 ## 1.11.0 - 2026-10-05
 
 Unkeyed siblings keep their native identity when a conditional sibling
