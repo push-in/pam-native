@@ -16,6 +16,19 @@ public enum PamActiveUpdateInstaller {
         guard manager.fileExists(atPath: bundle.path), manager.fileExists(atPath: metadata.path) else {
             return embeddedEntry
         }
+        // An OTA slot patches the app bundle it was activated over. Once an
+        // app update ships a different embedded bundle, that bundle wins: the
+        // slot is discarded instead of masking the update.
+        let embeddedRelease = embeddedReleaseIdentity(embeddedEntry: embeddedEntry)
+        let base = updates.appendingPathComponent(baseStamp, isDirectory: false)
+        let recordedBase = (try? String(contentsOf: base, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if recordedBase.isEmpty {
+            try? embeddedRelease.write(to: base, atomically: true, encoding: .utf8)
+        } else if recordedBase != embeddedRelease {
+            discardSupersededUpdates(updates: updates, documents: documents, manager: manager)
+            return embeddedEntry
+        }
 
         do {
             let manifestData = try Data(contentsOf: metadata, options: [.mappedIfSafe])
@@ -42,6 +55,29 @@ public enum PamActiveUpdateInstaller {
             quarantine(updates: updates, manager: manager)
             return embeddedEntry
         }
+    }
+
+    private static let baseStamp = "active.base"
+
+    /// Content digest the CLI writes beside the embedded entry (manifest.sha256).
+    private static func embeddedReleaseIdentity(embeddedEntry: URL) -> String {
+        let manifest = embeddedEntry.deletingLastPathComponent()
+            .appendingPathComponent("manifest.sha256", isDirectory: false)
+        let digest = (try? String(contentsOf: manifest, encoding: .utf8))?
+            .split(whereSeparator: \.isNewline).first.map(String.init)?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+        if !digest.isEmpty { return digest }
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? ""
+        let build = info?["CFBundleVersion"] as? String ?? ""
+        return "\(version)+\(build)"
+    }
+
+    private static func discardSupersededUpdates(updates: URL, documents: URL, manager: FileManager) {
+        for item in (try? manager.contentsOfDirectory(at: updates, includingPropertiesForKeys: nil)) ?? [] {
+            try? manager.removeItem(at: item)
+        }
+        try? manager.removeItem(at: documents.appendingPathComponent("pam/ota-releases", isDirectory: true))
     }
 
     private static func quarantine(updates: URL, manager: FileManager) {

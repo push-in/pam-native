@@ -725,15 +725,36 @@ public final class PamRuntime {
 
     /// Metrics PHP reads before its first render (`PAM_BOOT_METRICS`).
     private func exportBootMetrics(widthDp: Float, heightDp: Float, textScale: Float, insets: UIEdgeInsets) {
-        let values: [String: Double] = [
+        // The same style environment the dimensions event reports, so PHP
+        // recognises the first event as unchanged and skips a full re-render.
+        let screen = UIScreen.main
+        let idiom = UIDevice.current.userInterfaceIdiom
+        let deviceType = switch idiom {
+        case .pad: "tablet"
+        case .tv: "tv"
+        case .mac: "desktop"
+        default: "phone"
+        }
+        let inputMode = idiom == .tv ? "remote" : (idiom == .mac ? "mouse" : "touch")
+        let memoryClass = Double(ProcessInfo.processInfo.physicalMemory) / 1_048_576
+        let refreshRate = Double(screen.maximumFramesPerSecond)
+        let values: [String: Any] = [
             "width": Double(widthDp),
             "height": Double(heightDp),
-            "density": Double(UIScreen.main.scale),
+            "density": Double(screen.scale),
             "fontScale": Double(textScale),
             "safeAreaTop": Double(insets.top),
             "safeAreaRight": Double(insets.right),
             "safeAreaBottom": Double(insets.bottom),
             "safeAreaLeft": Double(insets.left),
+            "refreshRate": refreshRate,
+            "reducedMotion": UIAccessibility.isReduceMotionEnabled,
+            "deviceType": deviceType,
+            "pointer": inputMode == "touch" || inputMode == "remote" ? "coarse" : "fine",
+            "inputMode": inputMode,
+            "dynamicRange": screen.traitCollection.displayGamut == .P3 ? "high" : "standard",
+            "memoryClass": memoryClass,
+            "performanceTier": memoryClass >= 4_096 && refreshRate >= 90 ? 3.0 : (memoryClass >= 2_048 ? 2.0 : 1.0),
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: values),
               let json = String(data: data, encoding: .utf8) else { return }
