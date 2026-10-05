@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.8.0 - 2026-10-05
+
+iOS parity for the 1.5.0 gestures/animations and the 1.1.x native modules.
+See [docs/gestures.md](docs/gestures.md), [docs/animations.md](docs/animations.md)
+and [docs/native-capabilities.md](docs/native-capabilities.md).
+
+- iOS motion runs on the main thread with no PHP round-trips while a finger
+  moves: `PressEvent` coordinates for press/long press, `delayLongPress`,
+  press-in/out delays (hold-to-record), `on:doubleTap` with deferred single
+  press and `TapEffect` (heart burst), `Drag` (rubber band, drivers on
+  `nativeRef` views, snaps with spring/timing settle, threshold/velocity
+  release, haptic tick, groups, `dragSnap`), `Swipeable`, animation programs
+  and presets, `replayKey`, per-property CSS transitions with `spring()`,
+  per-keyframe `easing`, scroll begin/end drag and momentum end with page
+  index, list `pagingEnabled`, `on:textLayout`, `ellipsizeMode="marquee"`
+  and the `slide-fade` modal. The spring solver matches Android/PHP
+  durations exactly.
+- iOS native modules: `Http::multipart()` and upload transfers with progress
+  and cancellation, `Image::prefetch()`, conversation notifications
+  (communication notifications with avatar, inline reply, mark as read),
+  durable `Notifications::onAction()` queue with native `ActionEndpoint`
+  delivery, `PushRendering` for background (`content-available`) pushes with
+  route suppression and `PushMessage::$rendered`.
+- `Screen::secure()` on iOS: screenshots cannot be blocked, so secure mode
+  shields every window while the screen is recorded/mirrored
+  (`UIScreen.isCaptured`) and while the app is inactive (app switcher).
+- iOS host: forwards APNs registration, background pushes and notification
+  responses; declares `remote-notification` and `INSendMessageIntent`.
+- Views with a transform are laid out through bounds/center on iOS.
+- Tests: XCTest mirrors of the Android motion, drag, transfer and
+  notification suites. Swift sources were parse-checked with Swift 6.1 and
+  the pure motion and HTTP logic type-checked and exercised on Linux; the
+  UIKit code was not compiled (no Xcode) and needs Mac validation.
+
 ## 1.7.0 - 2026-10-05
 
 LogBox-style runtime error overlay. See [docs/error-overlay.md](docs/error-overlay.md).
