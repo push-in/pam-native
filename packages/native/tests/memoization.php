@@ -160,3 +160,61 @@ $assert(MemoTestParent::$renders === $beforeModel + 2, 'Disabling memoization mu
 \Pam\Native\Internal\DependencyTracker::memoization(true);
 $assert(MemoTestChild::$unmounts === 0, 'Memoized subtrees must never be unmounted while displayed.');
 Runtime::shutdown();
+
+final class MemoFreezeScreen extends Component
+{
+    public static array $renders = [];
+    public static int $unmounts = 0;
+    public string $label;
+
+    public function __construct(public string $name)
+    {
+        $this->label = $name.'-initial';
+    }
+
+    public function render(): Element
+    {
+        self::$renders[$this->name] = (self::$renders[$this->name] ?? 0) + 1;
+
+        return Screen::make(Text::make($this->label))->toElement();
+    }
+
+    public function unmount(): void
+    {
+        self::$unmounts++;
+    }
+}
+
+$freezeScreens = ['first' => new MemoFreezeScreen('first'), 'second' => new MemoFreezeScreen('second')];
+$freezeNavigator = new \Pam\Native\Navigation\Navigator(
+    initialRoute: 'first',
+    routes: [
+        'first' => static fn () => $freezeScreens['first'],
+        'second' => static fn () => $freezeScreens['second'],
+    ],
+    transition: \Pam\Native\Navigation\NavigationTransition::Fade,
+    handleSystemBack: false,
+);
+App::run($freezeNavigator);
+$memoResult(static function () use ($freezeNavigator): void {
+    $freezeNavigator->push('second');
+});
+$firstRenders = MemoFreezeScreen::$renders['first'];
+$memoResult(static function () use ($freezeScreens): void {
+    $freezeScreens['first']->label = 'first-changed';
+});
+$assert(
+    MemoFreezeScreen::$renders['first'] === $firstRenders
+        && MemoFreezeScreen::$unmounts === 0
+        && !str_contains((string) Runtime::lastFrame(), 'first-changed'),
+    'Screens below the top of the stack must stay frozen and mounted while inactive.',
+);
+$memoResult(static function () use ($freezeNavigator): void {
+    $freezeNavigator->pop();
+});
+$assert(
+    MemoFreezeScreen::$renders['first'] > $firstRenders
+        && str_contains((string) Runtime::lastFrame(), 'first-changed'),
+    'A frozen screen must render its latest state once it becomes the top again.',
+);
+Runtime::shutdown();

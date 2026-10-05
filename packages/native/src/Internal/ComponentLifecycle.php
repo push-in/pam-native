@@ -33,6 +33,9 @@ final class ComponentLifecycle
     /** @var WeakMap<Component, list<Component>>|null Child components rendered during each component's last real render. */
     private static ?WeakMap $children = null;
 
+    /** @var list<array{depth: int, components: list<Component>}> */
+    private static array $captures = [];
+
     private function __construct()
     {
     }
@@ -76,6 +79,12 @@ final class ComponentLifecycle
             $list[] = $component;
             $children[$parent] = $list;
         }
+        if (self::$captures !== []) {
+            $capture = count(self::$captures) - 1;
+            if (self::$captures[$capture]['depth'] === count(self::$renderStack)) {
+                self::$captures[$capture]['components'][] = $component;
+            }
+        }
         self::$renderStack[] = $component;
         try {
             if (!$state['booted']) {
@@ -101,6 +110,57 @@ final class ComponentLifecycle
             throw $error;
         } finally {
             array_pop(self::$renderStack);
+        }
+    }
+
+    /**
+     * Runs a render and returns its result with the top-level components it
+     * rendered, so a caller can later reuse the result without rendering
+     * (see adopt()).
+     *
+     * @template T
+     * @param Closure(): T $render
+     * @return array{0: T, 1: list<Component>}
+     */
+    public static function capture(Closure $render): array
+    {
+        self::$captures[] = ['depth' => count(self::$renderStack), 'components' => []];
+        try {
+            $result = $render();
+        } catch (\Throwable $error) {
+            array_pop(self::$captures);
+            throw $error;
+        }
+        $capture = array_pop(self::$captures);
+
+        return [$result, $capture['components']];
+    }
+
+    /**
+     * Keeps components of a reused (frozen) render result mounted and records
+     * them as children of the component rendering now.
+     *
+     * @param list<Component> $components
+     */
+    public static function adopt(array $components): void
+    {
+        $parent = self::$renderStack === [] ? null : self::$renderStack[count(self::$renderStack) - 1];
+        foreach ($components as $component) {
+            self::retain($component);
+            PamPhpRegistry::retainScope($component);
+            self::retainSubtree($component);
+            if ($parent !== null && $parent !== $component) {
+                $children = self::$children ??= new WeakMap();
+                $list = $children[$parent] ?? [];
+                $list[] = $component;
+                $children[$parent] = $list;
+            }
+            if (self::$captures !== []) {
+                $capture = count(self::$captures) - 1;
+                if (self::$captures[$capture]['depth'] === count(self::$renderStack)) {
+                    self::$captures[$capture]['components'][] = $component;
+                }
+            }
         }
     }
 
@@ -284,6 +344,7 @@ final class ComponentLifecycle
         self::$states = null;
         self::$children = null;
         self::$renderStack = [];
+        self::$captures = [];
         self::$pass = 0;
         self::$appState = AppState::Active;
         DependencyTracker::reset();

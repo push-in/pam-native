@@ -34,6 +34,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private array $preloaded = [];
     /** @var array<string, Renderable> */
     private array $routeInstances = [];
+    /** @var array<string, array{element: \Pam\Native\Element, components: list<Component>, epoch: int}> */
+    private array $frozenScreens = [];
     private int $nextListenerId = 1;
     private ?string $focusedEntryKey = null;
     /** @var array<string, NavigationSubscription> */
@@ -381,12 +383,16 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             $entries[] = $this->outgoing;
         }
 
+        $top = $this->stack[count($this->stack) - 1];
         $screens = array_map(
-            fn (array $entry): Renderable => $this->decorateRoute($entry)
-                ->toElement()
-                ->key('navigation.'.$entry['id']),
+            fn (array $entry): Renderable => $this->screenElement($entry, $entry['id'] === $top['id']),
             $entries,
         );
+        $live = [];
+        foreach ($entries as $entry) {
+            $live[$this->entryKey($entry)] = true;
+        }
+        $this->frozenScreens = array_intersect_key($this->frozenScreens, $live);
 
         $activeOptions = $this->currentOptions();
         \Pam\Native\System\Screen::claimForRoute($this->navigationKey, $activeOptions->secure);
@@ -903,6 +909,42 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     }
 
     /** @param array{name: string, id: int, params: array<string, string|int|float|bool|null>} $entry */
+    /**
+     * Screens below the top of the stack (and outgoing screens during a
+     * transition) are frozen: their last element is reused even when their
+     * state changes, until they become the top again. Global invalidations
+     * (theme, metrics, untracked renders) still refresh them.
+     *
+     * @param array{name: string, id: int, routeId?: string|null, params: array<string, string|int|float|bool|null>} $entry
+     */
+    private function screenElement(array $entry, bool $active): \Pam\Native\Element
+    {
+        $key = $this->entryKey($entry);
+        $frozen = $this->frozenScreens[$key] ?? null;
+        if (
+            !$active
+            && $frozen !== null
+            && $frozen['epoch'] === \Pam\Native\Internal\DependencyTracker::epoch()
+            && \Pam\Native\Internal\DependencyTracker::memoization()
+        ) {
+            \Pam\Native\Internal\ComponentLifecycle::adopt($frozen['components']);
+
+            return $frozen['element'];
+        }
+        [$element, $components] = \Pam\Native\Internal\ComponentLifecycle::capture(
+            fn (): \Pam\Native\Element => $this->decorateRoute($entry)
+                ->toElement()
+                ->key('navigation.'.$entry['id']),
+        );
+        $this->frozenScreens[$key] = [
+            'element' => $element,
+            'components' => $components,
+            'epoch' => \Pam\Native\Internal\DependencyTracker::epoch(),
+        ];
+
+        return $element;
+    }
+
     private function decorateRoute(array $entry): Renderable
     {
         $options = $this->resolvedOptions($entry);
