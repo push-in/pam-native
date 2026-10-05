@@ -17,4 +17,5 @@ enum StyleValueUnit: int
     case Vh = 9;
     case Vmin = 10;
     case Vmax = 11;
+    case Em = 12;
 }

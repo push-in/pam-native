@@ -1658,6 +1658,15 @@ class PamRenderer(
         state.properties[PropKey.TRANSLATION_X_PERCENT]?.decimal()?.let { percent ->
             view.translationX = width * (percent / 100.0).toFloat()
         }
+        state.properties[PropKey.TRANSLATION_Y_PERCENT]?.decimal()?.let { percent ->
+            view.translationY = height * (percent / 100.0).toFloat()
+        }
+        if (
+            state.properties.containsKey(PropKey.TRANSFORM_ORIGIN_X) ||
+            state.properties.containsKey(PropKey.TRANSFORM_ORIGIN_Y)
+        ) {
+            applyTransformOrigin(view, state, width, height)
+        }
     }
 
     private fun compensateFlexParentViewportReduction(
@@ -1885,6 +1894,10 @@ class PamRenderer(
             PropKey.BORDER_TOP_WIDTH,
             PropKey.BORDER_RIGHT_WIDTH,
             PropKey.BORDER_BOTTOM_WIDTH,
+            PropKey.BORDER_TOP_COLOR,
+            PropKey.BORDER_RIGHT_COLOR,
+            PropKey.BORDER_BOTTOM_COLOR,
+            PropKey.BORDER_LEFT_COLOR,
             PropKey.RIPPLE_COLOR,
             PropKey.RIPPLE_BORDERLESS,
             PropKey.RIPPLE_RADIUS,
@@ -2501,6 +2514,29 @@ class PamRenderer(
             PropKey.TRANSLATION_X_PERCENT -> {
                 view.translationX = view.width * (value.decimal() / 100.0).toFloat()
             }
+            PropKey.TRANSLATION_Y_PERCENT -> {
+                view.translationY = view.height * (value.decimal() / 100.0).toFloat()
+            }
+            PropKey.TRANSFORM_ORIGIN_X,
+            PropKey.TRANSFORM_ORIGIN_Y,
+            -> applyTransformOrigin(view, state)
+            PropKey.TEXT_SHADOW_OFFSET_X,
+            PropKey.TEXT_SHADOW_OFFSET_Y,
+            PropKey.TEXT_SHADOW_RADIUS,
+            PropKey.TEXT_SHADOW_COLOR,
+            -> (view as? TextView)?.let { applyTextShadow(it, state) }
+            PropKey.FONT_FEATURE_SETTINGS ->
+                (view as? TextView)?.fontFeatureSettings = value.text(key)
+            PropKey.FLEX_BASIS,
+            PropKey.FLEX_BASIS_PERCENT,
+            PropKey.FLEX_BASIS_CONTENT,
+            PropKey.ALIGN_CONTENT,
+            PropKey.MARGIN_TOP_AUTO,
+            PropKey.MARGIN_RIGHT_AUTO,
+            PropKey.MARGIN_BOTTOM_AUTO,
+            PropKey.MIN_WIDTH_PERCENT,
+            PropKey.MIN_HEIGHT_PERCENT,
+            -> Unit
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
             PropKey.ANIMATION_DURATION_MS -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -2693,6 +2729,10 @@ class PamRenderer(
             PropKey.BORDER_TOP_WIDTH,
             PropKey.BORDER_RIGHT_WIDTH,
             PropKey.BORDER_BOTTOM_WIDTH,
+            PropKey.BORDER_TOP_COLOR,
+            PropKey.BORDER_RIGHT_COLOR,
+            PropKey.BORDER_BOTTOM_COLOR,
+            PropKey.BORDER_LEFT_COLOR,
             PropKey.RIPPLE_COLOR,
             PropKey.RIPPLE_BORDERLESS,
             PropKey.RIPPLE_RADIUS,
@@ -3099,6 +3139,28 @@ class PamRenderer(
             PropKey.TRANSLATION_X_PERCENT -> {
                 view.translationX = dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
             }
+            PropKey.TRANSLATION_Y_PERCENT -> {
+                view.translationY = dp(state.number(PropKey.TRANSLATION_Y, 0.0).toFloat()).toFloat()
+            }
+            PropKey.TRANSFORM_ORIGIN_X,
+            PropKey.TRANSFORM_ORIGIN_Y,
+            -> applyTransformOrigin(view, state)
+            PropKey.TEXT_SHADOW_OFFSET_X,
+            PropKey.TEXT_SHADOW_OFFSET_Y,
+            PropKey.TEXT_SHADOW_RADIUS,
+            PropKey.TEXT_SHADOW_COLOR,
+            -> (view as? TextView)?.let { applyTextShadow(it, state) }
+            PropKey.FONT_FEATURE_SETTINGS -> (view as? TextView)?.fontFeatureSettings = null
+            PropKey.FLEX_BASIS,
+            PropKey.FLEX_BASIS_PERCENT,
+            PropKey.FLEX_BASIS_CONTENT,
+            PropKey.ALIGN_CONTENT,
+            PropKey.MARGIN_TOP_AUTO,
+            PropKey.MARGIN_RIGHT_AUTO,
+            PropKey.MARGIN_BOTTOM_AUTO,
+            PropKey.MIN_WIDTH_PERCENT,
+            PropKey.MIN_HEIGHT_PERCENT,
+            -> Unit
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, 1)
             PropKey.ANIMATION_DURATION_MS -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -4916,14 +4978,29 @@ class PamRenderer(
             rightBorderWidth,
             bottomBorderWidth,
         )
+        val uniformBorderColor = borderColorOverride ?: state.properties[PropKey.NATIVE_BORDER_COLOR_RESOURCE]
+            ?.let { resolveNativeColor(it.text(PropKey.NATIVE_BORDER_COLOR_RESOURCE)) }
+            ?: state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        // Per-side CSS colors; a pressed/focused state color overrides every side.
+        fun sideBorderColor(key: PropKey): Int =
+            borderColorOverride ?: state.properties[key]?.integer()?.toInt() ?: uniformBorderColor
+        val leftBorderColor = sideBorderColor(PropKey.BORDER_LEFT_COLOR)
+        val topBorderColor = sideBorderColor(PropKey.BORDER_TOP_COLOR)
+        val rightBorderColor = sideBorderColor(PropKey.BORDER_RIGHT_COLOR)
+        val bottomBorderColor = sideBorderColor(PropKey.BORDER_BOTTOM_COLOR)
+        val paintedSideColors = listOfNotNull(
+            leftBorderColor.takeIf { leftBorderWidth > 0 },
+            topBorderColor.takeIf { topBorderWidth > 0 },
+            rightBorderColor.takeIf { rightBorderWidth > 0 },
+            bottomBorderColor.takeIf { bottomBorderWidth > 0 },
+        ).distinct()
         val hasDirectionalBorder = borderWidth > 0 && (
             leftBorderWidth != rightBorderWidth ||
                 leftBorderWidth != topBorderWidth ||
-                leftBorderWidth != bottomBorderWidth
+                leftBorderWidth != bottomBorderWidth ||
+                paintedSideColors.size > 1
             )
-        val borderColor = borderColorOverride ?: state.properties[PropKey.NATIVE_BORDER_COLOR_RESOURCE]
-            ?.let { resolveNativeColor(it.text(PropKey.NATIVE_BORDER_COLOR_RESOURCE)) }
-            ?: state.integer(PropKey.BORDER_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        val borderColor = paintedSideColors.singleOrNull() ?: uniformBorderColor
         val borderStyle = state.integer(PropKey.BORDER_STYLE, 1).toInt()
         val imageHost = state.kind == NodeKind.IMAGE ||
             state.kind == NodeKind.IMAGE_BACKGROUND ||
@@ -4965,6 +5042,7 @@ class PamRenderer(
         }
         val background = if (!imageHost && hasDirectionalBorder) {
             val borders = object : android.graphics.drawable.Drawable() {
+                private var drawableAlpha = 255
                 private val paint = android.graphics.Paint(
                     android.graphics.Paint.ANTI_ALIAS_FLAG,
                 ).apply {
@@ -4974,7 +5052,12 @@ class PamRenderer(
 
                 override fun draw(canvas: android.graphics.Canvas) {
                     val area = bounds
+                    fun sidePaint(color: Int): android.graphics.Paint = paint.apply {
+                        this.color = color
+                        this.alpha = Color.alpha(color) * drawableAlpha / 255
+                    }
                     if (leftBorderWidth > 0) {
+                        sidePaint(leftBorderColor)
                         canvas.drawRect(
                             area.left.toFloat(),
                             area.top.toFloat(),
@@ -4984,6 +5067,7 @@ class PamRenderer(
                         )
                     }
                     if (topBorderWidth > 0) {
+                        sidePaint(topBorderColor)
                         canvas.drawRect(
                             area.left.toFloat(),
                             area.top.toFloat(),
@@ -4993,6 +5077,7 @@ class PamRenderer(
                         )
                     }
                     if (rightBorderWidth > 0) {
+                        sidePaint(rightBorderColor)
                         canvas.drawRect(
                             (area.right - rightBorderWidth).toFloat(),
                             area.top.toFloat(),
@@ -5002,6 +5087,7 @@ class PamRenderer(
                         )
                     }
                     if (bottomBorderWidth > 0) {
+                        sidePaint(bottomBorderColor)
                         canvas.drawRect(
                             area.left.toFloat(),
                             (area.bottom - bottomBorderWidth).toFloat(),
@@ -5013,7 +5099,8 @@ class PamRenderer(
                 }
 
                 override fun setAlpha(alpha: Int) {
-                    paint.alpha = alpha
+                    drawableAlpha = alpha.coerceIn(0, 255)
+                    invalidateSelf()
                 }
 
                 override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
@@ -5201,6 +5288,39 @@ class PamRenderer(
         )
     }
 
+    /** CSS transform-origin as a percentage of the view's own box. */
+    private fun applyTransformOrigin(
+        view: View,
+        state: NodeState,
+        width: Int = view.width,
+        height: Int = view.height,
+    ) {
+        val originX = state.properties[PropKey.TRANSFORM_ORIGIN_X]?.decimal()
+        val originY = state.properties[PropKey.TRANSFORM_ORIGIN_Y]?.decimal()
+        if (originX == null && originY == null) {
+            view.resetPivot()
+            return
+        }
+        view.pivotX = width * ((originX ?: 50.0) / 100.0).toFloat()
+        view.pivotY = height * ((originY ?: 50.0) / 100.0).toFloat()
+    }
+
+    /** CSS text-shadow; a zero blur still paints a hard shadow. */
+    private fun applyTextShadow(view: TextView, state: NodeState) {
+        val color = state.integer(PropKey.TEXT_SHADOW_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        if (Color.alpha(color) == 0) {
+            view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            return
+        }
+        val radius = dp(state.number(PropKey.TEXT_SHADOW_RADIUS, 0.0).toFloat()).toFloat()
+        view.setShadowLayer(
+            radius.coerceAtLeast(MIN_TEXT_SHADOW_RADIUS),
+            dp(state.number(PropKey.TEXT_SHADOW_OFFSET_X, 0.0).toFloat()).toFloat(),
+            dp(state.number(PropKey.TEXT_SHADOW_OFFSET_Y, 0.0).toFloat()).toFloat(),
+            color,
+        )
+    }
+
     private fun applyLetterSpacing(view: TextView, state: NodeState) {
         view.letterSpacing = resolvedAndroidLetterSpacing(
             state.number(PropKey.LETTER_SPACING, 0.0).toFloat(),
@@ -5211,10 +5331,15 @@ class PamRenderer(
     private fun applyTextAlignment(view: TextView, state: NodeState) {
         if (view is PamEditText) return
         val authored = state.properties[PropKey.TEXT_ALIGN]?.integer()?.toInt()
+        view.justificationMode = if (authored == TEXT_ALIGN_JUSTIFY) {
+            android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
+        } else {
+            android.text.Layout.JUSTIFICATION_MODE_NONE
+        }
         val horizontal = when (authored) {
             2 -> Gravity.CENTER_HORIZONTAL
             3 -> Gravity.END
-            1 -> Gravity.START
+            1, TEXT_ALIGN_JUSTIFY -> Gravity.START
             else -> {
                 val parent = nodes[state.parent]
                 val hasAllocatedWidth = state.properties.containsKey(PropKey.WIDTH) ||
@@ -7419,6 +7544,13 @@ class PamRenderer(
             PropKey.OPACITY,
             PropKey.VISIBLE,
             PropKey.TRANSLATION_X_PERCENT,
+            PropKey.TRANSLATION_Y_PERCENT,
+            PropKey.TRANSFORM_ORIGIN_X,
+            PropKey.TRANSFORM_ORIGIN_Y,
+            PropKey.BORDER_TOP_COLOR,
+            PropKey.BORDER_RIGHT_COLOR,
+            PropKey.BORDER_BOTTOM_COLOR,
+            PropKey.BORDER_LEFT_COLOR,
             PropKey.ANIMATION_KIND,
             PropKey.ANIMATION_KEYFRAMES,
             PropKey.ANIMATION_DURATION_MS,
@@ -7504,6 +7636,9 @@ class PamRenderer(
             PropKey.ACCESSIBILITY_ACTIONS,
             PropKey.ON_ACCESSIBILITY_ACTION,
         )
+
+        const val TEXT_ALIGN_JUSTIFY = 4
+        const val MIN_TEXT_SHADOW_RADIUS = 0.01f
 
         const val ROLE_DESCRIPTION_KEY = "AccessibilityNodeInfo.roleDescription"
         const val STATE_DESCRIPTION_KEY =

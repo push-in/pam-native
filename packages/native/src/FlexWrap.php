@@ -8,4 +8,5 @@ enum FlexWrap: int
 {
     case NoWrap = 1;
     case Wrap = 2;
+    case WrapReverse = 3;
 }

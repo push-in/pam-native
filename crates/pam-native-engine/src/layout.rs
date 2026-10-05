@@ -42,6 +42,7 @@ struct LayoutContext<'a> {
     previous: Option<&'a BTreeMap<u64, Layout>>,
     dirty_path: Option<&'a BTreeSet<u64>>,
     visited_nodes: Cell<usize>,
+    viewport: Layout,
 }
 
 #[derive(Clone, Copy)]
@@ -91,6 +92,12 @@ pub fn calculate_with_text_metrics(
         previous: None,
         dirty_path: None,
         visited_nodes: Cell::new(0),
+        viewport: Layout {
+            x: 0.0,
+            y: 0.0,
+            width: viewport.width,
+            height: viewport.height,
+        },
     };
     let mut result = BTreeMap::new();
     layout_node(
@@ -170,6 +177,12 @@ pub fn calculate_incremental_with_text_metrics(
         previous: Some(previous),
         dirty_path: Some(&dirty_path),
         visited_nodes: Cell::new(0),
+        viewport: Layout {
+            x: 0.0,
+            y: 0.0,
+            width: viewport.width,
+            height: viewport.height,
+        },
     };
     let mut result = previous.clone();
     let mut pending = dirty_nodes.iter().copied().collect::<Vec<_>>();
@@ -261,8 +274,26 @@ fn layout_node(
             bounds.height,
         );
         Layout {
-            width: constrained(width, number(node, PropKey::MinWidth), max_width)?,
-            height: constrained(height, number(node, PropKey::MinHeight), max_height)?,
+            width: constrained(
+                width,
+                dimension(
+                    node,
+                    PropKey::MinWidth,
+                    PropKey::MinWidthPercent,
+                    bounds.width,
+                ),
+                max_width,
+            )?,
+            height: constrained(
+                height,
+                dimension(
+                    node,
+                    PropKey::MinHeight,
+                    PropKey::MinHeightPercent,
+                    bounds.height,
+                ),
+                max_height,
+            )?,
             ..bounds
         }
     } else {
@@ -388,7 +419,12 @@ fn layout_node(
                         context.text_metrics,
                         depth + 1,
                     )?),
-                number(child, PropKey::MinWidth),
+                dimension(
+                    child,
+                    PropKey::MinWidth,
+                    PropKey::MinWidthPercent,
+                    inner.width,
+                ),
                 dimension(
                     child,
                     PropKey::MaxWidth,
@@ -413,7 +449,12 @@ fn layout_node(
                         context.text_metrics,
                         depth + 1,
                     )?),
-                number(child, PropKey::MinHeight),
+                dimension(
+                    child,
+                    PropKey::MinHeight,
+                    PropKey::MinHeightPercent,
+                    inner.height,
+                ),
                 dimension(
                     child,
                     PropKey::MaxHeight,
@@ -580,21 +621,14 @@ fn layout_node(
     let mut flow_children = node_children
         .iter()
         .copied()
-        .filter(|child| {
-            visible(child)
-                && child.kind != NodeKind::Modal
-                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
-        })
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && !out_of_flow(child))
         .collect::<Vec<_>>();
     let absolute_children = node_children
         .iter()
         .copied()
-        .filter(|child| {
-            visible(child)
-                && child.kind != NodeKind::Modal
-                && integer(child, PropKey::PositionType).unwrap_or(1) == 2
-        })
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && out_of_flow(child))
         .collect::<Vec<_>>();
+    sort_by_order(&mut flow_children);
     let mut ordered_children = if matches!(direction, 3 | 4) {
         flow_children.iter().rev().copied().collect::<Vec<_>>()
     } else {
@@ -608,7 +642,7 @@ fn layout_node(
         Axis::Vertical => inner.width,
         Axis::Horizontal => inner.height,
     };
-    if integer(node, PropKey::FlexWrap).unwrap_or(1) == 2 {
+    if matches!(integer(node, PropKey::FlexWrap), Some(2 | 3)) {
         layout_wrapped_children(
             context,
             node,
@@ -646,14 +680,13 @@ fn layout_node(
             })
             .sum::<f32>();
     let free = (available_main - consumed).max(0.0);
-    let auto_margin_count = if axis == Axis::Horizontal {
-        flow_children
-            .iter()
-            .filter(|child| boolean(child, PropKey::MarginLeftAuto))
-            .count()
-    } else {
-        0
-    };
+    let auto_margin_count = flow_children
+        .iter()
+        .map(|child| {
+            let (before, after) = auto_margins(child, axis);
+            usize::from(before) + usize::from(after)
+        })
+        .sum::<usize>();
     let auto_margin = if auto_margin_count > 0 {
         free / auto_margin_count as f32
     } else {
@@ -704,14 +737,20 @@ fn layout_node(
 
     for child in ordered_children {
         let main = resolved_main[&child.id];
-        let (mut main_before, main_after) = margin_main(child, axis);
-        if axis == Axis::Horizontal && boolean(child, PropKey::MarginLeftAuto) {
+        let (mut main_before, mut main_after) = margin_main(child, axis);
+        let (auto_before, auto_after) = auto_margins(child, axis);
+        if auto_before {
             main_before += auto_margin;
         }
+        if auto_after {
+            main_after += auto_margin;
+        }
         let (cross_before, cross_after) = margin_cross(child, axis);
-        let alignment = integer(child, PropKey::AlignSelf)
-            .map(cross_alignment)
-            .unwrap_or(parent_alignment);
+        let alignment = auto_cross_alignment(child, axis).unwrap_or_else(|| {
+            integer(child, PropKey::AlignSelf)
+                .map(cross_alignment)
+                .unwrap_or(parent_alignment)
+        });
         let explicit_cross = child_cross(child, axis, available_cross, main)?;
         let cross = explicit_cross.unwrap_or_else(|| {
             if alignment == CrossAlignment::Stretch {
@@ -760,11 +799,23 @@ fn layout_node(
                 height: cross,
             },
         };
-        layout_node(context, child.id, child_frame, false, depth + 1, output)?;
+        layout_node(
+            context,
+            child.id,
+            relative_offset(child, child_frame, inner),
+            false,
+            depth + 1,
+            output,
+        )?;
         cursor += main + main_after + distributed_gap;
     }
 
     for child in absolute_children {
+        let inner = if integer(child, PropKey::PositionType) == Some(3) {
+            context.viewport
+        } else {
+            inner
+        };
         let left = dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width);
         let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height);
         let right = dimension(child, PropKey::Right, PropKey::RightPercent, inner.width);
@@ -815,7 +866,12 @@ fn layout_node(
         }
         width = constrained(
             width,
-            number(child, PropKey::MinWidth),
+            dimension(
+                child,
+                PropKey::MinWidth,
+                PropKey::MinWidthPercent,
+                inner.width,
+            ),
             dimension(
                 child,
                 PropKey::MaxWidth,
@@ -825,7 +881,12 @@ fn layout_node(
         )?;
         height = constrained(
             height,
-            number(child, PropKey::MinHeight),
+            dimension(
+                child,
+                PropKey::MinHeight,
+                PropKey::MinHeightPercent,
+                inner.height,
+            ),
             dimension(
                 child,
                 PropKey::MaxHeight,
@@ -839,12 +900,11 @@ fn layout_node(
             absolute_static_offset(child, node, axis, Axis::Vertical, inner.height, height);
         let child_frame = Layout {
             x: inner.x
-                + left.unwrap_or_else(|| {
-                    right.map_or(static_x, |right| (inner.width - right - width).max(0.0))
-                }),
+                + left
+                    .unwrap_or_else(|| right.map_or(static_x, |right| inner.width - right - width)),
             y: inner.y
                 + top.unwrap_or_else(|| {
-                    bottom.map_or(static_y, |bottom| (inner.height - bottom - height).max(0.0))
+                    bottom.map_or(static_y, |bottom| inner.height - bottom - height)
                 }),
             width,
             height,
@@ -872,24 +932,24 @@ fn layout_wrapped_children(
         return Ok(());
     }
 
-    let mut base_main = BTreeMap::new();
+    let mut items = BTreeMap::new();
     let mut lines = Vec::<Vec<&Node>>::new();
     let mut line = Vec::<&Node>::new();
     let mut consumed = 0.0_f32;
     for child in children {
-        let main = child_main(
+        let item = flex_item(
             context.children,
             child,
             axis,
             available_main,
             available_cross,
+            false,
             context.text_scale,
             context.text_metrics,
             depth + 1,
         )?;
-        base_main.insert(child.id, main);
-        let (before, after) = margin_main(child, axis);
-        let outer = main + before + after;
+        let outer = item.hypothetical + item.margins;
+        items.insert(child.id, item);
         let candidate = if line.is_empty() {
             outer
         } else {
@@ -909,33 +969,31 @@ fn layout_wrapped_children(
 
     let parent_alignment = cross_alignment(integer(node, PropKey::AlignItems).unwrap_or(4));
     let justify = integer(node, PropKey::JustifyContent).unwrap_or(1);
-    let mut cross_cursor = 0.0_f32;
 
+    // Pass 1: resolve every line's main sizes and cross extent.
+    let mut resolved_lines = Vec::with_capacity(lines.len());
     for line in lines {
-        let fixed_with_margins = line
-            .iter()
-            .map(|child| {
-                let (before, after) = margin_main(child, axis);
-                base_main[&child.id] + before + after
-            })
-            .sum::<f32>();
         let line_gaps = main_gap * line.len().saturating_sub(1) as f32;
-        let grow = line
+        let line_items = line
             .iter()
-            .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
-            .sum::<f32>();
-        let grow_space = (available_main - fixed_with_margins - line_gaps).max(0.0);
+            .map(|child| &items[&child.id])
+            .map(|item| FlexItem {
+                id: item.id,
+                base: item.base,
+                hypothetical: item.hypothetical,
+                minimum: item.minimum,
+                maximum: item.maximum,
+                grow: item.grow,
+                shrink: item.shrink,
+                margins: item.margins,
+            })
+            .collect::<Vec<_>>();
+        let mains = resolve_flexible_lengths(&line_items, available_main - line_gaps);
 
         let mut resolved_cross = BTreeMap::new();
         let mut line_cross = 0.0_f32;
         for child in &line {
-            let child_grow = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
-            let main = base_main[&child.id]
-                + if grow > 0.0 {
-                    grow_space * child_grow / grow
-                } else {
-                    0.0
-                };
+            let main = mains[&child.id];
             let explicit = child_cross(child, axis, available_cross, main)?;
             let intrinsic = intrinsic_cross(
                 context.children,
@@ -956,13 +1014,67 @@ fn layout_wrapped_children(
             line_cross = line_cross.max(cross + before + after);
             resolved_cross.insert(child.id, (main, explicit, intrinsic));
         }
-        line_cross = line_cross.min((available_cross - cross_cursor).max(0.0));
+        let consumed_main = line_gaps
+            + line
+                .iter()
+                .map(|child| mains[&child.id] + items[&child.id].margins)
+                .sum::<f32>();
+        resolved_lines.push((line, resolved_cross, line_cross, consumed_main));
+    }
 
-        let consumed_main =
-            fixed_with_margins + line_gaps + if grow > 0.0 { grow_space } else { 0.0 };
+    // Pass 2: distribute the cross axis between lines (align-content).
+    let line_count = resolved_lines.len();
+    let total_lines_cross = resolved_lines
+        .iter()
+        .map(|(_, _, cross, _)| *cross)
+        .sum::<f32>()
+        + cross_gap * line_count.saturating_sub(1) as f32;
+    let free_cross = (available_cross - total_lines_cross).max(0.0);
+    let align_content = integer(node, PropKey::AlignContent).unwrap_or(1);
+    let (mut cross_cursor, extra_line_gap, stretch_extra) = match align_content {
+        2 => (free_cross / 2.0, 0.0, 0.0),
+        3 => (free_cross, 0.0, 0.0),
+        4 if line_count > 0 => (0.0, 0.0, free_cross / line_count as f32),
+        5 if line_count > 1 => (0.0, free_cross / (line_count - 1) as f32, 0.0),
+        6 if line_count > 0 => {
+            let space = free_cross / line_count as f32;
+            (space / 2.0, space, 0.0)
+        }
+        7 if line_count > 0 => {
+            let space = free_cross / (line_count + 1) as f32;
+            (space, space, 0.0)
+        }
+        _ => (0.0, 0.0, 0.0),
+    };
+    let reverse_lines = integer(node, PropKey::FlexWrap) == Some(3);
+
+    for (line, resolved_cross, measured_cross, consumed_main) in resolved_lines {
+        let line_cross =
+            (measured_cross + stretch_extra).min((available_cross - cross_cursor).max(0.0));
+        let line_start = if reverse_lines {
+            (available_cross - cross_cursor - line_cross).max(0.0)
+        } else {
+            cross_cursor
+        };
         let free = (available_main - consumed_main).max(0.0);
-        let (mut main_cursor, distributed_gap) =
-            justify_offsets(justify, free, line.len(), main_gap);
+        let auto_margin_count = line
+            .iter()
+            .map(|child| {
+                let (before, after) = auto_margins(child, axis);
+                usize::from(before) + usize::from(after)
+            })
+            .sum::<usize>();
+        let auto_margin = if auto_margin_count > 0 {
+            free / auto_margin_count as f32
+        } else {
+            0.0
+        };
+        let (mut main_cursor, distributed_gap) = justify_offsets(
+            justify,
+            if auto_margin_count > 0 { 0.0 } else { free },
+            line.len(),
+            main_gap,
+        );
 
         let has_line_baseline = parent_alignment == CrossAlignment::Baseline
             || line.iter().any(|child| {
@@ -982,11 +1094,20 @@ fn layout_wrapped_children(
 
         for child in line {
             let (main, explicit_cross, intrinsic_cross) = resolved_cross[&child.id];
-            let (main_before, main_after) = margin_main(child, axis);
+            let (mut main_before, mut main_after) = margin_main(child, axis);
+            let (auto_before, auto_after) = auto_margins(child, axis);
+            if auto_before {
+                main_before += auto_margin;
+            }
+            if auto_after {
+                main_after += auto_margin;
+            }
             let (cross_before, cross_after) = margin_cross(child, axis);
-            let alignment = integer(child, PropKey::AlignSelf)
-                .map(cross_alignment)
-                .unwrap_or(parent_alignment);
+            let alignment = auto_cross_alignment(child, axis).unwrap_or_else(|| {
+                integer(child, PropKey::AlignSelf)
+                    .map(cross_alignment)
+                    .unwrap_or(parent_alignment)
+            });
             let cross = explicit_cross.unwrap_or_else(|| {
                 if alignment == CrossAlignment::Stretch {
                     (line_cross - cross_before - cross_after).max(0.0)
@@ -1008,22 +1129,29 @@ fn layout_wrapped_children(
             main_cursor += main_before;
             let child_frame = match axis {
                 Axis::Vertical => Layout {
-                    x: inner.x + cross_cursor + cross_offset,
+                    x: inner.x + line_start + cross_offset,
                     y: inner.y + main_cursor,
                     width: cross,
                     height: main,
                 },
                 Axis::Horizontal => Layout {
                     x: inner.x + main_cursor,
-                    y: inner.y + cross_cursor + cross_offset,
+                    y: inner.y + line_start + cross_offset,
                     width: main,
                     height: cross,
                 },
             };
-            layout_node(context, child.id, child_frame, false, depth + 1, output)?;
+            layout_node(
+                context,
+                child.id,
+                relative_offset(child, child_frame, inner),
+                false,
+                depth + 1,
+                output,
+            )?;
             main_cursor += main + main_after + distributed_gap;
         }
-        cross_cursor += line_cross + cross_gap;
+        cross_cursor += line_cross + cross_gap + extra_line_gap;
     }
 
     Ok(())
@@ -1083,11 +1211,7 @@ fn layout_grid(
     let mut children = node_children
         .iter()
         .copied()
-        .filter(|child| {
-            visible(child)
-                && child.kind != NodeKind::Modal
-                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
-        })
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && !out_of_flow(child))
         .collect::<Vec<_>>();
     children.sort_by_key(|child| {
         (
@@ -1165,7 +1289,12 @@ fn layout_grid(
         {
             constrained(
                 (row_height - margin_top - margin_bottom).max(0.0),
-                number(placement.child, PropKey::MinHeight),
+                dimension(
+                    placement.child,
+                    PropKey::MinHeight,
+                    PropKey::MinHeightPercent,
+                    inner.height,
+                ),
                 dimension(
                     placement.child,
                     PropKey::MaxHeight,
@@ -1192,11 +1321,11 @@ fn layout_grid(
         layout_node(context, placement.child.id, frame, false, depth + 1, output)?;
     }
     // Absolute children remain relative to the grid's inner box.
-    for child in node_children.iter().copied().filter(|child| {
-        visible(child)
-            && child.kind != NodeKind::Modal
-            && integer(child, PropKey::PositionType).unwrap_or(1) == 2
-    }) {
+    for child in node_children
+        .iter()
+        .copied()
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && out_of_flow(child))
+    {
         let left =
             dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width).unwrap_or(0.0);
         let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height).unwrap_or(0.0);
@@ -1343,11 +1472,7 @@ fn natural_scroll_extent(
         .map_or(&[][..], Vec::as_slice)
         .iter()
         .copied()
-        .filter(|child| {
-            visible(child)
-                && child.kind != NodeKind::Modal
-                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
-        })
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && !out_of_flow(child))
         .collect::<Vec<_>>();
     if visible_children.is_empty() {
         return intrinsic_extent(
@@ -1503,11 +1628,7 @@ fn intrinsic_extent(
         .map_or(&[][..], Vec::as_slice)
         .iter()
         .copied()
-        .filter(|child| {
-            visible(child)
-                && child.kind != NodeKind::Modal
-                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
-        })
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && !out_of_flow(child))
         .collect::<Vec<_>>();
     let horizontal_scroll_height = node.kind == NodeKind::Scroll
         && boolean(node, PropKey::ScrollHorizontal)
@@ -1607,7 +1728,7 @@ fn intrinsic_extent(
         Axis::Horizontal => (column_gap, row_gap),
         Axis::Vertical => (row_gap, column_gap),
     };
-    if integer(node, PropKey::FlexWrap).unwrap_or(1) == 2 && requested_axis != flow_axis {
+    if matches!(integer(node, PropKey::FlexWrap), Some(2 | 3)) && requested_axis != flow_axis {
         let available_main = match flow_axis {
             Axis::Horizontal => inner_width,
             Axis::Vertical => inner_height,
@@ -1673,6 +1794,24 @@ fn intrinsic_extent(
             text_metrics,
             depth + 1,
         )?;
+        let child_extent = if requested_axis == flow_axis {
+            match number(child, PropKey::FlexBasis).filter(|value| value.is_finite()) {
+                Some(basis) => {
+                    let (minimum, maximum) = flex_main_bounds(
+                        child,
+                        flow_axis,
+                        match flow_axis {
+                            Axis::Horizontal => inner_width,
+                            Axis::Vertical => inner_height,
+                        },
+                    )?;
+                    basis.max(0.0).min(maximum).max(minimum)
+                }
+                None => child_extent,
+            }
+        } else {
+            child_extent
+        };
         let (before, after) = if requested_axis == flow_axis {
             margin_main(child, flow_axis)
         } else {
@@ -1748,22 +1887,37 @@ fn wrapped_intrinsic_cross(
 
     let parent_alignment = cross_alignment(integer(parent, PropKey::AlignItems).unwrap_or(4));
     for child in children {
-        let main = constrained_intrinsic_extent(
-            children_index,
-            child,
-            flow_axis,
-            available_width,
-            available_height,
-            text_scale,
-            text_metrics,
-            depth + 1,
-        )?;
+        let basis = match explicit_flex_basis(child, available_main) {
+            Some(FlexBasisValue::Points(points)) => {
+                let (minimum, maximum) = flex_main_bounds(child, flow_axis, available_main)?;
+                Some(points.min(maximum).max(minimum))
+            }
+            _ => None,
+        };
+        let main = match basis {
+            Some(basis) => basis,
+            None => constrained_intrinsic_extent(
+                children_index,
+                child,
+                flow_axis,
+                available_width,
+                available_height,
+                text_scale,
+                text_metrics,
+                depth + 1,
+            )?,
+        };
+        let (measure_width, measure_height) = match (basis, flow_axis) {
+            (Some(basis), Axis::Horizontal) => (basis, available_height),
+            (Some(basis), Axis::Vertical) => (available_width, basis),
+            (None, _) => (available_width, available_height),
+        };
         let cross = constrained_intrinsic_extent(
             children_index,
             child,
             cross_axis,
-            available_width,
-            available_height,
+            measure_width,
+            measure_height,
             text_scale,
             text_metrics,
             depth + 1,
@@ -1833,11 +1987,7 @@ fn grid_intrinsic_height(
     let mut flow = node_children
         .iter()
         .copied()
-        .filter(|child| {
-            visible(child)
-                && child.kind != NodeKind::Modal
-                && integer(child, PropKey::PositionType).unwrap_or(1) != 2
-        })
+        .filter(|child| visible(child) && child.kind != NodeKind::Modal && !out_of_flow(child))
         .collect::<Vec<_>>();
     flow.sort_by_key(|child| {
         (
@@ -2271,6 +2421,279 @@ fn intrinsic_cross(
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FlexBasisValue {
+    Points(f32),
+    Content,
+}
+
+/// Explicit `flex-basis`. `None` keeps PAM's React Native-compatible default:
+/// a growing item without a basis starts from zero (`flex: N` == `N 1 0`),
+/// every other item starts from its explicit or content size.
+fn explicit_flex_basis(node: &Node, available_main: f32) -> Option<FlexBasisValue> {
+    if let Some(points) = number(node, PropKey::FlexBasis).filter(|value| value.is_finite()) {
+        return Some(FlexBasisValue::Points(points.max(0.0)));
+    }
+    if let Some(percent) = number(node, PropKey::FlexBasisPercent).filter(|value| value.is_finite())
+    {
+        if available_main.is_finite() {
+            return Some(FlexBasisValue::Points(
+                (available_main * percent / 100.0).max(0.0),
+            ));
+        }
+        return Some(FlexBasisValue::Content);
+    }
+    boolean(node, PropKey::FlexBasisContent).then_some(FlexBasisValue::Content)
+}
+
+fn flex_grow(node: &Node) -> f32 {
+    number(node, PropKey::FlexGrow)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0)
+        .max(0.0)
+}
+
+fn flex_shrink(node: &Node) -> f32 {
+    number(node, PropKey::FlexShrink)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0)
+        .max(0.0)
+}
+
+fn sort_by_order(children: &mut [&Node]) {
+    if children.iter().any(|child| node_order(child) != 0) {
+        children.sort_by_key(|child| node_order(child));
+    }
+}
+
+fn node_order(node: &Node) -> i64 {
+    number(node, PropKey::GridOrder)
+        .filter(|value| value.is_finite())
+        .map_or(0, |value| value as i64)
+}
+
+/// Main-axis `margin: auto` flags as (before, after) for the given flow axis.
+fn auto_margins(node: &Node, axis: Axis) -> (bool, bool) {
+    match axis {
+        Axis::Horizontal => (
+            boolean(node, PropKey::MarginLeftAuto),
+            boolean(node, PropKey::MarginRightAuto),
+        ),
+        Axis::Vertical => (
+            boolean(node, PropKey::MarginTopAuto),
+            boolean(node, PropKey::MarginBottomAuto),
+        ),
+    }
+}
+
+/// Cross-axis auto margins override align-self as in CSS Flexbox §8.1.
+fn auto_cross_alignment(node: &Node, axis: Axis) -> Option<CrossAlignment> {
+    let cross_axis = match axis {
+        Axis::Horizontal => Axis::Vertical,
+        Axis::Vertical => Axis::Horizontal,
+    };
+    match auto_margins(node, cross_axis) {
+        (true, true) => Some(CrossAlignment::Center),
+        (true, false) => Some(CrossAlignment::End),
+        (false, true) => Some(CrossAlignment::Start),
+        (false, false) => None,
+    }
+}
+
+/// `position: relative` (the default) shifts the laid-out box by its insets
+/// without affecting siblings.
+fn relative_offset(node: &Node, frame: Layout, containing: Layout) -> Layout {
+    if integer(node, PropKey::PositionType).unwrap_or(1) != 1 {
+        return frame;
+    }
+    let horizontal = dimension(node, PropKey::Left, PropKey::LeftPercent, containing.width)
+        .or_else(|| {
+            dimension(
+                node,
+                PropKey::Right,
+                PropKey::RightPercent,
+                containing.width,
+            )
+            .map(|right| -right)
+        })
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    let vertical = dimension(node, PropKey::Top, PropKey::TopPercent, containing.height)
+        .or_else(|| {
+            dimension(
+                node,
+                PropKey::Bottom,
+                PropKey::BottomPercent,
+                containing.height,
+            )
+            .map(|bottom| -bottom)
+        })
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    Layout {
+        x: frame.x + horizontal,
+        y: frame.y + vertical,
+        ..frame
+    }
+}
+
+struct FlexItem {
+    id: u64,
+    base: f32,
+    hypothetical: f32,
+    minimum: f32,
+    maximum: f32,
+    grow: f32,
+    shrink: f32,
+    margins: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn flex_item(
+    children_index: &BTreeMap<u64, Vec<&Node>>,
+    child: &Node,
+    axis: Axis,
+    available_main: f32,
+    available_cross: f32,
+    growing_starts_at_zero: bool,
+    text_scale: f32,
+    text_metrics: &TextMetrics,
+    depth: usize,
+) -> Result<FlexItem, LayoutError> {
+    let (minimum, maximum) = flex_main_bounds(child, axis, available_main)?;
+    let grow = flex_grow(child);
+    let base = match explicit_flex_basis(child, available_main) {
+        Some(FlexBasisValue::Points(points)) => points,
+        None if growing_starts_at_zero && grow > 0.0 => 0.0,
+        Some(FlexBasisValue::Content) | None => child_main(
+            children_index,
+            child,
+            axis,
+            available_main,
+            available_cross,
+            text_scale,
+            text_metrics,
+            depth,
+        )?,
+    };
+    let (before, after) = margin_main(child, axis);
+    Ok(FlexItem {
+        id: child.id,
+        base,
+        hypothetical: base.max(minimum).min(maximum),
+        minimum,
+        maximum,
+        grow,
+        shrink: flex_shrink(child),
+        margins: before + after,
+    })
+}
+
+/// CSS Flexbox §9.7 "Resolving Flexible Lengths" for one line. `space` is the
+/// line's main size minus gaps.
+fn resolve_flexible_lengths(items: &[FlexItem], space: f32) -> BTreeMap<u64, f32> {
+    let count = items.len();
+    let margins = items.iter().map(|item| item.margins).sum::<f32>();
+    let outer_hypothetical = items.iter().map(|item| item.hypothetical).sum::<f32>() + margins;
+    let growing = outer_hypothetical < space;
+    let mut target = items
+        .iter()
+        .map(|item| item.hypothetical)
+        .collect::<Vec<_>>();
+    let mut frozen = items
+        .iter()
+        .map(|item| {
+            let factor = if growing { item.grow } else { item.shrink };
+            factor <= 0.0
+                || (growing && item.base > item.hypothetical)
+                || (!growing && item.base < item.hypothetical)
+        })
+        .collect::<Vec<_>>();
+    let used = |frozen: &[bool], target: &[f32]| {
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| {
+                if frozen[index] {
+                    target[index]
+                } else {
+                    item.base
+                }
+            })
+            .sum::<f32>()
+            + margins
+    };
+    let initial_free = space - used(&frozen, &target);
+    for _ in 0..=count {
+        if frozen.iter().all(|value| *value) {
+            break;
+        }
+        let mut free = space - used(&frozen, &target);
+        let factors = items
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !frozen[*index])
+            .map(|(_, item)| if growing { item.grow } else { item.shrink })
+            .sum::<f32>();
+        if factors < 1.0 {
+            let scaled = initial_free * factors;
+            if scaled.abs() < free.abs() {
+                free = scaled;
+            }
+        }
+        let scaled_shrink = items
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !frozen[*index])
+            .map(|(_, item)| item.shrink * item.base)
+            .sum::<f32>();
+        let mut violation = 0.0_f32;
+        let mut clamped = target.clone();
+        for (index, item) in items.iter().enumerate() {
+            if frozen[index] {
+                continue;
+            }
+            let candidate = if growing {
+                if factors > 0.0 {
+                    item.base + free * item.grow / factors
+                } else {
+                    item.base
+                }
+            } else if scaled_shrink > 0.0 {
+                item.base + free * (item.shrink * item.base) / scaled_shrink
+            } else {
+                item.base
+            };
+            let bounded = candidate.min(item.maximum).max(item.minimum).max(0.0);
+            violation += bounded - candidate;
+            target[index] = candidate;
+            clamped[index] = bounded;
+        }
+        let epsilon = 0.001;
+        for index in 0..count {
+            if frozen[index] {
+                continue;
+            }
+            let freeze = if violation.abs() <= epsilon {
+                true
+            } else if violation > 0.0 {
+                clamped[index] > target[index]
+            } else {
+                clamped[index] < target[index]
+            };
+            if freeze {
+                frozen[index] = true;
+            }
+            target[index] = clamped[index];
+        }
+    }
+    items
+        .iter()
+        .zip(target)
+        .map(|(item, size)| (item.id, size.max(0.0)))
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn resolved_child_main_sizes(
     children_index: &BTreeMap<u64, Vec<&Node>>,
@@ -2284,133 +2707,23 @@ fn resolved_child_main_sizes(
     depth: usize,
 ) -> Result<BTreeMap<u64, f32>, LayoutError> {
     let total_gap = main_gap * children.len().saturating_sub(1) as f32;
-    let mut sizes = BTreeMap::new();
-    for child in children {
-        sizes.insert(
-            child.id,
-            child_main(
+    let items = children
+        .iter()
+        .map(|child| {
+            flex_item(
                 children_index,
                 child,
                 axis,
                 available_main,
                 available_cross,
+                true,
                 text_scale,
                 text_metrics,
                 depth,
-            )?,
-        );
-    }
-    let fixed = children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
-        .map(|child| {
-            let (before, after) = margin_main(child, axis);
-            sizes[&child.id] + before + after
+            )
         })
-        .sum::<f32>();
-    let flex_margins = children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) > 0.0)
-        .map(|child| {
-            let (before, after) = margin_main(child, axis);
-            before + after
-        })
-        .sum::<f32>();
-    let overflow = (fixed + flex_margins + total_gap - available_main).max(0.0);
-    let shrink_weight = children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
-        .map(|child| number(child, PropKey::FlexShrink).unwrap_or(0.0).max(0.0) * sizes[&child.id])
-        .sum::<f32>();
-    if overflow > 0.0 && shrink_weight > 0.0 {
-        for child in children {
-            let base = sizes[&child.id];
-            let weight = number(child, PropKey::FlexShrink).unwrap_or(0.0).max(0.0) * base;
-            sizes.insert(
-                child.id,
-                (base - overflow * weight / shrink_weight).max(0.0),
-            );
-        }
-    }
-    let resolved_fixed = children
-        .iter()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) <= 0.0)
-        .map(|child| {
-            let (before, after) = margin_main(child, axis);
-            sizes[&child.id] + before + after
-        })
-        .sum::<f32>();
-    let remaining = (available_main - resolved_fixed - flex_margins - total_gap).max(0.0);
-    sizes.extend(allocate_flex_main(
-        children,
-        axis,
-        available_main,
-        remaining,
-    )?);
-    Ok(sizes)
-}
-
-fn allocate_flex_main(
-    children: &[&Node],
-    axis: Axis,
-    available_main: f32,
-    remaining: f32,
-) -> Result<BTreeMap<u64, f32>, LayoutError> {
-    let mut unresolved = children
-        .iter()
-        .copied()
-        .filter(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0) > 0.0)
-        .collect::<Vec<_>>();
-    let bounds = unresolved
-        .iter()
-        .map(|child| Ok((child.id, flex_main_bounds(child, axis, available_main)?)))
-        .collect::<Result<BTreeMap<_, _>, LayoutError>>()?;
-    let mut allocations = BTreeMap::new();
-    let mut pool = remaining.max(0.0);
-
-    while !unresolved.is_empty() {
-        let minimum_total = unresolved
-            .iter()
-            .map(|child| bounds[&child.id].0)
-            .sum::<f32>();
-        if minimum_total > pool {
-            for child in unresolved.drain(..) {
-                allocations.insert(child.id, bounds[&child.id].0);
-            }
-            break;
-        }
-        let total_weight = unresolved
-            .iter()
-            .map(|child| number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0))
-            .sum::<f32>();
-        if total_weight <= 0.0 {
-            break;
-        }
-        let mut frozen = Vec::new();
-        for child in &unresolved {
-            let weight = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
-            let candidate = pool * weight / total_weight;
-            let (minimum, maximum) = bounds[&child.id];
-            let constrained = candidate.max(minimum).min(maximum);
-            if (constrained - candidate).abs() > f32::EPSILON {
-                frozen.push((child.id, constrained));
-            }
-        }
-        if frozen.is_empty() {
-            for child in unresolved.drain(..) {
-                let weight = number(child, PropKey::FlexGrow).unwrap_or(0.0).max(0.0);
-                allocations.insert(child.id, pool * weight / total_weight);
-            }
-            break;
-        }
-        for (id, value) in frozen {
-            allocations.insert(id, value);
-            pool = (pool - value).max(0.0);
-            unresolved.retain(|child| child.id != id);
-        }
-    }
-
-    Ok(allocations)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(resolve_flexible_lengths(&items, available_main - total_gap))
 }
 
 fn flex_main_bounds(
@@ -2420,7 +2733,12 @@ fn flex_main_bounds(
 ) -> Result<(f32, f32), LayoutError> {
     let (raw_minimum, raw_maximum) = match axis {
         Axis::Vertical => (
-            number(node, PropKey::MinHeight),
+            dimension(
+                node,
+                PropKey::MinHeight,
+                PropKey::MinHeightPercent,
+                available_main,
+            ),
             dimension(
                 node,
                 PropKey::MaxHeight,
@@ -2429,7 +2747,12 @@ fn flex_main_bounds(
             ),
         ),
         Axis::Horizontal => (
-            number(node, PropKey::MinWidth),
+            dimension(
+                node,
+                PropKey::MinWidth,
+                PropKey::MinWidthPercent,
+                available_main,
+            ),
             dimension(
                 node,
                 PropKey::MaxWidth,
@@ -2503,7 +2826,12 @@ fn child_main(
     });
     let (minimum, maximum) = match axis {
         Axis::Vertical => (
-            number(node, PropKey::MinHeight),
+            dimension(
+                node,
+                PropKey::MinHeight,
+                PropKey::MinHeightPercent,
+                available_main,
+            ),
             dimension(
                 node,
                 PropKey::MaxHeight,
@@ -2512,7 +2840,12 @@ fn child_main(
             ),
         ),
         Axis::Horizontal => (
-            number(node, PropKey::MinWidth),
+            dimension(
+                node,
+                PropKey::MinWidth,
+                PropKey::MinWidthPercent,
+                available_main,
+            ),
             dimension(
                 node,
                 PropKey::MaxWidth,
@@ -2552,7 +2885,12 @@ fn child_cross(
     };
     let (minimum, maximum) = match axis {
         Axis::Vertical => (
-            number(node, PropKey::MinWidth),
+            dimension(
+                node,
+                PropKey::MinWidth,
+                PropKey::MinWidthPercent,
+                available_cross,
+            ),
             dimension(
                 node,
                 PropKey::MaxWidth,
@@ -2561,7 +2899,12 @@ fn child_cross(
             ),
         ),
         Axis::Horizontal => (
-            number(node, PropKey::MinHeight),
+            dimension(
+                node,
+                PropKey::MinHeight,
+                PropKey::MinHeightPercent,
+                available_cross,
+            ),
             dimension(
                 node,
                 PropKey::MaxHeight,
@@ -2703,6 +3046,11 @@ fn boolean(node: &Node, key: PropKey) -> bool {
         node.properties.get(&key),
         Some(pam_native_protocol::PropValue::Boolean(true))
     )
+}
+
+/// `position: absolute` (2) and `position: fixed` (3) leave the flex flow.
+fn out_of_flow(node: &Node) -> bool {
+    matches!(integer(node, PropKey::PositionType), Some(2 | 3))
 }
 
 fn visible(node: &Node) -> bool {
@@ -5548,5 +5896,369 @@ mod tests {
         assert!(!incremental.contains_key(&2));
         assert!(!incremental.contains_key(&3));
         assert!(incremental.contains_key(&4));
+    }
+}
+
+#[cfg(test)]
+mod css_flex_tests {
+    use pam_native_protocol::PropValue;
+
+    use super::*;
+
+    type Props = Vec<(PropKey, PropValue)>;
+
+    fn f(value: f32) -> PropValue {
+        PropValue::Float(f64::from(value))
+    }
+
+    fn i(value: i64) -> PropValue {
+        PropValue::Integer(value)
+    }
+
+    fn row(extra: Props) -> Props {
+        let mut props = vec![(PropKey::FlexDirection, i(2))];
+        props.extend(extra);
+        props
+    }
+
+    /// Root container (id 1) with view children (ids 2..).
+    fn layout(root: Props, children: Vec<Props>, width: f32, height: f32) -> BTreeMap<u64, Layout> {
+        let mut nodes = BTreeMap::from([(
+            1,
+            Node {
+                id: 1,
+                parent: 0,
+                index: 0,
+                kind: NodeKind::View,
+                properties: root.into_iter().collect(),
+            },
+        )]);
+        for (index, props) in children.into_iter().enumerate() {
+            let id = index as u64 + 2;
+            nodes.insert(
+                id,
+                Node {
+                    id,
+                    parent: 1,
+                    index: index as u32,
+                    kind: NodeKind::View,
+                    properties: props.into_iter().collect(),
+                },
+            );
+        }
+        calculate(&Tree { root: 1, nodes }, Size { width, height }).expect("layout")
+    }
+
+    #[test]
+    fn flex_basis_points_grow_and_shrink_like_css() {
+        // flex: 1 1 100px + flex: 2 1 100px in 400px → free 200 split 1:2.
+        let layouts = layout(
+            row(vec![]),
+            vec![
+                vec![
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::FlexShrink, f(1.0)),
+                    (PropKey::FlexBasis, f(100.0)),
+                ],
+                vec![
+                    (PropKey::FlexGrow, f(2.0)),
+                    (PropKey::FlexShrink, f(1.0)),
+                    (PropKey::FlexBasis, f(100.0)),
+                ],
+            ],
+            400.0,
+            100.0,
+        );
+        assert!((layouts[&2].width - 166.666).abs() < 0.01);
+        assert!((layouts[&3].width - 233.333).abs() < 0.01);
+        assert!((layouts[&3].x - 166.666).abs() < 0.01);
+
+        // flex: 0 1 300px twice in 400px → each shrinks by 100.
+        let shrunk = layout(
+            row(vec![]),
+            vec![
+                vec![
+                    (PropKey::FlexShrink, f(1.0)),
+                    (PropKey::FlexBasis, f(300.0)),
+                ],
+                vec![
+                    (PropKey::FlexShrink, f(1.0)),
+                    (PropKey::FlexBasis, f(300.0)),
+                ],
+            ],
+            400.0,
+            100.0,
+        );
+        assert_eq!(shrunk[&2].width, 200.0);
+        assert_eq!(shrunk[&3].width, 200.0);
+    }
+
+    #[test]
+    fn flex_basis_percent_and_zero_basis_with_gap() {
+        let layouts = layout(
+            row(vec![(PropKey::Gap, f(10.0))]),
+            vec![
+                vec![(PropKey::FlexBasisPercent, f(25.0))],
+                vec![
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::FlexShrink, f(1.0)),
+                    (PropKey::FlexBasis, f(0.0)),
+                ],
+                vec![
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::FlexShrink, f(1.0)),
+                    (PropKey::FlexBasis, f(0.0)),
+                ],
+            ],
+            420.0,
+            50.0,
+        );
+        assert_eq!(layouts[&2].width, 105.0);
+        assert_eq!(layouts[&3].width, 147.5);
+        assert_eq!(layouts[&4].width, 147.5);
+        assert_eq!(layouts[&4].x, 105.0 + 10.0 + 147.5 + 10.0);
+    }
+
+    #[test]
+    fn flex_basis_content_starts_from_explicit_size_and_grows() {
+        // flex: 1 1 auto with width 100 → basis 100, plus half the free space.
+        let layouts = layout(
+            row(vec![]),
+            vec![
+                vec![
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::FlexBasisContent, PropValue::Boolean(true)),
+                    (PropKey::Width, f(100.0)),
+                ],
+                vec![
+                    (PropKey::FlexGrow, f(1.0)),
+                    (PropKey::FlexBasisContent, PropValue::Boolean(true)),
+                    (PropKey::Width, f(50.0)),
+                ],
+            ],
+            300.0,
+            50.0,
+        );
+        assert_eq!(layouts[&2].width, 175.0);
+        assert_eq!(layouts[&3].width, 125.0);
+    }
+
+    #[test]
+    fn growth_respects_max_and_min_percent() {
+        let layouts = layout(
+            row(vec![]),
+            vec![
+                vec![(PropKey::FlexGrow, f(1.0)), (PropKey::MaxWidth, f(50.0))],
+                vec![(PropKey::FlexGrow, f(1.0))],
+                vec![
+                    (PropKey::MinWidthPercent, f(10.0)),
+                    (PropKey::Width, f(5.0)),
+                ],
+            ],
+            400.0,
+            50.0,
+        );
+        assert_eq!(layouts[&2].width, 50.0);
+        assert_eq!(layouts[&4].width, 40.0);
+        assert_eq!(layouts[&3].width, 310.0);
+    }
+
+    #[test]
+    fn order_auto_margins_and_relative_offsets() {
+        let layouts = layout(
+            row(vec![(PropKey::AlignItems, i(1))]),
+            vec![
+                vec![
+                    (PropKey::Width, f(40.0)),
+                    (PropKey::Height, f(10.0)),
+                    (PropKey::GridOrder, i(2)),
+                ],
+                vec![
+                    (PropKey::Width, f(60.0)),
+                    (PropKey::Height, f(10.0)),
+                    (PropKey::MarginRightAuto, PropValue::Boolean(true)),
+                    (PropKey::MarginTopAuto, PropValue::Boolean(true)),
+                    (PropKey::MarginBottomAuto, PropValue::Boolean(true)),
+                ],
+                vec![
+                    (PropKey::Width, f(20.0)),
+                    (PropKey::Height, f(10.0)),
+                    (PropKey::Top, f(3.0)),
+                    (PropKey::Left, f(-2.0)),
+                ],
+            ],
+            300.0,
+            100.0,
+        );
+        // Visual order: 3 (order 0), 4 (order 0), 2 (order 2); auto margin right on 3.
+        assert_eq!(layouts[&3].x, 0.0);
+        assert_eq!(layouts[&3].y, 45.0);
+        assert_eq!(layouts[&4].x, 300.0 - 40.0 - 20.0 - 2.0);
+        assert_eq!(layouts[&4].y, 3.0);
+        assert_eq!(layouts[&2].x, 260.0);
+    }
+
+    #[test]
+    fn fixed_position_uses_the_viewport() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            Node {
+                id: 1,
+                parent: 0,
+                index: 0,
+                kind: NodeKind::View,
+                properties: BTreeMap::new(),
+            },
+        );
+        nodes.insert(
+            2,
+            Node {
+                id: 2,
+                parent: 1,
+                index: 0,
+                kind: NodeKind::View,
+                properties: [
+                    (PropKey::MarginTop, f(100.0)),
+                    (PropKey::Height, f(200.0)),
+                    (PropKey::Padding, f(20.0)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+        nodes.insert(
+            3,
+            Node {
+                id: 3,
+                parent: 2,
+                index: 0,
+                kind: NodeKind::View,
+                properties: [
+                    (PropKey::PositionType, i(3)),
+                    (PropKey::Right, f(0.0)),
+                    (PropKey::Bottom, f(0.0)),
+                    (PropKey::Width, f(50.0)),
+                    (PropKey::Height, f(30.0)),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+        let layouts = calculate(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("layout");
+        assert_eq!(layouts[&3].x, 310.0);
+        assert_eq!(layouts[&3].y, 610.0);
+    }
+
+    #[test]
+    fn wrap_uses_percent_basis_align_content_and_reverse() {
+        let card = || {
+            vec![
+                (PropKey::FlexGrow, f(1.0)),
+                (PropKey::FlexShrink, f(1.0)),
+                (PropKey::FlexBasisPercent, f(30.0)),
+                (PropKey::Height, f(20.0)),
+            ]
+        };
+        let layouts = layout(
+            row(vec![
+                (PropKey::FlexWrap, i(2)),
+                (PropKey::AlignContent, i(5)),
+                (PropKey::GridColumnGap, f(10.0)),
+                (PropKey::GridRowGap, f(10.0)),
+            ]),
+            vec![card(), card(), card(), card()],
+            300.0,
+            200.0,
+        );
+        // 3 cards per line: 90 + 10 + 90 + 10 + 90 = 290 → each grows by 10/3.
+        assert!((layouts[&2].width - 93.333).abs() < 0.01);
+        assert_eq!(layouts[&2].y, 0.0);
+        // Last card alone on line two grows to the full width; space-between pins it to the end.
+        assert_eq!(layouts[&5].width, 300.0);
+        assert_eq!(layouts[&5].y, 180.0);
+
+        let centered = layout(
+            row(vec![
+                (PropKey::FlexWrap, i(2)),
+                (PropKey::AlignContent, i(2)),
+            ]),
+            vec![
+                vec![(PropKey::Width, f(200.0)), (PropKey::Height, f(20.0))],
+                vec![(PropKey::Width, f(200.0)), (PropKey::Height, f(20.0))],
+            ],
+            300.0,
+            100.0,
+        );
+        assert_eq!(centered[&2].y, 30.0);
+        assert_eq!(centered[&3].y, 50.0);
+
+        let reversed = layout(
+            row(vec![(PropKey::FlexWrap, i(3))]),
+            vec![
+                vec![(PropKey::Width, f(200.0)), (PropKey::Height, f(20.0))],
+                vec![(PropKey::Width, f(200.0)), (PropKey::Height, f(20.0))],
+            ],
+            300.0,
+            100.0,
+        );
+        assert_eq!(reversed[&2].y, 80.0);
+        assert_eq!(reversed[&3].y, 60.0);
+    }
+
+    #[test]
+    fn intrinsic_row_width_uses_point_basis() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            Node {
+                id: 1,
+                parent: 0,
+                index: 0,
+                kind: NodeKind::View,
+                properties: [(PropKey::AlignItems, i(1))].into_iter().collect(),
+            },
+        );
+        nodes.insert(
+            2,
+            Node {
+                id: 2,
+                parent: 1,
+                index: 0,
+                kind: NodeKind::View,
+                properties: [(PropKey::FlexDirection, i(2))].into_iter().collect(),
+            },
+        );
+        for id in 3..=4 {
+            nodes.insert(
+                id,
+                Node {
+                    id,
+                    parent: 2,
+                    index: (id - 3) as u32,
+                    kind: NodeKind::View,
+                    properties: [(PropKey::FlexBasis, f(70.0)), (PropKey::Height, f(10.0))]
+                        .into_iter()
+                        .collect(),
+                },
+            );
+        }
+        let layouts = calculate(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("layout");
+        assert_eq!(layouts[&2].width, 140.0);
+        assert_eq!(layouts[&4].x, 70.0);
     }
 }

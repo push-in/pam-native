@@ -648,6 +648,27 @@ pub enum PropKey {
     GridSpan2xl = 468,
     GridOffset2xl = 469,
     GridOrder2xl = 470,
+    FlexBasis = 471,
+    FlexBasisPercent = 472,
+    FlexBasisContent = 473,
+    AlignContent = 474,
+    MarginTopAuto = 475,
+    MarginRightAuto = 476,
+    MarginBottomAuto = 477,
+    MinWidthPercent = 478,
+    MinHeightPercent = 479,
+    BorderTopColor = 480,
+    BorderRightColor = 481,
+    BorderBottomColor = 482,
+    BorderLeftColor = 483,
+    TextShadowOffsetX = 484,
+    TextShadowOffsetY = 485,
+    TextShadowRadius = 486,
+    TextShadowColor = 487,
+    FontFeatureSettings = 488,
+    TransformOriginX = 489,
+    TransformOriginY = 490,
+    TranslationYPercent = 491,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1125,6 +1146,27 @@ impl TryFrom<u16> for PropKey {
             468 => Ok(Self::GridSpan2xl),
             469 => Ok(Self::GridOffset2xl),
             470 => Ok(Self::GridOrder2xl),
+            471 => Ok(Self::FlexBasis),
+            472 => Ok(Self::FlexBasisPercent),
+            473 => Ok(Self::FlexBasisContent),
+            474 => Ok(Self::AlignContent),
+            475 => Ok(Self::MarginTopAuto),
+            476 => Ok(Self::MarginRightAuto),
+            477 => Ok(Self::MarginBottomAuto),
+            478 => Ok(Self::MinWidthPercent),
+            479 => Ok(Self::MinHeightPercent),
+            480 => Ok(Self::BorderTopColor),
+            481 => Ok(Self::BorderRightColor),
+            482 => Ok(Self::BorderBottomColor),
+            483 => Ok(Self::BorderLeftColor),
+            484 => Ok(Self::TextShadowOffsetX),
+            485 => Ok(Self::TextShadowOffsetY),
+            486 => Ok(Self::TextShadowRadius),
+            487 => Ok(Self::TextShadowColor),
+            488 => Ok(Self::FontFeatureSettings),
+            489 => Ok(Self::TransformOriginX),
+            490 => Ok(Self::TransformOriginY),
+            491 => Ok(Self::TranslationYPercent),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2000,10 +2042,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=470 {
+        for value in 1..=491 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(471).is_err());
+        assert!(PropKey::try_from(492).is_err());
     }
 
     #[test]

@@ -115,7 +115,7 @@ final class PamPhpCompiler
 
         [$php, $template, $templateLine, $style, $language, $styleScope] =
             self::split($contents, $source);
-        $style = self::resolvedStyleSheet($style, $source);
+        $style = self::resolvedStyleSheet($style, $source, $contents);
         self::validateHotPath($php, $source);
         [$className, $tag] = self::classIdentity($php, $source);
         $cacheKey = hash('sha256', $source);
@@ -189,6 +189,7 @@ final class PamPhpCompiler
     private static function resolvedStyleSheet(
         string $localStyle,
         string $component,
+        string $componentSource = '',
     ): string {
         $sources = [];
         $appStyle = self::appStylePath($component);
@@ -197,13 +198,38 @@ final class PamPhpCompiler
             if ($contents === false) {
                 throw new RuntimeException("Cannot read PAM application stylesheet {$appStyle}.");
             }
-            $sources[] = ScopedStyleCompiler::resolveImports($contents, $appStyle);
+            $sources[] = ScopedStyleCompiler::sourceMarker(self::displayPath($appStyle, $component), 1)
+                .ScopedStyleCompiler::resolveImports($contents, $appStyle);
         }
         if ($localStyle !== '') {
-            $sources[] = ScopedStyleCompiler::resolveImports($localStyle, $component);
+            $styleOffset = $componentSource === '' ? false : strpos($componentSource, $localStyle);
+            $styleLine = $styleOffset === false
+                ? 1
+                : substr_count(substr($componentSource, 0, $styleOffset), "\n") + 1;
+            $sources[] = ScopedStyleCompiler::sourceMarker(self::displayPath($component, $component), $styleLine)
+                .ScopedStyleCompiler::resolveImports($localStyle, $component);
         }
 
         return implode("\n", $sources);
+    }
+
+    /** Project-relative path for diagnostics (absolute paths stay out of caches). */
+    private static function displayPath(string $path, string $component): string
+    {
+        $resolved = realpath($path);
+        $path = is_string($resolved) ? $resolved : $path;
+        $directory = dirname((string) (realpath($component) ?: $component));
+        while (true) {
+            if (is_file($directory.DIRECTORY_SEPARATOR.'composer.json')) {
+                $prefix = rtrim($directory, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+                return str_starts_with($path, $prefix) ? substr($path, strlen($prefix)) : $path;
+            }
+            $parent = dirname($directory);
+            if ($parent === $directory) {
+                return $path;
+            }
+            $directory = $parent;
+        }
     }
 
     private static function appStylePath(string $component): ?string

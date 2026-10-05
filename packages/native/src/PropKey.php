@@ -476,4 +476,25 @@ enum PropKey: int
     case GridSpan2xl = 468;
     case GridOffset2xl = 469;
     case GridOrder2xl = 470;
+    case FlexBasis = 471;
+    case FlexBasisPercent = 472;
+    case FlexBasisContent = 473;
+    case AlignContent = 474;
+    case MarginTopAuto = 475;
+    case MarginRightAuto = 476;
+    case MarginBottomAuto = 477;
+    case MinWidthPercent = 478;
+    case MinHeightPercent = 479;
+    case BorderTopColor = 480;
+    case BorderRightColor = 481;
+    case BorderBottomColor = 482;
+    case BorderLeftColor = 483;
+    case TextShadowOffsetX = 484;
+    case TextShadowOffsetY = 485;
+    case TextShadowRadius = 486;
+    case TextShadowColor = 487;
+    case FontFeatureSettings = 488;
+    case TransformOriginX = 489;
+    case TransformOriginY = 490;
+    case TranslationYPercent = 491;
 }

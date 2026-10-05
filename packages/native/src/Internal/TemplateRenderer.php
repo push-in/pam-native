@@ -125,6 +125,11 @@ final class TemplateRenderer
         'lineHeight',
         'textAlign',
         'textTransform',
+        'fontFeatureSettings',
+        'textShadowOffsetX',
+        'textShadowOffsetY',
+        'textShadowRadius',
+        'textShadowColor',
     ];
 
     /** @var array<string, ReflectionMethod> */
@@ -469,6 +474,27 @@ final class TemplateRenderer
         'gutterY' => PropKey::GridRowGap,
         'gridColumnGap' => PropKey::GridColumnGap,
         'gridRowGap' => PropKey::GridRowGap,
+        'flexBasis' => PropKey::FlexBasis,
+        'flexBasisPercent' => PropKey::FlexBasisPercent,
+        'flexBasisContent' => PropKey::FlexBasisContent,
+        'alignContent' => PropKey::AlignContent,
+        'marginTopAuto' => PropKey::MarginTopAuto,
+        'marginRightAuto' => PropKey::MarginRightAuto,
+        'marginBottomAuto' => PropKey::MarginBottomAuto,
+        'minWidthPercent' => PropKey::MinWidthPercent,
+        'minHeightPercent' => PropKey::MinHeightPercent,
+        'borderTopColor' => PropKey::BorderTopColor,
+        'borderRightColor' => PropKey::BorderRightColor,
+        'borderBottomColor' => PropKey::BorderBottomColor,
+        'borderLeftColor' => PropKey::BorderLeftColor,
+        'textShadowOffsetX' => PropKey::TextShadowOffsetX,
+        'textShadowOffsetY' => PropKey::TextShadowOffsetY,
+        'textShadowRadius' => PropKey::TextShadowRadius,
+        'textShadowColor' => PropKey::TextShadowColor,
+        'fontFeatureSettings' => PropKey::FontFeatureSettings,
+        'transformOriginX' => PropKey::TransformOriginX,
+        'transformOriginY' => PropKey::TransformOriginY,
+        'translationYPercent' => PropKey::TranslationYPercent,
     ];
 
     /** @var array<string, EventKind> */
@@ -2024,7 +2050,34 @@ final class TemplateRenderer
             PropKey::ModalBackdropColor,
             PropKey::DrawerOverlayColor,
             PropKey::DrawingColor,
+            PropKey::BorderTopColor,
+            PropKey::BorderRightColor,
+            PropKey::BorderBottomColor,
+            PropKey::BorderLeftColor,
+            PropKey::TextShadowColor,
             => self::colorValue($value, "Template {$key->name}"),
+            PropKey::AlignContent => self::named($value, [
+                'start' => 1, 'flex-start' => 1, 'normal' => 1, 'center' => 2,
+                'end' => 3, 'flex-end' => 3, 'stretch' => 4,
+                'space-between' => 5, 'space-around' => 6, 'space-evenly' => 7,
+            ]),
+            PropKey::FlexBasisContent,
+            PropKey::MarginTopAuto,
+            PropKey::MarginRightAuto,
+            PropKey::MarginBottomAuto,
+            => self::boolValue($value, "Style {$key->name}"),
+            PropKey::FlexBasis,
+            PropKey::FlexBasisPercent,
+            PropKey::MinWidthPercent,
+            PropKey::MinHeightPercent,
+            PropKey::TextShadowRadius,
+            => max(0.0, self::floatValue($value, "Style {$key->name}")),
+            PropKey::TextShadowOffsetX,
+            PropKey::TextShadowOffsetY,
+            PropKey::TransformOriginX,
+            PropKey::TransformOriginY,
+            PropKey::TranslationYPercent,
+            => self::floatValue($value, "Style {$key->name}"),
             PropKey::BorderStyle => self::named($value, [
                 'solid' => 1, 'dashed' => 2, 'dotted' => 3,
             ]),
@@ -2044,6 +2097,7 @@ final class TemplateRenderer
                 'center' => TextAlignment::Center->value,
                 'end' => TextAlignment::End->value,
                 'right' => TextAlignment::End->value,
+                'justify' => TextAlignment::Justify->value,
             ]),
             PropKey::DrawingMode => self::named($value, [
                 'brush' => DrawingMode::Brush->value,
@@ -2161,6 +2215,7 @@ final class TemplateRenderer
                 'nowrap' => FlexWrap::NoWrap->value,
                 'no-wrap' => FlexWrap::NoWrap->value,
                 'wrap' => FlexWrap::Wrap->value,
+                'wrap-reverse' => FlexWrap::WrapReverse->value,
             ]),
             PropKey::LayoutDirection => self::named($value, [
                 'ltr' => LayoutDirection::LeftToRight->value,
@@ -2189,8 +2244,10 @@ final class TemplateRenderer
                 'race' => GestureComposition::Race->value,
             ]),
             PropKey::PositionType => self::named($value, [
+                'static' => 1,
                 'relative' => 1,
                 'absolute' => 2,
+                'fixed' => 3,
             ]),
             PropKey::TextDecoration => self::named($value, [
                 'none' => 1,
@@ -2967,6 +3024,12 @@ final class TemplateRenderer
         if (!is_array($classes) || !is_array($nodeClasses) || !is_array($pseudos)
             || !is_array($nodePseudos) || !is_array($conditions)) return false;
         foreach ($classes as $class) if (!is_string($class) || !in_array($class, $nodeClasses, true)) return false;
+        $negations = $compound['nots'] ?? [];
+        if (is_array($negations)) {
+            foreach ($negations as $negated) {
+                if (self::styleCompoundMatches($negated, $node)) return false;
+            }
+        }
         foreach ($pseudos as $pseudo) {
             if (!is_string($pseudo) || in_array($pseudo, ['pressed', 'hover', 'focus', 'focus-visible', 'first-child', 'last-child'], true) || !in_array($pseudo, $nodePseudos, true)) return false;
         }
@@ -3028,6 +3091,20 @@ final class TemplateRenderer
                 $environment[$name] = $value;
             }
         }
+        $rootFontSize = (float) $environment['rootFontSize'];
+        $environment['fontSize'] = $rootFontSize;
+        $fontSize = $attributes['fontSize'] ?? null;
+        if (is_string($fontSize) && StyleValueCompiler::encoded($fontSize)) {
+            // `em` on font-size has no parent font in native trees; it resolves
+            // against the root font size (same as `rem`).
+            $environment['reference'] = $rootFontSize;
+            $fontSize = StyleValueCompiler::resolve($fontSize, $environment);
+            $attributes['fontSize'] = $fontSize;
+        }
+        $knownFontSize = is_int($fontSize) || is_float($fontSize) || (is_string($fontSize) && is_numeric($fontSize));
+        if ($knownFontSize) {
+            $environment['fontSize'] = (float) $fontSize;
+        }
         $vertical = [
             'height' => true,
             'minHeight' => true,
@@ -3048,6 +3125,15 @@ final class TemplateRenderer
                 ? $containerHeight
                 : $containerWidth;
             $attributes[$name] = StyleValueCompiler::resolve($value, $environment);
+        }
+        if (array_key_exists('lineHeightMultiplier', $attributes)) {
+            $multiplier = $attributes['lineHeightMultiplier'];
+            unset($attributes['lineHeightMultiplier']);
+            if (!array_key_exists('lineHeight', $attributes) && is_numeric($multiplier)) {
+                // Native text defaults to 14dp when no font-size is authored.
+                $base = $knownFontSize ? (float) $environment['fontSize'] : 14.0;
+                $attributes['lineHeight'] = round((float) $multiplier * $base * 100) / 100;
+            }
         }
 
         return $attributes;

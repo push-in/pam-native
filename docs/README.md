@@ -17,6 +17,7 @@ short end-to-end recipes.
 | Area | Guide with examples |
 | --- | --- |
 | Product-quality Android gallery and source tour | [Visual showcase](showcase.md) |
+| CSS properties, values, selectors, units and at-rules | [CSS support reference](css.md) |
 | Components, props, state, lifecycle, effects, slots, context and refs | [Component runtime](component-runtime.md) |
 | Typed retained UI queries, transactions, events, animation and measurement | [Visual DOM](visual-dom.md) |
 | Global store, transactions, persistence, sync, undo and optimistic state | [Pam Store](store.md) |

@@ -184,10 +184,284 @@ final class CssColor
                 ? self::rgbFunction($match[2], $context)
                 : self::hslFunction($match[2], $context);
         }
+        if (preg_match('/^(hwb|lab|lch|oklab|oklch|color|color-mix)\((.*)\)$/Dis', $raw, $match) === 1) {
+            [$red, $green, $blue, $alpha] = self::modern($match[1], $match[2], $context);
+
+            return self::argb(
+                self::byte($alpha * 255),
+                self::byte(self::encode($red) * 255),
+                self::byte(self::encode($green) * 255),
+                self::byte(self::encode($blue) * 255),
+            );
+        }
 
         throw new InvalidArgumentException(
-            "{$context} must be a CSS named, hex, rgb(), hsl(), or transparent color.",
+            "{$context} must be a CSS named, hex, rgb(), hsl(), hwb(), lab(), lch(), oklab(), oklch(), color(), color-mix() or transparent color.",
         );
+    }
+
+    /**
+     * CSS Color 4/5 functions resolved at compile time to linear sRGB.
+     *
+     * @return array{float, float, float, float} linear red, green, blue, alpha
+     */
+    private static function modern(string $function, string $body, string $context): array
+    {
+        $function = strtolower($function);
+        if ($function === 'color-mix') {
+            return self::mix($body, $context);
+        }
+        [$channels, $alphaSource] = self::functionalParts($body, $context);
+        $alpha = self::alpha($alphaSource, $context) / 255;
+        $channels = array_map(static fn (string $channel): string => $channel === 'none' ? '0' : $channel, $channels);
+        if ($function === 'color') {
+            $space = array_shift($channels);
+            if (count($channels) !== 3) {
+                throw new InvalidArgumentException("{$context} color() requires a color space and three channels.");
+            }
+            $values = array_map(
+                static fn (string $channel): float => str_ends_with($channel, '%')
+                    ? self::number(substr($channel, 0, -1), $context) / 100
+                    : self::number($channel, $context),
+                $channels,
+            );
+            return match ($space) {
+                'srgb' => [self::decode($values[0]), self::decode($values[1]), self::decode($values[2]), $alpha],
+                'srgb-linear' => [$values[0], $values[1], $values[2], $alpha],
+                'display-p3' => [...self::p3ToSrgbLinear(self::decode($values[0]), self::decode($values[1]), self::decode($values[2])), $alpha],
+                default => throw new InvalidArgumentException("{$context} color() supports srgb, srgb-linear and display-p3."),
+            };
+        }
+        if (count($channels) !== 3) {
+            throw new InvalidArgumentException("{$context} {$function}() requires three channels.");
+        }
+        $percent = static fn (string $value, float $scale): float => str_ends_with($value, '%')
+            ? self::number(substr($value, 0, -1), $context) / 100 * $scale
+            : self::number($value, $context);
+
+        return match ($function) {
+            'hwb' => (function () use ($channels, $alpha, $context): array {
+                $hue = self::hue($channels[0], $context);
+                $white = self::unit(self::number(rtrim($channels[1], '%'), $context) / 100);
+                $black = self::unit(self::number(rtrim($channels[2], '%'), $context) / 100);
+                if ($white + $black >= 1) {
+                    $gray = $white / ($white + $black);
+                    return [self::decode($gray), self::decode($gray), self::decode($gray), $alpha];
+                }
+                $base = self::hslToRgb($hue, 1.0, 0.5);
+                return [
+                    self::decode($base[0] * (1 - $white - $black) + $white),
+                    self::decode($base[1] * (1 - $white - $black) + $white),
+                    self::decode($base[2] * (1 - $white - $black) + $white),
+                    $alpha,
+                ];
+            })(),
+            'lab' => [...self::labToSrgbLinear($percent($channels[0], 100), $percent($channels[1], 125), $percent($channels[2], 125)), $alpha],
+            'lch' => (function () use ($channels, $alpha, $percent, $context): array {
+                $hue = deg2rad(self::hue($channels[2], $context));
+                $chroma = $percent($channels[1], 150);
+                return [...self::labToSrgbLinear($percent($channels[0], 100), $chroma * cos($hue), $chroma * sin($hue)), $alpha];
+            })(),
+            'oklab' => [...self::oklabToSrgbLinear($percent($channels[0], 1), $percent($channels[1], 0.4), $percent($channels[2], 0.4)), $alpha],
+            'oklch' => (function () use ($channels, $alpha, $percent, $context): array {
+                $hue = deg2rad(self::hue($channels[2], $context));
+                $chroma = $percent($channels[1], 0.4);
+                return [...self::oklabToSrgbLinear($percent($channels[0], 1), $chroma * cos($hue), $chroma * sin($hue)), $alpha];
+            })(),
+        };
+    }
+
+    /** @return array{float, float, float, float} */
+    private static function mix(string $body, string $context): array
+    {
+        $parts = [];
+        $depth = 0;
+        $start = 0;
+        for ($index = 0; $index < strlen($body); $index++) {
+            if ($body[$index] === '(') {
+                $depth++;
+            } elseif ($body[$index] === ')') {
+                $depth--;
+            } elseif ($body[$index] === ',' && $depth === 0) {
+                $parts[] = trim(substr($body, $start, $index - $start));
+                $start = $index + 1;
+            }
+        }
+        $parts[] = trim(substr($body, $start));
+        if (count($parts) !== 3 || preg_match('/^in\s+([a-z0-9-]+)(?:\s+(?:shorter|longer|increasing|decreasing)\s+hue)?$/D', $parts[0], $space) !== 1) {
+            throw new InvalidArgumentException("{$context} color-mix() requires 'in <space>, <color> [%], <color> [%]'.");
+        }
+        $colors = [];
+        $weights = [];
+        foreach ([$parts[1], $parts[2]] as $part) {
+            if (preg_match('/^(.*?)\s+((?:\d+|\d*\.\d+)%)$/Ds', $part, $match) === 1) {
+                $colors[] = trim($match[1]);
+                $weights[] = (float) substr($match[2], 0, -1) / 100;
+            } elseif (preg_match('/^((?:\d+|\d*\.\d+)%)\s+(.+)$/Ds', $part, $match) === 1) {
+                $colors[] = trim($match[2]);
+                $weights[] = (float) substr($match[1], 0, -1) / 100;
+            } else {
+                $colors[] = $part;
+                $weights[] = null;
+            }
+        }
+        [$first, $second] = $weights;
+        if ($first === null && $second === null) {
+            [$first, $second] = [0.5, 0.5];
+        } elseif ($first === null) {
+            $first = 1 - $second;
+        } elseif ($second === null) {
+            $second = 1 - $first;
+        }
+        $total = $first + $second;
+        if ($total <= 0) {
+            throw new InvalidArgumentException("{$context} color-mix() percentages must not sum to zero.");
+        }
+        $alphaMultiplier = min(1.0, $total);
+        [$first, $second] = [$first / $total, $second / $total];
+        $linear = array_map(static function (string $color) use ($context): array {
+            $argb = self::parse($color, $context);
+            return [
+                self::decode((($argb >> 16) & 0xFF) / 255),
+                self::decode((($argb >> 8) & 0xFF) / 255),
+                self::decode(($argb & 0xFF) / 255),
+                (($argb >> 24) & 0xFF) / 255,
+            ];
+        }, $colors);
+        $alpha = $linear[0][3] * $first + $linear[1][3] * $second;
+        $convert = match ($space[1]) {
+            'srgb' => [static fn (array $c): array => [self::encode($c[0]), self::encode($c[1]), self::encode($c[2])], static fn (array $c): array => [self::decode($c[0]), self::decode($c[1]), self::decode($c[2])]],
+            'srgb-linear' => [static fn (array $c): array => [$c[0], $c[1], $c[2]], static fn (array $c): array => $c],
+            'oklab', 'oklch' => [static fn (array $c): array => self::srgbLinearToOklab($c[0], $c[1], $c[2]), static fn (array $c): array => self::oklabToSrgbLinear($c[0], $c[1], $c[2])],
+            default => throw new InvalidArgumentException("{$context} color-mix() supports srgb, srgb-linear, oklab and oklch."),
+        };
+        $a = $convert[0]($linear[0]);
+        $b = $convert[0]($linear[1]);
+        if ($space[1] === 'oklch') {
+            // Interpolate lightness/chroma/hue (shorter arc) like CSS.
+            $polar = static fn (array $lab): array => [$lab[0], sqrt($lab[1] ** 2 + $lab[2] ** 2), atan2($lab[2], $lab[1])];
+            $pa = $polar($a);
+            $pb = $polar($b);
+            $delta = $pb[2] - $pa[2];
+            if ($delta > M_PI) {
+                $delta -= 2 * M_PI;
+            } elseif ($delta < -M_PI) {
+                $delta += 2 * M_PI;
+            }
+            $weightA = $linear[0][3] * $first;
+            $weightB = $linear[1][3] * $second;
+            $sum = max($weightA + $weightB, 1e-9);
+            $lightness = ($pa[0] * $weightA + $pb[0] * $weightB) / $sum;
+            $chroma = ($pa[1] * $weightA + $pb[1] * $weightB) / $sum;
+            $hue = $pa[2] + $delta * $second;
+            $mixed = [$lightness, $chroma * cos($hue), $chroma * sin($hue)];
+        } else {
+            // Premultiplied interpolation.
+            $mixed = [];
+            for ($channel = 0; $channel < 3; $channel++) {
+                $mixed[] = $alpha > 0
+                    ? ($a[$channel] * $linear[0][3] * $first + $b[$channel] * $linear[1][3] * $second) / $alpha
+                    : 0.0;
+            }
+        }
+        $result = $convert[1]($mixed);
+
+        return [$result[0], $result[1], $result[2], $alpha * $alphaMultiplier];
+    }
+
+    private static function decode(float $value): float
+    {
+        $sign = $value < 0 ? -1 : 1;
+        $absolute = abs($value);
+
+        return $absolute <= 0.04045 ? $value / 12.92 : $sign * (($absolute + 0.055) / 1.055) ** 2.4;
+    }
+
+    private static function encode(float $value): float
+    {
+        $value = max(0.0, min(1.0, $value));
+
+        return $value <= 0.0031308 ? 12.92 * $value : 1.055 * $value ** (1 / 2.4) - 0.055;
+    }
+
+    /** @return array{float, float, float} */
+    private static function hslToRgb(float $hue, float $saturation, float $lightness): array
+    {
+        $chroma = (1 - abs(2 * $lightness - 1)) * $saturation;
+        $segment = $hue / 60;
+        $x = $chroma * (1 - abs(fmod($segment, 2) - 1));
+        [$red, $green, $blue] = match ((int) floor($segment) % 6) {
+            0 => [$chroma, $x, 0.0],
+            1 => [$x, $chroma, 0.0],
+            2 => [0.0, $chroma, $x],
+            3 => [0.0, $x, $chroma],
+            4 => [$x, 0.0, $chroma],
+            default => [$chroma, 0.0, $x],
+        };
+        $offset = $lightness - $chroma / 2;
+
+        return [$red + $offset, $green + $offset, $blue + $offset];
+    }
+
+    /** @return array{float, float, float} */
+    private static function labToSrgbLinear(float $lightness, float $a, float $b): array
+    {
+        $epsilon = 216 / 24389;
+        $kappa = 24389 / 27;
+        $fy = ($lightness + 16) / 116;
+        $fx = $a / 500 + $fy;
+        $fz = $fy - $b / 200;
+        $x = ($fx ** 3 > $epsilon ? $fx ** 3 : (116 * $fx - 16) / $kappa) * 0.3457 / 0.3585;
+        $y = $lightness > $kappa * $epsilon ? $fy ** 3 : $lightness / $kappa;
+        $z = ($fz ** 3 > $epsilon ? $fz ** 3 : (116 * $fz - 16) / $kappa) * (1 - 0.3457 - 0.3585) / 0.3585;
+        // Bradford D50 -> D65, then XYZ D65 -> linear sRGB.
+        $x65 = 0.955473421488075 * $x - 0.02309845494876471 * $y + 0.06325924320057072 * $z;
+        $y65 = -0.0283697093338637 * $x + 1.0099953980813041 * $y + 0.021041441191917323 * $z;
+        $z65 = 0.012314014864481998 * $x - 0.020507649298898964 * $y + 1.330365926242124 * $z;
+
+        return [
+            3.2409699419045226 * $x65 - 1.537383177570094 * $y65 - 0.4986107602930034 * $z65,
+            -0.9692436362808796 * $x65 + 1.8759675015077202 * $y65 + 0.04155505740717559 * $z65,
+            0.05563007969699366 * $x65 - 0.20397695888897652 * $y65 + 1.0569715142428786 * $z65,
+        ];
+    }
+
+    /** @return array{float, float, float} */
+    private static function oklabToSrgbLinear(float $lightness, float $a, float $b): array
+    {
+        $l = ($lightness + 0.3963377774 * $a + 0.2158037573 * $b) ** 3;
+        $m = ($lightness - 0.1055613458 * $a - 0.0638541728 * $b) ** 3;
+        $s = ($lightness - 0.0894841775 * $a - 1.2914855480 * $b) ** 3;
+
+        return [
+            4.0767416621 * $l - 3.3077115913 * $m + 0.2309699292 * $s,
+            -1.2684380046 * $l + 2.6097574011 * $m - 0.3413193965 * $s,
+            -0.0041960863 * $l - 0.7034186147 * $m + 1.7076147010 * $s,
+        ];
+    }
+
+    /** @return array{float, float, float} */
+    private static function srgbLinearToOklab(float $red, float $green, float $blue): array
+    {
+        $l = (0.4122214708 * $red + 0.5363325363 * $green + 0.0514459929 * $blue) ** (1 / 3);
+        $m = (0.2119034982 * $red + 0.6806995451 * $green + 0.1073969566 * $blue) ** (1 / 3);
+        $s = (0.0883024619 * $red + 0.2817188376 * $green + 0.6299787005 * $blue) ** (1 / 3);
+
+        return [
+            0.2104542553 * $l + 0.7936177850 * $m - 0.0040720468 * $s,
+            1.9779984951 * $l - 2.4285922050 * $m + 0.4505937099 * $s,
+            0.0259040371 * $l + 0.7827717662 * $m - 0.8086757660 * $s,
+        ];
+    }
+
+    /** @return array{float, float, float} */
+    private static function p3ToSrgbLinear(float $red, float $green, float $blue): array
+    {
+        return [
+            1.2249401762805598 * $red - 0.22494017628055996 * $green,
+            -0.042056954709688163 * $red + 1.0420569547096881 * $green,
+            -0.019637554590334432 * $red - 0.07863604555063189 * $green + 1.0982736001409663 * $blue,
+        ];
     }
 
     private static function hex(string $raw, string $context): int
@@ -248,6 +522,13 @@ final class CssColor
     private static function hslFunction(string $body, string $context): int
     {
         [$channels, $alpha] = self::functionalParts($body, $context);
+        if (count($channels) === 3 && !str_contains($body, ',')) {
+            $channels = array_map(
+                static fn (string $channel): string => $channel === 'none' ? '0%' : (str_ends_with($channel, '%') ? $channel : $channel.'%'),
+                $channels,
+            );
+            $channels[0] = rtrim($channels[0], '%');
+        }
         if (
             count($channels) !== 3
             || !str_ends_with($channels[1], '%')

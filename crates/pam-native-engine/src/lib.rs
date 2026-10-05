@@ -851,6 +851,16 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::GridOrderXl
             | PropKey::GridColumnGap
             | PropKey::GridRowGap
+            | PropKey::FlexBasis
+            | PropKey::FlexBasisPercent
+            | PropKey::FlexBasisContent
+            | PropKey::AlignContent
+            | PropKey::MarginTopAuto
+            | PropKey::MarginRightAuto
+            | PropKey::MarginBottomAuto
+            | PropKey::MinWidthPercent
+            | PropKey::MinHeightPercent
+            | PropKey::FontFeatureSettings
     )
 }
 

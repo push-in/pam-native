@@ -62,18 +62,35 @@ foreach ($styleConformance as $property => $value) {
 
 $invalidStyleConformance = [
     'float: left;',
-    'display: block;',
-    'position: fixed;',
+    'display: contents;',
+    'display: inline;',
+    'position: sticky;',
     'box-sizing: content-box;',
     'grid-template-columns: subgrid;',
     'border-radius: 50% / 25%;',
+    'border-radius: 25%;',
+    'overflow: auto;',
+    'background: linear-gradient(red, blue);',
+    'backdrop-filter: blur(4px);',
+    'filter: grayscale(1);',
+    'transform: skewX(10deg);',
+    'width: min-content;',
+    'text-decoration: underline wavy red;',
+    'color: inherit;',
+    'transition: opacity 200ms ease 100ms;',
+    'animation: spin 1s linear infinite;',
+    'vertical-align: middle;',
+    'font-size: larger;',
+    'border-style: solid dashed;',
 ];
 foreach ($invalidStyleConformance as $declaration) {
     $rejected = false;
     try {
         ScopedStyleCompiler::compileDeclarations($declaration, [], 'CSS rejection contract');
-    } catch (RuntimeException) {
+    } catch (RuntimeException|InvalidArgumentException) {
         $rejected = true;
     }
     $assert($rejected, "Unsupported native CSS must fail closed: {$declaration}");
 }
+
+require __DIR__.'/css_complete.php';

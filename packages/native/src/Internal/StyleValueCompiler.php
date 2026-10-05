@@ -25,7 +25,7 @@ final class StyleValueCompiler
     public static function isDynamic(string $value): bool
     {
         return preg_match(
-            '/(?:calc|min|max|clamp|env)\(|-?(?:\d+|\d*\.\d+)(?:vw|vh|vmin|vmax|sp|%)(?:$|[^a-z])/i',
+            '/(?:calc|min|max|clamp|env)\(|-?(?:\d+|\d*\.\d+)(?:em|[dsl]?vw|[dsl]?vh|[dsl]?vmin|[dsl]?vmax|sp|%)(?:$|[^a-z])/i',
             trim($value),
         ) === 1;
     }
@@ -118,7 +118,7 @@ final class StyleValueCompiler
             ];
         }
         if ($token['type'] === 'number') {
-            if (preg_match('/^((?:\d+|\d*\.\d+))(px|dp|sp|pt|rem|%|vw|vh|vmin|vmax)?$/Di', $token['value'], $match) !== 1) {
+            if (preg_match('/^((?:\d+|\d*\.\d+))(px|dp|sp|pt|rem|em|%|[dsl]?vw|[dsl]?vh|[dsl]?vmin|[dsl]?vmax)?$/Di', $token['value'], $match) !== 1) {
                 throw new RuntimeException("Invalid CSS number {$token['value']} in {$this->name}.");
             }
             return self::literal(
@@ -141,10 +141,16 @@ final class StyleValueCompiler
             if ($name === null || $name['type'] !== 'identifier') {
                 throw new RuntimeException("env() requires a native environment name in {$this->name}.");
             }
+            $fallback = null;
+            if (($next = $this->peek()) !== null && $next['type'] === 'comma') {
+                $this->position++;
+                $fallback = $this->expression();
+            }
             $this->expect('right');
             return [
                 'kind' => StyleExpressionKind::Environment->value,
                 'name' => $name['value'],
+                ...($fallback === null ? [] : ['children' => [$fallback]]),
             ];
         }
         if ($function === 'calc') {
@@ -201,6 +207,10 @@ final class StyleValueCompiler
         if ($kind === StyleExpressionKind::Environment) {
             $name = $node['name'] ?? null;
             $value = is_string($name) ? ($environment['env.'.$name] ?? null) : null;
+            $fallback = $node['children'][0] ?? null;
+            if (!is_int($value) && !is_float($value) && is_array($fallback)) {
+                return self::evaluate($fallback, $environment, $depth + 1);
+            }
             if (!is_int($value) && !is_float($value)) {
                 throw new RuntimeException("Native style environment value {$name} is unavailable.");
             }
@@ -239,6 +249,7 @@ final class StyleValueCompiler
             StyleValueUnit::Number, StyleValueUnit::Px, StyleValueUnit::Dp, StyleValueUnit::Pt => $value,
             StyleValueUnit::Sp => $value * (float) ($environment['fontScale'] ?? 1.0),
             StyleValueUnit::Rem => $value * (float) ($environment['rootFontSize'] ?? 16.0),
+            StyleValueUnit::Em => $value * (float) ($environment['fontSize'] ?? $environment['rootFontSize'] ?? 16.0),
             StyleValueUnit::Percent => $value * (float) ($environment['reference'] ?? 0.0) / 100.0,
             StyleValueUnit::Vw => $value * $width / 100.0,
             StyleValueUnit::Vh => $value * $height / 100.0,
@@ -258,7 +269,7 @@ final class StyleValueCompiler
                 continue;
             }
             $rest = substr($value, $index);
-            if (preg_match('/^(?:\d+|\d*\.\d+)(?:px|dp|sp|pt|rem|%|vw|vh|vmin|vmax)?/i', $rest, $match) === 1) {
+            if (preg_match('/^(?:\d+|\d*\.\d+)(?:px|dp|sp|pt|rem|em|%|[dsl]?vw|[dsl]?vh|[dsl]?vmin|[dsl]?vmax)?(?![A-Za-z])/i', $rest, $match) === 1) {
                 $tokens[] = ['type' => 'number', 'value' => $match[0]];
                 $index += strlen($match[0]);
                 continue;
@@ -294,6 +305,13 @@ final class StyleValueCompiler
             'vh' => StyleValueUnit::Vh,
             'vmin' => StyleValueUnit::Vmin,
             'vmax' => StyleValueUnit::Vmax,
+            'em' => StyleValueUnit::Em,
+            // Dynamic/small/large viewport units equal the window viewport on native.
+            'dvw', 'svw', 'lvw' => StyleValueUnit::Vw,
+            'dvh', 'svh', 'lvh' => StyleValueUnit::Vh,
+            'dvmin', 'svmin', 'lvmin' => StyleValueUnit::Vmin,
+            'dvmax', 'svmax', 'lvmax' => StyleValueUnit::Vmax,
+            default => throw new RuntimeException("Unsupported CSS unit {$unit}."),
         };
     }
 

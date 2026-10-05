@@ -1,5 +1,26 @@
 # Changelog
 
+## Unreleased
+
+- Complete the CSS compiler: `flex-basis` (length, %, `auto`, `content`) and
+  the full `flex` shorthand (`flex: 1 1 0`, `auto`, `none`, `<basis>`) now
+  compile and drive the Rust layout engine, which implements CSS Flexbox
+  §9.7 flexible lengths, `order`, `align-content`, `wrap-reverse`,
+  `margin: auto` on every side, relative offsets, `position: fixed` and
+  percentage minimum sizes.
+- Add per-side border colors, any-order border shorthands, `text-shadow`,
+  `font-variant-numeric`/`font-feature-settings`, `transform-origin`,
+  percentage translations, `matrix()`, `text-align: justify`, unitless
+  `line-height`, `em`/dynamic viewport units, `env()` fallbacks, `hwb()`,
+  `lab()`, `lch()`, `oklab()`, `oklch()`, `color()`, `color-mix()`, `:not()`,
+  `:is()`, `:where()`, `::placeholder`, `@supports`, `@media` and/or/not/range
+  syntax and CSS `transition`.
+- Report unsupported CSS at compile time as `<file>:<line>: <message>`;
+  structural pseudo-classes, sibling combinators, `position: sticky`,
+  gradients and skew transforms fail closed instead of silently rendering
+  wrong. Repeated declarations act as CSS fallbacks.
+- See `docs/css.md` for the full support matrix.
+
 ## 1.1.1 - 2026-10-05
 
 - Remove release artifacts accidentally committed under `dist/` in 1.1.0 and
