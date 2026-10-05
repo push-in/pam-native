@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.2.2 - 2026-10-05
+
+Render pipeline performance, part 2. Chat benchmark fixture on an API 36
+emulator (3 runs, 1.2.0 → 1.2.2): scroll jank 12.1% → 6.0%, scroll frame
+p50 28 → 10 ms, send-to-frame 125 → 56 ms, open p50 150 → 85 ms, process
+start to first committed frame ~230-330 → ~195-245 ms.
+
+- Navigation: screens below the top of the stack (and outgoing screens
+  during a transition) are frozen: their last element is reused while they
+  are inactive, their components stay mounted, and they render their latest
+  state as soon as they become the top again. Theme, metrics and other
+  global invalidations still refresh them.
+- Android decoder: `NodeKind`/`PropKey` resolve through dense lookup tables
+  and the batch reader uses absolute little-endian reads instead of a buffer
+  slice per scalar.
+- Android lists: views of scrolled-out cells are pooled by node kind and
+  authored property set and reused for cells of the same shape (every
+  property is re-applied, so no stale value survives); the holder bound to a
+  cell is found through its list instead of scanning every view; created
+  nodes are appended to their siblings without an O(n log n) sort per insert.
+- Coalesced UI events for nodes removed before the next frame are dropped
+  instead of waking PHP.
+- Native child visibility changes are applied by the PHP worker instead of
+  committing and decoding on the UI thread.
+- Startup: bundle installation/verification and OTA resolution run off the
+  main thread (no ANR on first launch), and the manifest is verified in the
+  CLI's path-component order first, avoiding a second full hash. OPcache is
+  enabled (JIT off) with a file cache under the app state directory, so cold
+  starts reuse the opcodes compiled by the previous launch.
+- Android API 36 and API 26 instrumented suites (224/224 each), Android unit,
+  PHP SDK and Rust tests passed locally. iOS sources unchanged.
+
 ## 1.2.1 - 2026-10-05
 
 Render pipeline performance. On the host, a Zé-sized chat screen (32
