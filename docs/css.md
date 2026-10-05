@@ -173,7 +173,7 @@ there.
 | `transform` | `translate()`, `translateX/Y()` (lengths or % of the own box), `translate3d(x, y, 0)`, `scale()`, `scaleX/Y()`, `rotate()`/`rotateZ()` (`deg`, `rad`, `grad`, `turn`), non-skewing `matrix()`, `none` (skew/3D → —) | A i |
 | `translate`, `scale`, `rotate` | individual transform properties | A i |
 | `transform-origin` | keywords and percentages | A |
-| `transition` (+ `-property`, `-duration`, `-timing-function`, `-delay: 0`) | native implicit property animation on the UI thread (`linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier()` ≈ ease-in-out) | A i |
+| `transition` (+ `-property`, `-duration`, `-timing-function`, `-delay`) | native implicit animation on the UI thread with per-property durations, delays and easings (`linear`, `ease*`, `cubic-bezier()`, `steps()`, `spring(mass stiffness damping)`); see [Animations](animations.md) | A i |
 | `@keyframes` + `<Animated keyframes="…">` | opacity/translate/scale/rotate keyframes run natively | A i |
 | `animation*` properties | — (attach keyframes with `<Animated>`) | — |
 

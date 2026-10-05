@@ -25,6 +25,7 @@ short end-to-end recipes.
 | Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
 | Light/dark preference, first-frame theming and native window colours | [Appearance](appearance.md) |
 | Gestures and composition | [Gestures](gestures.md) |
+| UI-thread animations, transitions and presets | [Animations](animations.md) |
 | Bottom sheets | [Bottom Sheet](bottom-sheet.md) |
 | Image, video and audio cache | [Native media cache](media-cache.md) |
 | Scheduler, compiler fast paths, profiling and recovery | [Runtime performance](runtime-performance.md) |
