@@ -104,7 +104,15 @@ internal const val PAM_PHYSICAL_FRAME_GRAVITY: Int = Gravity.TOP or Gravity.LEFT
 
 private const val LOCAL_MODAL_SELECTION_BEHAVIOR = 24L
 private const val MAX_POOLED_CELL_VIEWS_PER_SHAPE = 24
-private val POOLED_CELL_KINDS = setOf(NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT)
+private val POOLED_CELL_KINDS = setOf(
+    NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT, NodeKind.PRESSABLE, NodeKind.IMAGE,
+)
+private val POOLED_CELL_VIEW_CLASSES = setOf<Class<*>>(
+    PamContainer::class.java,
+    TextView::class.java,
+    PamPressable::class.java,
+    PamImageView::class.java,
+)
 private const val KEYBOARD_VIEWPORT_RECONCILE_RETRIES = 8
 private const val KEYBOARD_VIEWPORT_RECONCILE_RETRY_MS = 100L
 
@@ -446,7 +454,7 @@ class PamRenderer(
 
     private fun poolCellView(id: Long, state: NodeState, view: View) {
         if (!recyclingCell || deferredViewportLayouts.containsKey(id)) return
-        if (view.javaClass != PamContainer::class.java && view.javaClass != TextView::class.java) return
+        if (view.javaClass !in POOLED_CELL_VIEW_CLASSES) return
         val shape = cellViewShape(state) ?: return
         val pool = cellViewPool.getOrPut(shape) { ArrayDeque() }
         if (pool.size >= MAX_POOLED_CELL_VIEWS_PER_SHAPE) return
@@ -458,6 +466,17 @@ class PamRenderer(
         view.scaleY = 1f
         view.rotation = 0f
         view.visibility = View.VISIBLE
+        view.isPressed = false
+        view.jumpDrawablesToCurrentState()
+        when (view) {
+            // Never show the previous cell's pixels while the new source loads.
+            is PamImageView -> {
+                view.setImageDrawable(null)
+                view.onImageSizeChanged = null
+            }
+            // Modal trigger actions are re-installed by the commit pass.
+            is PamPressable -> view.setLocalOnPress(null)
+        }
         cellViewShapes[view] = shape
         pool.addLast(view)
     }
