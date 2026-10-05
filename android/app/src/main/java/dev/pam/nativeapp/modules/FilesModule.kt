@@ -13,6 +13,8 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.net.HttpURLConnection
@@ -385,17 +387,22 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     }
 
     private fun pick(payload: ByteArray, completion: ModuleCompletion) {
-        val type = WireMap.decode(payload).integer("type", 4)
-        val mime = when (type) {
+        val values = WireMap.decode(payload)
+        val type = values.integer("type", 4)
+        val maximumBytes = values.integer("maximumBytes", MAX_IMPORT_BYTES)
+        require(maximumBytes in 1..MAX_PICK_IMPORT_BYTES) { "Picker import limit must be between 1 byte and 8 GiB" }
+        val requestedMime = (values["mimeType"] as? WireValue.Text)?.value.orEmpty()
+        require(requestedMime.isEmpty() || PICKER_MIME.matches(requestedMime)) { "Picker MIME type is invalid" }
+        val mime = requestedMime.ifEmpty { when (type) {
             1L -> "image/*"
             2L -> "video/*"
             3L -> "audio/*"
             else -> "*/*"
-        }
+        } }
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             this.type = mime
-            if (type == 5L) {
+            if (requestedMime.isEmpty() && type == 5L) {
                 putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
             }
         }
@@ -403,7 +410,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             if (result != Activity.RESULT_OK || data?.data == null) {
                 completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
             } else {
-                executor.execute { importUri(data.data!!, completion) }
+                executor.execute { importUri(data.data!!, completion, maximumBytes) }
             }
         }
     }
@@ -507,9 +514,9 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }
     }
 
-    private fun importUri(uri: Uri, completion: ModuleCompletion) {
+    private fun importUri(uri: Uri, completion: ModuleCompletion, maximumBytes: Long = MAX_IMPORT_BYTES) {
         runCatching {
-            val imported = importUri(uri)
+            val imported = importUri(uri, maximumBytes)
             completion.success(imported.file, imported.mime, imported.name)
         }.onFailure { completion.failure(it) }
     }
@@ -551,6 +558,13 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             if (cursor.moveToFirst()) {
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (index >= 0) name = cursor.getString(index)
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    val reportedSize = cursor.getLong(sizeIndex)
+                    require(reportedSize < 0 || reportedSize <= maximumBytes) {
+                        "Selected file exceeds ${maximumBytes / 1_048_576} MiB"
+                    }
+                }
             }
         }
         val file = uniqueImport(name)
@@ -558,21 +572,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             activity.contentResolver.openInputStream(uri).use { input ->
                 requireNotNull(input) { "Unable to read selected file" }
                 file.outputStream().use { output ->
-                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
-                    var total = 0L
-                    while (true) {
-                        val read = input.read(buffer)
-                        if (read < 0) break
-                        total += read
-                        require(total <= maximumBytes) {
-                            if (maximumBytes < MAX_IMPORT_BYTES) {
-                                "Selected files exceed 256 MiB"
-                            } else {
-                                "Selected file exceeds 64 MiB"
-                            }
-                        }
-                        output.write(buffer, 0, read)
-                    }
+                    copyImportedDocument(input, output, maximumBytes)
                 }
             }
             ImportedFile(file, mime, name)
@@ -644,6 +644,8 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         const val MAX_PICK_LIMIT = 50
         const val MAX_READ_BYTES = 1024 * 1024L
         const val MAX_IMPORT_BYTES = 64L * 1024L * 1024L
+        const val MAX_PICK_IMPORT_BYTES = 8L * 1024L * 1024L * 1024L
+        val PICKER_MIME = Regex("^[a-zA-Z0-9!#\\$&^_.+-]+/[a-zA-Z0-9!#\\$&^_.+*-]+$")
         const val MAX_DOWNLOAD_BYTES = 256L * 1024L * 1024L
         const val MAX_MULTI_IMPORT_BYTES = 256L * 1024L * 1024L
     }
@@ -654,6 +656,22 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
     )
 
     private data class ImportedFile(val file: File, val mime: String, val name: String)
+}
+
+internal fun copyImportedDocument(input: InputStream, output: OutputStream, maximumBytes: Long): Long {
+    require(maximumBytes > 0) { "Picker import limit must be positive" }
+    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+    var total = 0L
+    while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        require(read <= maximumBytes - total) {
+            "Selected file exceeds ${maximumBytes / 1_048_576} MiB"
+        }
+        output.write(buffer, 0, read)
+        total += read
+    }
+    return total
 }
 
 internal fun normalizedBundledAssetPath(path: String): String {
