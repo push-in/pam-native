@@ -147,3 +147,10 @@ as `windowSplashScreenAnimatedIcon` (centered in the 240 dp icon area; the
 system masks icons to a 160 dp circle), and API 26–30 draw it centered on the
 `splashBackground` starting window. Each scheme uses its own logo and
 background. Without `splash.logo` the platform default icon is kept.
+
+**iOS** (1.9.0): the build writes `App/PamLaunch.xcassets` with a
+`PamSplashBackground` color set (light/dark `splashBackground`) and, for PNG
+logos, a `PamSplashLogo` image set (light/dark) whose scale is chosen so its
+point size is closest to `size`; `UILaunchScreen` shows both. The host keeps
+the same logo centered on screen until the first PHP frame is committed.
+WebP logos are Android-only (the iOS launch screen then shows the background).

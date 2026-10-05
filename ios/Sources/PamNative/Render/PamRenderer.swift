@@ -43,8 +43,6 @@ public final class PamRenderer {
     private var animationDelegates: [Int64: PamAnimationDelegate] = [:]
     private var workletAnimators: [Int64: PamWorkletAnimator] = [:]
     private var localModalActions: [Int64: UIAction.Identifier] = [:]
-    private var borderLayers: [Int64: PamBorderLayers] = [:]
-    private var patternedBorderLayers: [Int64: CAShapeLayer] = [:]
     private lazy var motion = PamMotionCoordinator(
         dispatch: { [weak self] id, kind, payload in self?.dispatchEvent(id, kind, payload) },
         isMounted: { [weak self] id in self?.views[id] != nil },
@@ -54,6 +52,37 @@ public final class PamRenderer {
             return self.views[child]
         }
     )
+    private var keyboardInsetObservers: [Int64: PamKeyboardInsetObserver] = [:]
+    private var viewPool: [String: [UIView]] = [:]
+    private var viewPoolCount = 0
+    private lazy var layoutEvents = PamLayoutEvents(
+        resolve: { [weak self] id in self?.relativeLayoutFrame(id) },
+        dispatch: { [weak self] id, payload in
+            self?.dispatchEvent(id, EventKind.layout.rawValue, payload)
+        }
+    )
+
+    /// True once the engine lays out SafeAreaView insets from the window safe
+    /// area (`pam_native_runtime_set_safe_area_insets`); native insets are then
+    /// never applied a second time.
+    var engineManagedSafeArea = false {
+        didSet {
+            guard engineManagedSafeArea != oldValue else { return }
+            let relayout = { [weak self] in
+                guard let self else { return }
+                for (id, state) in self.nodes where state.kind == .safeAreaView {
+                    self.applyLayout(id)
+                    self.children[id]?.forEach { self.applyLayout($0) }
+                }
+            }
+            if Thread.isMainThread { relayout() } else { DispatchQueue.main.async(execute: relayout) }
+        }
+    }
+
+    /// True while `id` belongs to the committed tree (events for removed nodes are stale).
+    func hasNode(_ id: Int64) -> Bool {
+        id == 0 || nodes[id] != nil
+    }
     private var rootId: Int64 = 0
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
@@ -75,6 +104,9 @@ public final class PamRenderer {
         )
         sessionDelegate.renderer = self
     }
+
+    /// The view the runtime renders into.
+    var hostView: UIView? { host }
 
     private func nativeColor(named name: String?) -> UIColor? {
         guard let name, !name.isEmpty else { return nil }
@@ -147,6 +179,8 @@ public final class PamRenderer {
             }
             return
         }
+        viewPool.removeAll()
+        viewPoolCount = 0
         guard critical else { return }
         for node in nodes.values {
             cancelImageLoad(for: node)
@@ -191,9 +225,9 @@ public final class PamRenderer {
         workletAnimators.values.forEach { $0.stop() }
         workletAnimators.removeAll()
         localModalActions.removeAll()
-        borderLayers.removeAll()
-        patternedBorderLayers.values.forEach { $0.removeFromSuperlayer() }
-        patternedBorderLayers.removeAll()
+        keyboardInsetObservers.removeAll()
+        viewPool.removeAll()
+        viewPoolCount = 0
 
         for node in nodes.values {
             cancelImageLoad(for: node)
@@ -203,6 +237,7 @@ public final class PamRenderer {
 
         onNativeChildVisibility = nil
         for (nodeId, view) in views {
+            PamViewEffects.reset(view)
             (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = nil
             nativeViews.release(view: view)
             view.removeFromSuperview()
@@ -309,13 +344,13 @@ public final class PamRenderer {
         workletAnimators.removeValue(forKey: id)?.stop()
         motion.remove(id)
         localModalActions[id] = nil
-        borderLayers[id]?.remove()
-        borderLayers[id] = nil
-        patternedBorderLayers.removeValue(forKey: id)?.removeFromSuperlayer()
+        keyboardInsetObservers.removeValue(forKey: id)?.reset()
+        layoutEvents.forget(id)
 
         cancelImageLoad(for: state)
 
         if let view = views[id] {
+            PamViewEffects.reset(view)
             (view as? NativeChildVisibilityHost)?.onChildVisibilityChanged = nil
             nativeViews.release(view: view)
             if let navigation = views[state.parent] as? PamNavigationHost {
@@ -374,7 +409,8 @@ public final class PamRenderer {
             PamRenderer.motionEventKeys.contains(key) {
             installEvents(for: id)
         }
-        if let label = view as? UILabel, state.properties[PamConstants.onTextLayout] != nil {
+        if let label = view as? UILabel, !(label is PamTextView),
+           state.properties[PamConstants.onTextLayout] != nil {
             motion.scheduleTextLayout(nodeId: id, label: label)
         }
 
@@ -432,7 +468,7 @@ public final class PamRenderer {
             kind: state.kind,
             properties: state.properties
         )
-        let view = createView(for: spec)
+        let view = dequeueRecycledView(for: state) ?? createView(for: spec)
         views[state.id] = view
         view.tag = Int(clamping: state.id)
         attach(view, parentId: state.parent, index: state.index)
@@ -473,13 +509,13 @@ public final class PamRenderer {
         workletAnimators.removeValue(forKey: id)?.stop()
         motion.dematerialize(id)
         localModalActions[id] = nil
-        borderLayers[id]?.remove()
-        borderLayers[id] = nil
-        patternedBorderLayers.removeValue(forKey: id)?.removeFromSuperlayer()
+        keyboardInsetObservers.removeValue(forKey: id)?.reset()
+        layoutEvents.forget(id)
         cancelImageLoad(for: state)
         state.childrenNeedRethrow = nil
         nativeViews.release(view: view)
         view.removeFromSuperview()
+        recycle(view, state: state)
         views[id] = nil
         imageLoadContexts = imageLoadContexts.filter { _, context in
             context.nodeId != id
@@ -516,9 +552,10 @@ public final class PamRenderer {
                 let targetExtent = list.horizontal
                     ? CGFloat(targetFrame.width)
                     : CGFloat(targetFrame.height)
+                // The real native viewport (host insets may shrink the list).
                 let viewportExtent = list.horizontal
-                    ? CGFloat(listFrame.width)
-                    : CGFloat(listFrame.height)
+                    ? list.bounds.width - list.adjustedContentInset.left - list.adjustedContentInset.right
+                    : list.bounds.height - list.adjustedContentInset.top - list.adjustedContentInset.bottom
                 let available = max(0, viewportExtent - targetExtent)
                 let adjustment: CGFloat
                 switch targetAlignment {
@@ -581,15 +618,25 @@ public final class PamRenderer {
         let contentSize = CGSize(width: contentWidth, height: contentHeight)
         if list.contentSize != contentSize {
             list.contentSize = contentSize
+            list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
-        let visible = PamVirtualWindow.visibleIds(
+        var visible = PamVirtualWindow.visibleIds(
             frames: localFrames,
             viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
             horizontal: horizontal,
             overscan: forceMinimal ? 0 : list.adaptiveOverscan,
             velocity: list.scrollVelocity
         )
+        // A pinned sticky header stays mounted while the rows under it scroll.
+        if !horizontal {
+            let top = list.contentOffset.y + list.adjustedContentInset.top
+            if let pinned = localFrames.last(where: { entry in
+                entry.1.minY <= top && nodes[entry.0]?.properties[PamConstants.stickyHeader]?.pamFlag == true
+            }) {
+                visible.insert(pinned.0)
+            }
+        }
         for cellId in cellIds {
             if visible.contains(cellId) {
                 materializeSubtree(cellId)
@@ -617,7 +664,8 @@ public final class PamRenderer {
         var width = CGFloat(max(0, frame.width))
         var height = CGFloat(max(0, frame.height))
 
-        if let parentState = nodes[effectiveParent],
+        if !engineManagedSafeArea,
+           let parentState = nodes[effectiveParent],
            parentState.kind == .safeAreaView,
            Int(parentState.properties[PamConstants.safeAreaMode]?.integer() ?? 1) == 1,
            let parentView = views[effectiveParent] {
@@ -697,7 +745,8 @@ public final class PamRenderer {
             }
         }
 
-        if state.kind == .safeAreaView,
+        if !engineManagedSafeArea,
+           state.kind == .safeAreaView,
            Int(state.properties[PamConstants.safeAreaMode]?.integer() ?? 1) == 2 {
             let insets = view.safeAreaInsets
 
@@ -753,9 +802,144 @@ public final class PamRenderer {
         applyBorder(view: view, nodeId: id)
         applyBoxShadow(view: view, nodeId: id)
         applyTextAlignment(view: view, nodeId: id)
-        if layoutChanged, let label = view as? UILabel, state.properties[PamConstants.onTextLayout] != nil {
+        if layoutChanged, let label = view as? UILabel, !(label is PamTextView),
+           state.properties[PamConstants.onTextLayout] != nil {
             motion.scheduleTextLayout(nodeId: id, label: label)
         }
+        if layoutChanged, hasSizeDependentTransform(state) {
+            applyTransform(view: view, nodeId: id)
+        }
+        PamViewEffects.of(view, create: false)?.syncSiblingShadow()
+        applyStickyHeader(view: view, state: state, frame: nextFrame)
+        if let parentState = nodes[effectiveParent], parentState.kind == .scroll {
+            updateScrollContentSize(effectiveParent)
+        }
+        if state.properties[PamConstants.onLayout] != nil {
+            layoutEvents.queue(id)
+        }
+    }
+
+    /// React Native onLayout frame: relative to the parent, in points.
+    private func relativeLayoutFrame(_ id: Int64) -> CGRect? {
+        guard let frame = frames[id], let state = nodes[id] else { return nil }
+        let parent = state.parent == 0 ? nil : frames[state.parent]
+        return CGRect(
+            x: CGFloat(frame.x - (parent?.x ?? 0)),
+            y: CGFloat(frame.y - (parent?.y ?? 0)),
+            width: CGFloat(frame.width),
+            height: CGFloat(frame.height)
+        )
+    }
+
+    /// ScrollView content extent: the union of its children's frames.
+    private func updateScrollContentSize(_ scrollId: Int64) {
+        guard let scroll = views[scrollId] as? UIScrollView,
+              !(scroll is PamVirtualListView),
+              let scrollFrame = frames[scrollId] else { return }
+        var width: CGFloat = 0
+        var height: CGFloat = 0
+        for childId in children[scrollId] ?? [] {
+            guard let frame = frames[childId] else { continue }
+            width = max(width, CGFloat(frame.x - scrollFrame.x + frame.width))
+            height = max(height, CGFloat(frame.y - scrollFrame.y + frame.height))
+        }
+        let size = CGSize(width: max(0, width), height: max(0, height))
+        if scroll.contentSize != size {
+            scroll.contentSize = size
+        }
+    }
+
+    private func applyStickyHeader(view: UIView, state: NodeState, frame: CGRect) {
+        let parentView = views[state.parent]
+        let registry = (parentView as? PamAnchoredScrollView)?.pamSticky
+            ?? (parentView as? PamVirtualListView)?.pamSticky
+        guard let registry, let scroll = parentView as? UIScrollView else { return }
+        let sticky = state.properties[PamConstants.stickyHeader]?.pamFlag ?? false
+        guard sticky || registry.contains(view) else { return }
+        registry.set(view, frame: sticky ? frame : nil)
+        registry.update(offset: scroll.contentOffset.y + scroll.adjustedContentInset.top, host: scroll)
+    }
+
+    // MARK: View recycling (virtual list cells)
+
+    private static let recyclableKinds: Set<NodeKind> = [.view, .column, .row, .text, .image, .pressable, .spacer]
+
+    private func recycleKey(_ state: NodeState) -> String? {
+        guard Self.recyclableKinds.contains(state.kind) else { return nil }
+        let keys = state.properties.keys.sorted().map(String.init).joined(separator: ",")
+        return "\(state.kind.rawValue)|\(keys)"
+    }
+
+    /// Keeps a scrolled-out cell view for a later cell of the same shape
+    /// (node kind + authored property set, so every property is re-applied).
+    private func recycle(_ view: UIView, state: NodeState) {
+        guard virtualListAncestor(of: state.parent) != nil,
+              viewPoolCount < 256,
+              let key = recycleKey(state),
+              (viewPool[key]?.count ?? 0) < 32 else { return }
+        PamViewEffects.reset(view)
+        view.layer.removeAllAnimations()
+        view.transform = .identity
+        view.alpha = 1
+        view.isHidden = false
+        if let image = view as? PamImageView {
+            image.pamFilter = PamImageFilter()
+            image.image = nil
+        }
+        if let text = view as? PamTextView {
+            text.pamContent = nil
+            text.onSpanPress = nil
+            text.onTextLayout = nil
+            text.text = nil
+        }
+        if let button = view as? PamPressButton {
+            button.isHighlighted = false
+            button.removeTarget(nil, action: nil, for: .allEvents)
+            // Local modal triggers are UIActions keyed by the old node.
+            button.enumerateEventHandlers { action, _, event, _ in
+                if let action { button.removeAction(action, for: event) }
+            }
+        }
+        viewPool[key, default: []].append(view)
+        viewPoolCount += 1
+    }
+
+    private func dequeueRecycledView(for state: NodeState) -> UIView? {
+        guard virtualListAncestor(of: state.parent) != nil,
+              let key = recycleKey(state),
+              let view = viewPool[key]?.popLast() else { return nil }
+        viewPoolCount -= 1
+        return view
+    }
+
+    private func hasSizeDependentTransform(_ state: NodeState) -> Bool {
+        state.properties[PamConstants.translationXPercent] != nil
+            || state.properties[PamConstants.translationYPercent] != nil
+            || state.properties[PamConstants.transformOriginX] != nil
+            || state.properties[PamConstants.transformOriginY] != nil
+    }
+
+    /// translate (points and % of the own box), scale and rotation around
+    /// `transform-origin`.
+    private func applyTransform(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        if (view as? PamPressButton)?.isHighlighted == true { return }
+        let properties = state.properties
+        var spec = PamTransformSpec()
+        spec.translateX = CGFloat(properties[PamConstants.translationX]?.pamNumber ?? 0)
+        spec.translateY = CGFloat(properties[PamConstants.translationY]?.pamNumber ?? 0)
+        spec.translateXPercent = CGFloat(properties[PamConstants.translationXPercent]?.pamNumber ?? 0)
+        spec.translateYPercent = CGFloat(properties[PamConstants.translationYPercent]?.pamNumber ?? 0)
+        spec.scaleX = CGFloat(properties[PamConstants.scaleX]?.pamNumber ?? 1)
+        spec.scaleY = CGFloat(properties[PamConstants.scaleY]?.pamNumber ?? 1)
+        spec.rotationDegrees = CGFloat(properties[PamConstants.rotation]?.pamNumber ?? 0)
+        spec.originXPercent = CGFloat(properties[PamConstants.transformOriginX]?.pamNumber ?? 50)
+        spec.originYPercent = CGFloat(properties[PamConstants.transformOriginY]?.pamNumber ?? 50)
+        let next = spec.affine(size: view.bounds.size)
+        if view.transform != next {
+            view.transform = next
+        }
+        PamViewEffects.of(view, create: false)?.syncSiblingShadow()
     }
 
     private func addChild(to parent: Int64, child: Int64) {
@@ -812,12 +996,7 @@ public final class PamRenderer {
             return
         }
 
-        let target = min(max(index, 0), parent.subviews.count)
-        if target >= parent.subviews.count {
-            parent.addSubview(view)
-        } else {
-            parent.insertSubview(view, at: target)
-        }
+        parent.pamInsertManagedSubview(view, at: index)
     }
 
     private func hostName(for state: NodeState) -> String {
@@ -873,13 +1052,13 @@ public final class PamRenderer {
         case .button:
             return PamPressButton(type: .system)
         case .text:
-            return UILabel()
+            return PamTextView()
         case .input:
             let field = PamInputField()
             field.borderStyle = .none
             return field
         case .image, .imageBackground:
-            return UIImageView()
+            return PamImageView()
         case .scroll:
             return PamAnchoredScrollView()
         case .list, .sectionList, .virtualList:
@@ -1267,7 +1446,22 @@ public final class PamRenderer {
         }
         if let media = view as? PamMediaView {
             media.onReady = eventProperties.contains(PamConstants.onMediaReady) ? {
-                [weak self] in self?.dispatchEvent(nodeId, EventKind.mediaReady.rawValue, Data())
+                [weak self] width, height, duration in
+                // MediaReadyEvent: natural size and duration (older handlers ignore the payload).
+                let payload = (try? WireMap.encode([
+                    "naturalWidth": .integer(Int64(width)),
+                    "naturalHeight": .integer(Int64(height)),
+                    "duration": .decimal(duration),
+                ])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.mediaReady.rawValue, payload)
+            } : nil
+            media.onLoadStart = eventProperties.contains(PamConstants.onMediaLoadStart) ? {
+                [weak self] in self?.dispatchEvent(nodeId, EventKind.mediaLoadStart.rawValue, Data())
+            } : nil
+            media.onBuffering = eventProperties.contains(PamConstants.onMediaBuffering) ? {
+                [weak self] buffering in
+                let payload = (try? WireMap.encode(["buffering": .flag(buffering)])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.mediaBuffering.rawValue, payload)
             } : nil
             media.onProgress = eventProperties.contains(PamConstants.onMediaProgress) ? {
                 [weak self] current, duration in
@@ -1410,6 +1604,11 @@ public final class PamRenderer {
             PamConstants.onNavigationGesturePop,
             PamConstants.onAnimationComplete,
             PamConstants.onAccessibilityAction,
+            PamConstants.onSpanPress,
+            PamConstants.onLayout,
+            PamConstants.onTextLayout,
+            PamConstants.onMediaBuffering,
+            PamConstants.onMediaLoadStart,
         ].reduce(into: Set<Int>()) { $0.insert($1) }
     }
 
@@ -1679,7 +1878,10 @@ public final class PamRenderer {
         switch key {
         case PamConstants.text:
             if let textValue = value.textOrNil() {
-                if let label = view as? UILabel {
+                if let textView = view as? PamTextView {
+                    textView.text = textValue
+                    applyTextContent(view: textView, nodeId: nodeId)
+                } else if let label = view as? UILabel {
                     label.text = textValue
                 } else if let button = view as? UIButton {
                     button.setTitle(textValue, for: .normal)
@@ -1773,14 +1975,12 @@ public final class PamRenderer {
             if !motion.animateTransition(nodeId: nodeId, view: view, property: .opacity, target: value.decimalOrZero()) {
                 view.alpha = CGFloat(value.decimalOrZero())
             }
-        case PamConstants.translationX:
-            if !motion.animateTransition(nodeId: nodeId, view: view, property: .translateX, target: value.decimalOrZero()) {
-                view.transform.tx = CGFloat(value.decimalOrZero())
-            }
-        case PamConstants.translationY:
-            if !motion.animateTransition(nodeId: nodeId, view: view, property: .translateY, target: value.decimalOrZero()) {
-                view.transform.ty = CGFloat(value.decimalOrZero())
-            }
+        case PamConstants.translationX
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .translateX, target: value.decimalOrZero()):
+            break
+        case PamConstants.translationY
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .translateY, target: value.decimalOrZero()):
+            break
         case PamConstants.scaleX
             where motion.animateTransition(nodeId: nodeId, view: view, property: .scaleX, target: value.decimalOrZero()):
             break
@@ -1790,20 +1990,16 @@ public final class PamRenderer {
         case PamConstants.rotation
             where motion.animateTransition(nodeId: nodeId, view: view, property: .rotate, target: value.decimalOrZero()):
             break
-        case PamConstants.scaleX:
-            view.transform = view.transform.scaledBy(
-                x: CGFloat(value.decimalOrZero()),
-                y: 1
-            )
-        case PamConstants.scaleY:
-            view.transform = view.transform.scaledBy(
-                x: 1,
-                y: CGFloat(value.decimalOrZero())
-            )
-        case PamConstants.rotation:
-            view.transform = view.transform.rotated(
-                by: CGFloat(value.decimalOrZero()) * .pi / 180
-            )
+        case PamConstants.translationX,
+             PamConstants.translationY,
+             PamConstants.translationXPercent,
+             PamConstants.translationYPercent,
+             PamConstants.scaleX,
+             PamConstants.scaleY,
+             PamConstants.rotation,
+             PamConstants.transformOriginX,
+             PamConstants.transformOriginY:
+            applyTransform(view: view, nodeId: nodeId)
         case PamConstants.animationKind:
             applyMotion(
                 view: view,
@@ -1812,7 +2008,10 @@ public final class PamRenderer {
             )
         case PamConstants.backgroundColor:
             if let color = value.integerOrNil() {
-                view.backgroundColor = UIColor(argb: color)
+                let resolved = UIColor(argb: color)
+                if PamViewEffects.of(view, create: false)?.setBackgroundColor(resolved) != true {
+                    view.backgroundColor = resolved
+                }
             }
         case PamConstants.nativeBackgroundColorResource:
             if let color = nativeColor(named: value.textOrNil()) {
@@ -1825,10 +2024,20 @@ public final class PamRenderer {
              PamConstants.borderLeftWidth,
              PamConstants.borderTopWidth,
              PamConstants.borderRightWidth,
-             PamConstants.borderBottomWidth:
+             PamConstants.borderBottomWidth,
+             PamConstants.borderLeftColor,
+             PamConstants.borderTopColor,
+             PamConstants.borderRightColor,
+             PamConstants.borderBottomColor,
+             PamConstants.backgroundGradient,
+             PamConstants.borderGradient,
+             PamConstants.overflow:
             applyBorder(view: view, nodeId: nodeId)
-        case PamConstants.borderRadius:
-            view.layer.cornerRadius = CGFloat(value.decimalOrZero())
+        case PamConstants.borderRadius,
+             PamConstants.borderTopLeftRadius,
+             PamConstants.borderTopRightRadius,
+             PamConstants.borderBottomRightRadius,
+             PamConstants.borderBottomLeftRadius:
             applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.elevation:
@@ -1837,10 +2046,10 @@ public final class PamRenderer {
              PamConstants.shadowOffsetY,
              PamConstants.shadowBlurRadius,
              PamConstants.shadowSpreadRadius,
-             PamConstants.shadowColor:
+             PamConstants.shadowColor,
+             PamConstants.boxShadows:
             applyBoxShadow(view: view, nodeId: nodeId)
-        case PamConstants.overflow:
-            view.layer.masksToBounds = value.integerOrNil() == 2
+            applyBorder(view: view, nodeId: nodeId)
         case PamConstants.enabled:
             if let enabled = value.boolOrNil() {
                 view.isUserInteractionEnabled = enabled
@@ -1897,6 +2106,49 @@ public final class PamRenderer {
              PamConstants.textAdjustsFontSizeToFit,
              PamConstants.textMinimumFontScale:
             applyTextSizing(view: view, state: nodes[nodeId])
+            applyTextContent(view: view, nodeId: nodeId)
+        case PamConstants.textSpans,
+             PamConstants.onSpanPress,
+             PamConstants.onTextLayout,
+             PamConstants.lineHeight,
+             PamConstants.letterSpacing,
+             PamConstants.textTransform,
+             PamConstants.textDecoration,
+             PamConstants.numberOfLines,
+             PamConstants.textEllipsizeMode,
+             PamConstants.fontFeatureSettings,
+             PamConstants.textShadowOffsetX,
+             PamConstants.textShadowOffsetY,
+             PamConstants.textShadowRadius,
+             PamConstants.textShadowColor:
+            applyTextContent(view: view, nodeId: nodeId)
+        case PamConstants.includeFontPadding, PamConstants.listFullSpan:
+            // Android-only metric / laid out by the engine.
+            break
+        case PamConstants.stickyHeader:
+            applyLayout(nodeId)
+        case PamConstants.onLayout:
+            layoutEvents.queue(nodeId)
+        case PamConstants.scrollKeyboardInset:
+            configureKeyboardInset(view: view, nodeId: nodeId)
+        case PamConstants.blurRadius, PamConstants.filterColorMatrix:
+            applyFilter(view: view, nodeId: nodeId)
+        case PamConstants.backdropBlurRadius, PamConstants.backdropColorMatrix:
+            applyBackdrop(view: view, nodeId: nodeId)
+        case PamConstants.shimmerEnabled,
+             PamConstants.shimmerGradientColor,
+             PamConstants.shimmerDurationMs:
+            applyShimmer(view: view, nodeId: nodeId)
+        case PamConstants.modalAnimationType:
+            (view as? PamModalHost)?.setAnimationType(Int(value.integerOrNil() ?? 1))
+        case PamConstants.modalBackdropColor:
+            if let color = value.integerOrNil() {
+                (view as? PamModalHost)?.setBackdropColor(Int(truncatingIfNeeded: color))
+            }
+        case PamConstants.modalTransparent:
+            (view as? PamModalHost)?.setTransparent(value.boolOrNil() ?? false)
+        case PamConstants.modalAllowSwipeDismissal:
+            (view as? PamModalHost)?.setAllowSwipeDismissal(value.boolOrNil() ?? false)
         case PamConstants.visible:
             if let modal = view as? PamModalHost {
                 modal.setVisible(value.boolOrNil() ?? true)
@@ -2195,14 +2447,6 @@ public final class PamRenderer {
             installEvents(for: nodeId)
         case PamConstants.hostProperties:
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
-        case PamConstants.backgroundGradient,
-             PamConstants.boxShadows,
-             PamConstants.filterColorMatrix,
-             PamConstants.backdropBlurRadius,
-             PamConstants.backdropColorMatrix,
-             PamConstants.borderGradient,
-             PamConstants.shimmerEnabled:
-            PamUnsupportedEffects.report(key: key, value: value)
         default:
             break
         }
@@ -2210,8 +2454,74 @@ public final class PamRenderer {
 
     private func resetProperty(view: UIView, nodeId: Int64, key: Int, state: NodeState) {
         switch key {
+        case PamConstants.translationX,
+             PamConstants.translationY,
+             PamConstants.translationXPercent,
+             PamConstants.translationYPercent,
+             PamConstants.scaleX,
+             PamConstants.scaleY,
+             PamConstants.rotation,
+             PamConstants.transformOriginX,
+             PamConstants.transformOriginY:
+            applyTransform(view: view, nodeId: nodeId)
+        case PamConstants.borderLeftColor,
+             PamConstants.borderTopColor,
+             PamConstants.borderRightColor,
+             PamConstants.borderBottomColor,
+             PamConstants.backgroundGradient,
+             PamConstants.borderGradient,
+             PamConstants.borderTopLeftRadius,
+             PamConstants.borderTopRightRadius,
+             PamConstants.borderBottomRightRadius,
+             PamConstants.borderBottomLeftRadius:
+            applyBorder(view: view, nodeId: nodeId)
+            applyBoxShadow(view: view, nodeId: nodeId)
+        case PamConstants.boxShadows:
+            applyBoxShadow(view: view, nodeId: nodeId)
+            applyBorder(view: view, nodeId: nodeId)
+        case PamConstants.text,
+             PamConstants.textSpans,
+             PamConstants.onSpanPress,
+             PamConstants.onTextLayout,
+             PamConstants.lineHeight,
+             PamConstants.letterSpacing,
+             PamConstants.textTransform,
+             PamConstants.textDecoration,
+             PamConstants.numberOfLines,
+             PamConstants.textEllipsizeMode,
+             PamConstants.fontFeatureSettings,
+             PamConstants.textShadowOffsetX,
+             PamConstants.textShadowOffsetY,
+             PamConstants.textShadowRadius,
+             PamConstants.textShadowColor:
+            if key == PamConstants.text { (view as? UILabel)?.text = nil }
+            applyTextContent(view: view, nodeId: nodeId)
+        case PamConstants.stickyHeader:
+            applyLayout(nodeId)
+        case PamConstants.onLayout:
+            layoutEvents.forget(nodeId)
+        case PamConstants.scrollKeyboardInset:
+            configureKeyboardInset(view: view, nodeId: nodeId)
+        case PamConstants.blurRadius, PamConstants.filterColorMatrix:
+            applyFilter(view: view, nodeId: nodeId)
+        case PamConstants.backdropBlurRadius, PamConstants.backdropColorMatrix:
+            applyBackdrop(view: view, nodeId: nodeId)
+        case PamConstants.shimmerEnabled,
+             PamConstants.shimmerGradientColor,
+             PamConstants.shimmerDurationMs:
+            applyShimmer(view: view, nodeId: nodeId)
+        case PamConstants.modalAnimationType:
+            (view as? PamModalHost)?.setAnimationType(1)
+        case PamConstants.modalBackdropColor:
+            (view as? PamModalHost)?.setBackdropColor(0x5200_0000)
+        case PamConstants.modalTransparent:
+            (view as? PamModalHost)?.setTransparent(false)
+        case PamConstants.modalAllowSwipeDismissal:
+            (view as? PamModalHost)?.setAllowSwipeDismissal(false)
         case PamConstants.backgroundColor:
-            view.backgroundColor = .clear
+            if PamViewEffects.of(view, create: false)?.setBackgroundColor(nil) != true {
+                view.backgroundColor = .clear
+            }
         case PamConstants.nativeBackgroundColorResource:
             view.backgroundColor = .clear
         case PamConstants.keyboardType, PamConstants.inputMode, PamConstants.inputEditable,
@@ -2246,7 +2556,6 @@ public final class PamRenderer {
              PamConstants.borderBottomWidth:
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.borderRadius:
-            view.layer.cornerRadius = 0
             applyBorder(view: view, nodeId: nodeId)
             applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.elevation:
@@ -2260,7 +2569,7 @@ public final class PamRenderer {
              PamConstants.shadowColor:
             applyBoxShadow(view: view, nodeId: nodeId)
         case PamConstants.overflow:
-            view.layer.masksToBounds = false
+            applyBorder(view: view, nodeId: nodeId)
         case PamConstants.fontSize,
              PamConstants.fontWeight,
              PamConstants.fontStyle,
@@ -2270,6 +2579,7 @@ public final class PamRenderer {
              PamConstants.textAdjustsFontSizeToFit,
              PamConstants.textMinimumFontScale:
             applyTextSizing(view: view, state: state)
+            applyTextContent(view: view, nodeId: nodeId)
         case PamConstants.accessibilityLabel:
             view.accessibilityLabel = nil
             applyAccessibility(view: view, state: state)
@@ -2472,77 +2782,83 @@ public final class PamRenderer {
         }
     }
 
-    private func applyBorder(view: UIView, nodeId: Int64) {
-        guard let state = nodes[nodeId] else { return }
-        let uniform = CGFloat(
-            state.properties[PamConstants.borderWidth]?.decimalOrNil() ?? 0
+    /// Corner radii, borders (per-side widths/colors, dashed, gradient ring),
+    /// background gradients, CSS box-shadows and overflow clipping.
+    private func paintSpec(for state: NodeState) -> PamPaintSpec {
+        let properties = state.properties
+        var spec = PamPaintSpec()
+        let uniformRadius = max(0, properties[PamConstants.borderRadius]?.pamNumber ?? 0)
+        func radius(_ key: Int) -> CGFloat {
+            CGFloat(max(0, properties[key]?.pamNumber ?? uniformRadius))
+        }
+        spec.radii = PamCornerRadii(
+            topLeft: radius(PamConstants.borderTopLeftRadius),
+            topRight: radius(PamConstants.borderTopRightRadius),
+            bottomRight: radius(PamConstants.borderBottomRightRadius),
+            bottomLeft: radius(PamConstants.borderBottomLeftRadius)
         )
+        let uniformWidth = properties[PamConstants.borderWidth]?.pamNumber ?? 0
         func width(_ key: Int) -> CGFloat {
-            CGFloat(state.properties[key]?.decimalOrNil() ?? Double(uniform))
+            CGFloat(max(0, properties[key]?.pamNumber ?? uniformWidth))
         }
-
-        let left = max(0, width(PamConstants.borderLeftWidth))
-        let top = max(0, width(PamConstants.borderTopWidth))
-        let right = max(0, width(PamConstants.borderRightWidth))
-        let bottom = max(0, width(PamConstants.borderBottomWidth))
-        let color = (nativeColor(
-            named: state.properties[PamConstants.nativeBorderColorResource]?.textOrNil()
-        ) ?? UIColor(
-            argb: state.properties[PamConstants.borderColor]?.integerOrNil() ?? 0
-        )).cgColor
-        let directional = left != top || left != right || left != bottom
-        let borderStyle = Int(
-            state.properties[PamConstants.borderStyle]?.integerOrNil() ?? 1
-        )
-
-        if !directional && borderStyle == 1 {
-            borderLayers[nodeId]?.remove()
-            borderLayers[nodeId] = nil
-            patternedBorderLayers.removeValue(forKey: nodeId)?.removeFromSuperlayer()
-            view.layer.borderWidth = left
-            view.layer.borderColor = color
-            return
+        spec.borderWidths = [
+            width(PamConstants.borderLeftWidth),
+            width(PamConstants.borderTopWidth),
+            width(PamConstants.borderRightWidth),
+            width(PamConstants.borderBottomWidth),
+        ]
+        let baseColor = nativeColor(
+            named: properties[PamConstants.nativeBorderColorResource]?.textOrNil()
+        ).map(PamARGB.from) ?? properties[PamConstants.borderColor]?.integerOrNil() ?? 0
+        func color(_ key: Int) -> Int64 {
+            properties[key]?.integerOrNil() ?? baseColor
         }
-
-        view.layer.borderWidth = 0
-        view.layer.borderColor = nil
-        if !directional && left > 0 {
-            borderLayers[nodeId]?.remove()
-            borderLayers[nodeId] = nil
-            let layer = patternedBorderLayers[nodeId] ?? CAShapeLayer()
-            if layer.superlayer == nil {
-                view.layer.addSublayer(layer)
+        spec.borderColors = [
+            color(PamConstants.borderLeftColor),
+            color(PamConstants.borderTopColor),
+            color(PamConstants.borderRightColor),
+            color(PamConstants.borderBottomColor),
+        ]
+        spec.borderStyle = Int(properties[PamConstants.borderStyle]?.integerOrNil() ?? 1)
+        let imageHost = state.kind == .image || state.kind == .imageBackground || state.kind == .drawingCanvas
+        if !imageHost {
+            spec.gradients = PamGradientLayer.parse(properties[PamConstants.backgroundGradient]?.textOrNil())
+            if spec.hasBorder {
+                spec.borderGradient = PamGradientLayer.parse(
+                    properties[PamConstants.borderGradient]?.textOrNil()
+                ).first
             }
-            patternedBorderLayers[nodeId] = layer
-            let inset = left / 2
-            let pathBounds = view.bounds.insetBy(dx: inset, dy: inset)
-            layer.frame = view.bounds
-            layer.path = UIBezierPath(
-                roundedRect: pathBounds,
-                cornerRadius: max(0, view.layer.cornerRadius - inset)
-            ).cgPath
-            layer.fillColor = UIColor.clear.cgColor
-            layer.strokeColor = color
-            layer.lineWidth = left
-            layer.lineCap = borderStyle == 3 ? .round : .butt
-            layer.lineDashPattern = borderStyle == 3
-                ? [NSNumber(value: Double(left)), NSNumber(value: Double(left * 1.5))]
-                : [NSNumber(value: Double(left * 3)), NSNumber(value: Double(left * 2))]
-            return
         }
-        patternedBorderLayers.removeValue(forKey: nodeId)?.removeFromSuperlayer()
-        let layers = borderLayers[nodeId] ?? PamBorderLayers(host: view.layer)
-        borderLayers[nodeId] = layers
-        layers.update(
-            bounds: view.bounds,
-            left: left,
-            top: top,
-            right: right,
-            bottom: bottom,
-            color: color,
-        )
+        if let list = properties[PamConstants.boxShadows]?.textOrNil(), !list.isEmpty {
+            spec.shadows = PamBoxShadow.parse(list)
+        } else if let shadowColor = properties[PamConstants.shadowColor]?.integerOrNil() {
+            spec.shadows = [PamBoxShadow(
+                offsetX: CGFloat(properties[PamConstants.shadowOffsetX]?.pamNumber ?? 0),
+                offsetY: CGFloat(properties[PamConstants.shadowOffsetY]?.pamNumber ?? 0),
+                blurRadius: CGFloat(max(0, properties[PamConstants.shadowBlurRadius]?.pamNumber ?? 0)),
+                spreadRadius: CGFloat(properties[PamConstants.shadowSpreadRadius]?.pamNumber ?? 0),
+                color: shadowColor
+            )]
+        }
+        spec.clips = properties[PamConstants.overflow]?.integerOrNil() == 2
+        spec.clipsContent = state.kind == .image && !spec.radii.isZero
+        return spec
     }
 
+    private func applyBorder(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        let spec = paintSpec(for: state)
+        let plain = spec.radii.isZero && !spec.hasBorder && spec.gradients.isEmpty
+            && spec.shadows.isEmpty && !spec.clips && !spec.clipsContent
+        guard let effects = PamViewEffects.of(view, create: !plain) else {
+            if view.layer.borderWidth != 0 { view.layer.borderWidth = 0 }
+            return
+        }
+        effects.apply(spec)
+    }
+
+    /// Material `elevation` without a CSS shadow; CSS shadows are painted by
+    /// `PamViewEffects` (multiple, inset, spread, clipped views).
     private func applyBoxShadow(view: UIView, nodeId: Int64) {
         guard let state = nodes[nodeId] else {
             view.layer.shadowColor = nil
@@ -2550,102 +2866,191 @@ public final class PamRenderer {
             view.layer.shadowPath = nil
             return
         }
-
-        guard let colorValue = state.properties[PamConstants.shadowColor]?.integerOrNil() else {
-            let elevation = max(
-                0,
-                CGFloat(state.properties[PamConstants.elevation]?.decimalOrNil() ?? 0),
-            )
-            PamMaterialElevation.apply(
-                elevation,
-                to: view.layer,
-                bounds: view.bounds,
-                cornerRadius: view.layer.cornerRadius,
-            )
-            return
-        }
-
-        let color = UIColor(argb: colorValue)
-        let alpha = color.cgColor.alpha
-        if alpha == 0 {
+        if state.properties[PamConstants.boxShadows] != nil || state.properties[PamConstants.shadowColor] != nil {
             view.layer.shadowColor = nil
             view.layer.shadowOpacity = 0
             view.layer.shadowPath = nil
             return
         }
-        let x = CGFloat(
-            state.properties[PamConstants.shadowOffsetX]?.decimalOrNil() ?? 0
-        )
-        let y = CGFloat(
-            state.properties[PamConstants.shadowOffsetY]?.decimalOrNil() ?? 0
-        )
-        let blur = max(
+        let elevation = max(
             0,
-            CGFloat(state.properties[PamConstants.shadowBlurRadius]?.decimalOrNil() ?? 0),
+            CGFloat(state.properties[PamConstants.elevation]?.decimalOrNil() ?? 0)
         )
-        let spread = CGFloat(
-            state.properties[PamConstants.shadowSpreadRadius]?.decimalOrNil() ?? 0
+        PamMaterialElevation.apply(
+            elevation,
+            to: view.layer,
+            bounds: view.bounds,
+            cornerRadius: view.layer.cornerRadius
         )
-        let cornerRadius = max(
-            0,
-            CGFloat(state.properties[PamConstants.borderRadius]?.decimalOrNil() ?? 0)
-                + spread,
-        )
-        view.layer.shadowColor = color.cgColor
-        view.layer.shadowOpacity = 1
-        view.layer.shadowOffset = CGSize(width: x, height: y)
-        view.layer.shadowRadius = blur / 2
-        let shadowBounds = view.bounds.insetBy(dx: -spread, dy: -spread)
-        view.layer.shadowPath = UIBezierPath(
-            roundedRect: shadowBounds,
-            cornerRadius: cornerRadius,
-        ).cgPath
     }
 
-    private func applyTextAlignment(view: UIView, nodeId: Int64) {
-        guard let label = view as? UILabel, let state = nodes[nodeId] else { return }
+    /// 1 left, 2 center, 3 right, 4 justify (React Native defaults when unset).
+    private func textAlignmentValue(_ state: NodeState) -> Int {
         if let authored = state.properties[PamConstants.textAlign]?.integerOrNil() {
-            label.textAlignment = switch authored {
-            case 2: .center
-            case 3: .right
-            default: .left
-            }
-            return
+            return min(4, max(1, Int(authored)))
         }
-        guard let parent = nodes[state.parent] else {
-            label.textAlignment = .left
-            return
-        }
+        guard let parent = nodes[state.parent] else { return 1 }
         let hasAllocatedWidth =
             state.properties[PamConstants.width] != nil
             || state.properties[PamConstants.minWidth] != nil
             || (state.properties[PamConstants.flexGrow]?.decimalOrNil() ?? 0) > 0
-        if hasAllocatedWidth {
-            label.textAlignment = .left
-            return
-        }
+        if hasAllocatedWidth { return 1 }
         let defaultDirection: Int64 = parent.kind == .row ? 2 : 1
         let direction = parent.properties[PamConstants.flexDirection]?.integerOrNil()
             ?? defaultDirection
         let parentIsColumn = direction == 1 || direction == 3
+        let alignment: Int64
         if parentIsColumn {
             let authoredSelf = state.properties[PamConstants.alignSelf]?.integerOrNil()
-            let alignment = authoredSelf == 4 || authoredSelf == nil
+            alignment = authoredSelf == 4 || authoredSelf == nil
                 ? parent.properties[PamConstants.alignItems]?.integerOrNil() ?? 4
                 : authoredSelf!
-            label.textAlignment = switch alignment {
-            case 2: .center
-            case 3: .right
-            default: .left
+        } else {
+            alignment = parent.properties[PamConstants.justifyContent]?.integerOrNil() ?? 1
+        }
+        switch alignment {
+        case 2: return 2
+        case 3: return 3
+        default: return 1
+        }
+    }
+
+    private func applyTextAlignment(view: UIView, nodeId: Int64) {
+        guard let label = view as? UILabel, let state = nodes[nodeId] else { return }
+        if label is PamTextView {
+            applyTextContent(view: label, nodeId: nodeId)
+            return
+        }
+        label.textAlignment = switch textAlignmentValue(state) {
+        case 2: .center
+        case 3: .right
+        case 4: .justified
+        default: .left
+        }
+    }
+
+    /// Builds the `PamTextView` content from the node: the exact inputs the
+    /// engine measurer (`PamTextMeasurer`) received for this box.
+    private func applyTextContent(view: UIView, nodeId: Int64) {
+        guard let textView = view as? PamTextView, let state = nodes[nodeId] else { return }
+        let properties = state.properties
+        var style = PamTextStyle()
+        style.fontFamily = properties[PamConstants.fontFamily]?.textOrNil()
+        style.fontSize = CGFloat(max(1, properties[PamConstants.fontSize]?.pamNumber ?? 14))
+        style.fontScale = PamTextEnvironment.effectiveScale(
+            allowsScaling: properties[PamConstants.textAllowFontScaling]?.boolOrNil() ?? true,
+            maximumMultiplier: properties[PamConstants.textMaxFontSizeMultiplier]?.pamNumber ?? 0
+        )
+        style.fontWeight = Int(min(1000, max(1, properties[PamConstants.fontWeight]?.pamInteger ?? 400)))
+        style.italic = properties[PamConstants.fontStyle]?.integerOrNil() == 2
+        style.letterSpacing = CGFloat(properties[PamConstants.letterSpacing]?.pamNumber ?? 0)
+        style.lineHeight = CGFloat(max(0, properties[PamConstants.lineHeight]?.pamNumber ?? 0))
+        style.textTransform = Int(properties[PamConstants.textTransform]?.integerOrNil() ?? 1)
+        style.maxLines = Int(max(0, properties[PamConstants.numberOfLines]?.pamInteger ?? 0))
+        style.fontFeatures = properties[PamConstants.fontFeatureSettings]?.textOrNil()
+        style.decoration = Int(properties[PamConstants.textDecoration]?.integerOrNil() ?? 1)
+        var options = PamTextDrawOptions()
+        options.alignment = textAlignmentValue(state)
+        options.ellipsize = Int(properties[PamConstants.textEllipsizeMode]?.integerOrNil() ?? 1)
+        options.shadowOffset = CGSize(
+            width: properties[PamConstants.textShadowOffsetX]?.pamNumber ?? 0,
+            height: properties[PamConstants.textShadowOffsetY]?.pamNumber ?? 0
+        )
+        options.shadowRadius = CGFloat(max(0, properties[PamConstants.textShadowRadius]?.pamNumber ?? 0))
+        options.shadowColor = properties[PamConstants.textShadowColor]?.integerOrNil() ?? 0
+        options.adjustsFontSizeToFit = properties[PamConstants.textAdjustsFontSizeToFit]?.boolOrNil() ?? false
+        options.minimumFontScale = CGFloat(properties[PamConstants.textMinimumFontScale]?.pamNumber ?? 0.01)
+        textView.pamContent = PamTextContent(
+            text: properties[PamConstants.text]?.textOrNil() ?? "",
+            spans: properties[PamConstants.textSpans]?.textOrNil(),
+            style: style,
+            options: options
+        )
+        textView.onSpanPress = properties[PamConstants.onSpanPress] != nil
+            ? { [weak self] slot in
+                self?.dispatchEvent(nodeId, EventKind.spanPress.rawValue, Data(String(slot).utf8))
+            }
+            : nil
+        textView.onTextLayout = properties[PamConstants.onTextLayout] != nil
+            ? { [weak self] report in
+                let widths = report.lineWidths.map { String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), Double($0)) }
+                let payload = (try? WireMap.encode([
+                    "lines": .integer(Int64(report.lines)),
+                    "visibleLines": .integer(Int64(report.visibleLines)),
+                    "truncated": .flag(report.truncated),
+                    "width": .decimal(Double(report.width)),
+                    "height": .decimal(Double(report.height)),
+                    "lineWidths": .text("[" + widths.joined(separator: ",") + "]"),
+                ])) ?? Data()
+                self?.dispatchEvent(nodeId, EventKind.textLayout.rawValue, payload)
+            }
+            : nil
+    }
+
+    /// Re-resolves every text node after the device text scale changed.
+    func refreshTextScale() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.refreshTextScale() }
+            return
+        }
+        for (id, view) in views where view is PamTextView {
+            applyTextContent(view: view, nodeId: id)
+        }
+    }
+
+    /// CSS `filter`: images blur/recolor their bitmap; other views report the
+    /// effect once (no public per-view filter API on iOS).
+    private func applyFilter(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        let sigma = CGFloat(max(0, state.properties[PamConstants.blurRadius]?.pamNumber ?? 0))
+        let matrix = PamImageFilter.colorMatrix(state.properties[PamConstants.filterColorMatrix]?.textOrNil())
+        if let image = view as? PamImageView {
+            image.pamFilter = PamImageFilter(blurSigma: sigma, matrix: matrix)
+            return
+        }
+        if let value = state.properties[PamConstants.filterColorMatrix] {
+            PamUnsupportedEffects.report(key: PamConstants.filterColorMatrix, value: value)
+        }
+        if let value = state.properties[PamConstants.blurRadius] {
+            PamUnsupportedEffects.report(key: PamConstants.blurRadius, value: value)
+        }
+    }
+
+    private func applyBackdrop(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        let radius = CGFloat(max(0, state.properties[PamConstants.backdropBlurRadius]?.pamNumber ?? 0))
+        if radius > 0 {
+            PamViewEffects.of(view)?.setBackdrop(radius: radius)
+        } else {
+            PamViewEffects.of(view, create: false)?.setBackdrop(radius: 0)
+        }
+        if let value = state.properties[PamConstants.backdropColorMatrix] {
+            PamUnsupportedEffects.report(key: PamConstants.backdropColorMatrix, value: value)
+        }
+    }
+
+    private func applyShimmer(view: UIView, nodeId: Int64) {
+        guard let state = nodes[nodeId] else { return }
+        let enabled = state.properties[PamConstants.shimmerEnabled]?.boolOrNil() ?? false
+        if enabled {
+            PamViewEffects.of(view)?.setShimmer(
+                enabled: true,
+                color: state.properties[PamConstants.shimmerGradientColor]?.integerOrNil() ?? 0x59FF_FFFF,
+                durationMs: state.properties[PamConstants.shimmerDurationMs]?.pamInteger ?? 1_200
+            )
+        } else {
+            PamViewEffects.of(view, create: false)?.setShimmer(enabled: false, color: 0, durationMs: 0)
+        }
+    }
+
+    private func configureKeyboardInset(view: UIView, nodeId: Int64) {
+        let enabled = nodes[nodeId]?.properties[PamConstants.scrollKeyboardInset]?.boolOrNil() ?? false
+        if enabled, let scroll = view as? UIScrollView {
+            if keyboardInsetObservers[nodeId] == nil {
+                keyboardInsetObservers[nodeId] = PamKeyboardInsetObserver(scrollView: scroll)
             }
         } else {
-            let justification =
-                parent.properties[PamConstants.justifyContent]?.integerOrNil() ?? 1
-            label.textAlignment = switch justification {
-            case 2: .center
-            case 3: .right
-            default: .left
-            }
+            keyboardInsetObservers.removeValue(forKey: nodeId)?.reset()
         }
     }
 
@@ -2657,30 +3062,14 @@ public final class PamRenderer {
         let numericWeight = Int(
             state.properties[PamConstants.fontWeight]?.integerOrNil() ?? 400
         )
-        let weight: UIFont.Weight
-        switch numericWeight {
-        case 700...:
-            weight = .bold
-        case 600...:
-            weight = .semibold
-        case 500...:
-            weight = .medium
-        case ..<350:
-            weight = .light
-        default:
-            weight = .regular
-        }
-        let family = state.properties[PamConstants.fontFamily]?.textOrNil()
-        var baseFont = family.flatMap {
-            fontLoader.assetFont(family: $0, size: baseSize, weight: numericWeight)
-                ?? UIFont(name: $0, size: baseSize)
-        }
-            ?? UIFont.systemFont(ofSize: baseSize, weight: weight)
-        if state.properties[PamConstants.fontStyle]?.integerOrNil() == 2,
-           let italicDescriptor = baseFont.fontDescriptor
-            .withSymbolicTraits(.traitItalic) {
-            baseFont = UIFont(descriptor: italicDescriptor, size: baseSize)
-        }
+        // Same resolution as Text drawing/measurement: asset fonts, React
+        // Native file conventions, installed families, then the system font.
+        let baseFont = PamFontResolver.shared.font(
+            family: state.properties[PamConstants.fontFamily]?.textOrNil(),
+            size: baseSize,
+            weight: numericWeight,
+            italic: state.properties[PamConstants.fontStyle]?.integerOrNil() == 2
+        )
 
         let allowsScaling =
             state.properties[PamConstants.textAllowFontScaling]?.boolOrNil() ?? true

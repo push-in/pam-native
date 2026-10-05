@@ -84,11 +84,15 @@ final class PamPressButton: UIButton {
                 restingAlpha = alpha
                 restingTransform = transform
                 applyPamState(1, active: true)
+                // Pressed-state styles (translate/scale) compose with pressScale.
+                let pressedBase = transform
+                if pamStateStyles[1] != nil {
+                    transform = restingTransform ?? .identity
+                }
                 if PamMotionPolicy.isReduced {
                     layer.removeAllAnimations()
                     alpha = pamPressedOpacity
-                    transform = (restingTransform ?? .identity)
-                        .scaledBy(x: pamPressedScale, y: pamPressedScale)
+                    transform = pressedBase.scaledBy(x: pamPressedScale, y: pamPressedScale)
                     return
                 }
                 UIView.animate(
@@ -97,8 +101,7 @@ final class PamPressButton: UIButton {
                     options: [.beginFromCurrentState, .allowUserInteraction]
                 ) {
                     self.alpha = self.pamPressedOpacity
-                    self.transform = (self.restingTransform ?? .identity)
-                        .scaledBy(x: self.pamPressedScale, y: self.pamPressedScale)
+                    self.transform = pressedBase.scaledBy(x: self.pamPressedScale, y: self.pamPressedScale)
                 }
             } else {
                 let alpha = restingAlpha ?? self.alpha
@@ -187,7 +190,12 @@ final class PamPressButton: UIButton {
         if let opacity = styles[38] as? NSNumber { alpha = CGFloat(truncating: opacity) }
         let x = (styles[74] as? NSNumber).map(CGFloat.init(truncating:)) ?? 1
         let y = (styles[75] as? NSNumber).map(CGFloat.init(truncating:)) ?? 1
-        transform = transform.scaledBy(x: x, y: y)
+        // Pressed `transform: translate…` is authored in points (RN translateY: 1.1).
+        let dx = (styles[72] as? NSNumber).map(CGFloat.init(truncating:)) ?? 0
+        let dy = (styles[73] as? NSNumber).map(CGFloat.init(truncating:)) ?? 0
+        transform = transform
+            .concatenating(CGAffineTransform(translationX: dx, y: dy))
+            .scaledBy(x: x, y: y)
         if let color = styles[10] as? NSNumber {
             backgroundColor = UIColor(argb: color.int64Value)
         }
@@ -228,6 +236,8 @@ final class PamAnchoredScrollView: UIScrollView {
 
     private var initialEndAnchorApplied = false
     private var previousMaxOffset: CGFloat = 0
+    /// Sticky header children (`stickyHeader`).
+    let pamSticky = PamStickyRegistry()
 
     var primaryPageExtent: CGFloat {
         if pamSnapInterval > 0 {
@@ -281,6 +291,9 @@ final class PamAnchoredScrollView: UIScrollView {
             setPrimaryOffset(newMax)
         } else if maintainVisibleContentPosition, newMax > oldMax {
             setPrimaryOffset(previousOffset + newMax - oldMax)
+        }
+        if !horizontal {
+            pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
         }
     }
 
@@ -398,6 +411,10 @@ final class PamVirtualListView: UIScrollView {
         }
         return min(max(0, starts[index]), maximum)
     }
+    /// Sticky header cells (`stickyHeader`).
+    let pamSticky = PamStickyRegistry()
+    private var anchorOffset: CGFloat = 0
+    private var anchorMaximum: CGFloat = -1
     private(set) var scrollVelocity: CGFloat = 0
     private var previousOffset: CGFloat = 0
     private var previousTimestamp = CACurrentMediaTime()
@@ -424,8 +441,39 @@ final class PamVirtualListView: UIScrollView {
         return viewport * min(max(1.5 + velocityPages * 0.35, 1.5), 6)
     }
 
+    var primaryMaximumOffset: CGFloat {
+        horizontal
+            ? max(0, contentSize.width - bounds.width + adjustedContentInset.right)
+            : max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
+    }
+
+    /// A list resting at its end stays there when its cells are re-measured
+    /// or its viewport shrinks (chat timelines).
+    func maintainEndAnchor() {
+        let maximum = primaryMaximumOffset
+        let offset = horizontal ? contentOffset.x : contentOffset.y
+        defer {
+            anchorMaximum = maximum
+            anchorOffset = horizontal ? contentOffset.x : contentOffset.y
+        }
+        guard anchorMaximum > 0, maximum != anchorMaximum,
+              anchorOffset >= anchorMaximum - 1,
+              !isTracking, !isDragging, !isDecelerating else { return }
+        if abs(offset - maximum) > 0.5 {
+            if horizontal {
+                contentOffset.x = maximum
+            } else {
+                contentOffset.y = maximum
+            }
+        }
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
+        maintainEndAnchor()
+        if !horizontal {
+            pamSticky.update(offset: contentOffset.y + adjustedContentInset.top, host: self)
+        }
         let now = CACurrentMediaTime()
         let offset = horizontal ? contentOffset.x : contentOffset.y
         let elapsed = max(now - previousTimestamp, 1.0 / 240.0)
@@ -1757,7 +1805,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     func setBackdropColor(_ color: Int) {
-        backdropColor = UIColor(argb: Int64(color))
+        backdropColor = UIColor(argb: Int64(truncatingIfNeeded: UInt32(truncatingIfNeeded: color)))
         applyBackdropColor()
     }
 
@@ -1861,6 +1909,41 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         contentClip.transform = presentation == Presentation.sheet ? CGAffineTransform(translationX: 0, y: bounds.height * 0.25) : .identity
         applyBackdropColor()
         let animationDuration: TimeInterval = 0.225
+        let animated = !PamMotionPolicy.isReduced && animationType != Animation.none
+
+        if presentation == Presentation.sheet && animated {
+            // @gorhom/bottom-sheet: the backdrop fades while the sheet (and its
+            // handle) slides by its own height, independently.
+            layoutIfNeeded()
+            contentClip.alpha = 1
+            contentClip.transform = .identity
+            let distance = sheetTravel
+            contentHost.transform = CGAffineTransform(translationX: 0, y: distance)
+            sheetHandle.transform = contentHost.transform
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveLinear, .allowUserInteraction]) {
+                self.backdropView.alpha = 1
+            }
+            UIView.animate(withDuration: 0.25, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                self.contentHost.transform = .identity
+                self.sheetHandle.transform = .identity
+            }
+            finishPresent()
+            return
+        }
+        if animated && animationType == Animation.slideFade {
+            // slide-fade: the backdrop fades on its own curve while the content
+            // slides from fully below the screen.
+            contentClip.alpha = 1
+            contentClip.transform = CGAffineTransform(translationX: 0, y: max(bounds.height, 1))
+            UIView.animate(withDuration: 0.32 * 0.7, delay: 0, options: [.curveLinear]) {
+                self.backdropView.alpha = 1
+            }
+            UIView.animate(withDuration: 0.32, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
+                self.contentClip.transform = .identity
+            }
+            finishPresent()
+            return
+        }
 
         switch PamMotionPolicy.isReduced ? Animation.none : animationType {
         case Animation.slide:
@@ -1908,7 +1991,35 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             contentClip.alpha = 1
             contentClip.transform = .identity
         }
+        finishPresent()
+    }
 
+    /// Distance a sheet travels when it slides in or out.
+    private var sheetTravel: CGFloat {
+        max(contentHost.bounds.height, sheetHeight) + 24
+    }
+
+    /// Sheet height: percentage snap points resolve against the container
+    /// minus the top safe-area inset (@gorhom/bottom-sheet).
+    private var sheetHeight: CGFloat {
+        let available = max(1, bounds.height - safeAreaInsets.top)
+        return available * bottomSheetSnapPoints[bottomSheetIndex]
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if presentation == Presentation.sheet,
+           abs(contentHeightConstraint.constant - sheetHeight) > 0.5 {
+            contentHeightConstraint.constant = sheetHeight
+        }
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        setNeedsLayout()
+    }
+
+    private func finishPresent() {
         onShow?()
         becomeFirstResponder()
         let initialFocus = contentHost.pamFirstAccessibleView() ?? contentHost
@@ -1954,6 +2065,34 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
                 UIAccessibility.post(notification: .screenChanged, argument: nil)
             }
             self.previousFocus = nil
+        }
+
+        let animated = !PamMotionPolicy.isReduced && animationType != Animation.none
+        if presentation == Presentation.sheet && animated {
+            let distance = sheetTravel
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveLinear]) {
+                self.backdropView.alpha = 0
+            }
+            UIView.animate(withDuration: 0.2, delay: 0, options: [.curveEaseIn], animations: {
+                self.contentHost.transform = CGAffineTransform(translationX: 0, y: distance)
+                self.sheetHandle.transform = self.contentHost.transform
+            }, completion: { _ in
+                self.contentHost.transform = .identity
+                self.sheetHandle.transform = .identity
+                completion()
+            })
+            return
+        }
+        if animated && animationType == Animation.slideFade {
+            UIView.animate(withDuration: 0.22 * 0.7, delay: 0, options: [.curveLinear]) {
+                self.backdropView.alpha = 0
+            }
+            UIView.animate(withDuration: 0.22, delay: 0, options: [.curveEaseIn], animations: {
+                self.contentClip.transform = CGAffineTransform(translationX: 0, y: max(self.bounds.height, 1))
+            }, completion: { _ in
+                completion()
+            })
+            return
         }
 
         switch PamMotionPolicy.isReduced ? Animation.none : animationType {
@@ -2078,7 +2217,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func settleBottomSheet(translation: CGFloat, velocity: CGFloat) {
-        let height = max(bounds.height, 1)
+        let height = max(bounds.height - safeAreaInsets.top, 1)
         let current = bottomSheetSnapPoints[bottomSheetIndex]
         let projected = current - (translation + velocity * 0.12) / height
         if bottomSheetDismissible,
@@ -2118,10 +2257,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private func updatePresentationLayout() {
         if presentation == Presentation.sheet {
             contentHeightConstraint.isActive = false
-            contentHeightConstraint = contentHost.heightAnchor.constraint(
-                equalTo: contentClip.heightAnchor,
-                multiplier: bottomSheetSnapPoints[bottomSheetIndex]
-            )
+            contentHeightConstraint = contentHost.heightAnchor.constraint(equalToConstant: sheetHeight)
             contentHeightConstraint.isActive = true
             contentHost.layer.cornerRadius = bottomSheetCornerRadius
             contentHost.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]

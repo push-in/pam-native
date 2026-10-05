@@ -105,3 +105,14 @@ fail with an explicit size message; page them with `LIMIT`/`OFFSET`.
 (`file`, `line`, `call`, `kind`), `appFrame`, `snippet` (`file`, `line`,
 `start`, `lines`), `fingerprint` and the shortened `trace` text. Hosts still
 accept version 1 payloads (shown full-screen) and plain-text native errors.
+
+## iOS
+
+Since 1.9.0 the iOS host follows the same model (`PamErrorOverlay`, owned by
+`PamRuntime`): the toast and inspector are attached to the app window above
+the runtime views, Copy uses the pasteboard, Reload restarts PHP on the active
+entry, and release builds retry fatal errors three times before showing the
+"Something went wrong" / "Algo deu errado" screen. `devErrorOverlay` is
+written to `Info.plist` as `PamDevErrorOverlay` (0 off, 1 debug, 2 always).
+Brownfield hosts can set `runtime.showsErrorOverlay = false` to receive every
+error through their `reportError`/`onError` callback instead.

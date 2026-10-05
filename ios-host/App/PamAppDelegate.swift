@@ -7,6 +7,7 @@ import UserNotifications
 final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var window: UIWindow?
     private var runtime: PamRuntime?
+    private var splashView: UIView?
 #if DEBUG
     private var devTools: PamDevToolsOverlay?
     private let diagnosticsQueue = DispatchQueue(
@@ -29,6 +30,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         window.rootViewController = controller
         window.makeKeyAndVisible()
         self.window = window
+        installSplash(on: controller)
 
 #if DEBUG
         let devTools = PamDevToolsOverlay()
@@ -60,6 +62,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
                 DispatchQueue.main.async { self?.presentFatalError(message) }
             },
             onFrameCommitted: { [weak self] metrics in
+                self?.hideSplash()
 #if DEBUG
                 self?.devTools?.update(metrics)
 #endif
@@ -71,6 +74,15 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
             },
         )
         self.runtime = runtime
+        controller.onGeometryChange = { [weak runtime, weak controller] in
+            guard let runtime, let controller else { return }
+            runtime.updateViewport(
+                widthDp: Float(controller.view.bounds.width),
+                heightDp: Float(controller.view.bounds.height),
+                textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+                darkAppearance: controller.traitCollection.userInterfaceStyle == .dark
+            )
+        }
         controller.onAppearanceChange = { [weak runtime, weak controller] in
             guard let runtime, let controller else { return }
             runtime.updateViewport(
@@ -91,6 +103,36 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         runtime.startHotReload()
 #endif
         return true
+    }
+
+    /// `appearance.splash`: keeps the launch-screen logo (same asset, same
+    /// point size, centered in the safe area) until the first PHP frame.
+    private func installSplash(on controller: UIViewController) {
+        guard let logo = UIImage(named: "PamSplashLogo") else { return }
+        let cover = UIView(frame: controller.view.bounds)
+        cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        cover.backgroundColor = UIColor(named: "PamSplashBackground") ?? PamAppearance.backgroundColor
+        cover.isUserInteractionEnabled = false
+        let image = UIImageView(image: logo)
+        image.contentMode = .scaleAspectFit
+        image.translatesAutoresizingMaskIntoConstraints = false
+        cover.addSubview(image)
+        NSLayoutConstraint.activate([
+            image.centerXAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.centerXAnchor),
+            image.centerYAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.centerYAnchor),
+            image.widthAnchor.constraint(equalToConstant: logo.size.width),
+            image.heightAnchor.constraint(equalToConstant: logo.size.height),
+        ])
+        controller.view.addSubview(cover)
+        splashView = cover
+    }
+
+    private func hideSplash() {
+        guard let splash = splashView else { return }
+        splashView = nil
+        UIView.animate(withDuration: 0.18, animations: { splash.alpha = 0 }, completion: { _ in
+            splash.removeFromSuperview()
+        })
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
@@ -190,6 +232,31 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
 /// so CSS `prefers-color-scheme` restyles without remounting.
 final class PamHostViewController: UIViewController {
     var onAppearanceChange: (() -> Void)?
+    /// Size or safe-area change (rotation, split view, status bar): the engine
+    /// re-lays out SafeAreaView insets and PHP receives new Dimensions.
+    var onGeometryChange: (() -> Void)?
+    private var lastSize = CGSize.zero
+    private var lastInsets = UIEdgeInsets.zero
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        reportGeometryIfNeeded()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        reportGeometryIfNeeded()
+    }
+
+    private func reportGeometryIfNeeded() {
+        let size = view.bounds.size
+        let insets = view.safeAreaInsets
+        guard size.width > 0, size.height > 0, size != lastSize || insets != lastInsets else { return }
+        lastSize = size
+        lastInsets = insets
+        // No-op before the runtime starts (it boots with this geometry).
+        onGeometryChange?()
+    }
 
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)

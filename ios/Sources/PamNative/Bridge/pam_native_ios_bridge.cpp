@@ -75,6 +75,54 @@ struct RuntimeState {
 
 thread_local RuntimeState* active_runtime = nullptr;
 
+std::atomic<PamNativeMeasureTextCallback> host_text_measurer{nullptr};
+std::mutex boot_safe_area_mutex;
+bool boot_safe_area_set = false;
+std::array<float, 4> boot_safe_area{0.0F, 0.0F, 0.0F, 0.0F};
+
+// Text boxes are measured by the same CoreText pipeline that draws them
+// (PamTextLayout.swift), like React Native's Yoga measure functions.
+std::int32_t measure_text(
+    void* /* context */,
+    const PamTextMeasureRequest* request,
+    PamTextMeasureResult* result
+) {
+    const auto callback = host_text_measurer.load();
+    if (callback == nullptr || request == nullptr || result == nullptr) {
+        return 0;
+    }
+    std::array<float, 4> output{0.0F, 0.0F, 0.0F, 0.0F};
+    const auto measured = callback(
+        request->node_id,
+        request->text,
+        request->text_length,
+        request->spans,
+        request->spans_length,
+        request->font_family,
+        request->font_family_length,
+        request->font_features,
+        request->font_features_length,
+        request->font_size,
+        request->font_scale,
+        request->letter_spacing,
+        request->line_height,
+        request->available_width,
+        static_cast<std::int32_t>(request->font_weight),
+        static_cast<std::int32_t>(request->italic),
+        static_cast<std::int32_t>(request->text_transform),
+        request->max_lines,
+        output.data()
+    );
+    if (measured == 0) {
+        return 0;
+    }
+    result->width = output[0];
+    result->height = output[1];
+    result->first_baseline = output[2];
+    result->line_count = static_cast<std::uint32_t>(output[3] > 0.0F ? output[3] : 0.0F);
+    return 1;
+}
+
 void log_debug(const char* message) {
     fprintf(stdout, "%s\n", message);
 }
@@ -703,12 +751,52 @@ uint64_t pam_native_runtime_start(
         }
         return 0;
     }
+    if (host_text_measurer.load() != nullptr) {
+        pam_native_engine_set_text_measurer(state->engine, measure_text, state.get());
+    }
+    {
+        std::lock_guard<std::mutex> lock(boot_safe_area_mutex);
+        if (boot_safe_area_set) {
+            pam_native_engine_set_safe_area_insets(
+                state->engine,
+                boot_safe_area[0],
+                boot_safe_area[1],
+                boot_safe_area[2],
+                boot_safe_area[3]
+            );
+        }
+    }
 
     auto handle = reinterpret_cast<uint64_t>(state.get());
     state->worker = std::thread(runtime_loop, state.get());
     state.release();
 
     return handle;
+}
+
+void pam_native_ios_set_text_measurer(PamNativeMeasureTextCallback callback) {
+    host_text_measurer.store(callback);
+}
+
+void pam_native_ios_set_boot_safe_area_insets(float left, float top, float right, float bottom) {
+    std::lock_guard<std::mutex> lock(boot_safe_area_mutex);
+    boot_safe_area = {left, top, right, bottom};
+    boot_safe_area_set = true;
+}
+
+void pam_native_runtime_set_safe_area_insets(
+    uint64_t handle,
+    float left,
+    float top,
+    float right,
+    float bottom
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(state->engine_mutex);
+    pam_native_engine_set_safe_area_insets(state->engine, left, top, right, bottom);
 }
 
 void pam_native_runtime_relayout(

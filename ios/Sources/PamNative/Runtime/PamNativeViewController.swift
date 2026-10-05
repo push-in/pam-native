@@ -54,6 +54,12 @@ public final class PamNativeViewController: UIViewController {
         updateViewport()
     }
 
+    public override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        guard lastViewport != .zero else { return }
+        updateViewport()
+    }
+
     public override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
         super.traitCollectionDidChange(previousTraitCollection)
         if previousTraitCollection?.userInterfaceStyle != traitCollection.userInterfaceStyle

@@ -57,6 +57,18 @@ private func pam_native_runtime_relayout(
     _ dark_appearance: Bool,
 )
 
+@_silgen_name("pam_native_ios_set_boot_safe_area_insets")
+private func pam_native_ios_set_boot_safe_area_insets(_ left: Float, _ top: Float, _ right: Float, _ bottom: Float)
+
+@_silgen_name("pam_native_runtime_set_safe_area_insets")
+private func pam_native_runtime_set_safe_area_insets(
+    _ handle: UInt64,
+    _ left: Float,
+    _ top: Float,
+    _ right: Float,
+    _ bottom: Float
+)
+
 @_silgen_name("pam_native_runtime_set_refresh_rate")
 private func pam_native_runtime_set_refresh_rate(
     _ handle: UInt64,
@@ -273,6 +285,11 @@ public final class PamRuntime {
     private var runtimeEntry: String?
     private var recoveryAttempts = 0
     private var recoveryWorkItem: DispatchWorkItem?
+
+    /// LogBox-style error overlay (`devErrorOverlay`); see docs/error-overlay.md.
+    public let errorOverlay: PamErrorOverlay
+    /// When false, runtime errors only reach the host `reportError` callback.
+    public var showsErrorOverlay = true
 #if DEBUG
     private var hotReloadClient: PamHotReloadClient?
     private let hotReloadLatency = PamHotReloadLatency()
@@ -290,6 +307,11 @@ public final class PamRuntime {
         self.onFrameCommitted = onFrameCommitted
         self.onDiagnostic = onDiagnostic
         self.modules = NativeModuleRegistry(additionalModules: nativeModules)
+#if DEBUG
+        self.errorOverlay = PamErrorOverlay(developerMode: PamErrorOverlay.developerMode(debugBuild: true))
+#else
+        self.errorOverlay = PamErrorOverlay(developerMode: PamErrorOverlay.developerMode(debugBuild: false))
+#endif
         self.renderer = PamRenderer(hostView: hostView, nativeViews: nativeViews) { [weak self] nodeId, kind, payload in
             self?.dispatchEvent(nodeId, kind: kind, payload: payload)
         }
@@ -300,6 +322,8 @@ public final class PamRuntime {
             guard activeHandle != 0 else { return }
             pam_native_runtime_set_child_visibility(activeHandle, UInt64(owner), UInt64(child), visible)
         }
+
+        errorOverlay.onReload = { [weak self] in self?.reloadAfterError() }
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)
         displayLinkTarget = target
@@ -372,6 +396,22 @@ public final class PamRuntime {
             return
         }
 
+        // Text boxes are measured by the CoreText pipeline that draws them, and
+        // the first PHP frame already sees the real window geometry: the engine
+        // owns SafeAreaView insets from the start (no first-frame inset race).
+        PamTextEnvironment.textScale = CGFloat(textScale)
+        PamTextEnvironment.displayScale = UIScreen.main.scale
+        PamTextMeasurer.install()
+        let insets = currentSafeAreaInsets()
+        pam_native_ios_set_boot_safe_area_insets(
+            Float(insets.left),
+            Float(insets.top),
+            Float(insets.right),
+            Float(insets.bottom)
+        )
+        renderer.engineManagedSafeArea = true
+        exportBootMetrics(widthDp: widthDp, heightDp: heightDp, textScale: textScale, insets: insets)
+
         var startedHandle: UInt64 = 0
         stateLock.lock()
         if closed {
@@ -423,6 +463,20 @@ public final class PamRuntime {
         guard currentHandle != 0 else { return }
         let appearanceMode = PamAppearance.storedMode()
         PamAppearance.exportEnvironment(mode: appearanceMode)
+        let previousScale = PamTextEnvironment.textScale
+        PamTextEnvironment.textScale = CGFloat(textScale)
+        if abs(previousScale - CGFloat(textScale)) > 0.0001 {
+            renderer.refreshTextScale()
+        }
+        let safeArea = currentSafeAreaInsets()
+        pam_native_runtime_set_safe_area_insets(
+            currentHandle,
+            Float(safeArea.left),
+            Float(safeArea.top),
+            Float(safeArea.right),
+            Float(safeArea.bottom)
+        )
+        renderer.engineManagedSafeArea = true
         pam_native_runtime_relayout(
             currentHandle,
             widthDp,
@@ -475,6 +529,35 @@ public final class PamRuntime {
         }
     }
 
+    /// Window safe area seen by the runtime host view (points).
+    private func currentSafeAreaInsets() -> UIEdgeInsets {
+        if let host = renderer.hostView, host.window != nil {
+            return host.safeAreaInsets
+        }
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+        return window?.safeAreaInsets ?? .zero
+    }
+
+    /// Metrics PHP reads before its first render (`PAM_BOOT_METRICS`).
+    private func exportBootMetrics(widthDp: Float, heightDp: Float, textScale: Float, insets: UIEdgeInsets) {
+        let values: [String: Double] = [
+            "width": Double(widthDp),
+            "height": Double(heightDp),
+            "density": Double(UIScreen.main.scale),
+            "fontScale": Double(textScale),
+            "safeAreaTop": Double(insets.top),
+            "safeAreaRight": Double(insets.right),
+            "safeAreaBottom": Double(insets.bottom),
+            "safeAreaLeft": Double(insets.left),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: values),
+              let json = String(data: data, encoding: .utf8) else { return }
+        setenv("PAM_BOOT_METRICS", json, 1)
+    }
+
     public func dispatchLifecycle(kind: Int, payload: Data = Data()) {
         reportDiagnostic(RuntimeDiagnostic(kind: .lifecycle, label: "event \(kind)"))
         dispatchEvent(0, kind: kind, payload: payload)
@@ -497,6 +580,8 @@ public final class PamRuntime {
         entry.withCString { buffer in
             pam_native_runtime_reload(currentHandle, buffer)
         }
+        runtimeEntry = entry
+        DispatchQueue.main.async { [weak self] in self?.errorOverlay.onRuntimeReload() }
 
         stateLock.lock()
         readyForEvents = false
@@ -841,26 +926,41 @@ public final class PamRuntime {
         }
     }
 
+    /// Debug builds (or `devErrorOverlay: "always"`) queue every error in the
+    /// LogBox-style overlay. Release builds never show stacks: non-fatal
+    /// errors are logged only (PHP `App::onError()` listeners already received
+    /// them); fatal ones retry with backoff and then show the fallback screen.
     fileprivate func onNativeError(_ message: String) {
+        let report = PamRuntimeErrorReport.parse(message)
 #if DEBUG
-        reportHotReload(failed: true, message: "first frame failed")
+        if report.fatal { reportHotReload(failed: true, message: "first frame failed") }
 #endif
         reportDiagnostic(RuntimeDiagnostic(
             kind: .error,
-            label: String(message.prefix(120)),
+            label: String("\(report.shortType): \(report.message)".prefix(120)),
             failed: true
         ))
+        NSLog("[PamNativeErrors] %@", String(report.copyText().prefix(4_000)))
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-#if DEBUG
-            self.reportError(message)
-#else
+            guard self.showsErrorOverlay else {
+                self.reportError(message)
+                return
+            }
+            if let host = self.renderer.hostView {
+                self.errorOverlay.install(over: host)
+            }
+            if self.errorOverlay.developerMode {
+                self.errorOverlay.report(report)
+                return
+            }
+            guard report.fatal else { return }
             guard
                 let entry = self.runtimeEntry,
                 self.recoveryAttempts < 3,
                 self.recoveryWorkItem == nil
             else {
-                self.reportError(message)
+                if self.recoveryWorkItem == nil { self.errorOverlay.showFallback() }
                 return
             }
             self.recoveryAttempts += 1
@@ -872,8 +972,16 @@ public final class PamRuntime {
             }
             self.recoveryWorkItem = work
             DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
-#endif
         }
+    }
+
+    /// Reload / "Try again" from the error overlay: a fresh PHP runtime on the active entry.
+    private func reloadAfterError() {
+        recoveryWorkItem?.cancel()
+        recoveryWorkItem = nil
+        recoveryAttempts = 0
+        guard let entry = runtimeEntry else { return }
+        reload(entry: entry)
     }
 
     fileprivate func dispatchEvent(_ nodeId: Int64, kind: Int, payload: Data = Data()) {
@@ -958,7 +1066,8 @@ public final class PamRuntime {
         }
         active = handle
         if active == 0 { return }
-        readyEvents = pendingEvents
+        // Coalesced events of nodes removed before this frame are stale.
+        readyEvents = pendingEvents.filter { renderer.hasNode($0.key.nodeId) }
         pendingEvents.removeAll()
 
         for (identity, payload) in readyEvents {
@@ -1013,6 +1122,7 @@ public final class PamRuntime {
         )
 
         onFrameCommitted(metrics)
+        errorOverlay.onFrameCommitted()
 #if DEBUG
         reportHotReload(failed: false, message: "first frame committed")
 #endif

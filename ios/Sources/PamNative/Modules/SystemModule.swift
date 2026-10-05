@@ -27,6 +27,9 @@ public final class SystemModule: NativeModule, ClosableNativeModule, @unchecked 
                 completion(.failure, (error.localizedDescription).data(using: .utf8) ?? Data())
             }
         case "toast":
+            if let values = try? WireMap.decode(payload) {
+                PamToastPresenter.show(PamToastSpec.decode(values))
+            }
             completion(.success, Data())
         case "share":
             do {

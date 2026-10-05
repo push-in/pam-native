@@ -46,7 +46,10 @@
     <key>NSUserActivityTypes</key>
     <array><string>INSendMessageIntent</string></array>
     <key>UILaunchScreen</key>
-    <dict/>
+    <dict>
+        <key>UIColorName</key>
+        <string>PamSplashBackground</string>
+    </dict>
     <key>UIRequiredDeviceCapabilities</key>
     <array><string>arm64</string></array>
     <key>UISupportedInterfaceOrientations</key>

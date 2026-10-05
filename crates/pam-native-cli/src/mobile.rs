@@ -3320,6 +3320,13 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
     }
 
     merge_ios_appearance(project, &mut info, &info_path)?;
+    write_ios_launch_assets(project, workspace, &mut info, &info_path)?;
+    if let Some(object) = info.as_object_mut() {
+        object.insert(
+            "PamDevErrorOverlay".to_owned(),
+            serde_json::Value::from(project.manifest.dev_error_overlay.resource_value()),
+        );
+    }
     write_apple_plist(&info_path, &info)?;
     if has_entitlements {
         write_apple_plist(
@@ -3362,6 +3369,149 @@ fn merge_ios_appearance(
         )),
     );
     Ok(())
+}
+
+/// `appearance.splash` on iOS: the launch screen (`UILaunchScreen`) paints the
+/// light/dark `splashBackground` and the PNG logo from `App/PamLaunch.xcassets`;
+/// the host keeps the same logo on screen until the first PHP frame.
+fn write_ios_launch_assets(
+    project: &Project,
+    workspace: &Path,
+    info: &mut serde_json::Value,
+    info_path: &Path,
+) -> Result<(), String> {
+    let appearance = &project.manifest.appearance;
+    let catalog = workspace.join("App/PamLaunch.xcassets");
+    let color_set = catalog.join("PamSplashBackground.colorset");
+    fs::create_dir_all(&color_set)
+        .map_err(|error| format!("Cannot create {}: {error}", color_set.display()))?;
+    write_atomic(
+        &catalog.join("Contents.json"),
+        b"{\n  \"info\" : {\n    \"author\" : \"xcode\",\n    \"version\" : 1\n  }\n}\n",
+    )?;
+    write_atomic(
+        &color_set.join("Contents.json"),
+        ios_color_set(
+            appearance.light_palette()?.splash_background,
+            appearance.dark_palette()?.splash_background,
+        )
+        .as_bytes(),
+    )?;
+    let image_set = catalog.join("PamSplashLogo.imageset");
+    if image_set.exists() {
+        fs::remove_dir_all(&image_set)
+            .map_err(|error| format!("Cannot remove {}: {error}", image_set.display()))?;
+    }
+    let splash = &appearance.splash;
+    let mut launch = serde_json::Map::new();
+    launch.insert(
+        "UIColorName".to_owned(),
+        serde_json::Value::String("PamSplashBackground".to_owned()),
+    );
+    let png_logo = splash
+        .logo
+        .as_deref()
+        .filter(|path| crate::appearance::splash_extension(path) == Some("png"));
+    if let Some(logo) = png_logo {
+        fs::create_dir_all(&image_set)
+            .map_err(|error| format!("Cannot create {}: {error}", image_set.display()))?;
+        let mut images = Vec::new();
+        for (source, dark) in [(Some(logo), false), (splash.dark_logo.as_deref(), true)] {
+            let Some(source) = source else { continue };
+            let bytes = fs::read(project.root.join(source))
+                .map_err(|error| format!("Cannot read appearance.splash logo {source}: {error}"))?;
+            let scale = ios_splash_scale(&bytes, splash.size);
+            let name = format!("logo{}@{scale}x.png", if dark { "-dark" } else { "" });
+            write_atomic(&image_set.join(&name), &bytes)?;
+            images.push(ios_image_entry(&name, scale, dark));
+        }
+        write_atomic(
+            &image_set.join("Contents.json"),
+            format!(
+                "{{\n  \"images\" : [\n{}\n  ],\n  \"info\" : {{\n    \"author\" : \"xcode\",\n    \"version\" : 1\n  }}\n}}\n",
+                images.join(",\n")
+            )
+            .as_bytes(),
+        )?;
+        launch.insert(
+            "UIImageName".to_owned(),
+            serde_json::Value::String("PamSplashLogo".to_owned()),
+        );
+        launch.insert(
+            "UIImageRespectsSafeAreaInsets".to_owned(),
+            serde_json::Value::Bool(true),
+        );
+    } else if splash.logo.is_some() {
+        eprintln!(
+            "PAM Native: appearance.splash WebP logos are Android-only; the iOS launch screen shows the splash background."
+        );
+    }
+    let object = info.as_object_mut().ok_or_else(|| {
+        format!(
+            "{} must contain a top-level dictionary",
+            info_path.display()
+        )
+    })?;
+    object.insert(
+        "UILaunchScreen".to_owned(),
+        serde_json::Value::Object(launch),
+    );
+    if png_logo.is_some() {
+        object.insert(
+            "PamSplashLogoSize".to_owned(),
+            serde_json::Value::from(splash.size),
+        );
+    } else {
+        object.remove("PamSplashLogoSize");
+    }
+    Ok(())
+}
+
+/// Asset-catalog colour set with a dark appearance variant.
+fn ios_color_set(light: u32, dark: u32) -> String {
+    let entry = |rgb: u32, dark: bool| {
+        format!(
+            "    {{\n{}      \"color\" : {{\n        \"color-space\" : \"srgb\",\n        \"components\" : {{\n          \"alpha\" : \"1.000\",\n          \"blue\" : \"0x{:02X}\",\n          \"green\" : \"0x{:02X}\",\n          \"red\" : \"0x{:02X}\"\n        }}\n      }},\n      \"idiom\" : \"universal\"\n    }}",
+            if dark {
+                "      \"appearances\" : [\n        {\n          \"appearance\" : \"luminosity\",\n          \"value\" : \"dark\"\n        }\n      ],\n"
+            } else {
+                ""
+            },
+            rgb & 0xFF,
+            (rgb >> 8) & 0xFF,
+            (rgb >> 16) & 0xFF,
+        )
+    };
+    format!(
+        "{{\n  \"colors\" : [\n{},\n{}\n  ],\n  \"info\" : {{\n    \"author\" : \"xcode\",\n    \"version\" : 1\n  }}\n}}\n",
+        entry(light, false),
+        entry(dark, true)
+    )
+}
+
+fn ios_image_entry(name: &str, scale: u32, dark: bool) -> String {
+    format!(
+        "    {{\n{}      \"filename\" : \"{name}\",\n      \"idiom\" : \"universal\",\n      \"scale\" : \"{scale}x\"\n    }}",
+        if dark {
+            "      \"appearances\" : [\n        {\n          \"appearance\" : \"luminosity\",\n          \"value\" : \"dark\"\n        }\n      ],\n"
+        } else {
+            ""
+        }
+    )
+}
+
+/// Asset scale (1x–3x) whose point width is closest to the `size` logo box:
+/// the launch screen shows images at their natural point size.
+fn ios_splash_scale(png: &[u8], size: u32) -> u32 {
+    let width = if png.len() >= 24 && png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        u32::from_be_bytes([png[16], png[17], png[18], png[19]])
+    } else {
+        0
+    };
+    if width == 0 || size == 0 {
+        return 3;
+    }
+    ((f64::from(width) / f64::from(size)).round() as u32).clamp(1, 3)
 }
 
 fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), String> {
@@ -8177,6 +8327,34 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ios_launch_screen_assets_follow_the_splash_appearance() {
+        let colors = ios_color_set(0xF7F6F2, 0x111511);
+        assert!(colors.contains("\"red\" : \"0xF7\""));
+        assert!(colors.contains("\"blue\" : \"0x11\""));
+        assert!(colors.contains("\"value\" : \"dark\""));
+        serde_json::from_str::<serde_json::Value>(&colors).expect("valid colour set");
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend_from_slice(&360u32.to_be_bytes());
+        png.extend_from_slice(&360u32.to_be_bytes());
+        assert_eq!(ios_splash_scale(&png, 120), 3);
+        assert_eq!(ios_splash_scale(&png, 240), 2);
+        assert_eq!(ios_splash_scale(&png, 24), 3);
+        assert_eq!(ios_splash_scale(b"not a png", 96), 3);
+        let images = format!(
+            "{{\"images\":[{},{}]}}",
+            ios_image_entry("logo@3x.png", 3, false),
+            ios_image_entry("logo-dark@3x.png", 3, true)
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&images).expect("valid image set");
+        assert_eq!(parsed["images"][1]["appearances"][0]["value"], "dark");
+        let template = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../ios-host/App/PamLaunch.xcassets/PamSplashBackground.colorset/Contents.json",
+        ))
+        .expect("bundled launch colour set");
+        assert_eq!(template, ios_color_set(0xFFFFFF, 0x121212));
+    }
 
     #[test]
     fn dev_error_overlay_accepts_flags_and_always() {

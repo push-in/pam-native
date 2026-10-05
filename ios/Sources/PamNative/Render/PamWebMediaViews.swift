@@ -165,6 +165,8 @@ final class PamMediaView: UIView {
     private var observer: Any?
     private var endToken: NSObjectProtocol?
     private var statusObservation: NSKeyValueObservation?
+    private var bufferingObservation: NSKeyValueObservation?
+    private var buffering = false
     private var playbackRate: Float = 1
     private var resumeAfterPause = false
     private var sourceGeneration: UInt64 = 0
@@ -177,7 +179,10 @@ final class PamMediaView: UIView {
     private var cachePinned = false
     private var streamingCache = false
     private var downloadWhilePlaying = false
-    var onReady: (() -> Void)?
+    /// Natural width/height (pixels) and duration (seconds) — `MediaReadyEvent`.
+    var onReady: ((Int, Int, Double) -> Void)?
+    var onLoadStart: (() -> Void)?
+    var onBuffering: ((Bool) -> Void)?
     var onProgress: ((Double, Double) -> Void)?
     var onEnd: (() -> Void)?
     var onError: ((String) -> Void)?
@@ -320,6 +325,17 @@ final class PamMediaView: UIView {
         controller.player = next
         next.isMuted = muted
         next.volume = volume
+        onLoadStart?()
+        buffering = false
+        bufferingObservation = next.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            DispatchQueue.main.async {
+                guard let self, self.player === player else { return }
+                let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                guard waiting != self.buffering else { return }
+                self.buffering = waiting
+                self.onBuffering?(waiting)
+            }
+        }
         statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
             DispatchQueue.main.async {
                 guard let self, self.player?.currentItem === item else { return }
@@ -328,7 +344,13 @@ final class PamMediaView: UIView {
                     if self.currentTime > 0 {
                         self.seek(self.currentTime)
                     }
-                    self.onReady?()
+                    let size = item.presentationSize
+                    let duration = item.duration.seconds
+                    self.onReady?(
+                        Int(size.width.rounded()),
+                        Int(size.height.rounded()),
+                        duration.isFinite ? max(0, duration) : 0
+                    )
                     if self.autoPlay { self.play() }
                 case .failed:
                     self.onError?(item.error?.localizedDescription ?? "Media could not be loaded")
@@ -420,6 +442,8 @@ final class PamMediaView: UIView {
         endToken = nil
         statusObservation?.invalidate()
         statusObservation = nil
+        bufferingObservation?.invalidate()
+        bufferingObservation = nil
         player?.pause()
         player = nil
         controller.player = nil

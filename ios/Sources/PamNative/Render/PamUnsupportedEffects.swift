@@ -1,8 +1,8 @@
 import Foundation
 
-/// CSS visual effects compiled for Android that the iOS renderer does not
-/// paint yet. Debug builds report each property once instead of dropping it
-/// silently; release builds ignore it.
+/// CSS effects iOS cannot paint with public APIs (filters on arbitrary views,
+/// backdrop color matrices). Debug builds report each property once instead of
+/// dropping it silently; release builds ignore it.
 enum PamUnsupportedEffects {
     private static var reported = Set<Int>()
 
@@ -20,15 +20,12 @@ enum PamUnsupportedEffects {
         reported.insert(key)
         let name: String
         switch key {
-        case PamConstants.backgroundGradient: name = "background gradients"
-        case PamConstants.boxShadows: name = "multiple/inset box-shadow (first outer shadow is painted)"
-        case PamConstants.filterColorMatrix: name = "filter color functions"
-        case PamConstants.backdropBlurRadius, PamConstants.backdropColorMatrix: name = "backdrop-filter"
-        case PamConstants.borderGradient: name = "gradient border-image"
-        case PamConstants.shimmerEnabled: name = "<Shimmer> sweep (base color is painted)"
+        case PamConstants.filterColorMatrix: name = "filter color functions on non-image views (images are filtered)"
+        case PamConstants.blurRadius: name = "filter: blur() on non-image views (images are blurred)"
+        case PamConstants.backdropColorMatrix: name = "backdrop-filter color functions (blur is painted)"
         default: name = "property \(key)"
         }
-        NSLog("[PamNative] CSS %@ is not painted on iOS yet (Android only).", name)
+        NSLog("[PamNative] CSS %@ is not painted on iOS.", name)
         #endif
     }
 }

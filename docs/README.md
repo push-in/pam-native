@@ -24,6 +24,7 @@ short end-to-end recipes.
 | Files, direct gallery, camera, notifications, SQLite, WebView, media, animation and device APIs | [Capability cookbook](examples.md) |
 | Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
 | Light/dark preference, first-frame theming and native window colours | [Appearance](appearance.md) |
+| iOS rendering parity status (1.2.0–1.7.0 features) | [iOS parity](ios-parity.md) |
 | Gestures and composition | [Gestures](gestures.md) |
 | UI-thread animations, transitions and presets | [Animations](animations.md) |
 | Bottom sheets | [Bottom Sheet](bottom-sheet.md) |

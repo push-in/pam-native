@@ -68,14 +68,14 @@ by line numbers or areas → —.
 
 | Property | Values | Where |
 | --- | --- | --- |
-| `border`, `border-top/right/bottom/left` | width, style, color in any order; `none` | A (per side), i (single color) |
+| `border`, `border-top/right/bottom/left` | width, style, color in any order; `none` | A i |
 | `border-width` (+ per side) | 1–4 values, `thin`/`medium`/`thick` | A i |
-| `border-color` (+ per side) | 1–4 values | A per side; i uses the last side color |
+| `border-color` (+ per side) | 1–4 values (per-side colors join with CSS miters) | A i |
 | `border-style` (+ per side) | `solid`, `dashed`, `dotted`, `none` (one style per box) | A i |
 | `border-radius` (+ per corner, logical corners) | 1–4 lengths, `50%`+ (pill/circle); other `%` and elliptical `/` → — | A i |
-| `box-shadow` | comma-separated list of `[inset] x y [blur] [spread] [color]`, `none` | A (all), i (first outer shadow) |
-| `border-image`, `border-image-source` | `<linear/radial gradient> [1]`, `none` — a gradient stroke over the border widths that **follows `border-radius`** (story rings); `border-image-slice: 1`, other `border-image-*` initial values only | A |
-| `elevation` | Android elevation | A |
+| `box-shadow` | comma-separated list of `[inset] x y [blur] [spread] [color]`, `none` | A i |
+| `border-image`, `border-image-source` | `<linear/radial gradient> [1]`, `none` — a gradient stroke over the border widths that **follows `border-radius`** (story rings); `border-image-slice: 1`, other `border-image-*` initial values only | A i |
+| `elevation` | Android elevation (iOS: Material-like layer shadow) | A i |
 
 Shadow details: blur follows CSS (Gaussian σ = blur / 2), spread grows the
 shape and its non-zero radii, shadows paint last-to-first under the box
@@ -90,11 +90,11 @@ bitmap draw per shadow and never re-blur on scroll.
 | Property | Values | Where |
 | --- | --- | --- |
 | `background-color` | any color, `none`, `transparent` | A i |
-| `background` | comma-separated gradient layers plus an optional final color (`linear-gradient(…), radial-gradient(…), #fff`); `no-repeat` accepted; `url()`/`image-set()` → — (use `<ImageBackground>`) | A, i (color only) |
-| `background-image` | gradient layers, `none` | A |
-| `background-size/-position/-repeat/-clip/-origin/-attachment` | neutral values only (`cover`, `100% 100%`, `0 0`, `no-repeat`, `border-box`, `scroll`); gradients always cover the border box | A |
-| `filter` | `blur()`, `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`, `invert()`, `opacity()`, `hue-rotate()`, in any combination/order, `none` (`drop-shadow()`/`url()` → —) | A (blur: API 31+) |
-| `backdrop-filter`, `-webkit-backdrop-filter` | same functions as `filter`, `none` | A (API 31+, containers) |
+| `background` | comma-separated gradient layers plus an optional final color (`linear-gradient(…), radial-gradient(…), #fff`); `no-repeat` accepted; `url()`/`image-set()` → — (use `<ImageBackground>`) | A i |
+| `background-image` | gradient layers, `none` | A i |
+| `background-size/-position/-repeat/-clip/-origin/-attachment` | neutral values only (`cover`, `100% 100%`, `0 0`, `no-repeat`, `border-box`, `scroll`); gradients always cover the border box | A i |
+| `filter` | `blur()`, `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`, `invert()`, `opacity()`, `hue-rotate()`, in any combination/order, `none` (`drop-shadow()`/`url()` → —) | A (blur: API 31+), i (images only) |
+| `backdrop-filter`, `-webkit-backdrop-filter` | same functions as `filter`, `none` | A (API 31+, containers), i (blur only) |
 | `mix-blend-mode`, `clip-path`, `mask` | `normal` / `none` only | — |
 
 ### Gradients
@@ -162,9 +162,17 @@ it is a no-op (keep a translucent `background-color` as the fallback). Cost:
 one GPU blur of the element's area per frame while it is visible — prefer it
 for headers/sheets, not list rows.
 
-iOS currently paints background colors and the first outer shadow; gradients,
-extra/inset shadows, filters and backdrops log a one-time debug diagnostic
-there.
+**iOS** (1.9.0, see [iOS parity](ios-parity.md)): gradients (linear,
+radial, repeating, premultiplied stops) are drawn with Core Graphics in a
+layer below the children and clipped to the radius; `border-image` gradient
+rings and per-side colors are drawn above the children; every outer and inset
+`box-shadow` is a Core Animation `shadowPath` layer (rasterized and cached by
+the render server; outer shadows of clipping views live in a sibling layer
+right below the view so `overflow: hidden` never cuts them). `filter`
+(blur and the color matrix) applies to images only — iOS has no public
+per-view filter API — and other views log a one-time debug diagnostic.
+`backdrop-filter: blur()` uses a `UIVisualEffectView` whose strength is
+scrubbed to the CSS radius; its color functions log a diagnostic.
 
 ## Transforms and motion
 
@@ -172,7 +180,7 @@ there.
 | --- | --- | --- |
 | `transform` | `translate()`, `translateX/Y()` (lengths or % of the own box), `translate3d(x, y, 0)`, `scale()`, `scaleX/Y()`, `rotate()`/`rotateZ()` (`deg`, `rad`, `grad`, `turn`), non-skewing `matrix()`, `none` (skew/3D → —) | A i |
 | `translate`, `scale`, `rotate` | individual transform properties | A i |
-| `transform-origin` | keywords and percentages | A |
+| `transform-origin` | keywords and percentages | A i |
 | `transition` (+ `-property`, `-duration`, `-timing-function`, `-delay`) | native implicit animation on the UI thread with per-property durations, delays and easings (`linear`, `ease*`, `cubic-bezier()`, `steps()`, `spring(mass stiffness damping)`); see [Animations](animations.md) | A i |
 | `@keyframes` + `<Animated keyframes="…">` | opacity/translate/scale/rotate keyframes run natively | A i |
 | `animation*` properties | — (attach keyframes with `<Animated>`) | — |
@@ -186,13 +194,13 @@ there.
 | `font-size` | lengths, `rem`, `em` (= `rem` for font-size), keywords `xx-small`…`xxx-large` | A i |
 | `font-weight` | `100`–`900`, `normal`, `bold`, `bolder`, `lighter` | A i |
 | `font-style` | `normal`, `italic`, `oblique` | A i |
-| `font-variant-numeric`, `font-variant(-caps/-ligatures)`, `font-feature-settings` | `tabular-nums`, `lining-nums`, `oldstyle-nums`, `slashed-zero`, `small-caps`, ligatures, `"tag" on/off/N` | A |
+| `font-variant-numeric`, `font-variant(-caps/-ligatures)`, `font-feature-settings` | `tabular-nums`, `lining-nums`, `oldstyle-nums`, `slashed-zero`, `small-caps`, ligatures, `"tag" on/off/N` | A i |
 | `line-height` | `<length>`, unitless multiplier, `%`, `em`, `normal` | A i |
 | `letter-spacing` | `<length>`, `em`, `normal` | A i |
 | `text-align` | `left`/`start`, `center`, `right`/`end`, `justify` | A (justify API 26+), i |
 | `text-transform` | `none`, `uppercase`, `lowercase`, `capitalize` | A i |
 | `text-decoration`, `text-decoration-line` | `none`, `underline`, `line-through`, both (solid, text color) | A i |
-| `text-shadow` | one shadow `x y [blur] [color]`, `none` | A |
+| `text-shadow` | one shadow `x y [blur] [color]`, `none` | A i |
 | `text-overflow` | `ellipsis`, `clip` | A i |
 | `-webkit-line-clamp`, `line-clamp` | `<integer>` | A i |
 | `white-space`, `text-wrap` | `nowrap`/`pre` → one line; `normal`, `pre-wrap`, `pre-line`, `balance`, `pretty` | A i |

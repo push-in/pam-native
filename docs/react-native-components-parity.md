@@ -1,7 +1,8 @@
 # React Native component parity (1.5)
 
 Components and events that React Native screens rely on, with the same
-semantics on Android.
+semantics on Android and, since 1.9.0, iOS (see [iOS parity](ios-parity.md)
+for the per-feature status).
 
 ## Vector icons
 

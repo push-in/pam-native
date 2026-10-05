@@ -28,8 +28,17 @@ final class PamMediaDiskCache: @unchecked Sendable {
         )
     }
 
+    /// Cache identities are hashed once per source (list rows re-bind the
+    /// same URLs constantly).
+    private let identities = NSCache<NSString, NSString>()
+    private let files = NSCache<NSString, NSString>()
+
     func identity(source: String, stableKey: String?) -> String {
-        stableKey?.isEmpty == false ? stableKey! : sha256(Data(source.utf8))
+        if let stableKey, !stableKey.isEmpty { return stableKey }
+        if let cached = identities.object(forKey: source as NSString) { return cached as String }
+        let hashed = sha256(Data(source.utf8))
+        identities.setObject(hashed as NSString, forKey: source as NSString)
+        return hashed
     }
 
     func data(
@@ -253,7 +262,14 @@ final class PamMediaDiskCache: @unchecked Sendable {
     }
 
     private func file(_ identity: String) -> URL {
-        root.appendingPathComponent(sha256(Data(identity.utf8)) + ".media")
+        let name: String
+        if let cached = files.object(forKey: identity as NSString) {
+            name = cached as String
+        } else {
+            name = sha256(Data(identity.utf8))
+            files.setObject(name as NSString, forKey: identity as NSString)
+        }
+        return root.appendingPathComponent(name + ".media")
     }
 
     private func pin(_ identity: String) -> URL {
@@ -264,8 +280,21 @@ final class PamMediaDiskCache: @unchecked Sendable {
         root.appendingPathComponent(file.deletingPathExtension().lastPathComponent + ".pin")
     }
 
+    private static let hexDigits = Array("0123456789abcdef".utf8)
+
+    /// Lowercase hex without `String(format:)` (locale lookups per byte).
+    static func hex<S: Sequence>(_ bytes: S) -> String where S.Element == UInt8 {
+        var output = [UInt8]()
+        output.reserveCapacity(64)
+        for byte in bytes {
+            output.append(hexDigits[Int(byte >> 4)])
+            output.append(hexDigits[Int(byte & 0x0F)])
+        }
+        return String(decoding: output, as: UTF8.self)
+    }
+
     private func sha256(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        Self.hex(SHA256.hash(data: data))
     }
 
     private enum CacheError: Error {

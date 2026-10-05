@@ -13,6 +13,7 @@
 		100000000000000000000005 /* PamNativeEngine.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* PamNativeEngine.xcframework */; };
 		100000000000000000000006 /* PamNative in Frameworks */ = {isa = PBXBuildFile; productRef = 600000000000000000000001 /* PamNative */; };
 		100000000000000000000007 /* PamNativePlugins in Frameworks */ = {isa = PBXBuildFile; productRef = 600000000000000000000002 /* PamNativePlugins */; };
+		100000000000000000000008 /* PamLaunch.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* PamLaunch.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -22,6 +23,7 @@
 		200000000000000000000004 /* PamPhp.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = PamPhp.xcframework; sourceTree = "<group>"; };
 		200000000000000000000005 /* PamNativeEngine.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; path = PamNativeEngine.xcframework; sourceTree = "<group>"; };
 		200000000000000000000006 /* PamNativeApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = PamNativeApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000007 /* PamLaunch.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = PamLaunch.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -30,7 +32,7 @@
 
 /* Begin PBXGroup section */
 		400000000000000000000001 = {isa = PBXGroup; children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000005); sourceTree = "<group>"; };
-		400000000000000000000002 /* App */ = {isa = PBXGroup; children = (200000000000000000000001); path = App; sourceTree = "<group>"; };
+		400000000000000000000002 /* App */ = {isa = PBXGroup; children = (200000000000000000000001, 200000000000000000000007); path = App; sourceTree = "<group>"; };
 		400000000000000000000003 /* Bridge */ = {isa = PBXGroup; children = (200000000000000000000002); path = Bridge; sourceTree = "<group>"; };
 		400000000000000000000004 /* Runtime */ = {isa = PBXGroup; children = (200000000000000000000003, 200000000000000000000004, 200000000000000000000005); path = Runtime; sourceTree = "<group>"; };
 		400000000000000000000005 /* Products */ = {isa = PBXGroup; children = (200000000000000000000006); name = Products; sourceTree = "<group>"; };
@@ -45,7 +47,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		300000000000000000000002 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000003); runOnlyForDeploymentPostprocessing = 0; };
+		300000000000000000000002 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (100000000000000000000003, 100000000000000000000008); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */

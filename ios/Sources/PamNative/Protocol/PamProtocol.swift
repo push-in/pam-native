@@ -731,6 +731,20 @@ public enum PamConstants {
     public static let onMediaCacheProgress = 382
     public static let onMediaCacheReady = 383
     public static let mediaCacheChecksum = 384
+    public static let numberOfLines = 44
+    public static let borderTopLeftRadius = 118
+    public static let borderTopRightRadius = 119
+    public static let borderBottomRightRadius = 120
+    public static let borderBottomLeftRadius = 121
+    public static let textDecoration = 126
+    public static let textTransform = 127
+    public static let blurRadius = 135
+    public static let translationXPercent = 138
+    public static let textEllipsizeMode = 162
+    public static let modalAnimationType = 252
+    public static let modalBackdropColor = 253
+    public static let modalTransparent = 254
+    public static let modalAllowSwipeDismissal = 258
 }
 
 public enum BatchDecoder {

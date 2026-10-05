@@ -26,8 +26,22 @@ box (`pam_native_engine_set_text_measurer`, see
   of the last (or `numberOfLines`-th) line, first baseline for
   `align-items: baseline`. `numberOfLines` implies a tail ellipsis.
 
-Results are cached per text/style/width. iOS and hosts without a measurer keep
-the portable glyph-advance estimator.
+Results are cached per text/style/width. Hosts without a measurer keep the
+portable glyph-advance estimator.
+
+**iOS** (1.9.0): the engine measures every `Text` with the CoreText pipeline
+that draws it (`PamTextLayout`, installed through
+`pam_native_ios_set_text_measurer`), following React Native iOS: font sizes
+are `fontSize × fontScale` (no integer rounding), an authored `lineHeight`
+(scaled by `fontScale`) is the exact line box with the glyphs centered
+(`RCTApplyBaselineOffset`), widths/heights are ceiled to the pixel grid,
+`numberOfLines` truncates with a tail (or `ellipsizeMode` head/middle/clip)
+ellipsis, and the first baseline feeds `align-items: baseline`.
+`includeFontPadding` is Android-only and ignored. Nested spans, span presses,
+`text-shadow`, `font-feature-settings`, `text-align: justify`,
+`adjustsFontSizeToFit` and `on:textLayout` are drawn/reported from the same
+layout. A bare `fontFamily` resolves bundled files with the React Native
+conventions below before installed families.
 
 ## Nested text (inline spans)
 
