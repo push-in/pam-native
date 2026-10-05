@@ -922,12 +922,19 @@ internal class NativeImageLoader(
                     }
                 }.toByteArray(Charsets.UTF_8),
             )
-            .joinToString("") { byte -> "%02x".format(byte) }
+            .toHexString()
         return File(diskDirectory, "$digest.image")
     }
 
     private fun cacheIdentity(source: String, request: NativeImageRequest): String =
-        request.mediaCacheKey ?: sha256(source.toByteArray())
+        request.mediaCacheKey ?: sourceIdentities[source] ?: sha256(source.toByteArray()).also { identity ->
+            // Identities are compared for every active request on each
+            // network callback; hash each source once.
+            if (sourceIdentities.size >= MAX_SOURCE_IDENTITIES) sourceIdentities.clear()
+            sourceIdentities[source] = identity
+        }
+
+    private val sourceIdentities = ConcurrentHashMap<String, String>()
 
     private fun requestCallbacks(
         identity: String,
@@ -944,7 +951,7 @@ internal class NativeImageLoader(
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256")
             .digest(bytes)
-            .joinToString("") { byte -> "%02x".format(byte) }
+            .toHexString()
 
     private fun decodedKey(
         source: String,
@@ -1123,3 +1130,17 @@ internal const val MEDIA_CACHE_CACHE_FIRST = 5
 internal const val MEDIA_CACHE_NETWORK_FIRST = 6
 internal const val MEDIA_CACHE_CACHE_ONLY = 7
 internal const val MEDIA_CACHE_STALE_WHILE_REVALIDATE = 8
+
+private const val MAX_SOURCE_IDENTITIES = 2_048
+private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+/** Lowercase hex without String.format (which takes ICU locale locks per byte). */
+internal fun ByteArray.toHexString(): String {
+    val output = CharArray(size * 2)
+    forEachIndexed { index, byte ->
+        val value = byte.toInt() and 0xff
+        output[index * 2] = HEX_DIGITS[value ushr 4]
+        output[index * 2 + 1] = HEX_DIGITS[value and 0x0f]
+    }
+    return String(output)
+}

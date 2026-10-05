@@ -150,7 +150,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
                     }
                 }
             }
-            val checksum = digest.digest().joinToString("") { "%02x".format(it) }
+            val checksum = digest.digest().toHexString()
             require(request.checksum == null || checksum == request.checksum) {
                 "Media checksum verification failed."
             }
@@ -193,7 +193,7 @@ internal class NativeMediaFileCache(context: Context) : AutoCloseable {
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256")
             .digest(bytes)
-            .joinToString("") { "%02x".format(it) }
+            .toHexString()
 
     private companion object {
         const val MAX_FILE_BYTES = 2L * 1024 * 1024 * 1024
