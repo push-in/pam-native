@@ -20,7 +20,8 @@ final readonly class PressEvent
 
     public static function fromPayload(string $payload): self
     {
-        $values = Wire::decodeMap($payload);
+        // iOS and legacy hosts send an empty payload for press/long-press.
+        $values = $payload === '' ? [] : Wire::decodeMap($payload);
 
         return new self(
             self::number($values['x'] ?? null),

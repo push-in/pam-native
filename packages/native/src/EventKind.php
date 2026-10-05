@@ -75,4 +75,10 @@ enum EventKind: int
     case Layout = 67;
     case MediaBuffering = 68;
     case MediaLoadStart = 69;
+    case DoubleTap = 70;
+    case GestureSettle = 71;
+    case ScrollBeginDrag = 72;
+    case ScrollEndDrag = 73;
+    case MomentumScrollEnd = 74;
+    case TextLayout = 75;
 }

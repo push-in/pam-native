@@ -514,4 +514,18 @@ enum PropKey: int
     case OnMediaBuffering = 506;
     case OnMediaLoadStart = 507;
     case ScrollKeyboardInset = 508;
+    case PressDoubleTapDelayMs = 509;
+    case OnDoubleTap = 510;
+    case PressTapEffect = 511;
+    case GestureDrag = 512;
+    case GestureDragSnapIndex = 513;
+    case OnGestureSettle = 514;
+    case NativeRef = 515;
+    case AnimationProgram = 516;
+    case AnimationRestartKey = 517;
+    case TransitionSpec = 518;
+    case OnScrollBeginDrag = 519;
+    case OnScrollEndDrag = 520;
+    case OnMomentumScrollEnd = 521;
+    case OnTextLayout = 522;
 }

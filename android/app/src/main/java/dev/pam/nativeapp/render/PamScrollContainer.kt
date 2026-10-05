@@ -3,7 +3,9 @@ package dev.pam.nativeapp.render
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Rect
+import android.view.Choreographer
 import android.view.MotionEvent
+import android.view.VelocityTracker
 import android.view.ContextThemeWrapper
 import android.view.View
 import android.view.ViewConfiguration
@@ -33,6 +35,14 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private var indicatorStyle = initialIndicatorStyle
     private var pagingEnabled = false
     private var snapIntervalPx = 0
+    private var scrollPhase: ((Int, Float, Float, Float, Float) -> Unit)? = null
+    private var pointerDown = false
+    private var dragging = false
+    private var velocity: VelocityTracker? = null
+    private var momentumWatching = false
+    private var momentumStableFrames = 0
+    private var momentumLastX = 0
+    private var momentumLastY = 0
     private var decelerationRate = NORMAL_DECELERATION_RATE
     private var keyboardDismissMode = KEYBOARD_DISMISS_NONE
     private var requestedOffsetX = 0
@@ -452,6 +462,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
+        stopMomentumWatch()
         removeCallbacks(applyOffsetRunnable)
         offsetScheduled = false
         super.onDetachedFromWindow()
@@ -525,7 +536,119 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     private fun dispatchViewport(scrollX: Int, scrollY: Int) {
         val density = resources.displayMetrics.density
+        if (pointerDown && !dragging && scrollPhase != null) {
+            dragging = true
+            emitPhase(SCROLL_PHASE_BEGIN_DRAG, 0f, 0f)
+        }
         viewportChanged?.invoke(scrollX / density, scrollY / density)
+    }
+
+    /**
+     * RN scroll lifecycle on the UI thread: begin drag, end drag (with
+     * release velocity in dp/s) and momentum end once the offset has been
+     * stable for [MOMENTUM_STABLE_FRAMES] frames (paging snap included).
+     */
+    fun setOnScrollPhase(listener: ((Int, Float, Float, Float, Float) -> Unit)?) {
+        scrollPhase = listener
+        if (listener == null) {
+            stopMomentumWatch()
+            velocity?.recycle()
+            velocity = null
+        }
+    }
+
+    /** Page index along the primary axis using the paging/snap extent. */
+    fun pageIndex(): Int {
+        val extent = when {
+            snapIntervalPx > 0 -> snapIntervalPx
+            horizontal -> activeScroll.width - activeScroll.paddingLeft - activeScroll.paddingRight
+            else -> activeScroll.height - activeScroll.paddingTop - activeScroll.paddingBottom
+        }
+        if (extent <= 0) return 0
+        val offset = if (horizontal) activeScroll.scrollX else activeScroll.scrollY
+        return (offset.toFloat() / extent).roundToInt()
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (scrollPhase != null) observeScrollTouch(event)
+        return super.dispatchTouchEvent(event)
+    }
+
+    private fun observeScrollTouch(event: MotionEvent) {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                stopMomentumWatch()
+                pointerDown = true
+                dragging = false
+                velocity?.recycle()
+                velocity = VelocityTracker.obtain().also { it.addMovement(event) }
+            }
+            MotionEvent.ACTION_MOVE -> velocity?.addMovement(event)
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL,
+            -> {
+                pointerDown = false
+                velocity?.addMovement(event)
+                velocity?.computeCurrentVelocity(1_000)
+                val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
+                val vx = -(velocity?.xVelocity ?: 0f) / density
+                val vy = -(velocity?.yVelocity ?: 0f) / density
+                velocity?.recycle()
+                velocity = null
+                if (dragging) {
+                    dragging = false
+                    emitPhase(SCROLL_PHASE_END_DRAG, vx, vy)
+                    startMomentumWatch()
+                }
+            }
+        }
+    }
+
+    private fun emitPhase(phase: Int, vx: Float, vy: Float) {
+        val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
+        scrollPhase?.invoke(
+            phase,
+            activeScroll.scrollX / density,
+            activeScroll.scrollY / density,
+            vx,
+            vy,
+        )
+    }
+
+    private val momentumFrame = object : Choreographer.FrameCallback {
+        override fun doFrame(frameTimeNanos: Long) {
+            if (!momentumWatching) return
+            val x = activeScroll.scrollX
+            val y = activeScroll.scrollY
+            if (x == momentumLastX && y == momentumLastY) {
+                momentumStableFrames += 1
+            } else {
+                momentumStableFrames = 0
+                momentumLastX = x
+                momentumLastY = y
+            }
+            if (momentumStableFrames >= MOMENTUM_STABLE_FRAMES) {
+                momentumWatching = false
+                emitPhase(SCROLL_PHASE_MOMENTUM_END, 0f, 0f)
+                return
+            }
+            Choreographer.getInstance().postFrameCallback(this)
+        }
+    }
+
+    private fun startMomentumWatch() {
+        stopMomentumWatch()
+        momentumWatching = true
+        momentumStableFrames = 0
+        momentumLastX = activeScroll.scrollX
+        momentumLastY = activeScroll.scrollY
+        Choreographer.getInstance().postFrameCallback(momentumFrame)
+    }
+
+    private fun stopMomentumWatch() {
+        if (!momentumWatching) return
+        momentumWatching = false
+        Choreographer.getInstance().removeFrameCallback(momentumFrame)
     }
 
     private fun dismissKeyboard() {
@@ -871,7 +994,11 @@ internal class PamScrollContainer @JvmOverloads constructor(
         }
     }
 
-    private companion object {
+    internal companion object {
+        const val SCROLL_PHASE_BEGIN_DRAG = 1
+        const val SCROLL_PHASE_END_DRAG = 2
+        const val SCROLL_PHASE_MOMENTUM_END = 3
+        const val MOMENTUM_STABLE_FRAMES = 3
         const val SCROLL_TARGET_START = 1
         const val SCROLL_TARGET_CENTER = 2
         const val SCROLL_TARGET_END = 3

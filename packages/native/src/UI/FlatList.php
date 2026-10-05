@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\UI;
 
 use Closure;
+use Pam\Native\UI\Concerns\HasScrollPhaseEvents;
 use InvalidArgumentException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -15,6 +16,8 @@ use Pam\Native\PropKey;
 
 final class FlatList extends Element
 {
+    use HasScrollPhaseEvents;
+
     /** @param array<array-key, mixed> $items */
     public static function make(array $items): self
     {
@@ -83,6 +86,12 @@ final class FlatList extends Element
     public function showsIndicator(bool $visible = true): self
     {
         return $this->withProperty(PropKey::ShowsScrollIndicator, $visible);
+    }
+
+    /** RN `pagingEnabled` for lists: one item per page (Reels), snapped natively. */
+    public function pagingEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::ScrollPagingEnabled, $enabled);
     }
 
     public function onScroll(Closure $handler): self

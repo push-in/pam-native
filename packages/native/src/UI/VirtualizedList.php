@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\UI;
 
 use Closure;
+use Pam\Native\UI\Concerns\HasScrollPhaseEvents;
 use InvalidArgumentException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -17,6 +18,8 @@ use Pam\Native\Renderable;
 
 final class VirtualizedList extends Element
 {
+    use HasScrollPhaseEvents;
+
     /**
      * Creates a lazily mounted native list from arbitrary PAM components.
      *
@@ -111,6 +114,12 @@ final class VirtualizedList extends Element
             ->withProperty(PropKey::ScrollTargetOffset, $targetOffset)
             ->withProperty(PropKey::ScrollTargetAlignment, $targetAlignment->value)
             ->withProperty(PropKey::ScrollRequest, max(0, $request));
+    }
+
+    /** RN `pagingEnabled` for lists: one item per page (Reels), snapped natively. */
+    public function pagingEnabled(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::ScrollPagingEnabled, $enabled);
     }
 
     public function onScroll(Closure $handler): self

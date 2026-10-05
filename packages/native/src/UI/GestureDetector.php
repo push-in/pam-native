@@ -6,11 +6,13 @@ namespace Pam\Native\UI;
 
 use Closure;
 use InvalidArgumentException;
+use Pam\Native\Animation\Drag;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\GestureComposition;
 use Pam\Native\GestureDirection;
 use Pam\Native\GestureEvent;
+use Pam\Native\GestureSettleEvent;
 use Pam\Native\GestureType;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
@@ -124,6 +126,31 @@ final class GestureDetector extends Element
     }
 
     /** @param Closure(GestureEvent): void $handler */
+    /**
+     * Drives the child on the UI thread while panning and settles it onto a
+     * snap point on release (requires a pan detector). PHP receives only
+     * begin/end/settle events.
+     */
+    public function drag(Drag $drag): self
+    {
+        return $this->withProperty(PropKey::GestureDrag, $drag->encode());
+    }
+
+    /** Programmatically settle onto [index]; bump [request] to issue it again. */
+    public function snapTo(int $index, int $request = 0): self
+    {
+        return $this->withProperty(PropKey::GestureDragSnapIndex, Drag::snapRequest($index, $request));
+    }
+
+    /** The drag finished settling (after its spring/timing animation). */
+    public function onSettle(Closure $handler): self
+    {
+        return $this->withEvent(
+            EventKind::GestureSettle,
+            static fn (string $payload = ''): mixed => $handler(GestureSettleEvent::fromPayload($payload)),
+        );
+    }
+
     public function onBegin(Closure $handler): self
     {
         return $this->withGestureEvent(EventKind::GestureBegin, $handler);

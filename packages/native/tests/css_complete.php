@@ -134,7 +134,21 @@ $assert($matrix['rotation'] === '90' && $matrix['translationX'] === '10' && $mat
 $assert($css('rotate: 45deg;') === ['rotation' => '45'], 'The individual rotate property must compile.');
 
 // Transitions run as native property animations.
-$assert($css('transition: opacity 200ms ease-out;') === ['animate' => true, 'animationDuration' => 200, 'animationEasing' => 3], 'transition shorthand must compile.');
+$assert($css('transition: opacity 200ms ease-out;') === ['animate' => true, 'animationDuration' => 200, 'animationEasing' => 3, 'transitionSpec' => "@property opacity\n@duration 200\n@timing ease-out\n@delay 0"], 'transition shorthand must compile.');
+$assert(
+    $css('transition: transform 300ms spring(1 260 18), opacity 120ms ease-out 40ms;')['transitionSpec']
+        === "@property transform,opacity\n@duration 300,120\n@timing spring:260:18:1,ease-out\n@delay 0,40",
+    'transition must keep per-property durations, delays, easings and spring().',
+);
+$assert(
+    $css('transition: all 200ms ease; transition-duration: 300ms, 90ms; transition-property: transform, opacity;')['transitionSpec']
+        === "@property transform,opacity\n@duration 300,90\n@timing ease\n@delay 0",
+    'transition longhands must override the shorthand lists like CSS.',
+);
+$assert(
+    $css('transition: transform spring;')['animate'] === true,
+    'A spring transition animates without an explicit duration.',
+);
 $assert($css('transition: none;') === ['animate' => false], 'transition: none must disable implicit animation.');
 
 // Units and functions.

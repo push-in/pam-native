@@ -5,9 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\Internal;
 
 use Closure;
-use Pam\Native\GestureEvent;
 use ReflectionMethod;
-use ReflectionNamedType;
 use ReflectionProperty;
 use RuntimeException;
 use Stringable;
@@ -851,13 +849,9 @@ final class TemplateExpression
             $reflection = new ReflectionMethod($scope, $name);
             $gestures = [];
             foreach ($reflection->getParameters() as $index => $parameter) {
-                $type = $parameter->getType();
-                if (
-                    $type instanceof ReflectionNamedType
-                    && !$type->isBuiltin()
-                    && $type->getName() === GestureEvent::class
-                ) {
-                    $gestures[] = $index;
+                $class = EventPayloads::parameterClass($reflection, $index);
+                if ($class !== null) {
+                    $gestures[$index] = $class;
                 }
             }
             $method = self::$methods[$key] = [
@@ -868,9 +862,9 @@ final class TemplateExpression
         if (!$method['public']) {
             throw new RuntimeException("Template method {$name} must be public.");
         }
-        foreach ($method['gestures'] as $index) {
+        foreach ($method['gestures'] as $index => $class) {
             if (array_key_exists($index, $arguments) && is_string($arguments[$index])) {
-                $arguments[$index] = GestureEvent::fromPayload($arguments[$index]);
+                $arguments[$index] = EventPayloads::decode($class, $arguments[$index]);
             }
         }
 

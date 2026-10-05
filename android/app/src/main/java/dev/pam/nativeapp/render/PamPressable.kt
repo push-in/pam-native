@@ -24,9 +24,17 @@ internal data class PamPressPointer(
 
 internal class PamPressable(context: Context) : PamContainer(context) {
     private val gestureRecognizer = PamGestureRecognizer(this)
-    private var onPress: (() -> Unit)? = null
+    private var onPress: ((PamPressPointer) -> Unit)? = null
     private var localOnPress: (() -> Unit)? = null
-    private var onLongPress: (() -> Unit)? = null
+    private var onLongPress: ((PamPressPointer) -> Unit)? = null
+    private var onDoubleTap: ((PamPressPointer) -> Unit)? = null
+    private var doubleTapDelayMs = DEFAULT_DOUBLE_TAP_DELAY_MS
+    private var pendingSingleTap: PamPressPointer? = null
+    private var clickPointer: PamPressPointer? = null
+    private var lastTap: PamPressPointer? = null
+    private var tapEffect: PamTapEffect? = null
+    private var tapEffectRunner: PamMotionRunner? = null
+    internal val drag = PamDragController(this)
     private var onPressIn: ((PamPressPointer) -> Unit)? = null
     private var onPressOut: ((PamPressPointer) -> Unit)? = null
     private var onPressMove: ((PamPressPointer) -> Unit)? = null
@@ -78,6 +86,12 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     private fun nativeTransformTarget(): View? =
         nativeTransformTarget?.takeIf { it.parent === this } ?: getChildAt(0)
+
+    private val singleTapRunnable = Runnable {
+        val pointer = pendingSingleTap ?: return@Runnable
+        pendingSingleTap = null
+        performClickAt(pointer)
+    }
 
     private val pressInRunnable = Runnable {
         if (gestureActive && eligibleForPress) {
@@ -156,19 +170,34 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     }
 
     fun setCallbacks(
-        onPress: (() -> Unit)?,
-        onLongPress: (() -> Unit)?,
+        onPress: ((PamPressPointer) -> Unit)?,
+        onLongPress: ((PamPressPointer) -> Unit)?,
         onPressIn: ((PamPressPointer) -> Unit)?,
         onPressOut: ((PamPressPointer) -> Unit)?,
         onPressMove: ((PamPressPointer) -> Unit)?,
+        onDoubleTap: ((PamPressPointer) -> Unit)? = null,
     ) {
         this.onPress = onPress
         this.onLongPress = onLongPress
+        this.onDoubleTap = onDoubleTap
+        if (onDoubleTap == null) {
+            removeCallbacks(singleTapRunnable)
+            pendingSingleTap = null
+        }
         this.onPressIn = onPressIn
         this.onPressOut = onPressOut
         this.onPressMove = onPressMove
         isLongClickable = onLongPress != null
         updateClickable()
+    }
+
+    fun configureDoubleTap(delayMs: Long, effect: PamTapEffect?) {
+        doubleTapDelayMs = delayMs.coerceIn(MIN_DOUBLE_TAP_DELAY_MS, MAX_DOUBLE_TAP_DELAY_MS)
+        tapEffect = effect
+    }
+
+    fun configureDrag(config: PamDragConfig?, onSettle: ((Int, Double) -> Unit)?) {
+        drag.configure(config, onSettle)
     }
 
     fun setLocalOnPress(callback: (() -> Unit)?) {
@@ -196,14 +225,36 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             resetNativeTransform()
         }
         gestureRecognizer.configure(config) { payload ->
-            applyNativeTransform(payload)
-            callback?.invoke(payload)
+            val delivered = applyDrag(payload)
+            applyNativeTransform(delivered)
+            callback?.invoke(delivered)
         }
         updateClickable()
     }
 
+    private fun applyDrag(payload: PamGesturePayload): PamGesturePayload {
+        if (drag.config == null || payload.type != GESTURE_PAN) return payload
+        when (payload.state) {
+            1 -> {
+                drag.begin()
+                drag.update(payload.translationX, payload.translationY)
+            }
+            2 -> drag.update(payload.translationX, payload.translationY)
+            3, 4 -> {
+                if (payload.state == 3) drag.update(payload.translationX, payload.translationY)
+                val release = drag.end(payload.velocityX, payload.velocityY, payload.state == 4)
+                    ?: return payload
+                return payload.copy(
+                    snapIndex = release.snapIndex,
+                    thresholdReached = release.thresholdReached,
+                )
+            }
+        }
+        return payload
+    }
+
     private fun applyNativeTransform(payload: PamGesturePayload) {
-        if (!nativeTransformEnabled) return
+        if (!nativeTransformEnabled || drag.config != null) return
         traceGesture("transform type=${payload.type} state=${payload.state} x=${payload.translationX}")
         val child = nativeTransformTarget() ?: return
         val translationTarget = child
@@ -349,7 +400,12 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             }
             MotionEvent.ACTION_UP -> {
                 if (finishGesture(event, event.actionIndex, cancelled = false)) {
-                    performClick()
+                    if (onDoubleTap == null) {
+                        clickPointer = lastPointer
+                        performClick()
+                    } else {
+                        handleTap(lastPointer)
+                    }
                 }
                 true
             }
@@ -377,20 +433,106 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     override fun performClick(): Boolean {
         val platformHandled = super.performClick()
+        // Touch clicks carry the release point; accessibility clicks the centre.
+        val pointer = clickPointer ?: centerPointer()
+        clickPointer = null
         localOnPress?.invoke()
-        onPress?.invoke()
+        onPress?.invoke(pointer)
         return platformHandled || localOnPress != null || onPress != null
+    }
+
+    private fun performClickAt(pointer: PamPressPointer): Boolean {
+        clickPointer = pointer
+        return performClick()
     }
 
     override fun performLongClick(): Boolean {
         val platformHandled = super.performLongClick()
-        onLongPress?.invoke()
+        val pointer = if (gestureActive) lastPointer else centerPointer()
+        onLongPress?.invoke(pointer)
         return platformHandled || onLongPress != null
+    }
+
+    /**
+     * RN double-tap pattern on the UI thread: with a double-tap handler the
+     * single press waits [doubleTapDelayMs] and is cancelled by a second tap
+     * near the first one.
+     */
+    private fun handleTap(pointer: PamPressPointer) {
+        val doubleTap = onDoubleTap ?: return
+        val previous = lastTap
+        val slop = ViewConfiguration.get(context).scaledDoubleTapSlop.toFloat()
+        if (
+            previous != null &&
+            pointer.timestamp - previous.timestamp <= doubleTapDelayMs &&
+            kotlin.math.hypot(pointer.x - previous.x, pointer.y - previous.y) <= slop
+        ) {
+            removeCallbacks(singleTapRunnable)
+            pendingSingleTap = null
+            lastTap = null
+            playTapEffect(pointer)
+            doubleTap(pointer)
+            return
+        }
+        lastTap = pointer
+        if (onPress != null || localOnPress != null) {
+            pendingSingleTap = pointer
+            removeCallbacks(singleTapRunnable)
+            postDelayed(singleTapRunnable, doubleTapDelayMs)
+        }
+    }
+
+    private fun playTapEffect(pointer: PamPressPointer) {
+        val effect = tapEffect ?: return
+        val anchor = PamDragController.findRef(this, effect.ref) ?: return
+        val animated = (anchor as? ViewGroup)?.getChildAt(0) ?: anchor
+        var offsetX = 0f
+        var offsetY = 0f
+        var parentView = anchor.parent as? View
+        while (parentView != null && parentView !== this) {
+            offsetX += parentView.left + parentView.translationX
+            offsetY += parentView.top + parentView.translationY
+            parentView = parentView.parent as? View
+        }
+        anchor.translationX = pointer.x - offsetX - anchor.left - anchor.width / 2f
+        anchor.translationY = pointer.y - offsetY - anchor.top - anchor.height / 2f
+        anchor.rotation = if (effect.tiltDegrees > 0f) {
+            ((Math.random() - 0.5) * 2.0 * effect.tiltDegrees).toFloat()
+        } else {
+            0f
+        }
+        tapEffectRunner?.cancel()
+        val timeline = PamMotionTimeline.build(
+            effect.program,
+            current = { PamMotionTarget.read(animated, it) },
+            resolve = { property, value -> PamMotionTarget.resolve(animated, property, value) },
+        )
+        tapEffectRunner = PamMotionRunner(animated, timeline, effect.program.iterations).also {
+            it.start(PamMotionPolicy.isReduced(context))
+        }
+    }
+
+    private fun centerPointer(): PamPressPointer {
+        val location = IntArray(2)
+        getLocationOnScreen(location)
+        return PamPressPointer(
+            x = width / 2f,
+            y = height / 2f,
+            pageX = location[0] + width / 2f,
+            pageY = location[1] + height / 2f,
+            timestamp = SystemClock.uptimeMillis(),
+            pointerId = 0,
+        )
     }
 
     override fun onDetachedFromWindow() {
         gestureRecognizer.cancel()
         cancelGesture(emitOut = false)
+        removeCallbacks(singleTapRunnable)
+        pendingSingleTap = null
+        tapEffectRunner?.cancel()
+        tapEffectRunner = null
+        drag.detach()
         nativeTransformTarget = null
         super.onDetachedFromWindow()
     }
@@ -538,6 +680,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
 
     private fun updateClickable() {
         isClickable = localOnPress != null || onPress != null || onPressIn != null ||
+            onDoubleTap != null ||
             onPressOut != null || onPressMove != null || onLongPress != null ||
             gestureRecognizer.isEnabled() || nativeInteractionEnabled
         if (!isClickable) {
@@ -577,6 +720,35 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         const val MAX_PRESS_DELAY_MS = 60_000L
         const val PRESS_IN_ANIMATION_MS = 70L
         const val PRESS_OUT_ANIMATION_MS = 110L
+        const val GESTURE_PAN = 2
+        const val DEFAULT_DOUBLE_TAP_DELAY_MS = 250L
+        const val MIN_DOUBLE_TAP_DELAY_MS = 80L
+        const val MAX_DOUBLE_TAP_DELAY_MS = 1_000L
+    }
+}
+
+/** `ref=<nativeRef>;tilt=<deg>` line followed by a `pam-motion` program. */
+internal data class PamTapEffect(
+    val ref: String,
+    val tiltDegrees: Float,
+    val program: PamMotionProgram,
+) {
+    companion object {
+        fun parse(source: String): PamTapEffect? {
+            val newline = source.indexOf('\n')
+            if (newline < 0) return null
+            val options = source.substring(0, newline).split(';', ' ').mapNotNull {
+                val parts = it.trim().split('=', limit = 2)
+                if (parts.size == 2) parts[0] to parts[1] else null
+            }.toMap()
+            val ref = options["ref"]?.takeIf(String::isNotEmpty) ?: return null
+            val program = PamMotionProgram.parse(source.substring(newline + 1)) ?: return null
+            return PamTapEffect(
+                ref = ref,
+                tiltDegrees = (options["tilt"]?.toFloatOrNull() ?: 0f).coerceIn(0f, 180f),
+                program = program,
+            )
+        }
     }
 }
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use Pam\Native\Animation\Transition;
+
 use Pam\Native\Style\StyleScope;
 use RuntimeException;
 
@@ -2170,68 +2172,23 @@ final class ScopedStyleCompiler
     /** @param array<string, string|int|bool> $output */
     private static function transition(array &$output, string $property, string $value, string $name): void
     {
-        $lower = strtolower(trim($value));
-        $easings = [
-            'linear' => 1, 'ease-in' => 2, 'ease-out' => 3, 'ease-in-out' => 4, 'ease' => 4,
-            'step-start' => 1, 'step-end' => 1,
-        ];
-        $time = static function (string $part) use ($name): int {
-            if (preg_match('/^((?:\d+|\d*\.\d+))(ms|s)$/D', $part, $match) !== 1) {
-                throw new RuntimeException("Invalid transition time {$part} in {$name}.");
-            }
-            return (int) round((float) $match[1] * ($match[2] === 's' ? 1000 : 1));
-        };
-        if ($property === 'transition-property') {
-            $output['animate'] = $lower !== 'none';
-            return;
-        }
-        if ($property === 'transition-duration') {
-            $output['animationDuration'] = $time(trim(explode(',', $lower)[0]));
-            $output['animate'] ??= true;
-            return;
-        }
-        if ($property === 'transition-timing-function') {
-            $function = trim(explode(',', $lower)[0]);
-            $output['animationEasing'] = $easings[$function] ?? (str_starts_with($function, 'cubic-bezier(') ? 4 : throw new RuntimeException("Unsupported transition-timing-function {$function} in {$name}."));
-            return;
-        }
-        if ($property === 'transition-delay') {
-            if ($time(trim(explode(',', $lower)[0])) !== 0) {
-                throw new RuntimeException("Native transitions start immediately; transition-delay is unsupported in {$name}.");
-            }
-            return;
-        }
         if ($property === 'transition-behavior') {
             return;
         }
-        if ($property !== 'transition') {
-            throw new RuntimeException("Unsupported native CSS property {$property} in {$name}.");
+        try {
+            $spec = Transition::apply((string) ($output['transitionSpec'] ?? ''), $property, $value);
+        } catch (\InvalidArgumentException $error) {
+            throw new RuntimeException($error->getMessage()." in {$name}.", 0, $error);
         }
-        if ($lower === 'none') {
+        unset($output['animate'], $output['animationDuration'], $output['animationEasing'], $output['transitionSpec']);
+        if (!Transition::animates($spec)) {
             $output['animate'] = false;
             return;
         }
-        $duration = null;
-        $easing = null;
-        foreach (self::splitTopLevel($lower, ',') as $layer) {
-            $times = [];
-            foreach (self::cssValueParts($layer, $name) as $part) {
-                if (preg_match('/^(?:\d+|\d*\.\d+)(?:ms|s)$/D', $part) === 1) {
-                    $times[] = $time($part);
-                } elseif (isset($easings[$part])) {
-                    $easing ??= $easings[$part];
-                } elseif (str_starts_with($part, 'cubic-bezier(') || str_starts_with($part, 'steps(')) {
-                    $easing ??= 4;
-                }
-            }
-            if (($times[1] ?? 0) !== 0) {
-                throw new RuntimeException("Native transitions start immediately; transition delays are unsupported in {$name}.");
-            }
-            $duration = max($duration ?? 0, $times[0] ?? 0);
-        }
-        $output['animate'] = ($duration ?? 0) > 0;
-        $output['animationDuration'] = $duration ?? 0;
-        $output['animationEasing'] = $easing ?? 4;
+        $output['animate'] = true;
+        $output['animationDuration'] = Transition::maxDuration($spec);
+        $output['animationEasing'] = Transition::legacyEasing($spec);
+        $output['transitionSpec'] = $spec;
     }
 
     /** @return list<string> */

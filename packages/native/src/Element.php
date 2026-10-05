@@ -231,6 +231,57 @@ abstract class Element implements Renderable
             : $element->withProperty(PropKey::SharedTransitionConfig, $style->toJson());
     }
 
+    /**
+     * Names this view for native motion: drag drivers, drag targets and tap
+     * effects resolve `nativeRef` inside their gesture detector.
+     */
+    final public function nativeRef(string $ref): static
+    {
+        return $this->withProperty(PropKey::NativeRef, \Pam\Native\Animation\Drag::ref($ref));
+    }
+
+    /**
+     * Plays a UI-thread animation program. It replays only when the
+     * animation identity (program + `key()`) changes.
+     */
+    final public function animation(\Pam\Native\Animation\Animation $animation): static
+    {
+        return $this->withProperty(PropKey::AnimationProgram, $animation->encode());
+    }
+
+    /** Replays the attached animation program or keyframes whenever [key] changes. */
+    final public function replayKey(int $key): static
+    {
+        return $this->withProperty(PropKey::AnimationRestartKey, max(0, $key));
+    }
+
+    /**
+     * CSS transition with per-property durations, delays and easings plus
+     * `spring(mass stiffness damping)`, e.g.
+     * `transform 300ms spring(1 260 18), opacity 120ms ease-out 40ms`.
+     */
+    final public function transition(string $css): static
+    {
+        $spec = \Pam\Native\Animation\Transition::apply('', 'transition', $css);
+
+        return $this
+            ->withProperty(PropKey::TransitionSpec, $spec)
+            ->withProperty(PropKey::AnimateChanges, \Pam\Native\Animation\Transition::animates($spec))
+            ->withProperty(
+                PropKey::AnimationDurationMs,
+                max(1, min(10_000, \Pam\Native\Animation\Transition::maxDuration($spec))),
+            );
+    }
+
+    /** RN `onTextLayout`: wrapped line count, truncation and line widths. */
+    final public function onTextLayout(Closure $handler): static
+    {
+        return $this->withEvent(
+            EventKind::TextLayout,
+            static fn (string $payload = ''): mixed => $handler(\Pam\Native\TextLayoutEvent::fromPayload($payload)),
+        );
+    }
+
     final public function enabled(bool $enabled): static
     {
         return $this->withProperty(PropKey::Enabled, $enabled);
@@ -544,6 +595,12 @@ abstract class Element implements Renderable
             EventKind::Layout => PropKey::OnLayout,
             EventKind::MediaBuffering => PropKey::OnMediaBuffering,
             EventKind::MediaLoadStart => PropKey::OnMediaLoadStart,
+            EventKind::DoubleTap => PropKey::OnDoubleTap,
+            EventKind::GestureSettle => PropKey::OnGestureSettle,
+            EventKind::ScrollBeginDrag => PropKey::OnScrollBeginDrag,
+            EventKind::ScrollEndDrag => PropKey::OnScrollEndDrag,
+            EventKind::MomentumScrollEnd => PropKey::OnMomentumScrollEnd,
+            EventKind::TextLayout => PropKey::OnTextLayout,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,

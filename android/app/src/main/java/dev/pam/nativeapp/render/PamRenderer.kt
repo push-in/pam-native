@@ -869,6 +869,7 @@ class PamRenderer(
             state.propertyAnimator?.cancel()
             state.keyframeAnimator?.cancel()
             state.workletAnimator?.cancel()
+            state.cancelMotion()
             state.loadingDrawable?.stop()
             state.outsidePointerObserver?.let { observer ->
                 (host as? PamRootHost)?.removePointerObserver(observer)
@@ -1041,6 +1042,7 @@ class PamRenderer(
         state.propertyAnimator?.cancel()
         state.keyframeAnimator?.cancel()
         state.workletAnimator?.cancel()
+        state.cancelMotion()
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         (view as? PamModalHost)?.close()
@@ -1357,6 +1359,7 @@ class PamRenderer(
         state.propertyAnimator?.cancel()
         state.keyframeAnimator?.cancel()
         state.workletAnimator?.cancel()
+        state.cancelMotion()
         state.loadingDrawable?.stop()
         state.pendingChange?.let(main::removeCallbacks)
         pamImageView(view)?.let(imageLoader::cancel)
@@ -2354,6 +2357,22 @@ class PamRenderer(
             PropKey.DROP_ENABLED,
             PropKey.CONTEXT_MENU_ITEMS,
             -> configureNativeInteractions(view, state)
+            PropKey.PRESS_DOUBLE_TAP_DELAY_MS,
+            PropKey.PRESS_TAP_EFFECT,
+            PropKey.GESTURE_DRAG,
+            -> configurePressable(view, state)
+            PropKey.GESTURE_DRAG_SNAP_INDEX -> applyDragSnap(view, state)
+            PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, value.text(key))
+            PropKey.ANIMATION_PROGRAM -> configureMotionProgram(view, state)
+            PropKey.ANIMATION_RESTART_KEY -> restartAnimations(view, state)
+            PropKey.TRANSITION_SPEC -> state.transitionRules = PamTransitionSpec.parse(value.text(key))
+            PropKey.ON_DOUBLE_TAP,
+            PropKey.ON_GESTURE_SETTLE,
+            PropKey.ON_SCROLL_BEGIN_DRAG,
+            PropKey.ON_SCROLL_END_DRAG,
+            PropKey.ON_MOMENTUM_SCROLL_END,
+            PropKey.ON_TEXT_LAYOUT,
+            -> Unit
             PropKey.ANIMATION_KEYFRAMES,
             PropKey.ANIMATION_ITERATIONS,
             PropKey.ANIMATION_DELAY_MS,
@@ -2471,8 +2490,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setPersistentScrollbar(value.flag())
             PropKey.SCROLL_INDICATOR_STYLE ->
                 (view as? PamScrollContainer)?.setIndicatorStyle(value.integer().toInt())
-            PropKey.SCROLL_PAGING_ENABLED ->
-                (view as? PamScrollContainer)?.setPagingEnabled(value.flag())
+            PropKey.SCROLL_PAGING_ENABLED -> when (view) {
+                is PamScrollContainer -> view.setPagingEnabled(value.flag())
+                is PamRecyclerList -> view.setPagingEnabled(value.flag())
+            }
             PropKey.SCROLL_SNAP_INTERVAL ->
                 (view as? PamScrollContainer)?.setSnapInterval(
                     value.decimal().toFloat(),
@@ -2586,8 +2607,9 @@ class PamRenderer(
                 text.setTextIsSelectable(value.flag())
                 applyTextDataDetector(text, state)
             }
-            PropKey.TEXT_ELLIPSIZE_MODE -> (view as? TextView)?.ellipsize =
-                textEllipsize(value.integer().toInt())
+            PropKey.TEXT_ELLIPSIZE_MODE -> (view as? TextView)?.let { text ->
+                applyTextEllipsize(text, value.integer().toInt())
+            }
             PropKey.TEXT_ALLOW_FONT_SCALING,
             PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER,
             PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT,
@@ -2922,8 +2944,9 @@ class PamRenderer(
                 text.setTextIsSelectable(false)
                 applyTextDataDetector(text, state)
             }
-            PropKey.TEXT_ELLIPSIZE_MODE -> (view as? TextView)?.ellipsize =
-                TextUtils.TruncateAt.END
+            PropKey.TEXT_ELLIPSIZE_MODE -> (view as? TextView)?.let { text ->
+                applyTextEllipsize(text, 1)
+            }
             PropKey.TEXT_ALLOW_FONT_SCALING,
             PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER,
             PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT,
@@ -3110,8 +3133,10 @@ class PamRenderer(
                 (view as? PamScrollContainer)?.setPersistentScrollbar(false)
             PropKey.SCROLL_INDICATOR_STYLE ->
                 (view as? PamScrollContainer)?.setIndicatorStyle(ScrollIndicatorStyle.AUTO.wireValue)
-            PropKey.SCROLL_PAGING_ENABLED ->
-                (view as? PamScrollContainer)?.setPagingEnabled(false)
+            PropKey.SCROLL_PAGING_ENABLED -> when (view) {
+                is PamScrollContainer -> view.setPagingEnabled(false)
+                is PamRecyclerList -> view.setPagingEnabled(false)
+            }
             PropKey.SCROLL_SNAP_INTERVAL ->
                 (view as? PamScrollContainer)?.setSnapInterval(0f)
             PropKey.SCROLL_DECELERATION_RATE ->
@@ -3247,6 +3272,17 @@ class PamRenderer(
                 state.keyframeAnimator?.cancel()
                 state.keyframeAnimator = null
             }
+            PropKey.ANIMATION_PROGRAM -> {
+                state.motionRunner?.cancel()
+                state.motionRunner = null
+                state.motionProgramId = Long.MIN_VALUE
+            }
+            PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, null)
+            PropKey.TRANSITION_SPEC -> state.transitionRules = emptyMap()
+            PropKey.PRESS_DOUBLE_TAP_DELAY_MS,
+            PropKey.PRESS_TAP_EFFECT,
+            PropKey.GESTURE_DRAG,
+            -> configurePressable(view, state)
             PropKey.WORKLET_PROGRAM,
             PropKey.WORKLET_TARGET,
             PropKey.WORKLET_DURATION_MS,
@@ -3421,12 +3457,15 @@ class PamRenderer(
             view.setOnClickListener(null)
             view.setOnLongClickListener(null)
             view.setCallbacks(
-                onPress = state.callback(PropKey.ON_PRESS) {
+                onPress = state.pointerCallback(PropKey.ON_PRESS) { pointer ->
                     flushFocusedNativeInputs()
-                    dispatch(state.id, EVENT_PRESS)
+                    dispatchPressPointer(state, EVENT_PRESS, pointer)
                 },
-                onLongPress = state.callback(PropKey.ON_LONG_PRESS) {
-                    dispatch(state.id, EVENT_LONG_PRESS)
+                onLongPress = state.pointerCallback(PropKey.ON_LONG_PRESS) { pointer ->
+                    dispatchPressPointer(state, EVENT_LONG_PRESS, pointer)
+                },
+                onDoubleTap = state.pointerCallback(PropKey.ON_DOUBLE_TAP) { pointer ->
+                    dispatchPressPointer(state, EventKind.DOUBLE_TAP.value, pointer)
                 },
                 onPressIn = state.pointerCallback(PropKey.ON_PRESS_IN) { pointer ->
                     dispatchPressPointer(state, EVENT_PRESS_IN, pointer)
@@ -3488,6 +3527,7 @@ class PamRenderer(
             )
         }
         if (view is PamRecyclerList) installListEvents(view, state)
+        if (view is TextView && view !is EditText) installTextLayout(view, state)
         if (view is PamRefreshContainer) {
             view.setOnRefresh(
                 if (state.properties[PropKey.ON_REFRESH] != null) {
@@ -3927,6 +3967,11 @@ class PamRenderer(
                     scaleX = value.optDoubleOrNull("scaleX"),
                     scaleY = value.optDoubleOrNull("scaleY"),
                     rotation = value.optDoubleOrNull("rotation"),
+                    easing = if (value.has("easing") && !value.isNull("easing")) {
+                        value.getString("easing").takeIf(String::isNotEmpty)?.let(PamEasings::parse)
+                    } else {
+                        null
+                    },
                 )
             }
         }.getOrNull()?.takeIf { it.size in 2..64 } ?: return
@@ -3973,6 +4018,198 @@ class PamRenderer(
             })
             start()
         }
+    }
+
+    /** Tail/head/middle/clip, or 5 = native single-line marquee (RN audio-name ticker). */
+    private fun applyTextEllipsize(text: TextView, mode: Int) {
+        if (mode == TEXT_ELLIPSIZE_MARQUEE) {
+            text.isSingleLine = true
+            text.setHorizontallyScrolling(true)
+            text.marqueeRepeatLimit = -1
+            text.ellipsize = TextUtils.TruncateAt.MARQUEE
+            text.isSelected = true
+            return
+        }
+        if (text.ellipsize == TextUtils.TruncateAt.MARQUEE) {
+            text.isSelected = false
+            text.setHorizontallyScrolling(false)
+        }
+        text.ellipsize = textEllipsize(mode)
+    }
+
+    /**
+     * RN `onTextLayout`: total wrapped line count at the current width (even
+     * when `numberOfLines` truncates), visible lines, truncation and per-line
+     * widths. Reported only when the measurement changes.
+     */
+    private fun installTextLayout(text: TextView, state: NodeState) {
+        state.textLayoutListener?.let(text::removeOnLayoutChangeListener)
+        state.textLayoutListener = null
+        if (state.properties[PropKey.ON_TEXT_LAYOUT] == null) {
+            state.textLayoutSignature = ""
+            return
+        }
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            reportTextLayout(text, state)
+        }
+        text.addOnLayoutChangeListener(listener)
+        state.textLayoutListener = listener
+        if (text.isLaidOut) text.post { reportTextLayout(text, state) }
+    }
+
+    private fun reportTextLayout(text: TextView, state: NodeState) {
+        if (nodes[state.id] !== state || state.properties[PropKey.ON_TEXT_LAYOUT] == null) return
+        val visible = text.layout ?: return
+        val width = (text.width - text.totalPaddingLeft - text.totalPaddingRight).coerceAtLeast(0)
+        if (width == 0) return
+        val content = text.text ?: ""
+        val full = android.text.StaticLayout.Builder
+            .obtain(content, 0, content.length, text.paint, width)
+            .setLineSpacing(text.lineSpacingExtra, text.lineSpacingMultiplier)
+            .setIncludePad(text.includeFontPadding)
+            .setBreakStrategy(text.breakStrategy)
+            .setHyphenationFrequency(text.hyphenationFrequency)
+            .setAlignment(visible.alignment)
+            .build()
+        val totalLines = full.lineCount
+        val maxLines = text.maxLines.takeIf { it in 1 until Int.MAX_VALUE } ?: Int.MAX_VALUE
+        val visibleLines = min(visible.lineCount, maxLines)
+        val truncated = totalLines > visibleLines ||
+            (visibleLines > 0 && visible.getEllipsisCount(visibleLines - 1) > 0)
+        val density = resourcesDensity().coerceAtLeast(0.01f)
+        val widths = (0 until min(totalLines, MAX_TEXT_LAYOUT_LINES)).joinToString(",", "[", "]") {
+            "%.2f".format(java.util.Locale.ROOT, full.getLineWidth(it) / density)
+        }
+        val signature = "$totalLines|$visibleLines|$truncated|$width|$widths"
+        if (signature == state.textLayoutSignature) return
+        state.textLayoutSignature = signature
+        dispatchBytes(
+            state.id,
+            EventKind.TEXT_LAYOUT.value,
+            WireMap.encode(
+                mapOf(
+                    "lines" to WireValue.Integer(totalLines.toLong()),
+                    "visibleLines" to WireValue.Integer(visibleLines.toLong()),
+                    "truncated" to WireValue.Flag(truncated),
+                    "width" to WireValue.Decimal((width / density).toDouble()),
+                    "height" to WireValue.Decimal((full.height / density).toDouble()),
+                    "lineWidths" to WireValue.Text(widths),
+                ),
+            ),
+        )
+    }
+
+    private fun applyDragSnap(view: View, state: NodeState) {
+        val pressable = view as? PamPressable ?: return
+        val request = state.integer(PropKey.GESTURE_DRAG_SNAP_INDEX, -1L)
+        if (request < 0L || request == state.dragSnapRequest) return
+        state.dragSnapRequest = request
+        pressable.drag.snapTo((request % DRAG_SNAP_REQUEST_STRIDE).toInt(), animated = view.isLaidOut)
+    }
+
+    /**
+     * Plays a `pam-motion` program. A program id that is already playing (or
+     * already played) is not restarted, so re-rendering an unchanged
+     * Animation value never replays it; a new Animation instance does.
+     */
+    private fun configureMotionProgram(view: View, state: NodeState, force: Boolean = false) {
+        val source = (state.properties[PropKey.ANIMATION_PROGRAM] as? PropValue.Text)?.value ?: return
+        val program = PamMotionProgram.parse(source) ?: return
+        if (!force && program.id == state.motionProgramId) return
+        state.motionProgramId = program.id
+        state.motionRunner?.cancel()
+        val start = start@{
+            if (nodes[state.id] !== state) return@start
+            val timeline = PamMotionTimeline.build(
+                program,
+                current = { PamMotionTarget.read(view, it) },
+                resolve = { property, value -> PamMotionTarget.resolve(view, property, value) },
+            )
+            state.motionRunner = PamMotionRunner(
+                view,
+                timeline,
+                program.iterations,
+                onComplete = {
+                    state.motionRunner = null
+                    if (nodes[state.id] === state && state.properties[PropKey.ON_ANIMATION_COMPLETE] != null) {
+                        dispatch(state.id, EventKind.ANIMATION_COMPLETE.value, program.id.toString())
+                    }
+                },
+            ).also { it.start(PamMotionPolicy.isReduced(view.context)) }
+        }
+        // Percentages resolve against the laid-out size.
+        if (view.isLaidOut) start() else view.post { start() }
+    }
+
+    private fun restartAnimations(view: View, state: NodeState) {
+        val key = state.integer(PropKey.ANIMATION_RESTART_KEY, 0L)
+        if (key == state.motionRestartKey) return
+        val first = state.motionRestartKey == Long.MIN_VALUE
+        state.motionRestartKey = key
+        if (first) return
+        if (state.properties[PropKey.ANIMATION_PROGRAM] != null) {
+            configureMotionProgram(view, state, force = true)
+        }
+        if (state.properties[PropKey.ANIMATION_KEYFRAMES] != null) {
+            configureKeyframeAnimation(view, state)
+        }
+    }
+
+    /** Per-property CSS transition (duration, delay, easing or spring). */
+    private fun animateWithTransitionRule(
+        view: View,
+        state: NodeState,
+        key: PropKey,
+        target: Float,
+    ): Boolean {
+        if (state.transitionRules.isEmpty()) return false
+        val property = when (key) {
+            PropKey.OPACITY -> PamMotionProperty.OPACITY
+            PropKey.TRANSLATION_X -> PamMotionProperty.TRANSLATE_X
+            PropKey.TRANSLATION_Y -> PamMotionProperty.TRANSLATE_Y
+            PropKey.SCALE_X -> PamMotionProperty.SCALE_X
+            PropKey.SCALE_Y -> PamMotionProperty.SCALE_Y
+            PropKey.ROTATION -> PamMotionProperty.ROTATE
+            else -> return false
+        }
+        val rule = PamTransitionSpec.ruleFor(state.transitionRules, property) ?: return false
+        if (rule.spring == null && rule.durationMs == 0L && rule.delayMs == 0L) {
+            state.transitionRunners?.remove(property)?.cancel()
+            setAnimatedProperty(view, key, target)
+            return true
+        }
+        val runners = state.transitionRunners ?: mutableMapOf<PamMotionProperty, PamMotionRunner>().also {
+            state.transitionRunners = it
+        }
+        runners.remove(property)?.cancel()
+        val viewAnimator = view.animate()
+        when (property) {
+            PamMotionProperty.OPACITY -> viewAnimator.alpha(view.alpha)
+            PamMotionProperty.TRANSLATE_X -> viewAnimator.translationX(view.translationX)
+            PamMotionProperty.TRANSLATE_Y -> viewAnimator.translationY(view.translationY)
+            PamMotionProperty.SCALE_X -> viewAnimator.scaleX(view.scaleX)
+            PamMotionProperty.SCALE_Y -> viewAnimator.scaleY(view.scaleY)
+            PamMotionProperty.ROTATE -> viewAnimator.rotation(view.rotation)
+            else -> Unit
+        }
+        viewAnimator.setDuration(0L).start()
+        val step = if (rule.spring != null) {
+            PamMotionStep.Spring(PamMotionValue(target.toDouble()), rule.spring, 0.0, rule.delayMs)
+        } else {
+            PamMotionStep.Timing(PamMotionValue(target.toDouble()), rule.durationMs, rule.easing, rule.delayMs)
+        }
+        val timeline = PamMotionTimeline.build(
+            PamMotionProgram(0L, 1, listOf(mapOf(property to listOf(step)))),
+            current = { PamMotionTarget.read(view, it) },
+            resolve = { _, value -> value.number },
+        )
+        val runner = PamMotionRunner(view, timeline, 1, onComplete = {
+            state.transitionRunners?.remove(property)
+            Unit
+        })
+        runners[property] = runner
+        runner.start(reducedMotion = false)
+        return true
     }
 
     private fun configureWorkletAnimation(view: View, state: NodeState) {
@@ -4047,7 +4284,7 @@ class PamRenderer(
         val right = frames[rightIndex]
         val local = if (right.offset == left.offset) 0f else {
             ((progress - left.offset) / (right.offset - left.offset)).coerceIn(0f, 1f)
-        }
+        }.let { linear -> left.easing?.transform(linear) ?: linear }
         fun value(
             start: Float?,
             end: Float?,
@@ -4094,6 +4331,7 @@ class PamRenderer(
         val scaleX: Float?,
         val scaleY: Float?,
         val rotation: Float?,
+        val easing: PamEasing? = null,
     )
 
     private enum class NativeStyleState(val value: Int) {
@@ -4451,6 +4689,29 @@ class PamRenderer(
             ).toFloat(),
             androidDisableSound = state.flag(PropKey.PRESS_ANDROID_DISABLE_SOUND, false),
         )
+        pressable.configureDoubleTap(
+            delayMs = state.integer(PropKey.PRESS_DOUBLE_TAP_DELAY_MS, 250L),
+            effect = (state.properties[PropKey.PRESS_TAP_EFFECT] as? PropValue.Text)
+                ?.value
+                ?.let(PamTapEffect::parse),
+        )
+        val dragConfig = (state.properties[PropKey.GESTURE_DRAG] as? PropValue.Text)
+            ?.value
+            ?.let(PamDragConfig::parse)
+        pressable.configureDrag(dragConfig) { index, position ->
+            if (nodes[state.id] === state && state.properties[PropKey.ON_GESTURE_SETTLE] != null) {
+                dispatchBytes(
+                    state.id,
+                    EventKind.GESTURE_SETTLE.value,
+                    WireMap.encode(
+                        mapOf(
+                            "snapIndex" to WireValue.Integer(index.toLong()),
+                            "position" to WireValue.Decimal(position),
+                        ),
+                    ),
+                )
+            }
+        }
         val gestureType = state.integer(PropKey.GESTURE_TYPE, 0L).toInt()
         val hasGesture = gestureType in 1..6
         pressable.configureGesture(
@@ -4528,6 +4789,8 @@ class PamRenderer(
                     "rotation" to WireValue.Decimal(payload.rotation.toDouble()),
                     "pointerCount" to WireValue.Integer(payload.pointerCount.toLong()),
                     "timestamp" to WireValue.Integer(payload.timestamp),
+                    "snapIndex" to WireValue.Integer(payload.snapIndex.toLong()),
+                    "thresholdReached" to WireValue.Flag(payload.thresholdReached),
                 ),
             ),
         )
@@ -4755,6 +5018,7 @@ class PamRenderer(
     }
 
     private fun installScrollEvents(scroll: PamScrollContainer, state: NodeState) {
+        installScrollPhases(state) { listener -> scroll.setOnScrollPhase(listener) }
         val onScroll = state.properties[PropKey.ON_SCROLL] != null
         val endReached = state.properties[PropKey.ON_END_REACHED] != null
         if (!onScroll && !endReached) {
@@ -4792,7 +5056,50 @@ class PamRenderer(
         }
     }
 
+    private fun installScrollPhases(
+        state: NodeState,
+        install: (((Int, Float, Float, Float, Float) -> Unit)?) -> Unit,
+    ) {
+        val wanted = state.properties[PropKey.ON_SCROLL_BEGIN_DRAG] != null ||
+            state.properties[PropKey.ON_SCROLL_END_DRAG] != null ||
+            state.properties[PropKey.ON_MOMENTUM_SCROLL_END] != null
+        if (!wanted) {
+            install(null)
+            return
+        }
+        install { phase, x, y, vx, vy ->
+            if (nodes[state.id] !== state) return@install
+            val (event, key) = when (phase) {
+                PamScrollContainer.SCROLL_PHASE_BEGIN_DRAG ->
+                    EventKind.SCROLL_BEGIN_DRAG to PropKey.ON_SCROLL_BEGIN_DRAG
+                PamScrollContainer.SCROLL_PHASE_END_DRAG ->
+                    EventKind.SCROLL_END_DRAG to PropKey.ON_SCROLL_END_DRAG
+                else -> EventKind.MOMENTUM_SCROLL_END to PropKey.ON_MOMENTUM_SCROLL_END
+            }
+            if (state.properties[key] == null) return@install
+            val page = when (val view = views[state.id]) {
+                is PamScrollContainer -> view.pageIndex()
+                is PamRecyclerList -> view.pageIndex()
+                else -> 0
+            }
+            dispatchBytes(
+                state.id,
+                event.value,
+                WireMap.encode(
+                    mapOf(
+                        "x" to WireValue.Decimal(x.toDouble()),
+                        "y" to WireValue.Decimal(y.toDouble()),
+                        "velocityX" to WireValue.Decimal(vx.toDouble()),
+                        "velocityY" to WireValue.Decimal(vy.toDouble()),
+                        "page" to WireValue.Integer(page.toLong()),
+                    ),
+                ),
+            )
+        }
+    }
+
     private fun installListEvents(list: PamRecyclerList, state: NodeState) {
+        installScrollPhases(state) { listener -> list.setOnScrollPhase(listener) }
         val scroll = state.properties[PropKey.ON_SCROLL] != null
         val endReached = state.properties[PropKey.ON_END_REACHED] != null
         if (!scroll && !endReached) {
@@ -6013,6 +6320,7 @@ class PamRenderer(
             setAnimatedProperty(view, key, target)
             return
         }
+        if (animateWithTransitionRule(view, state, key, target)) return
         val animator = view.animate()
             .setDuration(state.integer(PropKey.ANIMATION_DURATION_MS, 180L).coerceIn(1L, 10_000L))
             .setInterpolator(
@@ -7763,6 +8071,14 @@ class PamRenderer(
         var defaultHighlightColor: Int = Color.TRANSPARENT,
         var propertyAnimator: ObjectAnimator? = null,
         var keyframeAnimator: ValueAnimator? = null,
+        var motionRunner: PamMotionRunner? = null,
+        var motionProgramId: Long = Long.MIN_VALUE,
+        var motionRestartKey: Long = Long.MIN_VALUE,
+        var transitionRules: Map<String, PamTransitionRule> = emptyMap(),
+        var transitionRunners: MutableMap<PamMotionProperty, PamMotionRunner>? = null,
+        var dragSnapRequest: Long = Long.MIN_VALUE,
+        var textLayoutSignature: String = "",
+        var textLayoutListener: View.OnLayoutChangeListener? = null,
         var workletAnimator: ValueAnimator? = null,
         var loadingDrawable: PamButtonLoadingDrawable? = null,
         var filterLayer: Boolean = false,
@@ -7814,6 +8130,13 @@ class PamRenderer(
         fun callback(key: PropKey, callback: () -> Unit): (() -> Unit)? =
             callback.takeIf { properties[key] != null }
 
+        fun cancelMotion() {
+            motionRunner?.cancel()
+            motionRunner = null
+            transitionRunners?.values?.forEach(PamMotionRunner::cancel)
+            transitionRunners = null
+        }
+
         fun pointerCallback(
             key: PropKey,
             callback: (PamPressPointer) -> Unit,
@@ -7825,6 +8148,7 @@ class PamRenderer(
 
     private companion object {
         const val COMMIT_PERF_TAG = "PamRendererPerf"
+        const val DRAG_SNAP_REQUEST_STRIDE = 64L
         const val AUTO_FOCUS_RETRIES = 20
         const val AUTO_FOCUS_RETRY_MS = 50L
         const val AUTO_FOCUS_KEYBOARD_RETRIES = 4
@@ -7913,6 +8237,8 @@ class PamRenderer(
         const val STATUS_BAR_LIGHT = 2
         const val STATUS_BAR_ANIMATION_DURATION_MS = 300L
         const val TEXT_ELLIPSIZE_HEAD = 2
+        const val TEXT_ELLIPSIZE_MARQUEE = 5
+        const val MAX_TEXT_LAYOUT_LINES = 200
         const val TEXT_ELLIPSIZE_MIDDLE = 3
         const val TEXT_ELLIPSIZE_CLIP = 4
         const val TEXT_BREAK_HIGH_QUALITY = 1
@@ -7965,6 +8291,14 @@ class PamRenderer(
             PropKey.BORDER_BOTTOM_COLOR,
             PropKey.BORDER_LEFT_COLOR,
             PropKey.ANIMATION_KIND,
+            PropKey.ANIMATION_PROGRAM,
+            PropKey.ANIMATION_RESTART_KEY,
+            PropKey.TRANSITION_SPEC,
+            PropKey.NATIVE_REF,
+            PropKey.PRESS_TAP_EFFECT,
+            PropKey.GESTURE_DRAG,
+            PropKey.ON_DOUBLE_TAP,
+            PropKey.ON_GESTURE_SETTLE,
             PropKey.ANIMATION_KEYFRAMES,
             PropKey.ANIMATION_DURATION_MS,
             PropKey.ANIMATION_EASING,
@@ -8074,6 +8408,12 @@ class PamRenderer(
             "androidx.view.accessibility.AccessibilityNodeInfoCompat.STATE_DESCRIPTION_KEY"
 
         val EVENT_PROPERTIES = setOf(
+            PropKey.ON_DOUBLE_TAP,
+            PropKey.ON_GESTURE_SETTLE,
+            PropKey.ON_SCROLL_BEGIN_DRAG,
+            PropKey.ON_SCROLL_END_DRAG,
+            PropKey.ON_MOMENTUM_SCROLL_END,
+            PropKey.ON_TEXT_LAYOUT,
             PropKey.ON_PRESS,
             PropKey.ON_CHANGE,
             PropKey.ON_LONG_PRESS,

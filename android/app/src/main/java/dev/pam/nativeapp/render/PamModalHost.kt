@@ -97,6 +97,7 @@ internal class PamModalHost @JvmOverloads constructor(
     private var previousFocus: WeakReference<View>? = null
     private var lastOrientation: Int? = null
     private var dialogGeneration = 0L
+    private var slideFadeAnimator: ValueAnimator? = null
     private var updateScheduled = false
     private var bottomSheetSnapPoints = listOf(0.5f, 0.9f)
     private var bottomSheetIndex = 0
@@ -182,7 +183,7 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     fun setAnimationType(value: Int) {
-        animationType = value.coerceIn(ANIMATION_NONE, ANIMATION_FADE)
+        animationType = value.coerceIn(ANIMATION_NONE, ANIMATION_SLIDE_FADE)
     }
 
     fun setBackdropColor(color: Int) {
@@ -769,11 +770,68 @@ internal class PamModalHost @JvmOverloads constructor(
         content.setBackgroundColor(backdropColor)
     }
 
+    /**
+     * `slide-fade`: the backdrop fades while the sheet/content slides from
+     * fully below the screen on its own curve (RN sheet modals). One
+     * frame-synchronised animator drives both on the UI thread.
+     */
+    private fun animateSlideFade(entering: Boolean, end: (() -> Unit)? = null) {
+        slideFadeAnimator?.cancel()
+        content.alpha = 1f
+        content.translationY = 0f
+        val backdrop = content.background as? ColorDrawable
+        val distance = { child: View ->
+            (content.height - child.top).coerceAtLeast(resources.displayMetrics.heightPixels / 2).toFloat()
+        }
+        val sheetEasing = if (entering) PamEasings.parse("ease-out-cubic") else PamEasings.parse("ease-in-quad")
+        fun apply(progress: Float) {
+            // progress 0 = hidden, 1 = shown
+            backdrop?.alpha = (255 * (progress / SLIDE_FADE_BACKDROP_SHARE).coerceIn(0f, 1f)).toInt()
+            // Fraction of the travel still hidden below the screen.
+            val slide = if (entering) 1f - sheetEasing.transform(progress) else sheetEasing.transform(1f - progress)
+            for (index in 0 until content.childCount) {
+                val child = content.getChildAt(index)
+                child.translationY = distance(child) * slide.coerceIn(0f, 1f)
+            }
+        }
+        apply(if (entering) 0f else 1f)
+        slideFadeAnimator = ValueAnimator.ofFloat(if (entering) 0f else 1f, if (entering) 1f else 0f).apply {
+            duration = if (entering) SLIDE_FADE_ENTER_DURATION_MS else SLIDE_FADE_EXIT_DURATION_MS
+            interpolator = android.view.animation.LinearInterpolator()
+            addUpdateListener { apply(it.animatedValue as Float) }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                private var cancelled = false
+                override fun onAnimationCancel(animation: android.animation.Animator) {
+                    cancelled = true
+                }
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    slideFadeAnimator = null
+                    if (!cancelled) end?.invoke()
+                }
+            })
+            start()
+        }
+    }
+
+    private fun resetSlideFade() {
+        slideFadeAnimator?.cancel()
+        slideFadeAnimator = null
+        (content.background as? ColorDrawable)?.alpha = 255
+        if (animationType == ANIMATION_SLIDE_FADE) {
+            for (index in 0 until content.childCount) content.getChildAt(index).translationY = 0f
+        }
+    }
+
     private fun animateEntrance() {
         content.animate().cancel()
+        resetSlideFade()
         if (animationType == ANIMATION_NONE || PamMotionPolicy.isReduced(context)) {
             content.alpha = 1f
             content.translationY = 0f
+            return
+        }
+        if (animationType == ANIMATION_SLIDE_FADE) {
+            if (content.isLaidOut) animateSlideFade(entering = true) else content.post { animateSlideFade(entering = true) }
             return
         }
         content.alpha = if (animationType == ANIMATION_FADE) 0f else 1f
@@ -802,6 +860,14 @@ internal class PamModalHost @JvmOverloads constructor(
         ) {
             val generation = ++dialogGeneration
             content.animate().cancel()
+            if (animationType == ANIMATION_SLIDE_FADE) {
+                animateSlideFade(entering = false) {
+                    if (dialogGeneration == generation && dialog === modal && !desiredVisible) {
+                        dismissNow(modal, notify)
+                    }
+                }
+                return
+            }
             content.animate()
                 .alpha(if (animationType == ANIMATION_FADE) 0f else 1f)
                 .translationY(
@@ -831,6 +897,7 @@ internal class PamModalHost @JvmOverloads constructor(
         if (dialog !== modal) return
         ++dialogGeneration
         content.animate().cancel()
+        resetSlideFade()
         content.alpha = 1f
         content.translationY = 0f
         val wasShowing = modal.isShowing
@@ -855,6 +922,7 @@ internal class PamModalHost @JvmOverloads constructor(
         val modal = dialog ?: return
         ++dialogGeneration
         content.animate().cancel()
+        resetSlideFade()
         content.alpha = 1f
         content.translationY = 0f
         val wasShowing = modal.isShowing
@@ -912,6 +980,10 @@ internal class PamModalHost @JvmOverloads constructor(
         const val ANIMATION_NONE = 1
         const val ANIMATION_SLIDE = 2
         const val ANIMATION_FADE = 3
+        const val ANIMATION_SLIDE_FADE = 4
+        const val SLIDE_FADE_ENTER_DURATION_MS = 320L
+        const val SLIDE_FADE_EXIT_DURATION_MS = 220L
+        const val SLIDE_FADE_BACKDROP_SHARE = 0.7f
         const val ORIENTATION_PORTRAIT = 1
         const val ORIENTATION_LANDSCAPE = 2
         const val KEYBOARD_INTERACTIVE = 1

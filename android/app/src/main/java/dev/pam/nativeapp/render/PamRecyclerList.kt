@@ -16,6 +16,7 @@ import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.PagerSnapHelper
 import androidx.recyclerview.widget.RecyclerView
 import dev.pam.nativeapp.protocol.PackedSectionList
 import dev.pam.nativeapp.protocol.PackedStringList
@@ -46,6 +47,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var touchDownY = 0f
     private var touchMoved = false
     private var viewportChanged: ((Float, Int, Int, Int) -> Unit)? = null
+    private var scrollPhase: ((Int, Float, Float, Float, Float) -> Unit)? = null
+    private var pagerSnap: PagerSnapHelper? = null
+    private var phaseDragging = false
+    private var releaseVelocityX = 0f
+    private var releaseVelocityY = 0f
     private var richIds: List<Long> = emptyList()
     private var richExtents: Map<Long, Int> = emptyMap()
     private val accessibilityModes = IdentityHashMap<View, Int>()
@@ -60,6 +66,38 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         setHasFixedSize(true)
         updateLayoutManager()
         addOnScrollListener(object : OnScrollListener() {
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                val listener = scrollPhase ?: return
+                val density = resources.displayMetrics.density.coerceAtLeast(0.01f)
+                val x = computeHorizontalScrollOffset() / density
+                val y = computeVerticalScrollOffset() / density
+                when (newState) {
+                    SCROLL_STATE_DRAGGING -> {
+                        phaseDragging = true
+                        listener(PamScrollContainer.SCROLL_PHASE_BEGIN_DRAG, x, y, 0f, 0f)
+                    }
+                    SCROLL_STATE_SETTLING -> if (phaseDragging) {
+                        phaseDragging = false
+                        listener(
+                            PamScrollContainer.SCROLL_PHASE_END_DRAG,
+                            x,
+                            y,
+                            releaseVelocityX / density,
+                            releaseVelocityY / density,
+                        )
+                    }
+                    SCROLL_STATE_IDLE -> {
+                        if (phaseDragging) {
+                            phaseDragging = false
+                            listener(PamScrollContainer.SCROLL_PHASE_END_DRAG, x, y, 0f, 0f)
+                        }
+                        listener(PamScrollContainer.SCROLL_PHASE_MOMENTUM_END, x, y, 0f, 0f)
+                    }
+                }
+                releaseVelocityX = 0f
+                releaseVelocityY = 0f
+            }
+
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 updateAdaptivePrefetch(if (horizontal) dx else dy)
                 updateAccessibilityVisibility()
@@ -241,6 +279,30 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         if (rowTextColor == value) return
         rowTextColor = value
         configureAdapter()
+    }
+
+    fun setOnScrollPhase(listener: ((Int, Float, Float, Float, Float) -> Unit)?) {
+        scrollPhase = listener
+    }
+
+    /** RN `pagingEnabled` for lists: one item per page, snapped natively. */
+    fun setPagingEnabled(enabled: Boolean) {
+        if (enabled == (pagerSnap != null)) return
+        pagerSnap?.attachToRecyclerView(null)
+        pagerSnap = if (enabled) PagerSnapHelper().also { it.attachToRecyclerView(this) } else null
+    }
+
+    fun pageIndex(): Int {
+        val manager = layoutManager as? LinearLayoutManager ?: return 0
+        pagerSnap?.findSnapView(manager)?.let { return manager.getPosition(it) }
+        return manager.findFirstCompletelyVisibleItemPosition().takeIf { it >= 0 }
+            ?: manager.findFirstVisibleItemPosition().coerceAtLeast(0)
+    }
+
+    override fun fling(velocityX: Int, velocityY: Int): Boolean {
+        releaseVelocityX = velocityX.toFloat()
+        releaseVelocityY = velocityY.toFloat()
+        return super.fling(velocityX, velocityY)
     }
 
     fun setOnViewportChanged(listener: ((Float, Int, Int, Int) -> Unit)?) {

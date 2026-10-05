@@ -37,6 +37,17 @@ final class Animated extends Element
     }
 
     /** @param list<AnimationKeyframe> $keyframes */
+    /**
+     * Wraps [content] in a view that plays an Animation program on the UI
+     * thread (springs, per-property timing, sequences, repeats).
+     */
+    public static function program(Renderable $content, \Pam\Native\Animation\Animation $animation): self
+    {
+        return (new self(NodeKind::View))
+            ->withChildren([$content])
+            ->withProperty(PropKey::AnimationProgram, $animation->encode());
+    }
+
     public static function make(
         Renderable $content,
         array $keyframes,

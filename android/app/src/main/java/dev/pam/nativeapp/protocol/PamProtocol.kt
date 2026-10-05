@@ -146,7 +146,13 @@ enum class EventKind(val value: Int) {
     SPAN_PRESS(66),
     LAYOUT(67),
     MEDIA_BUFFERING(68),
-    MEDIA_LOAD_START(69);
+    MEDIA_LOAD_START(69),
+    DOUBLE_TAP(70),
+    GESTURE_SETTLE(71),
+    SCROLL_BEGIN_DRAG(72),
+    SCROLL_END_DRAG(73),
+    MOMENTUM_SCROLL_END(74),
+    TEXT_LAYOUT(75);
 }
 
 enum class PropKey(val value: Int) {
@@ -657,7 +663,21 @@ enum class PropKey(val value: Int) {
     STICKY_HEADER(505),
     ON_MEDIA_BUFFERING(506),
     ON_MEDIA_LOAD_START(507),
-    SCROLL_KEYBOARD_INSET(508);
+    SCROLL_KEYBOARD_INSET(508),
+    PRESS_DOUBLE_TAP_DELAY_MS(509),
+    ON_DOUBLE_TAP(510),
+    PRESS_TAP_EFFECT(511),
+    GESTURE_DRAG(512),
+    GESTURE_DRAG_SNAP_INDEX(513),
+    ON_GESTURE_SETTLE(514),
+    NATIVE_REF(515),
+    ANIMATION_PROGRAM(516),
+    ANIMATION_RESTART_KEY(517),
+    TRANSITION_SPEC(518),
+    ON_SCROLL_BEGIN_DRAG(519),
+    ON_SCROLL_END_DRAG(520),
+    ON_MOMENTUM_SCROLL_END(521),
+    ON_TEXT_LAYOUT(522);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

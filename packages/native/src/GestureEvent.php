@@ -23,6 +23,8 @@ final readonly class GestureEvent
         public float $rotation,
         public int $pointerCount,
         public int $timestamp,
+        public int $snapIndex = -1,
+        public bool $thresholdReached = false,
     ) {
     }
 
@@ -45,6 +47,8 @@ final readonly class GestureEvent
             rotation: self::number($values['rotation'] ?? null),
             pointerCount: self::integer($values['pointerCount'] ?? null, 1),
             timestamp: self::integer($values['timestamp'] ?? null),
+            snapIndex: self::integer($values['snapIndex'] ?? null, -1),
+            thresholdReached: ($values['thresholdReached'] ?? false) === true,
         );
     }
 

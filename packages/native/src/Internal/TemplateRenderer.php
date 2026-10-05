@@ -30,6 +30,10 @@ use Pam\Native\EventKind;
 use Pam\Native\FlexWrap;
 use Pam\Native\GestureComposition;
 use Pam\Native\GestureDirection;
+use Pam\Native\Animation\Animation;
+use Pam\Native\Animation\Drag;
+use Pam\Native\Animation\TapEffect;
+use Pam\Native\UI\Swipeable;
 use Pam\Native\GestureEvent;
 use Pam\Native\GestureType;
 use Pam\Native\ImageFit;
@@ -357,6 +361,17 @@ final class TemplateRenderer
         'animationDuration' => PropKey::AnimationDurationMs,
         'animationEasing' => PropKey::AnimationEasing,
         'animate' => PropKey::AnimateChanges,
+        'transitionSpec' => PropKey::TransitionSpec,
+        'nativeRef' => PropKey::NativeRef,
+        'animation' => PropKey::AnimationProgram,
+        'motionKey' => PropKey::AnimationRestartKey,
+        'animationKey' => PropKey::AnimationRestartKey,
+        'replayKey' => PropKey::AnimationRestartKey,
+        'doubleTapDelay' => PropKey::PressDoubleTapDelayMs,
+        'tapEffect' => PropKey::PressTapEffect,
+        'gestureDrag' => PropKey::GestureDrag,
+        'drag' => PropKey::GestureDrag,
+        'dragSnap' => PropKey::GestureDragSnapIndex,
         'rowHeight' => PropKey::ListRowHeight,
         'estimatedRowHeight' => PropKey::ListRowHeight,
         'prefetch' => PropKey::ListPrefetch,
@@ -611,6 +626,12 @@ final class TemplateRenderer
         'on:menuAction' => EventKind::MenuAction,
         'on:animationComplete' => EventKind::AnimationComplete,
         'on:accessibilityAction' => EventKind::AccessibilityAction,
+        'on:doubleTap' => EventKind::DoubleTap,
+        'on:gestureSettle' => EventKind::GestureSettle,
+        'on:scrollBeginDrag' => EventKind::ScrollBeginDrag,
+        'on:scrollEndDrag' => EventKind::ScrollEndDrag,
+        'on:momentumScrollEnd' => EventKind::MomentumScrollEnd,
+        'on:textLayout' => EventKind::TextLayout,
         'on:cacheHit' => EventKind::MediaCacheHit,
         'on:cacheMiss' => EventKind::MediaCacheMiss,
         'on:cacheProgress' => EventKind::MediaCacheProgress,
@@ -1270,6 +1291,10 @@ final class TemplateRenderer
         if ($text !== '' && $richParts === null) {
             $values['text'] ??= $text;
         }
+        if ($tag === 'Animated' && ($values['animation'] ?? null) instanceof Animation) {
+            $values['animationProgram'] = $values['animation'];
+            unset($values['animation']);
+        }
         if ($tag === 'Animated' && isset($values['animation'])) {
             $animation = self::stringValue($values['animation'], 'Animated animation');
             $animationSheet = $data['__pamStyles'] ?? null;
@@ -1378,6 +1403,7 @@ final class TemplateRenderer
             ),
             'SectionList' => SectionList::make(self::sections($values['sections'] ?? [])),
             'Spacer' => Spacer::make(self::floatValue($values['size'] ?? 8.0, 'Spacer size')),
+            'Swipeable' => self::swipeable($values, $children),
             'GestureDetector' => GestureDetector::make(
                 self::gestureType($values['gestureType'] ?? 'tap'),
                 self::singleChild($children, $tag),
@@ -1473,12 +1499,14 @@ final class TemplateRenderer
                     'Interaction dropEnabled',
                 ))
                 ->contextMenu(self::nativeMenuItems($values['menuItems'] ?? [])),
-            'Animated' => Animated::make(
-                self::singleChild($children, $tag),
-                self::animationKeyframes($values['keyframes'] ?? []),
-                self::intValue($values['durationMs'] ?? 300, 'Animated durationMs'),
-                self::animationEasing($values['easing'] ?? 'easeInOut'),
-            )
+            'Animated' => (($values['animationProgram'] ?? null) instanceof Animation
+                ? Animated::program(self::singleChild($children, $tag), $values['animationProgram'])
+                : Animated::make(
+                    self::singleChild($children, $tag),
+                    self::animationKeyframes($values['keyframes'] ?? []),
+                    self::intValue($values['durationMs'] ?? 300, 'Animated durationMs'),
+                    self::animationEasing($values['easing'] ?? 'easeInOut'),
+                ))
                 ->iterations(self::intValue(
                     $values['iterations'] ?? 1,
                     'Animated iterations',
@@ -1555,6 +1583,7 @@ final class TemplateRenderer
                         EventKind::PressIn => $element->onPressIn($handler),
                         EventKind::PressOut => $element->onPressOut($handler),
                         EventKind::PressMove => $element->onPressMove($handler),
+                        EventKind::DoubleTap => $element->onDoubleTap($handler),
                         default => $element->on($event, $handler),
                     };
                 } elseif ($factory === null && $element instanceof Modal) {
@@ -1989,6 +2018,48 @@ final class TemplateRenderer
         return $element;
     }
 
+    /**
+     * `<Swipeable leftWidth rightWidth group threshold :closeRequest>`: children
+     * are the left panel (when leftWidth > 0), the right panel (when
+     * rightWidth > 0) and the row content, in that order.
+     *
+     * @param array<string, mixed> $values
+     * @param list<Element> $children
+     */
+    private static function swipeable(array $values, array $children): Element
+    {
+        $leftWidth = self::floatValue($values['leftWidth'] ?? 0.0, 'Swipeable leftWidth');
+        $rightWidth = self::floatValue($values['rightWidth'] ?? 0.0, 'Swipeable rightWidth');
+        $expected = 1 + ($leftWidth > 0 ? 1 : 0) + ($rightWidth > 0 ? 1 : 0);
+        if (count($children) !== $expected) {
+            throw new RuntimeException(
+                "Swipeable expects {$expected} children: [left panel], [right panel], content.",
+            );
+        }
+        $swipeable = Swipeable::make($children[$expected - 1]);
+        $index = 0;
+        if ($leftWidth > 0) {
+            $swipeable = $swipeable->leftActions($children[$index++], $leftWidth);
+        }
+        if ($rightWidth > 0) {
+            $swipeable = $swipeable->rightActions($children[$index], $rightWidth);
+        }
+        if (isset($values['group'])) {
+            $swipeable = $swipeable->group(self::stringValue($values['group'], 'Swipeable group'));
+        }
+        if (isset($values['threshold'])) {
+            $swipeable = $swipeable->threshold(self::floatValue($values['threshold'], 'Swipeable threshold'));
+        }
+        if (isset($values['swipeEnabled'])) {
+            $swipeable = $swipeable->enabled(self::boolValue($values['swipeEnabled'], 'Swipeable swipeEnabled'));
+        }
+        if (isset($values['closeRequest'])) {
+            $swipeable = $swipeable->closeRequest(self::intValue($values['closeRequest'], 'Swipeable closeRequest'));
+        }
+
+        return $swipeable->toElement();
+    }
+
     private static function propertyAppliesToKind(
         PropKey $key,
         NodeKind $kind,
@@ -2012,11 +2083,11 @@ final class TemplateRenderer
             PropKey::ScrollNestedEnabled,
             PropKey::ScrollFadingEdgeLength,
             PropKey::ScrollPersistentScrollbar,
-            PropKey::ScrollPagingEnabled,
             PropKey::ScrollSnapInterval,
             PropKey::ScrollDecelerationRate,
             PropKey::ScrollKeyboardDismissMode,
             => $kind === NodeKind::Scroll,
+            PropKey::ScrollPagingEnabled,
             PropKey::ScrollTargetTestId,
             PropKey::ScrollTargetOffset,
             PropKey::ScrollTargetAlignment,
@@ -2290,6 +2361,8 @@ final class TemplateRenderer
                 'none' => ModalAnimationType::None->value,
                 'slide' => ModalAnimationType::Slide->value,
                 'fade' => ModalAnimationType::Fade->value,
+                'slide-fade' => ModalAnimationType::SlideFade->value,
+                'slideFade' => ModalAnimationType::SlideFade->value,
             ]),
             PropKey::StatusBarStyle => self::named($value, ['dark' => 1, 'light' => 2]),
             PropKey::KeyboardBehavior => self::named($value, [
@@ -2489,6 +2562,7 @@ final class TemplateRenderer
                 'head' => TextEllipsizeMode::Head->value,
                 'middle' => TextEllipsizeMode::Middle->value,
                 'clip' => TextEllipsizeMode::Clip->value,
+                'marquee' => TextEllipsizeMode::Marquee->value,
             ]),
             PropKey::TextBreakStrategy => self::named($value, [
                 'highQuality' => TextBreakStrategy::HighQuality->value,
@@ -2580,6 +2654,19 @@ final class TemplateRenderer
             PropKey::StickyHeader,
             PropKey::ScrollKeyboardInset,
             => self::boolValue($value, "Template {$key->name}"),
+            PropKey::AnimationProgram => $value instanceof Animation
+                ? $value->encode()
+                : (is_string($value) && $value !== '' ? $value : null),
+            PropKey::PressTapEffect => $value instanceof TapEffect
+                ? $value->encode()
+                : (is_string($value) && $value !== '' ? $value : null),
+            PropKey::GestureDrag => $value instanceof Drag
+                ? $value->encode()
+                : (is_string($value) && $value !== '' ? $value : null),
+            PropKey::NativeRef => Drag::ref(self::stringValue($value, 'nativeRef')),
+            PropKey::PressDoubleTapDelayMs => max(80, min(1_000, self::intValue($value, 'doubleTapDelay'))),
+            PropKey::GestureDragSnapIndex => Drag::snapRequestValue($value),
+            PropKey::AnimationRestartKey => max(0, self::intValue($value, "Template {$key->name}")),
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
                 ? $value
                 : null,
@@ -4545,6 +4632,21 @@ final class TemplateRenderer
             if ($method->getNumberOfParameters() === 0) {
                 $method->invoke($scope);
                 return;
+            }
+
+            $typed = EventPayloads::parameterClass($method, 0);
+            if ($typed !== null && is_string($payload)) {
+                $method->invoke($scope, EventPayloads::decode($typed, $payload));
+                return;
+            }
+            if ($typed !== null && $payload instanceof $typed) {
+                $method->invoke($scope, $payload);
+                return;
+            }
+            if (in_array($kind, [EventKind::Press, EventKind::LongPress], true) && is_string($payload)) {
+                // Press payloads now carry coordinates; untyped handlers keep
+                // the historical empty payload.
+                $payload = '';
             }
 
             if (

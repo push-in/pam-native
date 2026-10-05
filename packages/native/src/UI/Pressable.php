@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\UI;
 
 use Closure;
+use Pam\Native\Animation\TapEffect;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
 use Pam\Native\NodeKind;
@@ -19,14 +20,40 @@ final class Pressable extends Element
         return (new self(NodeKind::Pressable))->withChildren($children);
     }
 
+    /**
+     * Handlers typed `PressEvent $event` receive the touch location
+     * (locationX/Y as `x`/`y`, pageX/pageY); others keep the empty payload.
+     */
     public function onPress(Closure $handler): self
     {
-        return $this->withEvent(EventKind::Press, $handler);
+        return $this->withEvent(EventKind::Press, self::pressHandler($handler));
     }
 
+    /** Fires after `delayLongPress` while held; pair with `onPressOut` for hold-to-record. */
     public function onLongPress(Closure $handler): self
     {
-        return $this->withEvent(EventKind::LongPress, $handler);
+        return $this->withEvent(EventKind::LongPress, self::pressHandler($handler));
+    }
+
+    /**
+     * Second tap within `doubleTapDelay` near the first. When present, the
+     * single `onPress` is deferred by that delay and cancelled by a double tap
+     * (the RN ReelPage pattern), all on the UI thread.
+     */
+    public function onDoubleTap(Closure $handler): self
+    {
+        return $this->withPressEvent(EventKind::DoubleTap, $handler);
+    }
+
+    public function doubleTapDelay(int $milliseconds): self
+    {
+        return $this->withProperty(PropKey::PressDoubleTapDelayMs, max(80, min(1_000, $milliseconds)));
+    }
+
+    /** Native animation centred on the double-tap point (Reels heart burst). */
+    public function tapEffect(TapEffect $effect): self
+    {
+        return $this->withProperty(PropKey::PressTapEffect, $effect->encode());
     }
 
     public function onPressIn(Closure $handler): self
@@ -135,6 +162,17 @@ final class Pressable extends Element
     public function androidDisableSound(bool $disabled = true): self
     {
         return $this->withProperty(PropKey::PressAndroidDisableSound, $disabled);
+    }
+
+    private static function pressHandler(Closure $handler): Closure
+    {
+        $parameter = (new \ReflectionFunction($handler))->getParameters()[0] ?? null;
+        $type = $parameter?->getType();
+        $typed = $type instanceof \ReflectionNamedType && $type->getName() === PressEvent::class;
+
+        return $typed
+            ? static fn (string $payload = ''): mixed => $handler(PressEvent::fromPayload($payload))
+            : static fn (mixed $payload = ''): mixed => $handler(is_string($payload) ? '' : $payload);
     }
 
     private function withPressEvent(EventKind $kind, Closure $handler): self

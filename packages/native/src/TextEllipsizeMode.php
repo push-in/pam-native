@@ -10,4 +10,6 @@ enum TextEllipsizeMode: int
     case Head = 2;
     case Middle = 3;
     case Clip = 4;
+    /** Android single-line marquee ticker (native, no PHP per frame). */
+    case Marquee = 5;
 }

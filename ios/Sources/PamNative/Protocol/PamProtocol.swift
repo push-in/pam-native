@@ -132,6 +132,12 @@ public enum EventKind: Int {
     case layout = 67
     case mediaBuffering = 68
     case mediaLoadStart = 69
+    case doubleTap = 70
+    case gestureSettle = 71
+    case scrollBeginDrag = 72
+    case scrollEndDrag = 73
+    case momentumScrollEnd = 74
+    case textLayout = 75
 }
 
 public enum PropValue {
@@ -504,6 +510,20 @@ public enum PamConstants {
     public static let onMediaBuffering = 506
     public static let onMediaLoadStart = 507
     public static let scrollKeyboardInset = 508
+    public static let pressDoubleTapDelayMs = 509
+    public static let onDoubleTap = 510
+    public static let pressTapEffect = 511
+    public static let gestureDrag = 512
+    public static let gestureDragSnapIndex = 513
+    public static let onGestureSettle = 514
+    public static let nativeRef = 515
+    public static let animationProgram = 516
+    public static let animationRestartKey = 517
+    public static let transitionSpec = 518
+    public static let onScrollBeginDrag = 519
+    public static let onScrollEndDrag = 520
+    public static let onMomentumScrollEnd = 521
+    public static let onTextLayout = 522
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

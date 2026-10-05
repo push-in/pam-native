@@ -83,7 +83,6 @@ $invalidStyleConformance = [
     'width: min-content;',
     'text-decoration: underline wavy red;',
     'color: inherit;',
-    'transition: opacity 200ms ease 100ms;',
     'animation: spin 1s linear infinite;',
     'vertical-align: middle;',
     'font-size: larger;',
