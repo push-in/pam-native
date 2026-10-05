@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.36 - 2026-10-05
+
+- Add MIME filtering, an optional failure callback and an explicit import
+  limit up to 8 GiB to `Files::pick()`, retaining the 64 MiB default and
+  positional source compatibility.
+- Stream Android document imports with bounded memory and copy iOS
+  security-scoped documents without loading the whole file into `Data`.
+- Android API 26 and API 36 instrumented suites passed locally. iOS device,
+  Xcode and APNs gates were not run for this Android-focused patch release.
+
 ## 1.0.35 - 2026-10-05
 
 - Add composable `Route::guard()` groups so protected nested routes and
