@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Pam\Native\Http;
 
 use DateTimeImmutable;
-use DateTimeInterface;
 
 final readonly class HttpResponse
 {
@@ -63,7 +62,7 @@ final readonly class HttpResponse
         if ($value === null) {
             return null;
         }
-        $date = DateTimeImmutable::createFromFormat(DateTimeInterface::RFC7231, $value);
+        $date = DateTimeImmutable::createFromFormat('!D, d M Y H:i:s \\G\\M\\T', $value, new \DateTimeZone('UTC'));
 
         return $date === false ? null : $date;
     }

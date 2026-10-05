@@ -413,6 +413,7 @@ $assert(
     'HttpResponse must expose case-insensitive headers and the server Date.',
 );
 $assert((new HttpResponse(200, ''))->date() === null, 'Responses without a Date header must return null.');
+$assert((new HttpResponse(200, '', '', ['date' => 'not a date']))->date() === null, 'Malformed Date headers must return null.');
 
 // Cancellable timers.
 $ticks = 0;
