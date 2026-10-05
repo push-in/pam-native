@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.5.1 - 2026-10-05
+
+Render pipeline performance, part 3 (from a Galaxy S10 cold-start trace and
+the chat benchmark fixture). Chat fixture on an API 36 emulator, 3 runs
+(1.2.2 → this release): scroll jank 6.0% → 2.9%, scroll frame p90/p99 26/61
+→ 16/32 ms, typing frame p90 19 → 16 ms; app threads have no frame over
+16 ms during scroll in a Perfetto trace (remaining jank is emulator
+composition).
+
+- Images: cache identities are hashed once per source and hex-encoded
+  without `String.format`, which serialised the three image threads on ICU
+  locale locks and accounted for most of their CPU at cold start on device.
+- Lists: image and pressable cell views are pooled too; recycled image views
+  are cleared so a reused row never shows the previous row's pixels, and
+  pressables drop pressed state and local trigger actions.
+- OPcache: 128 MB shared memory, 16 MB interned strings and 16000 scripts so
+  large apps fit, and freshly installed bundles are cached on first launch
+  (bundles are activated atomically by rename).
+- iOS: the PHP worker drains events and module results and renders once per
+  batch through `Runtime::deferRendering()`/`flush()` (12 ms budget), and
+  collects cycles only when idle.
+- Android API 36 instrumented suite (268/268), Android unit, PHP SDK and Rust
+  tests passed locally. The iOS bridge was syntax-checked only (no Xcode).
+
 ## 1.5.0 - 2026-10-05
 
 Gestures and animations on the UI thread (React Native Reanimated +
