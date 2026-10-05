@@ -14,6 +14,13 @@ private const val MAX_PACKED_LIST_ITEMS = 100_000
 private const val MAX_PACKED_SECTIONS = 10_000
 private const val MAX_PACKED_SECTION_ENTRIES = 100_000
 
+/** Dense value -> constant table so protocol enums resolve in O(1) per field. */
+private inline fun <reified T> lookupTable(values: List<T>, value: (T) -> Int): Array<T?> {
+    val table = arrayOfNulls<T>((values.maxOfOrNull(value) ?: 0) + 1)
+    values.forEach { table[value(it)] = it }
+    return table
+}
+
 private fun strictUtf8(value: ByteBuffer, label: String): String =
     try {
         Charsets.UTF_8.newDecoder()
@@ -62,8 +69,10 @@ enum class NodeKind(val value: Int) {
     CANVAS(31);
 
     companion object {
+        private val byValue: Array<NodeKind?> = lookupTable(entries) { it.value }
+
         fun from(value: Int): NodeKind =
-            entries.firstOrNull { it.value == value }
+            byValue.getOrNull(value)
                 ?: throw ProtocolException("Unknown node kind $value")
     }
 }
@@ -630,8 +639,10 @@ enum class PropKey(val value: Int) {
     TRANSLATION_Y_PERCENT(491);
 
     companion object {
+        private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }
+
         fun from(value: Int): PropKey =
-            entries.firstOrNull { it.value == value }
+            byValue.getOrNull(value)
                 ?: throw ProtocolException("Unknown property $value")
     }
 }
@@ -839,22 +850,37 @@ object BatchDecoder {
     }
 }
 
+/**
+ * Reads with absolute indexes on one little-endian view; scalars never
+ * allocate a slice.
+ */
 private class BinaryReader(bytes: ByteBuffer) {
     private val buffer = bytes.slice().order(ByteOrder.LITTLE_ENDIAN)
+    private val limit = buffer.limit()
+    private var position = 0
 
-    fun u8(): Int = take(Byte.SIZE_BYTES).get().toInt() and 0xff
+    private fun advance(length: Int): Int {
+        if (length < 0 || limit - position < length) {
+            throw ProtocolException("Pam Native batch is truncated")
+        }
+        val start = position
+        position += length
+        return start
+    }
 
-    fun u16(): Int = take(Short.SIZE_BYTES).short.toInt() and 0xffff
+    fun u8(): Int = buffer.get(advance(Byte.SIZE_BYTES)).toInt() and 0xff
+
+    fun u16(): Int = buffer.getShort(advance(Short.SIZE_BYTES)).toInt() and 0xffff
 
     fun u32(): Int {
-        val value = take(Int.SIZE_BYTES).int.toLong() and 0xffff_ffffL
+        val value = buffer.getInt(advance(Int.SIZE_BYTES)).toLong() and 0xffff_ffffL
         if (value > Int.MAX_VALUE) {
             throw ProtocolException("Protocol count exceeds Android capacity")
         }
         return value.toInt()
     }
 
-    fun u64(): Long = take(Long.SIZE_BYTES).long
+    fun u64(): Long = buffer.getLong(advance(Long.SIZE_BYTES))
 
     fun positiveId(): Long =
         u64().also { value ->
@@ -864,7 +890,7 @@ private class BinaryReader(bytes: ByteBuffer) {
         }
 
     fun f32(): Float =
-        take(Float.SIZE_BYTES).float.also { value ->
+        buffer.getFloat(advance(Float.SIZE_BYTES)).also { value ->
             if (!value.isFinite() || value < 0f) {
                 throw ProtocolException("Layout value must be finite and non-negative")
             }
@@ -892,9 +918,9 @@ private class BinaryReader(bytes: ByteBuffer) {
     fun value(key: PropKey? = null): PropValue =
         when (val tag = u8()) {
             1 -> PropValue.Text(strictUtf8(sizedBytes(), "Text property"))
-            2 -> PropValue.Integer(take(Long.SIZE_BYTES).long)
+            2 -> PropValue.Integer(buffer.getLong(advance(Long.SIZE_BYTES)))
             3 -> PropValue.Decimal(
-                take(Double.SIZE_BYTES).double.also { value ->
+                buffer.getDouble(advance(Double.SIZE_BYTES)).also { value ->
                     if (!value.isFinite()) {
                         throw ProtocolException("Floating property must be finite")
                     }
@@ -918,7 +944,7 @@ private class BinaryReader(bytes: ByteBuffer) {
         }
 
     fun finish() {
-        check(!buffer.hasRemaining()) { "Pam Native batch contains trailing bytes" }
+        check(position == limit) { "Pam Native batch contains trailing bytes" }
     }
 
     private fun sizedBytes(): ByteArray {
@@ -937,19 +963,24 @@ private class BinaryReader(bytes: ByteBuffer) {
     }
 
     private fun bytes(length: Int): ByteArray {
+        val start = advance(length)
         val output = ByteArray(length)
-        take(length).get(output)
+        if (buffer.hasArray()) {
+            System.arraycopy(buffer.array(), buffer.arrayOffset() + start, output, 0, length)
+        } else {
+            val view = buffer.duplicate()
+            view.position(start)
+            view.get(output)
+        }
         return output
     }
 
     private fun take(length: Int): ByteBuffer {
-        if (length < 0 || buffer.remaining() < length) {
-            throw ProtocolException("Pam Native batch is truncated")
-        }
-        val slice = buffer.slice().order(ByteOrder.LITTLE_ENDIAN)
-        slice.limit(length)
-        buffer.position(buffer.position() + length)
-        return slice
+        val start = advance(length)
+        val view = buffer.duplicate()
+        view.position(start)
+        view.limit(start + length)
+        return view.slice().order(ByteOrder.LITTLE_ENDIAN)
     }
 }
 
