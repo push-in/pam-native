@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.4.0 - 2026-10-05
+
+React Native typography and layout parity (Android). See
+[docs/typography.md](docs/typography.md).
+
+- Exact text measurement: the engine measures every `Text` box with the
+  Android text stack that draws it (`pam_native_engine_set_text_measurer`,
+  `PamTextLayout`), following React Native: integer (ceil) font pixel sizes,
+  hinted glyph advances, kerning, emoji/fallback fonts, `CustomLineHeightSpan`
+  line heights, ceil widths, last-line heights and real first baselines.
+  `numberOfLines` implies a tail ellipsis. iOS keeps the estimator.
+- **Behaviour change:** `includeFontPadding` now defaults to `true` like React
+  Native Android (single-line Roboto 14 sp is 49 px instead of 43 px at
+  2.625×). Opt out with `include-font-padding: false`
+  (`-pam-include-font-padding`), `includeFontPadding="false"` or
+  `Text::includeFontPadding(false)`. Text nodes no longer force linear
+  (subpixel) advances.
+- Nested text: `Text` may contain text and nested `Text`/`Span` runs with
+  their own size, weight, style, family, color, background, decoration,
+  letter spacing and transform, rendered as one paragraph. `on:press` on a run
+  makes it a link/mention (`EventKind::SpanPress`). PHP: `Text::rich()`.
+  Whitespace inside `Text` follows JSX.
+- `hairline` (= `StyleSheet.hairlineWidth`) and `Ndpx` device-pixel units in
+  CSS; `Pam\Native\PixelRatio` (`get`, `getFontScale`, `roundToNearestPixel`,
+  `getPixelSizeForLayoutSize`, `hairlineWidth`).
+- Yoga layout semantics: border widths inset children and leaf content and
+  grow content-sized boxes; `align-items/align-self: baseline` uses the first
+  text baseline of container children recursively.
+- `on:layout` / `Element::onLayout()` (`LayoutEvent` x/y/width/height relative
+  to the parent), on mount and on frame changes, coalesced per frame.
+- Safe areas: `SafeAreaView` insets are laid out by the engine for the window
+  edges each view touches, at any nesting level (fixes a bottom-only nested
+  `SafeAreaView` under a root without the bottom edge drawing under the
+  navigation bar). `WindowMetrics` safe areas are correct from the first
+  render (`PAM_BOOT_METRICS`) and `Dimensions` is re-sent when insets change.
+  New `android.safeAreaBottomFallback` (dp) for devices reporting no bottom
+  inset.
+- `appearance.splash` (`logo`, `darkLogo`, `size`) for the Android 12+
+  SplashScreen icon and the legacy starting window.
+- `HttpResponse::date()` no longer uses the PHP 8.5-deprecated
+  `DateTimeInterface::RFC7231` constant.
+- Protocol (append-only): properties `TextSpans` (501) … `ScrollKeyboardInset`
+  (508), events `SpanPress` (66), `Layout` (67), `MediaBuffering` (68),
+  `MediaLoadStart` (69).
+
 ## 1.3.0 - 2026-10-05
 
 Native CSS visual effects on top of the 1.2.0 complete-CSS compiler and the
