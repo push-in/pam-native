@@ -35,6 +35,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var lastScrollNanos = 0L
     private var initialIndex = 0
     private var initialPositionApplied = false
+    private var initialPositionGeneration = 0
     private var scrollEnabled = true
     private var showsScrollIndicator = true
     private var removeClippedSubviews = true
@@ -123,6 +124,25 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     /**
+     * A viewport that shrinks while resting at its end (a banner or composer
+     * growing around a chat timeline) keeps that end visible, like a
+     * bottom-anchored React Native list, instead of hiding the newest rows.
+     */
+    override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+        val oldExtent = if (horizontal) oldWidth else oldHeight
+        val newExtent = if (horizontal) width else height
+        val wasAtEnd = initialPositionApplied && oldExtent > 0 && newExtent != oldExtent &&
+            restingAtEnd()
+        super.onSizeChanged(width, height, oldWidth, oldHeight)
+        if (wasAtEnd && !inverted) {
+            post {
+                val count = adapter?.itemCount ?: 0
+                if (count > 0) (layoutManager as? LinearLayoutManager)?.scrollToPosition(count - 1)
+            }
+        }
+    }
+
+    /**
      * RecyclerView deliberately lays out prefetched rows beyond its clipped
      * viewport. Android's accessibility snapshot can otherwise intersect a
      * descendant with the clip and publish an inverted rectangle. Keep those
@@ -179,9 +199,22 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         unmount: (Long, FrameLayout) -> Unit,
     ) {
         val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(1f)) }
+        // Content-sized cells are re-measured after mounting (fonts, images,
+        // async text). When only extents change for the same rows, a list that
+        // was resting at its end stays there instead of drifting by the delta.
+        val keepEnd = initialPositionApplied &&
+            ids.isNotEmpty() &&
+            ids == richIds &&
+            pixelExtents != richExtents &&
+            restingAtEnd()
         richIds = ids
         richExtents = pixelExtents
         val current = adapter as? RichRecyclerAdapter
+        if (keepEnd) {
+            post {
+                if (!inverted) (layoutManager as? LinearLayoutManager)?.scrollToPosition(ids.size - 1)
+            }
+        }
         if (current == null) {
             adapter = RichRecyclerAdapter(
                 context,
@@ -198,7 +231,42 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         applyInitialPosition()
     }
 
+    /**
+     * Aligns a rich cell using the same per-cell pixel extents the adapter
+     * lays out. Converting an accumulated logical offset once drifts by the
+     * per-cell rounding (about 9 px across a 33-row chat on a 2.625 density),
+     * leaving end-aligned rows partially hidden. Returns false when [id] is
+     * not a rich cell of this list.
+     */
+    fun scrollToRichItem(
+        id: Long,
+        alignment: Int,
+        innerStartPx: Int = 0,
+        targetExtentPx: Int? = null,
+    ): Boolean {
+        val index = richIds.indexOf(id)
+        if (index < 0) return false
+        initialPositionApplied = true
+        val extents = richIds.map { richExtents[it] ?: dp(rowHeight) }
+        val viewport = if (horizontal) width else height
+        val available = (viewport - (targetExtentPx ?: extents[index])).coerceAtLeast(0)
+        val adjustment = when (alignment) {
+            2 -> available / 2
+            3 -> available
+            else -> 0
+        }
+        val start = extents.subList(0, index).sum() + innerStartPx
+        val position = virtualScrollPosition(extents, (start - adjustment).coerceAtLeast(0))
+        (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(
+            position.index,
+            -position.offset,
+        )
+        dispatchViewport()
+        return true
+    }
+
     fun scrollToLogicalOffset(value: Float) {
+        initialPositionApplied = true
         val targetPx = dp(value.coerceAtLeast(0f))
         if (richIds.isEmpty()) {
             scrollBy(
@@ -562,14 +630,25 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
     }
 
+    private fun restingAtEnd(): Boolean {
+        val count = adapter?.itemCount ?: 0
+        val layout = layoutManager as? LinearLayoutManager ?: return false
+        return count > 0 && layout.findLastCompletelyVisibleItemPosition() == count - 1
+    }
+
     private fun applyInitialPosition() {
         if (initialPositionApplied) return
         val count = adapter?.itemCount ?: 0
         if (count == 0) return
-        val target = initialIndex.coerceAtMost(count - 1)
+        val generation = ++initialPositionGeneration
         post {
+            // An explicit scroll request issued in the same commit (or a newer
+            // initial index) supersedes this pending initial position.
+            if (initialPositionApplied || generation != initialPositionGeneration) return@post
+            val itemCount = adapter?.itemCount ?: 0
+            if (itemCount == 0) return@post
             (layoutManager as? LinearLayoutManager)
-                ?.scrollToPositionWithOffset(target, 0)
+                ?.scrollToPositionWithOffset(initialIndex.coerceAtMost(itemCount - 1), 0)
             initialPositionApplied = true
         }
     }

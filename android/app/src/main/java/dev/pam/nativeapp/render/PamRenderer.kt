@@ -1220,6 +1220,28 @@ class PamRenderer(
             val targetTestId = state.textOrNull(PropKey.SCROLL_TARGET_TEST_ID).orEmpty()
             val targetOffset = if (targetTestId.isNotEmpty()) {
                 val targetId = descendantWithTestId(state.id, targetTestId)
+                val cellId = targetId?.let(::virtualCellRoot)
+                val cellFrame = cellId?.let { frames[it] }
+                val innerFrame = targetId?.let { frames[it] }
+                if (cellId != null && cellFrame != null && innerFrame != null) {
+                    val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
+                    val innerStart = if (horizontal) {
+                        innerFrame.x - cellFrame.x
+                    } else {
+                        innerFrame.y - cellFrame.y
+                    }
+                    val innerExtent = if (horizontal) innerFrame.width else innerFrame.height
+                    if (
+                        list.scrollToRichItem(
+                            cellId,
+                            state.integer(PropKey.SCROLL_TARGET_ALIGNMENT, 1).toInt(),
+                            innerStartPx = if (cellId == targetId) 0 else dp(innerStart),
+                            targetExtentPx = if (cellId == targetId) null else dp(innerExtent),
+                        )
+                    ) {
+                        return@post
+                    }
+                }
                 val targetFrame = targetId?.let { frames[it] }
                 val listFrame = frames[state.id]
                 if (targetFrame != null && listFrame != null) {
@@ -1230,7 +1252,19 @@ class PamRenderer(
                         targetFrame.y - listFrame.y
                     }
                     val targetExtent = if (horizontal) targetFrame.width else targetFrame.height
-                    val viewportExtent = if (horizontal) listFrame.width else listFrame.height
+                    // Align against the list's real native viewport: host-side
+                    // insets (keyboard avoidance, safe areas) can make it
+                    // shorter than the engine frame, which left end-aligned
+                    // targets hidden below the visible edge.
+                    val nativeExtent = (if (horizontal) list.width else list.height) /
+                        list.resources.displayMetrics.density
+                    val viewportExtent = if (nativeExtent > 0f) {
+                        nativeExtent
+                    } else if (horizontal) {
+                        listFrame.width
+                    } else {
+                        listFrame.height
+                    }
                     alignedTargetOffset(
                         targetStart,
                         targetExtent,
