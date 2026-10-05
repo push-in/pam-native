@@ -581,9 +581,12 @@ void apply_php_ini_defaults(HashTable* configuration) {
     set_ini(configuration, "opcache.enable_cli", has_state_dir ? "1" : "0");
     set_ini(configuration, "opcache.jit", "disable");
     set_ini(configuration, "opcache.jit_buffer_size", "0");
-    set_ini(configuration, "opcache.memory_consumption", "48");
-    set_ini(configuration, "opcache.interned_strings_buffer", "8");
-    set_ini(configuration, "opcache.max_accelerated_files", "8000");
+    set_ini(configuration, "opcache.memory_consumption", "128");
+    set_ini(configuration, "opcache.interned_strings_buffer", "16");
+    set_ini(configuration, "opcache.max_accelerated_files", "16000");
+    // Bundles are extracted to a staging directory and activated by rename,
+    // so fresh mtimes never mean a half-written file: cache on first launch.
+    set_ini(configuration, "opcache.file_update_protection", "0");
     // Release bundles are content-addressed; hot reload writes new files, so
     // revalidate on every include (a stat) rather than serving stale code.
     set_ini(configuration, "opcache.validate_timestamps", "1");
