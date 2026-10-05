@@ -593,12 +593,38 @@ fn layout_node(
         } else {
             let mut cursor = inner.y;
             for row in visible_children.chunks(columns) {
-                let item_height = row
+                let authored = row
                     .iter()
                     .filter_map(|child| number(child, PropKey::Height))
-                    .reduce(f32::max)
-                    .unwrap_or(row_height)
-                    .max(1.0);
+                    .reduce(f32::max);
+                let item_height = match authored {
+                    Some(height) => height,
+                    // A single-column cell without an authored height is
+                    // content-sized, like a React Native FlatList cell. The
+                    // estimate only remains for cells whose content has no
+                    // definite intrinsic extent (e.g. percentage-sized media)
+                    // and for empty cells that have not been populated yet.
+                    None if columns == 1
+                        && context
+                            .children
+                            .get(&row[0].id)
+                            .is_some_and(|cell| cell.iter().any(|child| visible(child))) =>
+                    {
+                        let measured = constrained_intrinsic_extent(
+                            context.children,
+                            row[0],
+                            Axis::Vertical,
+                            cell_width,
+                            inner.height,
+                            context.text_scale,
+                            context.text_metrics,
+                            depth + 1,
+                        )?;
+                        if measured > 0.0 { measured } else { row_height }
+                    }
+                    None => row_height,
+                }
+                .max(1.0);
                 for (column, child) in row.iter().enumerate() {
                     let item_frame = Layout {
                         x: inner.x + column as f32 * cell_width,
@@ -1826,8 +1852,20 @@ fn intrinsic_extent(
         let child_available_width = if let Some(widths) = &allocated_widths {
             widths[&child.id]
         } else if requested_axis == Axis::Vertical {
-            dimension(child, PropKey::Width, PropKey::WidthPercent, inner_width)
-                .unwrap_or(inner_width)
+            // A column child wraps inside its own cross size: the containing
+            // width minus its horizontal margins, clamped by min/max-width.
+            // Ignoring max-width measured capped bubbles with too few lines,
+            // so content-sized parents clipped their wrapped text.
+            let (margin_start, margin_end) = margin_cross(child, Axis::Vertical);
+            let width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner_width)
+                .unwrap_or((inner_width - margin_start - margin_end).max(0.0));
+            let maximum = dimension(
+                child,
+                PropKey::MaxWidth,
+                PropKey::MaxWidthPercent,
+                inner_width,
+            );
+            constrained(width, number(child, PropKey::MinWidth), maximum)?
         } else {
             inner_width
         };
@@ -2861,7 +2899,21 @@ fn child_main(
         (Axis::Horizontal, Some(height), Some(ratio)) => height * ratio,
         _ => {
             let (available_width, available_height) = match axis {
-                Axis::Vertical => (explicit_cross.unwrap_or(available_cross), available_main),
+                Axis::Vertical => {
+                    // Wrap at the item's own cross size (see intrinsic_extent).
+                    let (margin_start, margin_end) = margin_cross(node, Axis::Vertical);
+                    let width = explicit_cross
+                        .unwrap_or((available_cross - margin_start - margin_end).max(0.0));
+                    let maximum = dimension(
+                        node,
+                        PropKey::MaxWidth,
+                        PropKey::MaxWidthPercent,
+                        available_cross,
+                    );
+                    let width = constrained(width, number(node, PropKey::MinWidth), maximum)
+                        .unwrap_or(width);
+                    (width, available_main)
+                }
                 Axis::Horizontal => (available_main, explicit_cross.unwrap_or(available_cross)),
             };
             intrinsic_extent(
@@ -5936,6 +5988,138 @@ mod tests {
         assert_eq!(layout[&4].height, 180.0);
         assert_eq!(layout[&5].y, 540.0);
         assert_eq!(layout[&5].height, 60.0);
+    }
+
+    #[test]
+    fn column_children_wrap_text_inside_their_max_width() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(1, node(1, 0, 0, NodeKind::Column, []));
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Pressable,
+                [
+                    (PropKey::MaxWidth, PropValue::Float(200.0)),
+                    (PropKey::MarginLeft, PropValue::Float(12.0)),
+                    (PropKey::Padding, PropValue::Float(10.0)),
+                    (PropKey::AlignSelf, PropValue::Integer(1)),
+                ],
+            ),
+        );
+        nodes.insert(
+            3,
+            node(
+                3,
+                2,
+                0,
+                NodeKind::Text,
+                [
+                    (
+                        PropKey::Text,
+                        PropValue::String(
+                            "Painel de gerenciamento com um texto longo que precisa quebrar"
+                                .to_owned(),
+                        ),
+                    ),
+                    (PropKey::FontSize, PropValue::Float(16.0)),
+                    (PropKey::LineHeight, PropValue::Float(21.0)),
+                ],
+            ),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 700.0,
+            },
+        )
+        .expect("max-width wrapping");
+
+        assert_eq!(layout[&2].width, 200.0);
+        assert_eq!(layout[&3].width, 180.0);
+        assert!(layout[&3].height > 21.0 * 2.0);
+        assert_eq!(layout[&2].height, layout[&3].height + 20.0);
+    }
+
+    #[test]
+    fn virtual_list_content_sizes_cells_without_authored_height() {
+        let text = |id: u64, parent: u64, value: &str| {
+            node(
+                id,
+                parent,
+                0,
+                NodeKind::Text,
+                [
+                    (PropKey::Text, PropValue::String(value.to_owned())),
+                    (PropKey::FontSize, PropValue::Float(16.0)),
+                    (PropKey::LineHeight, PropValue::Float(20.0)),
+                ],
+            )
+        };
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListRowHeight, PropValue::Float(120.0))],
+            ),
+        );
+        nodes.insert(
+            2,
+            node(
+                2,
+                1,
+                0,
+                NodeKind::Column,
+                [(PropKey::PaddingVertical, PropValue::Float(4.0))],
+            ),
+        );
+        nodes.insert(3, text(3, 2, "short"));
+        nodes.insert(4, node(4, 1, 1, NodeKind::Column, []));
+        nodes.insert(
+            5,
+            node(
+                5,
+                1,
+                2,
+                NodeKind::Column,
+                [(PropKey::Padding, PropValue::Float(10.0))],
+            ),
+        );
+        nodes.insert(6, text(6, 5, "one"));
+        nodes.insert(
+            7,
+            node(
+                7,
+                5,
+                1,
+                NodeKind::View,
+                [(PropKey::Height, PropValue::Float(200.0))],
+            ),
+        );
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("content-sized virtual list");
+
+        assert_eq!(layout[&2].height, 28.0);
+        assert_eq!(layout[&4].y, 28.0);
+        assert_eq!(layout[&4].height, 120.0);
+        assert_eq!(layout[&5].y, 148.0);
+        assert_eq!(layout[&5].height, 240.0);
+        assert_eq!(layout[&7].y, 178.0);
     }
 
     #[test]
