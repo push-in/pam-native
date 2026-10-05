@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.35 - 2026-10-05
+
+- Add composable `Route::guard()` groups so protected nested routes and
+  destinations share guards without repeating route definitions.
+- Add `android.debugApplicationIdSuffix` for separate QA installations even
+  when a Firebase application ID is present.
+- Rearm rich `VirtualizedList` end-reached events when the item IDs change,
+  allowing another page request after new rows arrive.
+- Android API 26 and API 36 instrumented suites passed locally. iOS device,
+  Xcode and APNs gates were not run for this Android-focused patch release.
+
 ## 1.0.34 - 2026-10-04
 
 - Decode iOS mutation numbers from a single borrowed payload buffer instead of
