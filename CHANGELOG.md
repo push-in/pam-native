@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.6.1 - 2026-10-05
+
+Fixes for the React Native parity releases (1.4.0+), found on a Galaxy S10.
+
+- **Release builds measured text with the estimator**: R8 stripped the JNI
+  text-measurement callback (`PamRuntime.onMeasureText`), so minified builds
+  silently fell back to the portable estimator (wrong text box heights, e.g.
+  line pitch not following `fontScale`). The callback is now kept, with a unit
+  test that every JNI callback looked up by the bridge has a keep rule.
+- **SafeAreaView inset race**: the runtime now starts with the window safe
+  area already set in the engine (and the renderer in engine-managed mode)
+  before the first PHP frame, reconciles insets right after the
+  off-UI-thread start, and drops any native SafeAreaView padding applied
+  earlier, so a root SafeAreaView is never inset twice or not at all and its
+  descendants are never shifted.
+- `Text::rich()`/`<Span>` and `Icon` no longer require `ext-mbstring`
+  (absent from the Android PHP runtime).
+- Regression tests: engine layout of the Zé chat header under a top-edge
+  root SafeAreaView, renderer ordering (legacy frame → engine insets),
+  `lineHeight` × `fontScale` 1.1 parity, ProGuard JNI contract.
+- `examples/layout_dump.rs` prints engine frames for a captured render frame
+  and window safe area.
+
 ## 1.6.0 - 2026-10-05
 
 React Native component parity on Android. See
