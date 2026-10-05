@@ -31,6 +31,8 @@ internal fun isEligibleTranslatedTouchOccluder(
     containsInteractiveTarget: Boolean,
 ): Boolean = !isScrollContainer && containsInteractiveTarget
 
+private const val IME_RECONCILE_DELAY_MS = 350L
+
 internal class PamRootHost(context: Context) : FrameLayout(context) {
     private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()
@@ -39,11 +41,19 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
     private var translatedTouchTarget: View? = null
     var stableSafeAreaInsets: SafeAreaInsets = SafeAreaInsets(0, 0, 0, 0)
         private set
+    private var stableInsetsSize: Pair<Int, Int>? = null
     var consumesBottomSystemInset: Boolean = false
         private set
     var consumedBottomSystemInset: Int = 0
         private set
     var onStableInsetsChanged: (() -> Unit)? = null
+
+    /** Visible IME height in pixels from the window bottom (0 when hidden). */
+    var imeBottomInset: Int = 0
+        private set
+
+    /** Called synchronously while insets are dispatched, before layout. */
+    var onImeInsetChanged: ((Int) -> Unit)? = null
     internal var statusBarSurfaceColor: Int = Color.TRANSPARENT
         private set
 
@@ -62,8 +72,13 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
         }
     }
 
+    /** Whether the owning window has input focus (another window may be on top). */
+    var windowFocused: () -> Boolean = { hasWindowFocus() }
+
     override fun onApplyWindowInsets(insets: WindowInsets): WindowInsets {
         val previous = stableSafeAreaInsets
+        val previousSize = stableInsetsSize
+        stableInsetsSize = width to height
         stableSafeAreaInsets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val safe = insets.getInsetsIgnoringVisibility(
                 WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout(),
@@ -83,8 +98,80 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
             consumedBottomSystemInset = 0
             safe
         }
+        val sameWindow = previousSize == null || previousSize == stableInsetsSize ||
+            previousSize.first == 0 || previousSize.second == 0
+        if (!windowFocused() && sameWindow) {
+            // A dialog on top must not shrink this window's safe area.
+            stableSafeAreaInsets = SafeAreaInsets(
+                maxOf(previous.left, stableSafeAreaInsets.left),
+                maxOf(previous.top, stableSafeAreaInsets.top),
+                maxOf(previous.right, stableSafeAreaInsets.right),
+                maxOf(previous.bottom, stableSafeAreaInsets.bottom),
+            )
+        }
         if (stableSafeAreaInsets != previous) post { onStableInsetsChanged?.invoke() }
+        updateImeInset(imeInsetOf(insets))
+        // The end-state insets dispatched before an IME animation can differ
+        // from the settled IME (a suggestion strip appearing or not); the
+        // root window insets are authoritative once the transition settles.
+        removeCallbacks(imeReconciliation)
+        postDelayed(imeReconciliation, IME_RECONCILE_DELAY_MS)
         return super.onApplyWindowInsets(insets)
+    }
+
+    /**
+     * The user closed the keyboard (Back, the IME's own hide key or a system
+     * gesture) while a text input kept focus. Blur it, so `on:blur` observers
+     * (a chat composer restoring its safe-area padding) see the same state as
+     * the screen: a hidden keyboard and no caret. The root host absorbs the
+     * focus; otherwise Android would refocus the first focusable input.
+     */
+    private val imeReconciliation = Runnable { reconcileImeInset() }
+
+    private fun imeInsetOf(insets: WindowInsets): Int =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            visibleImeInset(
+                rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
+                visible = insets.isVisible(WindowInsets.Type.ime()),
+            )
+        } else {
+            0
+        }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        super.onWindowFocusChanged(hasWindowFocus)
+        if (hasWindowFocus) {
+            rootWindowInsets?.let { updateImeInset(imeInsetOf(it)) }
+            // Re-read the real insets that were retained while unfocused.
+            requestApplyInsets()
+        }
+    }
+
+    /** Re-reads the settled IME height (after an insets animation ends). */
+    fun reconcileImeInset() {
+        if (!isAttachedToWindow) return
+        val settled = rootWindowInsets?.let(::imeInsetOf) ?: return
+        // Only the height is reconciled: visibility follows the dispatched
+        // insets, because the root insets lag behind while the IME animates.
+        if ((settled > 0) == (imeBottomInset > 0)) updateImeInset(settled)
+    }
+
+    private fun updateImeInset(ime: Int) {
+        if (ime == imeBottomInset) return
+        // The IME of another (dialog) window does not cover this window's
+        // composer; only hiding is applied while unfocused.
+        if (ime > 0 && !windowFocused()) return
+        val hidden = imeBottomInset > 0 && ime == 0
+        imeBottomInset = ime
+        onImeInsetChanged?.invoke(ime)
+        if (hidden) post(::blurInputAfterImeHidden)
+    }
+
+    private fun blurInputAfterImeHidden() {
+        if (imeBottomInset != 0 || !isAttachedToWindow) return
+        val focused = findFocus() as? android.widget.EditText ?: return
+        isFocusableInTouchMode = true
+        if (!requestFocus()) focused.clearFocus()
     }
 
     fun addPointerObserver(observer: (MotionEvent) -> Unit) {

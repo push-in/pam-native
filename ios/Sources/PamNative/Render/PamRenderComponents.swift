@@ -895,7 +895,27 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
 
     func setFormattedTextFromRenderer(_ value: String) {
-        setTextFromRenderer(formatInput(value))
+        let formatted = formatInput(value)
+        let current = text ?? ""
+        // A controlled value rendered from an older change event must not
+        // overwrite newer keyboard text (React Native's mostRecentEventCount).
+        if isFirstResponder && PamInputEcho.isStale(
+            &inFlightValues,
+            value: formatted,
+            current: current,
+            now: ProcessInfo.processInfo.systemUptime
+        ) {
+            return
+        }
+        if formatted == current { return }
+        setTextFromRenderer(formatted)
+    }
+
+    /// Values dispatched to PHP whose echo has not been rendered yet.
+    private var inFlightValues: [(String, TimeInterval)] = []
+
+    func recordDispatchedValue(_ value: String) {
+        PamInputEcho.record(&inFlightValues, value: value, now: ProcessInfo.processInfo.systemUptime)
     }
 
     func setInputCallbacks(
@@ -2417,5 +2437,40 @@ final class ImageLoadSessionDelegate: NSObject, URLSessionDataDelegate {
         lock.lock()
         defer { lock.unlock() }
         return active[task.taskIdentifier]
+    }
+}
+
+
+/// Controlled-input echo reconciliation shared with Android
+/// (`isStaleInputEcho`): PHP renders change events in order, so a rendered
+/// value equal to one still in flight is that event's echo; when the field
+/// already holds newer text it is stale. Any other value is authored.
+enum PamInputEcho {
+    static let window: TimeInterval = 3
+    static let limit = 64
+
+    static func record(_ inFlight: inout [(String, TimeInterval)], value: String, now: TimeInterval) {
+        if inFlight.last?.0 == value { return }
+        inFlight.append((value, now))
+        if inFlight.count > limit { inFlight.removeFirst(inFlight.count - limit) }
+    }
+
+    static func isStale(
+        _ inFlight: inout [(String, TimeInterval)],
+        value: String,
+        current: String,
+        now: TimeInterval
+    ) -> Bool {
+        while let first = inFlight.first, now - first.1 > window { inFlight.removeFirst() }
+        if value == current {
+            inFlight.removeAll()
+            return false
+        }
+        guard let index = inFlight.firstIndex(where: { $0.0 == value }) else {
+            inFlight.removeAll()
+            return false
+        }
+        inFlight.removeFirst(index + 1)
+        return true
     }
 }

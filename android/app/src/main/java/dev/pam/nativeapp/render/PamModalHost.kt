@@ -394,28 +394,38 @@ internal class PamModalHost @JvmOverloads constructor(
 
         previousFocus = WeakReference(rootView.findFocus())
         val generation = ++dialogGeneration
-        dialog = Dialog(context, R.style.Theme_PamNative_Modal).also { modal ->
+        Dialog(context, R.style.Theme_PamNative_Modal).also { modal ->
+            // Track the window before it is shown: a close()/removal that
+            // runs while show() dispatches attach/focus callbacks must still
+            // find and dismiss it, never leaving an orphan dimmed window.
+            dialog = modal
             modal.requestWindowFeature(Window.FEATURE_NO_TITLE)
             (content.parent as? ViewGroup)?.removeView(content)
             modal.setContentView(content)
             applyDismissPolicy(modal)
-            modal.setOnCancelListener { requestClose() }
+            modal.setOnCancelListener {
+                // Platform cancellation (legacy Back) closes this window only.
+                pamActivity()?.suppressNextPamBack()
+                requestClose()
+            }
             modal.setOnKeyListener { _, keyCode, event ->
-                if (
-                    keyCode == KeyEvent.KEYCODE_BACK
-                    && event.action == KeyEvent.ACTION_UP
-                ) {
-                    requestCloseFromBack()
-                    true
-                } else {
+                if (keyCode != KeyEvent.KEYCODE_BACK) {
                     false
+                } else {
+                    // Own the whole Back gesture (down and up) so neither half
+                    // reaches the activity's navigator below this window.
+                    if (event.action == KeyEvent.ACTION_UP && !event.isCanceled) {
+                        requestCloseFromBack()
+                    }
+                    true
                 }
             }
             applyBackdrop()
             applyWindowConfiguration(modal)
             modal.show()
-            if (dialogGeneration != generation || !desiredVisible) {
+            if (dialog !== modal || dialogGeneration != generation || !desiredVisible) {
                 modal.dismiss()
+                if (dialog === modal) dialog = null
                 return@also
             }
             registerDialogBackCallback(modal)
@@ -826,7 +836,21 @@ internal class PamModalHost @JvmOverloads constructor(
                 }
 
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    if (!cancelled) endAction?.invoke()
+                    if (cancelled) return
+                    // The IME of the window below usually hides while the
+                    // sheet enters; its target translation was captured at
+                    // the start, so settle on the current keyboard inset.
+                    if (entering) {
+                        movers.forEach { view ->
+                            if (view.translationY != sheetKeyboardTranslation) {
+                                view.animate()
+                                    .translationY(sheetKeyboardTranslation)
+                                    .setDuration(SHEET_KEYBOARD_SETTLE_MS)
+                                    .start()
+                            }
+                        }
+                    }
+                    endAction?.invoke()
                 }
             })
             start()
@@ -1076,6 +1100,7 @@ internal class PamModalHost @JvmOverloads constructor(
         const val MODAL_ENTER_DURATION_MS = 225L
         const val MODAL_EXIT_DURATION_MS = 125L
         const val SHEET_ENTER_DURATION_MS = 250L
+        const val SHEET_KEYBOARD_SETTLE_MS = 160L
         const val SHEET_EXIT_DURATION_MS = 200L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
     }

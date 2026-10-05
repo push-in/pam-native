@@ -57,6 +57,15 @@ private func pam_native_runtime_relayout(
     _ dark_appearance: Bool,
 )
 
+@_silgen_name("pam_native_runtime_set_keyboard_inset")
+private func pam_native_runtime_set_keyboard_inset(
+    _ handle: UInt64,
+    _ bottom: Float,
+    _ width_dp: Float,
+    _ height_dp: Float,
+    _ text_scale: Float,
+)
+
 @_silgen_name("pam_native_ios_set_boot_safe_area_insets")
 private func pam_native_ios_set_boot_safe_area_insets(_ left: Float, _ top: Float, _ right: Float, _ bottom: Float)
 
@@ -337,6 +346,7 @@ public final class PamRuntime {
         self.renderer = makeRenderer(hostView: hostView)
 
         errorOverlay.onReload = { [weak self] in self?.reloadAfterError() }
+        observeKeyboard()
 
         let target = PamRuntimeDisplayLinkTarget(runtime: self)
         displayLinkTarget = target
@@ -489,6 +499,7 @@ public final class PamRuntime {
         textScale: Float,
         darkAppearance: Bool,
     ) {
+        layoutViewport = (widthDp, heightDp, textScale)
         let normalizedEntry = entry.hasPrefix("file://")
             ? String(entry.dropFirst("file://".count))
             : entry
@@ -574,7 +585,58 @@ public final class PamRuntime {
         configureDisplayLink()
     }
 
+    private var layoutViewport: (width: Float, height: Float, textScale: Float) = (0, 0, 1)
+
+    /// Visible keyboard height in points over the PAM root view (0 when
+    /// hidden). The engine lays a trailing panning KeyboardAvoidingView out
+    /// directly above the keyboard and shrinks its flexible siblings.
+    public func updateKeyboardInset(bottom: Float) {
+        let currentHandle = currentHandle()
+        let viewport = layoutViewport
+        guard currentHandle != 0, viewport.width > 0, viewport.height > 0 else { return }
+        pam_native_runtime_set_keyboard_inset(
+            currentHandle,
+            max(0, bottom),
+            viewport.width,
+            viewport.height,
+            viewport.textScale
+        )
+    }
+
+    private var keyboardObservers: [NSObjectProtocol] = []
+
+    /// Feeds the visible keyboard height over the current host view to the
+    /// engine for every host (brownfield controller and generated app).
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        keyboardObservers.append(center.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.keyboardChanged(notification, hiding: false)
+        })
+        keyboardObservers.append(center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.keyboardChanged(notification, hiding: true)
+        })
+    }
+
+    private func keyboardChanged(_ notification: Notification, hiding: Bool) {
+        guard let host = renderer.hostView, let window = host.window else { return }
+        let end = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
+            .cgRectValue ?? .zero
+        let keyboard = window.convert(end, from: window.screen.coordinateSpace)
+        let frame = host.convert(host.bounds, to: window)
+        let overlap = hiding ? 0 : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
+        updateKeyboardInset(bottom: Float(overlap))
+    }
+
     public func updateViewport(widthDp: Float, heightDp: Float, textScale: Float, darkAppearance: Bool) {
+        layoutViewport = (widthDp, heightDp, textScale)
         let currentHandle = currentHandle()
         guard currentHandle != 0 else { return }
         let appearanceMode = PamAppearance.storedMode()
@@ -814,6 +876,8 @@ public final class PamRuntime {
         modules.close()
         renderer.close()
         lifecycleObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        keyboardObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        keyboardObservers.removeAll()
         lifecycleObservers.removeAll()
         displayLinkTarget = nil
 

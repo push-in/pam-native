@@ -246,6 +246,12 @@ class PamActivity : FragmentActivity() {
     private fun bindRuntimeSurface() {
         run {
             rootHost.onStableInsetsChanged = { scheduleViewportUpdate() }
+            rootHost.onImeInsetChanged = { inset ->
+                runtime.updateKeyboardInset(inset / resources.displayMetrics.density)
+            }
+            rootHost.windowFocused = ::hasWindowFocus
+            // A re-attached runtime may still carry the previous host's IME.
+            runtime.updateKeyboardInset(rootHost.imeBottomInset / resources.displayMetrics.density)
             // The runtime may start after the first window layout (assets are
             // installed off the UI thread); reconcile insets and metrics now.
             scheduleViewportUpdate(force = true)
@@ -803,7 +809,37 @@ class PamActivity : FragmentActivity() {
         } else {
             reported.bottom
         }
-        return androidx.core.graphics.Insets.of(reported.left, reported.top, reported.right, bottom)
+        return retainedWhileUnfocused(
+            androidx.core.graphics.Insets.of(reported.left, reported.top, reported.right, bottom),
+        )
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && runtimeStarted) scheduleViewportUpdate()
+    }
+
+    private var safeAreaWindowSize: Pair<Int, Int>? = null
+    private var lastFocusedSafeArea: androidx.core.graphics.Insets? = null
+
+    /**
+     * A dialog/sheet window (PAM Modal, BottomSheet, permission prompt) that
+     * takes focus can make Android report this window's system-bar insets as
+     * zero while the bars are still drawn over it. The base window's safe
+     * area must not change because another window opened: keep the previous
+     * edges for the same window size until focus returns.
+     */
+    private fun retainedWhileUnfocused(
+        reported: androidx.core.graphics.Insets,
+    ): androidx.core.graphics.Insets {
+        val size = window.decorView.width to window.decorView.height
+        val previous = lastFocusedSafeArea
+        if (hasWindowFocus() || previous == null || safeAreaWindowSize != size) {
+            safeAreaWindowSize = size
+            lastFocusedSafeArea = reported
+            return reported
+        }
+        return retainedSafeAreaInsets(previous, reported)
     }
 
     /** Metrics exported to PHP before its first render (PAM_BOOT_METRICS). */

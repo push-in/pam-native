@@ -70,3 +70,23 @@ class PamPixelSnappingTest {
         assertEquals(20, span.extent)
     }
 }
+
+class PamTextPixelSnappingTest {
+    @Test
+    fun measuredTextWidthIsNeverRoundedAwayByItsPosition() {
+        val density = 2.625f
+        // "QA" measured as 48 px -> 18.285715 dp. Some fractional positions
+        // round the two edges apart by only 47 px.
+        val width = 48f / density
+        var lostPixel = false
+        for (step in 0 until 20_000) {
+            val start = step * 0.0137f
+            val plain = snappedPixelSpan(start, width, 0f, density)
+            if (plain.extent < 48) lostPixel = true
+            val text = snappedPixelSpan(start, width, 0f, density, preserveContentExtent = true)
+            org.junit.Assert.assertTrue("start=$start extent=${text.extent}", text.extent >= 48)
+            org.junit.Assert.assertTrue("start=$start extent=${text.extent}", text.extent <= 49)
+        }
+        org.junit.Assert.assertTrue("fixture must cover the lossy rounding case", lostPixel)
+    }
+}

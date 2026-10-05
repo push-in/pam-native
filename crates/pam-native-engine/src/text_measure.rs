@@ -108,6 +108,7 @@ impl HostTextMeasurer {
 thread_local! {
     static ACTIVE: Cell<*const HostTextMeasurer> = const { Cell::new(std::ptr::null()) };
     static SAFE_AREA: Cell<Option<[f32; 4]>> = const { Cell::new(None) };
+    static KEYBOARD_INSET: Cell<f32> = const { Cell::new(0.0) };
 }
 
 /// Installs host layout inputs (text measurer, window safe area) for layout
@@ -115,22 +116,25 @@ thread_local! {
 pub(crate) struct ActiveScope {
     previous: *const HostTextMeasurer,
     previous_safe_area: Option<[f32; 4]>,
+    previous_keyboard_inset: f32,
 }
 
 impl ActiveScope {
     #[cfg(test)]
     pub(crate) fn enter(measurer: Option<&HostTextMeasurer>) -> Self {
-        Self::enter_with(measurer, None)
+        Self::enter_with(measurer, None, 0.0)
     }
 
     pub(crate) fn enter_with(
         measurer: Option<&HostTextMeasurer>,
         safe_area: Option<[f32; 4]>,
+        keyboard_inset: f32,
     ) -> Self {
         let pointer = measurer.map_or(std::ptr::null(), std::ptr::from_ref);
         Self {
             previous: ACTIVE.with(|active| active.replace(pointer)),
             previous_safe_area: SAFE_AREA.with(|area| area.replace(safe_area)),
+            previous_keyboard_inset: KEYBOARD_INSET.with(|inset| inset.replace(keyboard_inset)),
         }
     }
 }
@@ -139,6 +143,7 @@ impl Drop for ActiveScope {
     fn drop(&mut self) {
         ACTIVE.with(|active| active.set(self.previous));
         SAFE_AREA.with(|area| area.set(self.previous_safe_area));
+        KEYBOARD_INSET.with(|inset| inset.set(self.previous_keyboard_inset));
     }
 }
 
@@ -146,6 +151,12 @@ impl Drop for ActiveScope {
 /// host lets the engine lay out `SafeAreaView` padding.
 pub(crate) fn safe_area() -> Option<[f32; 4]> {
     SAFE_AREA.with(Cell::get)
+}
+
+/// Visible IME height (points, from the window bottom) used to keep a
+/// trailing panning `KeyboardAvoidingView` above the keyboard in layout.
+pub(crate) fn keyboard_inset() -> f32 {
+    KEYBOARD_INSET.with(Cell::get)
 }
 
 fn string(node: &Node, key: PropKey) -> &str {

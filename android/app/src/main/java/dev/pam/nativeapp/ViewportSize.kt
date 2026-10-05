@@ -16,3 +16,14 @@ internal fun resolvedViewportSize(
 } else {
     windowWidth.coerceAtLeast(0) to windowHeight.coerceAtLeast(0)
 }
+
+/** Per-edge maximum: an unfocused window never loses a known safe edge. */
+internal fun retainedSafeAreaInsets(
+    previous: androidx.core.graphics.Insets,
+    reported: androidx.core.graphics.Insets,
+): androidx.core.graphics.Insets = androidx.core.graphics.Insets.of(
+    maxOf(previous.left, reported.left),
+    maxOf(previous.top, reported.top),
+    maxOf(previous.right, reported.right),
+    maxOf(previous.bottom, reported.bottom),
+)

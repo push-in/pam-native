@@ -176,6 +176,34 @@ pub unsafe extern "C" fn pam_native_engine_set_safe_area_insets(
 }
 
 #[unsafe(no_mangle)]
+/// Sets the visible IME height (points from the window bottom, 0 when hidden).
+/// Writes 1 to `changed` when the value differs from the previous one; the
+/// host then relayouts with [`pam_native_engine_relayout_with_metrics`].
+///
+/// # Safety
+///
+/// `handle` must point to a live engine and `changed` must be null or point to
+/// writable memory.
+pub unsafe extern "C" fn pam_native_engine_set_keyboard_inset(
+    handle: *mut PamNativeEngineHandle,
+    bottom: f32,
+    changed: *mut u8,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    match handle.engine.set_keyboard_inset(bottom) {
+        Ok(value) => {
+            if let Some(changed) = unsafe { changed.as_mut() } {
+                *changed = u8::from(value);
+            }
+            PamStatus::Success
+        }
+        Err(_) => PamStatus::InvalidArgument,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Releases an engine allocated by [`pam_native_engine_new`].
 ///
 /// # Safety

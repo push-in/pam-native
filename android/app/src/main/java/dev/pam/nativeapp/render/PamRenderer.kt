@@ -21,6 +21,7 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Build
+import android.os.SystemClock
 import android.util.DisplayMetrics
 import android.os.Handler
 import android.os.Looper
@@ -125,6 +126,47 @@ internal inline fun <reified T> snapshotValues(
         (valueAt(position) as? T)?.let(snapshot::add)
     }
     return snapshot
+}
+
+internal const val INPUT_ECHO_WINDOW_MS = 3_000L
+private const val INPUT_ECHO_LIMIT = 64
+
+internal fun recordInputInFlight(
+    inFlight: ArrayDeque<Pair<String, Long>>,
+    value: String,
+    now: Long,
+) {
+    if (inFlight.lastOrNull()?.first == value) return
+    inFlight.addLast(value to now)
+    while (inFlight.size > INPUT_ECHO_LIMIT) inFlight.removeFirst()
+}
+
+/**
+ * Change events are processed by PHP in order, so a rendered value equal to
+ * one still in flight is the echo of that event. When the editor already
+ * holds newer text the echo is stale and must be ignored; any other value is
+ * an authored change (clearing after send, normalization) and is applied.
+ */
+internal fun isStaleInputEcho(
+    inFlight: ArrayDeque<Pair<String, Long>>,
+    value: String,
+    current: String,
+    now: Long,
+): Boolean {
+    while (inFlight.isNotEmpty() && now - inFlight.first().second > INPUT_ECHO_WINDOW_MS) {
+        inFlight.removeFirst()
+    }
+    if (value == current) {
+        inFlight.clear()
+        return false
+    }
+    val index = inFlight.indexOfFirst { it.first == value }
+    if (index < 0) {
+        inFlight.clear()
+        return false
+    }
+    repeat(index + 1) { inFlight.removeFirst() }
+    return true
 }
 
 internal fun resolvedKeyboardInset(
@@ -351,14 +393,24 @@ internal fun snappedPixelSpan(
     extent: Float,
     parentStart: Float,
     density: Float,
+    preserveContentExtent: Boolean = false,
 ): SnappedPixelSpan {
     val safeDensity = density.coerceAtLeast(0.01f)
     val absoluteStart = (start * safeDensity).roundToInt()
     val absoluteEnd = ((start + extent.coerceAtLeast(0f)) * safeDensity).roundToInt()
     val absoluteParentStart = (parentStart * safeDensity).roundToInt()
+    var snappedExtent = (absoluteEnd - absoluteStart).coerceAtLeast(0)
+    if (preserveContentExtent) {
+        // Text widths are measured as whole (ceiled) pixels. Rounding both
+        // edges independently can lose one of them at a .5 boundary, and a
+        // TextView one pixel narrower than its measured line wraps the last
+        // glyph onto a clipped second line ("QA" drawn as "Q").
+        val content = kotlin.math.ceil(extent.coerceAtLeast(0f) * safeDensity - 0.01f).toInt()
+        snappedExtent = max(snappedExtent, content)
+    }
     return SnappedPixelSpan(
         offset = absoluteStart - absoluteParentStart,
-        extent = (absoluteEnd - absoluteStart).coerceAtLeast(0),
+        extent = snappedExtent,
     )
 }
 
@@ -1176,6 +1228,7 @@ class PamRenderer(
                 host.setWindowInsetsAnimationCallback(null)
             }
             state.keyboardLayoutListener?.let(host::removeOnLayoutChangeListener)
+            state.keyboardSelfLayoutListener?.let { view?.removeOnLayoutChangeListener(it) }
         }
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
@@ -1504,8 +1557,20 @@ class PamRenderer(
             frames[hostedParent] ?: rootFrame
         }
         val density = resourcesDensity()
-        val horizontal = snappedPixelSpan(frame.x, frame.width, parentFrame.x, density)
-        val vertical = snappedPixelSpan(frame.y, frame.height, parentFrame.y, density)
+        val horizontal = snappedPixelSpan(
+            frame.x,
+            frame.width,
+            parentFrame.x,
+            density,
+            preserveContentExtent = state.kind == NodeKind.TEXT,
+        )
+        val vertical = snappedPixelSpan(
+            frame.y,
+            frame.height,
+            parentFrame.y,
+            density,
+            preserveContentExtent = state.kind == NodeKind.TEXT,
+        )
         val paddedHost = if (nodes[hostedParent]?.kind == NodeKind.CUSTOM_VIEW) {
             views[hostedParent] as? FrameLayout
         } else {
@@ -1726,12 +1791,14 @@ class PamRenderer(
             frame.width,
             parentFrame?.x ?: 0f,
             density,
+            preserveContentExtent = state.kind == NodeKind.TEXT,
         )
         val vertical = snappedPixelSpan(
             frame.y,
             frame.height,
             parentFrame?.y ?: 0f,
             density,
+            preserveContentExtent = state.kind == NodeKind.TEXT,
         )
         val hostedParentState = nodes[effectiveParent(state.parent)]
         val safeAreaParentState = when {
@@ -1831,9 +1898,17 @@ class PamRenderer(
                     PropKey.FLEX_DIRECTION,
                     if (hostedParentState.kind == NodeKind.ROW) 2L else 1L,
                 )?.toInt() in listOf(2, 4),
-                engineWidth = dp(parentFrame?.width ?: 0f),
+                // Compare with the parent's pixel-snapped extent: a parent
+                // whose fractional frame snapped one pixel narrower is not
+                // a reduced viewport (that misread trimmed text by 1 px and
+                // ellipsized bold labels: "Curtir" -> "Cur…").
+                engineWidth = parentFrame?.let {
+                    snappedPixelSpan(it.x, it.width, 0f, density).extent
+                } ?: 0,
                 measuredWidth = measuredParentWidth,
-                engineHeight = dp(parentFrame?.height ?: 0f),
+                engineHeight = parentFrame?.let {
+                    snappedPixelSpan(it.y, it.height, 0f, density).extent
+                } ?: 0,
                 measuredHeight = measuredParentHeight,
             )
         val parentCrossAxisWidthReduction = max(
@@ -1980,9 +2055,10 @@ class PamRenderer(
             NodeKind.KEYBOARD_AVOIDING_VIEW -> Axis.VERTICAL
             else -> return
         }
+        val density = resourcesDensity()
         val engineExtent = when (axis) {
-            Axis.HORIZONTAL -> dp(parentFrame.width)
-            Axis.VERTICAL -> dp(parentFrame.height)
+            Axis.HORIZONTAL -> snappedPixelSpan(parentFrame.x, parentFrame.width, 0f, density).extent
+            Axis.VERTICAL -> snappedPixelSpan(parentFrame.y, parentFrame.height, 0f, density).extent
         }
         val rawMeasuredExtent = when (axis) {
             Axis.HORIZONTAL -> parentView.width
@@ -5090,8 +5166,14 @@ class PamRenderer(
                     if (state.updating) return
                     var current = editable?.toString().orEmpty()
                     val selection = input.selectionStart.coerceAtLeast(0)
+                    // Masked/currency inputs: deleting a literal (separator)
+                    // removes the digit before it. Plain inputs must delete
+                    // exactly what the IME deleted, or every non-digit
+                    // deletion would also drop an unrelated digit.
                     if (
                         state.inputDeleting
+                        && state.integer(PropKey.INPUT_FORMAT, INPUT_FORMAT_NONE.toLong()).toInt() !=
+                        INPUT_FORMAT_NONE
                         && current.count(Char::isDigit) == state.inputDigitsBeforeChange
                     ) {
                         val removeAt = current.take(selection).count(Char::isDigit) - 1
@@ -5386,6 +5468,7 @@ class PamRenderer(
         state.pendingChange?.let(main::removeCallbacks)
         state.pendingChange = null
         if (state.properties[PropKey.ON_CHANGE] != null) {
+            recordInputInFlight(state.inputInFlight, state.nativeValue, SystemClock.uptimeMillis())
             dispatch(state.id, EVENT_CHANGE, state.nativeValue)
         }
     }
@@ -5487,6 +5570,19 @@ class PamRenderer(
     private fun applyInputValue(view: View, state: NodeState, next: String) {
         val input = view as? EditText ?: return
         val formattedNext = formatInputValue(next, state)
+        // A controlled value rendered from an older change event must not
+        // overwrite newer IME text (React Native's mostRecentEventCount).
+        if (
+            input.hasFocus() &&
+            isStaleInputEcho(
+                inFlight = state.inputInFlight,
+                value = formattedNext,
+                current = input.text.toString(),
+                now = SystemClock.uptimeMillis(),
+            )
+        ) {
+            return
+        }
         if (
             input.hasFocus() &&
             state.inputSyncMode() != INPUT_SYNC_IMMEDIATE &&
@@ -6880,7 +6976,34 @@ class PamRenderer(
         }
         state.keyboardLayoutListener = layoutListener
         host.addOnLayoutChangeListener(layoutListener)
-        host.setOnApplyWindowInsetsListener { _, insets ->
+        // The engine lays a trailing panning KAV out above the IME. When that
+        // frame lands, recompute the native residual translation from the new
+        // position so the view is never moved twice.
+        val selfLayoutListener = View.OnLayoutChangeListener {
+                _,
+                _,
+                top,
+                _,
+                bottom,
+                _,
+                oldTop,
+                _,
+                oldBottom,
+            ->
+            if (
+                (top != oldTop || bottom != oldBottom) &&
+                !state.keyboardAnimating &&
+                (state.keyboardInset > 0 || view.translationY != 0f)
+            ) {
+                applyKeyboardAvoidance(view, state)
+            }
+        }
+        state.keyboardSelfLayoutListener = selfLayoutListener
+        view.addOnLayoutChangeListener(selfLayoutListener)
+        host.setOnApplyWindowInsetsListener { target, insets ->
+            // The root host's own inset handling (stable safe areas and the
+            // engine IME inset) must keep running while a KAV is mounted.
+            val dispatched = target.onApplyWindowInsets(insets)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                 state.keyboardInset = visibleImeInset(
                     rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
@@ -6888,7 +7011,7 @@ class PamRenderer(
                 )
                 if (!state.keyboardAnimating) applyKeyboardAvoidance(view, state)
             }
-            insets
+            dispatched
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             host.setWindowInsetsAnimationCallback(
@@ -6914,6 +7037,7 @@ class PamRenderer(
                         if (animation.typeMask and WindowInsets.Type.ime() != 0) {
                             state.keyboardAnimating = false
                             state.keyboardInset = currentPlatformImeInset()
+                            (host as? PamRootHost)?.reconcileImeInset()
                             applyKeyboardAvoidance(view, state)
                             view.post { restoreKeyboardAvoidingInput(state) }
                         }
@@ -6943,6 +7067,7 @@ class PamRenderer(
         fun reconcile() {
             if (nodes[state.id] !== state) return
             val inset = currentPlatformImeInset()
+            (host as? PamRootHost)?.reconcileImeInset()
             if (state.keyboardInset != inset || inset == 0) {
                 state.keyboardInset = inset
                 state.keyboardAnimating = false
@@ -6995,6 +7120,7 @@ class PamRenderer(
             KEYBOARD_PAN -> {
                 view.translationY = -keyboard.toFloat()
                 view.setPadding(0, 0, 0, 0)
+                liftTranslatedKeyboardView(view, state, keyboard > 0)
                 // A panning container may extend into a system-inset region even
                 // while the IME is closed. Keep its interactive descendants in
                 // the geometry-aware dispatcher so the first input tap is not
@@ -7072,6 +7198,27 @@ class PamRenderer(
         }
     }
 
+    /**
+     * A translated container is drawn where its later siblings are not, so it
+     * must not stay underneath an earlier sibling with a higher z-index (a chat
+     * timeline with `z-index: 1`): lift it above its siblings while
+     * translated and restore the authored z-index afterwards.
+     */
+    private fun liftTranslatedKeyboardView(view: View, state: NodeState, translated: Boolean) {
+        val authored = runCatching {
+            state.properties[PropKey.Z_INDEX]?.decimal()?.toFloat()
+        }.getOrNull() ?: 0f
+        val parent = view.parent as? ViewGroup
+        var target = authored
+        if (translated && parent != null) {
+            for (index in 0 until parent.childCount) {
+                val sibling = parent.getChildAt(index)
+                if (sibling !== view) target = max(target, sibling.z + 1f)
+            }
+        }
+        if (view.z != target) view.z = target
+    }
+
     private fun keyboardOverlap(view: View, keyboardInset: Int, offset: Int): Int {
         if (keyboardInset <= 0) return 0
         val root = (activity() as? PamActivity)?.rootHost ?: host
@@ -7095,8 +7242,15 @@ class PamRenderer(
             }
             metrics.bounds.bottom
         } else {
-            rootLocation[1] + root.height +
-                ((root as? PamRootHost)?.stableSafeAreaInsets?.bottom ?: 0)
+            // Embedded hosts: the window bottom is the decor view's bottom
+            // (edge-to-edge hosts already extend behind the navigation bar).
+            val decor = root.rootView
+            val decorLocation = IntArray(2)
+            decor.getLocationOnScreen(decorLocation)
+            max(
+                decorLocation[1] + decor.height,
+                rootLocation[1] + root.height,
+            )
         }
         // WindowInsets.Type.ime() is a bottom inset in the same full-window
         // coordinate space as `windowBottom`. Removing the top safe-area
@@ -8351,6 +8505,8 @@ class PamRenderer(
         var keyboardAnimating: Boolean = false,
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
+        var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null,
+        val inputInFlight: ArrayDeque<Pair<String, Long>> = ArrayDeque(),
         var keyboardViewportReconcileGeneration: Int = 0,
         var keyboardAvoidingScrollId: Long = 0L,
         var keyboardAvoidingViewportInset: Int = 0,

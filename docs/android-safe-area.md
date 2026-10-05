@@ -136,3 +136,26 @@ fallback for every PAM safe-area consumer:
 
 The value (dp, 0–96, default 0) is used only when Android reports no bottom
 inset.
+
+## Engine keyboard avoidance (1.12)
+
+Hosts report the visible IME height to the layout engine
+(`pam_native_engine_set_keyboard_inset`, Android `WindowInsets.Type.ime()`,
+iOS `keyboardWillChangeFrame`). A `KeyboardAvoidingView` with
+`behavior="pan"` that ends a vertical flex container (a chat composer after a
+flexible timeline) is then laid out directly above the keyboard: the
+container reserves the overlap and its flexible siblings shrink, like
+Android `adjustResize` / react-native-keyboard-controller. Engine frames and
+native views agree, so hit testing and accessibility bounds follow the
+visible composer. Native translation only covers overlap layout could not
+absorb, and a translated container is lifted above siblings with a higher
+`z-index`. Modal content is excluded (modal windows resize themselves).
+
+- When the user closes the keyboard (Back, IME hide key) while a text input
+  keeps focus, the input is blurred so `on:blur` observers restore their
+  resting layout (the composer returns above the navigation bar).
+- A window that loses focus to a dialog, sheet or permission prompt keeps its
+  safe-area insets and ignores the other window's IME.
+- Controlled inputs ignore rendered values that echo an older change event
+  while the editor already holds newer text (React Native
+  `mostRecentEventCount`); authored values (clearing after send) still apply.

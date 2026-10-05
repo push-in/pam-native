@@ -25,9 +25,10 @@ pub use ffi::{
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
     pam_native_engine_remount, pam_native_engine_set_asset_root,
-    pam_native_engine_set_native_child_visibility, pam_native_engine_set_refresh_rate,
-    pam_native_engine_set_safe_area_insets, pam_native_engine_set_text_measurer,
-    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_keyboard_inset, pam_native_engine_set_native_child_visibility,
+    pam_native_engine_set_refresh_rate, pam_native_engine_set_safe_area_insets,
+    pam_native_engine_set_text_measurer, pam_native_engine_set_text_scale,
+    pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 pub use text_measure::{PamTextMeasureCallback, PamTextMeasureRequest, PamTextMeasureResult};
 
@@ -39,6 +40,7 @@ pub struct Engine {
     font_metrics: font_metrics::FontMetricsCache,
     text_measurer: Option<text_measure::HostTextMeasurer>,
     safe_area: Option<[f32; 4]>,
+    keyboard_inset: f32,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
     created: u64,
@@ -64,6 +66,7 @@ impl Default for Engine {
             font_metrics: font_metrics::FontMetricsCache::default(),
             text_measurer: None,
             safe_area: None,
+            keyboard_inset: 0.0,
             layouts: BTreeMap::new(),
             commits: 0,
             created: 0,
@@ -148,6 +151,21 @@ impl Engine {
         Ok(())
     }
 
+    /// Visible IME height in points measured from the window bottom (0 when
+    /// hidden). A `KeyboardAvoidingView` with the pan behavior that ends a
+    /// vertical flex container then sits directly above the keyboard in
+    /// layout: the container reserves the overlap and its flexible siblings
+    /// (a chat timeline) shrink, like Android `adjustResize`. Returns whether
+    /// the value changed; the host relayouts afterwards.
+    pub fn set_keyboard_inset(&mut self, bottom: f32) -> Result<bool, EngineError> {
+        if !bottom.is_finite() || bottom < 0.0 {
+            return Err(EngineError::InvalidViewport);
+        }
+        let changed = (self.keyboard_inset - bottom).abs() > f32::EPSILON;
+        self.keyboard_inset = bottom;
+        Ok(changed)
+    }
+
     /// Drops cached host text measurements (fonts or configuration changed).
     pub fn invalidate_text_measurements(&mut self) {
         if let Some(measurer) = &self.text_measurer {
@@ -188,8 +206,11 @@ impl Engine {
             return Ok(());
         };
         let layout_started = Instant::now();
-        let _text_measurer =
-            text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
+        let _text_measurer = text_measure::ActiveScope::enter_with(
+            self.text_measurer.as_ref(),
+            self.safe_area,
+            self.keyboard_inset,
+        );
         let text_metrics = self.font_metrics.measure_tree(current);
         let next_layouts = layout::calculate_with_text_metrics(
             current,
@@ -314,8 +335,11 @@ impl Engine {
             decode_started.elapsed(),
         );
         let layout_started = Instant::now();
-        let _text_measurer =
-            text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
+        let _text_measurer = text_measure::ActiveScope::enter_with(
+            self.text_measurer.as_ref(),
+            self.safe_area,
+            self.keyboard_inset,
+        );
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -427,8 +451,11 @@ impl Engine {
                 .as_ref()
                 .expect("current tree remains available");
             let dirty_nodes = layout_dirty_nodes.iter().copied().collect::<Vec<_>>();
-            let _text_measurer =
-                text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
+            let _text_measurer = text_measure::ActiveScope::enter_with(
+                self.text_measurer.as_ref(),
+                self.safe_area,
+                self.keyboard_inset,
+            );
             let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
             let calculated = layout::calculate_incremental_with_text_metrics(
                 current,
@@ -545,8 +572,11 @@ impl Engine {
         );
 
         let layout_started = Instant::now();
-        let _text_measurer =
-            text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
+        let _text_measurer = text_measure::ActiveScope::enter_with(
+            self.text_measurer.as_ref(),
+            self.safe_area,
+            self.keyboard_inset,
+        );
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,

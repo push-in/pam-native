@@ -114,6 +114,14 @@ PamStatus pam_native_engine_set_safe_area_insets(
     float right,
     float bottom
 );
+/* Visible IME height in points from the window bottom (0 when hidden). A
+ * trailing pan KeyboardAvoidingView is then laid out above the keyboard.
+ * Writes 1 to `changed` when the value changed; relayout afterwards. */
+PamStatus pam_native_engine_set_keyboard_inset(
+    PamNativeEngineHandle *handle,
+    float bottom,
+    uint8_t *changed
+);
 PamStatus pam_native_engine_set_refresh_rate(
     PamNativeEngineHandle *handle,
     double refresh_rate_hz

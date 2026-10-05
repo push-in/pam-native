@@ -167,6 +167,7 @@ class PamRuntime(
     ) {
         synchronized(handleLock) {
             check(!closed.get()) { "Pam Runtime is closed" }
+            layoutViewport = floatArrayOf(widthDp, heightDp, textScale)
             renderer.engineManagedSafeArea = true
             check(handle == 0L) { "Pam Runtime is already running" }
             val stateDirectory = File(context.filesDir, "pam/state").apply {
@@ -213,9 +214,28 @@ class PamRuntime(
         darkAppearance: Boolean,
     ) {
         synchronized(handleLock) {
+            layoutViewport = floatArrayOf(widthDp, heightDp, textScale)
             val active = handle
             if (active != 0L) {
                 nativeRelayout(active, widthDp, heightDp, textScale, darkAppearance)
+            }
+        }
+    }
+
+    private var layoutViewport = floatArrayOf(0f, 0f, 1f)
+
+    /**
+     * Visible IME height in dp (0 when hidden). The engine lays out a
+     * trailing panning KeyboardAvoidingView directly above the keyboard and
+     * shrinks its flexible siblings, then relayouts synchronously so native
+     * views and engine frames move together.
+     */
+    fun updateKeyboardInset(bottomDp: Float) {
+        synchronized(handleLock) {
+            val active = handle
+            val (width, height, textScale) = layoutViewport.let { Triple(it[0], it[1], it[2]) }
+            if (active != 0L && width > 0f && height > 0f) {
+                nativeSetKeyboardInset(active, bottomDp.coerceAtLeast(0f), width, height, textScale)
             }
         }
     }
@@ -606,6 +626,14 @@ class PamRuntime(
         safeRight: Float,
         safeBottom: Float,
     ): Long
+    private external fun nativeSetKeyboardInset(
+        handle: Long,
+        bottom: Float,
+        width: Float,
+        height: Float,
+        textScale: Float,
+    )
+
     private external fun nativeRelayout(
         handle: Long,
         widthDp: Float,

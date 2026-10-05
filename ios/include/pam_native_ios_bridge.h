@@ -103,6 +103,16 @@ void pam_native_runtime_set_safe_area_insets(
     float bottom
 );
 
+/* Visible keyboard height (points from the bottom of the PAM root view, 0
+ * when hidden). Relayouts immediately when it changed. */
+void pam_native_runtime_set_keyboard_inset(
+    uint64_t handle,
+    float bottom,
+    float width_dp,
+    float height_dp,
+    float text_scale
+);
+
 void pam_native_runtime_relayout(
     uint64_t handle,
     float width_dp,

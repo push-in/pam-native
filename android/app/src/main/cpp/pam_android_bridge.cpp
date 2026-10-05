@@ -129,6 +129,17 @@ void log_debug(const char* message) {
     __android_log_print(ANDROID_LOG_INFO, kLogTag, "%s", message);
 }
 
+// PHP error_log()/log_errors output. The embed SAPI writes it to stderr,
+// which Android discards; route it to logcat for the whole process lifetime
+// (the runtime outlives Activities since it is re-attached to new hosts).
+void pam_php_log_message(const char* message, int syslog_type) {
+    if (message == nullptr) return;
+    const int priority = syslog_type <= 3 ? ANDROID_LOG_ERROR
+        : syslog_type == 4 ? ANDROID_LOG_WARN
+        : ANDROID_LOG_INFO;
+    __android_log_print(priority, "PamPHP", "%s", message);
+}
+
 class AttachedEnvironment {
 public:
     explicit AttachedEnvironment(JavaVM* vm) : vm_(vm) {
@@ -669,6 +680,7 @@ bool initialize_php(RuntimeState* state) {
     }
     setenv("PAM_SYSTEM_DARK", state->dark_appearance ? "1" : "0", 1);
     php_embed_module.ini_defaults = apply_php_ini_defaults;
+    php_embed_module.log_message = pam_php_log_message;
     state->php_entry_argument = state->entry;
     state->php_arguments = {
         state->php_executable.data(),
@@ -1106,6 +1118,46 @@ Java_dev_pam_nativeapp_PamRuntime_nativeRelayout(
     }
     if (status != PAM_STATUS_SUCCESS) {
         report_error(state, "Pam Native could not update the viewport.");
+        return;
+    }
+    publish_batch(state, batch);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeSetKeyboardInset(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jfloat bottom,
+    jfloat width,
+    jfloat height,
+    jfloat text_scale
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || width <= 0 || height <= 0 || text_scale <= 0) {
+        return;
+    }
+    PamNativeBuffer batch{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        std::uint8_t changed = 0;
+        status = pam_native_engine_set_keyboard_inset(state->engine, bottom, &changed);
+        if (status != PAM_STATUS_SUCCESS || changed == 0) {
+            return;
+        }
+        // The keyboard-avoiding layout must land in the same UI frame as the
+        // IME insets, so relayout synchronously instead of waiting for PHP.
+        status = pam_native_engine_relayout_with_metrics(
+            state->engine,
+            width,
+            height,
+            text_scale,
+            &batch
+        );
+    }
+    if (status != PAM_STATUS_SUCCESS) {
+        pam_native_buffer_free(batch);
         return;
     }
     publish_batch(state, batch);

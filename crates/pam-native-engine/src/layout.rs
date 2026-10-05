@@ -689,6 +689,11 @@ fn layout_node(
     } else {
         Axis::Vertical
     };
+    let inner = if direction == 1 {
+        reserve_keyboard_space(context, node, node_children, inner)
+    } else {
+        inner
+    };
     let column_gap = finite_non_negative(number(node, PropKey::GridColumnGap).unwrap_or(gap))?;
     let row_gap = finite_non_negative(number(node, PropKey::GridRowGap).unwrap_or(gap))?;
     let (main_gap, cross_gap) = match axis {
@@ -3330,6 +3335,69 @@ fn boolean(node: &Node, key: PropKey) -> bool {
         node.properties.get(&key),
         Some(pam_native_protocol::PropValue::Boolean(true))
     )
+}
+
+/// A panning `KeyboardAvoidingView` that ends a column stays directly above
+/// the IME in layout (Android `adjustResize`, react-native-keyboard-controller
+/// `KeyboardStickyView` + an inset list): the column reserves the part of the
+/// keyboard that still overlaps its content box, so flexible siblings such as
+/// a chat timeline shrink and the composer is laid out right above the
+/// keyboard. Native views and engine frames therefore agree; hosts only
+/// translate whatever overlap layout could not absorb. Modal content is
+/// excluded because modal windows resize with the IME themselves.
+fn reserve_keyboard_space(
+    context: &LayoutContext<'_>,
+    node: &Node,
+    node_children: &[&Node],
+    inner: Layout,
+) -> Layout {
+    let keyboard = crate::text_measure::keyboard_inset();
+    if keyboard <= 0.0 {
+        return inner;
+    }
+    let Some(trailing) = node_children
+        .iter()
+        .copied()
+        .filter(|child| visible(child) && !out_of_flow(child))
+        .last()
+    else {
+        return inner;
+    };
+    if trailing.kind != NodeKind::KeyboardAvoidingView
+        || integer(trailing, PropKey::KeyboardBehavior) != Some(2)
+        || matches!(
+            trailing.properties.get(&PropKey::KeyboardAvoidingEnabled),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        )
+        || inside_modal(context.tree, node)
+    {
+        return inner;
+    }
+    let offset = number(trailing, PropKey::KeyboardVerticalOffset)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    let below_content = (context.viewport.y + context.viewport.height) - (inner.y + inner.height);
+    let reserve = (keyboard + offset - below_content.max(0.0)).clamp(0.0, inner.height);
+    Layout {
+        height: inner.height - reserve,
+        ..inner
+    }
+}
+
+fn inside_modal(tree: &Tree, node: &Node) -> bool {
+    let mut current = Some(node);
+    let mut steps = 0;
+    while let Some(candidate) = current {
+        if candidate.kind == NodeKind::Modal {
+            return true;
+        }
+        if candidate.id == tree.root || steps > MAX_LAYOUT_DEPTH {
+            return false;
+        }
+        steps += 1;
+        current = tree.nodes.get(&candidate.parent);
+    }
+    false
 }
 
 /// `position: absolute` (2) and `position: fixed` (3) leave the flex flow.
@@ -6440,6 +6508,171 @@ mod css_flex_tests {
     }
 
     #[test]
+    fn panning_composer_ending_a_column_sits_above_the_keyboard_and_the_list_shrinks() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let off = PropValue::Boolean(false);
+        // Zé chat: root SafeAreaView without the bottom edge, header, flexible
+        // timeline (z-index 1) and a panning composer KeyboardAvoidingView.
+        let chat = |kav: Vec<(PropKey, PropValue)>| Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::SafeAreaView,
+                        vec![
+                            (PropKey::SafeAreaBottomEdge, off.clone()),
+                            (PropKey::HeightPercent, f(100.0)),
+                        ],
+                    ),
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Column,
+                        vec![(PropKey::FlexGrow, f(1.0)), (PropKey::MinHeight, f(0.0))],
+                    ),
+                ),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::View, vec![(PropKey::Height, f(56.0))]),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        2,
+                        1,
+                        NodeKind::View,
+                        vec![
+                            (PropKey::FlexGrow, f(1.0)),
+                            (PropKey::FlexShrink, f(1.0)),
+                            (PropKey::MinHeight, f(0.0)),
+                            (PropKey::ZIndex, PropValue::Integer(1)),
+                        ],
+                    ),
+                ),
+                (5, node(5, 2, 2, NodeKind::KeyboardAvoidingView, kav)),
+                (
+                    6,
+                    node(6, 5, 0, NodeKind::View, vec![(PropKey::Height, f(60.0))]),
+                ),
+            ]),
+        };
+        let pan = vec![(PropKey::KeyboardBehavior, PropValue::Integer(2))];
+        let viewport = Size {
+            width: 400.0,
+            height: 800.0,
+        };
+        let _scope =
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]), 320.0);
+        let open = calculate(&chat(pan.clone()), viewport).unwrap();
+        assert_eq!(open[&5].y + open[&5].height, 800.0 - 320.0);
+        assert_eq!(open[&6].y, 800.0 - 320.0 - 60.0);
+        assert_eq!(open[&4].height, 800.0 - 24.0 - 56.0 - 60.0 - 320.0);
+        drop(_scope);
+
+        let _scope =
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]), 0.0);
+        let closed = calculate(&chat(pan.clone()), viewport).unwrap();
+        assert_eq!(closed[&5].y + closed[&5].height, 800.0);
+        assert_eq!(closed[&4].height, 800.0 - 24.0 - 56.0 - 60.0);
+        drop(_scope);
+
+        let _scope =
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]), 320.0);
+        let mut offset = pan.clone();
+        offset.push((PropKey::KeyboardVerticalOffset, f(-20.0)));
+        let offset = calculate(&chat(offset), viewport).unwrap();
+        assert_eq!(offset[&5].y + offset[&5].height, 800.0 - 300.0);
+        let resize = calculate(
+            &chat(vec![(PropKey::KeyboardBehavior, PropValue::Integer(1))]),
+            viewport,
+        )
+        .unwrap();
+        assert_eq!(
+            resize[&5].y + resize[&5].height,
+            800.0,
+            "resize/padding keep their native viewport reduction"
+        );
+        let mut disabled = pan.clone();
+        disabled.push((PropKey::KeyboardAvoidingEnabled, off.clone()));
+        let disabled = calculate(&chat(disabled), viewport).unwrap();
+        assert_eq!(disabled[&5].y + disabled[&5].height, 800.0);
+    }
+
+    #[test]
+    fn panning_composer_inside_a_modal_is_left_to_the_resized_modal_window() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, vec![])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        vec![(PropKey::ModalPresentation, PropValue::Integer(1))],
+                    ),
+                ),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::Column, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                (
+                    4,
+                    node(4, 3, 0, NodeKind::View, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        3,
+                        1,
+                        NodeKind::KeyboardAvoidingView,
+                        vec![(PropKey::KeyboardBehavior, PropValue::Integer(2))],
+                    ),
+                ),
+                (
+                    6,
+                    node(6, 5, 0, NodeKind::View, vec![(PropKey::Height, f(60.0))]),
+                ),
+            ]),
+        };
+        let _scope = crate::text_measure::ActiveScope::enter_with(None, None, 320.0);
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 400.0,
+                height: 800.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(layouts[&5].y + layouts[&5].height, 800.0);
+    }
+
+    #[test]
     fn nested_safe_area_views_receive_the_insets_of_the_edges_they_touch() {
         let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
             id,
@@ -6489,7 +6722,7 @@ mod css_flex_tests {
             ]),
         };
         let _scope =
-            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]));
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]), 0.0);
         let layouts = calculate(
             &tree,
             Size {
@@ -6761,7 +6994,7 @@ mod css_flex_tests {
             ]),
         };
         let _scope =
-            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]));
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]), 0.0);
         let layouts = calculate(
             &tree,
             Size {

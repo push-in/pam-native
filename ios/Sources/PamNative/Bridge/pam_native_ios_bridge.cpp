@@ -886,6 +886,43 @@ void pam_native_runtime_relayout(
     publish_batch(state, batch);
 }
 
+void pam_native_runtime_set_keyboard_inset(
+    uint64_t handle,
+    float bottom,
+    float width_dp,
+    float height_dp,
+    float text_scale
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || width_dp <= 0 || height_dp <= 0 || text_scale <= 0) {
+        return;
+    }
+    PamNativeBuffer batch{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        uint8_t changed = 0;
+        status = pam_native_engine_set_keyboard_inset(state->engine, bottom, &changed);
+        if (status != PAM_STATUS_SUCCESS || changed == 0) {
+            return;
+        }
+        // Lay the trailing panning KeyboardAvoidingView out above the
+        // keyboard in the same runloop turn as the keyboard notification.
+        status = pam_native_engine_relayout_with_metrics(
+            state->engine,
+            width_dp,
+            height_dp,
+            text_scale,
+            &batch
+        );
+    }
+    if (status != PAM_STATUS_SUCCESS) {
+        pam_native_buffer_free(batch);
+        return;
+    }
+    publish_batch(state, batch);
+}
+
 void pam_native_runtime_set_child_visibility(uint64_t handle, uint64_t owner, uint64_t child, bool visible) {
     RuntimeState* state = from_handle(handle);
     if (state == nullptr || owner == 0 || child == 0) {

@@ -5802,6 +5802,7 @@ public final class PamRenderer {
                 return
             }
             let value = sender.text ?? ""
+            field.recordDispatchedValue(value)
             let payload = (try? WireMap.encode(["value": .text(value)])) ?? Data()
             dispatchEvent(nodeId, EventKind.change.rawValue, payload)
         }
