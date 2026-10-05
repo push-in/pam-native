@@ -70,7 +70,7 @@ final class PamProtocolTests: XCTestCase {
             .mediaCacheReady,
             .accessibilityAction,
         ]
-        XCTAssertEqual(events.map(\.rawValue), Array(1...65))
+        XCTAssertEqual(events.map(\.rawValue), Array(1...69))
         XCTAssertEqual(PamConstants.onClickOutside, 285)
         XCTAssertEqual(PamConstants.onIntersect, 286)
         XCTAssertEqual(PamConstants.onMutate, 287)

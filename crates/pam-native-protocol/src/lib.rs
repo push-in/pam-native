@@ -678,6 +678,14 @@ pub enum PropKey {
     ShimmerGradientColor = 498,
     ShimmerDurationMs = 499,
     ShimmerEnabled = 500,
+    TextSpans = 501,
+    OnSpanPress = 502,
+    IncludeFontPadding = 503,
+    OnLayout = 504,
+    StickyHeader = 505,
+    OnMediaBuffering = 506,
+    OnMediaLoadStart = 507,
+    ScrollKeyboardInset = 508,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1185,6 +1193,14 @@ impl TryFrom<u16> for PropKey {
             498 => Ok(Self::ShimmerGradientColor),
             499 => Ok(Self::ShimmerDurationMs),
             500 => Ok(Self::ShimmerEnabled),
+            501 => Ok(Self::TextSpans),
+            502 => Ok(Self::OnSpanPress),
+            503 => Ok(Self::IncludeFontPadding),
+            504 => Ok(Self::OnLayout),
+            505 => Ok(Self::StickyHeader),
+            506 => Ok(Self::OnMediaBuffering),
+            507 => Ok(Self::OnMediaLoadStart),
+            508 => Ok(Self::ScrollKeyboardInset),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2060,10 +2076,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=500 {
+        for value in 1..=508 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(501).is_err());
+        assert!(PropKey::try_from(509).is_err());
     }
 
     #[test]

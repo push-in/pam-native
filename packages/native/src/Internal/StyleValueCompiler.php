@@ -24,6 +24,9 @@ final class StyleValueCompiler
 
     public static function isDynamic(string $value): bool
     {
+        if (preg_match('/(?<![\w-])hairline(?![\w-])|(?:\d|\.)dpx(?![a-z])/i', $value) === 1) {
+            return true;
+        }
         return preg_match(
             '/(?:calc|min|max|clamp|env)\(|-?(?:\d+|\d*\.\d+)(?:em|[dsl]?vw|[dsl]?vh|[dsl]?vmin|[dsl]?vmax|sp|%)(?:$|[^a-z])/i',
             trim($value),
@@ -33,7 +36,7 @@ final class StyleValueCompiler
     public static function encode(string $value, string $name): string
     {
         $compiler = new self($name);
-        $compiler->tokens = self::tokenize(trim($value), $name);
+        $compiler->tokens = self::tokenize(self::devicePixels(trim($value)), $name);
         $node = $compiler->expression();
         if ($compiler->peek() !== null) {
             throw new RuntimeException("Unexpected CSS math token in {$name}: {$value}.");
@@ -46,6 +49,17 @@ final class StyleValueCompiler
         } catch (JsonException $error) {
             throw new RuntimeException("Cannot encode CSS math in {$name}.", previous: $error);
         }
+    }
+
+    /**
+     * React Native `StyleSheet.hairlineWidth` and device pixels: `hairline`
+     * becomes `env(hairline-width)` and `Ndpx` becomes N physical pixels.
+     */
+    private static function devicePixels(string $value): string
+    {
+        $value = preg_replace('/(?<![\w-])hairline(?![\w-])/i', 'env(hairline-width)', $value) ?? $value;
+
+        return preg_replace('/((?:\d+|\d*\.\d+))dpx(?![a-z])/i', '($1 * env(device-pixel))', $value) ?? $value;
     }
 
     public static function encoded(string $value): bool

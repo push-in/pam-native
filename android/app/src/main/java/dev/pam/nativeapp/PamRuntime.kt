@@ -30,6 +30,7 @@ class PamRuntime(
     private val main = Handler(Looper.getMainLooper())
     private val choreographer = Choreographer.getInstance()
     private val modules = NativeModuleRegistry(context)
+    private val textTypefaces = dev.pam.nativeapp.render.NativeTypefaceLoader.shared(context)
     private val closed = AtomicBoolean()
     private val handleLock = Any()
     private val ownedBatchHandles = ConcurrentHashMap.newKeySet<Long>()
@@ -83,6 +84,20 @@ class PamRuntime(
             val display = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
                 ?.getDisplay(android.view.Display.DEFAULT_DISPLAY)
             nativeSetRefreshRate(handle, display?.refreshRate?.toDouble() ?: 60.0)
+        }
+    }
+
+    /**
+     * Window safe-area insets (dp). The engine then lays out every
+     * SafeAreaView from the window edges its frame touches, at any nesting.
+     */
+    fun updateSafeArea(left: Float, top: Float, right: Float, bottom: Float) {
+        synchronized(handleLock) {
+            val active = handle
+            if (active != 0L) {
+                renderer.engineManagedSafeArea = true
+                nativeSetSafeAreaInsets(active, left, top, right, bottom)
+            }
         }
     }
 
@@ -368,6 +383,57 @@ class PamRuntime(
         )
     }
 
+    /** JNI: engine text measurement, see text_measure.rs and PamTextLayout. */
+    @Suppress("unused", "LongParameterList")
+    private fun onMeasureText(
+        nodeId: Long,
+        text: ByteArray,
+        spans: ByteArray,
+        family: String,
+        features: String,
+        fontSize: Float,
+        fontScale: Float,
+        letterSpacing: Float,
+        lineHeight: Float,
+        availableWidth: Float,
+        fontWeight: Int,
+        italic: Boolean,
+        includeFontPadding: Boolean,
+        textTransform: Int,
+        breakStrategy: Int,
+        hyphenation: Int,
+        maxLines: Int,
+        output: FloatArray,
+    ): Boolean = try {
+        dev.pam.nativeapp.render.PamTextLayout.measure(
+            raw = String(text, Charsets.UTF_8),
+            spansWire = String(spans, Charsets.UTF_8),
+            style = dev.pam.nativeapp.render.PamTextStyle(
+                fontFamily = family.ifEmpty { null },
+                fontSize = fontSize,
+                fontScale = fontScale,
+                fontWeight = fontWeight,
+                italic = italic,
+                letterSpacing = letterSpacing,
+                lineHeight = lineHeight,
+                includeFontPadding = includeFontPadding,
+                textTransform = textTransform,
+                breakStrategy = breakStrategy,
+                hyphenation = hyphenation,
+                maxLines = maxLines,
+                fontFeatures = features.ifEmpty { null },
+            ),
+            availableWidth = availableWidth,
+            density = context.resources.displayMetrics.density,
+            typefaces = textTypefaces,
+            output = output,
+        )
+        true
+    } catch (error: RuntimeException) {
+        Log.w("PamNativeText", "Text measurement failed for node $nodeId", error)
+        false
+    }
+
     @Suppress("unused")
     private fun onNativeError(message: String) {
         completeHotReload(failed = true)
@@ -397,6 +463,8 @@ class PamRuntime(
     private external fun nativeSetChildVisibility(handle: Long, owner: Long, child: Long, visible: Boolean)
 
     private external fun nativeSetRefreshRate(handle: Long, refreshRateHz: Double)
+
+    private external fun nativeSetSafeAreaInsets(handle: Long, left: Float, top: Float, right: Float, bottom: Float)
 
     private external fun nativeDispatchEvent(
         handle: Long,

@@ -142,7 +142,11 @@ enum class EventKind(val value: Int) {
     MEDIA_CACHE_MISS(62),
     MEDIA_CACHE_PROGRESS(63),
     MEDIA_CACHE_READY(64),
-    ACCESSIBILITY_ACTION(65);
+    ACCESSIBILITY_ACTION(65),
+    SPAN_PRESS(66),
+    LAYOUT(67),
+    MEDIA_BUFFERING(68),
+    MEDIA_LOAD_START(69);
 }
 
 enum class PropKey(val value: Int) {
@@ -645,7 +649,15 @@ enum class PropKey(val value: Int) {
     BORDER_GRADIENT(497),
     SHIMMER_GRADIENT_COLOR(498),
     SHIMMER_DURATION_MS(499),
-    SHIMMER_ENABLED(500);
+    SHIMMER_ENABLED(500),
+    TEXT_SPANS(501),
+    ON_SPAN_PRESS(502),
+    INCLUDE_FONT_PADDING(503),
+    ON_LAYOUT(504),
+    STICKY_HEADER(505),
+    ON_MEDIA_BUFFERING(506),
+    ON_MEDIA_LOAD_START(507),
+    SCROLL_KEYBOARD_INSET(508);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

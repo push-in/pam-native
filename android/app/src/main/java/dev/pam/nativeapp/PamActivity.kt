@@ -174,6 +174,7 @@ class PamActivity : FragmentActivity() {
             val density = resources.displayMetrics.density
             val widthDp = windowWidth / density
             val heightDp = windowHeight / density
+            exportBootMetrics(widthDp, heightDp)
             runtime.start(
                 entry,
                 widthDp,
@@ -581,14 +582,19 @@ class PamActivity : FragmentActivity() {
     private fun updateViewportFromWindow(force: Boolean = false) {
         if (!runtimeStarted) return
         val (width, height) = resolvedViewportSize()
-        if (!force && width == viewportWidth && height == viewportHeight) return
+        val insets = currentSafeAreaInsets()
+        if (!force && width == viewportWidth && height == viewportHeight && insets == dispatchedSafeArea) return
         viewportWidth = width
         viewportHeight = height
+        dispatchedSafeArea = insets
         val density = resources.displayMetrics.density
         val widthDp = width / density
         val heightDp = height / density
-        val insets = ViewCompat.getRootWindowInsets(window.decorView)?.getInsets(
-            WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
+        runtime.updateSafeArea(
+            insets.left / density,
+            insets.top / density,
+            insets.right / density,
+            insets.bottom / density,
         )
         val configuration = resources.configuration
         val deviceType = when {
@@ -637,10 +643,10 @@ class PamActivity : FragmentActivity() {
                         PamAppearance.systemAppearance(this, appearanceMode).toLong(),
                     ),
                     "fontScale" to WireValue.Decimal(configuration.fontScale.toDouble()),
-                    "safeAreaTop" to WireValue.Decimal(((insets?.top ?: 0) / density).toDouble()),
-                    "safeAreaRight" to WireValue.Decimal(((insets?.right ?: 0) / density).toDouble()),
-                    "safeAreaBottom" to WireValue.Decimal(((insets?.bottom ?: 0) / density).toDouble()),
-                    "safeAreaLeft" to WireValue.Decimal(((insets?.left ?: 0) / density).toDouble()),
+                    "safeAreaTop" to WireValue.Decimal((insets.top / density).toDouble()),
+                    "safeAreaRight" to WireValue.Decimal((insets.right / density).toDouble()),
+                    "safeAreaBottom" to WireValue.Decimal((insets.bottom / density).toDouble()),
+                    "safeAreaLeft" to WireValue.Decimal((insets.left / density).toDouble()),
                     "refreshRate" to WireValue.Decimal(refreshRate.toDouble()),
                     "reducedMotion" to WireValue.Flag(reducedMotion),
                     "deviceType" to WireValue.Text(deviceType),
@@ -654,6 +660,52 @@ class PamActivity : FragmentActivity() {
                 ),
             ),
         )
+    }
+
+    private var dispatchedSafeArea: androidx.core.graphics.Insets? = null
+
+    /**
+     * Window safe area in pixels (system bars + cutout). When Android reports
+     * no bottom inset (some gesture/OEM configurations) the configured
+     * `safeArea.bottomFallback` dp is used, like React Native apps'
+     * `getBottomSafeInset()`.
+     */
+    private fun currentSafeAreaInsets(): androidx.core.graphics.Insets {
+        val types = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+        val reported = ViewCompat.getRootWindowInsets(window.decorView)
+            ?.getInsetsIgnoringVisibility(types)
+            ?: if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            androidx.core.graphics.Insets.toCompatInsets(
+                windowManager.currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(
+                    android.view.WindowInsets.Type.systemBars() or android.view.WindowInsets.Type.displayCutout(),
+                ),
+            )
+        } else {
+            androidx.core.graphics.Insets.NONE
+        }
+        val fallbackDp = resources.getInteger(R.integer.pam_safe_area_bottom_fallback_dp)
+        val bottom = if (reported.bottom == 0 && fallbackDp > 0) {
+            (fallbackDp * resources.displayMetrics.density + 0.5f).toInt()
+        } else {
+            reported.bottom
+        }
+        return androidx.core.graphics.Insets.of(reported.left, reported.top, reported.right, bottom)
+    }
+
+    /** Metrics exported to PHP before its first render (PAM_BOOT_METRICS). */
+    private fun exportBootMetrics(widthDp: Float, heightDp: Float) {
+        val density = resources.displayMetrics.density
+        val insets = currentSafeAreaInsets()
+        val json = org.json.JSONObject()
+            .put("width", widthDp.toDouble())
+            .put("height", heightDp.toDouble())
+            .put("density", density.toDouble())
+            .put("fontScale", resources.configuration.fontScale.toDouble())
+            .put("safeAreaTop", (insets.top / density).toDouble())
+            .put("safeAreaRight", (insets.right / density).toDouble())
+            .put("safeAreaBottom", (insets.bottom / density).toDouble())
+            .put("safeAreaLeft", (insets.left / density).toDouble())
+        runCatching { android.system.Os.setenv("PAM_BOOT_METRICS", json.toString(), true) }
     }
 
     private fun appearanceValue(): Long =

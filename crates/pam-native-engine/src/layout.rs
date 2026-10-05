@@ -328,6 +328,18 @@ fn layout_node(
         finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(padding_horizontal))?;
     let padding_bottom =
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
+    // Yoga: the border is part of the padding box and insets content.
+    let (border_left, border_top, border_right, border_bottom) = border_edges(node);
+    let padding_left = padding_left + border_left;
+    let padding_top = padding_top + border_top;
+    let padding_right = padding_right + border_right;
+    let padding_bottom = padding_bottom + border_bottom;
+    let (safe_left, safe_top, safe_right, safe_bottom) =
+        safe_area_padding(node, frame, context.viewport);
+    let padding_left = padding_left + safe_left;
+    let padding_top = padding_top + safe_top;
+    let padding_right = padding_right + safe_right;
+    let padding_bottom = padding_bottom + safe_bottom;
     let gap = finite_non_negative(number(node, PropKey::Gap).unwrap_or(0.0))?;
     let inner = Layout {
         x: frame.x + padding_left,
@@ -728,7 +740,7 @@ fn layout_node(
                         .ok()
                     })
                     .unwrap_or(0.0);
-                baseline_from_top(child, cross, context.text_scale)
+                baseline_from_top(context.children, child, cross, context.text_scale)
             })
             .fold(0.0_f32, f32::max)
     } else {
@@ -779,7 +791,9 @@ fn layout_node(
             CrossAlignment::Center => (available_cross - cross + cross_before - cross_after) / 2.0,
             CrossAlignment::End => available_cross - cross - cross_after,
             CrossAlignment::Baseline if axis == Axis::Horizontal => {
-                baseline_target - baseline_from_top(child, cross, context.text_scale) + cross_before
+                baseline_target
+                    - baseline_from_top(context.children, child, cross, context.text_scale)
+                    + cross_before
             }
             CrossAlignment::Baseline => cross_before,
         }
@@ -1085,7 +1099,12 @@ fn layout_wrapped_children(
             line.iter()
                 .map(|child| {
                     let (_, explicit, intrinsic) = resolved_cross[&child.id];
-                    baseline_from_top(child, explicit.unwrap_or(intrinsic), context.text_scale)
+                    baseline_from_top(
+                        context.children,
+                        child,
+                        explicit.unwrap_or(intrinsic),
+                        context.text_scale,
+                    )
                 })
                 .fold(0.0_f32, f32::max)
         } else {
@@ -1120,7 +1139,8 @@ fn layout_wrapped_children(
                 CrossAlignment::Center => (line_cross - cross + cross_before - cross_after) / 2.0,
                 CrossAlignment::End => line_cross - cross - cross_after,
                 CrossAlignment::Baseline if axis == Axis::Horizontal => {
-                    line_baseline - baseline_from_top(child, cross, context.text_scale)
+                    line_baseline
+                        - baseline_from_top(context.children, child, cross, context.text_scale)
                         + cross_before
                 }
                 CrossAlignment::Baseline => cross_before,
@@ -1524,6 +1544,11 @@ fn natural_scroll_extent(
             finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(horizontal_padding))?
         }
     };
+    let (border_left, border_top, border_right, border_bottom) = border_edges(node);
+    let (padding_before, padding_after) = match axis {
+        Axis::Vertical => (padding_before + border_top, padding_after + border_bottom),
+        Axis::Horizontal => (padding_before + border_left, padding_after + border_right),
+    };
     let mut extents = Vec::with_capacity(visible_children.len());
     let mut grow_total = 0.0_f32;
     let mut grow_unit = 0.0_f32;
@@ -1607,6 +1632,11 @@ fn intrinsic_extent(
             finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(padding_horizontal))?;
         let padding_bottom =
             finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
+        let (border_left, border_top, border_right, border_bottom) = border_edges(node);
+        let padding_left = padding_left + border_left;
+        let padding_top = padding_top + border_top;
+        let padding_right = padding_right + border_right;
+        let padding_bottom = padding_bottom + border_bottom;
         let inner_width = (available_width - padding_left - padding_right).max(0.0);
         let text = text_extent(
             node,
@@ -1655,6 +1685,23 @@ fn intrinsic_extent(
         finite_non_negative(number(node, PropKey::PaddingRight).unwrap_or(padding_horizontal))?;
     let padding_bottom =
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
+    // Yoga: the border is part of the padding box and insets content.
+    let (border_left, border_top, border_right, border_bottom) = border_edges(node);
+    let padding_left = padding_left + border_left;
+    let padding_top = padding_top + border_top;
+    let padding_right = padding_right + border_right;
+    let padding_bottom = padding_bottom + border_bottom;
+    // A content-sized SafeAreaView grows by the insets of the edges it may
+    // touch; layout_node later applies the exact overlap of its frame.
+    let (padding_left, padding_top, padding_right, padding_bottom) = match safe_area_edges(node) {
+        Some((window, enabled)) => (
+            padding_left + if enabled[0] { window[0] } else { 0.0 },
+            padding_top + if enabled[1] { window[1] } else { 0.0 },
+            padding_right + if enabled[2] { window[2] } else { 0.0 },
+            padding_bottom + if enabled[3] { window[3] } else { 0.0 },
+        ),
+        None => (padding_left, padding_top, padding_right, padding_bottom),
+    };
     let inner_width = (available_width - padding_left - padding_right).max(0.0);
     let inner_height = (available_height - padding_top - padding_bottom).max(0.0);
     if horizontal_scroll_height {
@@ -1836,7 +1883,7 @@ fn intrinsic_extent(
         let (ascent, descent) = node_children.iter().zip(&child_extents).fold(
             (0.0_f32, 0.0_f32),
             |(ascent, descent), (child, (extent, before, after))| {
-                let baseline = baseline_from_top(child, *extent, text_scale);
+                let baseline = baseline_from_top(children, child, *extent, text_scale);
                 (
                     ascent.max(before + baseline),
                     descent.max(after + extent - baseline),
@@ -1929,7 +1976,7 @@ fn wrapped_intrinsic_cross(
                 .map(cross_alignment)
                 .unwrap_or(parent_alignment)
                 == CrossAlignment::Baseline;
-        let baseline = baseline_from_top(child, cross, text_scale);
+        let baseline = baseline_from_top(children_index, child, cross, text_scale);
         let outer_main = main + main_before + main_after;
         let candidate = if line_count == 0 {
             outer_main
@@ -2152,6 +2199,12 @@ fn text_extent(
     } else {
         device_text_scale
     };
+    if let Some(measured) = crate::text_measure::measure(node, available_width, text_scale) {
+        return match axis {
+            Axis::Vertical => measured.height,
+            Axis::Horizontal => measured.width.min(available_width.max(0.0)),
+        };
+    }
     let base_font_size = number(node, PropKey::FontSize).unwrap_or(14.0).max(1.0);
     let font_size = base_font_size * text_scale;
     let line_height = number(node, PropKey::LineHeight)
@@ -2961,7 +3014,70 @@ fn cross_alignment(value: i64) -> CrossAlignment {
     }
 }
 
-fn baseline_from_top(node: &Node, height: f32, text_scale: f32) -> f32 {
+/// Yoga `YGBaseline`: text reports its first baseline; a container reports
+/// the baseline of its first in-flow child (or the first child that itself
+/// aligns to baseline), offset by the container's top inset and the child's
+/// top margin; a leaf without text falls back to its bottom edge.
+fn baseline_from_top(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    height: f32,
+    text_scale: f32,
+) -> f32 {
+    baseline_at_depth(children, node, height, text_scale, 0)
+}
+
+fn baseline_at_depth(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    height: f32,
+    text_scale: f32,
+    depth: usize,
+) -> f32 {
+    if !matches!(
+        node.kind,
+        NodeKind::Text | NodeKind::Input | NodeKind::Button
+    ) && depth < 32
+    {
+        let in_flow = children
+            .get(&node.id)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .copied()
+            .filter(|child| visible(child) && child.kind != NodeKind::Modal && !out_of_flow(child));
+        let mut first = None;
+        for child in in_flow {
+            if integer(child, PropKey::AlignSelf).map(cross_alignment)
+                == Some(CrossAlignment::Baseline)
+            {
+                first = Some(child);
+                break;
+            }
+            first = first.or(Some(child));
+        }
+        if let Some(child) = first {
+            let padding = number(node, PropKey::Padding).unwrap_or(0.0);
+            let top = number(node, PropKey::PaddingTop)
+                .or_else(|| number(node, PropKey::PaddingVertical))
+                .unwrap_or(padding)
+                .max(0.0)
+                + border_edges(node).1;
+            let margin = number(child, PropKey::Margin).unwrap_or(0.0);
+            let margin_top = number(child, PropKey::MarginTop)
+                .or_else(|| number(child, PropKey::MarginVertical))
+                .unwrap_or(margin);
+            let child_height = number(child, PropKey::Height).unwrap_or(f32::INFINITY);
+            let baseline = top
+                + margin_top
+                + baseline_at_depth(children, child, child_height, text_scale, depth + 1);
+            return baseline.min(height.max(0.0));
+        }
+        return height.max(0.0);
+    }
+    text_baseline(node, height, text_scale)
+}
+
+fn text_baseline(node: &Node, height: f32, text_scale: f32) -> f32 {
     if matches!(
         node.kind,
         NodeKind::Text | NodeKind::Input | NodeKind::Button
@@ -2971,6 +3087,17 @@ fn baseline_from_top(node: &Node, height: f32, text_scale: f32) -> f32 {
             Some(pam_native_protocol::PropValue::Boolean(false))
         );
         let scale = if allow_scaling { text_scale } else { 1.0 };
+        if node.kind == NodeKind::Text {
+            let maximum_scale = number(node, PropKey::TextMaxFontSizeMultiplier).unwrap_or(0.0);
+            let effective = if allow_scaling && maximum_scale > 0.0 {
+                text_scale.min(maximum_scale.max(1.0))
+            } else {
+                scale
+            };
+            if let Some(measured) = crate::text_measure::measure(node, f32::INFINITY, effective) {
+                return measured.first_baseline.min(height.max(0.0));
+            }
+        }
         let font_size = number(node, PropKey::FontSize).unwrap_or(14.0).max(1.0) * scale;
         let base_font_size = number(node, PropKey::FontSize).unwrap_or(14.0).max(1.0);
         let line_height = number(node, PropKey::LineHeight)
@@ -3026,6 +3153,72 @@ fn justify_offsets(value: i64, free: f32, count: usize, gap: f32) -> (f32, f32) 
         }
         _ => (0.0, gap),
     }
+}
+
+fn safe_area_edges(node: &Node) -> Option<([f32; 4], [bool; 4])> {
+    if node.kind != NodeKind::SafeAreaView {
+        return None;
+    }
+    let window = crate::text_measure::safe_area()?;
+    let enabled = |key| {
+        !matches!(
+            node.properties.get(&key),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        )
+    };
+    Some((
+        window,
+        [
+            enabled(PropKey::SafeAreaLeft),
+            enabled(PropKey::SafeAreaTop),
+            enabled(PropKey::SafeAreaRight),
+            enabled(PropKey::SafeAreaBottomEdge),
+        ],
+    ))
+}
+
+/// `SafeAreaView` padding for the window edges its absolute frame overlaps
+/// (react-native-safe-area-context semantics at any nesting level).
+fn safe_area_padding(node: &Node, frame: Layout, viewport: Layout) -> (f32, f32, f32, f32) {
+    let Some((window, enabled)) = safe_area_edges(node) else {
+        return (0.0, 0.0, 0.0, 0.0);
+    };
+    let overlap = |inset: f32, distance: f32| (inset - distance.max(0.0)).clamp(0.0, inset);
+    let left = overlap(window[0], frame.x - viewport.x);
+    let top = overlap(window[1], frame.y - viewport.y);
+    let right = overlap(
+        window[2],
+        viewport.x + viewport.width - (frame.x + frame.width),
+    );
+    let bottom = overlap(
+        window[3],
+        viewport.y + viewport.height - (frame.y + frame.height),
+    );
+    (
+        if enabled[0] { left } else { 0.0 },
+        if enabled[1] { top } else { 0.0 },
+        if enabled[2] { right } else { 0.0 },
+        if enabled[3] { bottom } else { 0.0 },
+    )
+}
+
+/// Border widths per edge (left, top, right, bottom), Yoga semantics.
+fn border_edges(node: &Node) -> (f32, f32, f32, f32) {
+    let valid = |value: f32| value.is_finite() && value > 0.0;
+    let all = number(node, PropKey::BorderWidth)
+        .filter(|value| valid(*value))
+        .unwrap_or(0.0);
+    let side = |key| {
+        number(node, key)
+            .map(|value| if valid(value) { value } else { 0.0 })
+            .unwrap_or(all)
+    };
+    (
+        side(PropKey::BorderLeftWidth),
+        side(PropKey::BorderTopWidth),
+        side(PropKey::BorderRightWidth),
+        side(PropKey::BorderBottomWidth),
+    )
 }
 
 fn number(node: &Node, key: PropKey) -> Option<f32> {
@@ -3360,10 +3553,20 @@ mod tests {
             },
         )
         .expect("baseline layout");
-        let small_baseline =
-            layouts[&2].y + baseline_from_top(&tree.nodes[&2], layouts[&2].height, 1.0);
-        let large_baseline =
-            layouts[&3].y + baseline_from_top(&tree.nodes[&3], layouts[&3].height, 1.0);
+        let small_baseline = layouts[&2].y
+            + baseline_from_top(
+                &child_index(&tree),
+                &tree.nodes[&2],
+                layouts[&2].height,
+                1.0,
+            );
+        let large_baseline = layouts[&3].y
+            + baseline_from_top(
+                &child_index(&tree),
+                &tree.nodes[&3],
+                layouts[&3].height,
+                1.0,
+            );
 
         assert!((small_baseline - large_baseline).abs() < 0.01);
         assert!(layouts[&2].y > layouts[&3].y);
@@ -5947,6 +6150,206 @@ mod css_flex_tests {
             );
         }
         calculate(&Tree { root: 1, nodes }, Size { width, height }).expect("layout")
+    }
+
+    #[test]
+    fn borders_inset_children_like_yoga() {
+        let layouts = layout(
+            vec![
+                (PropKey::Padding, f(4.0)),
+                (PropKey::BorderWidth, f(2.0)),
+                (PropKey::BorderTopWidth, f(3.0)),
+                (PropKey::AlignItems, i(1)),
+            ],
+            vec![vec![(PropKey::Width, f(10.0)), (PropKey::Height, f(10.0))]],
+            100.0,
+            100.0,
+        );
+        assert_eq!((layouts[&2].x, layouts[&2].y), (6.0, 7.0));
+        // Content-sized box: 10 + 2 * padding + borders.
+        let mut tree_nodes = BTreeMap::new();
+        tree_nodes.insert(
+            1,
+            Node {
+                id: 1,
+                parent: 0,
+                index: 0,
+                kind: NodeKind::Column,
+                properties: BTreeMap::from([(PropKey::AlignItems, i(1))]),
+            },
+        );
+        tree_nodes.insert(
+            2,
+            Node {
+                id: 2,
+                parent: 1,
+                index: 0,
+                kind: NodeKind::View,
+                properties: BTreeMap::from([
+                    (PropKey::BorderWidth, f(1.5)),
+                    (PropKey::Padding, f(2.0)),
+                ]),
+            },
+        );
+        tree_nodes.insert(
+            3,
+            Node {
+                id: 3,
+                parent: 2,
+                index: 0,
+                kind: NodeKind::View,
+                properties: BTreeMap::from([(PropKey::Width, f(20.0)), (PropKey::Height, f(8.0))]),
+            },
+        );
+        let sized = calculate(
+            &Tree {
+                root: 1,
+                nodes: tree_nodes,
+            },
+            Size {
+                width: 200.0,
+                height: 200.0,
+            },
+        )
+        .unwrap();
+        assert_eq!((sized[&2].width, sized[&2].height), (27.0, 15.0));
+        assert_eq!((sized[&3].x, sized[&3].y), (3.5, 3.5));
+    }
+
+    #[test]
+    fn nested_safe_area_views_receive_the_insets_of_the_edges_they_touch() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let off = PropValue::Boolean(false);
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                // Root SafeAreaView owns the top edge only.
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::SafeAreaView,
+                        vec![(PropKey::SafeAreaBottomEdge, off.clone())],
+                    ),
+                ),
+                (
+                    2,
+                    node(2, 1, 0, NodeKind::View, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                // Bottom bar: nested SafeAreaView with only the bottom edge.
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::SafeAreaView,
+                        vec![
+                            (PropKey::SafeAreaTop, off.clone()),
+                            (PropKey::SafeAreaLeft, off.clone()),
+                            (PropKey::SafeAreaRight, off.clone()),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(4, 3, 0, NodeKind::View, vec![(PropKey::Height, f(56.0))]),
+                ),
+            ]),
+        };
+        let _scope =
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]));
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 400.0,
+                height: 800.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(layouts[&2].y, 24.0);
+        assert_eq!(layouts[&3].height, 104.0);
+        assert_eq!(layouts[&3].y + layouts[&3].height, 800.0);
+        assert_eq!(layouts[&4].y, 800.0 - 48.0 - 56.0);
+        drop(_scope);
+        let legacy = calculate(
+            &tree,
+            Size {
+                width: 400.0,
+                height: 800.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            legacy[&3].height, 56.0,
+            "without host insets the legacy renderer owns safe areas"
+        );
+    }
+
+    #[test]
+    fn baseline_of_a_container_uses_its_first_text_descendant() {
+        let text = |id, parent, size: f32| Node {
+            id,
+            parent,
+            index: 0,
+            kind: NodeKind::Text,
+            properties: BTreeMap::from([
+                (PropKey::Text, PropValue::String("Ag".into())),
+                (PropKey::FontSize, f(size)),
+            ]),
+        };
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::Row,
+                        properties: BTreeMap::from([(PropKey::AlignItems, i(5))]),
+                    },
+                ),
+                (2, text(2, 1, 24.0)),
+                (
+                    3,
+                    Node {
+                        id: 3,
+                        parent: 1,
+                        index: 1,
+                        kind: NodeKind::View,
+                        properties: BTreeMap::from([(PropKey::PaddingTop, f(10.0))]),
+                    },
+                ),
+                (4, text(4, 3, 12.0)),
+            ]),
+        };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 300.0,
+                height: 300.0,
+            },
+        )
+        .unwrap();
+        let index = child_index(&tree);
+        let first =
+            layouts[&2].y + baseline_from_top(&index, &tree.nodes[&2], layouts[&2].height, 1.0);
+        let nested =
+            layouts[&4].y + baseline_from_top(&index, &tree.nodes[&4], layouts[&4].height, 1.0);
+        assert!(
+            (first - nested).abs() < 0.01,
+            "baselines {first} vs {nested}"
+        );
     }
 
     #[test]

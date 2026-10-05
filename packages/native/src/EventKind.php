@@ -71,4 +71,8 @@ enum EventKind: int
     case MediaCacheProgress = 63;
     case MediaCacheReady = 64;
     case AccessibilityAction = 65;
+    case SpanPress = 66;
+    case Layout = 67;
+    case MediaBuffering = 68;
+    case MediaLoadStart = 69;
 }

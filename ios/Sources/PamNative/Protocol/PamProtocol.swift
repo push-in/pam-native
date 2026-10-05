@@ -128,6 +128,10 @@ public enum EventKind: Int {
     case mediaCacheProgress = 63
     case mediaCacheReady = 64
     case accessibilityAction = 65
+    case spanPress = 66
+    case layout = 67
+    case mediaBuffering = 68
+    case mediaLoadStart = 69
 }
 
 public enum PropValue {
@@ -492,6 +496,14 @@ public enum PamConstants {
     public static let shimmerGradientColor = 498
     public static let shimmerDurationMs = 499
     public static let shimmerEnabled = 500
+    public static let textSpans = 501
+    public static let onSpanPress = 502
+    public static let includeFontPadding = 503
+    public static let onLayout = 504
+    public static let stickyHeader = 505
+    public static let onMediaBuffering = 506
+    public static let onMediaLoadStart = 507
+    public static let scrollKeyboardInset = 508
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

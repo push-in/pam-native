@@ -506,4 +506,12 @@ enum PropKey: int
     case ShimmerGradientColor = 498;
     case ShimmerDurationMs = 499;
     case ShimmerEnabled = 500;
+    case TextSpans = 501;
+    case OnSpanPress = 502;
+    case IncludeFontPadding = 503;
+    case OnLayout = 504;
+    case StickyHeader = 505;
+    case OnMediaBuffering = 506;
+    case OnMediaLoadStart = 507;
+    case ScrollKeyboardInset = 508;
 }

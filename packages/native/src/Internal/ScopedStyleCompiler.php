@@ -56,6 +56,8 @@ final class ScopedStyleCompiler
         'font-weight' => 'fontWeight',
         'gap' => 'gap',
         'height' => 'height',
+        'include-font-padding' => 'includeFontPadding',
+        '-pam-include-font-padding' => 'includeFontPadding',
         'justify-content' => 'justifyContent',
         'left' => 'left',
         'letter-spacing' => 'letterSpacing',
@@ -1172,6 +1174,10 @@ final class ScopedStyleCompiler
         }
         if (in_array($property, ['font-variant', 'font-variant-numeric', 'font-variant-caps', 'font-variant-ligatures', 'font-feature-settings'], true)) {
             self::fontFeatures($output, $property, $value, $name);
+            return;
+        }
+        if ($property === 'include-font-padding' || $property === '-pam-include-font-padding') {
+            $output['includeFontPadding'] = self::keyword($lower, ['true', 'false', 'auto'], $property, $name) !== 'false';
             return;
         }
         if ($property === 'line-height') {
@@ -2363,6 +2369,9 @@ final class ScopedStyleCompiler
                 throw new RuntimeException("Invalid native color resource in {$name}.");
             }
             return $resource;
+        }
+        if ($property === 'include-font-padding' || $property === '-pam-include-font-padding') {
+            return strtolower(trim($value)) !== 'false';
         }
         if ($property === 'display') {
             return match (strtolower($value)) {

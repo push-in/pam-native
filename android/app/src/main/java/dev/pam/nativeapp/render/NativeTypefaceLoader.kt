@@ -43,8 +43,15 @@ internal class NativeTypefaceLoader(context: Context) {
         return Typeface.create(base, style)
     }
 
-    private companion object {
-        const val TAG = "PamNativeFonts"
+    companion object {
+        private const val TAG = "PamNativeFonts"
+
+        private val sharedInstances = java.util.WeakHashMap<android.content.res.AssetManager, NativeTypefaceLoader>()
+
+        /** One loader per asset source so drawing and measurement share typefaces. */
+        fun shared(context: Context): NativeTypefaceLoader = synchronized(sharedInstances) {
+            sharedInstances.getOrPut(context.assets) { NativeTypefaceLoader(context) }
+        }
     }
 }
 

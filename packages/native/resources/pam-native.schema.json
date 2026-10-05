@@ -130,6 +130,13 @@
                         "type": "string",
                         "pattern": "^[A-Za-z0-9!#$&^_.+*-]+/(?:[A-Za-z0-9!#$&^_.+*-]+|\\*)$"
                     }
+                },
+                "safeAreaBottomFallback": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 96,
+                    "default": 0,
+                    "description": "Bottom safe-area inset in dp used when Android reports none (e.g. some gesture-navigation configurations), like React Native apps' getBottomSafeInset() fallback of 48. 0 disables it."
                 }
             }
         },
@@ -219,6 +226,30 @@
                             "type": "string",
                             "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$",
                             "description": "Android 12+ splash screen background; defaults to background."
+                        }
+                    }
+                },
+                "splash": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "description": "Centered splash logo on the Android 12+ SplashScreen and the legacy starting window.",
+                    "properties": {
+                        "logo": {
+                            "type": "string",
+                            "pattern": "^[^/][^\\\\]*\\.(?:png|webp|PNG|WEBP)$",
+                            "description": "Project-relative PNG/WebP logo for the light scheme (and dark when darkLogo is not set)."
+                        },
+                        "darkLogo": {
+                            "type": "string",
+                            "pattern": "^[^/][^\\\\]*\\.(?:png|webp|PNG|WEBP)$",
+                            "description": "Optional logo for the dark scheme; same format as logo."
+                        },
+                        "size": {
+                            "type": "integer",
+                            "minimum": 24,
+                            "maximum": 240,
+                            "default": 96,
+                            "description": "Logo box edge in dp. Android 12+ masks splash icons to a 160 dp circle inside 240 dp."
                         }
                     }
                 }

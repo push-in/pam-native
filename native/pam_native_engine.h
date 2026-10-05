@@ -47,7 +47,54 @@ typedef struct PamNativeStats {
     uint64_t deadline_misses;
 } PamNativeStats;
 
+/* Host text measurement (see crates/pam-native-engine/src/text_measure.rs).
+ * Pointers are valid only during the callback; strings are UTF-8. */
+typedef struct PamTextMeasureRequest {
+    uint64_t node_id;
+    const uint8_t *text;
+    size_t text_length;
+    const uint8_t *spans;
+    size_t spans_length;
+    const uint8_t *font_family;
+    size_t font_family_length;
+    const uint8_t *font_features;
+    size_t font_features_length;
+    float font_size;
+    float font_scale;
+    float letter_spacing;
+    float line_height;
+    float available_width; /* non-finite or <= 0: unbounded */
+    uint16_t font_weight;
+    uint8_t italic;
+    uint8_t include_font_padding;
+    uint8_t text_transform;
+    uint8_t break_strategy;
+    uint8_t hyphenation;
+    uint8_t reserved;
+    uint32_t max_lines; /* 0: unlimited */
+} PamTextMeasureRequest;
+
+typedef struct PamTextMeasureResult {
+    float width;
+    float height;
+    float first_baseline;
+    uint32_t line_count;
+} PamTextMeasureResult;
+
+/* Returns non-zero when result was written. */
+typedef int32_t (*PamTextMeasureCallback)(
+    void *context,
+    const PamTextMeasureRequest *request,
+    PamTextMeasureResult *result
+);
+
 PamNativeEngineHandle *pam_native_engine_new(void);
+/* callback NULL removes the measurer. */
+PamStatus pam_native_engine_set_text_measurer(
+    PamNativeEngineHandle *handle,
+    PamTextMeasureCallback callback,
+    void *context
+);
 PamStatus pam_native_engine_set_asset_root(
     PamNativeEngineHandle *handle,
     const uint8_t *data,
@@ -58,6 +105,14 @@ PamStatus pam_native_engine_set_viewport(
     PamNativeEngineHandle *handle,
     float width,
     float height
+);
+/* Window safe-area insets in points; enables engine SafeAreaView layout. */
+PamStatus pam_native_engine_set_safe_area_insets(
+    PamNativeEngineHandle *handle,
+    float left,
+    float top,
+    float right,
+    float bottom
 );
 PamStatus pam_native_engine_set_refresh_rate(
     PamNativeEngineHandle *handle,

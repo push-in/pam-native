@@ -347,14 +347,25 @@ final class TemplateCompiler
      */
     private static function appendText(array $stack, string $text, int &$nodes): void
     {
-        if (trim($text) === '') {
+        $parent = self::lastNode($stack);
+        // Inside Text/Span, whitespace follows JSX: runs that contain a line
+        // break collapse (dropped at the edges, one space inside); spaces on
+        // one line are kept so inline runs keep their separators. A plain
+        // Text without element children is still trimmed when rendered.
+        $inline = in_array($parent->name, ['Text', 'Span'], true);
+        if ($inline) {
+            $text = preg_replace('/^[ \t]*\R\s*|\s*\R[ \t]*$/u', '', $text) ?? $text;
+            $text = preg_replace('/[ \t]*\R\s*/u', ' ', $text) ?? $text;
+            if ($text === '') {
+                return;
+            }
+        } elseif (trim($text) === '') {
             return;
         }
 
         if (++$nodes > self::MAX_NODES) {
             throw new RuntimeException('Template exceeds its node limit.');
         }
-        $parent = self::lastNode($stack);
 
         $parent->children[] = new CompiledTemplateNode(
             kind: 2,
@@ -363,7 +374,7 @@ final class TemplateCompiler
             source: $parent->source,
             line: $parent->line,
             column: $parent->column,
-            value: trim($text),
+            value: $inline ? $text : trim($text),
         );
     }
 

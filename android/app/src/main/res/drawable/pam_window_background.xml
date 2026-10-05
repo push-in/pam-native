@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "appearance.splash" by the PAM Native CLI. -->
+<color xmlns:android="http://schemas.android.com/apk/res/android"
+    android:color="@color/pam_window_background" />

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "android.safeAreaBottomFallback" by the PAM Native CLI. -->
+<resources>
+    <integer name="pam_safe_area_bottom_fallback_dp">0</integer>
+</resources>

@@ -7,6 +7,7 @@ mod layout;
 pub mod performance;
 pub mod reactive;
 pub mod scheduler;
+mod text_measure;
 pub mod transaction;
 pub mod ui_language;
 pub mod virtualization;
@@ -24,9 +25,11 @@ pub use ffi::{
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
     pam_native_engine_set_asset_root, pam_native_engine_set_native_child_visibility,
-    pam_native_engine_set_refresh_rate, pam_native_engine_set_text_scale,
+    pam_native_engine_set_refresh_rate, pam_native_engine_set_safe_area_insets,
+    pam_native_engine_set_text_measurer, pam_native_engine_set_text_scale,
     pam_native_engine_set_viewport, pam_native_engine_stats,
 };
+pub use text_measure::{PamTextMeasureCallback, PamTextMeasureRequest, PamTextMeasureResult};
 
 #[derive(Debug)]
 pub struct Engine {
@@ -34,6 +37,8 @@ pub struct Engine {
     viewport: layout::Size,
     text_scale: f32,
     font_metrics: font_metrics::FontMetricsCache,
+    text_measurer: Option<text_measure::HostTextMeasurer>,
+    safe_area: Option<[f32; 4]>,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
     created: u64,
@@ -57,6 +62,8 @@ impl Default for Engine {
             },
             text_scale: 1.0,
             font_metrics: font_metrics::FontMetricsCache::default(),
+            text_measurer: None,
+            safe_area: None,
             layouts: BTreeMap::new(),
             commits: 0,
             created: 0,
@@ -106,6 +113,48 @@ impl Engine {
         self.text_scale
     }
 
+    /// Installs (or removes) the host text measurer used for text boxes.
+    ///
+    /// # Safety
+    ///
+    /// `callback` must be safe to invoke with `context` from the thread that
+    /// calls into this engine for as long as it remains installed.
+    pub unsafe fn set_text_measurer(
+        &mut self,
+        measurer: Option<(PamTextMeasureCallback, *mut std::ffi::c_void)>,
+    ) {
+        self.text_measurer = measurer
+            .map(|(callback, context)| text_measure::HostTextMeasurer::new(callback, context));
+    }
+
+    /// Window safe-area insets in points. Once set, `SafeAreaView` padding is
+    /// part of engine layout (like react-native-safe-area-context): each view
+    /// receives the inset of the window edges its frame actually touches.
+    pub fn set_safe_area_insets(
+        &mut self,
+        left: f32,
+        top: f32,
+        right: f32,
+        bottom: f32,
+    ) -> Result<(), EngineError> {
+        let values = [left, top, right, bottom];
+        if values
+            .iter()
+            .any(|value| !value.is_finite() || *value < 0.0)
+        {
+            return Err(EngineError::InvalidViewport);
+        }
+        self.safe_area = Some(values);
+        Ok(())
+    }
+
+    /// Drops cached host text measurements (fonts or configuration changed).
+    pub fn invalidate_text_measurements(&mut self) {
+        if let Some(measurer) = &self.text_measurer {
+            measurer.clear();
+        }
+    }
+
     pub fn set_asset_root(&mut self, asset_root: impl Into<std::path::PathBuf>) {
         self.font_metrics.set_asset_root(asset_root);
     }
@@ -139,6 +188,8 @@ impl Engine {
             return Ok(());
         };
         let layout_started = Instant::now();
+        let _text_measurer =
+            text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
         let text_metrics = self.font_metrics.measure_tree(current);
         let next_layouts = layout::calculate_with_text_metrics(
             current,
@@ -243,6 +294,8 @@ impl Engine {
             decode_started.elapsed(),
         );
         let layout_started = Instant::now();
+        let _text_measurer =
+            text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -354,6 +407,8 @@ impl Engine {
                 .as_ref()
                 .expect("current tree remains available");
             let dirty_nodes = layout_dirty_nodes.iter().copied().collect::<Vec<_>>();
+            let _text_measurer =
+                text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
             let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
             let calculated = layout::calculate_incremental_with_text_metrics(
                 current,
@@ -470,6 +525,8 @@ impl Engine {
         );
 
         let layout_started = Instant::now();
+        let _text_measurer =
+            text_measure::ActiveScope::enter_with(self.text_measurer.as_ref(), self.safe_area);
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -861,6 +918,15 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::MinWidthPercent
             | PropKey::MinHeightPercent
             | PropKey::FontFeatureSettings
+            | PropKey::TextSpans
+            | PropKey::IncludeFontPadding
+            | PropKey::BorderWidth
+            | PropKey::BorderLeftWidth
+            | PropKey::BorderTopWidth
+            | PropKey::BorderRightWidth
+            | PropKey::BorderBottomWidth
+            | PropKey::TextBreakStrategy
+            | PropKey::TextHyphenationFrequency
     )
 }
 
@@ -887,6 +953,8 @@ fn affects_resolved_layout(node: &Node, key: PropKey) -> bool {
                 | PropKey::TextMaxFontSizeMultiplier
                 | PropKey::TextAdjustsFontSizeToFit
                 | PropKey::TextMinimumFontScale
+                | PropKey::TextSpans
+                | PropKey::IncludeFontPadding
         )
     {
         return false;

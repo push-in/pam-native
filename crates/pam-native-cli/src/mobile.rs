@@ -221,6 +221,51 @@ struct AndroidOptions {
     deep_links: Vec<AndroidDeepLink>,
     #[serde(default)]
     share_targets: Vec<String>,
+    /// Bottom safe-area inset (dp) used when Android reports none, like React
+    /// Native apps' `getBottomSafeInset()` fallback. 0 disables it.
+    #[serde(default)]
+    safe_area_bottom_fallback: u32,
+}
+
+/// `res/values/pam_safe_area.xml` (bundled default: fallback 0).
+fn safe_area_resources(bottom_fallback: u32) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Generated from pam-native.json \"android.safeAreaBottomFallback\" by the PAM Native CLI. -->\n<resources>\n    <integer name=\"pam_safe_area_bottom_fallback_dp\">{}</integer>\n</resources>\n",
+        bottom_fallback.min(96)
+    )
+}
+
+/// Copies `appearance.splash` logos into the host resources (`-nodpi`, so
+/// the PNG is scaled once to the configured dp box) and removes stale ones.
+fn sync_splash_logos(project: &Project, res: &Path) -> Result<(), String> {
+    let splash = &project.manifest.appearance.splash;
+    for (directory, source) in [
+        ("drawable-nodpi", splash.logo.as_deref()),
+        ("drawable-night-nodpi", splash.dark_logo.as_deref()),
+    ] {
+        let target_directory = res.join(directory);
+        for extension in ["png", "webp"] {
+            let stale = target_directory.join(format!("pam_splash_logo.{extension}"));
+            if stale.is_file()
+                && source.and_then(crate::appearance::splash_extension) != Some(extension)
+            {
+                fs::remove_file(&stale)
+                    .map_err(|error| format!("Cannot remove {}: {error}", stale.display()))?;
+            }
+        }
+        let Some(source) = source else { continue };
+        let extension = crate::appearance::splash_extension(source)
+            .ok_or_else(|| format!("Invalid splash logo path {source}"))?;
+        let bytes = fs::read(project.root.join(source))
+            .map_err(|error| format!("Cannot read appearance.splash logo {source}: {error}"))?;
+        fs::create_dir_all(&target_directory)
+            .map_err(|error| format!("Cannot create {}: {error}", target_directory.display()))?;
+        write_atomic(
+            &target_directory.join(format!("pam_splash_logo.{extension}")),
+            &bytes,
+        )?;
+    }
+    Ok(())
 }
 
 fn default_debug_firebase() -> bool {
@@ -237,6 +282,7 @@ impl Default for AndroidOptions {
             permissions: Vec::new(),
             deep_links: Vec::new(),
             share_targets: Vec::new(),
+            safe_area_bottom_fallback: 0,
         }
     }
 }
@@ -5034,6 +5080,11 @@ fn configure_android(
         .manifest
         .appearance
         .write_android_resources(&workspace.join("app/src/main/res"), write_atomic)?;
+    sync_splash_logos(project, &workspace.join("app/src/main/res"))?;
+    write_atomic(
+        &workspace.join("app/src/main/res/values/pam_safe_area.xml"),
+        safe_area_resources(project.manifest.android.safe_area_bottom_fallback).as_bytes(),
+    )?;
     generate_plugin_projects(project, workspace)?;
     write_plugin_lock(project)?;
     write_ios_plugin_plan(project)?;

@@ -127,6 +127,55 @@ pub unsafe extern "C" fn pam_native_engine_set_asset_root(
 }
 
 #[unsafe(no_mangle)]
+/// Installs a host text measurer, or removes it when `callback` is null.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine. `callback` must remain callable with
+/// `context` from every thread that later calls into this engine until it is
+/// replaced, removed, or the engine is freed. The callback must not retain the
+/// request or result pointers and must not call back into this engine.
+pub unsafe extern "C" fn pam_native_engine_set_text_measurer(
+    handle: *mut PamNativeEngineHandle,
+    callback: Option<crate::PamTextMeasureCallback>,
+    context: *mut c_void,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    match catch_unwind(AssertUnwindSafe(|| unsafe {
+        handle
+            .engine
+            .set_text_measurer(callback.map(|callback| (callback, context)));
+    })) {
+        Ok(()) => PamStatus::Success,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
+/// Sets the window safe-area insets (points) used to lay out `SafeAreaView`.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine.
+pub unsafe extern "C" fn pam_native_engine_set_safe_area_insets(
+    handle: *mut PamNativeEngineHandle,
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    match handle.engine.set_safe_area_insets(left, top, right, bottom) {
+        Ok(()) => PamStatus::Success,
+        Err(_) => PamStatus::InvalidArgument,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Releases an engine allocated by [`pam_native_engine_new`].
 ///
 /// # Safety

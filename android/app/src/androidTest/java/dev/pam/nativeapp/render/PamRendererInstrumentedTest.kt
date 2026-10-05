@@ -2742,11 +2742,13 @@ class PamRendererInstrumentedTest {
                 val text = (activity.host.getChildAt(0) as ViewGroup).getChildAt(0) as TextView
                 for ((weight, reference) in listOf(400L to 268.34375f, 600L to 279.34375f, 700L to 284.875f)) {
                     renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.FONT_WEIGHT, PropValue.Integer(weight)))))
-                    assertTrue(text.paintFlags and android.graphics.Paint.LINEAR_TEXT_FLAG != 0)
+                    // Text nodes use React Native's paint (hinted advances); the
+                    // engine measures them with the same PamTextLayout pipeline.
+                    assertTrue(text.paintFlags and android.graphics.Paint.LINEAR_TEXT_FLAG == 0)
                     if (Build.VERSION.SDK_INT >= 28) assertEquals(weight.toInt(), text.typeface.weight)
                     val expected = reference / 64f * text.textSize
                     val drawn = text.paint.measureText(text.text.toString())
-                    assertTrue("drawn=$drawn expected=$expected weight=$weight", drawn <= kotlin.math.ceil(expected))
+                    assertTrue("drawn=$drawn expected=$expected weight=$weight", kotlin.math.abs(drawn - expected) <= 0.03f * expected)
                 }
                 renderer.close()
             }

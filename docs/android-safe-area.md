@@ -105,3 +105,40 @@ Before releasing an Android host change, exercise:
    touch actions while the composer is translated.
 6. `PamSafeAreaInsetsTest`, `PamSafeAreaLayoutTest`,
    `PamKeyboardAvoidanceTest` and Android instrumentation tests.
+
+## Engine-managed SafeAreaView (1.3)
+
+The Android host passes the window safe area to the layout engine
+(`pam_native_engine_set_safe_area_insets`). Every `SafeAreaView` then gets
+padding for exactly the window edges its own frame overlaps, at any nesting
+level, as part of flex layout — like `react-native-safe-area-context`. A
+bottom bar wrapped in `<SafeAreaView safeAreaEdgeTop="false"
+safeAreaEdgeLeft="false" safeAreaEdgeRight="false">` inside a root
+`SafeAreaView` whose bottom edge is disabled receives the full navigation-bar
+inset; a nested view that does not reach an edge receives none. Content-sized
+safe area views grow by the insets of their enabled edges.
+
+`WindowMetrics` (`App::windowMetrics()`, `env(safe-area-inset-*)`) carries the
+real safe area from the first render: the host exports size, density and
+insets before PHP starts (`PAM_BOOT_METRICS`) and re-sends `Dimensions`
+whenever the insets change, even when the window size does not.
+
+### Bottom inset fallback
+
+Some gesture-navigation configurations report a zero bottom inset although
+system UI overlaps the bottom of the screen. React Native apps commonly guard
+with a fallback (`getBottomSafeInset()` returning 48). Configure the same
+fallback for every PAM safe-area consumer:
+
+```json
+{ "android": { "safeAreaBottomFallback": 48 } }
+```
+
+The value (dp, 0–96, default 0) is used only when Android reports no bottom
+inset.
+
+### Keyboard inset inside scroll content
+
+`<Scroll keyboardInset>` (`PropKey::ScrollKeyboardInset`) adds the visible IME
+height as bottom content inset inside the scroll container and keeps the
+focused input revealed, like `KeyboardAwareScrollView`.

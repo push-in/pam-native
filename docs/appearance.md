@@ -124,3 +124,26 @@ SharedPreferences (`pam.appearance`) with a synchronous commit.
 **iOS.** The mode is stored in `UserDefaults` (`pam.appearance.mode`) and
 applied as the window's `overrideUserInterfaceStyle` before
 `makeKeyAndVisible()`. The launch storyboard follows the system scheme.
+
+## Splash logo
+
+```json
+{
+    "appearance": {
+        "light": { "splashBackground": "#F7F6F2" },
+        "dark": { "splashBackground": "#111511" },
+        "splash": {
+            "logo": "assets/logos/ze-chat.png",
+            "darkLogo": "assets/logos/ze-chat-dark.png",
+            "size": 120
+        }
+    }
+}
+```
+
+`logo`/`darkLogo` are project-relative PNG or WebP files (same format for
+both). `size` is the logo box in dp (24–240, default 96). Android 12+ shows it
+as `windowSplashScreenAnimatedIcon` (centered in the 240 dp icon area; the
+system masks icons to a 160 dp circle), and API 26–30 draw it centered on the
+`splashBackground` starting window. Each scheme uses its own logo and
+background. Without `splash.logo` the platform default icon is kept.

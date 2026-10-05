@@ -390,6 +390,13 @@ class PamRenderer(
     private val dispatchEvent: (Long, Int, ByteArray) -> Unit,
 ) : AutoCloseable {
     var onNativeChildVisibility: ((Long, Long, Boolean) -> Unit)? = null
+
+    /**
+     * True once the runtime feeds window insets to the engine: SafeAreaView
+     * padding is then part of engine layout and must not be applied again.
+     */
+    @Volatile
+    var engineManagedSafeArea: Boolean = false
     private val main = Handler(Looper.getMainLooper())
     private val views = LongSparseArray<View>()
     private val scrollContainers = LongSparseArray<PamScrollContainer>()
@@ -406,7 +413,7 @@ class PamRenderer(
     private val imageLoader = NativeImageLoader(context)
     private val mediaCache = NativeMediaFileCache(context)
     private val nativeViews = NativeViewRegistry(context)
-    private val typefaces = NativeTypefaceLoader(context)
+    private val typefaces = NativeTypefaceLoader.shared(context)
     private var rootId = 0L
     private var nextMountOrder = 1L
     private var statusBarDefaults: StatusBarConfig? = null
@@ -928,7 +935,12 @@ class PamRenderer(
             -> PamContainer(context)
             NodeKind.PRESSABLE -> PamPressable(context)
             NodeKind.TEXT -> TextView(context).apply {
-                includeFontPadding = false
+                // React Native Android defaults: includeFontPadding=true,
+                // high-quality breaking, no hyphenation, fallback spacing.
+                includeFontPadding = true
+                breakStrategy = android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY
+                hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isFallbackLineSpacing = true
                 gravity = Gravity.CENTER_VERTICAL
             }
             NodeKind.BUTTON -> Button(context).apply {
@@ -1944,10 +1956,18 @@ class PamRenderer(
         when (key) {
             PropKey.TEXT -> (view as? TextView)?.let { text ->
                 val semanticText = value.semanticValue().toString()
-                text.text = semanticText
                 state.baseText = semanticText
-                applyTextDataDetector(text, state)
+                if (isRichTextView(text, state)) {
+                    applyTextContent(text, state)
+                } else {
+                    text.text = semanticText
+                    applyTextDataDetector(text, state)
+                }
             }
+            PropKey.TEXT_SPANS,
+            PropKey.ON_SPAN_PRESS,
+            -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
+            PropKey.INCLUDE_FONT_PADDING -> (view as? TextView)?.includeFontPadding = value.flag()
             PropKey.VALUE -> when (view) {
                 is EditText -> applyInputValue(view, state, value.text(key))
                 is PamDrawingCanvas -> view.setDrawing(value.text(key))
@@ -1982,7 +2002,10 @@ class PamRenderer(
             PropKey.BACKGROUND_GRADIENT,
             PropKey.BORDER_GRADIENT,
             PropKey.BOX_SHADOWS,
-            -> updateBackground(view, state)
+            -> {
+                updateBackground(view, state)
+                if (key in BORDER_WIDTH_KEYS) applyLeafPadding(view, state)
+            }
             PropKey.FILTER_COLOR_MATRIX -> applyFilter(view, state)
             PropKey.BACKDROP_BLUR_RADIUS,
             PropKey.BACKDROP_COLOR_MATRIX,
@@ -2123,14 +2146,22 @@ class PamRenderer(
                         Paint.UNDERLINE_TEXT_FLAG or Paint.STRIKE_THRU_TEXT_FLAG
                 }
             }
-            PropKey.TEXT_TRANSFORM -> if (view is TextView && view !is EditText) {
+            PropKey.TEXT_TRANSFORM -> if (view is TextView && isRichTextView(view, state)) {
+                view.transformationMethod = null
+                applyTextContent(view, state)
+            } else if (view is TextView && view !is EditText) {
                 view.transformationMethod = when (value.integer().toInt()) {
                     2, 3, 4 -> PamTextTransformMethod(value.integer().toInt())
                     else -> null
                 }
             }
-            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.maxLines =
-                value.integer().toInt().takeIf { it > 0 } ?: Int.MAX_VALUE
+            PropKey.NUMBER_OF_LINES -> (view as? TextView)?.let { text ->
+                text.maxLines = value.integer().toInt().takeIf { it > 0 } ?: Int.MAX_VALUE
+                // React Native: numberOfLines implies ellipsizeMode="tail".
+                if (isRichTextView(text, state) && state.properties[PropKey.TEXT_ELLIPSIZE_MODE] == null) {
+                    text.ellipsize = if (value.integer() > 0) TextUtils.TruncateAt.END else null
+                }
+            }
             PropKey.MULTILINE,
             PropKey.SECURE,
             PropKey.KEYBOARD_TYPE,
@@ -2627,6 +2658,11 @@ class PamRenderer(
             PropKey.MARGIN_BOTTOM_AUTO,
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
+            PropKey.ON_LAYOUT,
+            PropKey.STICKY_HEADER,
+            PropKey.ON_MEDIA_BUFFERING,
+            PropKey.ON_MEDIA_LOAD_START,
+            PropKey.SCROLL_KEYBOARD_INSET,
             -> Unit
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
             PropKey.ANIMATION_DURATION_MS -> {
@@ -2797,7 +2833,10 @@ class PamRenderer(
     private fun resetProperty(view: View, state: NodeState, key: PropKey) {
         when (key) {
             PropKey.LAYOUT_DIRECTION -> view.layoutDirection = View.LAYOUT_DIRECTION_INHERIT
-            PropKey.TEXT -> (view as? TextView)?.text = ""
+            PropKey.TEXT -> (view as? TextView)?.let { text ->
+                state.baseText = ""
+                if (isRichTextView(text, state)) applyTextContent(text, state) else text.text = ""
+            }
             PropKey.VALUE -> when (view) {
                 is EditText -> view.setText("")
                 is PamDrawingCanvas -> view.setDrawing("")
@@ -2832,7 +2871,10 @@ class PamRenderer(
             PropKey.BACKGROUND_GRADIENT,
             PropKey.BORDER_GRADIENT,
             PropKey.BOX_SHADOWS,
-            -> updateBackground(view, state)
+            -> {
+                updateBackground(view, state)
+                if (key in BORDER_WIDTH_KEYS) applyLeafPadding(view, state)
+            }
             PropKey.FILTER_COLOR_MATRIX -> applyFilter(view, state)
             PropKey.BACKDROP_BLUR_RADIUS,
             PropKey.BACKDROP_COLOR_MATRIX,
@@ -3238,6 +3280,7 @@ class PamRenderer(
             }
             PropKey.TEXT_TRANSFORM -> if (view is TextView && view !is EditText) {
                 view.transformationMethod = null
+                if (isRichTextView(view, state)) applyTextContent(view, state)
             }
             PropKey.POINTER_EVENTS -> applyPointerEvents(view, state, POINTER_EVENTS_AUTO)
             PropKey.SAFE_AREA_BOTTOM -> applySafeAreaBottom(view, state, false)
@@ -3266,6 +3309,15 @@ class PamRenderer(
             PropKey.MARGIN_BOTTOM_AUTO,
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
+            PropKey.TEXT_SPANS,
+            PropKey.ON_SPAN_PRESS,
+            -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
+            PropKey.INCLUDE_FONT_PADDING -> (view as? TextView)?.includeFontPadding = view !is EditText
+            PropKey.ON_LAYOUT,
+            PropKey.STICKY_HEADER,
+            PropKey.ON_MEDIA_BUFFERING,
+            PropKey.ON_MEDIA_LOAD_START,
+            PropKey.SCROLL_KEYBOARD_INSET,
             -> Unit
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, 1)
             PropKey.ANIMATION_DURATION_MS -> {
@@ -5024,7 +5076,23 @@ class PamRenderer(
         val top = state.number(PropKey.PADDING_TOP, vertical.toDouble()).toFloat()
         val right = state.number(PropKey.PADDING_RIGHT, horizontal.toDouble()).toFloat()
         val bottom = state.number(PropKey.PADDING_BOTTOM, vertical.toDouble()).toFloat()
-        view.setPadding(dp(left), dp(top), dp(right), dp(bottom) + state.safeBottomInset)
+        // Yoga: borders belong to the padding box, so leaf content (text,
+        // images) is inset by the border as well.
+        val border = state.number(PropKey.BORDER_WIDTH, 0.0).toFloat().coerceAtLeast(0f)
+        fun edge(key: PropKey) = state.number(key, border.toDouble()).toFloat().coerceAtLeast(0f)
+        // Text content was measured at the exact inner width; never round the
+        // insets up or the last word of a fitted line could wrap.
+        val inset: (Float) -> Int = if (view is TextView) {
+            { value -> (value * resourcesDensity() + 0.001f).toInt() }
+        } else {
+            ::dp
+        }
+        view.setPadding(
+            inset(left + edge(PropKey.BORDER_LEFT_WIDTH)),
+            inset(top + edge(PropKey.BORDER_TOP_WIDTH)),
+            inset(right + edge(PropKey.BORDER_RIGHT_WIDTH)),
+            inset(bottom + edge(PropKey.BORDER_BOTTOM_WIDTH)) + state.safeBottomInset,
+        )
     }
 
     @SuppressLint("DiscouragedApi")
@@ -5412,7 +5480,11 @@ class PamRenderer(
             .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
             .toFloat()
         val effectiveScale = resolvedFontScale(allowScaling, deviceScale, maximumMultiplier)
-        val maximumPx = max(1f, baseSize * metrics.density * effectiveScale)
+        val maximumPx = if (isRichTextView(view, state)) {
+            PamTextLayout.fontSizePx(baseSize, effectiveScale, metrics.density)
+        } else {
+            max(1f, baseSize * metrics.density * effectiveScale)
+        }
         view.setTextSize(TypedValue.COMPLEX_UNIT_PX, maximumPx)
 
         if (!state.flag(PropKey.TEXT_ADJUSTS_FONT_SIZE_TO_FIT, false)) return
@@ -5469,6 +5541,10 @@ class PamRenderer(
     }
 
     private fun applyLetterSpacing(view: TextView, state: NodeState) {
+        if (isRichTextView(view, state)) {
+            view.letterSpacing = PamTextLayout.letterSpacingEm(textStyle(state), resourcesDensity())
+            return
+        }
         view.letterSpacing = resolvedAndroidLetterSpacing(
             state.number(PropKey.LETTER_SPACING, 0.0).toFloat(),
             state.number(PropKey.FONT_SIZE, 14.0).toFloat(),
@@ -5543,6 +5619,10 @@ class PamRenderer(
     }
 
     private fun applyLineHeight(view: TextView, state: NodeState) {
+        if (isRichTextView(view, state)) {
+            applyTextContent(view, state)
+            return
+        }
         val logicalLineHeight = state.properties[PropKey.LINE_HEIGHT]?.decimal()?.toFloat()
         if (logicalLineHeight == null) {
             view.setLineSpacing(0f, 1f)
@@ -5594,13 +5674,109 @@ class PamRenderer(
         }
     }
 
+    /** Text nodes use the shared PamTextLayout pipeline (React Native parity). */
+    private fun isRichTextView(view: TextView, state: NodeState): Boolean =
+        state.kind == NodeKind.TEXT && view !is EditText && view !is Button
+
+    private fun textStyle(state: NodeState): PamTextStyle =
+        PamTextStyle(
+            fontFamily = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value,
+            fontSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat().coerceAtLeast(1f),
+            fontScale = resolvedFontScale(
+                state.flag(PropKey.TEXT_ALLOW_FONT_SCALING, true),
+                context.resources.configuration.fontScale,
+                state.number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0).toFloat(),
+            ),
+            fontWeight = state.integer(PropKey.FONT_WEIGHT, 400L).coerceIn(1L, 1000L).toInt(),
+            italic = state.integer(PropKey.FONT_STYLE, 1L) == 2L,
+            letterSpacing = state.number(PropKey.LETTER_SPACING, 0.0).toFloat(),
+            lineHeight = state.number(PropKey.LINE_HEIGHT, 0.0).toFloat().coerceAtLeast(0f),
+            includeFontPadding = state.flag(PropKey.INCLUDE_FONT_PADDING, true),
+            textTransform = state.integer(PropKey.TEXT_TRANSFORM, 1L).toInt(),
+            breakStrategy = state.integer(PropKey.TEXT_BREAK_STRATEGY, 1L).toInt(),
+            hyphenation = state.integer(PropKey.TEXT_HYPHENATION_FREQUENCY, 1L).toInt(),
+            maxLines = state.integer(PropKey.NUMBER_OF_LINES, 0L).toInt().coerceAtLeast(0),
+            fontFeatures = (state.properties[PropKey.FONT_FEATURE_SETTINGS] as? PropValue.Text)?.value,
+        )
+
+    private fun applyTextContent(view: TextView, state: NodeState) {
+        view.setLineSpacing(0f, 1f)
+        view.transformationMethod = null
+        val spans = (state.properties[PropKey.TEXT_SPANS] as? PropValue.Text)?.value
+        view.text = PamTextLayout.content(
+            state.baseText,
+            spans,
+            textStyle(state),
+            resourcesDensity(),
+            typefaces,
+        )
+        configureSpanPress(view, state, !spans.isNullOrEmpty())
+        applyTextDataDetector(view, state)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun configureSpanPress(view: TextView, state: NodeState, hasSpans: Boolean) {
+        if (!hasSpans || state.properties[PropKey.ON_SPAN_PRESS] == null) {
+            if (state.spanPressInstalled) {
+                view.setOnTouchListener(null)
+                state.spanPressInstalled = false
+            }
+            return
+        }
+        state.spanPressInstalled = true
+        var pressed: PamSpanPress? = null
+        view.setOnTouchListener { touched, event ->
+            val text = (touched as TextView).text as? android.text.Spanned
+            val layout = touched.layout
+            fun spanAt(): PamSpanPress? {
+                if (text == null || layout == null) return null
+                val x = event.x - touched.totalPaddingLeft + touched.scrollX
+                val y = event.y - touched.totalPaddingTop + touched.scrollY
+                if (y < 0 || y > layout.height) return null
+                val line = layout.getLineForVertical(y.toInt())
+                if (x < layout.getLineLeft(line) || x > layout.getLineRight(line)) return null
+                val offset = layout.getOffsetForHorizontal(line, x)
+                return text.getSpans(offset, offset, PamSpanPress::class.java)
+                    .filter { text.getSpanStart(it) <= offset && offset < text.getSpanEnd(it) }
+                    .lastOrNull()
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    pressed = spanAt()
+                    pressed != null
+                }
+                MotionEvent.ACTION_UP -> {
+                    val target = pressed
+                    pressed = null
+                    if (target != null && spanAt() === target) {
+                        dispatch(state.id, EventKind.SPAN_PRESS.value, target.slot.toString())
+                        touched.performClick()
+                    }
+                    target != null
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    val consumed = pressed != null
+                    pressed = null
+                    consumed
+                }
+                else -> pressed != null
+            }
+        }
+    }
+
     private fun applyTypeface(view: TextView, state: NodeState) {
         val weight = state.integer(PropKey.FONT_WEIGHT, 400L).coerceIn(1L, 1000L).toInt()
         val italic = state.integer(PropKey.FONT_STYLE, 1L) == 2L
         val family = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value
-        // Keep fractional glyph advances consistent with the layout engine.
-        view.paintFlags = view.paintFlags or android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
-            android.graphics.Paint.LINEAR_TEXT_FLAG
+        // Text nodes are measured by PamTextLayout with React Native's default
+        // paint (hinted advances); other controls keep linear metrics.
+        view.paintFlags = if (isRichTextView(view, state)) {
+            view.paintFlags and (android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
+                android.graphics.Paint.LINEAR_TEXT_FLAG).inv()
+        } else {
+            view.paintFlags or android.graphics.Paint.SUBPIXEL_TEXT_FLAG or
+                android.graphics.Paint.LINEAR_TEXT_FLAG
+        }
         view.typeface = typefaces.resolve(family, weight, italic)
     }
 
@@ -5887,7 +6063,11 @@ class PamRenderer(
         insets: WindowInsets,
     ) {
         val raw = windowSafeAreaInsets(insets)
-        val resolved = safeAreaInsetsForView(raw, target)
+        val resolved = if (engineManagedSafeArea) {
+            SafeAreaInsets(0, 0, 0, 0)
+        } else {
+            safeAreaInsetsForView(raw, target)
+        }
         state.safeAreaLeftInset = resolved.left
         state.safeAreaTopInset = resolved.top
         state.safeAreaRightInset = resolved.right
@@ -7508,6 +7688,7 @@ class PamRenderer(
         var nativeValueAcknowledged: Boolean = true,
         var deferredInputValue: String? = null,
         var baseText: String = "",
+        var spanPressInstalled: Boolean = false,
         var pressOpacity: Float = 0.72f,
         var pressScale: Float = 1f,
         var scrollScheduled: Boolean = false,
@@ -7828,6 +8009,13 @@ class PamRenderer(
 
         const val TEXT_ALIGN_JUSTIFY = 4
         var blurFilterWarned = false
+        val BORDER_WIDTH_KEYS = setOf(
+            PropKey.BORDER_WIDTH,
+            PropKey.BORDER_LEFT_WIDTH,
+            PropKey.BORDER_TOP_WIDTH,
+            PropKey.BORDER_RIGHT_WIDTH,
+            PropKey.BORDER_BOTTOM_WIDTH,
+        )
         const val MIN_TEXT_SHADOW_RADIUS = 0.01f
 
         const val ROLE_DESCRIPTION_KEY = "AccessibilityNodeInfo.roleDescription"

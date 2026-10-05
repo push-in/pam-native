@@ -50,9 +50,88 @@ pub enum LegacyStartingWindow {
     None,
 }
 
+/// `appearance.splash`: a centered logo on the Android 12+ splash screen and
+/// on the legacy (API 26–30) starting window, per light/dark scheme.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SplashOptions {
+    /// Project-relative PNG/WebP used in the light scheme (and dark when no
+    /// `darkLogo` is set).
+    #[serde(default)]
+    pub logo: Option<String>,
+    #[serde(default)]
+    pub dark_logo: Option<String>,
+    /// Logo box edge in dp (24–240; Android 12 masks icons to a 160 dp circle).
+    #[serde(default = "default_splash_size")]
+    pub size: u32,
+}
+
+const fn default_splash_size() -> u32 {
+    96
+}
+
+impl Default for SplashOptions {
+    fn default() -> Self {
+        Self {
+            logo: None,
+            dark_logo: None,
+            size: default_splash_size(),
+        }
+    }
+}
+
+impl SplashOptions {
+    fn validate(&self) -> Result<(), String> {
+        if !(24..=240).contains(&self.size) {
+            return Err("appearance.splash.size must be between 24 and 240 dp".into());
+        }
+        if self.dark_logo.is_some() && self.logo.is_none() {
+            return Err("appearance.splash.darkLogo requires appearance.splash.logo".into());
+        }
+        for (field, value) in [("logo", &self.logo), ("darkLogo", &self.dark_logo)] {
+            if let Some(path) = value {
+                splash_extension(path).ok_or_else(|| {
+                    format!("appearance.splash.{field} must be a project-relative .png or .webp path, got {path:?}")
+                })?;
+            }
+        }
+        if let (Some(light), Some(dark)) = (&self.logo, &self.dark_logo) {
+            if splash_extension(light) != splash_extension(dark) {
+                return Err(
+                    "appearance.splash.logo and darkLogo must use the same image format".into(),
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Lowercase image extension of a safe project-relative splash path.
+pub fn splash_extension(path: &str) -> Option<&'static str> {
+    let relative = Path::new(path);
+    if path.is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".png") {
+        Some("png")
+    } else if lower.ends_with(".webp") {
+        Some("webp")
+    } else {
+        None
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppearanceOptions {
+    #[serde(default)]
+    pub splash: SplashOptions,
     #[serde(default)]
     pub default_mode: AppearanceMode,
     #[serde(default)]
@@ -109,7 +188,7 @@ impl AppearanceOptions {
     pub fn validate(&self) -> Result<(), String> {
         self.light_palette()?;
         self.dark_palette()?;
-        Ok(())
+        self.splash.validate()
     }
 
     /// Writes the Android `values` and `values-night` resources consumed by
@@ -130,8 +209,76 @@ impl AppearanceOptions {
         write(
             &res.join("values-night/pam_appearance.xml"),
             android_resources(&self.dark_palette()?, None).as_bytes(),
-        )
+        )?;
+        for (name, contents) in splash_resources(&self.splash) {
+            write(&res.join(name), contents.as_bytes())?;
+        }
+        Ok(())
     }
+}
+
+const GENERATED: &str =
+    "<!-- Generated from pam-native.json \"appearance.splash\" by the PAM Native CLI. -->";
+
+/// Theme/drawable resources for the splash logo. Without a logo the bundled
+/// defaults are restored (plain window colour, platform default icon).
+fn splash_resources(splash: &SplashOptions) -> Vec<(&'static str, String)> {
+    let size = splash.size;
+    let header = format!("<?xml version=\"1.0\" encoding=\"utf-8\"?>\n{GENERATED}\n");
+    let Some(_) = splash.logo else {
+        return vec![
+            (
+                "values/pam_splash.xml",
+                format!(
+                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\" />\n</resources>\n"
+                ),
+            ),
+            (
+                "values-v31/pam_splash.xml",
+                format!(
+                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\" />\n</resources>\n"
+                ),
+            ),
+            (
+                "drawable/pam_window_background.xml",
+                format!(
+                    "{header}<color xmlns:android=\"http://schemas.android.com/apk/res/android\"\n    android:color=\"@color/pam_window_background\" />\n"
+                ),
+            ),
+            (
+                "drawable/pam_splash_icon.xml",
+                format!(
+                    "{header}<shape xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <solid android:color=\"@android:color/transparent\" />\n    <size android:width=\"240dp\" android:height=\"240dp\" />\n</shape>\n"
+                ),
+            ),
+        ];
+    };
+    vec![
+        (
+            "values/pam_splash.xml",
+            format!(
+                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\" />\n</resources>\n"
+            ),
+        ),
+        (
+            "values-v31/pam_splash.xml",
+            format!(
+                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/pam_splash_icon</item>\n    </style>\n</resources>\n"
+            ),
+        ),
+        (
+            "drawable/pam_window_background.xml",
+            format!(
+                "{header}<layer-list xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <item android:drawable=\"@color/pam_splash_background\" />\n    <item\n        android:width=\"{size}dp\"\n        android:height=\"{size}dp\"\n        android:gravity=\"center\"\n        android:drawable=\"@drawable/pam_splash_logo\" />\n</layer-list>\n"
+            ),
+        ),
+        (
+            "drawable/pam_splash_icon.xml",
+            format!(
+                "{header}<layer-list xmlns:android=\"http://schemas.android.com/apk/res/android\">\n    <item>\n        <shape>\n            <solid android:color=\"@android:color/transparent\" />\n            <size android:width=\"240dp\" android:height=\"240dp\" />\n        </shape>\n    </item>\n    <item\n        android:width=\"{size}dp\"\n        android:height=\"{size}dp\"\n        android:gravity=\"center\"\n        android:drawable=\"@drawable/pam_splash_logo\" />\n</layer-list>\n"
+            ),
+        ),
+    ]
 }
 
 fn parse_color(value: &str) -> Option<u32> {
@@ -224,6 +371,10 @@ mod tests {
         for name in [
             "values/pam_appearance.xml",
             "values-night/pam_appearance.xml",
+            "values/pam_splash.xml",
+            "values-v31/pam_splash.xml",
+            "drawable/pam_window_background.xml",
+            "drawable/pam_splash_icon.xml",
         ] {
             assert_eq!(
                 files[&Path::new("res").join(name)],
@@ -255,6 +406,37 @@ mod tests {
         assert!(dark.contains("<bool name=\"pam_light_navigation_bar\">true</bool>"));
         assert!(!dark.contains("pam_appearance_default_mode"));
         assert!(!dark.contains("pam_disable_starting_window"));
+    }
+
+    #[test]
+    fn splash_logo_generates_android_12_and_legacy_resources() {
+        let options: AppearanceOptions = serde_json::from_str(
+            r#"{"splash":{"logo":"assets/logos/ze.png","darkLogo":"assets/logos/ze-dark.png","size":120}}"#,
+        )
+        .expect("appearance");
+        options.validate().expect("valid splash");
+        let files = splash_resources(&options.splash);
+        let get = |name: &str| {
+            files
+                .iter()
+                .find(|(path, _)| *path == name)
+                .unwrap()
+                .1
+                .clone()
+        };
+        assert!(get("values-v31/pam_splash.xml").contains("windowSplashScreenAnimatedIcon"));
+        assert!(get("drawable/pam_window_background.xml").contains("android:width=\"120dp\""));
+        assert!(get("drawable/pam_splash_icon.xml").contains("@drawable/pam_splash_logo"));
+        for invalid in [
+            r#"{"splash":{"logo":"../x.png"}}"#,
+            r#"{"splash":{"logo":"x.svg"}}"#,
+            r#"{"splash":{"logo":"x.png","size":8}}"#,
+            r#"{"splash":{"darkLogo":"x.png"}}"#,
+            r#"{"splash":{"logo":"x.png","darkLogo":"y.webp"}}"#,
+        ] {
+            let options: AppearanceOptions = serde_json::from_str(invalid).expect("parse");
+            assert!(options.validate().is_err(), "{invalid} must be rejected");
+        }
     }
 
     #[test]

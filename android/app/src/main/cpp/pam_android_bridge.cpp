@@ -57,6 +57,7 @@ struct RuntimeState {
     jmethodID on_call = nullptr;
     jmethodID on_typed_call = nullptr;
     jmethodID on_error = nullptr;
+    jmethodID on_measure_text = nullptr;
     std::string entry;
     std::string state_dir;
     std::string php_executable = "pam-native";
@@ -80,7 +81,7 @@ struct RuntimeState {
 bool is_interactive_event(std::int32_t kind) {
     switch (kind) {
         case 1: case 2: case 3: case 5: case 8: case 11:
-        case 27: case 31: case 58: case 59:
+        case 27: case 31: case 58: case 59: case 66:
             return true;
         default:
             return false;
@@ -139,6 +140,90 @@ private:
     JNIEnv* env_ = nullptr;
     bool attached_ = false;
 };
+
+jstring new_ascii_string(JNIEnv* env, const std::uint8_t* data, std::size_t length) {
+    std::string value(reinterpret_cast<const char*>(data == nullptr ? reinterpret_cast<const std::uint8_t*>("") : data), data == nullptr ? 0 : length);
+    for (char& character : value) {
+        if (static_cast<unsigned char>(character) >= 0x80 || character == '\0') {
+            character = '?';
+        }
+    }
+    return env->NewStringUTF(value.c_str());
+}
+
+// Text boxes are measured by the same Android text stack that draws them,
+// like React Native's Yoga measure functions (see text_measure.rs).
+std::int32_t measure_text(
+    void* context,
+    const PamTextMeasureRequest* request,
+    PamTextMeasureResult* result
+) {
+    auto* state = static_cast<RuntimeState*>(context);
+    if (state == nullptr || request == nullptr || result == nullptr
+        || state->on_measure_text == nullptr || state->runtime == nullptr) {
+        return 0;
+    }
+    AttachedEnvironment attached(state->vm);
+    JNIEnv* env = attached.get();
+    if (env == nullptr || env->PushLocalFrame(16) != JNI_OK) {
+        if (env != nullptr) {
+            env->ExceptionClear();
+        }
+        return 0;
+    }
+    const auto text_length = static_cast<jsize>(std::min<std::size_t>(request->text_length, 1U << 30));
+    jbyteArray text = env->NewByteArray(text_length);
+    jbyteArray spans = env->NewByteArray(static_cast<jsize>(request->spans_length));
+    jfloatArray output = env->NewFloatArray(4);
+    jstring family = new_ascii_string(env, request->font_family, request->font_family_length);
+    jstring features = new_ascii_string(env, request->font_features, request->font_features_length);
+    jboolean measured = JNI_FALSE;
+    if (text != nullptr && spans != nullptr && output != nullptr && family != nullptr && features != nullptr) {
+        if (text_length > 0) {
+            env->SetByteArrayRegion(text, 0, text_length, reinterpret_cast<const jbyte*>(request->text));
+        }
+        if (request->spans_length > 0) {
+            env->SetByteArrayRegion(spans, 0, static_cast<jsize>(request->spans_length), reinterpret_cast<const jbyte*>(request->spans));
+        }
+        measured = env->CallBooleanMethod(
+            state->runtime,
+            state->on_measure_text,
+            static_cast<jlong>(request->node_id),
+            text,
+            spans,
+            family,
+            features,
+            static_cast<jfloat>(request->font_size),
+            static_cast<jfloat>(request->font_scale),
+            static_cast<jfloat>(request->letter_spacing),
+            static_cast<jfloat>(request->line_height),
+            static_cast<jfloat>(request->available_width),
+            static_cast<jint>(request->font_weight),
+            static_cast<jboolean>(request->italic != 0),
+            static_cast<jboolean>(request->include_font_padding != 0),
+            static_cast<jint>(request->text_transform),
+            static_cast<jint>(request->break_strategy),
+            static_cast<jint>(request->hyphenation),
+            static_cast<jint>(std::min<std::uint32_t>(request->max_lines, 0x7fffffff)),
+            output
+        );
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        measured = JNI_FALSE;
+    }
+    if (measured == JNI_TRUE) {
+        std::array<jfloat, 4> values{};
+        env->GetFloatArrayRegion(output, 0, 4, values.data());
+        result->width = values[0];
+        result->height = values[1];
+        result->first_baseline = values[2];
+        result->line_count = static_cast<std::uint32_t>(std::max(0.0F, values[3]));
+    }
+    env->PopLocalFrame(nullptr);
+    return measured == JNI_TRUE ? 1 : 0;
+}
 
 void report_error(RuntimeState* state, const std::string& message) {
     log_error(message);
@@ -850,6 +935,18 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
             "(Ljava/lang/String;)V"
         );
     }
+    if (state->on_error != nullptr && !env->ExceptionCheck()) {
+        state->on_measure_text = env->GetMethodID(
+            runtime_class,
+            "onMeasureText",
+            "(J[B[BLjava/lang/String;Ljava/lang/String;FFFFFIZZIIII[F)Z"
+        );
+        if (env->ExceptionCheck()) {
+            // Older hosts without a measurer keep the portable estimator.
+            env->ExceptionClear();
+            state->on_measure_text = nullptr;
+        }
+    }
     if (runtime_class != nullptr) {
         env->DeleteLocalRef(runtime_class);
     }
@@ -885,6 +982,9 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
         }
         env->DeleteGlobalRef(state->runtime);
         return 0;
+    }
+    if (state->on_measure_text != nullptr) {
+        pam_native_engine_set_text_measurer(state->engine, measure_text, state.get());
     }
     RuntimeState* handle = state.release();
     handle->worker = std::thread(runtime_loop, handle);
@@ -939,6 +1039,24 @@ Java_dev_pam_nativeapp_PamRuntime_nativeSetChildVisibility(
         Event{EventType::ChildVisibility, owner, visible == JNI_TRUE ? 1 : 0, std::move(payload)},
         false
     );
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeSetSafeAreaInsets(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jfloat left,
+    jfloat top,
+    jfloat right,
+    jfloat bottom
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(state->engine_mutex);
+    pam_native_engine_set_safe_area_insets(state->engine, left, top, right, bottom);
 }
 
 extern "C" JNIEXPORT void JNICALL

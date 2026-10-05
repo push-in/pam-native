@@ -49,6 +49,7 @@ use Pam\Native\LayoutDirection;
 use Pam\Native\ModalAnimationType;
 use Pam\Native\ModalPresentation;
 use Pam\Native\NodeKind;
+use Pam\Native\PixelRatio;
 use Pam\Native\PropKey;
 use Pam\Native\RefreshIndicatorSize;
 use Pam\Native\Renderable;
@@ -461,6 +462,9 @@ final class TemplateRenderer
         'borderRightWidth' => PropKey::BorderRightWidth,
         'borderBottomWidth' => PropKey::BorderBottomWidth,
         'textDecoration' => PropKey::TextDecoration,
+        'includeFontPadding' => PropKey::IncludeFontPadding,
+        'stickyHeader' => PropKey::StickyHeader,
+        'keyboardInset' => PropKey::ScrollKeyboardInset,
         'textTransform' => PropKey::TextTransform,
         'fontStyle' => PropKey::FontStyle,
         'widthPercent' => PropKey::WidthPercent,
@@ -611,6 +615,9 @@ final class TemplateRenderer
         'on:cacheMiss' => EventKind::MediaCacheMiss,
         'on:cacheProgress' => EventKind::MediaCacheProgress,
         'on:cacheReady' => EventKind::MediaCacheReady,
+        'on:layout' => EventKind::Layout,
+        'on:buffering' => EventKind::MediaBuffering,
+        'on:mediaLoadStart' => EventKind::MediaLoadStart,
     ];
 
     private function __construct()
@@ -1237,14 +1244,30 @@ final class TemplateRenderer
             static fn (mixed $value): bool => is_string($value),
         ));
 
-        if ($factory === null && $text !== '' && !in_array($tag, ['Text', 'Button'], true)) {
+        if ($factory === null && $text !== '' && !in_array($tag, ['Text', 'Span', 'Button'], true)) {
             throw new RuntimeException("Text content is not valid inside {$tag}; wrap it in Text.");
         }
 
-        if ($factory === null && $children !== [] && in_array($tag, ['Text', 'Button'], true)) {
+        if ($factory === null && $children !== [] && $tag === 'Button') {
             throw new RuntimeException("{$tag} cannot contain element children.");
         }
-        if ($text !== '') {
+        $richParts = null;
+        if ($factory === null && $children !== [] && in_array($tag, ['Text', 'Span'], true)) {
+            $richParts = [];
+            foreach ($renderedChildren as $part) {
+                if (is_string($part)) {
+                    $richParts[] = $part;
+                } elseif ($part instanceof Text) {
+                    $richParts[] = $part;
+                } else {
+                    throw new RuntimeException("{$tag} can only contain text and nested Text or Span elements.");
+                }
+            }
+        }
+        if ($richParts === null && in_array($tag, ['Text', 'Span'], true)) {
+            $text = trim($text);
+        }
+        if ($text !== '' && $richParts === null) {
             $values['text'] ??= $text;
         }
         if ($tag === 'Animated' && isset($values['animation'])) {
@@ -1312,7 +1335,9 @@ final class TemplateRenderer
             'Row' => Row::make(...$children),
             'Grid' => Grid::make(...$children),
             'View', 'LinearGradient', 'Shimmer' => NativeView::make(...$children),
-            'Text' => Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
+            'Text', 'Span' => $richParts !== null
+                ? Text::rich(...$richParts)
+                : Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
             'Button' => Button::make(self::stringValue(
                 $values['label'] ?? $values['text'] ?? $text,
                 'Button label',
@@ -2551,6 +2576,10 @@ final class TemplateRenderer
                 1.0,
                 max(0.0, self::floatValue($value, 'Pressable ripple alpha')),
             ),
+            PropKey::IncludeFontPadding,
+            PropKey::StickyHeader,
+            PropKey::ScrollKeyboardInset,
+            => self::boolValue($value, "Template {$key->name}"),
             default => is_string($value) || is_int($value) || is_float($value) || is_bool($value)
                 ? $value
                 : null,
@@ -3731,6 +3760,8 @@ final class TemplateRenderer
             'env.safe-area-inset-right' => $metrics->safeAreaRight,
             'env.safe-area-inset-bottom' => $metrics->safeAreaBottom,
             'env.safe-area-inset-left' => $metrics->safeAreaLeft,
+            'env.hairline-width' => PixelRatio::hairlineWidth(),
+            'env.device-pixel' => 1.0 / PixelRatio::get(),
         ];
         foreach ($provided as $name => $value) {
             if (is_string($name) && (is_int($value) || is_float($value))) {

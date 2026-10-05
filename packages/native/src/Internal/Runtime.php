@@ -135,7 +135,33 @@ final class Runtime
      */
     private static function bootMetrics(): WindowMetrics
     {
-        return new WindowMetrics(0.0, 0.0, 1.0, Appearance::bootAppearance());
+        // Hosts export the window (size, density, safe areas) before PHP
+        // starts so the very first render already sees the real geometry.
+        $raw = getenv('PAM_BOOT_METRICS');
+        $values = is_string($raw) && $raw !== '' && strlen($raw) < 4_096
+            ? json_decode($raw, true)
+            : null;
+        if (!is_array($values)) {
+            return new WindowMetrics(0.0, 0.0, 1.0, Appearance::bootAppearance());
+        }
+        $number = static function (string $key, float $default) use ($values): float {
+            $value = $values[$key] ?? null;
+            return (is_int($value) || is_float($value)) && is_finite((float) $value) && $value >= 0
+                ? (float) $value
+                : $default;
+        };
+
+        return new WindowMetrics(
+            width: $number('width', 0.0),
+            height: $number('height', 0.0),
+            density: max(0.1, $number('density', 1.0)),
+            appearance: Appearance::bootAppearance(),
+            fontScale: max(0.1, $number('fontScale', 1.0)),
+            safeAreaTop: $number('safeAreaTop', 0.0),
+            safeAreaRight: $number('safeAreaRight', 0.0),
+            safeAreaBottom: $number('safeAreaBottom', 0.0),
+            safeAreaLeft: $number('safeAreaLeft', 0.0),
+        );
     }
 
     public static function render(): void
