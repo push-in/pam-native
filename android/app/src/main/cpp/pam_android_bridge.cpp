@@ -5,8 +5,10 @@
 #include <Zend/zend_execute.h>
 #include <Zend/zend_exceptions.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstdint>
@@ -25,6 +27,11 @@ namespace {
 constexpr char kLogTag[] = "PamNative";
 constexpr std::size_t kMaxEventBytes = 1024 * 1024;
 constexpr std::size_t kMaxQueuedEvents = 1024;
+// Upper bound for draining the event queue before rendering once.
+constexpr auto kFlushBudget = std::chrono::milliseconds(12);
+// Cycle collection runs when idle, not after every event.
+constexpr int kGcEventInterval = 64;
+constexpr auto kGcIdleInterval = std::chrono::seconds(2);
 
 enum class EventType : std::uint8_t {
     Ui = 1,
@@ -59,7 +66,29 @@ struct RuntimeState {
     std::deque<Event> events;
     std::thread worker;
     std::atomic<bool> stopping = false;
+    std::mutex stats_mutex;
+    std::array<jlong, 19> last_stats{};
 };
+
+// Interactive input that must not wait behind module results or scroll/
+// progress traffic: press, change, back, long press, submit, toggle, key
+// press, modal close requests, menu actions and navigation gesture pops.
+bool is_interactive_event(std::int32_t kind) {
+    switch (kind) {
+        case 1: case 2: case 3: case 5: case 8: case 11:
+        case 27: case 31: case 58: case 59:
+            return true;
+        default:
+            return false;
+    }
+}
+
+int event_priority(const Event& event) {
+    if (event.type == EventType::Ui) {
+        return is_interactive_event(event.second) ? 0 : 2;
+    }
+    return 1;
+}
 
 struct PublishedBatch {
     explicit PublishedBatch(PamNativeBuffer value) : buffer(value) {}
@@ -501,6 +530,36 @@ bool initialize_php(RuntimeState* state) {
     return true;
 }
 
+bool runtime_has_method(const char* method) {
+    zend_string* name = zend_string_init(
+        "Pam\\Native\\Internal\\Runtime",
+        sizeof("Pam\\Native\\Internal\\Runtime") - 1,
+        0
+    );
+    zend_class_entry* entry = zend_lookup_class(name);
+    zend_string_release(name);
+    if (entry == nullptr) {
+        return false;
+    }
+    return zend_hash_str_exists(&entry->function_table, method, std::strlen(method));
+}
+
+// Older PHP SDKs render synchronously per event; newer ones coalesce
+// rendering until the bridge flushes after draining its queue.
+bool enable_deferred_rendering() {
+    if (!runtime_has_method("deferrendering") || !runtime_has_method("flush")) {
+        return false;
+    }
+    zval argument;
+    ZVAL_TRUE(&argument);
+    const bool enabled = call_runtime("deferRendering", 1, &argument);
+    if (EG(exception)) {
+        zend_clear_exception();
+        return false;
+    }
+    return enabled;
+}
+
 bool run_php_request(RuntimeState* state) {
     zend_file_handle file_handle;
     zend_stream_init_filename(&file_handle, state->entry.c_str());
@@ -513,9 +572,15 @@ bool run_php_request(RuntimeState* state) {
         }
     }
 
+    const bool deferred = enable_deferred_rendering();
     bool reload = false;
+    bool draining = false;
+    int events_since_gc = 0;
+    auto drain_started = std::chrono::steady_clock::now();
+    auto last_gc = drain_started;
     while (!state->stopping.load(std::memory_order_acquire)) {
         Event event;
+        bool queue_empty = false;
         {
             std::unique_lock<std::mutex> lock(state->queue_mutex);
             state->queue_ready.wait(lock, [&] {
@@ -527,6 +592,7 @@ bool run_php_request(RuntimeState* state) {
             }
             event = std::move(state->events.front());
             state->events.pop_front();
+            queue_empty = state->events.empty();
         }
         if (event.type == EventType::Reload) {
             if (!event.payload.empty()) {
@@ -535,12 +601,38 @@ bool run_php_request(RuntimeState* state) {
             reload = true;
             break;
         }
+        const auto now = std::chrono::steady_clock::now();
+        if (!draining) {
+            draining = true;
+            drain_started = now;
+        }
         dispatch_event(event);
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");
             zend_clear_exception();
         }
-        gc_collect_cycles();
+        ++events_since_gc;
+        if (deferred
+            && !queue_empty
+            && std::chrono::steady_clock::now() - drain_started < kFlushBudget) {
+            continue;
+        }
+        if (deferred) {
+            // One render for everything drained since the last flush.
+            call_runtime("flush", 0, nullptr);
+            if (EG(exception)) {
+                report_error(state, "Unhandled PHP exception while rendering.");
+                zend_clear_exception();
+            }
+        }
+        draining = false;
+        const auto after = std::chrono::steady_clock::now();
+        if (queue_empty
+            && (events_since_gc >= kGcEventInterval || after - last_gc >= kGcIdleInterval)) {
+            gc_collect_cycles();
+            events_since_gc = 0;
+            last_gc = after;
+        }
     }
 
     zval result;
@@ -551,6 +643,12 @@ bool run_php_request(RuntimeState* state) {
 
 void runtime_loop(RuntimeState* state) {
     active_runtime = state;
+    // Attach the worker once so every batch/call/error callback reuses the
+    // JNIEnv instead of attaching and detaching per call.
+    JNIEnv* worker_env = nullptr;
+    const bool worker_attached =
+        state->vm->GetEnv(reinterpret_cast<void**>(&worker_env), JNI_VERSION_1_6) != JNI_OK
+        && state->vm->AttachCurrentThread(&worker_env, nullptr) == JNI_OK;
     if (initialize_php(state)) {
         while (
             !state->stopping.load(std::memory_order_acquire)
@@ -576,10 +674,15 @@ void runtime_loop(RuntimeState* state) {
     }
     active_runtime = nullptr;
 
-    AttachedEnvironment attached(state->vm);
-    if (attached.get() != nullptr) {
-        attached.get()->DeleteGlobalRef(state->runtime);
-        state->runtime = nullptr;
+    {
+        AttachedEnvironment attached(state->vm);
+        if (attached.get() != nullptr) {
+            attached.get()->DeleteGlobalRef(state->runtime);
+            state->runtime = nullptr;
+        }
+    }
+    if (worker_attached) {
+        state->vm->DetachCurrentThread();
     }
 }
 
@@ -600,40 +703,38 @@ void enqueue(RuntimeState* state, Event event, bool coalesce) {
                 }
             }
         }
+        const int priority = event_priority(event);
         if (state->events.size() >= kMaxQueuedEvents) {
-            if (event.type == EventType::Ui) {
+            // Module results complete PHP promises/callbacks exactly once and
+            // reload controls the runtime lifecycle; never discard either.
+            // Transient UI input is dropped, or evicts the oldest
+            // non-interactive UI event when it is interactive itself.
+            if (priority == 2) {
                 return;
             }
-            // Module results complete PHP promises/callbacks exactly once and
-            // reload controls the runtime lifecycle. Never discard either when
-            // transient UI input fills the bounded queue: evict the oldest UI
-            // event instead. If every queued item is critical, permit the queue
-            // to grow until PHP drains those already-issued native operations.
             auto disposable = state->events.begin();
             while (
                 disposable != state->events.end()
-                && disposable->type != EventType::Ui
+                && event_priority(*disposable) != 2
             ) {
                 ++disposable;
             }
             if (disposable != state->events.end()) {
                 state->events.erase(disposable);
+            } else if (priority == 0) {
+                return;
             }
         }
-        if (event.type == EventType::Ui) {
-            state->events.push_back(std::move(event));
-        } else {
-            // Preserve FIFO ordering among completion/lifecycle events while
-            // letting them bypass an arbitrarily large UI backlog.
-            auto insertion = state->events.begin();
-            while (
-                insertion != state->events.end()
-                && insertion->type != EventType::Ui
-            ) {
-                ++insertion;
-            }
-            state->events.insert(insertion, std::move(event));
+        // Priority lanes, FIFO within each lane: interactive input, then
+        // module results/reload, then other UI traffic (scroll, progress...).
+        auto insertion = state->events.begin();
+        while (
+            insertion != state->events.end()
+            && event_priority(*insertion) <= priority
+        ) {
+            ++insertion;
         }
+        state->events.insert(insertion, std::move(event));
     }
     state->queue_ready.notify_one();
 }
@@ -924,8 +1025,13 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStats(JNIEnv* env, jobject, jlong handle
     jlong values[19] = {};
     if (state != nullptr) {
         PamNativeStats stats{};
-        std::lock_guard<std::mutex> lock(state->engine_mutex);
-        if (pam_native_engine_stats(state->engine, &stats) == PAM_STATUS_SUCCESS) {
+        // Never block the UI thread behind a PHP commit: reuse the last
+        // snapshot when the engine is busy.
+        std::unique_lock<std::mutex> lock(state->engine_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {
+            std::lock_guard<std::mutex> cached(state->stats_mutex);
+            std::copy(state->last_stats.begin(), state->last_stats.end(), values);
+        } else if (pam_native_engine_stats(state->engine, &stats) == PAM_STATUS_SUCCESS) {
             values[0] = static_cast<jlong>(stats.commits);
             values[1] = static_cast<jlong>(stats.nodes);
             values[2] = static_cast<jlong>(stats.created);
@@ -945,6 +1051,8 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStats(JNIEnv* env, jobject, jlong handle
             values[16] = static_cast<jlong>(stats.reused_buffer_bytes);
             values[17] = static_cast<jlong>(stats.measured_frames);
             values[18] = static_cast<jlong>(stats.deadline_misses);
+            std::lock_guard<std::mutex> cached(state->stats_mutex);
+            std::copy(values, values + 19, state->last_stats.begin());
         }
     }
     jlongArray result = env->NewLongArray(19);

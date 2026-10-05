@@ -1108,17 +1108,25 @@ $androidBridge = file_get_contents(
 $iosBridge = file_get_contents(
     $repositoryRoot.'/ios/Sources/PamNative/Bridge/pam_native_ios_bridge.cpp',
 );
-foreach (['Android' => $androidBridge, 'iOS' => $iosBridge] as $platform => $bridge) {
-    $assert(
-        is_string($bridge)
-            && str_contains($bridge, 'if (event.type == EventType::Ui)')
-            && str_contains($bridge, 'disposable->type != EventType::Ui')
-            && str_contains($bridge, 'state->events.erase(disposable);')
-            && str_contains($bridge, 'insertion->type != EventType::Ui')
-            && str_contains($bridge, 'state->events.insert(insertion, std::move(event));'),
-        $platform.' bridge must preserve module results and reloads when the event queue is full.',
-    );
-}
+$assert(
+    is_string($iosBridge)
+        && str_contains($iosBridge, 'if (event.type == EventType::Ui)')
+        && str_contains($iosBridge, 'disposable->type != EventType::Ui')
+        && str_contains($iosBridge, 'state->events.erase(disposable);')
+        && str_contains($iosBridge, 'insertion->type != EventType::Ui')
+        && str_contains($iosBridge, 'state->events.insert(insertion, std::move(event));'),
+    'iOS bridge must preserve module results and reloads when the event queue is full.',
+);
+$assert(
+    is_string($androidBridge)
+        && str_contains($androidBridge, 'return is_interactive_event(event.second) ? 0 : 2;')
+        && str_contains($androidBridge, 'event_priority(*disposable) != 2')
+        && str_contains($androidBridge, 'state->events.erase(disposable);')
+        && str_contains($androidBridge, 'event_priority(*insertion) <= priority')
+        && str_contains($androidBridge, 'state->events.insert(insertion, std::move(event));')
+        && str_contains($androidBridge, 'call_runtime("flush", 0, nullptr);'),
+    'Android bridge must keep module results and reloads when the queue is full, give interactive input its own lane and render once per drained batch.',
+);
 if (
     preg_match(
         '/enum class PropKey\\(val value: Int\\) \\{(?<body>.*?)\\n\\}/s',
