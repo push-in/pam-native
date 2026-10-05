@@ -1,5 +1,6 @@
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstddef>
@@ -371,6 +372,34 @@ bool call_runtime(
     return status == SUCCESS && !EG(exception);
 }
 
+bool runtime_has_method(const char* method) {
+    zend_string* name = zend_string_init(
+        "Pam\\Native\\Internal\\Runtime",
+        sizeof("Pam\\Native\\Internal\\Runtime") - 1,
+        0
+    );
+    zend_class_entry* entry = zend_lookup_class(name);
+    zend_string_release(name);
+    if (entry == nullptr) {
+        return false;
+    }
+    return zend_hash_str_exists(&entry->function_table, method, std::strlen(method));
+}
+
+bool enable_deferred_rendering() {
+    if (!runtime_has_method("deferrendering") || !runtime_has_method("flush")) {
+        return false;
+    }
+    zval argument;
+    ZVAL_TRUE(&argument);
+    const bool enabled = call_runtime("deferRendering", 1, &argument);
+    if (EG(exception)) {
+        zend_clear_exception();
+        return false;
+    }
+    return enabled;
+}
+
 void dispatch_event(const Event& event) {
     if (event.type == EventType::Ui) {
         zval arguments[3];
@@ -430,8 +459,16 @@ bool run_php_request(RuntimeState* state) {
         }
     }
 
+    // Newer PHP SDKs coalesce rendering until flush(): drain the queue (or a
+    // 12 ms budget) and render once instead of once per event/module result.
+    const bool deferred = enable_deferred_rendering();
+    bool draining = false;
+    int events_since_gc = 0;
+    auto drain_started = std::chrono::steady_clock::now();
+    auto last_gc = drain_started;
     while (!state->stopping.load(std::memory_order_acquire)) {
         Event event;
+        bool queue_empty = false;
         {
             std::unique_lock<std::mutex> lock(state->queue_mutex);
             state->queue_ready.wait(lock, [&] {
@@ -445,6 +482,7 @@ bool run_php_request(RuntimeState* state) {
 
             event = std::move(state->events.front());
             state->events.pop_front();
+            queue_empty = state->events.empty();
         }
 
         if (event.type == EventType::Reload) {
@@ -455,13 +493,37 @@ bool run_php_request(RuntimeState* state) {
             break;
         }
 
+        if (!draining) {
+            draining = true;
+            drain_started = std::chrono::steady_clock::now();
+        }
         dispatch_event(event);
 
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");
             zend_clear_exception();
         }
-        gc_collect_cycles();
+        ++events_since_gc;
+        if (deferred
+            && !queue_empty
+            && std::chrono::steady_clock::now() - drain_started < std::chrono::milliseconds(12)) {
+            continue;
+        }
+        if (deferred) {
+            call_runtime("flush", 0, nullptr);
+            if (EG(exception)) {
+                report_error(state, "Unhandled PHP exception while rendering.");
+                zend_clear_exception();
+            }
+        }
+        draining = false;
+        const auto after = std::chrono::steady_clock::now();
+        // Cycle collection when idle instead of after every event.
+        if (queue_empty && (events_since_gc >= 64 || after - last_gc >= std::chrono::seconds(2))) {
+            gc_collect_cycles();
+            events_since_gc = 0;
+            last_gc = after;
+        }
     }
 
     zval result;
