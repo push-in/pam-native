@@ -717,31 +717,7 @@ class PamActivity : FragmentActivity() {
             insets.bottom / density,
         )
         val configuration = resources.configuration
-        val deviceType = when {
-            configuration.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION -> "tv"
-            configuration.smallestScreenWidthDp >= 600 -> "tablet"
-            else -> "phone"
-        }
-        val inputMode = when {
-            deviceType == "tv" -> "remote"
-            configuration.keyboard != Configuration.KEYBOARD_NOKEYS -> "keyboard"
-            configuration.touchscreen == Configuration.TOUCHSCREEN_NOTOUCH -> "mouse"
-            else -> "touch"
-        }
-        val pointer = if (inputMode == "touch" || inputMode == "remote") "coarse" else "fine"
-        @Suppress("DEPRECATION")
-        val refreshRate = windowManager.defaultDisplay.refreshRate.coerceAtLeast(1f)
-        val reducedMotion = Settings.Global.getFloat(
-            contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) == 0f
-        val memoryClass = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).memoryClass
-        val performanceTier = when {
-            memoryClass >= 512 && refreshRate >= 90f -> 3L
-            memoryClass >= 256 -> 2L
-            else -> 1L
-        }
+        val environment = styleEnvironment()
         val appearanceMode = PamAppearance.storedMode(this)
         PamAppearance.exportEnvironment(this, appearanceMode)
         runtime.updateViewport(
@@ -767,18 +743,63 @@ class PamActivity : FragmentActivity() {
                     "safeAreaRight" to WireValue.Decimal((insets.right / density).toDouble()),
                     "safeAreaBottom" to WireValue.Decimal((insets.bottom / density).toDouble()),
                     "safeAreaLeft" to WireValue.Decimal((insets.left / density).toDouble()),
-                    "refreshRate" to WireValue.Decimal(refreshRate.toDouble()),
-                    "reducedMotion" to WireValue.Flag(reducedMotion),
-                    "deviceType" to WireValue.Text(deviceType),
-                    "pointer" to WireValue.Text(pointer),
-                    "inputMode" to WireValue.Text(inputMode),
+                    "refreshRate" to WireValue.Decimal(environment.refreshRate.toDouble()),
+                    "reducedMotion" to WireValue.Flag(environment.reducedMotion),
+                    "deviceType" to WireValue.Text(environment.deviceType),
+                    "pointer" to WireValue.Text(environment.pointer),
+                    "inputMode" to WireValue.Text(environment.inputMode),
                     "dynamicRange" to WireValue.Text("standard"),
                     "displayMode" to WireValue.Text("standalone"),
                     "foldPosture" to WireValue.Text("flat"),
-                    "memoryClass" to WireValue.Decimal(memoryClass.toDouble()),
-                    "performanceTier" to WireValue.Decimal(performanceTier.toDouble()),
+                    "memoryClass" to WireValue.Decimal(environment.memoryClass.toDouble()),
+                    "performanceTier" to WireValue.Decimal(environment.performanceTier.toDouble()),
                 ),
             ),
+        )
+    }
+
+    private class StyleEnvironment(
+        val deviceType: String,
+        val inputMode: String,
+        val pointer: String,
+        val refreshRate: Float,
+        val reducedMotion: Boolean,
+        val memoryClass: Int,
+        val performanceTier: Long,
+    )
+
+    private fun styleEnvironment(): StyleEnvironment {
+        val configuration = resources.configuration
+        val deviceType = when {
+            configuration.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION -> "tv"
+            configuration.smallestScreenWidthDp >= 600 -> "tablet"
+            else -> "phone"
+        }
+        val inputMode = when {
+            deviceType == "tv" -> "remote"
+            configuration.keyboard != Configuration.KEYBOARD_NOKEYS -> "keyboard"
+            configuration.touchscreen == Configuration.TOUCHSCREEN_NOTOUCH -> "mouse"
+            else -> "touch"
+        }
+        @Suppress("DEPRECATION")
+        val refreshRate = windowManager.defaultDisplay.refreshRate.coerceAtLeast(1f)
+        val memoryClass = (getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager).memoryClass
+        return StyleEnvironment(
+            deviceType = deviceType,
+            inputMode = inputMode,
+            pointer = if (inputMode == "touch" || inputMode == "remote") "coarse" else "fine",
+            refreshRate = refreshRate,
+            reducedMotion = Settings.Global.getFloat(
+                contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            ) == 0f,
+            memoryClass = memoryClass,
+            performanceTier = when {
+                memoryClass >= 512 && refreshRate >= 90f -> 3L
+                memoryClass >= 256 -> 2L
+                else -> 1L
+            },
         )
     }
 
@@ -855,6 +876,16 @@ class PamActivity : FragmentActivity() {
             .put("safeAreaRight", (insets.right / density).toDouble())
             .put("safeAreaBottom", (insets.bottom / density).toDouble())
             .put("safeAreaLeft", (insets.left / density).toDouble())
+        // The same style environment the first dimensions event reports, so
+        // PHP recognises that event as unchanged and skips a full re-render.
+        val environment = styleEnvironment()
+        json.put("refreshRate", environment.refreshRate.toDouble())
+            .put("reducedMotion", environment.reducedMotion)
+            .put("deviceType", environment.deviceType)
+            .put("pointer", environment.pointer)
+            .put("inputMode", environment.inputMode)
+            .put("memoryClass", environment.memoryClass.toDouble())
+            .put("performanceTier", environment.performanceTier.toDouble())
         runCatching { android.system.Os.setenv("PAM_BOOT_METRICS", json.toString(), true) }
     }
 

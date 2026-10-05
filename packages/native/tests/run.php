@@ -4629,6 +4629,28 @@ $assert(
     $memoryPressure === MemoryPressure::Critical,
     'Memory-pressure lifecycle event was not decoded.',
 );
+$repeatedMetrics = $windowMetrics;
+Runtime::dispatchEvent(0, EventKind::Dimensions->value, Wire::map([
+    'width' => 412.0,
+    'height' => 915.0,
+    'density' => 3.0,
+    'appearance' => UserInterfaceAppearance::Dark->value,
+    'fontScale' => 1.15,
+    'safeAreaTop' => 24.0,
+    'safeAreaBottom' => 16.0,
+    'refreshRate' => 120.0,
+    'reducedMotion' => true,
+    'deviceType' => 'tablet',
+    'pointer' => 'fine',
+    'inputMode' => 'mouse',
+    'dynamicRange' => 'high',
+    'memoryClass' => 512.0,
+    'performanceTier' => 3.0,
+]));
+$assert(
+    $windowMetrics === $repeatedMetrics && Runtime::windowMetrics() === $repeatedMetrics,
+    'An unchanged dimensions event must keep the WindowMetrics instance (no full re-render).',
+);
 Runtime::shutdown();
 
 $deviceInfo = new DeviceInfo(

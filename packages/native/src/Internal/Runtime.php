@@ -155,6 +155,8 @@ final class Runtime
                 : $default;
         };
 
+        // Hosts that also export the style environment let the first
+        // dimensions event match these metrics, so it skips a full re-render.
         return new WindowMetrics(
             width: $number('width', 0.0),
             height: $number('height', 0.0),
@@ -165,6 +167,16 @@ final class Runtime
             safeAreaRight: $number('safeAreaRight', 0.0),
             safeAreaBottom: $number('safeAreaBottom', 0.0),
             safeAreaLeft: $number('safeAreaLeft', 0.0),
+            refreshRate: $number('refreshRate', 60.0),
+            reducedMotion: ($values['reducedMotion'] ?? false) === true,
+            deviceType: self::styleEnvironmentKeyword($values['deviceType'] ?? null, 'phone'),
+            pointer: self::styleEnvironmentKeyword($values['pointer'] ?? null, 'coarse'),
+            inputMode: self::styleEnvironmentKeyword($values['inputMode'] ?? null, 'touch'),
+            dynamicRange: self::styleEnvironmentKeyword($values['dynamicRange'] ?? null, 'standard'),
+            displayMode: self::styleEnvironmentKeyword($values['displayMode'] ?? null, 'standalone'),
+            foldPosture: self::styleEnvironmentKeyword($values['foldPosture'] ?? null, 'flat'),
+            memoryClass: $number('memoryClass', 0.0),
+            performanceTier: $number('performanceTier', 1.0),
         );
     }
 
@@ -393,7 +405,8 @@ final class Runtime
             }
             if ($eventKind === EventKind::Dimensions->value) {
                 $values = Wire::decodeMap($payload);
-                $previousAppearance = self::windowMetrics()->appearance;
+                $previousMetrics = self::windowMetrics();
+                $previousAppearance = $previousMetrics->appearance;
                 self::$windowMetrics = new WindowMetrics(
                     width: (float) ($values['width'] ?? 0.0),
                     height: (float) ($values['height'] ?? 0.0),
@@ -418,7 +431,16 @@ final class Runtime
                     performanceTier: (float) ($values['performanceTier'] ?? 1.0),
                 );
                 Appearance::synchronize($values, $previousAppearance);
-                DependencyTracker::invalidateAll();
+                // Hosts re-send the window on every surface bind (also right
+                // after boot). Identical metrics cannot change any rendered
+                // output, so only real changes re-render the whole tree.
+                if (self::$windowMetrics == $previousMetrics) {
+                    // Keep the instance: render() keys the style environment
+                    // on its identity and would invalidate everything again.
+                    self::$windowMetrics = $previousMetrics;
+                } else {
+                    DependencyTracker::invalidateAll();
+                }
                 self::$dimensionsHandler?->__invoke(self::$windowMetrics);
                 self::afterDispatch();
 
