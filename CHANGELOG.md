@@ -42,9 +42,9 @@ Native CSS visual effects on top of the 1.2.0 complete-CSS compiler and the
   shadow only; the new effects log a one-time debug diagnostic there.
 - Behaviour change: `background: <color>` now also clears gradients and
   `filter: <function>` resets the other filter functions, as in CSS.
-- PHP SDK, Rust protocol and Android unit tests, plus Android instrumented
-  suites (API 36 full suite, API 26 effects/paint), passed locally. iOS/Xcode
-  gates were not run.
+- PHP SDK, Rust workspace (152), Android unit/lint, Android instrumented
+  API 36 full suite (123/123) and API 26 effects/paint/renderer suites
+  (60, 2 API-31-only skips) passed locally. iOS/Xcode gates were not run.
 ## 1.2.3 - 2026-10-05
 
 - Fix frames rejected with `DuplicateSiblingIndex` ("Pam Native rejected an
