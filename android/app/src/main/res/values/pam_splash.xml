@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Generated from pam-native.json "appearance.splash" by the PAM Native CLI. -->
 <resources>
-    <style name="Theme.PamNative.Splash" parent="Theme.PamNative.Base" />
+    <style name="Theme.PamNative.Splash" parent="Theme.PamNative.Base">
+        <item name="android:windowBackground">@color/pam_window_background</item>
+    </style>
 </resources>

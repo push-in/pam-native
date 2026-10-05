@@ -136,9 +136,3 @@ fallback for every PAM safe-area consumer:
 
 The value (dp, 0–96, default 0) is used only when Android reports no bottom
 inset.
-
-### Keyboard inset inside scroll content
-
-`<Scroll keyboardInset>` (`PropKey::ScrollKeyboardInset`) adds the visible IME
-height as bottom content inset inside the scroll container and keeps the
-focused input revealed, like `KeyboardAwareScrollView`.

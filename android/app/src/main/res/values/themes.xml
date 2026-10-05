@@ -7,7 +7,6 @@
     <style name="Theme.PamNative" parent="Theme.PamNative.Splash">
         <item name="android:fontFamily">sans</item>
         <item name="android:windowActionModeOverlay">true</item>
-        <item name="android:windowBackground">@drawable/pam_window_background</item>
         <item name="android:colorBackground">@color/pam_window_background</item>
         <item name="android:windowLightStatusBar">@bool/pam_light_status_bar</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="27">@bool/pam_light_navigation_bar</item>

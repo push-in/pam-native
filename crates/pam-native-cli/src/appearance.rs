@@ -230,13 +230,13 @@ fn splash_resources(splash: &SplashOptions) -> Vec<(&'static str, String)> {
             (
                 "values/pam_splash.xml",
                 format!(
-                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\" />\n</resources>\n"
+                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@color/pam_window_background</item>\n    </style>\n</resources>\n"
                 ),
             ),
             (
                 "values-v31/pam_splash.xml",
                 format!(
-                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\" />\n</resources>\n"
+                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@color/pam_window_background</item>\n    </style>\n</resources>\n"
                 ),
             ),
             (
@@ -257,13 +257,13 @@ fn splash_resources(splash: &SplashOptions) -> Vec<(&'static str, String)> {
         (
             "values/pam_splash.xml",
             format!(
-                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\" />\n</resources>\n"
+                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@drawable/pam_window_background</item>\n    </style>\n</resources>\n"
             ),
         ),
         (
             "values-v31/pam_splash.xml",
             format!(
-                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/pam_splash_icon</item>\n    </style>\n</resources>\n"
+                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@color/pam_window_background</item>\n        <item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/pam_splash_icon</item>\n    </style>\n</resources>\n"
             ),
         ),
         (
