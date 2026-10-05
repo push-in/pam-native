@@ -7291,7 +7291,7 @@ fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
     // from an earlier build while layout/protocol sources have changed. Let
     // Cargo perform its inexpensive freshness check in that case so Android
     // builds can never silently link stale native behavior.
-    if engine_ready_at(native_home, abi) && !native_home.join(".git").is_dir() {
+    if engine_ready_at(native_home, abi) && !is_source_checkout(native_home) {
         return Ok(());
     }
     let installed = installed_rust_targets()?;
@@ -7350,11 +7350,17 @@ fn native_engine_path(native_home: &Path, abi: AndroidAbi) -> PathBuf {
         .join("release/libpam_native_engine.a")
 }
 
+/// A source checkout has a `.git` directory, or a `.git` file when it is a
+/// linked worktree (`git worktree add`); both must build the engine locally.
+fn is_source_checkout(native_home: &Path) -> bool {
+    native_home.join(".git").exists()
+}
+
 fn engine_ready_at(native_home: &Path, abi: AndroidAbi) -> bool {
     if !native_engine_path(native_home, abi).is_file() {
         return false;
     }
-    native_home.join(".git").is_dir()
+    is_source_checkout(native_home)
         || fs::read_to_string(native_home.join("target/pam-native-engine-version"))
             .is_ok_and(|version| version.trim() == env!("CARGO_PKG_VERSION"))
 }
@@ -8114,6 +8120,33 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worktree_native_homes_are_source_checkouts() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-worktree-home-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("native home");
+        assert!(!is_source_checkout(&root));
+        fs::write(
+            root.join(".git"),
+            b"gitdir: /elsewhere/.git/worktrees/home\n",
+        )
+        .expect("worktree marker");
+        assert!(is_source_checkout(&root));
+        let engine = native_engine_path(&root, AndroidAbi::Arm64);
+        fs::create_dir_all(engine.parent().expect("engine parent")).expect("engine dir");
+        fs::write(&engine, b"engine").expect("engine");
+        assert!(engine_ready_at(&root, AndroidAbi::Arm64));
+        fs::remove_file(root.join(".git")).expect("remove marker");
+        fs::create_dir(root.join(".git")).expect("checkout marker");
+        assert!(is_source_checkout(&root));
+        fs::remove_dir_all(&root).expect("cleanup");
+    }
 
     #[test]
     fn hot_reload_watches_sources_without_reloading_for_logs_or_vendor() {
