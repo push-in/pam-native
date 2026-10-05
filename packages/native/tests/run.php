@@ -478,6 +478,7 @@ $assert(
     $modernCss['classes']['later'] === [
         'textColor' => 0xBF0C2238,
         'backgroundColor' => 0,
+        'backgroundGradient' => '',
         'aspectRatio' => (string) (16 / 9),
         'paddingLeft' => '8',
         'paddingRight' => '16',
@@ -844,6 +845,7 @@ $assert(
         'shadowBlurRadius' => '0',
         'shadowSpreadRadius' => '1',
         'shadowColor' => 0xFFFFD23F,
+        'boxShadows' => '',
     ]
         && $shadowStyles['classes']['first']['shadowColor'] === 0x80010203
         && $shadowStyles['classes']['flat']['shadowColor'] === 0,

@@ -497,4 +497,10 @@ enum PropKey: int
     case TransformOriginX = 489;
     case TransformOriginY = 490;
     case TranslationYPercent = 491;
+    case BackgroundGradient = 492;
+    case BoxShadows = 493;
+    case FilterColorMatrix = 494;
+    case BackdropBlurRadius = 495;
+    case BackdropColorMatrix = 496;
+    case BorderGradient = 497;
 }

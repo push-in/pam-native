@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.3.0 - 2026-10-05
+
+Native CSS visual effects on top of the 1.2.0 complete-CSS compiler and the
+1.2.x render-pipeline work:
+
+- CSS gradients: `linear-gradient()`, `radial-gradient()` and their
+  `repeating-*` variants (angles, `to <side>`, magic corners, circle/ellipse,
+  size keywords, explicit radii, `at <position>`, multiple and double-position
+  color stops, hard stops) in `background`/`background-image`, layered over
+  `background-color` and clipped anti-aliased to `border-radius`. Stops
+  interpolate in premultiplied space like browsers (`transparent` fades never
+  darken).
+- `<LinearGradient colors start end locations>` with `expo-linear-gradient`
+  semantics for React Native ports.
+- `border-image: <gradient> 1` paints a gradient stroke that follows
+  `border-radius` (story rings).
+- `box-shadow`: comma-separated lists, `inset` shadows and spread; CSS blur
+  semantics (σ = blur / 2). Outer shadows use cached, downscaled ALPHA_8
+  nine-slice masks shared across views and now follow the child's full
+  transform (scale/rotation).
+- `filter`: `blur()` plus `brightness()`, `contrast()`, `saturate()`,
+  `grayscale()`, `sepia()`, `invert()`, `opacity()` and `hue-rotate()`,
+  composed at compile time into one color matrix (RenderEffect on API 31+,
+  hardware layer paint before). `blur()` below API 31 is now a logged no-op
+  instead of a fake elevation.
+- `backdrop-filter` on containers (Android 12+): GPU blur/color matrix of
+  the content behind the element, clipped to its radius.
+- Protocol: append-only property IDs 492–497 (`BackgroundGradient`,
+  `BoxShadows`, `FilterColorMatrix`, `BackdropBlurRadius`,
+  `BackdropColorMatrix`, `BorderGradient`).
+- Still diagnosed at compile time: `conic-gradient()`, gradient color hints,
+  `url()` backgrounds, `drop-shadow()`/`url()` filters, non-neutral
+  `background-size/position/clip`. iOS paints colors and the first outer
+  shadow only; the new effects log a one-time debug diagnostic there.
+- Behaviour change: `background: <color>` now also clears gradients and
+  `filter: <function>` resets the other filter functions, as in CSS.
+- PHP SDK, Rust protocol and Android unit tests, plus Android instrumented
+  suites (API 36 full suite, API 26 effects/paint), passed locally. iOS/Xcode
+  gates were not run.
 ## 1.2.3 - 2026-10-05
 
 - Fix frames rejected with `DuplicateSiblingIndex` ("Pam Native rejected an

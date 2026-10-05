@@ -1069,28 +1069,58 @@ final class ScopedStyleCompiler
         if (in_array($property, ['background', 'background-color'], true)) {
             if (in_array($lower, ['none', 'transparent'], true)) {
                 $output['backgroundColor'] = 0;
+                if ($property === 'background') {
+                    $output['backgroundGradient'] = '';
+                }
                 return;
             }
-            if ($property === 'background' && (str_contains($lower, 'gradient(') || str_contains($lower, 'url('))) {
-                throw new RuntimeException(
-                    "Native background in {$name} supports a color; gradients and images need <ImageBackground> or a <Canvas> layer.",
-                );
+            if ($property === 'background') {
+                $background = CssEffects::background($value, true, $name);
+                $output['backgroundColor'] = $background['color'] ?? 0;
+                $output['backgroundGradient'] = CssEffects::encode($background['layers']);
+                return;
             }
             $output['backgroundColor'] = self::color($value, $property, $name);
             return;
         }
         if ($property === 'background-image') {
-            if ($lower === 'none') {
-                return;
-            }
-            throw new RuntimeException(
-                "Native background-image is unsupported in {$name}; use <ImageBackground> or a <Canvas> layer.",
+            $output['backgroundGradient'] = CssEffects::encode(
+                CssEffects::background($value, false, $name)['layers'],
             );
+            return;
+        }
+        if (in_array($property, ['border-image', 'border-image-source'], true)) {
+            self::borderImage($output, $property, $value, $name);
+            return;
+        }
+        if (in_array($property, ['border-image-slice', 'border-image-width', 'border-image-outset', 'border-image-repeat'], true)) {
+            $initial = match ($property) {
+                'border-image-slice' => ['1', '100%', '1 fill', 'fill 1'],
+                'border-image-width' => ['1', 'auto'],
+                'border-image-outset' => ['0', '0px'],
+                default => ['stretch'],
+            };
+            if (!in_array($lower, $initial, true)) {
+                throw new RuntimeException(
+                    "Native {$property} supports only its initial value in {$name}; a gradient border-image strokes the whole border.",
+                );
+            }
+            return;
         }
         if (in_array($property, ['background-size', 'background-position', 'background-repeat', 'background-clip', 'background-origin', 'background-attachment'], true)) {
-            throw new RuntimeException(
-                "Native {$property} is unsupported in {$name}; native backgrounds are solid colors.",
-            );
+            $neutral = match ($property) {
+                'background-size' => ['auto', 'auto auto', '100%', '100% 100%', 'cover'],
+                'background-position' => ['0 0', '0% 0%', 'left top', 'top left', '0px 0px'],
+                'background-repeat' => ['repeat', 'no-repeat'],
+                'background-clip', 'background-origin' => ['border-box'],
+                default => ['scroll'],
+            };
+            if (!in_array($lower, $neutral, true)) {
+                throw new RuntimeException(
+                    "Native {$property}: {$value} is unsupported in {$name}; native gradients cover the border box.",
+                );
+            }
+            return;
         }
         if ($property === 'color') {
             $output['textColor'] = self::color($value, $property, $name);
@@ -1329,12 +1359,10 @@ final class ScopedStyleCompiler
             return;
         }
         if (in_array($property, ['backdrop-filter', '-webkit-backdrop-filter'], true)) {
-            if ($lower === 'none') {
-                return;
-            }
-            throw new RuntimeException(
-                "backdrop-filter is unsupported natively in {$name}; use a translucent background color.",
-            );
+            $filter = CssEffects::filter($value, 'backdrop-filter', $name);
+            $output['backdropBlurRadius'] = CssEffects::number($filter['blur']);
+            $output['backdropColorMatrix'] = CssEffects::encodeMatrix($filter['matrix']);
+            return;
         }
         if (str_starts_with($property, 'transition')) {
             self::transition($output, $property, $value, $name);
@@ -2103,23 +2131,34 @@ final class ScopedStyleCompiler
     /** @param array<string, string|int|bool> $output */
     private static function filter(array &$output, string $value, string $name): void
     {
-        $remaining = strtolower(trim($value));
-        if ($remaining === 'none') {
-            $output['blurRadius'] = '0';
-            return;
-        }
-        while ($remaining !== '') {
-            if (preg_match('/^([a-z-]+)\(([^()]*)\)\s*/D', $remaining, $match) !== 1) {
-                throw new RuntimeException("Invalid filter {$value} in {$name}.");
+        $filter = CssEffects::filter($value, 'filter', $name);
+        $output['blurRadius'] = CssEffects::number($filter['blur']);
+        $output['filterColorMatrix'] = CssEffects::encodeMatrix($filter['matrix']);
+    }
+
+    /** @param array<string, string|int|bool> $output */
+    private static function borderImage(array &$output, string $property, string $value, string $name): void
+    {
+        $tokens = self::splitTopLevel(trim($value), ' ');
+        $gradient = null;
+        foreach ($tokens as $token) {
+            $lower = strtolower($token);
+            if ($lower === 'none') {
+                continue;
             }
-            if ($match[1] !== 'blur') {
-                throw new RuntimeException(
-                    "Native filter supports blur() only in {$name}; {$match[1]}() is unsupported.",
-                );
+            if (str_contains($lower, 'gradient(') && $gradient === null) {
+                $gradient = CssEffects::gradient($token, $name);
+                continue;
             }
-            $output['blurRadius'] = self::scalar($match[2] === '' ? '0' : $match[2], $name);
-            $remaining = ltrim(substr($remaining, strlen($match[0])));
+            // border-image: <gradient> 1 / <slice> fill / stretch.
+            if ($property === 'border-image' && in_array($lower, ['1', '100%', 'fill', 'stretch', '/'], true)) {
+                continue;
+            }
+            throw new RuntimeException(
+                "Native {$property} in {$name} supports a linear or radial gradient stroke (slice 1); {$token} is unsupported.",
+            );
         }
+        $output['borderGradient'] = $gradient === null ? '' : CssEffects::encode([$gradient]);
     }
 
     /** @param array<string, string|int|bool> $output */
@@ -2218,55 +2257,24 @@ final class ScopedStyleCompiler
         string $name,
     ): void {
         $trimmed = trim($value);
-        if (strtolower($trimmed) === 'none') {
-            $output['shadowOffsetX'] = '0';
-            $output['shadowOffsetY'] = '0';
-            $output['shadowBlurRadius'] = '0';
-            $output['shadowSpreadRadius'] = '0';
-            $output['shadowColor'] = 0;
-
-            return;
+        $shadows = strtolower($trimmed) === 'none' ? [] : CssEffects::boxShadows($trimmed, $name);
+        // The first outer shadow keeps the legacy single-shadow keys (iOS and
+        // older hosts); the full list only travels when it adds information.
+        $outer = null;
+        foreach ($shadows as $shadow) {
+            if ($shadow[5] === 0) {
+                $outer = $shadow;
+                break;
+            }
         }
-        if (self::containsTopLevelComma($trimmed)) {
-            throw new RuntimeException(
-                "Native box-shadow in {$name} supports one shadow.",
-            );
-        }
-        $parts = self::cssValueParts($trimmed, $name);
-        if (in_array('inset', array_map('strtolower', $parts), true)) {
-            throw new RuntimeException(
-                "Inset box-shadow is not supported in {$name}.",
-            );
-        }
-        $color = CssColor::parse('rgba(0, 0, 0, 0.33)', "Box shadow in {$name}");
-        $colorParts = array_values(array_filter(
-            $parts,
-            static fn (string $part): bool => !self::isScalarToken($part),
-        ));
-        if (count($colorParts) > 1) {
-            throw new RuntimeException("Invalid box-shadow color in {$name}.");
-        }
-        if ($colorParts !== []) {
-            $color = CssColor::parse($colorParts[0], "Box shadow color in {$name}");
-            $parts = array_values(array_filter(
-                $parts,
-                static fn (string $part): bool => self::isScalarToken($part),
-            ));
-        }
-        if (count($parts) < 2 || count($parts) > 4) {
-            throw new RuntimeException(
-                "Native box-shadow in {$name} expects x-offset, y-offset, optional blur/spread, and an optional color.",
-            );
-        }
-        $numbers = array_map(
-            static fn (string $part): string => self::scalar($part, $name),
-            $parts,
-        );
-        $output['shadowOffsetX'] = $numbers[0];
-        $output['shadowOffsetY'] = $numbers[1];
-        $output['shadowBlurRadius'] = $numbers[2] ?? '0';
-        $output['shadowSpreadRadius'] = $numbers[3] ?? '0';
-        $output['shadowColor'] = $color;
+        $output['shadowOffsetX'] = CssEffects::number($outer[0] ?? 0.0);
+        $output['shadowOffsetY'] = CssEffects::number($outer[1] ?? 0.0);
+        $output['shadowBlurRadius'] = CssEffects::number($outer[2] ?? 0.0);
+        $output['shadowSpreadRadius'] = CssEffects::number($outer[3] ?? 0.0);
+        $output['shadowColor'] = $outer[4] ?? 0;
+        $output['boxShadows'] = count($shadows) > 1 || ($shadows !== [] && $outer === null)
+            ? json_encode($shadows, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION)
+            : '';
     }
 
     /** @return list<string> */

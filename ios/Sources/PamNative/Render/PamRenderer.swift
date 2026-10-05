@@ -2101,6 +2101,13 @@ public final class PamRenderer {
             installEvents(for: nodeId)
         case PamConstants.hostProperties:
             nativeViews.update(view: view, properties: value.propertiesOrNil() ?? [:])
+        case PamConstants.backgroundGradient,
+             PamConstants.boxShadows,
+             PamConstants.filterColorMatrix,
+             PamConstants.backdropBlurRadius,
+             PamConstants.backdropColorMatrix,
+             PamConstants.borderGradient:
+            PamUnsupportedEffects.report(key: key, value: value)
         default:
             break
         }

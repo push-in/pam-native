@@ -73,17 +73,83 @@ by line numbers or areas → —.
 | `border-color` (+ per side) | 1–4 values | A per side; i uses the last side color |
 | `border-style` (+ per side) | `solid`, `dashed`, `dotted`, `none` (one style per box) | A i |
 | `border-radius` (+ per corner, logical corners) | 1–4 lengths, `50%`+ (pill/circle); other `%` and elliptical `/` → — | A i |
-| `box-shadow` | one outer shadow `x y [blur] [spread] [color]`, `none` (multiple / `inset` → —) | A i |
+| `box-shadow` | comma-separated list of `[inset] x y [blur] [spread] [color]`, `none` | A (all), i (first outer shadow) |
+| `border-image`, `border-image-source` | `<linear/radial gradient> [1]`, `none` — a gradient stroke over the border widths that **follows `border-radius`** (story rings); `border-image-slice: 1`, other `border-image-*` initial values only | A |
 | `elevation` | Android elevation | A |
+
+Shadow details: blur follows CSS (Gaussian σ = blur / 2), spread grows the
+shape and its non-zero radii, shadows paint last-to-first under the box
+(outer) or inside the padding box above the background (inset). Outer
+shadows are drawn by the parent container from cached ALPHA_8 nine-slice
+masks (one small bitmap per radius/blur combination, shared by every view;
+large blurs are rendered downscaled), so lists of shadowed cards cost one
+bitmap draw per shadow and never re-blur on scroll.
 
 ## Backgrounds and effects
 
 | Property | Values | Where |
 | --- | --- | --- |
-| `background`, `background-color` | any color, `none`, `transparent` (gradients/`url()` → —; use `<ImageBackground>` or `<Canvas>`) | A i |
-| `filter` | `blur(<length>)`, `none` (other functions → —) | A (API 31+) |
-| `backdrop-filter` | `none` only | — |
+| `background-color` | any color, `none`, `transparent` | A i |
+| `background` | comma-separated gradient layers plus an optional final color (`linear-gradient(…), radial-gradient(…), #fff`); `no-repeat` accepted; `url()`/`image-set()` → — (use `<ImageBackground>`) | A, i (color only) |
+| `background-image` | gradient layers, `none` | A |
+| `background-size/-position/-repeat/-clip/-origin/-attachment` | neutral values only (`cover`, `100% 100%`, `0 0`, `no-repeat`, `border-box`, `scroll`); gradients always cover the border box | A |
+| `filter` | `blur()`, `brightness()`, `contrast()`, `saturate()`, `grayscale()`, `sepia()`, `invert()`, `opacity()`, `hue-rotate()`, in any combination/order, `none` (`drop-shadow()`/`url()` → —) | A (blur: API 31+) |
+| `backdrop-filter`, `-webkit-backdrop-filter` | same functions as `filter`, `none` | A (API 31+, containers) |
 | `mix-blend-mode`, `clip-path`, `mask` | `normal` / `none` only | — |
+
+### Gradients
+
+`linear-gradient()`, `radial-gradient()`, `repeating-linear-gradient()`,
+`repeating-radial-gradient()` and legacy `-webkit-linear-gradient()`:
+
+* Direction: angles (`deg`, `rad`, `grad`, `turn`), `to <side>` and magic
+  corners (`to top right` — perpendicular to the box diagonal, resolved with
+  the painted size).
+* Radial: `circle`/`ellipse`, `closest-side`, `closest-corner`,
+  `farthest-side`, `farthest-corner` (default) or explicit radii (`40px`,
+  `40px 50%`), `at <position>` with keywords, percentages and lengths
+  (1–2 values).
+* Color stops: any CSS color, `transparent`, positions in `%` or lengths,
+  double positions (`red 10px 40px`), auto positions distributed as in CSS,
+  hard stops. Interpolation happens in **premultiplied** space like
+  browsers, so `transparent` fades never darken. Color hints
+  (`red, 30%, blue`) and `conic-gradient()` → —.
+* Layers paint in CSS order (first on top) over `background-color`, clipped
+  anti-aliased to `border-radius`. Shaders are rebuilt only when the box
+  size changes; parsed gradients are cached per wire string.
+
+`<LinearGradient>` mirrors `expo-linear-gradient` for React Native ports:
+
+```html
+<LinearGradient colors="rgba(0,0,0,.55), transparent" start="0.5, 0" end="0.5, 1" locations="0, 1" class="scrim"/>
+<LinearGradient :colors="$ringColors" :start="$ringStart" :end="$ringEnd"/>
+```
+
+`colors` (list or comma string), `start`/`end` (`{x, y}` or `[x, y]` box
+fractions, default top-center → bottom-center) and `locations` (fractions)
+compile to the same native gradient; children render on top like `<View>`.
+
+### Filters and backdrop
+
+`filter` color functions are composed at compile time into one 4×5 color
+matrix. On Android 12+ blur and the matrix run as a GPU `RenderEffect`
+(blur σ = the CSS length; edges fade like browsers); before API 31 the color
+matrix uses a hardware layer and `blur()` is a no-op with a one-time
+`PamNative` log warning.
+
+`backdrop-filter` (Android 12+, on container nodes) re-records what is painted
+behind the element every frame it draws — ancestor backgrounds and earlier
+siblings along the ancestor chain, referencing their existing render nodes —
+applies the blur/color matrix on the GPU and clips it to `border-radius`.
+Limits: `SurfaceView` video is not captured (use the default texture-backed
+`<Video>`), siblings painted later in z-order are ignored, and before API 31
+it is a no-op (keep a translucent `background-color` as the fallback). Cost:
+one GPU blur of the element's area per frame while it is visible — prefer it
+for headers/sheets, not list rows.
+
+iOS currently paints background colors and the first outer shadow; gradients,
+extra/inset shadows, filters and backdrops log a one-time debug diagnostic
+there.
 
 ## Transforms and motion
 
@@ -197,3 +263,7 @@ properties.
   paint-only changes (colors, shadows, transforms, opacity) never trigger a
   relayout.
 * Transitions and keyframes animate on the native UI thread.
+* Gradients, shadow lists and filter matrices travel as compact strings,
+  are decoded once per distinct value (LRU-cached), and their shaders/masks
+  are rebuilt only when the painted size changes. Animating gradients is not
+  supported; animate `opacity`/transforms of a gradient layer instead.

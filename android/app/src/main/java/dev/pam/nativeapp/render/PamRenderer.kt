@@ -12,6 +12,7 @@ import android.content.Context
 import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RenderEffect
@@ -1978,7 +1979,14 @@ class PamRenderer(
             PropKey.RIPPLE_RADIUS,
             PropKey.RIPPLE_FOREGROUND,
             PropKey.RIPPLE_ALPHA,
+            PropKey.BACKGROUND_GRADIENT,
+            PropKey.BORDER_GRADIENT,
+            PropKey.BOX_SHADOWS,
             -> updateBackground(view, state)
+            PropKey.FILTER_COLOR_MATRIX -> applyFilter(view, state)
+            PropKey.BACKDROP_BLUR_RADIUS,
+            PropKey.BACKDROP_COLOR_MATRIX,
+            -> applyBackdrop(view, state)
             PropKey.SHADOW_OFFSET_X,
             PropKey.SHADOW_OFFSET_Y,
             PropKey.SHADOW_BLUR_RADIUS,
@@ -2585,7 +2593,7 @@ class PamRenderer(
             -> applyLeafPadding(view, state)
             PropKey.POINTER_EVENTS -> applyPointerEvents(view, state, value.integer().toInt())
             PropKey.SAFE_AREA_BOTTOM -> applySafeAreaBottom(view, state, value.flag())
-            PropKey.BLUR_RADIUS -> applyBlur(view, state, value.decimal().toFloat())
+            PropKey.BLUR_RADIUS -> applyFilter(view, state)
             PropKey.TRANSLATION_X_PERCENT -> {
                 view.translationX = view.width * (value.decimal() / 100.0).toFloat()
             }
@@ -2813,7 +2821,14 @@ class PamRenderer(
             PropKey.RIPPLE_RADIUS,
             PropKey.RIPPLE_FOREGROUND,
             PropKey.RIPPLE_ALPHA,
+            PropKey.BACKGROUND_GRADIENT,
+            PropKey.BORDER_GRADIENT,
+            PropKey.BOX_SHADOWS,
             -> updateBackground(view, state)
+            PropKey.FILTER_COLOR_MATRIX -> applyFilter(view, state)
+            PropKey.BACKDROP_BLUR_RADIUS,
+            PropKey.BACKDROP_COLOR_MATRIX,
+            -> applyBackdrop(view, state)
             PropKey.TEXT_COLOR -> when (view) {
                 is TextView -> view.setTextColor(Color.BLACK)
                 is PamRecyclerList -> view.setTextColor(Color.BLACK)
@@ -3210,7 +3225,7 @@ class PamRenderer(
             }
             PropKey.POINTER_EVENTS -> applyPointerEvents(view, state, POINTER_EVENTS_AUTO)
             PropKey.SAFE_AREA_BOTTOM -> applySafeAreaBottom(view, state, false)
-            PropKey.BLUR_RADIUS -> applyBlur(view, state, 0f)
+            PropKey.BLUR_RADIUS -> applyFilter(view, state)
             PropKey.TRANSLATION_X_PERCENT -> {
                 view.translationX = dp(state.number(PropKey.TRANSLATION_X, 0.0).toFloat()).toFloat()
             }
@@ -5094,10 +5109,42 @@ class PamRenderer(
             state.integer(PropKey.OVERFLOW, OVERFLOW_VISIBLE) == OVERFLOW_HIDDEN,
             radii,
         )
+        val density = resourcesDensity()
+        val gradientLayers = PamGradientLayer.parse(
+            state.properties[PropKey.BACKGROUND_GRADIENT]?.textOrNull(),
+        )
+        val borderGradient = PamGradientLayer.parse(
+            state.properties[PropKey.BORDER_GRADIENT]?.textOrNull(),
+        ).firstOrNull()?.takeIf { borderWidth > 0 && !imageHost }
+        val insetShadows = PamBoxShadows.parse(
+            state.properties[PropKey.BOX_SHADOWS]?.textOrNull(),
+            density,
+            radii,
+        ).filter { it.inset }
+        val effects = if (
+            !imageHost &&
+            (gradientLayers.isNotEmpty() || insetShadows.isNotEmpty() || borderGradient != null)
+        ) {
+            PamEffectsDrawable(
+                gradientLayers,
+                insetShadows,
+                borderGradient,
+                radii,
+                floatArrayOf(
+                    leftBorderWidth.toFloat(),
+                    topBorderWidth.toFloat(),
+                    rightBorderWidth.toFloat(),
+                    bottomBorderWidth.toFloat(),
+                ),
+                density,
+            )
+        } else {
+            null
+        }
         val shape = GradientDrawable().apply {
             setColor(color)
             cornerRadii = radii
-            if (!imageHost && borderWidth > 0 && !hasDirectionalBorder) {
+            if (!imageHost && borderWidth > 0 && !hasDirectionalBorder && borderGradient == null) {
                 when (borderStyle) {
                     2 -> setStroke(
                         borderWidth,
@@ -5115,7 +5162,7 @@ class PamRenderer(
                 }
             }
         }
-        val background = if (!imageHost && hasDirectionalBorder) {
+        val background = if (!imageHost && hasDirectionalBorder && borderGradient == null) {
             val borders = object : android.graphics.drawable.Drawable() {
                 private var drawableAlpha = 255
                 private val paint = android.graphics.Paint(
@@ -5185,7 +5232,9 @@ class PamRenderer(
                 @Suppress("DEPRECATION")
                 override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
             }
-            android.graphics.drawable.LayerDrawable(arrayOf(shape, borders))
+            android.graphics.drawable.LayerDrawable(listOfNotNull(shape, effects, borders).toTypedArray())
+        } else if (effects != null) {
+            android.graphics.drawable.LayerDrawable(arrayOf(shape, effects))
         } else {
             shape
         }
@@ -5260,13 +5309,13 @@ class PamRenderer(
             }
         }
         if (foreground || borderless) {
-            view.background = shape
+            view.background = background
             view.foreground = overlay
         } else {
             view.foreground = null
             view.background = (RippleDrawable(
                 ColorStateList.valueOf(effectiveRipple),
-                shape,
+                background,
                 rippleMask,
             ).mutate() as RippleDrawable).apply {
                 state.properties[PropKey.RIPPLE_RADIUS]?.decimal()?.let { radius ->
@@ -5281,11 +5330,6 @@ class PamRenderer(
         state: NodeState,
         resolvedRadii: FloatArray? = null,
     ) {
-        val color = state.integer(PropKey.SHADOW_COLOR, Color.TRANSPARENT.toLong()).toInt()
-        if (Color.alpha(color) == 0) {
-            PamBoxShadows.set(view, null)
-            return
-        }
         val logicalRadius = state.number(PropKey.BORDER_RADIUS, 0.0)
         val radii = resolvedRadii ?: floatArrayOf(
             dp(state.number(PropKey.BORDER_TOP_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
@@ -5297,17 +5341,24 @@ class PamRenderer(
             dp(state.number(PropKey.BORDER_BOTTOM_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
             dp(state.number(PropKey.BORDER_BOTTOM_LEFT_RADIUS, logicalRadius).toFloat()).toFloat(),
         )
+        val list = state.properties[PropKey.BOX_SHADOWS]?.textOrNull()
+        if (!list.isNullOrEmpty()) {
+            PamBoxShadows.set(view, PamBoxShadows.parse(list, resourcesDensity(), radii))
+            return
+        }
+        val color = state.integer(PropKey.SHADOW_COLOR, Color.TRANSPARENT.toLong()).toInt()
+        if (Color.alpha(color) == 0) {
+            PamBoxShadows.set(view, null)
+            return
+        }
+        val density = resourcesDensity()
         PamBoxShadows.set(
             view,
             PamBoxShadow(
-                offsetX = dp(state.number(PropKey.SHADOW_OFFSET_X, 0.0).toFloat()).toFloat(),
-                offsetY = dp(state.number(PropKey.SHADOW_OFFSET_Y, 0.0).toFloat()).toFloat(),
-                blurRadius = dp(
-                    state.number(PropKey.SHADOW_BLUR_RADIUS, 0.0).toFloat(),
-                ).toFloat(),
-                spreadRadius = dp(
-                    state.number(PropKey.SHADOW_SPREAD_RADIUS, 0.0).toFloat(),
-                ).toFloat(),
+                offsetX = state.number(PropKey.SHADOW_OFFSET_X, 0.0).toFloat() * density,
+                offsetY = state.number(PropKey.SHADOW_OFFSET_Y, 0.0).toFloat() * density,
+                blurRadius = state.number(PropKey.SHADOW_BLUR_RADIUS, 0.0).toFloat() * density,
+                spreadRadius = state.number(PropKey.SHADOW_SPREAD_RADIUS, 0.0).toFloat() * density,
                 color = color,
                 cornerRadii = radii,
             ),
@@ -5552,23 +5603,50 @@ class PamRenderer(
         view.requestApplyInsets()
     }
 
-    private fun applyBlur(view: View, state: NodeState, radius: Float) {
+    /**
+     * CSS `filter`: blur() via RenderEffect (API 31+) and the compiled color
+     * matrix (brightness/contrast/saturate/grayscale/sepia/invert/opacity/
+     * hue-rotate) via RenderEffect or, before API 31, a hardware layer paint.
+     */
+    private fun applyFilter(view: View, state: NodeState) {
+        val sigma = state.number(PropKey.BLUR_RADIUS, 0.0).toFloat().coerceAtLeast(0f) * resourcesDensity()
+        val matrix = PamBackdrop.colorMatrix(state.properties[PropKey.FILTER_COLOR_MATRIX]?.textOrNull())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            view.setRenderEffect(
-                if (radius > 0f) {
-                    val pixels = dp(radius).toFloat().coerceAtLeast(1f)
-                    RenderEffect.createBlurEffect(pixels, pixels, Shader.TileMode.CLAMP)
-                } else {
-                    null
-                },
-            )
-        } else {
-            view.elevation = if (radius > 0f) {
-                max(view.elevation, dp(radius / 2f).toFloat())
+            var effect: RenderEffect? = if (sigma > 0f) {
+                val radius = ((sigma - 0.5f) / 0.57735f).coerceAtLeast(0.1f)
+                RenderEffect.createBlurEffect(radius, radius, Shader.TileMode.DECAL)
             } else {
-                dp(state.number(PropKey.ELEVATION, 0.0).toFloat()).toFloat()
+                null
             }
+            if (matrix != null) {
+                val color = RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(matrix))
+                effect = effect?.let { RenderEffect.createChainEffect(color, it) } ?: color
+            }
+            view.setRenderEffect(effect)
+            return
         }
+        if (sigma > 0f && !blurFilterWarned) {
+            blurFilterWarned = true
+            Log.w("PamNative", "CSS filter: blur() needs Android 12 (API 31); it is a no-op on API ${Build.VERSION.SDK_INT}.")
+        }
+        if (matrix != null) {
+            view.setLayerType(
+                View.LAYER_TYPE_HARDWARE,
+                Paint().apply { colorFilter = ColorMatrixColorFilter(matrix) },
+            )
+            state.filterLayer = true
+        } else if (state.filterLayer) {
+            view.setLayerType(View.LAYER_TYPE_NONE, null)
+            state.filterLayer = false
+        }
+    }
+
+    private fun applyBackdrop(view: View, state: NodeState) {
+        val container = view as? PamContainer ?: return
+        container.setBackdrop(
+            state.number(PropKey.BACKDROP_BLUR_RADIUS, 0.0).toFloat().coerceAtLeast(0f) * resourcesDensity(),
+            PamBackdrop.colorMatrix(state.properties[PropKey.BACKDROP_COLOR_MATRIX]?.textOrNull()),
+        )
     }
 
     private fun applyAnimationKind(view: View, state: NodeState, kind: Int) {
@@ -7433,6 +7511,7 @@ class PamRenderer(
         var keyframeAnimator: ValueAnimator? = null,
         var workletAnimator: ValueAnimator? = null,
         var loadingDrawable: PamButtonLoadingDrawable? = null,
+        var filterLayer: Boolean = false,
         var virtual: Boolean = false,
         var imageLoading: Boolean = false,
         var imageProgressScheduled: Boolean = false,
@@ -7706,6 +7785,13 @@ class PamRenderer(
             PropKey.PRESS_DELAY_OUT_MS,
             PropKey.PRESS_ANDROID_DISABLE_SOUND,
             PropKey.ELEVATION,
+            PropKey.SHADOW_COLOR,
+            PropKey.BACKGROUND_GRADIENT,
+            PropKey.BORDER_GRADIENT,
+            PropKey.BOX_SHADOWS,
+            PropKey.FILTER_COLOR_MATRIX,
+            PropKey.BACKDROP_BLUR_RADIUS,
+            PropKey.BACKDROP_COLOR_MATRIX,
             PropKey.TRANSLATION_X,
             PropKey.TRANSLATION_Y,
             PropKey.SCALE_X,
@@ -7718,6 +7804,7 @@ class PamRenderer(
         )
 
         const val TEXT_ALIGN_JUSTIFY = 4
+        var blurFilterWarned = false
         const val MIN_TEXT_SHADOW_RADIUS = 0.01f
 
         const val ROLE_DESCRIPTION_KEY = "AccessibilityNodeInfo.roleDescription"

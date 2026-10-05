@@ -483,6 +483,12 @@ public enum PamConstants {
     public static let transformOriginX = 489
     public static let transformOriginY = 490
     public static let translationYPercent = 491
+    public static let backgroundGradient = 492
+    public static let boxShadows = 493
+    public static let filterColorMatrix = 494
+    public static let backdropBlurRadius = 495
+    public static let backdropColorMatrix = 496
+    public static let borderGradient = 497
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

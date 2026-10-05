@@ -669,6 +669,12 @@ pub enum PropKey {
     TransformOriginX = 489,
     TransformOriginY = 490,
     TranslationYPercent = 491,
+    BackgroundGradient = 492,
+    BoxShadows = 493,
+    FilterColorMatrix = 494,
+    BackdropBlurRadius = 495,
+    BackdropColorMatrix = 496,
+    BorderGradient = 497,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1167,6 +1173,12 @@ impl TryFrom<u16> for PropKey {
             489 => Ok(Self::TransformOriginX),
             490 => Ok(Self::TransformOriginY),
             491 => Ok(Self::TranslationYPercent),
+            492 => Ok(Self::BackgroundGradient),
+            493 => Ok(Self::BoxShadows),
+            494 => Ok(Self::FilterColorMatrix),
+            495 => Ok(Self::BackdropBlurRadius),
+            496 => Ok(Self::BackdropColorMatrix),
+            497 => Ok(Self::BorderGradient),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2042,10 +2054,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=491 {
+        for value in 1..=497 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(492).is_err());
+        assert!(PropKey::try_from(498).is_err());
     }
 
     #[test]

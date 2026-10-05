@@ -20,6 +20,7 @@ internal open class PamContainer(context: Context) :
     private val boxShadowPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
     private val boxShadowPath = Path()
     private val boxShadowBounds = RectF()
+    private var backdrop: PamBackdrop? = null
 
     init {
         clipChildren = false
@@ -61,6 +62,37 @@ internal open class PamContainer(context: Context) :
     }
 
     open override fun performClick(): Boolean = super.performClick()
+
+    /** CSS backdrop-filter; a zero radius and null matrix remove it. */
+    fun setBackdrop(radiusPx: Float, matrix: android.graphics.ColorMatrix?) {
+        val effect = backdrop ?: if (radiusPx > 0f || matrix != null) {
+            PamBackdrop(this).also { backdrop = it }
+        } else {
+            return
+        }
+        effect.configure(radiusPx, matrix)
+        if (effect.active) {
+            setWillNotDraw(false)
+        } else {
+            effect.detach()
+            backdrop = null
+        }
+    }
+
+    override fun draw(canvas: Canvas) {
+        backdrop?.draw(canvas, overflowClipRadii)
+        super.draw(canvas)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        backdrop?.attach()
+    }
+
+    override fun onDetachedFromWindow() {
+        backdrop?.detach()
+        super.onDetachedFromWindow()
+    }
 
     override fun dispatchDraw(canvas: Canvas) {
         if (!overflowClipEnabled) {

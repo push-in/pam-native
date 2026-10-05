@@ -534,6 +534,12 @@ final class TemplateRenderer
         'textShadowRadius' => PropKey::TextShadowRadius,
         'textShadowColor' => PropKey::TextShadowColor,
         'fontFeatureSettings' => PropKey::FontFeatureSettings,
+        'backgroundGradient' => PropKey::BackgroundGradient,
+        'boxShadows' => PropKey::BoxShadows,
+        'filterColorMatrix' => PropKey::FilterColorMatrix,
+        'backdropBlurRadius' => PropKey::BackdropBlurRadius,
+        'backdropColorMatrix' => PropKey::BackdropColorMatrix,
+        'borderGradient' => PropKey::BorderGradient,
         'transformOriginX' => PropKey::TransformOriginX,
         'transformOriginY' => PropKey::TransformOriginY,
         'translationYPercent' => PropKey::TranslationYPercent,
@@ -1289,6 +1295,9 @@ final class TemplateRenderer
                 $childData['__pamInheritedStyles'];
         }
 
+        if ($factory === null && $tag === 'LinearGradient') {
+            $values = self::linearGradientAttributes($values);
+        }
         $element = $factory !== null
             ? $factory($componentValues, $children, $scope)->toElement()
             : match ($tag) {
@@ -1296,7 +1305,7 @@ final class TemplateRenderer
             'Column' => Column::make(...$children),
             'Row' => Row::make(...$children),
             'Grid' => Grid::make(...$children),
-            'View' => NativeView::make(...$children),
+            'View', 'LinearGradient' => NativeView::make(...$children),
             'Text' => Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
             'Button' => Button::make(self::stringValue(
                 $values['label'] ?? $values['text'] ?? $text,
@@ -2539,6 +2548,111 @@ final class TemplateRenderer
                 ? $value
                 : null,
         };
+    }
+
+    /**
+     * expo-linear-gradient props → backgroundGradient. `start`/`end` are box
+     * fractions ({x, y} maps or [x, y] lists), `locations` stop fractions.
+     *
+     * @param array<string, mixed> $values
+     * @return array<string, mixed>
+     */
+    private static function linearGradientAttributes(array $values): array
+    {
+        $colors = $values['colors'] ?? null;
+        if (is_string($colors)) {
+            $colors = self::splitList($colors);
+        }
+        if (!is_array($colors)) {
+            throw new RuntimeException('LinearGradient requires a colors list.');
+        }
+        $locations = $values['locations'] ?? null;
+        if (is_string($locations)) {
+            $locations = self::splitList($locations);
+        }
+        if ($locations !== null && !is_array($locations)) {
+            throw new RuntimeException('LinearGradient locations must be a list of fractions.');
+        }
+        $values['backgroundGradient'] = CssEffects::encode([CssEffects::pointsGradient(
+            array_map(
+                static fn (mixed $color): int => is_int($color)
+                    ? $color
+                    : CssColor::parse(self::stringValue($color, 'LinearGradient color'), 'LinearGradient color'),
+                array_values($colors),
+            ),
+            self::gradientPoint($values['start'] ?? null, [0.5, 0.0], 'start'),
+            self::gradientPoint($values['end'] ?? null, [0.5, 1.0], 'end'),
+            $locations === null ? null : array_map(
+                static fn (mixed $location): float => self::floatValue($location, 'LinearGradient location'),
+                array_values($locations),
+            ),
+            'LinearGradient',
+        )]);
+        unset($values['colors'], $values['start'], $values['end'], $values['locations'], $values['dither']);
+
+        return $values;
+    }
+
+    /**
+     * @param array{0: float, 1: float} $default
+     * @return array{0: float, 1: float}
+     */
+    private static function gradientPoint(mixed $value, array $default, string $label): array
+    {
+        if ($value === null) {
+            return $default;
+        }
+        if (is_string($value)) {
+            $value = self::splitList($value);
+        }
+        if (is_array($value) && array_key_exists('x', $value) && array_key_exists('y', $value)) {
+            $value = [$value['x'], $value['y']];
+        }
+        if (!is_array($value) || count($value) !== 2) {
+            throw new RuntimeException("LinearGradient {$label} must be {x, y} or [x, y].");
+        }
+        $value = array_values($value);
+
+        return [
+            self::floatValue($value[0], "LinearGradient {$label}.x"),
+            self::floatValue($value[1], "LinearGradient {$label}.y"),
+        ];
+    }
+
+    /** @return list<string> */
+    private static function splitList(string $value): array
+    {
+        $trimmed = trim($value);
+        if (str_starts_with($trimmed, '[')) {
+            $decoded = json_decode($trimmed, true);
+            if (is_array($decoded)) {
+                return array_map(
+                    static fn (mixed $item): string => self::stringValue($item, 'LinearGradient list item'),
+                    array_values($decoded),
+                );
+            }
+        }
+        $parts = [];
+        $depth = 0;
+        $current = '';
+        foreach (str_split($trimmed) as $character) {
+            if ($character === '(') {
+                $depth++;
+            } elseif ($character === ')') {
+                $depth--;
+            }
+            if ($character === ',' && $depth === 0) {
+                $parts[] = trim($current);
+                $current = '';
+                continue;
+            }
+            $current .= $character;
+        }
+        if (trim($current) !== '') {
+            $parts[] = trim($current);
+        }
+
+        return $parts;
     }
 
     private static function colorValue(mixed $value, string $context): int

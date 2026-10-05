@@ -164,6 +164,10 @@ final class StylePropertyCatalog
             ['caret-color', 'cursorColor', StyleRenderCost::Paint],
             ['transition', 'animate', StyleRenderCost::Composite, ['transition-duration', 'transition-timing-function', 'transition-property', 'transition-delay']],
             ['overflow-x', 'overflow', StyleRenderCost::Paint, ['overflow-y']],
+            ['background-image', 'backgroundGradient', StyleRenderCost::Paint],
+            ['box-shadow', 'boxShadows', StyleRenderCost::Paint],
+            ['backdrop-filter', 'backdropBlurRadius', StyleRenderCost::Composite, ['-webkit-backdrop-filter']],
+            ['border-image', 'borderGradient', StyleRenderCost::Paint, ['border-image-source']],
         ];
         $definitions = [];
         foreach ($rows as $index => $row) {

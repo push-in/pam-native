@@ -91,7 +91,8 @@ $assert(
     ],
     'text-shadow must compile to the native text shadow.',
 );
-$assert($css('filter: blur(4px);') === ['blurRadius' => '4'], 'filter: blur() must compile.');
+$assert($css('filter: blur(4px);') === ['blurRadius' => '4', 'filterColorMatrix' => ''], 'filter: blur() must compile.');
+require __DIR__.'/css_effects.php';
 $assert($css('pointer-events: none;') === ['pointerEvents' => 'none'], 'pointer-events must compile.');
 $assert($css('cursor: pointer; -webkit-tap-highlight-color: transparent; will-change: transform;') === [], 'Browser-only properties are documented no-ops.');
 $assert($css('user-select: none;') === ['selectable' => false], 'user-select must map to text selection.');
@@ -204,7 +205,7 @@ $sheet = ScopedStyleCompiler::compile(
     .field::placeholder { color: var(--brand); }
     .a:pressed, .b:pressed { opacity: 0.5; }
     @supports (display: grid) { .grid { gap: 4px; } }
-    @supports (backdrop-filter: blur(2px)) { .glass { opacity: 0.1; } }
+    @supports (backdrop-filter: url(#x)) { .glass { opacity: 0.1; } }
     @media (prefers-color-scheme: dark) { .card { background-color: var(--brand); } }
     CSS,
     'CssCompleteSheet.pam.php',

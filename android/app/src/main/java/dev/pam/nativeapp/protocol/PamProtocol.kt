@@ -636,7 +636,13 @@ enum class PropKey(val value: Int) {
     FONT_FEATURE_SETTINGS(488),
     TRANSFORM_ORIGIN_X(489),
     TRANSFORM_ORIGIN_Y(490),
-    TRANSLATION_Y_PERCENT(491);
+    TRANSLATION_Y_PERCENT(491),
+    BACKGROUND_GRADIENT(492),
+    BOX_SHADOWS(493),
+    FILTER_COLOR_MATRIX(494),
+    BACKDROP_BLUR_RADIUS(495),
+    BACKDROP_COLOR_MATRIX(496),
+    BORDER_GRADIENT(497);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }
