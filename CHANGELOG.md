@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.1 - 2026-10-05
+
+- Remove release artifacts accidentally committed under `dist/` in 1.1.0 and
+  ignore that directory, keeping Composer downloads small. No API or runtime
+  change from 1.1.0.
+
 ## 1.1.0 - 2026-10-05
 
 - Add `Http::multipart()` with fluent fields, private-file parts, headers,

@@ -12,3 +12,4 @@
 /android/app/src/main/assets/pam/
 /android/app/src/main/generated/
 **/vendor/
+/dist/
