@@ -22,7 +22,7 @@ final class CustomView extends Element
     public static function make(
         string $name,
         array $properties = [],
-        Renderable ...$children,
+        Renderable|false|null ...$children,
     ): self {
         if (preg_match('/^[a-z][a-z0-9_.-]{0,63}$/', $name) !== 1) {
             throw new InvalidArgumentException('Native view names must be safe lowercase identifiers.');

@@ -7702,5 +7702,6 @@ require __DIR__.'/native_capabilities.php';
 require __DIR__.'/typography_parity.php';
 require __DIR__.'/gestures_animations.php';
 require __DIR__.'/error_reporting.php';
+require __DIR__.'/conditional_identity.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

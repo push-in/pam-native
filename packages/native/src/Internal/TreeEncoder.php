@@ -247,8 +247,18 @@ final class TreeEncoder
             properties: $encodedProperties,
         );
 
+        $segments = [];
+
         foreach ($element->children() as $childIndex => $child) {
-            $childPath = $path.'/'.$this->pathSegment($child, $childIndex);
+            $segment = $this->pathSegment($child, $childIndex);
+            if (isset($segments[$segment]) && $child->elementKey() === null && $child->domIdentity() === null) {
+                // A builder mixed slotted children with positional ones (for
+                // example template slot content composed in PHP); fall back to
+                // the output position instead of failing on a collision.
+                $segment = $child->kind()->value.':#'.$childIndex;
+            }
+            $segments[$segment] = true;
+            $childPath = $path.'/'.$segment;
             $childId = $this->nodeId($childPath, $child);
             $this->encodeNode($child, $childId, $id, $childIndex, $childPath);
         }
@@ -414,13 +424,19 @@ final class TreeEncoder
             .implode('', $operations);
     }
 
+    /**
+     * Unkeyed children are identified by their static slot (template or
+     * builder argument position), not by their output index: a conditional
+     * sibling that renders nothing leaves a hole, so the siblings after it keep
+     * their native identity (React-like reconciliation).
+     */
     private function pathSegment(Element $element, int $index): string
     {
         return $element->domIdentity() !== null
             ? 'dom:'.$element->domIdentity()
             : ($element->elementKey() !== null
             ? 'key:'.$element->elementKey()
-            : $element->kind()->value.':'.$index);
+            : $element->kind()->value.':'.($element->identitySlot() ?? $index));
     }
 
     private function nodeId(string $path, Element $element): int

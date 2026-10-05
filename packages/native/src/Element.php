@@ -32,6 +32,17 @@ abstract class Element implements Renderable
     /** @var array<string, string> */
     private array $domDataset = [];
 
+    /**
+     * Static position of this element among the slots its parent declared
+     * (template position or builder argument position). Conditional siblings
+     * that render nothing leave a hole, so unkeyed siblings keep their native
+     * identity when a sibling before them appears or disappears.
+     */
+    private ?string $identitySlot = null;
+
+    /** @var \WeakMap<Element, array<string, Element>>|null */
+    private static ?\WeakMap $slottedCopies = null;
+
     final protected function __construct(private readonly NodeKind $kind)
     {
     }
@@ -417,6 +428,39 @@ abstract class Element implements Renderable
         return $this->domDataset;
     }
 
+    /** @internal Static slot used by the tree encoder for unkeyed identity. */
+    final public function identitySlot(): ?string
+    {
+        return $this->identitySlot;
+    }
+
+    /**
+     * @internal Places this element at a static parent slot. Copies are
+     * memoized per source element so reused (memoized) subtrees keep their
+     * object identity and their encoder caches across renders.
+     */
+    final public function withIdentitySlot(string $slot): static
+    {
+        if ($this->identitySlot === $slot) {
+            return $this;
+        }
+        self::$slottedCopies ??= new \WeakMap();
+        $copies = self::$slottedCopies[$this] ?? [];
+        if (isset($copies[$slot])) {
+            /** @var static */
+            return $copies[$slot];
+        }
+        $copy = clone $this;
+        $copy->identitySlot = $slot;
+        if (count($copies) >= 8) {
+            $copies = [];
+        }
+        $copies[$slot] = $copy;
+        self::$slottedCopies[$this] = $copies;
+
+        return $copy;
+    }
+
     /** @internal Visual DOM retained-tree operation. */
     final public function domWithIdentity(string $identity): static
     {
@@ -522,17 +566,43 @@ abstract class Element implements Renderable
         return $copy;
     }
 
-    /** @param array<array-key, mixed> $children */
+    /**
+     * Null and false children are holes: they render nothing but keep their
+     * position, so the following unkeyed siblings keep their native identity
+     * when a conditional child appears or disappears.
+     *
+     * @param array<array-key, mixed> $children
+     */
     final protected function withChildren(array $children): static
     {
         $validated = [];
+        $holes = false;
 
         foreach ($children as $child) {
+            if ($child === null || $child === false) {
+                $holes = true;
+                continue;
+            }
             if (!$child instanceof Renderable) {
                 throw new InvalidArgumentException('Every child must be renderable by Pam Native.');
             }
+        }
 
-            $validated[] = $child->toElement();
+        if ($holes) {
+            $position = 0;
+            foreach ($children as $child) {
+                if ($child !== null && $child !== false) {
+                    $element = $child->toElement();
+                    $validated[] = $element->identitySlot === null
+                        ? $element->withIdentitySlot((string) $position)
+                        : $element;
+                }
+                $position++;
+            }
+        } else {
+            foreach ($children as $child) {
+                $validated[] = $child->toElement();
+            }
         }
 
         $copy = clone $this;

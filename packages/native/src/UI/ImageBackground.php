@@ -14,7 +14,7 @@ final class ImageBackground extends Element
 {
     use HasImageBehavior;
 
-    public static function make(string $source, Renderable ...$children): self
+    public static function make(string $source, Renderable|false|null ...$children): self
     {
         return (new self(NodeKind::ImageBackground))
             ->withChildren($children)

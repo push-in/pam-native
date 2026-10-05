@@ -17,13 +17,10 @@ use Pam\Native\Renderable;
 
 final class InteractionRegion extends Element
 {
-    public static function make(Renderable ...$children): self
+    public static function make(Renderable|false|null ...$children): self
     {
         return (new self(NodeKind::Pressable))
-            ->withChildren(array_map(
-                static fn (Renderable $child): Element => $child->toElement(),
-                $children,
-            ))
+            ->withChildren($children)
             ->withProperty(PropKey::Draggable, false)
             ->withProperty(PropKey::DropEnabled, false);
     }

@@ -15,7 +15,7 @@ use Pam\Native\Renderable;
 
 final class Pressable extends Element
 {
-    public static function make(Renderable ...$children): self
+    public static function make(Renderable|false|null ...$children): self
     {
         return (new self(NodeKind::Pressable))->withChildren($children);
     }

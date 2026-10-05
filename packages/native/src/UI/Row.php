@@ -10,7 +10,7 @@ use Pam\Native\Renderable;
 
 final class Row extends Element
 {
-    public static function make(Renderable ...$children): self
+    public static function make(Renderable|false|null ...$children): self
     {
         return (new self(NodeKind::Row))->withChildren($children);
     }

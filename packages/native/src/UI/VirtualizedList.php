@@ -23,9 +23,10 @@ final class VirtualizedList extends Element
     /**
      * Creates a lazily mounted native list from arbitrary PAM components.
      *
-     * Assign stable keys to stateful or reorderable children.
+     * Assign stable keys to stateful or reorderable children. Null and false
+     * items are holes that keep the following siblings' identities stable.
      */
-    public static function make(Renderable|array ...$items): self
+    public static function make(Renderable|array|false|null ...$items): self
     {
         if (count($items) === 1 && is_array($items[0])) {
             $strings = [];
@@ -45,7 +46,7 @@ final class VirtualizedList extends Element
             );
         }
 
-        /** @var list<Renderable> $items */
+        /** @var list<Renderable|false|null> $items */
         return (new self(NodeKind::VirtualList))->withChildren($items);
     }
 

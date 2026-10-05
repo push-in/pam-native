@@ -672,15 +672,20 @@ final class TemplateRenderer
     /**
      * @param list<CompiledTemplateNode> $nodes
      * @param array<string, mixed> $data
+     * @param string $slotPrefix static slot of the enclosing control-flow
+     *        block; every element gets the static template position it was
+     *        declared at, so conditionals that render nothing leave a hole and
+     *        unkeyed siblings after them keep their native identity
      * @return list<Element|string>
      */
-    private static function nodes(array $nodes, ?object $scope, array $data): array
+    private static function nodes(array $nodes, ?object $scope, array $data, string $slotPrefix = ''): array
     {
         $output = [];
 
         $branchMatched = false;
 
         foreach ($nodes as $index => $node) {
+            $slot = $slotPrefix.$index;
             $nodeData = [
                 ...$data,
                 '__pamNodePath' => self::nodePath($data, $index),
@@ -728,6 +733,17 @@ final class TemplateRenderer
                 }
                 $indexName = ltrim($indexName, '$');
                 $loopNode = self::withoutAttributes($node, ['p-for', 'p-key', 'p-index']);
+                if (
+                    $keyExpression === null
+                    && !isset($attributes['key'])
+                    && !isset($attributes[':key'])
+                    && count($items) > 1
+                ) {
+                    DevWarnings::warn(
+                        'p-for children should declare p-key (or :key) so native identities follow items, not positions',
+                        $node->source.':'.$node->line.':'.$node->column,
+                    );
+                }
                 $seenKeys = [];
                 foreach ($items as $itemIndex => $item) {
                     $iterationData = [
@@ -755,7 +771,7 @@ final class TemplateRenderer
                                 self::pathValue(
                                     $nodeData['__pamNodePath'] ?? 'root',
                                 ).'.'.(string) $identity,
-                        ]),
+                        ], $slot.'.'.(string) $identity.'.'),
                     );
                 }
                 $branchMatched = false;
@@ -808,7 +824,7 @@ final class TemplateRenderer
                 );
 
                 if ((bool) $condition) {
-                    array_push($output, ...self::nodes($children, $scope, $nodeData));
+                    array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
                 }
 
                 continue;
@@ -821,7 +837,7 @@ final class TemplateRenderer
                     $nodeData,
                 );
                 if ((bool) $condition) {
-                    array_push($output, ...self::nodes($children, $scope, $nodeData));
+                    array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
                 }
                 continue;
             }
@@ -829,12 +845,14 @@ final class TemplateRenderer
             if ($tag === 'Match') {
                 $subject = self::value($attributes['value'] ?? null, $scope, $nodeData);
                 $fallback = null;
-                foreach ($children as $candidate) {
+                $fallbackIndex = 0;
+                foreach ($children as $candidateIndex => $candidate) {
                     if ($candidate->kind !== 1) {
                         continue;
                     }
                     if ($candidate->name === 'Default') {
                         $fallback = $candidate;
+                        $fallbackIndex = $candidateIndex;
                         continue;
                     }
                     if ($candidate->name !== 'Case') {
@@ -842,12 +860,12 @@ final class TemplateRenderer
                     }
                     $case = self::value($candidate->attributes['value'] ?? null, $scope, $nodeData);
                     if ($subject === $case) {
-                        array_push($output, ...self::nodes($candidate->children, $scope, $nodeData));
+                        array_push($output, ...self::nodes($candidate->children, $scope, $nodeData, $slot.'.'.$candidateIndex.'.'));
                         continue 2;
                     }
                 }
                 if ($fallback !== null) {
-                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData));
+                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData, $slot.'.'.$fallbackIndex.'.'));
                 }
                 continue;
             }
@@ -867,12 +885,14 @@ final class TemplateRenderer
                     AsyncStatus::Stale => 'Stale',
                 };
                 $fallback = null;
-                foreach ($children as $candidate) {
+                $fallbackIndex = 0;
+                foreach ($children as $candidateIndex => $candidate) {
                     if ($candidate->kind !== 1) {
                         continue;
                     }
                     if ($candidate->name === 'Default') {
                         $fallback = $candidate;
+                        $fallbackIndex = $candidateIndex;
                     }
                     if ($candidate->name !== $branch) {
                         continue;
@@ -882,11 +902,11 @@ final class TemplateRenderer
                         'data' => $async->data,
                         'message' => $async->message,
                         'retryable' => $async->retryable,
-                    ]));
+                    ], $slot.'.'.$candidateIndex.'.'));
                     continue 2;
                 }
                 if ($fallback !== null) {
-                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData));
+                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData, $slot.'.'.$fallbackIndex.'.'));
                 }
                 continue;
             }
@@ -907,14 +927,14 @@ final class TemplateRenderer
                     throw new RuntimeException('Each items must resolve to an array or Traversable.');
                 }
 
-                foreach ($items as $index => $item) {
+                foreach ($items as $itemIndex => $item) {
                     array_push(
                         $output,
                         ...self::nodes($children, $scope, [
                             ...$nodeData,
                             $name => $item,
-                            $name.'Index' => $index,
-                        ]),
+                            $name.'Index' => $itemIndex,
+                        ], $slot.'.'.(string) $itemIndex.'.'),
                     );
                 }
 
@@ -923,22 +943,28 @@ final class TemplateRenderer
 
             if ($tag === 'Slot') {
                 $name = (string) ($attributes['name'] ?? 'slot');
-                $slot = $nodeData[$name] ?? [];
-                if ($slot instanceof Renderable) {
-                    $slot = [$slot];
+                $slotContent = $nodeData[$name] ?? [];
+                if ($slotContent instanceof Renderable) {
+                    $slotContent = [$slotContent];
                 }
-                if (!is_array($slot)) {
+                if (!is_array($slotContent)) {
                     throw new RuntimeException("Slot {$name} must resolve to renderable content.");
                 }
-                if ($slot === [] && $children !== []) {
-                    array_push($output, ...self::nodes($children, $scope, $nodeData));
+                if ($slotContent === [] && $children !== []) {
+                    array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
                     continue;
                 }
-                foreach ($slot as $content) {
+                foreach ($slotContent as $contentIndex => $content) {
+                    if ($content === null || $content === false) {
+                        continue;
+                    }
                     if (!$content instanceof Renderable) {
                         throw new RuntimeException("Slot {$name} contains non-renderable content.");
                     }
-                    $output[] = $content->toElement();
+                    $element = $content->toElement();
+                    $output[] = $element->withIdentitySlot(
+                        $slot.'.'.($element->identitySlot() ?? (string) $contentIndex),
+                    );
                 }
                 continue;
             }
@@ -950,7 +976,7 @@ final class TemplateRenderer
                     $children,
                     $scope,
                     $nodeData,
-                );
+                )->withIdentitySlot($slot);
             } catch (TemplateException $error) {
                 throw $error;
             } catch (RuntimeException $error) {
