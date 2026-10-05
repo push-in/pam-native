@@ -202,6 +202,24 @@ final class Route
     }
 
     /**
+     * Apply a guard to every route declared in the group, including routes
+     * registered by nested groups and modules. Route-level guards are additive.
+     *
+     * @param Closure(\Pam\Native\Navigation\RouteContext): bool $guard
+     */
+    public static function guard(Closure $guard, Closure $routes): void
+    {
+        $registrar = self::$registrar
+            ?? throw new LogicException('Route::guard() must be declared inside Route::stack().');
+        $registrar->beginGuard($guard);
+        try {
+            $routes();
+        } finally {
+            $registrar->endGuard();
+        }
+    }
+
+    /**
      * @param class-string<Renderable>|Renderable|Closure $screen
      */
     public static function screen(string|BackedEnum $name, string|Renderable|Closure $screen): PendingRoute
