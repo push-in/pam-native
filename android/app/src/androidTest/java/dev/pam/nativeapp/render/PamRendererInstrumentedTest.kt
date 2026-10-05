@@ -51,6 +51,55 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun unrelatedTextPatchDoesNotResubmitRichVirtualList() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                try {
+                    renderer.commit(listOf(listOf(
+                        Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                        Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST)),
+                        Mutation.Create(node(3, 2, NodeKind.TEXT, mapOf(
+                            PropKey.TEXT to PropValue.Text("Row"),
+                        ))),
+                        Mutation.Create(node(4, 1, NodeKind.TEXT, mapOf(
+                            PropKey.TEXT to PropValue.Text("Before"),
+                        ))),
+                        Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                        Mutation.Layout(2, Frame(0f, 0f, 300f, 200f)),
+                        Mutation.Layout(3, Frame(0f, 0f, 300f, 48f)),
+                        Mutation.Layout(4, Frame(0f, 220f, 300f, 48f)),
+                        Mutation.SetRoot(1),
+                    )))
+                    val viewsField = PamRenderer::class.java.getDeclaredField("views").apply {
+                        isAccessible = true
+                    }
+                    @Suppress("UNCHECKED_CAST")
+                    val views = viewsField.get(renderer) as android.util.LongSparseArray<View>
+                    val list = views[2] as PamRecyclerList
+                    val idsField = PamRecyclerList::class.java.getDeclaredField("richIds").apply {
+                        isAccessible = true
+                    }
+                    val retainedIds = idsField.get(list)
+
+                    renderer.commit(listOf(listOf(
+                        Mutation.Update(4, PropKey.TEXT, PropValue.Text("After")),
+                    )))
+
+                    assertSame(retainedIds, idsField.get(list))
+                    assertEquals(1, list.adapter?.itemCount)
+                } finally {
+                    renderer.close()
+                }
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun richVirtualListRearmsEndReachedWhenItsItemsChange() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

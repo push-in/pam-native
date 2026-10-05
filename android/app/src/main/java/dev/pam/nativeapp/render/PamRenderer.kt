@@ -389,6 +389,11 @@ class PamRenderer(
     var onNativeChildVisibility: ((Long, Long, Boolean) -> Unit)? = null
     private val main = Handler(Looper.getMainLooper())
     private val views = LongSparseArray<View>()
+    private val scrollContainers = LongSparseArray<PamScrollContainer>()
+    private val virtualListIds = LinkedHashSet<Long>()
+    private val localModalIds = LinkedHashSet<Long>()
+    private val pressableIds = LinkedHashSet<Long>()
+    private val inputIds = LinkedHashSet<Long>()
     private val nodes = LongSparseArray<NodeState>()
     private val frames = LongSparseArray<Frame>()
     private val children = LongSparseArray<MutableList<Long>>()
@@ -402,6 +407,21 @@ class PamRenderer(
     private var statusBarColorAnimator: ValueAnimator? = null
     private var lastFocusedInput: EditText? = null
     private val deferredViewportLayouts = HashMap<Long, Pair<View, View.OnLayoutChangeListener>>()
+
+    private fun putView(id: Long, view: View) {
+        views.put(id, view)
+        if (view is PamScrollContainer) scrollContainers.put(id, view)
+        else scrollContainers.remove(id)
+        if (view is PamPressable) pressableIds.add(id) else pressableIds.remove(id)
+        if (view is EditText) inputIds.add(id) else inputIds.remove(id)
+    }
+
+    private fun removeView(id: Long) {
+        scrollContainers.remove(id)
+        pressableIds.remove(id)
+        inputIds.remove(id)
+        views.remove(id)
+    }
 
     fun onHostPause() {
         for (index in 0 until views.size()) {
@@ -433,14 +453,17 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
         }
+        val profileCommit = BuildConfig.DEBUG && Log.isLoggable(COMMIT_PERF_TAG, Log.DEBUG)
+        val commitStarted = if (profileCommit) System.nanoTime() else 0L
         val retainedScrollOffsets = buildMap {
-            for (position in 0 until views.size()) {
-                val view = views.valueAt(position)
-                if (view is PamScrollContainer) {
-                    put(views.keyAt(position), view.snapshotOffsetPixels())
-                }
+            for (position in 0 until scrollContainers.size()) {
+                put(
+                    scrollContainers.keyAt(position),
+                    scrollContainers.valueAt(position).snapshotOffsetPixels(),
+                )
             }
         }
+        val scrollSnapshotNanos = if (profileCommit) System.nanoTime() - commitStarted else 0L
         val explicitlyUpdatedScrollOffsets = buildSet {
             batches.forEach { batch ->
                 batch.forEach { mutation ->
@@ -459,31 +482,69 @@ class PamRenderer(
         }
         val dirtyLayouts = LinkedHashSet<Long>()
         val createdNodes = LinkedHashSet<Long>()
+        var needsModalSync = false
+        var needsVirtualListSync = false
         batches.forEach { batch ->
             batch.forEach { mutation ->
                 when (mutation) {
                     is Mutation.Create -> {
                         create(mutation.node)
                         createdNodes += mutation.node.id
+                        needsModalSync = true
+                        needsVirtualListSync = true
                     }
-                    is Mutation.Remove -> remove(mutation.id)
-                    is Mutation.Update -> update(mutation.id, mutation.key, mutation.value)
-                    is Mutation.Move -> move(mutation.id, mutation.parent, mutation.index)
+                    is Mutation.Remove -> {
+                        remove(mutation.id)
+                        needsModalSync = true
+                        needsVirtualListSync = true
+                    }
+                    is Mutation.Update -> {
+                        update(mutation.id, mutation.key, mutation.value)
+                        if (
+                            mutation.key == PropKey.VALUE ||
+                            mutation.key == PropKey.ACCESSIBILITY_LABEL
+                        ) {
+                            needsModalSync = true
+                        }
+                        if (
+                            mutation.key == PropKey.LIST_HORIZONTAL ||
+                            mutation.key == PropKey.LIST_ROW_HEIGHT
+                        ) {
+                            needsVirtualListSync = true
+                        }
+                    }
+                    is Mutation.Move -> {
+                        move(mutation.id, mutation.parent, mutation.index)
+                        needsVirtualListSync = true
+                    }
                     is Mutation.Layout -> {
                         frames.put(mutation.id, mutation.frame)
                         dirtyLayouts += mutation.id
+                        needsVirtualListSync = true
                     }
-                    is Mutation.SetRoot -> rootId = mutation.id
+                    is Mutation.SetRoot -> {
+                        rootId = mutation.id
+                        needsModalSync = true
+                        needsVirtualListSync = true
+                    }
                 }
             }
         }
-        syncLocalModalTriggers()
+        val mutationsNanos = if (profileCommit) {
+            System.nanoTime() - commitStarted - scrollSnapshotNanos
+        } else 0L
+        if (needsModalSync) syncLocalModalTriggers()
+        val modalSyncNanos = if (profileCommit) {
+            System.nanoTime() - commitStarted - scrollSnapshotNanos - mutationsNanos
+        } else 0L
         syncHostBackground()
         // Android 15 renders the status-bar surface through the decor view.
         // Host background synchronization also writes that surface, so the
         // authored StatusBar color must win at the end of every commit.
         applyMergedStatusBar()
-        syncVirtualLists()
+        val virtualListStarted = if (profileCommit) System.nanoTime() else 0L
+        if (needsVirtualListSync) syncVirtualLists()
+        val virtualListSyncNanos = if (profileCommit) System.nanoTime() - virtualListStarted else 0L
         // A stable row ID/extent does not trigger a RecyclerView rebind when
         // conditional descendants are inserted. Materialize only affected,
         // already-mounted cells after all nodes and frames have arrived.
@@ -501,14 +562,25 @@ class PamRenderer(
             }
         }
         ensureFocusedInputVisibleAfterCommit()
+        if (profileCommit) {
+            Log.d(
+                COMMIT_PERF_TAG,
+                "nodes=${nodes.size()} views=${views.size()} scrolls=${scrollContainers.size()} " +
+                    "lists=${virtualListIds.size} modals=${localModalIds.size} " +
+                    "mutations=${batches.sumOf { it.size }} " +
+                    "scrollNs=$scrollSnapshotNanos mutationNs=$mutationsNanos " +
+                    "modalNs=$modalSyncNanos virtualListNs=$virtualListSyncNanos " +
+                    "totalNs=${System.nanoTime() - commitStarted}",
+            )
+        }
     }
 
     private fun ensureFocusedInputVisibleAfterCommit() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
-        if (currentPlatformImeInset() <= 0) return
         val input = (host.findFocus() as? EditText)
             ?: lastFocusedInput?.takeIf(EditText::hasFocus)
             ?: return
+        if (currentPlatformImeInset() <= 0) return
         var ancestor = input.parent as? View
         while (ancestor != null) {
             if (ancestor is PamScrollContainer) {
@@ -552,19 +624,20 @@ class PamRenderer(
 
     private fun syncLocalModalTriggers() {
         val modals = HashMap<String, PamModalHost>()
-        for (position in 0 until nodes.size()) {
-            val state = nodes.valueAt(position)
-            if (state.kind != NodeKind.MODAL) continue
+        val orderedModals = ArrayList<Pair<Int, PamModalHost>>()
+        for (id in localModalIds) {
+            val state = nodes[id] ?: continue
             val marker = state.properties[PropKey.VALUE]?.textOrNull() ?: continue
             if (marker.startsWith(LOCAL_MODAL_PREFIX)) {
-                (views[state.id] as? PamModalHost)?.let {
-                    modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = it
+                (views[id] as? PamModalHost)?.let { modal ->
+                    modals[marker.removePrefix(LOCAL_MODAL_PREFIX)] = modal
+                    orderedModals += nodes.indexOfKey(id) to modal
                 }
             }
         }
-        for (position in 0 until nodes.size()) {
-            val state = nodes.valueAt(position)
-            val trigger = views[state.id] as? PamPressable ?: continue
+        for (id in pressableIds) {
+            val state = nodes[id] ?: continue
+            val trigger = views[id] as? PamPressable ?: continue
             val marker = state.properties[PropKey.VALUE]?.textOrNull()
             val accessibilityMarker =
                 state.properties[PropKey.ACCESSIBILITY_LABEL]?.textOrNull()
@@ -587,19 +660,12 @@ class PamRenderer(
             }
             trigger.setLocalOnPress(localPress)
         }
-        val orderedModals = ArrayList<Pair<Int, PamModalHost>>()
-        val orderedInputs = ArrayList<Pair<Int, EditText>>()
-        for (position in 0 until nodes.size()) {
-            val state = nodes.valueAt(position)
-            val marker = state.properties[PropKey.VALUE]?.textOrNull() ?: continue
-            if (state.kind == NodeKind.MODAL && marker.startsWith(LOCAL_MODAL_PREFIX)) {
-                (views[state.id] as? PamModalHost)?.let { orderedModals += position to it }
-            }
+        orderedModals.sortBy { it.first }
+        val orderedInputs = ArrayList<Pair<Int, EditText>>(inputIds.size)
+        for (id in inputIds) {
+            (views[id] as? EditText)?.let { orderedInputs += nodes.indexOfKey(id) to it }
         }
-        for (position in 0 until nodes.size()) {
-            val state = nodes.valueAt(position)
-            (views[state.id] as? EditText)?.let { orderedInputs += position to it }
-        }
+        orderedInputs.sortBy { it.first }
         orderedInputs.forEach { (inputPosition, input) ->
             val target = orderedModals.minByOrNull { (modalPosition, _) ->
                 kotlin.math.abs(modalPosition - inputPosition)
@@ -758,6 +824,11 @@ class PamRenderer(
         nativeViews.close()
         host.removeAllViews()
         views.clear()
+        scrollContainers.clear()
+        virtualListIds.clear()
+        localModalIds.clear()
+        pressableIds.clear()
+        inputIds.clear()
         nodes.clear()
         frames.clear()
         children.clear()
@@ -775,13 +846,15 @@ class PamRenderer(
             virtual = isLayoutOnly(spec),
         )
         nodes.put(spec.id, state)
+        if (state.kind == NodeKind.VIRTUAL_LIST) virtualListIds.add(spec.id)
+        if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
         addChild(state.parent, state.id)
         if (!state.virtual && virtualListAncestor(state.parent) == null) {
             val view = createView(spec.kind, state)
             if (view is TextView) {
                 state.defaultHighlightColor = view.highlightColor
             }
-            views.put(spec.id, view)
+            putView(spec.id, view)
             attachHosted(view, state)
             state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
             (view as? TextView)?.let { applyTextAlignment(it, state) }
@@ -927,7 +1000,9 @@ class PamRenderer(
         (view?.parent as? ViewGroup)?.removeView(view)
         removeChild(state.parent, id)
         children.remove(id)
-        views.remove(id)
+        removeView(id)
+        virtualListIds.remove(id)
+        localModalIds.remove(id)
         nodes.remove(id)
         frames.remove(id)
         if (id == rootId) rootId = 0L
@@ -1014,11 +1089,10 @@ class PamRenderer(
     }
 
     private fun syncVirtualLists() {
-        for (position in 0 until nodes.size()) {
-            val state = nodes.valueAt(position)
-            if (state.kind != NodeKind.VIRTUAL_LIST) continue
-            val list = views[state.id] as? PamRecyclerList ?: continue
-            val itemIds = children[state.id]?.toList().orEmpty()
+        for (id in virtualListIds) {
+            val state = nodes[id] ?: continue
+            val list = views[id] as? PamRecyclerList ?: continue
+            val itemIds = children[id]?.toList().orEmpty()
             if (state.virtualListItemIds != itemIds) {
                 state.virtualListItemIds = itemIds
                 state.endReachedSent = false
@@ -1127,7 +1201,7 @@ class PamRenderer(
         if (!state.virtual && views[id] == null) {
             val view = createView(state.kind, state)
             if (view is TextView) state.defaultHighlightColor = view.highlightColor
-            views.put(id, view)
+            putView(id, view)
             attachCellView(view, state, rootId, holder)
             state.properties.forEach { (key, value) ->
                 applyProperty(view, state, key, value)
@@ -1211,7 +1285,7 @@ class PamRenderer(
         val navigationParent = views[state.parent] as? PamNavigationHost
         if (navigationParent != null) navigationParent.removeRoute(view)
         else (view.parent as? ViewGroup)?.removeView(view)
-        views.remove(id)
+        removeView(id)
     }
 
     private fun attach(view: View, parentId: Long, index: Int) {
@@ -1311,7 +1385,7 @@ class PamRenderer(
     private fun promote(state: NodeState) {
         state.virtual = false
         val view = createView(state.kind, state)
-        views.put(state.id, view)
+        putView(state.id, view)
         attachHosted(view, state)
         state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
         installEvents(view, state)
@@ -1323,7 +1397,7 @@ class PamRenderer(
         val view = views[state.id] ?: return
         clearHitSlop(view)
         (view.parent as? ViewGroup)?.removeView(view)
-        views.remove(state.id)
+        removeView(state.id)
         state.virtual = true
         reattachHostedDescendants(state.id)
     }
@@ -7197,6 +7271,7 @@ class PamRenderer(
     private data class AccessibilityActionSpec(val name: String, val label: String)
 
     private companion object {
+        const val COMMIT_PERF_TAG = "PamRendererPerf"
         const val AUTO_FOCUS_RETRIES = 20
         const val AUTO_FOCUS_RETRY_MS = 50L
         const val AUTO_FOCUS_KEYBOARD_RETRIES = 4
