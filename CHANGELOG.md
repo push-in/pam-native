@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.2.3 - 2026-10-05
+
+- Fix frames rejected with `DuplicateSiblingIndex` ("Pam Native rejected an
+  invalid render frame") after 1.2.1: a reused keyed or memoized subtree that
+  moved to another sibling index under the same path kept its cached index,
+  for example the previous screen of a navigation stack when pushing a third
+  screen, or keyed list rows of a memoized component when items are inserted
+  before them. The encoder now re-places the reused subtree root.
+
 ## 1.2.2 - 2026-10-05
 
 Render pipeline performance, part 2. Chat benchmark fixture on an API 36
