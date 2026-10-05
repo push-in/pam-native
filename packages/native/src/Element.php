@@ -398,9 +398,14 @@ abstract class Element implements Renderable
      * Descendants are handled in one retained-tree pass before encoding.
      *
      * @param array<int, array<int, string|int|float|bool>> $defaultsByKind
+     * @param \WeakMap<Element, Element>|null $memo themed copies for one theme
      */
-    final public function withThemeDefaults(array $defaultsByKind): static
+    final public function withThemeDefaults(array $defaultsByKind, ?\WeakMap $memo = null): static
     {
+        if ($memo !== null && isset($memo[$this])) {
+            /** @var static */
+            return $memo[$this];
+        }
         $copy = clone $this;
         foreach ($defaultsByKind[$this->kind->value] ?? [] as $key => $value) {
             if (!array_key_exists($key, $copy->properties)) {
@@ -408,9 +413,14 @@ abstract class Element implements Renderable
             }
         }
         $copy->children = array_map(
-            static fn (Element $child): Element => $child->withThemeDefaults($defaultsByKind),
+            static fn (Element $child): Element => $child->withThemeDefaults($defaultsByKind, $memo),
             $copy->children,
         );
+        if ($memo !== null) {
+            // Elements are immutable, so a reused (memoized) subtree reuses
+            // its themed copy instead of being cloned again every render.
+            $memo[$this] = $copy;
+        }
 
         return $copy;
     }

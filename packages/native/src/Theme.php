@@ -178,9 +178,10 @@ final readonly class Theme
         }
     }
 
-    public function applyTo(Element $element): Element
+    /** @param \WeakMap<Element, Element>|null $memo themed copies cached for this theme */
+    public function applyTo(Element $element, ?\WeakMap $memo = null): Element
     {
-        return $element->withThemeDefaults($this->elementDefaults);
+        return $element->withThemeDefaults($this->elementDefaults, $memo);
     }
 
     /** @param array<string, int> $palette */

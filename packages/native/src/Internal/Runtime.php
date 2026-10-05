@@ -26,6 +26,8 @@ use Pam\Native\System\IncomingShares;
 use Pam\Native\System\Linking;
 use Pam\Native\System\PushNotifications;
 use Pam\Native\TemplateException;
+use Pam\Native\Theme;
+use Pam\Native\Style\StyleVariables;
 use Pam\Native\UserInterfaceAppearance;
 use Pam\Native\WindowMetrics;
 use Pam\Native\BuildConfiguration;
@@ -54,6 +56,15 @@ final class Runtime
     private static bool $renderRequested = false;
     private static bool $dispatchingEvent = false;
     private static WindowMetrics $windowMetrics;
+    /** When true the native bridge drains its queue and calls flush() once. */
+    private static bool $deferred = false;
+    private static bool $pending = false;
+    private static ?Element $lastRoot = null;
+    private static ?Element $lastThemed = null;
+    private static ?Theme $lastTheme = null;
+    private static ?string $environmentKey = null;
+    /** @var \WeakMap<Theme, \WeakMap<Element, Element>>|null */
+    private static ?\WeakMap $themed = null;
 
     private function __construct()
     {
@@ -145,6 +156,16 @@ final class Runtime
         try {
             do {
                 self::$renderRequested = false;
+                self::$pending = false;
+                $theme = App::activeTheme();
+                $environment = spl_object_id(self::windowMetrics()).':'
+                    .StyleVariables::revision().':'
+                    .($theme === null ? 0 : spl_object_id($theme));
+                if ($environment !== self::$environmentKey) {
+                    self::$environmentKey = $environment;
+                    DependencyTracker::invalidateAll();
+                }
+                ComponentLifecycle::detectChanges();
                 PamPhpRegistry::beginRender();
                 ComponentLifecycle::beginRender();
                 try {
@@ -157,21 +178,33 @@ final class Runtime
                 if (!$element instanceof Element) {
                     throw new LogicException('The Pam Native root must be renderable.');
                 }
-                $theme = App::activeTheme();
+                $untouched = $element;
                 if ($theme !== null) {
+                    $themed = self::$themed ??= new \WeakMap();
+                    $memo = $themed[$theme] ?? null;
+                    if ($memo === null) {
+                        $memo = new \WeakMap();
+                        $themed[$theme] = $memo;
+                    }
                     $element = Profiler::measure(
                         'php.theme',
-                        static fn (): Element => $theme->applyTo($element),
+                        static fn (): Element => $theme->applyTo($element, $memo),
                     );
                 }
+                // When every component was memoized the committed tree is current.
+                $unchanged = $untouched === self::$lastRoot
+                    && $theme === self::$lastTheme
+                    && $element === self::$lastThemed;
 
                 $encoder = self::$encoder ??= new TreeEncoder();
+                if (!$unchanged) {
                 $encoded = Profiler::measure(
                     'php.encode',
                     static fn (): array => $encoder->encode($element),
                 );
                 self::$eventCallbacks = $encoded['callbacks'];
                 $frame = $encoded['frame'];
+                $current = true;
 
                 if ($frame !== null) {
                     $committed = true;
@@ -185,6 +218,7 @@ final class Runtime
                             $committed = $frame !== null && pam_native_commit($frame);
                         }
                         if (!$committed) {
+                            $current = false;
                             @file_put_contents(
                                 sys_get_temp_dir() . '/pam-native-invalid-frame.bin',
                                 $frame,
@@ -199,6 +233,12 @@ final class Runtime
                         );
                     }
                 }
+                if ($current) {
+                    self::$lastRoot = $untouched;
+                    self::$lastTheme = $theme;
+                    self::$lastThemed = $element;
+                }
+                }
                 } finally {
                     ComponentLifecycle::finishRender();
                     PamPhpRegistry::finishRender();
@@ -210,7 +250,22 @@ final class Runtime
         }
     }
 
+    /**
+     * Requests a render after an untracked change: every memoized component
+     * re-renders. Prefer scheduleRender() when the change already marked the
+     * affected components dirty (tracked state, stores, signals).
+     */
     public static function requestRender(): void
+    {
+        if (self::$root === null) {
+            return;
+        }
+        DependencyTracker::invalidateAll();
+        self::scheduleRender();
+    }
+
+    /** Requests a render after a tracked change; memoized components stay reused. */
+    public static function scheduleRender(): void
     {
         if (self::$root === null) {
             return;
@@ -226,6 +281,11 @@ final class Runtime
 
             return;
         }
+        if (self::$deferred) {
+            self::$pending = true;
+
+            return;
+        }
         Scheduler::schedule(
             static fn () => self::render(),
             TaskPriority::Render,
@@ -234,12 +294,56 @@ final class Runtime
         Scheduler::drain();
     }
 
+    /**
+     * Enables queue-drained rendering: events and module results only mark
+     * the runtime dirty and the host calls flush() once its queue is empty
+     * (or its frame budget elapsed), so bursts render once.
+     */
+    public static function deferRendering(bool $enabled = true): void
+    {
+        self::$deferred = $enabled;
+        if (!$enabled) {
+            self::flush();
+        }
+    }
+
+    /** Renders once if anything was dispatched or scheduled since the last render. */
+    public static function flush(): bool
+    {
+        if (!self::$pending || self::$root === null) {
+            return false;
+        }
+        self::$pending = false;
+        try {
+            self::render();
+        } catch (Throwable $error) {
+            self::reportError($error);
+        }
+
+        return true;
+    }
+
+    public static function hasPendingRender(): bool
+    {
+        return self::$pending;
+    }
+
+    private static function afterDispatch(): void
+    {
+        if (self::$deferred) {
+            self::$pending = true;
+
+            return;
+        }
+        self::render();
+    }
+
     public static function dispatchEvent(int $nodeId, int $eventKind, string $payload): void
     {
         try {
             if ($eventKind === EventKind::Back->value) {
                 self::$backHandler?->__invoke();
-                self::render();
+                self::afterDispatch();
 
                 return;
             }
@@ -247,7 +351,7 @@ final class Runtime
                 $appState = AppState::from((int) $payload);
                 ComponentLifecycle::appState($appState);
                 self::$appStateHandler?->__invoke($appState);
-                self::render();
+                self::afterDispatch();
 
                 return;
             }
@@ -280,13 +384,13 @@ final class Runtime
                 Appearance::synchronize($values, $previousAppearance);
                 DependencyTracker::invalidateAll();
                 self::$dimensionsHandler?->__invoke(self::$windowMetrics);
-                self::render();
+                self::afterDispatch();
 
                 return;
             }
             if ($eventKind === EventKind::MemoryPressure->value) {
                 self::$memoryPressureHandler?->__invoke(MemoryPressure::from((int) $payload));
-                self::render();
+                self::afterDispatch();
 
                 return;
             }
@@ -301,7 +405,7 @@ final class Runtime
             } finally {
                 self::$dispatchingEvent = false;
             }
-            self::render();
+            self::afterDispatch();
         } catch (Throwable $error) {
             self::reportError($error);
         }
@@ -328,7 +432,7 @@ final class Runtime
 
         try {
             $callback(ModuleResultStatus::from($status), $payload);
-            self::render();
+            self::afterDispatch();
         } catch (Throwable $error) {
             self::reportError($error);
         }
@@ -439,6 +543,13 @@ final class Runtime
         self::$rendering = false;
         self::$renderRequested = false;
         self::$dispatchingEvent = false;
+        self::$deferred = false;
+        self::$pending = false;
+        self::$lastRoot = null;
+        self::$lastThemed = null;
+        self::$lastTheme = null;
+        self::$environmentKey = null;
+        self::$themed = null;
         Appearance::resetRuntime();
         self::$windowMetrics = self::bootMetrics();
         ComponentLifecycle::shutdown();

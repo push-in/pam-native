@@ -27,6 +27,12 @@ final class ComponentLifecycle
     private static int $pass = 0;
     private static AppState $appState = AppState::Active;
 
+    /** @var list<Component> Components currently inside render(). */
+    private static array $renderStack = [];
+
+    /** @var WeakMap<Component, list<Component>>|null Child components rendered during each component's last real render. */
+    private static ?WeakMap $children = null;
+
     private function __construct()
     {
     }
@@ -63,6 +69,14 @@ final class ComponentLifecycle
 
         $state['seen'] = self::$pass;
         $states[$component] = $state;
+        $parent = self::$renderStack === [] ? null : self::$renderStack[count(self::$renderStack) - 1];
+        if ($parent !== null && $parent !== $component) {
+            $children = self::$children ??= new WeakMap();
+            $list = $children[$parent] ?? [];
+            $list[] = $component;
+            $children[$parent] = $list;
+        }
+        self::$renderStack[] = $component;
         try {
             if (!$state['booted']) {
                 $component->boot();
@@ -85,6 +99,50 @@ final class ComponentLifecycle
         } catch (\Throwable $error) {
             $states[$component] = $state;
             throw $error;
+        } finally {
+            array_pop(self::$renderStack);
+        }
+    }
+
+    /** Called when a component really renders (not reused), before its children render. */
+    public static function beginComponentRender(Component $component): void
+    {
+        $children = self::$children ??= new WeakMap();
+        $children[$component] = [];
+    }
+
+    /**
+     * Keeps every component rendered under a memoized (reused) component
+     * mounted for this pass, recursively.
+     */
+    public static function retainSubtree(Component $component, int $depth = 0): void
+    {
+        $children = self::$children;
+        if ($children === null || $depth > 256 || !isset($children[$component])) {
+            return;
+        }
+        foreach ($children[$component] as $child) {
+            self::retain($child);
+            PamPhpRegistry::retainScope($child);
+            self::retainSubtree($child, $depth + 1);
+        }
+    }
+
+    /**
+     * Marks mounted components whose own state changed outside the tracked
+     * paths (direct property writes from callbacks) dirty, with ancestors,
+     * so memoized parents re-render down to them.
+     */
+    public static function detectChanges(): void
+    {
+        $states = self::$states;
+        if ($states === null) {
+            return;
+        }
+        foreach ($states as $component => $state) {
+            if ($state['mounted'] && $component->__pamStateChanged()) {
+                DependencyTracker::markDirty($component);
+            }
         }
     }
 
@@ -224,6 +282,8 @@ final class ComponentLifecycle
         }
 
         self::$states = null;
+        self::$children = null;
+        self::$renderStack = [];
         self::$pass = 0;
         self::$appState = AppState::Active;
         DependencyTracker::reset();

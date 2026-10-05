@@ -48,6 +48,26 @@ abstract class Component implements Renderable
     private int $pamFailureAttempt = 0;
     private bool $pamSkipRender = false;
     private ?Element $pamLastElement = null;
+    /** @var array<string, mixed>|null Own state captured after the last real render. */
+    private ?array $pamSnapshot = null;
+    private int $pamEpoch = -1;
+
+    /** @var array<class-string, bool> */
+    private static array $pamAlwaysRender = [];
+
+    /** Component bookkeeping that never affects rendered output. */
+    private const PAM_SNAPSHOT_EXCLUDED = [
+        'pamEventListeners',
+        'pamEffects',
+        'pamMemo',
+        'pamComputed',
+        'pamChanges',
+        'pamFailureAttempt',
+        'pamSkipRender',
+        'pamLastElement',
+        'pamSnapshot',
+        'pamEpoch',
+    ];
 
     public function render(): Renderable
     {
@@ -240,6 +260,8 @@ abstract class Component implements Renderable
         $component = $this->pamParent;
         while ($component !== null) {
             if (array_key_exists($type, $component->pamProvided)) {
+                DependencyTracker::read($component, '__pamProvided');
+
                 return $component->pamProvided[$type];
             }
             $component = $component->pamParent;
@@ -263,14 +285,16 @@ abstract class Component implements Renderable
     {
         return ComponentLifecycle::render($this, function (): Element {
             if (
-                ($this->pamSkipRender || DependencyTracker::canSkip($this))
-                && $this->pamLastElement !== null
+                $this->pamLastElement !== null
+                && ($this->pamSkipRender || $this->pamCanReuse())
             ) {
                 $this->pamSkipRender = false;
                 PamPhpRegistry::retainScope($this);
+                ComponentLifecycle::retainSubtree($this);
 
                 return $this->pamLastElement;
             }
+            ComponentLifecycle::beginComponentRender($this);
             DependencyTracker::begin($this);
             try {
                 $this->rendering();
@@ -325,6 +349,8 @@ abstract class Component implements Renderable
             }
 
                 $this->pamLastElement = $element;
+                $this->pamEpoch = DependencyTracker::epoch();
+                $this->pamSnapshot = $this->pamOwnState();
 
                 return $element;
             } finally {
@@ -348,7 +374,11 @@ abstract class Component implements Renderable
         $this->pamEventListeners = $listeners;
         $this->pamParent = $parent;
         $this->pamInheritedStyles = $inheritedStyles;
-        $this->pamProvided = $this->provide();
+        $provided = $this->provide();
+        if ($provided !== $this->pamProvided) {
+            DependencyTracker::invalidate($this, '__pamProvided');
+        }
+        $this->pamProvided = $provided;
         foreach ($this->slots() as $name => $definition) {
             if (!$definition instanceof Slot) {
                 throw new LogicException('Component slot definitions must contain Slot instances.');
@@ -370,6 +400,65 @@ abstract class Component implements Renderable
     final public function __pamInheritedStyles(): array
     {
         return $this->pamInheritedStyles;
+    }
+
+    /**
+     * Requests a re-render of this component on the next frame even though
+     * none of its properties changed (e.g. it reads a mutable service).
+     */
+    final protected function markForRender(): void
+    {
+        DependencyTracker::markDirty($this);
+        Runtime::scheduleRender();
+    }
+
+    /** @internal True when own properties changed since the last real render. */
+    final public function __pamStateChanged(): bool
+    {
+        return $this->pamSnapshot !== null && $this->pamSnapshot !== $this->pamOwnState();
+    }
+
+    private function pamCanReuse(): bool
+    {
+        if (
+            $this->pamEpoch !== DependencyTracker::epoch()
+            || !DependencyTracker::canSkip($this)
+        ) {
+            return false;
+        }
+        $class = static::class;
+        $always = self::$pamAlwaysRender[$class] ??= self::pamAlwaysRenders($class);
+
+        return !$always && $this->pamSnapshot === $this->pamOwnState();
+    }
+
+    /** @param class-string $class */
+    private static function pamAlwaysRenders(string $class): bool
+    {
+        for ($reflection = new \ReflectionClass($class); $reflection !== false; $reflection = $reflection->getParentClass()) {
+            if ($reflection->getAttributes(\Pam\Native\Attributes\AlwaysRender::class) !== []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Shallow copy of every property (public, protected and private, including
+     * subclasses) except render bookkeeping. Arrays compare by value and
+     * objects by identity.
+     *
+     * @return array<string, mixed>
+     */
+    private function pamOwnState(): array
+    {
+        $values = (array) $this;
+        foreach (self::PAM_SNAPSHOT_EXCLUDED as $name) {
+            unset($values["\0".self::class."\0".$name]);
+        }
+
+        return $values;
     }
 
     final public function __pamNotifyUpdating(string $property, mixed $next, mixed $previous): void
@@ -487,7 +576,7 @@ abstract class Component implements Renderable
                     'previous' => $previous,
                     'current' => $current,
                 ];
-                Runtime::requestRender();
+                Runtime::scheduleRender();
             },
         );
     }

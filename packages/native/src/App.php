@@ -86,6 +86,17 @@ final class App
         $theme->apply();
     }
 
+    /**
+     * Component render memoization (enabled by default). Components re-render
+     * when their own properties, props, slots, tracked state/stores/signals
+     * change or an event handler ran on them; disable to re-render the whole
+     * tree on every event as in releases before 1.0.38.
+     */
+    public static function memoization(bool $enabled): void
+    {
+        \Pam\Native\Internal\DependencyTracker::memoization($enabled);
+    }
+
     public static function activeTheme(): ?Theme
     {
         return self::$activeTheme;

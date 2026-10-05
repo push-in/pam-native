@@ -19,6 +19,8 @@ final class DependencyTracker
     private static ?WeakMap $dirty = null;
     /** @var WeakMap<Component, Component>|null */
     private static ?WeakMap $parents = null;
+    private static int $epoch = 0;
+    private static bool $memoization = true;
 
     private function __construct()
     {
@@ -83,14 +85,34 @@ final class DependencyTracker
         }
     }
 
+    /**
+     * True when no tracked dependency, event handler or explicit invalidation
+     * marked the component (or a descendant) dirty since it last rendered.
+     * Callers combine this with the component's own state snapshot and epoch.
+     */
     public static function canSkip(Component $component): bool
     {
-        $dependencies = self::$dependencies;
-        if ($dependencies === null || !isset($dependencies[$component])) {
+        if (!self::$memoization) {
             return false;
         }
 
         return !isset((self::$dirty ??= new WeakMap())[$component]);
+    }
+
+    /** Monotonic counter bumped by every global invalidation. */
+    public static function epoch(): int
+    {
+        return self::$epoch;
+    }
+
+    public static function memoization(?bool $enabled = null): bool
+    {
+        if ($enabled !== null) {
+            self::$memoization = $enabled;
+            self::$epoch++;
+        }
+
+        return self::$memoization;
     }
 
     public static function markDirty(Component $component): void
@@ -101,14 +123,7 @@ final class DependencyTracker
 
     public static function invalidateAll(): void
     {
-        $dependencies = self::$dependencies;
-        if ($dependencies === null) {
-            return;
-        }
-        $dirty = self::$dirty ??= new WeakMap();
-        foreach ($dependencies as $component => $_) {
-            $dirty[$component] = true;
-        }
+        self::$epoch++;
     }
 
     public static function forget(Component $component): void
@@ -127,6 +142,7 @@ final class DependencyTracker
         self::$dependencies = null;
         self::$dirty = null;
         self::$parents = null;
+        self::$epoch++;
     }
 
     /** @param WeakMap<Component, true> $dirty */
