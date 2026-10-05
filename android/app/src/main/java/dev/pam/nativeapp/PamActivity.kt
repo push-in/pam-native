@@ -56,6 +56,11 @@ class PamActivity : FragmentActivity() {
     private var nextActivityRequest = 50_000
     private var runtimeStarted = false
     private var fullyDrawnReported = false
+
+    /** Uptime of this Activity's first committed native frame (0 = none yet). */
+    @Volatile
+    internal var firstFrameUptimeMillis = 0L
+        private set
     private var runtimeEntryPath: String? = null
     private var recoveryAttempts = 0
     private var recoveryRunnable: Runnable? = null
@@ -110,23 +115,43 @@ class PamActivity : FragmentActivity() {
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->
             runtime.dispatchEvent(nodeId, kind, payload)
         }
-        runtime = PamRuntime(
-            context = this,
-            renderer = renderer,
-            reportError = { message -> handleRuntimeError(message) },
-            onFrameCommitted = {
-                devTools.update(it)
-                errors.onFrameCommitted()
-                recoveryAttempts = 0
-                recoveryRunnable?.let(window.decorView::removeCallbacks)
-                recoveryRunnable = null
-                if (!fullyDrawnReported) {
-                    fullyDrawnReported = true
-                    reportFullyDrawn()
-                }
-            },
-            onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
-        )
+        val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {
+            devTools.update(it)
+            errors.onFrameCommitted()
+            recoveryAttempts = 0
+            recoveryRunnable?.let(window.decorView::removeCallbacks)
+            recoveryRunnable = null
+            if (firstFrameUptimeMillis == 0L) {
+                firstFrameUptimeMillis = SystemClock.uptimeMillis()
+            }
+            if (!fullyDrawnReported) {
+                fullyDrawnReported = true
+                reportFullyDrawn()
+            }
+        }
+        // Embedded PHP lives as long as the process. When the previous
+        // Activity finished (Back at the root, system recreation) while the
+        // process survived, re-attach to that runtime and remount its tree
+        // instead of booting PHP a second time in the same process.
+        val retained = PamRuntimeHost.runtime?.takeIf(PamRuntime::isRunning)
+        if (retained != null) {
+            runtime = retained
+            retained.attach(
+                context = this,
+                renderer = renderer,
+                reportError = { message -> handleRuntimeError(message) },
+                onFrameCommitted = onFrameCommitted,
+                onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
+            )
+        } else {
+            runtime = PamRuntime(
+                context = this,
+                renderer = renderer,
+                reportError = { message -> handleRuntimeError(message) },
+                onFrameCommitted = onFrameCommitted,
+                onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
+            )
+        }
         val root = FrameLayout(this)
         root.addView(
             host,
@@ -150,6 +175,19 @@ class PamActivity : FragmentActivity() {
         applyDefaultSystemBars()
         registerBackCallback()
         registerDevTools()
+        if (retained != null) {
+            // PHP already consumed its launch intent; this one is a new open.
+            intent?.dataString?.let(PamDeepLinks::reportOpened)
+            intent?.let { PamIncomingShares.reportOpened(this, it) }
+            reportNotificationOpen(intent)
+            runtimeEntryPath = PamRuntimeHost.entryPath
+            runtimeStarted = true
+            bindRuntimeSurface()
+            // Window metrics, insets or font scale may differ from the
+            // surface that rendered last; relayout once the window settles.
+            scheduleViewportUpdate(force = true)
+            return
+        }
         PamDeepLinks.captureInitial(intent?.dataString)
         PamIncomingShares.captureInitial(this, intent)
         reportNotificationOpen(intent)
@@ -198,7 +236,15 @@ class PamActivity : FragmentActivity() {
                     safeArea.bottom / density,
                 ),
             )
+            PamRuntimeHost.runtime = runtime
+            PamRuntimeHost.entryPath = entry.absolutePath
             runtimeStarted = true
+            bindRuntimeSurface()
+        }
+    }
+
+    private fun bindRuntimeSurface() {
+        run {
             rootHost.onStableInsetsChanged = { scheduleViewportUpdate() }
             // The runtime may start after the first window layout (assets are
             // installed off the UI thread); reconcile insets and metrics now.
@@ -356,8 +402,15 @@ class PamActivity : FragmentActivity() {
         devToolsReceiver?.let(::unregisterReceiver)
         devToolsReceiver = null
         diagnosticsExecutor.shutdownNow()
+        if (runtimeStarted && PamRuntimeHost.runtime === runtime) {
+            // Keep PHP (and its state) alive for the next Activity; only this
+            // surface goes away. Shutting embedded PHP down in a live process
+            // is not restartable and crashed or hung the relaunch.
+            runtime.detach(this)
+        } else {
+            runtime.close()
+        }
         runtimeStarted = false
-        runtime.close()
         permissionCallbacks.clear()
         super.onDestroy()
     }

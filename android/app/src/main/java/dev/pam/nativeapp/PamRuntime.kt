@@ -21,15 +21,32 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
 class PamRuntime(
-    private val context: Context,
-    private val renderer: PamRenderer,
-    private val reportError: (String) -> Unit,
-    private val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {},
-    private val onDiagnostic: (RuntimeDiagnostic) -> Unit = {},
+    context: Context,
+    renderer: PamRenderer,
+    reportError: (String) -> Unit,
+    onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {},
+    onDiagnostic: (RuntimeDiagnostic) -> Unit = {},
 ) : AutoCloseable {
+    // The PHP runtime is process scoped (embedded PHP cannot be restarted in
+    // a live process), while the surface (Activity, renderer, modules bound
+    // to that Activity) can be recreated. attach() rebinds every one of these.
+    private var context: Context = context
+    private var renderer: PamRenderer = renderer
+    private var reportError: (String) -> Unit = reportError
+    private var onFrameCommitted: (RuntimeFrameMetrics) -> Unit = onFrameCommitted
+    private var onDiagnostic: (RuntimeDiagnostic) -> Unit = onDiagnostic
     private val main = Handler(Looper.getMainLooper())
     private val choreographer = Choreographer.getInstance()
-    private val modules = NativeModuleRegistry(context)
+    private var modules = NativeModuleRegistry(context)
+
+    /**
+     * True between a surface change (detach/attach) and the arrival of the
+     * engine's remount batch: every batch published before it describes the
+     * previous surface and is dropped; the remount batch mounts the whole
+     * retained tree on the new renderer.
+     */
+    private var awaitingRemount = false
+    private var attachedSurface = true
     private val textTypefaces = dev.pam.nativeapp.render.NativeTypefaceLoader.shared(context)
     private val closed = AtomicBoolean()
     private val handleLock = Any()
@@ -50,11 +67,92 @@ class PamRuntime(
     private var handle = 0L
 
     init {
-        renderer.onNativeChildVisibility = { owner, child, visible ->
+        bindRenderer(renderer)
+    }
+
+    private fun bindRenderer(target: PamRenderer) {
+        target.onNativeChildVisibility = { owner, child, visible ->
             synchronized(handleLock) {
                 if (!closed.get() && handle != 0L) {
                     nativeSetChildVisibility(handle, owner, child, visible)
                 }
+            }
+        }
+    }
+
+    val isRunning: Boolean
+        get() = !closed.get() && handle != 0L
+
+    /**
+     * Rebinds a live runtime to a new host surface (a recreated Activity) and
+     * asks the engine to mount the retained tree on [renderer] from scratch.
+     * PHP keeps its state; nothing is re-executed.
+     */
+    fun attach(
+        context: Context,
+        renderer: PamRenderer,
+        reportError: (String) -> Unit,
+        onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {},
+        onDiagnostic: (RuntimeDiagnostic) -> Unit = {},
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        check(!closed.get()) { "Pam Runtime is closed" }
+        val previousRenderer = this.renderer
+        val previousModules = modules
+        this.context = context
+        this.reportError = reportError
+        this.onFrameCommitted = onFrameCommitted
+        this.onDiagnostic = onDiagnostic
+        if (previousRenderer !== renderer) {
+            previousRenderer.onNativeChildVisibility = null
+            if (attachedSurface) runCatching { previousRenderer.close() }
+            renderer.engineManagedSafeArea = previousRenderer.engineManagedSafeArea
+            this.renderer = renderer
+            bindRenderer(renderer)
+        }
+        if (previousModules.boundContext !== context) {
+            modules = NativeModuleRegistry(context)
+            previousModules.retire()
+        }
+        attachedSurface = true
+        requestRemount()
+        onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.LIFECYCLE, "surface attached"))
+    }
+
+    /**
+     * The host surface is going away while the process (and PHP) stays alive.
+     * Views are released; PHP keeps running and its later frames are folded
+     * into the remount performed by the next [attach].
+     */
+    fun detach(context: Context) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (this.context !== context || !attachedSurface) return
+        attachedSurface = false
+        awaitingRemount = true
+        choreographer.removeFrameCallback(frameCallback)
+        frameScheduled = false
+        while (pendingBatches.isNotEmpty()) {
+            releaseBatch(pendingBatches.removeFirst().handle)
+        }
+        pendingEvents.clear()
+        renderer.onNativeChildVisibility = null
+        runCatching { renderer.close() }
+        reportError = {}
+        onFrameCommitted = {}
+        onDiagnostic = {}
+    }
+
+    private fun requestRemount() {
+        awaitingRemount = true
+        while (pendingBatches.isNotEmpty()) {
+            releaseBatch(pendingBatches.removeFirst().handle)
+        }
+        synchronized(handleLock) {
+            val active = handle
+            if (active != 0L) {
+                nativeRemount(active)
+            } else {
+                awaitingRemount = false
             }
         }
     }
@@ -266,7 +364,7 @@ class PamRuntime(
         }
         val decodeNanos = System.nanoTime() - decodeStarted
         main.post {
-            if (closed.get()) {
+            if (closed.get() || awaitingRemount || !attachedSurface) {
                 releaseBatch(batchHandle)
                 return@post
             }
@@ -281,6 +379,44 @@ class PamRuntime(
             scheduleFrame()
         }
         return true
+    }
+
+    /**
+     * JNI: the engine's full mount of the retained tree, published in order
+     * with regular batches by the runtime worker. An empty buffer (no tree yet)
+     * still ends the remount window.
+     */
+    @Suppress("unused")
+    private fun onNativeRemount(batch: ByteBuffer?, batchHandle: Long): Boolean {
+        if (closed.get()) return false
+        val owned = batch != null && batchHandle != 0L && ownedBatchHandles.add(batchHandle)
+        val decodeStarted = System.nanoTime()
+        val mutations = if (owned) {
+            runCatching { BatchDecoder.decode(batch!!.asReadOnlyBuffer()) }.getOrElse { error ->
+                ownedBatchHandles.remove(batchHandle)
+                onNativeError(error.message ?: "Cannot decode native remount batch")
+                null
+            }
+        } else {
+            null
+        }
+        val decodeNanos = System.nanoTime() - decodeStarted
+        main.post {
+            if (closed.get() || !attachedSurface) {
+                if (mutations != null) releaseBatch(batchHandle)
+                return@post
+            }
+            awaitingRemount = false
+            while (pendingBatches.isNotEmpty()) {
+                releaseBatch(pendingBatches.removeFirst().handle)
+            }
+            if (mutations != null) {
+                pendingBatches.addLast(PendingBatch(mutations, batchHandle, decodeNanos))
+            }
+            markReadyForEvents()
+            scheduleFrame()
+        }
+        return mutations != null
     }
 
     @Suppress("unused")
@@ -492,6 +628,7 @@ class PamRuntime(
     )
 
     private external fun nativeReload(handle: Long, entry: String)
+    private external fun nativeRemount(handle: Long)
     private external fun nativeStats(handle: Long): LongArray
     private external fun nativeReleaseBatch(batchHandle: Long)
     private external fun nativeStop(handle: Long)
@@ -684,3 +821,12 @@ private data class PendingBatch(
     val handle: Long,
     val decodeNanos: Long,
 )
+
+/** Process-wide owner of the embedded PHP runtime (see [PamRuntime.attach]). */
+internal object PamRuntimeHost {
+    @Volatile
+    var runtime: PamRuntime? = null
+
+    @Volatile
+    var entryPath: String? = null
+}

@@ -135,6 +135,11 @@ PamStatus pam_native_engine_relayout_with_metrics(
     float text_scale,
     PamNativeBuffer *output
 );
+/* Mounts the retained tree from scratch for a recreated host surface. */
+PamStatus pam_native_engine_remount(
+    PamNativeEngineHandle *handle,
+    PamNativeBuffer *output
+);
 PamStatus pam_native_engine_commit(
     PamNativeEngineHandle *handle,
     const uint8_t *input,

@@ -141,6 +141,13 @@ void pam_native_runtime_dispatch_module_result(
 
 void pam_native_runtime_reload(uint64_t handle, const char* entry);
 
+/*
+ * Asks the runtime worker to publish the retained tree as a full mount for a
+ * recreated host view. The batch arrives through `on_remount`, in order with
+ * regular batches; `bytes` is NULL (batch handle 0) when nothing rendered yet.
+ */
+void pam_native_runtime_remount(uint64_t handle, PamNativeBatchCallback on_remount);
+
 void pam_native_runtime_stats(uint64_t handle, uint64_t values[PAM_NATIVE_MAX_STAT_VALUES]);
 
 void pam_native_runtime_release_batch(uint64_t batch_handle);

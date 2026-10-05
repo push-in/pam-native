@@ -4,6 +4,8 @@ import android.content.Context
 import java.util.concurrent.atomic.AtomicLong
 
 class NativeModuleRegistry(context: Context) : AutoCloseable {
+    /** The surface (normally the PamActivity) these modules were created for. */
+    val boundContext: Context = context
     private val generation = AtomicLong(1)
     private val http = HttpModule(
         java.io.File(context.filesDir, "pam-files"),
@@ -128,6 +130,18 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         PamIncomingShares.prepareReload()
         PamPushNotifications.prepareReload()
         PamNotificationActions.prepareReload()
+    }
+
+    /**
+     * Releases this registry's resources when a recreated Activity replaces
+     * it, without invalidating in-flight completions: requests PHP already
+     * awaits still resolve (successfully or with the module's own failure).
+     */
+    fun retire() {
+        modules.values.filterIsInstance<AutoCloseable>().forEach {
+            runCatching { it.close() }
+        }
+        runCatching { system.close() }
     }
 
     override fun close() {

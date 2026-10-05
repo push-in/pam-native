@@ -104,6 +104,9 @@ private func pam_native_runtime_dispatch_module_result(
 @_silgen_name("pam_native_runtime_reload")
 private func pam_native_runtime_reload(_ handle: UInt64, _ entry: UnsafePointer<CChar>)
 
+@_silgen_name("pam_native_runtime_remount")
+private func pam_native_runtime_remount(_ handle: UInt64, _ on_remount: PamNativeBatchCallback)
+
 @_silgen_name("pam_native_runtime_stats")
 private func pam_native_runtime_stats(_ handle: UInt64, _ values: UnsafeMutablePointer<UInt64>)
 
@@ -177,6 +180,19 @@ private func pamNativeRuntimeBatchCallback(
         size: size,
         batchHandle: batchHandle,
     )
+}
+
+@_cdecl("pam_native_runtime_remount_callback")
+private func pamNativeRuntimeRemountCallback(
+    handle: UInt64,
+    bytes: UnsafePointer<UInt8>?,
+    size: Int,
+    batchHandle: UInt64,
+) -> Bool {
+    guard let runtime = RuntimeRegistry.runtime(for: handle) else {
+        return false
+    }
+    return runtime.onNativeRemount(bytes: bytes, size: size, batchHandle: batchHandle)
 }
 
 @_cdecl("pam_native_runtime_call_callback")
@@ -269,6 +285,11 @@ public final class PamRuntime {
     private var pendingBatches: [PendingBatch] = []
     private var pendingImmediateEvents: [PendingEvent] = []
     private var pendingEvents: [EventIdentity: Data] = [:]
+    private let nativeViews: [String: NativeViewFactory]
+    /// Main thread only. True between a host-view change and the engine's
+    /// remount batch: batches published before it target the previous view
+    /// and are dropped; the remount mounts the whole retained tree.
+    private var awaitingRemount = false
 
     private let coalescedEvents: Set<Int> = [
         EventKind.scroll.rawValue,
@@ -312,16 +333,8 @@ public final class PamRuntime {
 #else
         self.errorOverlay = PamErrorOverlay(developerMode: PamErrorOverlay.developerMode(debugBuild: false))
 #endif
-        self.renderer = PamRenderer(hostView: hostView, nativeViews: nativeViews) { [weak self] nodeId, kind, payload in
-            self?.dispatchEvent(nodeId, kind: kind, payload: payload)
-        }
-
-        self.renderer.onNativeChildVisibility = { [weak self] owner, child, visible in
-            guard let self, owner > 0, child > 0 else { return }
-            let activeHandle = self.currentHandle()
-            guard activeHandle != 0 else { return }
-            pam_native_runtime_set_child_visibility(activeHandle, UInt64(owner), UInt64(child), visible)
-        }
+        self.nativeViews = nativeViews
+        self.renderer = makeRenderer(hostView: hostView)
 
         errorOverlay.onReload = { [weak self] in self?.reloadAfterError() }
 
@@ -364,6 +377,109 @@ public final class PamRuntime {
 
     deinit {
         close()
+    }
+
+    private func makeRenderer(hostView: UIView) -> PamRenderer {
+        let renderer = PamRenderer(hostView: hostView, nativeViews: nativeViews) { [weak self] nodeId, kind, payload in
+            self?.dispatchEvent(nodeId, kind: kind, payload: payload)
+        }
+        renderer.onNativeChildVisibility = { [weak self] owner, child, visible in
+            guard let self, owner > 0, child > 0 else { return }
+            let activeHandle = self.currentHandle()
+            guard activeHandle != 0 else { return }
+            pam_native_runtime_set_child_visibility(activeHandle, UInt64(owner), UInt64(child), visible)
+        }
+        return renderer
+    }
+
+    /// True while PHP is running in this process.
+    public var isRunning: Bool {
+        currentHandle() != 0 && !closed
+    }
+
+    /// Re-attaches this live runtime to a new host view (for example a
+    /// recreated `PamNativeViewController`) and mounts the retained tree there
+    /// from scratch. Embedded PHP cannot be restarted inside one process, so a
+    /// new host must re-attach instead of starting a second runtime. Main
+    /// thread only.
+    public func attach(hostView: UIView) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let previous = renderer
+        previous?.onNativeChildVisibility = nil
+        previous?.close()
+        renderer = makeRenderer(hostView: hostView)
+        requestRemount()
+    }
+
+    /// The host view is going away while PHP stays alive; later frames are
+    /// folded into the remount performed by the next `attach(hostView:)`.
+    public func detach() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        awaitingRemount = true
+        dropPendingBatches()
+        renderer?.onNativeChildVisibility = nil
+        renderer?.close()
+    }
+
+    private func requestRemount() {
+        awaitingRemount = true
+        dropPendingBatches()
+        let active = currentHandle()
+        guard active != 0 else {
+            awaitingRemount = false
+            return
+        }
+        pam_native_runtime_remount(active, pamNativeRuntimeRemountCallback)
+    }
+
+    private func dropPendingBatches() {
+        stateLock.lock()
+        let stale = pendingBatches.map { $0.handle }
+        pendingBatches.removeAll()
+        stateLock.unlock()
+        stale.forEach(releaseBatch)
+    }
+
+    fileprivate func onNativeRemount(bytes: UnsafePointer<UInt8>?, size: Int, batchHandle: UInt64) -> Bool {
+        var mutations: [Mutation]?
+        var decodeNanos: Int64 = 0
+        if let bytes, size > 0, batchHandle != 0 {
+            stateLock.lock()
+            let owned = !closed && ownedBatchHandles.insert(batchHandle).inserted
+            stateLock.unlock()
+            if owned {
+                let start = DispatchTime.now().uptimeNanoseconds
+                do {
+                    mutations = try BatchDecoder.decode(CInterop.data(from: bytes, size))
+                } catch {
+                    stateLock.lock()
+                    _ = ownedBatchHandles.remove(batchHandle)
+                    stateLock.unlock()
+                    onNativeError(error.localizedDescription)
+                }
+                decodeNanos = Int64(DispatchTime.now().uptimeNanoseconds - start)
+            }
+        }
+        let decoded = mutations
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.currentHandle() != 0 && !self.closed else {
+                if decoded != nil { self.releaseBatch(batchHandle) }
+                return
+            }
+            self.awaitingRemount = false
+            self.dropPendingBatches()
+            if let decoded {
+                self.stateLock.lock()
+                self.pendingBatches.append(
+                    PendingBatch(mutations: decoded, handle: batchHandle, decodeNanos: decodeNanos),
+                )
+                self.stateLock.unlock()
+            }
+            self.markReadyForEvents()
+            self.scheduleFrame()
+        }
+        return decoded != nil
     }
 
     public func start(
@@ -773,7 +889,7 @@ public final class PamRuntime {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            guard self.currentHandle() != 0 && !self.closed else {
+            guard self.currentHandle() != 0 && !self.closed && !self.awaitingRemount else {
                 self.releaseBatch(batchHandle)
                 self.stateLock.lock()
                 _ = self.ownedBatchHandles.remove(batchHandle)

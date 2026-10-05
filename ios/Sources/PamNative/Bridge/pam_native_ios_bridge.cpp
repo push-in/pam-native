@@ -23,12 +23,25 @@
 namespace {
 
 constexpr std::size_t kMaxEventBytes = 1024 * 1024;
+// Module results (file reads, base64 media, large JSON) may legitimately be
+// bigger than UI events. Anything above this is never dropped silently: PHP
+// receives a failure so its callback always runs.
+constexpr std::size_t kMaxModuleResultBytes = 32 * 1024 * 1024;
+constexpr std::int32_t kModuleResultFailure = 2;
+
+std::string oversized_module_result_message(std::size_t size) {
+    return "Native module result exceeds the bridge limit (" + std::to_string(size)
+        + " bytes > " + std::to_string(kMaxModuleResultBytes) + " bytes)";
+}
 constexpr std::size_t kMaxQueuedEvents = 1024;
 
 enum class EventType : std::uint8_t {
     Ui = 1,
     ModuleResult = 2,
     Reload = 3,
+    // A recreated host view attached to the live runtime: publish the
+    // retained tree as a full mount, in order with other batches.
+    Remount = 5,
 };
 
 struct Event {
@@ -62,6 +75,7 @@ struct RuntimeState {
     float text_scale = 0.0f;
     PamNativeEngineHandle* engine = nullptr;
     PamNativeRuntimeCallbacks callbacks;
+    std::atomic<PamNativeBatchCallback> on_remount{nullptr};
 
     std::mutex queue_mutex;
     std::condition_variable queue_ready;
@@ -161,6 +175,37 @@ void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
         handle
     );
     if (accepted) {
+        published.release();
+    }
+}
+
+// Always calls back (NULL bytes when there is no tree yet) so the host can
+// close its remount window. A full mount may exceed the event size limit.
+void publish_remount(RuntimeState* state) {
+    const PamNativeBatchCallback callback = state->on_remount.load();
+    if (callback == nullptr) {
+        return;
+    }
+    PamNativeBuffer buffer{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        status = pam_native_engine_remount(state->engine, &buffer);
+    }
+    if (status != PAM_STATUS_SUCCESS) {
+        pam_native_buffer_free(buffer);
+        buffer = PamNativeBuffer{nullptr, 0, 0};
+    }
+    auto published = std::make_unique<PublishedBatch>(buffer);
+    const bool empty = buffer.data == nullptr || buffer.length == 0;
+    const auto handle = empty ? std::uint64_t{0} : reinterpret_cast<std::uint64_t>(published.get());
+    const auto accepted = callback(
+        reinterpret_cast<std::uint64_t>(state),
+        empty ? nullptr : static_cast<const std::uint8_t*>(buffer.data),
+        empty ? 0 : buffer.length,
+        handle
+    );
+    if (accepted && !empty) {
         published.release();
     }
 }
@@ -545,7 +590,11 @@ bool run_php_request(RuntimeState* state) {
             draining = true;
             drain_started = std::chrono::steady_clock::now();
         }
-        dispatch_event(event);
+        if (event.type == EventType::Remount) {
+            publish_remount(state);
+        } else {
+            dispatch_event(event);
+        }
 
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");
@@ -616,7 +665,10 @@ void enqueue(RuntimeState* state, Event event, bool coalesce) {
     if (state == nullptr || state->stopping.load(std::memory_order_acquire)) {
         return;
     }
-    if (event.payload.size() > kMaxEventBytes) {
+    const std::size_t limit = event.type == EventType::ModuleResult
+        ? kMaxModuleResultBytes
+        : kMaxEventBytes;
+    if (event.payload.size() > limit) {
         return;
     }
 
@@ -911,7 +963,17 @@ void pam_native_runtime_dispatch_module_result(
     if (payload == nullptr && payload_size != 0) {
         return;
     }
-    if (payload_size > kMaxEventBytes) {
+    if (payload_size > kMaxModuleResultBytes) {
+        enqueue(
+            state,
+            Event{
+                EventType::ModuleResult,
+                request_id,
+                kModuleResultFailure,
+                oversized_module_result_message(payload_size),
+            },
+            false
+        );
         return;
     }
 
@@ -930,6 +992,15 @@ void pam_native_runtime_dispatch_module_result(
         },
         false
     );
+}
+
+void pam_native_runtime_remount(uint64_t handle, PamNativeBatchCallback on_remount) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr) {
+        return;
+    }
+    state->on_remount.store(on_remount);
+    enqueue(state, Event{EventType::Remount, 0, 0, std::string()}, false);
 }
 
 void pam_native_runtime_reload(uint64_t handle, const char* entry) {

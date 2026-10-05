@@ -79,9 +79,23 @@ internal class SystemModule(private val context: Context) : AutoCloseable {
 
     private fun closeApp(completion: ModuleCompletion) {
         main.post {
-            (context as? Activity)?.finish()
+            (context as? Activity)?.let(::invokeDefaultBack)
             completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
         }
+    }
+
+    /**
+     * React Native's `invokeDefaultOnBackPressed()`: the platform's own Back.
+     * Since Android 12 a root launcher Activity is moved to the background
+     * instead of being finished, so returning to the app is a warm resume;
+     * older releases finish it (the live runtime re-attaches on relaunch).
+     */
+    private fun invokeDefaultBack(activity: Activity) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && activity.isTaskRoot) {
+            if (activity.moveTaskToBack(false)) return
+        }
+        activity.finish()
     }
 
     private fun alert(payload: ByteArray, completion: ModuleCompletion) {

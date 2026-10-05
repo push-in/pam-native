@@ -1,7 +1,16 @@
 import UIKit
 
 /// Embeds one PAM Native runtime inside an existing UIKit navigation or tab hierarchy.
+///
+/// Embedded PHP lives as long as the process and cannot be restarted inside
+/// it. Closing the controller detaches its view; a later controller for the
+/// same entry re-attaches to the live runtime and remounts the current tree
+/// (PHP state is kept, nothing re-executes). Modules and native views are the
+/// ones the first controller registered.
 public final class PamNativeViewController: UIViewController {
+    private static var liveRuntime: PamRuntime?
+    private static var liveEntry: String?
+
     public typealias ErrorHandler = (String) -> Void
 
     private let entryURL: URL
@@ -37,6 +46,12 @@ public final class PamNativeViewController: UIViewController {
 
     public override func viewDidLoad() {
         super.viewDidLoad()
+        if let live = Self.liveRuntime, live.isRunning, Self.liveEntry == entryURL.path {
+            runtime = live
+            live.attach(hostView: view)
+            updateViewport()
+            return
+        }
         let runtime = PamRuntime(
             hostView: view,
             nativeModules: nativeModules,
@@ -75,8 +90,13 @@ public final class PamNativeViewController: UIViewController {
     }
 
     public func close() {
-        runtime?.close()
-        runtime = nil
+        guard let runtime else { return }
+        self.runtime = nil
+        if runtime === Self.liveRuntime {
+            runtime.detach()
+        } else {
+            runtime.close()
+        }
     }
 
     deinit {
@@ -88,6 +108,8 @@ public final class PamNativeViewController: UIViewController {
             errorHandler("PAM Native brownfield entry does not exist.")
             return
         }
+        Self.liveRuntime = runtime
+        Self.liveEntry = entryURL.path
         runtime.start(
             entry: entryURL.path,
             widthDp: Float(max(view.bounds.width, 1)),

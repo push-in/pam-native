@@ -24,10 +24,10 @@ pub use ffi::{
     PamNativeBuffer, PamNativeEngineHandle, PamNativeStats, PamStatus, pam_native_buffer_free,
     pam_native_engine_commit, pam_native_engine_free, pam_native_engine_last_error,
     pam_native_engine_new, pam_native_engine_relayout, pam_native_engine_relayout_with_metrics,
-    pam_native_engine_set_asset_root, pam_native_engine_set_native_child_visibility,
-    pam_native_engine_set_refresh_rate, pam_native_engine_set_safe_area_insets,
-    pam_native_engine_set_text_measurer, pam_native_engine_set_text_scale,
-    pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_remount, pam_native_engine_set_asset_root,
+    pam_native_engine_set_native_child_visibility, pam_native_engine_set_refresh_rate,
+    pam_native_engine_set_safe_area_insets, pam_native_engine_set_text_measurer,
+    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 pub use text_measure::{PamTextMeasureCallback, PamTextMeasureRequest, PamTextMeasureResult};
 
@@ -258,6 +258,26 @@ impl Engine {
         .encode()
         .map_err(EngineError::Protocol)?;
         self.commit(&patch)
+    }
+
+    /// Re-emits the retained tree as a fresh mount (root, creates, layouts).
+    ///
+    /// Hosts call this when a new surface (for example a recreated Android
+    /// Activity) attaches to a live runtime: the new renderer starts empty and
+    /// receives the current tree without PHP re-rendering anything.
+    pub fn remount_into(&mut self, output: &mut Vec<u8>) -> Result<(), EngineError> {
+        output.clear();
+        let Some(current) = self.current.as_ref() else {
+            return Ok(());
+        };
+        let children = child_index(current);
+        let mut mutations = vec![Mutation::SetRoot { id: current.root }];
+        append_creates(current, &children, current.root, &mut mutations);
+        mutations.extend(self.layouts.iter().map(|(id, frame)| Mutation::Layout {
+            id: *id,
+            frame: *frame,
+        }));
+        self.encode_mutations(output, &mut mutations)
     }
 
     pub fn commit_into(&mut self, frame: &[u8], output: &mut Vec<u8>) -> Result<(), EngineError> {
@@ -1036,6 +1056,35 @@ mod tests {
             );
         }
         Tree { root: 1, nodes }.encode().expect("frame")
+    }
+
+    #[test]
+    fn remount_replays_the_retained_tree_for_a_new_surface() {
+        let mut engine = Engine::new();
+        let mut empty = Vec::new();
+        engine.remount_into(&mut empty).expect("empty remount");
+        assert!(empty.is_empty(), "nothing to mount before the first commit");
+
+        engine.commit(&frame("A", true)).expect("initial");
+        engine.commit(&frame("B", false)).expect("update");
+        let mut output = Vec::new();
+        engine.remount_into(&mut output).expect("remount");
+        let mutations = decode_batch(&output).expect("batch");
+        assert!(matches!(mutations.first(), Some(Mutation::SetRoot { .. })));
+        let created = mutations
+            .iter()
+            .filter(|item| matches!(item, Mutation::Create(_)))
+            .count();
+        assert_eq!(created, engine.current.as_ref().expect("tree").nodes.len());
+        let laid_out = mutations
+            .iter()
+            .filter(|item| matches!(item, Mutation::Layout { .. }))
+            .count();
+        assert_eq!(laid_out, engine.layouts.len());
+        assert!(mutations.iter().any(|item| matches!(
+            item,
+            Mutation::Create(node) if node.id == 3
+        )));
     }
 
     #[test]

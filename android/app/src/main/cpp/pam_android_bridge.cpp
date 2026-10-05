@@ -27,6 +27,16 @@ namespace {
 
 constexpr char kLogTag[] = "PamNative";
 constexpr std::size_t kMaxEventBytes = 1024 * 1024;
+// Module results (file reads, base64 media, large JSON) may legitimately be
+// bigger than UI events. Anything above this is never dropped silently: PHP
+// receives a failure so its callback always runs.
+constexpr std::size_t kMaxModuleResultBytes = 32 * 1024 * 1024;
+constexpr std::int32_t kModuleResultFailure = 2;
+
+std::string oversized_module_result_message(std::size_t size) {
+    return "Native module result exceeds the bridge limit (" + std::to_string(size)
+        + " bytes > " + std::to_string(kMaxModuleResultBytes) + " bytes)";
+}
 constexpr std::size_t kMaxQueuedEvents = 1024;
 // Upper bound for draining the event queue before rendering once.
 constexpr auto kFlushBudget = std::chrono::milliseconds(12);
@@ -41,6 +51,9 @@ enum class EventType : std::uint8_t {
     // Engine-only work (no PHP): applied on the worker so the UI thread never
     // waits on the engine lock or decodes a batch synchronously.
     ChildVisibility = 4,
+    // A new host surface (recreated Activity) attached to the live runtime:
+    // publish the retained tree as a full mount, in order with other batches.
+    Remount = 5,
 };
 
 struct Event {
@@ -58,6 +71,7 @@ struct RuntimeState {
     jmethodID on_typed_call = nullptr;
     jmethodID on_error = nullptr;
     jmethodID on_measure_text = nullptr;
+    jmethodID on_remount = nullptr;
     std::string entry;
     std::string state_dir;
     std::string php_executable = "pam-native";
@@ -271,6 +285,50 @@ void publish_batch(RuntimeState* state, PamNativeBuffer buffer) {
         return;
     }
     if (accepted == JNI_TRUE) {
+        published.release();
+    }
+}
+
+// Always calls back (with a null buffer when there is no tree yet) so the
+// host can close its remount window.
+void publish_remount(RuntimeState* state) {
+    PamNativeBuffer buffer{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        status = pam_native_engine_remount(state->engine, &buffer);
+    }
+    if (status != PAM_STATUS_SUCCESS) {
+        pam_native_buffer_free(buffer);
+        buffer = PamNativeBuffer{nullptr, 0, 0};
+    }
+    std::unique_ptr<PublishedBatch> published =
+        std::make_unique<PublishedBatch>(buffer);
+    AttachedEnvironment attached(state->vm);
+    JNIEnv* env = attached.get();
+    if (env == nullptr || state->on_remount == nullptr) {
+        return;
+    }
+    jobject batch = nullptr;
+    if (buffer.data != nullptr
+        && buffer.length > 0
+        && buffer.length <= static_cast<std::size_t>(INT32_MAX)) {
+        batch = env->NewDirectByteBuffer(buffer.data, static_cast<jlong>(buffer.length));
+    }
+    const auto handle = batch == nullptr
+        ? static_cast<jlong>(0)
+        : static_cast<jlong>(reinterpret_cast<std::uintptr_t>(published.get()));
+    const jboolean accepted =
+        env->CallBooleanMethod(state->runtime, state->on_remount, batch, handle);
+    if (batch != nullptr) {
+        env->DeleteLocalRef(batch);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        return;
+    }
+    if (accepted == JNI_TRUE && batch != nullptr) {
         published.release();
     }
 }
@@ -728,6 +786,8 @@ bool run_php_request(RuntimeState* state) {
         }
         if (event.type == EventType::ChildVisibility) {
             apply_child_visibility(state, event);
+        } else if (event.type == EventType::Remount) {
+            publish_remount(state);
         } else {
             dispatch_event(event);
         }
@@ -811,7 +871,10 @@ void runtime_loop(RuntimeState* state) {
 }
 
 void enqueue(RuntimeState* state, Event event, bool coalesce) {
-    if (event.payload.size() > kMaxEventBytes || state->stopping.load(std::memory_order_acquire)) {
+    const std::size_t limit = event.type == EventType::ModuleResult
+        ? kMaxModuleResultBytes
+        : kMaxEventBytes;
+    if (event.payload.size() > limit || state->stopping.load(std::memory_order_acquire)) {
         return;
     }
     {
@@ -952,6 +1015,15 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
             // Older hosts without a measurer keep the portable estimator.
             env->ExceptionClear();
             state->on_measure_text = nullptr;
+        }
+        state->on_remount = env->GetMethodID(
+            runtime_class,
+            "onNativeRemount",
+            "(Ljava/nio/ByteBuffer;J)Z"
+        );
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            state->on_remount = nullptr;
         }
     }
     if (runtime_class != nullptr) {
@@ -1138,7 +1210,20 @@ Java_dev_pam_nativeapp_PamRuntime_nativeDispatchModuleResult(
         return;
     }
     const jsize length = env->GetArrayLength(payload);
-    if (length < 0 || static_cast<std::size_t>(length) > kMaxEventBytes) {
+    if (length < 0) {
+        return;
+    }
+    if (static_cast<std::size_t>(length) > kMaxModuleResultBytes) {
+        enqueue(
+            state,
+            Event{
+                EventType::ModuleResult,
+                request_id,
+                kModuleResultFailure,
+                oversized_module_result_message(static_cast<std::size_t>(length)),
+            },
+            false
+        );
         return;
     }
     std::string bytes(static_cast<std::size_t>(length), '\0');
@@ -1155,6 +1240,15 @@ Java_dev_pam_nativeapp_PamRuntime_nativeDispatchModuleResult(
         Event{EventType::ModuleResult, request_id, status, std::move(bytes)},
         false
     );
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeRemount(JNIEnv*, jobject, jlong handle) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr) {
+        return;
+    }
+    enqueue(state, Event{EventType::Remount, 0, 0, std::string()}, false);
 }
 
 extern "C" JNIEXPORT void JNICALL

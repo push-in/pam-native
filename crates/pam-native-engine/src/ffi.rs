@@ -372,6 +372,38 @@ pub unsafe extern "C" fn pam_native_engine_relayout_with_metrics(
 }
 
 #[unsafe(no_mangle)]
+/// Writes a batch that mounts the retained tree from scratch (set root,
+/// create every node, every layout) for a host surface that was recreated.
+///
+/// # Safety
+///
+/// `handle` must point to a live, exclusively borrowed engine and `output`
+/// must point to writable storage for one [`PamNativeBuffer`].
+pub unsafe extern "C" fn pam_native_engine_remount(
+    handle: *mut PamNativeEngineHandle,
+    output: *mut PamNativeBuffer,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    let Some(output) = (unsafe { output.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    *output = PamNativeBuffer::default();
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut batch = acquire_buffer();
+        handle.engine.remount_into(&mut batch).map(|()| batch)
+    })) {
+        Ok(Ok(batch)) => {
+            *output = lease_buffer(batch);
+            PamStatus::Success
+        }
+        Ok(Err(_)) => PamStatus::InvalidArgument,
+        Err(_) => PamStatus::Panic,
+    }
+}
+
+#[unsafe(no_mangle)]
 /// Applies an encoded tree or patch and writes an owned mutation buffer.
 ///
 /// # Safety

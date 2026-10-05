@@ -15,6 +15,8 @@ void pam_native_runtime_dispatch_module_result(void) {}
 
 void pam_native_runtime_reload(void) {}
 
+void pam_native_runtime_remount(void) {}
+
 void pam_native_runtime_stats(void) {}
 
 void pam_native_runtime_release_batch(void) {}
