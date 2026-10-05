@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.9.1 - 2026-10-05
+
+- iOS SQLite reuses compiled statements per database (32-entry LRU keyed by
+  SQL, oversized one-off statements excluded, finalized on close), matching
+  Android's `SQLiteDatabase` statement cache; `pam-native-nitro` upserts,
+  batches and paged reads no longer re-prepare SQL on every call. Statements
+  are reset right after use so cached reads never hold a WAL snapshot.
+- iOS: `onTextLayout` and `ellipsizeMode="marquee"` on `Text` are owned by
+  `PamTextView` (1.9.0); the 1.8.0 UILabel fallback no longer duplicates
+  text-layout events or reconfigures `PamTextView`.
+- Uncompiled on the release machine (no Xcode); needs Mac validation
+  (`SQLiteStatementCacheTests`).
+
 ## 1.9.0 - 2026-10-05
 
 iOS rendering parity with the Android 1.2.0–1.7.0 releases (CSS paint and
