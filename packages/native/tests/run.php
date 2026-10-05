@@ -6847,8 +6847,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.10.0',
-    'The runtime SDK contract must match the 1.10.0 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.11.0',
+    'The runtime SDK contract must match the 1.11.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

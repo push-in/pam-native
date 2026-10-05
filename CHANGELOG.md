@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.11.0 - 2026-10-05
+
+Unkeyed siblings keep their native identity when a conditional sibling
+appears or disappears (React-like reconciliation). Behaviour change: apps no
+longer need `:key` on every sibling of a `p-if` to avoid remounts.
+
+- The tree encoder identifies unkeyed children by their static slot (template
+  position or builder argument position) instead of their output index. A
+  false `p-if`, the inactive `p-if`/`p-else` branch, `If`/`Show`/`Match`/
+  `Await` blocks, an empty `p-for` and `null`/`false` children passed to the
+  Element API (`View`, `Column`, `Row`, `Screen`, `SafeAreaView`, `Pressable`,
+  `Grid`, `VirtualizedList`, ...) leave a hole, so the siblings after them
+  keep their identity: a sheet `Modal` no longer inherits the native host of
+  a removed full-screen overlay `Modal`, and a `VirtualizedList` or
+  `TextInput` after a conditional banner is not remounted (no empty timeline
+  frame, focus and IME are kept).
+- `p-for` children are identified by `p-key` (stable across reorders);
+  unkeyed loops with more than one item log a one-time development warning.
+- Slot content and component roots take the slot they are rendered at;
+  slotted children mixed with positional children in PHP builders fall back
+  to their position instead of colliding.
+- Identities stay encoder-side: the wire protocol is unchanged and both
+  Android and iOS apply the resulting moves by id. Unkeyed template nodes get
+  new identities once after upgrading (a single remount on the first frame).
+
 ## 1.10.0 - 2026-10-05
 
 Lifecycle and mount-cost fixes from Zé Chat device QA.
