@@ -271,8 +271,10 @@ Up to 64 parts and 2 GiB per request; fields are limited to 1 MiB. The
 builder owns `Content-Type`; transport headers cannot be overridden. Progress
 is throttled to whole percents or 256 KiB. A cancelled transfer never invokes
 its callback. Transport failures arrive as `HttpResponse::transportFailed()`.
-Android streams through `HttpURLConnection`; iOS reports the transfer as not
-yet available.
+Android streams through `HttpURLConnection`; iOS writes the multipart body to
+a private temporary file and uploads it with `URLSession` (byte progress from
+`didSendBodyData`, cancellation through the task), deleting the file when the
+transfer ends.
 
 `HttpResponse::$headers` (lower-case names), `header($name)` and `date()`
 expose response headers for every request, e.g. to correct client clock skew
@@ -311,8 +313,13 @@ Accessibility::announce('Message sent');
 
 Route-scoped secure mode sets `FLAG_SECURE` while the route is the active entry
 of its navigator and clears it when the route is popped or replaced. The
-effective state is the union of route claims and the explicit claim. iOS has
-no public equivalent and reports `false` to the `Screen::secure()` callback.
+effective state is the union of route claims and the explicit claim. iOS
+cannot block screenshots (no public `FLAG_SECURE`); instead, while secure mode
+is on, PAM covers every window with an opaque privacy shield whenever the
+screen is recorded, mirrored or AirPlayed (`UIScreen.isCaptured`) and while the
+app is inactive, so the app-switcher snapshot never shows protected content.
+The callback receives `true`; the native result also reports
+`screenshotsBlocked: false`.
 
 `Accessibility::announce()` sends a polite TalkBack/VoiceOver announcement and
 is a no-op when no screen reader runs; `screenReaderEnabled()` reports state.
@@ -322,7 +329,9 @@ is a no-op when no screen reader runs; `screenReaderEnabled()` reports state.
 `Image::prefetch($urls, MediaPriority::Visible, $headers)` downloads remote
 images into the renderer disk cache (`pam-images-v1`) using the same key as
 `Image::make()`, so later renders and notification avatars load from disk.
-Pass the same headers and `cacheKeys` the `Image` will use. Android only.
+Pass the same headers and `cacheKeys` the `Image` will use. iOS stores the
+images in the renderer media cache (`pam-media-v1`) two at a time, higher
+priority first.
 
 `Timers::timeout()` and `Timers::every()` return a `TimerHandle` with
 `cancel()`; `Timers::cancel($id)` also cancels ids returned by
@@ -483,8 +492,12 @@ listener replaces the previous one), even when they happened while PHP was not
 running. An optional `ActionEndpoint` performs the HTTP request natively at tap
 time; `NotificationAction::delivered()` reports its 2xx result. Endpoint
 templates accept push data fields, `{reply}`, `{conversation}`, `{uuid}`,
-`{now}` and `{storage:key}` (a value saved with `Storage`). iOS shows a
-threaded notification with the latest message; actions are Android-only.
+`{now}` and `{storage:key}` (a value saved with `Storage`). iOS posts one
+threaded communication notification per conversation (latest message, sender
+avatar and group name through `INSendMessageIntent` when the app has the
+Communication Notifications capability) with a text-input reply action and a
+mark-as-read action; `PamPushNotifications.didReceive(response:completionHandler:)`
+runs the endpoint natively (inside a background task) and queues the action.
 
 ### Declarative push rendering
 
@@ -517,8 +530,12 @@ route matches (navigators report focused routes once a rule uses
 `suppressWhenRoute`). Rendered pushes still reach `PushNotifications::listen()`
 with `PushMessage::$rendered = true`, so PHP must not display them again.
 Pushes that carry a `notification` payload are displayed by the OS and bypass
-rules; send data-only messages. Android only; on iOS `register()` reports an
-unsupported failure (use a Notification Service Extension).
+rules; send data-only messages. On iOS send them as background pushes
+(`content-available: 1`, no `alert`); the host forwards
+`application(_:didReceiveRemoteNotification:fetchCompletionHandler:)` to
+`PamPushNotifications.didReceiveRemote(userInfo:completion:)`, which applies the
+rules natively. iOS does not deliver background pushes to an app the user
+force-quit, and throttles them under Low Power Mode.
 
 ## SQLite
 

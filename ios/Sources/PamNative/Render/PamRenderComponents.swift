@@ -357,6 +357,47 @@ final class PamAnchoredScrollView: UIScrollView {
 
 final class PamVirtualListView: UIScrollView {
     var onViewportChange: (() -> Void)?
+    /// RN `pagingEnabled` for lists: one item per page.
+    var pamPagingEnabled = false {
+        didSet { decelerationRate = pamPagingEnabled ? .fast : .normal }
+    }
+    /// Sorted item start offsets along the primary axis.
+    var pamItemStarts: [CGFloat] = []
+
+    /// Snapped item when paging; otherwise the first fully visible item.
+    func pageIndex() -> Int {
+        guard !pamItemStarts.isEmpty else { return 0 }
+        let offset = horizontal ? contentOffset.x : contentOffset.y
+        if pamPagingEnabled {
+            return PamDragMath.nearest(pamItemStarts.map(Double.init), Double(offset))
+        }
+        return pamItemStarts.firstIndex { $0 >= offset - 0.5 }
+            ?? max(0, (pamItemStarts.lastIndex { $0 <= offset } ?? 0))
+    }
+
+    /// One item per gesture from the item nearest the gesture start, moved
+    /// by velocity (> 350 pt/s) or 18% of the item extent.
+    static func itemPageTarget(
+        starts: [CGFloat],
+        start: CGFloat,
+        position: CGFloat,
+        velocity: CGFloat,
+        maximum: CGFloat
+    ) -> CGFloat {
+        guard !starts.isEmpty else { return min(max(0, position), maximum) }
+        let origin = PamDragMath.nearest(starts.map(Double.init), Double(start))
+        let extent = origin + 1 < starts.count
+            ? starts[origin + 1] - starts[origin]
+            : (origin > 0 ? starts[origin] - starts[origin - 1] : max(1, maximum))
+        let displacement = position - starts[origin]
+        var index = origin
+        if velocity > 350 || (abs(velocity) <= 350 && displacement > extent * 0.18) {
+            index = min(origin + 1, starts.count - 1)
+        } else if velocity < -350 || (abs(velocity) <= 350 && displacement < -extent * 0.18) {
+            index = max(origin - 1, 0)
+        }
+        return min(max(0, starts[index]), maximum)
+    }
     private(set) var scrollVelocity: CGFloat = 0
     private var previousOffset: CGFloat = 0
     private var previousTimestamp = CACurrentMediaTime()
@@ -1563,7 +1604,18 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         static let none = 1
         static let slide = 2
         static let fade = 3
+        static let slideFade = 4
     }
+
+    /// `slide-fade` (RN sheet modals): the backdrop fades while the content
+    /// slides from fully below the screen on its own curve.
+    private enum SlideFade {
+        static let enter: TimeInterval = 0.32
+        static let exit: TimeInterval = 0.22
+        static let backdropShare: TimeInterval = 0.7
+    }
+
+    private var slideFadeAnimator: UIViewPropertyAnimator?
 
     private enum Orientation {
         static let portrait = 1
@@ -1829,6 +1881,28 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
                 self.backdropView.alpha = 1
                 self.contentClip.alpha = 1
             }
+        case Animation.slideFade:
+            slideFadeAnimator?.stopAnimation(true)
+            layoutIfNeeded()
+            contentClip.alpha = 1
+            contentClip.transform = CGAffineTransform(translationX: 0, y: slideFadeDistance())
+            UIView.animate(
+                withDuration: SlideFade.enter * SlideFade.backdropShare,
+                delay: 0,
+                options: [.curveLinear, .allowUserInteraction]
+            ) {
+                self.backdropView.alpha = 1
+            }
+            let animator = UIViewPropertyAnimator(
+                duration: SlideFade.enter,
+                controlPoint1: CGPoint(x: 0.215, y: 0.61),
+                controlPoint2: CGPoint(x: 0.355, y: 1)
+            ) {
+                self.contentClip.transform = .identity
+            }
+            animator.addCompletion { [weak self] _ in self?.slideFadeAnimator = nil }
+            slideFadeAnimator = animator
+            animator.startAnimation()
         default:
             backdropView.alpha = 1
             contentClip.alpha = 1
@@ -1900,9 +1974,41 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             }, completion: { _ in
                 completion()
             })
+        case Animation.slideFade:
+            slideFadeAnimator?.stopAnimation(true)
+            UIView.animate(
+                withDuration: SlideFade.exit * SlideFade.backdropShare,
+                delay: SlideFade.exit * (1 - SlideFade.backdropShare),
+                options: [.curveLinear]
+            ) {
+                self.backdropView.alpha = 0
+            }
+            let distance = slideFadeDistance()
+            let animator = UIViewPropertyAnimator(
+                duration: SlideFade.exit,
+                controlPoint1: CGPoint(x: 0.55, y: 0.085),
+                controlPoint2: CGPoint(x: 0.68, y: 0.53)
+            ) {
+                self.contentClip.transform = CGAffineTransform(translationX: 0, y: distance)
+            }
+            animator.addCompletion { [weak self] _ in
+                guard let self else { return }
+                self.slideFadeAnimator = nil
+                self.contentClip.transform = .identity
+                completion()
+            }
+            slideFadeAnimator = animator
+            animator.startAnimation()
         default:
             completion()
         }
+    }
+
+    /// Travel that hides the content fully below the screen (at least half
+    /// the screen, like Android).
+    private func slideFadeDistance() -> CGFloat {
+        let untransformedTop = contentClip.center.y - contentClip.bounds.height / 2
+        return max(bounds.height - untransformedTop, bounds.height / 2)
     }
 
     func requestClose() {

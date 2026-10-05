@@ -12,6 +12,7 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
     }
     private let filesRoot: URL
     private let uploadCache: URL
+    private let transfers = HttpTransferRegistry()
 
     public convenience init() {
         self.init(configuration: .default)
@@ -30,11 +31,7 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
         }
 
         if method == "transferStart" || method == "transferNext" || method == "transferCancel" {
-            // Streamed multipart transfers are Android-only in this release.
-            completion(
-                method == "transferCancel" ? .success : .failure,
-                method == "transferCancel" ? Data() : Data("Streamed HTTP transfers are not available on iOS yet".utf8)
-            )
+            transfer(method: method, payload: payload, completion: completion)
             return
         }
         if method != "get" && method != "request" && method != "upload" {
@@ -216,7 +213,181 @@ public final class HttpModule: NativeModule, ClosableNativeModule, @unchecked Se
         if stopped { stateLock.unlock(); return }
         stopped = true
         stateLock.unlock()
+        transfers.cancelAll()
         session.invalidateAndCancel()
+    }
+
+    // MARK: Streamed transfers (Http::multipart(), upload progress/cancel)
+
+    private static let transferHttpMethods = Set(["POST", "PUT", "PATCH"])
+    private static let transferMultipart: Int64 = 1
+
+    private func transfer(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            if method == "transferStart" {
+                try startTransfer(values, completion: completion)
+                return
+            }
+            guard case let .integer(id)? = values["transfer"] else { throw RuntimeError("HTTP transfer id is required") }
+            if method == "transferCancel" {
+                transfers.remove(Int(id))?.cancel()
+                completion(.success, Data())
+                return
+            }
+            guard let transfer = transfers.get(Int(id)) else { throw RuntimeError("HTTP transfer not found") }
+            transfer.channel.next(completion)
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func startTransfer(_ values: [String: WireValue], completion: @escaping ModuleCompletion) throws {
+        guard case let .text(urlText)? = values["url"],
+              let url = URL(string: urlText),
+              let scheme = url.scheme?.lowercased(),
+              url.host != nil, url.user == nil, url.password == nil else {
+            throw RuntimeError("Invalid HTTP URL")
+        }
+        #if DEBUG
+        guard scheme == "https" || scheme == "http" else { throw RuntimeError("HTTP requests require HTTPS") }
+        #else
+        guard scheme == "https" else { throw RuntimeError("HTTP requests require HTTPS") }
+        #endif
+        var requestMethod = "POST"
+        if case let .text(value)? = values["method"] { requestMethod = value }
+        guard Self.transferHttpMethods.contains(requestMethod) else {
+            throw RuntimeError("Unsupported HTTP transfer method \(requestMethod)")
+        }
+        var kind = Self.transferMultipart
+        if case let .integer(value)? = values["kind"] { kind = value }
+        var timeoutMs: Int64 = 60_000
+        if case let .integer(value)? = values["timeoutMs"] { timeoutMs = min(max(value, 1_000), 600_000) }
+        var baseRequest = URLRequest(url: url)
+        baseRequest.httpMethod = requestMethod
+        baseRequest.timeoutInterval = Double(timeoutMs) / 1_000
+        baseRequest.setValue("application/json, text/plain, */*", forHTTPHeaderField: "Accept")
+        let multipart = kind == Self.transferMultipart
+        if case let .text(headersText)? = values["headers"] {
+            guard let data = headersText.data(using: .utf8),
+                  let headers = try JSONSerialization.jsonObject(with: data) as? [String: String],
+                  headers.count <= 32 else { throw RuntimeError("Invalid HTTP headers") }
+            for (name, value) in headers {
+                guard name.range(of: Self.safeHeaderName, options: .regularExpression) != nil,
+                      value.utf8.count <= 8_192, !value.contains("\r"), !value.contains("\n") else {
+                    throw RuntimeError("Invalid HTTP header")
+                }
+                let lower = name.lowercased()
+                guard !Self.reservedTraceHeaders.contains(lower) else {
+                    throw RuntimeError("Trace headers require an origin-scoped context")
+                }
+                guard !Self.fileTransportHeaders.contains(lower) else {
+                    throw RuntimeError("File upload headers cannot override HTTP transport fields")
+                }
+                guard !(multipart && lower == "content-type") else {
+                    throw RuntimeError("Multipart requests own the Content-Type boundary")
+                }
+                baseRequest.setValue(value, forHTTPHeaderField: name)
+            }
+        }
+        var traceparent: String?
+        var traceOrigin: String?
+        if case let .text(value)? = values["traceparent"] { traceparent = value }
+        if case let .text(value)? = values["traceOrigin"] { traceOrigin = value }
+        if traceparent != nil || traceOrigin != nil {
+            guard let traceparent, let traceOrigin,
+                  traceparent.range(of: Self.traceparentPattern, options: .regularExpression) != nil,
+                  Self.origin(of: url) == traceOrigin, traceOrigin.hasPrefix("https://") else {
+                throw RuntimeError("Trace context origin does not match the HTTP request origin")
+            }
+            baseRequest.setValue(traceparent, forHTTPHeaderField: "traceparent")
+        }
+        var partsJson: String?
+        var sourcePath: String?
+        if case let .text(value)? = values["parts"] { partsJson = value }
+        if case let .text(value)? = values["path"] { sourcePath = value }
+        if multipart && partsJson == nil { throw RuntimeError("Multipart parts are required") }
+        if !multipart && sourcePath == nil { throw RuntimeError("Upload source path is required") }
+
+        let transfer = HttpStreamTransfer()
+        let id = transfers.add(transfer)
+        completion(.success, (try? WireMap.encode(["transfer": .integer(Int64(id))])) ?? Data())
+
+        let partsSource = partsJson
+        let pathSource = sourcePath
+        let prepared = baseRequest
+        queue.async { [weak self] in
+            guard let self else { return }
+            var request = prepared
+            var snapshot: HttpUploadSnapshot?
+            do {
+                let bodyURL: URL
+                if multipart {
+                    let body = try HttpMultipartBody.decode(partsSource ?? "[]", root: self.filesRoot)
+                    try FileManager.default.createDirectory(
+                        at: self.uploadCache,
+                        withIntermediateDirectories: true,
+                        attributes: [.posixPermissions: 0o700]
+                    )
+                    bodyURL = self.uploadCache.appendingPathComponent("pam-multipart-\(UUID().uuidString).tmp")
+                    transfer.bodyFile = bodyURL
+                    try body.write(to: bodyURL) { transfer.cancelled || self.closed }
+                    request.setValue(body.contentType, forHTTPHeaderField: "Content-Type")
+                } else {
+                    let created = try HttpUploadSnapshot.create(
+                        root: self.filesRoot,
+                        cache: self.uploadCache,
+                        path: pathSource ?? ""
+                    ) { transfer.cancelled || self.closed }
+                    snapshot = created
+                    bodyURL = created.url
+                    if request.value(forHTTPHeaderField: "Content-Type") == nil {
+                        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+                    }
+                }
+                guard !transfer.cancelled, !self.closed else { throw RuntimeError("HTTP transfer cancelled") }
+                let total = Int64((try? bodyURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+                transfer.channel.offer(HttpTransferEvents.progress(0, total))
+                let createdSnapshot = snapshot
+                let task = self.session.uploadTask(with: request, fromFile: bodyURL) { data, response, error in
+                    defer {
+                        transfer.removeBody()
+                        try? createdSnapshot?.close()
+                    }
+                    if let error {
+                        transfer.channel.offer(HttpTransferEvents.failed(
+                            transfer.cancelled ? "HTTP transfer cancelled" : error.localizedDescription
+                        ))
+                        return
+                    }
+                    let http = response as? HTTPURLResponse
+                    guard let data, data.count <= 900 * 1024 else {
+                        transfer.channel.offer(HttpTransferEvents.failed("HTTP response exceeds one MiB"))
+                        return
+                    }
+                    var headers: [String: String] = [:]
+                    for (name, value) in http?.allHeaderFields ?? [:] {
+                        if let name = name as? String, headers.count < 64 { headers[name.lowercased()] = "\(value)" }
+                    }
+                    let headersJson = (try? JSONSerialization.data(withJSONObject: headers))
+                        .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+                    transfer.channel.offer(HttpTransferEvents.complete(
+                        status: http?.statusCode ?? 0,
+                        body: String(decoding: data, as: UTF8.self),
+                        headers: headersJson
+                    ))
+                }
+                task.delegate = transfer
+                transfer.attach(task, total: total)
+                task.resume()
+            } catch {
+                transfer.removeBody()
+                try? snapshot?.close()
+                transfer.channel.offer(HttpTransferEvents.failed(
+                    transfer.cancelled ? "HTTP transfer cancelled" : error.localizedDescription
+                ))
+            }
+        }
     }
 
     private struct RuntimeError: LocalizedError {

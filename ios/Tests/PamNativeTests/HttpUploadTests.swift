@@ -90,6 +90,107 @@ final class HttpUploadTests: XCTestCase {
     }
 }
 
+extension HttpUploadTests {
+    /// Mirrors NativeCapabilitiesInstrumentedTest transfer coverage: streamed
+    /// upload with byte progress pulled through `transferNext`.
+    func testStreamedTransferReportsProgressThenCompletes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = directory.appendingPathComponent("files")
+        let cache = directory.appendingPathComponent("snapshots")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = root.appendingPathComponent("clip.bin")
+        let bytes = Data((0..<(1024 * 1024)).map { UInt8($0 % 241) })
+        try bytes.write(to: source)
+        let ready = expectation(description: "Transfer server ready")
+        let server = try UploadHTTPServer(length: bytes.count, source: source, responseStatus: 201) { ready.fulfill() }
+        let module = HttpModule(configuration: .ephemeral, filesRoot: root, uploadCache: cache)
+        defer { module.close(); server.stop() }
+        wait(for: [ready], timeout: 5)
+        let started = expectation(description: "Transfer started")
+        var transferId: Int64 = 0
+        module.invoke(method: "transferStart", payload: try WireMap.encode([
+            "url": .text(try XCTUnwrap(server.url)),
+            "method": .text("PUT"),
+            "kind": .integer(2),
+            "path": .text("clip.bin"),
+        ])) { status, payload in
+            XCTAssertEqual(status, .success)
+            if case let .integer(id)? = (try? WireMap.decode(payload))?["transfer"] { transferId = id }
+            started.fulfill()
+        }
+        wait(for: [started], timeout: 5)
+        XCTAssertGreaterThan(transferId, 0)
+        var progress: [Int64] = []
+        var finalStatus: Int64 = -1
+        let finished = expectation(description: "Transfer finished")
+        func pull() {
+            module.invoke(method: "transferNext", payload: (try? WireMap.encode(["transfer": .integer(transferId)])) ?? Data()) { status, payload in
+                guard status == .success, let values = try? WireMap.decode(payload) else {
+                    XCTFail("transferNext failed")
+                    finished.fulfill()
+                    return
+                }
+                switch values["state"] {
+                case .integer(1)?:
+                    if case let .integer(sent)? = values["bytesSent"] { progress.append(sent) }
+                    pull()
+                case .integer(2)?:
+                    if case let .integer(code)? = values["statusCode"] { finalStatus = code }
+                    finished.fulfill()
+                default:
+                    XCTFail("Transfer failed: \(values)")
+                    finished.fulfill()
+                }
+            }
+        }
+        pull()
+        wait(for: [finished], timeout: 20)
+        XCTAssertEqual(finalStatus, 201)
+        XCTAssertEqual(progress.first, 0)
+        XCTAssertEqual(progress, progress.sorted())
+        XCTAssertEqual(server.digest, SHA256.hash(data: bytes))
+    }
+
+    func testCancelledTransferFailsPendingReadAndRemovesBody() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let root = directory.appendingPathComponent("files")
+        let cache = directory.appendingPathComponent("snapshots")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(repeating: 1, count: 4_096).write(to: root.appendingPathComponent("a.txt"))
+        let module = HttpModule(configuration: .ephemeral, filesRoot: root, uploadCache: cache)
+        defer { module.close() }
+        let started = expectation(description: "Multipart transfer started")
+        var transferId: Int64 = 0
+        module.invoke(method: "transferStart", payload: try WireMap.encode([
+            "url": .text("http://127.0.0.1:9/never"),
+            "kind": .integer(1),
+            "parts": .text(#"[{"type":1,"name":"caption","value":"oi"},{"type":2,"name":"file","path":"a.txt"}]"#),
+        ])) { status, payload in
+            XCTAssertEqual(status, .success)
+            if case let .integer(id)? = (try? WireMap.decode(payload))?["transfer"] { transferId = id }
+            started.fulfill()
+        }
+        wait(for: [started], timeout: 5)
+        let cancelled = expectation(description: "Transfer cancelled")
+        module.invoke(method: "transferCancel", payload: try WireMap.encode(["transfer": .integer(transferId)])) { status, _ in
+            XCTAssertEqual(status, .success)
+            cancelled.fulfill()
+        }
+        wait(for: [cancelled], timeout: 5)
+        let next = expectation(description: "Next after cancel")
+        module.invoke(method: "transferNext", payload: try WireMap.encode(["transfer": .integer(transferId)])) { status, _ in
+            XCTAssertEqual(status, .failure)
+            next.fulfill()
+        }
+        wait(for: [next], timeout: 5)
+        Thread.sleep(forTimeInterval: 0.5)
+        let leftovers = (try? FileManager.default.contentsOfDirectory(atPath: cache.path)) ?? []
+        XCTAssertTrue(leftovers.allSatisfy { !$0.hasPrefix("pam-multipart-") })
+    }
+}
+
 private final class UploadHTTPServer: @unchecked Sendable {
     private let listener: NWListener
     private let queue = DispatchQueue(label: "pam.test.http.upload")

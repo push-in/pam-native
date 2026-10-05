@@ -281,6 +281,11 @@ names in Reels).
 
 ## Platform status
 
-Android implements every primitive on this page. iOS ships the protocol
-identifiers and decodes the events; its native implementation of drags,
-double tap, scroll phases and text layout is pending.
+Android and iOS (1.8.0) implement every primitive on this page. On iOS,
+presses carry coordinates from the touch that ended the press (VoiceOver
+activations report the centre), `delayLongPress`/`unstable_pressDelay`/
+`delayPressOut` drive the recognizers, axis-locked pans (drags, horizontal or
+vertical `GestureDetector`s) only begin on their axis so rows keep scrolling
+their list, and `ellipsizeMode="marquee"` scrolls single-line labels.
+`pressRetentionOffset` keeps UIKit's fixed touch-tracking slop on iOS. The iOS
+implementation has not been validated on a device yet.

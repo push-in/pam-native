@@ -26,6 +26,88 @@ public enum PamPushNotifications {
             request: response.notification.request
         )
     }
+
+    /// UNUserNotificationCenterDelegate `didReceive`: handles conversation
+    /// inline replies / mark-as-read natively (endpoint delivery, durable
+    /// Notifications::onAction() queue) and reports other taps as opens.
+    /// Call `completionHandler` exactly as UIKit hands it in.
+    public static func didReceive(response: UNNotificationResponse, completionHandler: @escaping () -> Void) {
+        let userInfo = response.notification.request.content.userInfo
+        guard let key = userInfo[PamConversationNotifications.userInfoKey] as? String,
+              response.actionIdentifier == PamConversationNotifications.replyAction ||
+                response.actionIdentifier == PamConversationNotifications.markReadAction else {
+            if response.actionIdentifier != UNNotificationDismissActionIdentifier {
+                didOpen(response: response)
+            }
+            completionHandler()
+            return
+        }
+        let type = response.actionIdentifier == PamConversationNotifications.replyAction
+            ? PamNotificationActionType.reply
+            : PamNotificationActionType.markRead
+        let text = String(
+            ((response as? UNTextInputNotificationResponse)?.userText ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(PamConversationMessage.maxText)
+        )
+        if type == PamNotificationActionType.reply && text.isEmpty {
+            completionHandler()
+            return
+        }
+        // Keep the process alive while the endpoint request runs.
+        let token = PamBackgroundTaskToken()
+        let finish = PamMainCallback(completionHandler)
+        DispatchQueue.main.async {
+            token.begin("pam-notification-action")
+            PamNotificationActions.handle(type: type, key: key, text: text) {
+                DispatchQueue.main.async {
+                    finish.call()
+                    token.end()
+                }
+            }
+        }
+    }
+
+    /// `application(_:didReceiveRemoteNotification:fetchCompletionHandler:)`
+    /// for data-only (`content-available: 1`) pushes: applies PushRendering
+    /// rules natively, then reports the push to PHP (`PushMessage::$rendered`).
+    public static func didReceiveRemote(
+        userInfo: [AnyHashable: Any],
+        completion: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        var data: [String: Any] = [:]
+        for (key, value) in userInfo {
+            guard let key = key as? String, key != "aps" else { continue }
+            data[key] = value
+        }
+        let aps = userInfo["aps"] as? [String: Any]
+        let alert = aps?["alert"] as? [String: Any]
+        let title = (alert?["title"] as? String) ?? ""
+        let body = (alert?["body"] as? String) ?? (aps?["alert"] as? String) ?? ""
+        let id = (userInfo["gcm.message_id"] as? String)
+            ?? (userInfo["google.message_id"] as? String)
+            ?? (userInfo["id"] as? String)
+            ?? UUID().uuidString
+        let dataJson = JSONSerialization.isValidJSONObject(data)
+            ? (try? JSONSerialization.data(withJSONObject: data)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+            : "{}"
+        DispatchQueue.global(qos: .userInitiated).async {
+            let rendered = PamPushRendering.render(id: id, title: title, body: body, dataJson: dataJson)
+            PushTokenRegistry.shared.report(
+                event: 1,
+                id: id,
+                title: title,
+                body: body,
+                dataJson: dataJson,
+                deepLink: (data["pam.deepLink"] as? String) ?? (data["deepLink"] as? String) ?? (data["deep_link"] as? String) ?? "",
+                rendered: rendered
+            )
+            // Give UserNotifications a moment to persist the posted request.
+            DispatchQueue.main.asyncAfter(deadline: .now() + (rendered ? 0.5 : 0)) {
+                completion(rendered ? .newData : .noData)
+            }
+        }
+    }
 }
 
 final class NotificationsModule: NativeModule, ClosableNativeModule {
@@ -102,37 +184,17 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
             case "nextPushEvent":
                 PushTokenRegistry.shared.nextEvent(completion: completion)
             case "showConversation":
-                // iOS fallback: one threaded notification per conversation with the
-                // latest message. Inline replies need a host notification category.
                 let values = try WireMap.decode(payload)
                 guard case let .text(specJSON)? = values["spec"],
-                      let spec = try JSONSerialization.jsonObject(with: Data(specJSON.utf8)) as? [String: Any],
-                      let key = spec["key"] as? String,
-                      let last = (spec["messages"] as? [[String: Any]])?.last,
-                      let text = last["text"] as? String else {
+                      let object = try JSONSerialization.jsonObject(with: Data(specJSON.utf8)) as? [String: Any] else {
                     throw NotificationsError("Invalid conversation payload")
                 }
-                let sender = (last["sender"] as? [String: Any])?["name"] as? String ?? ""
-                let title = spec["title"] as? String ?? ""
-                let content = UNMutableNotificationContent()
-                content.threadIdentifier = key
-                content.title = title.isEmpty ? sender : title
-                content.body = title.isEmpty || sender.isEmpty ? text : "\(sender): \(text)"
-                content.sound = (spec["silent"] as? Bool) == true ? nil : .default
-                var userInfo: [AnyHashable: Any] = ["pam.conversation": key]
-                if let dataJSON = spec["data"] as? String,
-                   let object = try? JSONSerialization.jsonObject(with: Data(dataJSON.utf8)) {
-                    userInfo["pam.data"] = object
-                }
-                if let deepLink = spec["deepLink"] as? String, !deepLink.isEmpty {
-                    userInfo["pam.deepLink"] = deepLink
-                }
-                content.userInfo = userInfo
-                center.add(UNNotificationRequest(identifier: "pam-conversation-\(key)", content: content, trigger: nil)) {
-                    if let error = $0 {
+                let spec = try PamConversationSpec.from(object)
+                PamConversationNotifications.show(spec) { error in
+                    if let error {
                         completion(.failure, Data(error.localizedDescription.utf8))
                     } else {
-                        completion(.success, (try? WireMap.encode(["key": .text(key)])) ?? Data())
+                        completion(.success, (try? WireMap.encode(["key": .text(spec.key)])) ?? Data())
                     }
                 }
             case "cancelConversation":
@@ -140,14 +202,35 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
                 guard case let .text(key)? = values["key"] else {
                     throw NotificationsError("Missing conversation key")
                 }
-                center.removeDeliveredNotifications(withIdentifiers: ["pam-conversation-\(key)"])
+                PamConversationNotifications.cancel(key: key)
                 completion(.success, Data())
-            case "setActiveRoute", "forgetPushRendering":
+            case "nextAction":
+                PamNotificationActions.next(completion)
+            case "registerPushRendering":
+                let values = try WireMap.decode(payload)
+                guard case let .text(rule)? = values["rule"] else { throw NotificationsError("Missing push rendering rule") }
+                try PamPushRendering.register(rule)
                 completion(.success, Data())
-            case "nextAction", "registerPushRendering":
-                throw NotificationsError(
-                    "Notification actions and declarative push rendering are not available on iOS yet"
-                )
+            case "forgetPushRendering":
+                let values = try WireMap.decode(payload)
+                if case .flag(true)? = values["all"] {
+                    PamPushRendering.clear()
+                } else {
+                    guard case let .text(field)? = values["field"], case let .text(type)? = values["type"] else {
+                        throw NotificationsError("Missing push rendering field/type")
+                    }
+                    PamPushRendering.forget(field: field, type: type)
+                }
+                completion(.success, Data())
+            case "setActiveRoute":
+                let values = try WireMap.decode(payload)
+                guard case let .text(name)? = values["name"] else { throw NotificationsError("Missing route name") }
+                var params = "{}"
+                var path = ""
+                if case let .text(value)? = values["params"] { params = value }
+                if case let .text(value)? = values["path"] { path = value }
+                PamActiveRoute.update(name: name, paramsJson: params, path: path)
+                completion(.success, Data())
             default:
                 throw NotificationsError("Unknown notifications method \(method)")
             }
@@ -158,6 +241,7 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
 
     func close() {
         PushTokenRegistry.shared.closeEvents()
+        PamNotificationActions.close("Notifications module closed")
     }
 }
 
@@ -248,13 +332,35 @@ private final class PushTokenRegistry {
             ?? userInfo["deepLink"] as? String
             ?? userInfo["deep_link"] as? String
             ?? ""
+        report(
+            event: event,
+            id: request.identifier,
+            title: content.title,
+            body: content.body,
+            dataJson: String(decoding: data, as: UTF8.self),
+            deepLink: deepLink,
+            rendered: false
+        )
+    }
+
+    func report(
+        event: Int64,
+        id: String,
+        title: String,
+        body: String,
+        dataJson: String,
+        deepLink: String,
+        rendered: Bool
+    ) {
+        let data = dataJson.utf8.count <= 256 * 1_024 ? dataJson : "{}"
         let payload = (try? WireMap.encode([
             "event": .integer(event),
-            "id": .text(String(request.identifier.prefix(512))),
-            "title": .text(String(content.title.prefix(4_096))),
-            "body": .text(String(content.body.prefix(16_384))),
-            "data": .text(String(decoding: data, as: UTF8.self)),
+            "id": .text(String(id.prefix(512))),
+            "title": .text(String(title.prefix(4_096))),
+            "body": .text(String(body.prefix(16_384))),
+            "data": .text(data),
             "deepLink": .text(String(deepLink.prefix(8_192))),
+            "rendered": .flag(rendered),
         ])) ?? Data()
         lock.lock()
         let callback = eventWaiter
@@ -288,4 +394,11 @@ private struct NotificationsError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+/// Carries a UIKit completion handler across queues.
+final class PamMainCallback: @unchecked Sendable {
+    private let callback: () -> Void
+    init(_ callback: @escaping () -> Void) { self.callback = callback }
+    func call() { callback() }
 }

@@ -45,6 +45,15 @@ public final class PamRenderer {
     private var localModalActions: [Int64: UIAction.Identifier] = [:]
     private var borderLayers: [Int64: PamBorderLayers] = [:]
     private var patternedBorderLayers: [Int64: CAShapeLayer] = [:]
+    private lazy var motion = PamMotionCoordinator(
+        dispatch: { [weak self] id, kind, payload in self?.dispatchEvent(id, kind, payload) },
+        isMounted: { [weak self] id in self?.views[id] != nil },
+        wants: { [weak self] id, key in self?.nodes[id]?.properties[key] != nil },
+        firstChild: { [weak self] id in
+            guard let self, let child = self.children[id]?.first else { return nil }
+            return self.views[child]
+        }
+    )
     private var rootId: Int64 = 0
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
@@ -298,6 +307,7 @@ public final class PamRenderer {
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
         workletAnimators.removeValue(forKey: id)?.stop()
+        motion.remove(id)
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
@@ -356,10 +366,16 @@ public final class PamRenderer {
             }
         }
 
+        applyMotionProperty(view: view, nodeId: id, key: key, value: value)
+
         if isEventProperty(key) ||
             key == PamConstants.scrollHorizontal ||
-            key == PamConstants.endReachedThreshold {
+            key == PamConstants.endReachedThreshold ||
+            PamRenderer.motionEventKeys.contains(key) {
             installEvents(for: id)
+        }
+        if let label = view as? UILabel, state.properties[PamConstants.onTextLayout] != nil {
+            motion.scheduleTextLayout(nodeId: id, label: label)
         }
 
         if state.kind == .customView && key == PamConstants.hostProperties {
@@ -423,6 +439,11 @@ public final class PamRenderer {
         for (key, value) in state.properties {
             applyProperty(view: view, nodeId: state.id, key: key, value: value)
         }
+        for key in PamRenderer.motionPropertyOrder {
+            if let value = state.properties[key] {
+                applyMotionProperty(view: view, nodeId: state.id, key: key, value: value)
+            }
+        }
         applyInputSelection(view: view, nodeId: state.id)
         installEvents(for: state.id)
         applyLayout(state.id)
@@ -450,6 +471,7 @@ public final class PamRenderer {
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
         workletAnimators.removeValue(forKey: id)?.stop()
+        motion.dematerialize(id)
         localModalActions[id] = nil
         borderLayers[id]?.remove()
         borderLayers[id] = nil
@@ -560,6 +582,7 @@ public final class PamRenderer {
         if list.contentSize != contentSize {
             list.contentSize = contentSize
         }
+        list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
         let visible = PamVirtualWindow.visibleIds(
             frames: localFrames,
             viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
@@ -700,8 +723,18 @@ public final class PamRenderer {
             width: max(0, width),
             height: max(0, height),
         )
-        let layoutChanged = view.frame != nextFrame
-        view.frame = nextFrame
+        // `frame` is undefined while a transform (drag, animation program,
+        // transition) is applied; position through bounds/center instead.
+        let layoutChanged: Bool
+        if view.transform.isIdentity {
+            layoutChanged = view.frame != nextFrame
+            view.frame = nextFrame
+        } else {
+            let center = CGPoint(x: nextFrame.midX, y: nextFrame.midY)
+            layoutChanged = view.bounds.size != nextFrame.size || view.center != center
+            view.bounds.size = nextFrame.size
+            view.center = center
+        }
         if layoutChanged,
            let source = state.properties[PamConstants.source]?.textOrNil(),
            PamPhotoAssetURI.identifier(source) != nil,
@@ -720,6 +753,9 @@ public final class PamRenderer {
         applyBorder(view: view, nodeId: id)
         applyBoxShadow(view: view, nodeId: id)
         applyTextAlignment(view: view, nodeId: id)
+        if layoutChanged, let label = view as? UILabel, state.properties[PamConstants.onTextLayout] != nil {
+            motion.scheduleTextLayout(nodeId: id, label: label)
+        }
     }
 
     private func addChild(to parent: Int64, child: Int64) {
@@ -984,21 +1020,43 @@ public final class PamRenderer {
                 nativeResetOnEnd:
                     state.properties[PamConstants.gestureNativeResetOnEnd]?.boolOrNil() ?? false
             )
+            bridge.drag = motion.existing(nodeId)?.drag
             eventBridges[nodeId]?[EventKind.gestureUpdate.rawValue] = bridge
         }
 
         let inputField = view as? PamInputField
+        let hasDoubleTap = eventProperties.contains(PamConstants.onDoubleTap)
+        let doubleTapDelayMs = state.properties[PamConstants.pressDoubleTapDelayMs]?.integerOrNil() ?? 250
+        let pressInDelayMs = state.properties[PamMotionKeys.pressDelayInMs]?.integerOrNil() ?? 0
+        let pressOutDelayMs = state.properties[PamMotionKeys.pressDelayOutMs]?.integerOrNil() ?? 0
+        let longPressMs = pressInDelayMs +
+            (state.properties[PamMotionKeys.pressDelayLongMs]?.integerOrNil() ?? 500)
+        let tapEffect: (CGPoint) -> Void = { [weak self, weak view] point in
+            guard let self, let view else { return }
+            self.motion.playTapEffect(
+                nodeId: nodeId,
+                pressable: view,
+                source: self.nodes[nodeId]?.properties[PamConstants.pressTapEffect]?.textOrNil(),
+                point: point
+            )
+        }
 
         if let button = view as? UIButton {
-            if eventProperties.contains(PamConstants.onPress) {
+            if eventProperties.contains(PamConstants.onPress) || hasDoubleTap {
                 let bridge = EventBridge(nodeId: nodeId, kind: EventKind.press.rawValue, dispatchEvent: dispatchEvent)
                 bridge.attachButtonPress(button)
+                bridge.configureTaps(
+                    doubleTap: hasDoubleTap,
+                    emitsPress: eventProperties.contains(PamConstants.onPress),
+                    delayMs: doubleTapDelayMs
+                )
+                bridge.onDoubleTapEffect = hasDoubleTap ? tapEffect : nil
                 eventBridges[nodeId]?[EventKind.press.rawValue] = bridge
             }
 
             if eventProperties.contains(PamConstants.onLongPress) {
                 let bridge = EventBridge(nodeId: nodeId, kind: EventKind.longPress.rawValue, dispatchEvent: dispatchEvent)
-                bridge.attachLongPress(to: button)
+                bridge.attachLongPress(to: button, minimumDurationMs: longPressMs)
                 eventBridges[nodeId]?[EventKind.longPress.rawValue] = bridge
             }
 
@@ -1011,6 +1069,8 @@ public final class PamRenderer {
                     pressIn: eventProperties.contains(PamConstants.onPressIn) ? EventKind.pressIn.rawValue : nil,
                     pressOut: eventProperties.contains(PamConstants.onPressOut) ? EventKind.pressOut.rawValue : nil,
                     pressMove: eventProperties.contains(PamConstants.onPressMove) ? EventKind.pressMove.rawValue : nil,
+                    pressInDelayMs: pressInDelayMs,
+                    pressOutDelayMs: pressOutDelayMs,
                 )
                 eventBridges[nodeId]?[EventKind.pressMove.rawValue] = bridge
             }
@@ -1023,15 +1083,21 @@ public final class PamRenderer {
             return
         }
 
-        if eventProperties.contains(PamConstants.onPress), !state.kind.isContainer {
+        if (eventProperties.contains(PamConstants.onPress) && !state.kind.isContainer) || hasDoubleTap {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.press.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachPress(to: view)
+            bridge.configureTaps(
+                doubleTap: hasDoubleTap,
+                emitsPress: eventProperties.contains(PamConstants.onPress),
+                delayMs: doubleTapDelayMs
+            )
+            bridge.onDoubleTapEffect = hasDoubleTap ? tapEffect : nil
             eventBridges[nodeId]?[EventKind.press.rawValue] = bridge
         }
 
         if eventProperties.contains(PamConstants.onLongPress) {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.longPress.rawValue, dispatchEvent: dispatchEvent)
-            bridge.attachLongPress(to: view)
+            bridge.attachLongPress(to: view, minimumDurationMs: longPressMs)
             eventBridges[nodeId]?[EventKind.longPress.rawValue] = bridge
         }
 
@@ -1044,6 +1110,8 @@ public final class PamRenderer {
                 pressIn: eventProperties.contains(PamConstants.onPressIn) ? EventKind.pressIn.rawValue : nil,
                 pressOut: eventProperties.contains(PamConstants.onPressOut) ? EventKind.pressOut.rawValue : nil,
                 pressMove: eventProperties.contains(PamConstants.onPressMove) ? EventKind.pressMove.rawValue : nil,
+                pressInDelayMs: pressInDelayMs,
+                pressOutDelayMs: pressOutDelayMs,
             )
             eventBridges[nodeId]?[EventKind.pressMove.rawValue] = bridge
         }
@@ -1110,7 +1178,11 @@ public final class PamRenderer {
         let hasNativePaging =
             state.properties[PamConstants.scrollPagingEnabled]?.boolOrNil() == true ||
             (state.properties[PamConstants.scrollSnapInterval]?.decimalOrNil() ?? 0) > 0
-        if (hasScroll || hasEndReached || hasNativePaging), let scroll = view as? UIScrollView {
+        let hasBeginDrag = eventProperties.contains(PamConstants.onScrollBeginDrag)
+        let hasEndDrag = eventProperties.contains(PamConstants.onScrollEndDrag)
+        let hasMomentumEnd = eventProperties.contains(PamConstants.onMomentumScrollEnd)
+        if (hasScroll || hasEndReached || hasNativePaging || hasBeginDrag || hasEndDrag || hasMomentumEnd),
+           let scroll = view as? UIScrollView {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.scroll.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachScrollEvents(
                 scroll,
@@ -1121,7 +1193,13 @@ public final class PamRenderer {
                     0,
                     state.properties[PamConstants.endReachedThreshold]?.decimalOrNil() ?? 0.5
                 ),
+                emitBeginDrag: hasBeginDrag,
+                emitEndDrag: hasEndDrag,
+                emitMomentumEnd: hasMomentumEnd,
             )
+            if hasBeginDrag || hasEndDrag || hasMomentumEnd {
+                eventBridges[nodeId]?[EventKind.momentumScrollEnd.rawValue] = bridge
+            }
             if hasScroll {
                 eventBridges[nodeId]?[EventKind.scroll.rawValue] = bridge
             }
@@ -1692,11 +1770,26 @@ public final class PamRenderer {
                 view.frame = frame
             }
         case PamConstants.opacity:
-            view.alpha = CGFloat(value.decimalOrZero())
+            if !motion.animateTransition(nodeId: nodeId, view: view, property: .opacity, target: value.decimalOrZero()) {
+                view.alpha = CGFloat(value.decimalOrZero())
+            }
         case PamConstants.translationX:
-            view.transform.tx = CGFloat(value.decimalOrZero())
+            if !motion.animateTransition(nodeId: nodeId, view: view, property: .translateX, target: value.decimalOrZero()) {
+                view.transform.tx = CGFloat(value.decimalOrZero())
+            }
         case PamConstants.translationY:
-            view.transform.ty = CGFloat(value.decimalOrZero())
+            if !motion.animateTransition(nodeId: nodeId, view: view, property: .translateY, target: value.decimalOrZero()) {
+                view.transform.ty = CGFloat(value.decimalOrZero())
+            }
+        case PamConstants.scaleX
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .scaleX, target: value.decimalOrZero()):
+            break
+        case PamConstants.scaleY
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .scaleY, target: value.decimalOrZero()):
+            break
+        case PamConstants.rotation
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .rotate, target: value.decimalOrZero()):
+            break
         case PamConstants.scaleX:
             view.transform = view.transform.scaledBy(
                 x: CGFloat(value.decimalOrZero()),
@@ -1996,6 +2089,7 @@ public final class PamRenderer {
             }
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = value.boolOrNil() ?? false
+            (view as? PamVirtualListView)?.pamPagingEnabled = value.boolOrNil() ?? false
         case PamConstants.scrollSnapInterval:
             (view as? PamAnchoredScrollView)?.pamSnapInterval =
                 max(0, CGFloat(value.decimalOrZero()))
@@ -2332,6 +2426,7 @@ public final class PamRenderer {
             (view as? UIScrollView)?.indicatorStyle = PamScrollIndicatorStyle.auto.native
         case PamConstants.scrollPagingEnabled:
             (view as? PamAnchoredScrollView)?.pamPagingEnabled = false
+            (view as? PamVirtualListView)?.pamPagingEnabled = false
         case PamConstants.scrollSnapInterval:
             (view as? PamAnchoredScrollView)?.pamSnapInterval = 0
         case PamConstants.scrollDecelerationRate:
@@ -3018,6 +3113,12 @@ public final class PamRenderer {
             let animation = CAKeyframeAnimation(keyPath: keyPath)
             animation.values = values
             animation.keyTimes = offsets.map { NSNumber(value: $0) }
+            // Per-keyframe `easing` applies to the segment leaving that frame.
+            if resolvedFrames.contains(where: { ($0["easing"] as? String)?.isEmpty == false }) {
+                animation.timingFunctions = resolvedFrames.dropLast().map { frame in
+                    PamEasings.timingFunction((frame["easing"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "linear")
+                }
+            }
             animations.append(animation)
         }
         guard !animations.isEmpty else { return }
@@ -3049,6 +3150,69 @@ public final class PamRenderer {
         group.delegate = delegate
         animationDelegates[nodeId] = delegate
         view.layer.add(group, forKey: "pam.keyframes")
+    }
+
+    /// Gesture/animation properties added in 1.5.0 (`nil` = property removed).
+    private static let motionPropertyOrder = [
+        PamConstants.nativeRef,
+        PamConstants.transitionSpec,
+        PamConstants.gestureDrag,
+        PamConstants.gestureDragSnapIndex,
+        PamConstants.animationRestartKey,
+        PamConstants.animationProgram,
+        PamMotionKeys.textEllipsizeMode,
+    ]
+
+    /// Props whose change must rebuild the node's gesture/scroll bridges.
+    private static let motionEventKeys: Set<Int> = [
+        PamConstants.onDoubleTap,
+        PamConstants.onGestureSettle,
+        PamConstants.onScrollBeginDrag,
+        PamConstants.onScrollEndDrag,
+        PamConstants.onMomentumScrollEnd,
+        PamConstants.onTextLayout,
+        PamConstants.pressDoubleTapDelayMs,
+        PamConstants.pressTapEffect,
+        PamConstants.gestureDrag,
+        PamConstants.scrollPagingEnabled,
+        PamMotionKeys.pressDelayLongMs,
+        PamMotionKeys.pressDelayInMs,
+        PamMotionKeys.pressDelayOutMs,
+    ]
+
+    private func applyMotionProperty(view: UIView, nodeId: Int64, key: Int, value: PropValue?) {
+        switch key {
+        case PamConstants.nativeRef:
+            view.pamNativeRef = value?.textOrNil()
+        case PamConstants.transitionSpec:
+            motion.setTransitionSpec(nodeId: nodeId, source: value?.textOrNil())
+        case PamConstants.gestureDrag:
+            _ = motion.configureDrag(nodeId: nodeId, host: view, source: value?.textOrNil())
+        case PamConstants.gestureDragSnapIndex:
+            motion.applyDragSnap(nodeId: nodeId, view: view, request: value?.integerOrNil())
+        case PamConstants.animationProgram:
+            if value == nil {
+                motion.cancelProgram(nodeId)
+            } else {
+                motion.configureProgram(nodeId: nodeId, view: view, source: value?.textOrNil())
+            }
+        case PamConstants.animationRestartKey:
+            motion.restart(nodeId: nodeId, key: value?.integerOrNil() ?? 0) {
+                let properties = nodes[nodeId]?.properties ?? [:]
+                if let program = properties[PamConstants.animationProgram]?.textOrNil() {
+                    motion.configureProgram(nodeId: nodeId, view: view, source: program, force: true)
+                }
+                if properties[PamConstants.animationKeyframes] != nil {
+                    configureKeyframeAnimation(nodeId: nodeId, view: view)
+                }
+            }
+        case PamMotionKeys.textEllipsizeMode:
+            if let label = view as? UILabel {
+                motion.applyEllipsizeMode(label: label, mode: value?.integerOrNil())
+            }
+        default:
+            break
+        }
     }
 
     private func configureWorkletAnimation(nodeId: Int64, view: UIView) {
@@ -3894,6 +4058,23 @@ public final class PamRenderer {
         private var nativeGestureResetOnEnd = false
         private var nativeGestureBaseTransform = CGAffineTransform.identity
         private var scrollGestureStart: CGFloat = 0
+        private var doubleTapEnabled = false
+        private var emitsSinglePress = true
+        private var doubleTapDelay: TimeInterval = 0.25
+        private var lastTapPoint: CGPoint?
+        private var lastTapTime: TimeInterval = 0
+        private var pendingSingleTap: DispatchWorkItem?
+        var onDoubleTapEffect: ((CGPoint) -> Void)?
+        private var pressInDelay: TimeInterval = 0
+        private var pressOutDelay: TimeInterval = 0
+        private var pendingPressIn: DispatchWorkItem?
+        private var pressInEmitted = false
+        var drag: PamDragController?
+        private var dragRelease: PamDragRelease?
+        private var emitsScrollBeginDrag = false
+        private var emitsScrollEndDrag = false
+        private var emitsMomentumScrollEnd = false
+        private var scrollPhaseDragging = false
 
         init(nodeId: Int64, kind: Int, dispatchEvent: @escaping (Int64, Int, Data) -> Void) {
             self.nodeId = nodeId
@@ -3902,8 +4083,16 @@ public final class PamRenderer {
         }
 
         func attachButtonPress(_ button: UIButton) {
-            button.addTarget(self, action: #selector(onPress), for: .touchUpInside)
+            button.addTarget(self, action: #selector(onButtonPress(_:event:)), for: .touchUpInside)
             control = button
+        }
+
+        /// RN double-tap pattern: with a double-tap handler the single press
+        /// waits [delayMs] and is cancelled by a second nearby tap.
+        func configureTaps(doubleTap: Bool, emitsPress: Bool, delayMs: Int64) {
+            doubleTapEnabled = doubleTap
+            emitsSinglePress = emitsPress
+            doubleTapDelay = TimeInterval(min(max(delayMs, 80), 1_000)) / 1_000
         }
 
         func attachSubmit(_ control: UIControl) {
@@ -3914,15 +4103,18 @@ public final class PamRenderer {
         }
 
         func attachPress(to view: UIView) {
-            let recognizer = UITapGestureRecognizer(target: self, action: #selector(onPress))
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
             recognizer.cancelsTouchesInView = false
+            recognizer.delegate = self
             view.addGestureRecognizer(recognizer)
             tap = recognizer
         }
 
-        func attachLongPress(to view: UIView) {
+        /// `delayLongPress` (+ `unstable_pressDelay`) in milliseconds; RN default 500 ms.
+        func attachLongPress(to view: UIView, minimumDurationMs: Int64 = 500) {
             let recognizer = UILongPressGestureRecognizer(target: self, action: #selector(onLongPress(_:)))
-            recognizer.minimumPressDuration = 0.5
+            recognizer.minimumPressDuration = TimeInterval(min(max(minimumDurationMs, 1), 60_000)) / 1_000
+            recognizer.delegate = self
             view.addGestureRecognizer(recognizer)
             longPress = recognizer
         }
@@ -3932,10 +4124,14 @@ public final class PamRenderer {
             pressIn: Int?,
             pressOut: Int?,
             pressMove: Int?,
+            pressInDelayMs: Int64 = 0,
+            pressOutDelayMs: Int64 = 0,
         ) {
             pressInKind = pressIn
             pressOutKind = pressOut
             pressMoveKind = pressMove
+            pressInDelay = TimeInterval(min(max(pressInDelayMs, 0), 60_000)) / 1_000
+            pressOutDelay = TimeInterval(min(max(pressOutDelayMs, 0), 60_000)) / 1_000
             let recognizer = UILongPressGestureRecognizer(
                 target: self,
                 action: #selector(onPressPointer(_:)),
@@ -3943,6 +4139,7 @@ public final class PamRenderer {
             recognizer.minimumPressDuration = 0
             recognizer.cancelsTouchesInView = false
             recognizer.delaysTouchesEnded = false
+            recognizer.delegate = self
             view.addGestureRecognizer(recognizer)
             pressPointer = recognizer
         }
@@ -4178,7 +4375,14 @@ public final class PamRenderer {
             emitScroll: Bool,
             emitEndReached: Bool,
             endReachedThreshold: Double,
+            emitBeginDrag: Bool = false,
+            emitEndDrag: Bool = false,
+            emitMomentumEnd: Bool = false,
         ) {
+            emitsScrollBeginDrag = emitBeginDrag
+            emitsScrollEndDrag = emitEndDrag
+            emitsMomentumScrollEnd = emitMomentumEnd
+            scrollPhaseDragging = false
             scroll.delegate = self
             scrollView = scroll
             emitsScroll = emitScroll
@@ -4327,7 +4531,17 @@ public final class PamRenderer {
                 focusField.removeTarget(self, action: #selector(onBlur), for: .editingDidEnd)
             }
             self.focusField = nil
+            pendingSingleTap?.cancel()
+            pendingSingleTap = nil
+            pendingPressIn?.cancel()
+            pendingPressIn = nil
+            pressInEmitted = false
+            lastTapPoint = nil
+            onDoubleTapEffect = nil
+            drag = nil
+            dragRelease = nil
             if let control {
+                control.removeTarget(self, action: #selector(onButtonPress(_:event:)), for: .touchUpInside)
                 control.removeTarget(self, action: #selector(onPress), for: .touchUpInside)
                 control.removeTarget(self, action: #selector(onSubmit), for: .touchUpInside)
                 control.removeTarget(self, action: #selector(onSubmit), for: .primaryActionTriggered)
@@ -4431,14 +4645,39 @@ public final class PamRenderer {
                 rotation = rotationGesture.rotation
                 velocity = CGPoint(x: rotationGesture.velocity, y: 0)
             }
-            applyNativeGestureTransform(
-                sender,
-                translation: translation,
-                scale: scale,
-                rotation: rotation
-            )
+            // Drag runs on the main thread every frame; PHP only sees the
+            // semantic begin/end (with the chosen snap) and the settle.
+            let dragging = sender is UIPanGestureRecognizer && drag?.config != nil
+            if dragging, let drag {
+                switch sender.state {
+                case .began:
+                    drag.begin()
+                    drag.update(translation: translation)
+                case .changed:
+                    drag.update(translation: translation)
+                case .ended:
+                    drag.update(translation: translation)
+                    dragRelease = drag.end(velocity: velocity, cancelled: false)
+                case .cancelled, .failed:
+                    dragRelease = drag.end(velocity: velocity, cancelled: true)
+                default:
+                    break
+                }
+            } else {
+                applyNativeGestureTransform(
+                    sender,
+                    translation: translation,
+                    scale: scale,
+                    rotation: rotation
+                )
+            }
+            defer {
+                if sender.state == .ended || sender.state == .cancelled || sender.state == .failed {
+                    dragRelease = nil
+                }
+            }
 
-            if semanticGestureType == 2 || semanticGestureType == 5 {
+            if (semanticGestureType == 2 || semanticGestureType == 5) && !dragging {
                 guard matchesSemanticDirection(translation) else {
                     if sender.state == .ended || sender.state == .cancelled {
                         emitSemanticCancel(
@@ -4668,6 +4907,8 @@ public final class PamRenderer {
                 "timestamp": .integer(
                     Int64(ProcessInfo.processInfo.systemUptime * 1_000)
                 ),
+                "snapIndex": .integer(Int64(dragRelease?.snapIndex ?? -1)),
+                "thresholdReached": .flag(dragRelease?.thresholdReached ?? false),
             ])) ?? Data()
         }
 
@@ -4740,12 +4981,34 @@ public final class PamRenderer {
             }
         }
 
+        /// Axis-locked pans (drags, horizontal/vertical direction) only begin
+        /// on their axis so rows still scroll their list (gesture-handler
+        /// activeOffset/failOffset semantics).
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === semanticGesture,
+                  let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let velocity = pan.velocity(in: pan.view)
+            if let config = drag?.config {
+                return config.horizontal ? abs(velocity.x) > abs(velocity.y) : abs(velocity.y) > abs(velocity.x)
+            }
+            switch semanticGestureDirection {
+            case 2, 3, 6: return abs(velocity.x) > abs(velocity.y)
+            case 4, 5, 7: return abs(velocity.y) > abs(velocity.x)
+            default: return true
+            }
+        }
+
         func gestureRecognizer(
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
             if gestureRecognizer === semanticGesture {
                 return semanticGestureComposition == 2
+            }
+            if gestureRecognizer === tap || gestureRecognizer === longPress || gestureRecognizer === pressPointer {
+                // Press-in/out, long press and tap of one node coexist (hold
+                // to record); other views keep UIKit's exclusivity.
+                return otherGestureRecognizer.view === gestureRecognizer.view
             }
             return true
         }
@@ -4810,10 +5073,63 @@ public final class PamRenderer {
         }
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+            scrollPhaseDragging = true
+            if emitsScrollBeginDrag {
+                dispatchScrollPhase(scrollView, kind: EventKind.scrollBeginDrag.rawValue, velocity: .zero)
+            }
+            if let list = scrollView as? PamVirtualListView {
+                scrollGestureStart = list.horizontal ? list.contentOffset.x : list.contentOffset.y
+            }
             guard let scroll = scrollView as? PamAnchoredScrollView else { return }
             scrollGestureStart = scroll.horizontal
                 ? scroll.contentOffset.x
                 : scroll.contentOffset.y
+        }
+
+        func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+            if scrollPhaseDragging {
+                // willEndDragging normally reports first; this covers cancels.
+                scrollPhaseDragging = false
+                if emitsScrollEndDrag {
+                    dispatchScrollPhase(scrollView, kind: EventKind.scrollEndDrag.rawValue, velocity: .zero)
+                }
+            }
+            if !decelerate && emitsMomentumScrollEnd {
+                dispatchScrollPhase(scrollView, kind: EventKind.momentumScrollEnd.rawValue, velocity: .zero)
+            }
+        }
+
+        func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+            guard emitsMomentumScrollEnd else { return }
+            dispatchScrollPhase(scrollView, kind: EventKind.momentumScrollEnd.rawValue, velocity: .zero)
+        }
+
+        /// `ScrollPhaseEvent`: offset, release velocity (points/s, positive
+        /// towards larger offsets) and page index.
+        private func dispatchScrollPhase(_ scrollView: UIScrollView, kind: Int, velocity: CGPoint) {
+            let payload = (try? WireMap.encode([
+                "x": .decimal(scrollView.contentOffset.x),
+                "y": .decimal(scrollView.contentOffset.y),
+                "velocityX": .decimal(velocity.x),
+                "velocityY": .decimal(velocity.y),
+                "page": .integer(Int64(Self.pageIndex(scrollView))),
+            ])) ?? Data()
+            dispatchEvent(nodeId, kind, payload)
+        }
+
+        static func pageIndex(_ scrollView: UIScrollView) -> Int {
+            if let list = scrollView as? PamVirtualListView {
+                return list.pageIndex()
+            }
+            guard let scroll = scrollView as? PamAnchoredScrollView else { return 0 }
+            let extent = scroll.pamSnapInterval > 0
+                ? scroll.pamSnapInterval
+                : (scroll.horizontal
+                    ? scroll.bounds.width - scroll.adjustedContentInset.left - scroll.adjustedContentInset.right
+                    : scroll.bounds.height - scroll.adjustedContentInset.top - scroll.adjustedContentInset.bottom)
+            guard extent > 0 else { return 0 }
+            let offset = scroll.horizontal ? scroll.contentOffset.x : scroll.contentOffset.y
+            return max(0, Int((offset / extent).rounded()))
         }
 
         func scrollViewWillEndDragging(
@@ -4821,6 +5137,36 @@ public final class PamRenderer {
             withVelocity velocity: CGPoint,
             targetContentOffset: UnsafeMutablePointer<CGPoint>
         ) {
+            if scrollPhaseDragging {
+                scrollPhaseDragging = false
+                if emitsScrollEndDrag {
+                    dispatchScrollPhase(
+                        scrollView,
+                        kind: EventKind.scrollEndDrag.rawValue,
+                        velocity: CGPoint(x: velocity.x * 1_000, y: velocity.y * 1_000)
+                    )
+                }
+            }
+            if let list = scrollView as? PamVirtualListView, list.pamPagingEnabled {
+                let horizontal = list.horizontal
+                let position = horizontal ? list.contentOffset.x : list.contentOffset.y
+                let maximum = horizontal
+                    ? max(0, list.contentSize.width - list.bounds.width + list.adjustedContentInset.right)
+                    : max(0, list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom)
+                let target = PamVirtualListView.itemPageTarget(
+                    starts: list.pamItemStarts,
+                    start: scrollGestureStart,
+                    position: position,
+                    velocity: (horizontal ? velocity.x : velocity.y) * 1_000,
+                    maximum: maximum
+                )
+                if horizontal {
+                    targetContentOffset.pointee.x = target
+                } else {
+                    targetContentOffset.pointee.y = target
+                }
+                return
+            }
             guard let scroll = scrollView as? PamAnchoredScrollView else { return }
             let extent = scroll.primaryPageExtent
             guard extent > 0 else { return }
@@ -4891,9 +5237,72 @@ public final class PamRenderer {
             dispatchEvent(nodeId, kind, Data())
         }
 
+        /// Touch presses carry the release point; accessibility activations
+        /// (no touches) report the centre, like Android.
+        @objc private func onButtonPress(_ sender: UIControl, event: UIEvent) {
+            let touch = event.allTouches?.first
+            let point = touch?.location(in: sender) ?? CGPoint(x: sender.bounds.midX, y: sender.bounds.midY)
+            let page = touch?.location(in: nil) ?? sender.convert(point, to: nil)
+            handleTap(point: point, page: page)
+        }
+
+        @objc private func onTap(_ sender: UITapGestureRecognizer) {
+            guard sender.state == .ended, let view = sender.view else { return }
+            handleTap(point: sender.location(in: view), page: sender.location(in: nil))
+        }
+
+        private func handleTap(point: CGPoint, page: CGPoint) {
+            let payload = Self.pointerPayload(point: point, page: page)
+            guard doubleTapEnabled else {
+                if emitsSinglePress { dispatchEvent(nodeId, kind, payload) }
+                return
+            }
+            let now = ProcessInfo.processInfo.systemUptime
+            if let previous = lastTapPoint,
+               now - lastTapTime <= doubleTapDelay,
+               hypot(point.x - previous.x, point.y - previous.y) <= Self.doubleTapSlop {
+                pendingSingleTap?.cancel()
+                pendingSingleTap = nil
+                lastTapPoint = nil
+                onDoubleTapEffect?(point)
+                dispatchEvent(nodeId, EventKind.doubleTap.rawValue, payload)
+                return
+            }
+            lastTapPoint = point
+            lastTapTime = now
+            guard emitsSinglePress else { return }
+            pendingSingleTap?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                self.pendingSingleTap = nil
+                self.dispatchEvent(self.nodeId, self.kind, payload)
+            }
+            pendingSingleTap = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + doubleTapDelay, execute: work)
+        }
+
+        private static let doubleTapSlop: CGFloat = 100
+
+        private static func pointerPayload(point: CGPoint, page: CGPoint) -> Data {
+            (try? WireMap.encode([
+                "x": .decimal(point.x),
+                "y": .decimal(point.y),
+                "pageX": .decimal(page.x),
+                "pageY": .decimal(page.y),
+                "timestamp": .integer(Int64(ProcessInfo.processInfo.systemUptime * 1000)),
+                "pointerId": .integer(0),
+            ])) ?? Data()
+        }
+
         @objc private func onLongPress(_ sender: UILongPressGestureRecognizer) {
             guard sender.state == .began else { return }
-            dispatchEvent(nodeId, EventKind.longPress.rawValue, Data())
+            let view = sender.view
+            let point = view.map { sender.location(in: $0) } ?? .zero
+            dispatchEvent(
+                nodeId,
+                EventKind.longPress.rawValue,
+                Self.pointerPayload(point: point, page: sender.location(in: nil))
+            )
         }
 
         @objc private func onSubmit() {
@@ -4904,26 +5313,60 @@ public final class PamRenderer {
         }
 
         @objc private func onPressPointer(_ sender: UILongPressGestureRecognizer) {
-            let kind: Int
+            let point = sender.location(in: sender.view)
+            let page = sender.location(in: sender.view?.window)
             switch sender.state {
             case .began:
-                guard let pressInKind else { return }
-                kind = pressInKind
+                pendingPressIn?.cancel()
+                pressInEmitted = false
+                if pressInDelay <= 0 {
+                    emitPressIn(sender, point: point, page: page)
+                } else {
+                    let work = DispatchWorkItem { [weak self, weak sender] in
+                        guard let self, let sender else { return }
+                        self.pendingPressIn = nil
+                        self.emitPressIn(sender, point: point, page: page)
+                    }
+                    pendingPressIn = work
+                    DispatchQueue.main.asyncAfter(deadline: .now() + pressInDelay, execute: work)
+                }
             case .ended, .cancelled, .failed:
+                if let pending = pendingPressIn {
+                    pending.cancel()
+                    pendingPressIn = nil
+                    // A completed tap shorter than the press-in delay still
+                    // reports press-in before press-out (RN/Android order).
+                    if sender.state == .ended { emitPressIn(sender, point: point, page: page) }
+                }
+                guard pressInEmitted else { return }
+                pressInEmitted = false
                 guard let pressOutKind else { return }
-                kind = pressOutKind
+                let emit = { [weak self] in
+                    self?.dispatchPressPointer(
+                        sender,
+                        kind: pressOutKind,
+                        locationInView: point,
+                        locationInWindow: page,
+                    )
+                }
+                if pressOutDelay <= 0 {
+                    emit()
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + pressOutDelay, execute: emit)
+                }
             case .changed:
                 guard let pressMoveKind else { return }
-                kind = pressMoveKind
+                dispatchPressPointer(sender, kind: pressMoveKind, locationInView: point, locationInWindow: page)
             default:
                 return
             }
-            dispatchPressPointer(
-                sender,
-                kind: kind,
-                locationInView: sender.location(in: sender.view),
-                locationInWindow: sender.location(in: sender.view?.window),
-            )
+        }
+
+        private func emitPressIn(_ sender: UILongPressGestureRecognizer, point: CGPoint, page: CGPoint) {
+            guard !pressInEmitted else { return }
+            pressInEmitted = true
+            guard let pressInKind else { return }
+            dispatchPressPointer(sender, kind: pressInKind, locationInView: point, locationInWindow: page)
         }
 
         @objc private func onTextChanged(_ sender: UITextField) {

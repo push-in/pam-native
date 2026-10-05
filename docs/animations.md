@@ -106,6 +106,9 @@ drive it with `->drive('backdrop', 'opacity', [0, '100%'], [1, 0])`.
 
 ## Platform status
 
-Android implements all of the above. iOS decodes the protocol; its native
-animation-program, per-property transition and slide-fade implementations are
-pending, and it falls back to the legacy single-duration transition.
+Android and iOS (1.8.0) implement all of the above on the UI thread. iOS
+drives programs, transitions and drag settles from a `CADisplayLink` with the
+same spring solver and easing curves as Android, maps per-keyframe `easing` to
+Core Animation timing functions and runs `slide-fade` modals with
+`UIViewPropertyAnimator`. The iOS implementation has not been validated on a
+device yet (no Xcode in the release pipeline).

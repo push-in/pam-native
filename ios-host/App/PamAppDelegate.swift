@@ -1,9 +1,10 @@
 import PamNative
 import PamNativePlugins
 import UIKit
+import UserNotifications
 
 @main
-final class PamAppDelegate: UIResponder, UIApplicationDelegate {
+final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     var window: UIWindow?
     private var runtime: PamRuntime?
 #if DEBUG
@@ -18,6 +19,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
         let window = UIWindow(frame: UIScreen.main.bounds)
         let controller = PamHostViewController()
         // Apply the persisted appearance before the window is visible so the
@@ -93,6 +95,41 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate {
 
     func applicationWillTerminate(_ application: UIApplication) {
         runtime?.close()
+    }
+
+    // MARK: Push notifications (Notifications::registerPush(), PushRendering, actions)
+
+    func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        PamPushNotifications.didRegister(deviceToken: deviceToken)
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        PamPushNotifications.didFailToRegister(error: error)
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        PamPushNotifications.didReceiveRemote(userInfo: userInfo, completion: completionHandler)
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        PamPushNotifications.didReceive(notification: notification)
+        completionHandler([.banner, .list, .sound, .badge])
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        PamPushNotifications.didReceive(response: response, completionHandler: completionHandler)
     }
 
     func application(
