@@ -6531,13 +6531,29 @@ mod css_flex_tests {
             root: 1,
             nodes: BTreeMap::from([
                 (1, node(1, 0, 0, NodeKind::VirtualList, vec![])),
-                (2, node(2, 1, 0, NodeKind::Column, vec![(PropKey::Padding, f(5.0))])),
-                (3, node(3, 2, 0, NodeKind::View, vec![(PropKey::Height, f(30.0))])),
+                (
+                    2,
+                    node(2, 1, 0, NodeKind::Column, vec![(PropKey::Padding, f(5.0))]),
+                ),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::View, vec![(PropKey::Height, f(30.0))]),
+                ),
                 (4, node(4, 1, 1, NodeKind::Column, vec![])),
-                (5, node(5, 4, 0, NodeKind::View, vec![(PropKey::Height, f(72.0))])),
+                (
+                    5,
+                    node(5, 4, 0, NodeKind::View, vec![(PropKey::Height, f(72.0))]),
+                ),
             ]),
         };
-        let layouts = calculate(&tree, Size { width: 300.0, height: 600.0 }).unwrap();
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 300.0,
+                height: 600.0,
+            },
+        )
+        .unwrap();
         assert_eq!(layouts[&2].height, 40.0);
         assert_eq!(layouts[&4].y, 40.0);
         assert_eq!(layouts[&4].height, 72.0);
@@ -6555,16 +6571,48 @@ mod css_flex_tests {
         let tree = Tree {
             root: 1,
             nodes: BTreeMap::from([
-                (1, Node { id: 1, parent: 0, index: 0, kind: NodeKind::VirtualList, properties: BTreeMap::from([(PropKey::ListNumColumns, i(2)), (PropKey::ListRowHeight, f(50.0))]) }),
-                (2, node(2, 0, vec![(PropKey::ListFullSpan, PropValue::Boolean(true)), (PropKey::Height, f(80.0))])),
+                (
+                    1,
+                    Node {
+                        id: 1,
+                        parent: 0,
+                        index: 0,
+                        kind: NodeKind::VirtualList,
+                        properties: BTreeMap::from([
+                            (PropKey::ListNumColumns, i(2)),
+                            (PropKey::ListRowHeight, f(50.0)),
+                        ]),
+                    },
+                ),
+                (
+                    2,
+                    node(
+                        2,
+                        0,
+                        vec![
+                            (PropKey::ListFullSpan, PropValue::Boolean(true)),
+                            (PropKey::Height, f(80.0)),
+                        ],
+                    ),
+                ),
                 (3, node(3, 1, vec![])),
                 (4, node(4, 2, vec![])),
                 (5, node(5, 3, vec![])),
             ]),
         };
-        let layouts = calculate(&tree, Size { width: 300.0, height: 600.0 }).unwrap();
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 300.0,
+                height: 600.0,
+            },
+        )
+        .unwrap();
         assert_eq!((layouts[&2].width, layouts[&2].height), (300.0, 80.0));
-        assert_eq!((layouts[&3].x, layouts[&3].y, layouts[&3].width), (0.0, 80.0, 150.0));
+        assert_eq!(
+            (layouts[&3].x, layouts[&3].y, layouts[&3].width),
+            (0.0, 80.0, 150.0)
+        );
         assert_eq!((layouts[&4].x, layouts[&4].y), (150.0, 80.0));
         assert_eq!((layouts[&5].x, layouts[&5].y), (0.0, 130.0));
     }
