@@ -1361,6 +1361,11 @@ final class ScopedStyleCompiler
             $output[self::PROPERTIES[$property]] = self::propertyValue($property, $value, $name);
             return;
         }
+        $attribute = self::PROPERTIES[$property] ?? null;
+        if ($attribute !== null) {
+            $output[$attribute] = self::propertyValue($property, $value, $name);
+            return;
+        }
 
         throw new RuntimeException(
             "Unsupported native CSS property {$property} in {$name}.",

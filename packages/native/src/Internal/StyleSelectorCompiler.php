@@ -24,7 +24,7 @@ final class StyleSelectorCompiler
                 "Unsupported native selector {$selector} in {$name}; pseudo-elements other than ::placeholder and ::selection have no native node.",
             );
         }
-        if (preg_match('/(?:^|[^\\])[+~]/', preg_replace('/\([^()]*\)|\[[^\]]*\]/', '', $selector) ?? $selector) === 1) {
+        if (preg_match('/(?:^|[^\\\\])[+~]/', preg_replace('/\([^()]*\)|\[[^\]]*\]/', '', $selector) ?? $selector) === 1) {
             throw new RuntimeException(
                 "Sibling combinators (+, ~) in {$selector} are unsupported natively in {$name}; add a class to the sibling instead.",
             );

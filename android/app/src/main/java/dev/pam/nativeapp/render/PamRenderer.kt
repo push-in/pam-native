@@ -5298,7 +5298,12 @@ class PamRenderer(
         val originX = state.properties[PropKey.TRANSFORM_ORIGIN_X]?.decimal()
         val originY = state.properties[PropKey.TRANSFORM_ORIGIN_Y]?.decimal()
         if (originX == null && originY == null) {
-            view.resetPivot()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                view.resetPivot()
+            } else {
+                view.pivotX = width / 2f
+                view.pivotY = height / 2f
+            }
             return
         }
         view.pivotX = width * ((originX ?: 50.0) / 100.0).toFloat()

@@ -188,10 +188,10 @@ final class CssColor
             [$red, $green, $blue, $alpha] = self::modern($match[1], $match[2], $context);
 
             return self::argb(
-                self::byte($alpha * 255),
-                self::byte(self::encode($red) * 255),
-                self::byte(self::encode($green) * 255),
-                self::byte(self::encode($blue) * 255),
+                self::byte(round($alpha * 255, 6)),
+                self::byte(round(self::encode($red) * 255, 6)),
+                self::byte(round(self::encode($green) * 255, 6)),
+                self::byte(round(self::encode($blue) * 255, 6)),
             );
         }
 

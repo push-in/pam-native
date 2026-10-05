@@ -38,6 +38,7 @@ parameters:
         - src/Attributes/Prop.php
         - src/Component.php
         - src/Internal/CompiledTemplateNode.php
+        - src/Internal/CssDiagnostic.php
         - src/Internal/ScopedStyleCompiler.php
         - src/Internal/StyleIrCompiler.php
         - src/Internal/StyleQueryCompiler.php
