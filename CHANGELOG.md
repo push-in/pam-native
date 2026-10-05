@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.12.2 - 2026-10-05
+
+- Android: a BottomSheet with `keyboardBehavior="interactive"` (Zé's "Editar
+  mensagem") rides above its own keyboard again. The sheet window keeps
+  `adjustNothing` and read the IME from its content view, where a window
+  fitting system windows (Android 11-14, the Galaxy S10) had already
+  consumed the insets, so the field and Save button stayed behind the
+  keyboard. The IME is now read on the dialog's decor view and followed
+  frame by frame (`WindowInsetsAnimation`); the sheet's bottom edge is put
+  on the IME top from the real window geometry (edge-to-edge or not).
+- The covered window ignores the sheet's keyboard: a panning
+  KeyboardAvoidingView (the chat composer) only avoids the IME of its own
+  focused window, like the root host since 1.12.0.
+- While the keyboard lifts a sheet, a tap on its upper part is no longer
+  taken for a backdrop tap and dragging starts from the lifted position.
+- `autoFocus` inside a sheet waits (up to 1 s) for the sheet window's focus
+  before opening the keyboard.
+- `PamSheetKeyboardInstrumentedTest`: tapped and auto-focused sheet inputs
+  end directly above the IME with Save visible; the base composer and root
+  IME inset stay at 0; Back settles the sheet.
+- iOS: presented sheets follow `keyboardWillChangeFrame` with the keyboard's
+  duration and curve, the screen below ignores the keyboard of an input
+  inside a presented modal, and `autoFocus` inside a sheet runs once it is
+  presented. **Uncompiled; needs Mac validation.**
+
 ## 1.12.1 - 2026-10-05
 
 - Android: taps inside a Pressable nested in another Pressable reach the
