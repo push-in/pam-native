@@ -29,10 +29,12 @@
 - Add `android.debugFirebase: false` to build debug variants without Firebase
   (for debug application-id suffixes missing from `google-services.json`) and
   accept `pam-native mobile <command>` as an alias.
-- Android API 36 instrumented and unit suites, PHP SDK and Rust CLI tests
-  passed locally. iOS sources were updated without an Xcode build; multipart
+- Android instrumented suites passed locally on API 36 and API 26 (109/109;
+  load-induced renderer flakes re-run green), plus Android unit, PHP SDK and
+  Rust tests. iOS sources were updated without an Xcode build; multipart
   transfers, image prefetch, notification actions and push rendering report
   "not available on iOS yet".
+
 ## 1.0.37 - 2026-10-05
 
 - Add `Appearance` and the int-backed `AppearanceMode` enum (`System = 1`,

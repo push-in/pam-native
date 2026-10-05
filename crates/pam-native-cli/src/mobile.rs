@@ -8703,6 +8703,7 @@ mod tests {
         let project = load_project(&root).expect("project without debug Firebase");
         assert!(!project.manifest.android.debug_firebase);
         assert_eq!(debug_application_id(&project), "app.pam.generated.debug");
+        assert!(ensure_isolated_debug_application_id(&project).is_ok());
         manifest["android"] = serde_json::json!({ "debugApplicationIdSuffix": ".qa" });
 
         manifest["android"]["debugApplicationIdSuffix"] = serde_json::json!(".bad-suffix");
