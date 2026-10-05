@@ -747,6 +747,19 @@ final class PamVuetifySpinner: UIView {
 }
 
 private extension UIView {
+    /// Retries `autoFocus` on the first input under this view that asked for it.
+    @discardableResult
+    func pamRequestAutomaticFocus() -> Bool {
+        if let input = self as? PamInputField, input.autoFocusRequested {
+            input.requestAutomaticFocus()
+            return true
+        }
+        for child in subviews where child.pamRequestAutomaticFocus() {
+            return true
+        }
+        return false
+    }
+
     func pamFirstResponder() -> UIView? {
         if isFirstResponder {
             return self
@@ -812,6 +825,12 @@ final class PamInputField: UITextField, UITextFieldDelegate {
     }
     private var automaticFocusApplied = false
     private var automaticFocusScheduled = false
+
+    /// Retries `autoFocus` once a hidden ancestor (a presenting Modal or
+    /// BottomSheet) became visible.
+    func requestAutomaticFocus() {
+        scheduleAutomaticFocus()
+    }
 
     private func scheduleAutomaticFocus() {
         guard autoFocusRequested, !automaticFocusApplied, !automaticFocusScheduled else { return }
@@ -1696,6 +1715,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private let sheetHandle = UIView()
     private let orientationObserver = NotificationCenter.default
     private var contentHeightConstraint: NSLayoutConstraint!
+    private var contentBottomConstraint: NSLayoutConstraint!
+    private var keyboardTokens: [NSObjectProtocol] = []
+    /// How far the sheet sits above its resting position so its bottom edge
+    /// rests on the keyboard (@gorhom/bottom-sheet `interactive`).
+    private var sheetKeyboardLift: CGFloat = 0
 
     private var showScheduled = false
     private var desiredVisible = true
@@ -1765,6 +1789,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         contentClip.addGestureRecognizer(pan)
 
         contentHeightConstraint = contentHost.heightAnchor.constraint(equalTo: contentClip.heightAnchor)
+        contentBottomConstraint = contentHost.bottomAnchor.constraint(equalTo: contentClip.bottomAnchor)
         NSLayoutConstraint.activate([
             backdropView.leadingAnchor.constraint(equalTo: leadingAnchor),
             backdropView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -1778,7 +1803,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
             contentHost.leadingAnchor.constraint(equalTo: contentClip.leadingAnchor),
             contentHost.trailingAnchor.constraint(equalTo: contentClip.trailingAnchor),
-            contentHost.bottomAnchor.constraint(equalTo: contentClip.bottomAnchor),
+            contentBottomConstraint,
             contentHeightConstraint,
             sheetHandle.widthAnchor.constraint(equalToConstant: 36),
             sheetHandle.heightAnchor.constraint(equalToConstant: 4),
@@ -1787,6 +1812,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         ])
 
         isUserInteractionEnabled = true
+        observeKeyboard()
     }
 
     required init?(coder: NSCoder) {
@@ -1797,6 +1823,57 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         if let token = orientationToken {
             orientationObserver.removeObserver(token)
         }
+        for token in keyboardTokens {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
+    private func observeKeyboard() {
+        let center = NotificationCenter.default
+        keyboardTokens.append(center.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.sheetKeyboardChanged(notification, hiding: false)
+        })
+        keyboardTokens.append(center.addObserver(
+            forName: UIResponder.keyboardWillHideNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.sheetKeyboardChanged(notification, hiding: true)
+        })
+    }
+
+    /// A presented sheet rides on the keyboard with the keyboard's own
+    /// duration and curve, so its focused field and actions stay visible.
+    private func sheetKeyboardChanged(_ notification: Notification, hiding: Bool) {
+        guard let window else { return }
+        let info = notification.userInfo
+        let end = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
+        let keyboard = window.convert(end, from: window.screen.coordinateSpace)
+        let frame = convert(bounds, to: window)
+        let lift = hiding || !currentlyVisible || presentation != Presentation.sheet
+            ? 0
+            : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
+        guard abs(lift - sheetKeyboardLift) > 0.5 else { return }
+        sheetKeyboardLift = lift
+        contentBottomConstraint.constant = -lift
+        let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.25
+        let curve = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: [UIView.AnimationOptions(rawValue: curve << 16), .beginFromCurrentState, .allowUserInteraction]
+        ) {
+            self.layoutIfNeeded()
+        }
+    }
+
+    private func resetSheetKeyboardLift() {
+        sheetKeyboardLift = 0
+        contentBottomConstraint.constant = 0
     }
 
     func insert(_ view: UIView, index _: Int) {
@@ -1853,7 +1930,19 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     func setBottomSheetDismissible(_ value: Bool) { bottomSheetDismissible = value }
     func setBottomSheetBackdropDismiss(_ value: Bool) { bottomSheetBackdropDismiss = value }
     func setBottomSheetDragEnabled(_ value: Bool) { bottomSheetDragEnabled = value }
+    /// Every keyboard behavior keeps the sheet above the keyboard on iOS.
     func setBottomSheetKeyboardBehavior(_: Int) {}
+
+    /// Whether the keyboard belongs to an input inside a presented modal or
+    /// sheet: the screen below must not avoid that keyboard.
+    static func hostsFirstResponder(in window: UIWindow) -> Bool {
+        var view = window.pamFirstResponder()
+        while let current = view {
+            if let host = current as? PamModalHost { return host.currentlyVisible }
+            view = current.superview
+        }
+        return false
+    }
 
     func setBottomSheetHandleVisible(_ value: Bool) {
         bottomSheetHandleVisible = value
@@ -2040,6 +2129,12 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private func finishPresent() {
+        // `autoFocus` inside the sheet was skipped while the host was hidden;
+        // focus it (and so open the keyboard) once the entrance settled.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.currentlyVisible else { return }
+            self.contentHost.pamRequestAutomaticFocus()
+        }
         onShow?()
         becomeFirstResponder()
         let initialFocus = contentHost.pamFirstAccessibleView() ?? contentHost
@@ -2066,6 +2161,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
             }
             self.currentlyVisible = false
             self.isHidden = true
+            self.resetSheetKeyboardLift()
             self.accessibilityViewIsModal = false
             self.resignFirstResponder()
             if notify {

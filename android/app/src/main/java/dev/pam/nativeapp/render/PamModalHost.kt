@@ -59,6 +59,16 @@ internal fun interactiveBottomSheetLayout(
     return baseHeight.coerceAtLeast(1) to translation
 }
 
+/**
+ * How far an interactive sheet resting at [contentBottom] (window
+ * coordinates) must rise so its bottom edge sits on the IME top of a window
+ * [windowHeight] tall whose bottom [imeInset] pixels are covered.
+ */
+internal fun sheetKeyboardLift(contentBottom: Int, windowHeight: Int, imeInset: Int): Int {
+    if (imeInset <= 0) return 0
+    return (contentBottom - (windowHeight - imeInset)).coerceAtLeast(0)
+}
+
 internal fun blocksModalDismissal(dismissible: Boolean): Boolean = !dismissible
 
 internal fun isPointOutsideModalChild(
@@ -109,6 +119,7 @@ internal class PamModalHost @JvmOverloads constructor(
     private var bottomSheetKeyboardBehavior = KEYBOARD_INTERACTIVE
     private var bottomSheetKeyboardInset = 0
     private var sheetKeyboardTranslation = 0f
+    private var sheetImeAnimating = false
     private var lastSheetHeight = 0
     private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
     private var backdropAnimator: android.animation.ValueAnimator? = null
@@ -145,20 +156,6 @@ internal class PamModalHost @JvmOverloads constructor(
             handle,
             FrameLayout.LayoutParams(dp(36f).toInt(), dp(4f).toInt()),
         )
-        ViewCompat.setOnApplyWindowInsetsListener(content) { _, insets ->
-            val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
-            val navigation = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
-            val nextInset = if (insets.isVisible(WindowInsetsCompat.Type.ime())) {
-                (ime - navigation).coerceAtLeast(0)
-            } else {
-                0
-            }
-            if (bottomSheetKeyboardInset != nextInset) {
-                bottomSheetKeyboardInset = nextInset
-                dialog?.let(::applyWindowLayout)
-            }
-            insets
-        }
         content.observeMotion = ::onModalMotion
     }
 
@@ -403,6 +400,7 @@ internal class PamModalHost @JvmOverloads constructor(
             modal.requestWindowFeature(Window.FEATURE_NO_TITLE)
             (content.parent as? ViewGroup)?.removeView(content)
             modal.setContentView(content)
+            observeDialogIme(modal)
             applyDismissPolicy(modal)
             modal.setOnCancelListener {
                 // Platform cancellation (legacy Back) closes this window only.
@@ -438,6 +436,85 @@ internal class PamModalHost @JvmOverloads constructor(
             focusModalContent(modal)
         }
     }
+
+    /**
+     * An interactive sheet's window keeps `adjustNothing`, so it must track
+     * the IME itself. The insets are read on the dialog's decor view: a
+     * window that fits system windows consumes them before they reach the
+     * content (Android 11-14), which left the sheet behind the keyboard. The
+     * covered activity window ignores this IME (see PamRootHost).
+     */
+    private fun observeDialogIme(modal: Dialog) {
+        val decor = modal.window?.decorView ?: return
+        ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
+            if (!sheetImeAnimating) updateSheetKeyboardInset(sheetKeyboardLiftFor(insets))
+            ViewCompat.onApplyWindowInsets(view, insets)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            decor.setWindowInsetsAnimationCallback(
+                object : android.view.WindowInsetsAnimation.Callback(
+                    DISPATCH_MODE_CONTINUE_ON_SUBTREE,
+                ) {
+                    override fun onPrepare(animation: android.view.WindowInsetsAnimation) {
+                        if (animation.typeMask and WindowInsets.Type.ime() != 0) {
+                            sheetImeAnimating = true
+                        }
+                    }
+
+                    override fun onProgress(
+                        insets: WindowInsets,
+                        running: MutableList<android.view.WindowInsetsAnimation>,
+                    ): WindowInsets {
+                        if (sheetImeAnimating && running.any { it.typeMask and WindowInsets.Type.ime() != 0 }) {
+                            followSheetKeyboard(
+                                sheetKeyboardLiftFor(WindowInsetsCompat.toWindowInsetsCompat(insets, decor)),
+                            )
+                        }
+                        return insets
+                    }
+
+                    override fun onEnd(animation: android.view.WindowInsetsAnimation) {
+                        if (animation.typeMask and WindowInsets.Type.ime() == 0) return
+                        sheetImeAnimating = false
+                        val settled = ViewCompat.getRootWindowInsets(decor)
+                        bottomSheetKeyboardInset = -1
+                        updateSheetKeyboardInset(settled?.let(::sheetKeyboardLiftFor) ?: 0)
+                    }
+                },
+            )
+        }
+    }
+
+    private fun sheetKeyboardLiftFor(insets: WindowInsetsCompat): Int {
+        if (!insets.isVisible(WindowInsetsCompat.Type.ime())) return 0
+        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom
+        val root = content.rootView ?: return 0
+        if (root.height <= 0 || content.height <= 0) return 0
+        val location = IntArray(2)
+        content.getLocationInWindow(location)
+        val contentBottom = location[1] - content.translationY.toInt() + content.height
+        return sheetKeyboardLift(contentBottom, root.height, ime)
+    }
+
+    private fun updateSheetKeyboardInset(lift: Int) {
+        if (bottomSheetKeyboardInset == lift) return
+        bottomSheetKeyboardInset = lift
+        dialog?.let(::applyWindowLayout)
+    }
+
+    /** Moves the sheet with the IME frame by frame (gorhom `interactive`). */
+    private fun followSheetKeyboard(lift: Int) {
+        if (!usesInteractiveKeyboard()) return
+        sheetKeyboardTranslation = -lift.coerceAtLeast(0).toFloat()
+        if (backdropAnimator?.isRunning == true || dragActive) return
+        (sheetChildren() + handle).forEach { view ->
+            view.animate().cancel()
+            view.translationY = sheetKeyboardTranslation
+        }
+    }
+
+    private fun usesInteractiveKeyboard(): Boolean =
+        presentation == PRESENTATION_SHEET && bottomSheetKeyboardBehavior == KEYBOARD_INTERACTIVE
 
     private fun focusModalContent(modal: Dialog) {
         content.post {
@@ -670,7 +747,9 @@ internal class PamModalHost @JvmOverloads constructor(
             return
         }
         val sheet = sheetChild() ?: return
-        val sheetTop = content.height - sheet.height
+        // Where the sheet is drawn: above the keyboard while the IME is up,
+        // so a tap on its upper part is not taken for a backdrop tap.
+        val sheetTop = (content.height - sheet.height + sheetKeyboardTranslation).toInt()
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 dragStartY = event.y
@@ -701,7 +780,7 @@ internal class PamModalHost @JvmOverloads constructor(
                     dragActive = true
                 }
                 if (dragActive) {
-                    val translation = delta.coerceAtLeast(
+                    val translation = (sheetKeyboardTranslation + delta).coerceAtLeast(
                         -(content.height - sheet.height).toFloat(),
                     )
                     sheetChildren().forEach { it.translationY = translation }

@@ -7015,9 +7015,13 @@ class PamRenderer(
             // engine IME inset) must keep running while a KAV is mounted.
             val dispatched = target.onApplyWindowInsets(insets)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                state.keyboardInset = visibleImeInset(
-                    rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
-                    visible = insets.isVisible(WindowInsets.Type.ime()),
+                state.keyboardInset = ownWindowImeInset(
+                    view,
+                    visibleImeInset(
+                        rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
+                        visible = insets.isVisible(WindowInsets.Type.ime()),
+                    ),
+                    state.keyboardInset,
                 )
                 if (!state.keyboardAnimating) applyKeyboardAvoidance(view, state)
             }
@@ -7039,14 +7043,18 @@ class PamRenderer(
                         runningAnimations: MutableList<WindowInsetsAnimation>,
                     ): WindowInsets {
                         val nextInset = insets.getInsets(WindowInsets.Type.ime()).bottom
-                        state.keyboardInset = nextInset
+                        state.keyboardInset = ownWindowImeInset(view, nextInset, state.keyboardInset)
                         return insets
                     }
 
                     override fun onEnd(animation: WindowInsetsAnimation) {
                         if (animation.typeMask and WindowInsets.Type.ime() != 0) {
                             state.keyboardAnimating = false
-                            state.keyboardInset = currentPlatformImeInset()
+                            state.keyboardInset = ownWindowImeInset(
+                                view,
+                                currentPlatformImeInset(),
+                                state.keyboardInset,
+                            )
                             (host as? PamRootHost)?.reconcileImeInset()
                             applyKeyboardAvoidance(view, state)
                             view.post { restoreKeyboardAvoidingInput(state) }
@@ -7063,6 +7071,14 @@ class PamRenderer(
         reconcileMountedKeyboardInsets(view, state)
     }
 
+    /**
+     * The IME a KeyboardAvoidingView may avoid. While another window (a
+     * BottomSheet or dialog) has input focus, its keyboard does not cover this
+     * window's composer: only hiding is applied, like PamRootHost.
+     */
+    private fun ownWindowImeInset(view: View, inset: Int, previous: Int): Int =
+        if (inset > 0 && !view.hasWindowFocus()) minOf(previous, inset) else inset
+
     private fun currentPlatformImeInset(): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
         val insets = host.rootWindowInsets ?: return 0
@@ -7076,7 +7092,7 @@ class PamRenderer(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         fun reconcile() {
             if (nodes[state.id] !== state) return
-            val inset = currentPlatformImeInset()
+            val inset = ownWindowImeInset(view, currentPlatformImeInset(), state.keyboardInset)
             (host as? PamRootHost)?.reconcileImeInset()
             if (state.keyboardInset != inset || inset == 0) {
                 state.keyboardInset = inset
@@ -8604,7 +8620,7 @@ class PamRenderer(
         const val DRAG_SNAP_REQUEST_STRIDE = 64L
         const val AUTO_FOCUS_RETRIES = 20
         const val AUTO_FOCUS_RETRY_MS = 50L
-        const val AUTO_FOCUS_KEYBOARD_RETRIES = 4
+        const val AUTO_FOCUS_KEYBOARD_RETRIES = 20
         const val AUTO_FOCUS_KEYBOARD_RETRY_MS = 50L
         const val LOCAL_MODAL_PREFIX = "pam:local-modal:"
         const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"

@@ -1,0 +1,243 @@
+package dev.pam.nativeapp.render
+
+import android.app.Instrumentation
+import android.content.Intent
+import android.os.Build
+import android.os.SystemClock
+import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.pam.nativeapp.PamTestActivity
+import dev.pam.nativeapp.protocol.Frame
+import dev.pam.nativeapp.protocol.Mutation
+import dev.pam.nativeapp.protocol.NodeKind
+import dev.pam.nativeapp.protocol.NodeSpec
+import dev.pam.nativeapp.protocol.PropKey
+import dev.pam.nativeapp.protocol.PropValue
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.Collections
+
+/**
+ * Zé chat "Editar mensagem": a BottomSheet with `keyboardBehavior="interactive"`
+ * over a screen whose composer is a panning KeyboardAvoidingView. The sheet's
+ * dialog window owns the IME: its field sits above the keyboard (gorhom
+ * interactive) while the covered base window and its composer stay put.
+ */
+@RunWith(AndroidJUnit4::class)
+class PamSheetKeyboardInstrumentedTest {
+    @Volatile
+    private var lastGeometry = ""
+
+    @Test
+    fun focusedSheetInputSitsAboveTheImeAndTheBaseComposerStaysPut() {
+        runSheetScenario(autoFocus = false)
+    }
+
+    @Test
+    fun autoFocusedSheetInputOpensTheKeyboardOnceTheSheetIsPresented() {
+        runSheetScenario(autoFocus = true)
+    }
+
+    private fun runSheetScenario(autoFocus: Boolean) {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        val baseImeInsets = Collections.synchronizedList(ArrayList<Int>())
+        try {
+            onMain(instrumentation) {
+                activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+                activity.host.onImeInsetChanged = { baseImeInsets += it }
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val density = activity.host.resources.displayMetrics.density
+                val width = activity.host.width / density
+                val height = activity.host.height / density
+                val snapPoints = ByteBuffer.allocate(2 + 8).order(ByteOrder.LITTLE_ENDIAN).apply {
+                    putShort(1)
+                    putDouble(0.3)
+                    flip()
+                }
+                val sheetInputProps = buildMap<PropKey, PropValue> {
+                    put(PropKey.TEST_ID, PropValue.Text("sheet-input"))
+                    if (autoFocus) put(PropKey.AUTO_FOCUS, PropValue.Flag(true))
+                }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.COLUMN)),
+                    Mutation.Create(node(3, 2, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFF7F6F2),
+                    ))),
+                    Mutation.Create(node(4, 2, NodeKind.KEYBOARD_AVOIDING_VIEW, mapOf(
+                        PropKey.KEYBOARD_BEHAVIOR to PropValue.Integer(2),
+                        PropKey.TEST_ID to PropValue.Text("base-composer"),
+                    ), index = 1)),
+                    Mutation.Create(node(5, 4, NodeKind.INPUT, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("base-input"),
+                    ))),
+                    Mutation.Create(node(6, 1, NodeKind.MODAL, mapOf(
+                        PropKey.VISIBLE to PropValue.Flag(true),
+                        PropKey.MODAL_PRESENTATION to PropValue.Integer(3),
+                        PropKey.BOTTOM_SHEET_SNAP_POINTS to PropValue.Bytes(snapPoints),
+                        PropKey.BOTTOM_SHEET_KEYBOARD_BEHAVIOR to PropValue.Integer(1),
+                    ), index = 1)),
+                    Mutation.Create(node(7, 6, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                    ))),
+                    Mutation.Create(node(8, 7, NodeKind.INPUT, sheetInputProps)),
+                    Mutation.Create(node(9, 7, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF1F6FEBL),
+                        PropKey.TEST_ID to PropValue.Text("sheet-save"),
+                    ), index = 1)),
+                    Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(2, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(3, Frame(0f, 0f, width, height - 72f)),
+                    Mutation.Layout(4, Frame(0f, height - 72f, width, 72f)),
+                    Mutation.Layout(5, Frame(8f, 8f, width - 16f, 56f)),
+                    Mutation.Layout(6, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(7, Frame(0f, 0f, width, 180f)),
+                    Mutation.Layout(8, Frame(16f, 24f, width - 32f, 48f)),
+                    Mutation.Layout(9, Frame(16f, 88f, width - 32f, 48f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            lateinit var composer: View
+            lateinit var sheetInput: EditText
+            lateinit var save: View
+            waitUntil(instrumentation, "sheet presented") {
+                val content = presentedModalContent(renderer) ?: return@waitUntil false
+                val input = content.findByTransitionName("sheet-input") as? EditText
+                    ?: return@waitUntil false
+                composer = requireNotNull(activity.host.findByTransitionName("base-composer"))
+                sheetInput = input
+                save = requireNotNull(content.findByTransitionName("sheet-save"))
+                input.isShown && input.hasWindowFocus()
+            }
+            if (!autoFocus) {
+                // Let the entrance settle, then tap the field like a user.
+                Thread.sleep(400)
+                onMain(instrumentation) {
+                    sheetInput.requestFocus()
+                    sheetInput.context.getSystemService(InputMethodManager::class.java)
+                        .showSoftInput(sheetInput, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+            waitUntil(instrumentation, "sheet field and save above the IME", timeoutMs = 10_000) {
+                val imeTop = dialogImeTop(sheetInput) ?: return@waitUntil false
+                val input = screenBottom(sheetInput)
+                val button = screenBottom(save)
+                lastGeometry = "imeTop=$imeTop input=$input save=$button " +
+                    "sheetTy=${(sheetInput.parent as View).translationY} " +
+                    "composerTy=${composer.translationY} baseIme=${activity.host.imeBottomInset}"
+                sheetInput.hasFocus() && input <= imeTop + 1 && button <= imeTop + 1 &&
+                    // Directly above the keyboard, not floating somewhere higher.
+                    (sheetInput.parent as View).let { imeTop - screenBottom(it) in -1..1 }
+            }
+            Thread.sleep(500)
+            onMain(instrumentation) {
+                val imeTop = requireNotNull(dialogImeTop(sheetInput))
+                assertTrue("settled: $lastGeometry", screenBottom(save) <= imeTop + 1)
+                assertEquals("base composer must ignore the sheet's IME", 0f, composer.translationY)
+                assertEquals("base host must ignore the sheet's IME", 0, activity.host.imeBottomInset)
+                assertTrue("base ime reports $baseImeInsets", baseImeInsets.none { it > 0 })
+            }
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            waitUntil(instrumentation, "sheet settles back once the IME hides") {
+                lastGeometry = "sheetTy=${(sheetInput.parent as View).translationY}"
+                dialogImeTop(sheetInput) == null && (sheetInput.parent as View).translationY == 0f
+            }
+            onMain(instrumentation) {
+                assertEquals(0f, composer.translationY)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) {
+                activity.host.onImeInsetChanged = null
+                activity.finish()
+            }
+        }
+    }
+
+    /** IME top in screen coordinates as seen by the view's (dialog) window, or null when hidden. */
+    private fun dialogImeTop(view: View): Int? {
+        val root = view.rootView
+        val insets = root.rootWindowInsets ?: return null
+        if (!insets.isVisible(WindowInsets.Type.ime())) return null
+        val ime = insets.getInsets(WindowInsets.Type.ime()).bottom
+        if (ime <= 0) return null
+        val location = IntArray(2)
+        root.getLocationOnScreen(location)
+        return location[1] + root.height - ime
+    }
+
+    private fun screenBottom(view: View): Int {
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        return location[1] + view.height
+    }
+
+    private fun presentedModalContent(renderer: PamRenderer): View? {
+        val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        val views = field.get(renderer) as android.util.LongSparseArray<View>
+        val modal = (0 until views.size()).mapNotNull { views.valueAt(it) as? PamModalHost }
+            .singleOrNull { it.isPresented() } ?: return null
+        val content = PamModalHost::class.java.getDeclaredField("content").apply { isAccessible = true }
+        return content.get(modal) as? View
+    }
+
+    private fun waitUntil(
+        instrumentation: Instrumentation,
+        description: String,
+        timeoutMs: Long = 8_000,
+        condition: () -> Boolean,
+    ) {
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            var satisfied = false
+            instrumentation.runOnMainSync { satisfied = condition() }
+            if (satisfied) return
+            Thread.sleep(50)
+        }
+        throw AssertionError("Timed out waiting for $description ($lastGeometry)")
+    }
+
+    private fun node(
+        id: Long,
+        parent: Long,
+        kind: NodeKind,
+        properties: Map<PropKey, PropValue> = emptyMap(),
+        index: Int = 0,
+    ): NodeSpec = NodeSpec(id = id, parent = parent, index = index, kind = kind, properties = properties)
+
+    private fun launchActivity(instrumentation: Instrumentation): PamTestActivity =
+        instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, PamTestActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            },
+        ) as PamTestActivity
+
+    private fun onMain(instrumentation: Instrumentation, block: () -> Unit) {
+        instrumentation.runOnMainSync(block)
+    }
+
+    private fun View.findByTransitionName(name: String): View? {
+        if (transitionName == name) return this
+        if (this !is ViewGroup) return null
+        for (index in 0 until childCount) {
+            getChildAt(index).findByTransitionName(name)?.let { return it }
+        }
+        return null
+    }
+}

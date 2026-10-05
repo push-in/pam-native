@@ -29,6 +29,16 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun sheetLiftPutsItsBottomOnTheImeTopWhetherOrNotTheWindowFitsTheNavigationBar() {
+        // Window fits the 126 px navigation bar: the content ends above it.
+        assertEquals(757, sheetKeyboardLift(contentBottom = 2_274, windowHeight = 2_400, imeInset = 883))
+        // Edge-to-edge content reaches the screen bottom.
+        assertEquals(883, sheetKeyboardLift(contentBottom = 2_400, windowHeight = 2_400, imeInset = 883))
+        assertEquals(0, sheetKeyboardLift(contentBottom = 2_274, windowHeight = 2_400, imeInset = 0))
+        assertEquals(0, sheetKeyboardLift(contentBottom = 1_000, windowHeight = 2_400, imeInset = 883))
+    }
+
+    @Test
     fun hiddenImeRestoresTheConfiguredDetent() {
         assertEquals(
             1_968 to 0f,

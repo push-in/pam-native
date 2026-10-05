@@ -631,6 +631,10 @@ public final class PamRuntime {
             .cgRectValue ?? .zero
         let keyboard = window.convert(end, from: window.screen.coordinateSpace)
         let frame = host.convert(host.bounds, to: window)
+        // The keyboard of a presented sheet/modal input does not cover the
+        // screen's composer below it (Android: the covered window ignores the
+        // dialog's IME); only hiding applies.
+        if !hiding, PamModalHost.hostsFirstResponder(in: window) { return }
         let overlap = hiding ? 0 : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
         updateKeyboardInset(bottom: Float(overlap))
     }
