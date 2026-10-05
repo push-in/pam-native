@@ -121,6 +121,12 @@ final class TreeEncoder
                     throw new LogicException("Element identity collision at {$path}; assign a unique key.");
                 }
 
+                if ($offset === 0 && ($node->index !== $index || $node->parent !== $parent)) {
+                    // A reused (memoized or keyed) subtree can sit at a new
+                    // sibling position under the same path; only its root's
+                    // placement changes, its descendants are unchanged.
+                    $node = new EncodedNode($node->id, $parent, $index, $node->kind, $node->properties);
+                }
                 $this->ids[$node->id] = true;
                 $this->nodes[$node->id] = $node;
             }

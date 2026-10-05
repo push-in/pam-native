@@ -218,3 +218,46 @@ $assert(
     'A frozen screen must render its latest state once it becomes the top again.',
 );
 Runtime::shutdown();
+
+// A memoized keyed subtree that moves to another sibling index must be
+// re-placed, not replayed with its cached index (DuplicateSiblingIndex).
+$movingScreens = [
+    'a' => new MemoFreezeScreen('a'),
+    'b' => new MemoFreezeScreen('b'),
+    'c' => new MemoFreezeScreen('c'),
+];
+$movingNavigator = new \Pam\Native\Navigation\Navigator(
+    initialRoute: 'a',
+    routes: [
+        'a' => static fn () => $movingScreens['a'],
+        'b' => static fn () => $movingScreens['b'],
+        'c' => static fn () => $movingScreens['c'],
+    ],
+    transition: \Pam\Native\Navigation\NavigationTransition::Fade,
+    handleSystemBack: false,
+);
+App::run($movingNavigator);
+$movingEncoder = new \Pam\Native\Internal\TreeEncoder();
+$movingIndexes = static function () use ($movingNavigator, $movingEncoder, $assert): void {
+    \Pam\Native\Internal\PamPhpRegistry::beginRender();
+    \Pam\Native\Internal\ComponentLifecycle::beginRender();
+    $element = $movingNavigator->toElement();
+    \Pam\Native\Internal\ComponentLifecycle::finishRender();
+    \Pam\Native\Internal\PamPhpRegistry::finishRender();
+    $movingEncoder->encode($element);
+    $nodes = (new ReflectionProperty($movingEncoder, 'nodes'))->getValue($movingEncoder);
+    $seen = [];
+    foreach ($nodes as $node) {
+        $slot = $node->parent.':'.$node->index;
+        $assert(!isset($seen[$slot]), 'Encoded siblings must never share an index.');
+        $seen[$slot] = true;
+    }
+};
+$movingIndexes();
+$movingNavigator->push('b');
+$movingIndexes();
+$movingNavigator->push('c');
+$movingIndexes();
+$movingNavigator->pop();
+$movingIndexes();
+Runtime::shutdown();
