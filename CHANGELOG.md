@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.9.0 - 2026-10-05
+
+iOS rendering parity with the Android 1.2.0–1.7.0 releases (CSS paint and
+effects, typography, layout, components and the error overlay). See
+[docs/ios-parity.md](docs/ios-parity.md). Swift and the iOS bridge were
+written on Linux: the bridge was syntax-checked with the PHP headers, the
+Swift sources and the new XCTest suites are **uncompiled and need Mac
+validation**.
+
+- Text: `Text` draws with a CoreText layout (`PamTextLayout`) that the Rust
+  engine also uses to measure every text box (`pam_native_ios_set_text_measurer`,
+  installed before the first frame): React Native iOS line-height rule
+  (scaled by `fontScale`), pixel-ceiled sizes, first baselines,
+  `numberOfLines` ellipsis modes, `adjustsFontSizeToFit`, nested spans with
+  per-span press (`SpanPress`), `text-shadow`, `font-feature-settings` /
+  `font-variant-numeric`, `text-align: justify`, `on:textLayout` and marquee.
+  A bare `fontFamily` resolves bundled files by React Native conventions;
+  `<Icon>` fonts load from `asset://`.
+- CSS paint/effects: per-side border colors, per-corner radii,
+  `transform-origin` and `%` translations, linear/radial/repeating gradients
+  with premultiplied stops clipped to the radius, `border-image` gradient
+  rings, multiple/inset/spread `box-shadow` as cached Core Animation shadow
+  paths (outer shadows of `overflow: hidden` views live in a sibling layer),
+  image `filter`/`blurRadius` (blur with opaque edges + color matrix),
+  `backdrop-filter: blur()`, `<Shimmer>`. Filters on non-image views and
+  backdrop color functions log a one-time debug diagnostic.
+- Layout: the engine owns SafeAreaView insets from boot (window insets set
+  before the worker starts, `PAM_BOOT_METRICS` exported, native insets never
+  applied twice, geometry changes relayout), `on:layout`, `ScrollView`
+  content size (previously never set on iOS), sticky headers in ScrollView
+  and VirtualizedList, `<ScrollView keyboardInset>`, lists resting at their
+  end stay there, scroll targets use the real viewport, and scrolled-out cell
+  views are pooled by kind and property set.
+- Components: `MediaReadyEvent` natural size/duration, `on:mediaLoadStart`,
+  `on:buffering`; pressed-state `translate` in points; `Toast::message()`
+  card; Modal `backdropColor`/`animationType` (incl. `slide-fade`)/
+  `transparent`; bottom sheets slide while the backdrop fades and resolve
+  `%` snap points against the container minus the top inset.
+- Runtime: LogBox-style error overlay (toast, scrollable inspector,
+  Dismiss/Copy/Reload, queue and repeat counter, release fallback with retry,
+  `devErrorOverlay` → `PamDevErrorOverlay`), coalesced events of removed
+  nodes are dropped, media cache identities are hashed once with a fast hex
+  encoder.
+- CLI/host: `appearance.splash` builds the iOS launch screen
+  (`App/PamLaunch.xcassets`, light/dark background, PNG logo) and the host
+  keeps the logo until the first frame.
+- PHP SDK, Rust workspace, CLI and protocol parity tests passed locally.
+
 ## 1.8.0 - 2026-10-05
 
 iOS parity for the 1.5.0 gestures/animations and the 1.1.x native modules.
