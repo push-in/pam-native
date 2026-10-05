@@ -117,6 +117,7 @@ internal class PamModalHost @JvmOverloads constructor(
     private var dragStartY = 0f
     private var dragActive = false
     private var dragFromHandle = false
+    private var dragScrollChain: List<View> = emptyList()
     private var modalBackdropPressed = false
     private var dragVelocity: VelocityTracker? = null
 
@@ -674,6 +675,11 @@ internal class PamModalHost @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 dragStartY = event.y
                 dragFromHandle = event.y in sheetTop.toFloat()..(sheetTop + dp(44f))
+                // Like gorhom/react-native-bottom-sheet: a drag that starts on
+                // a nested scrollable only moves the sheet once that
+                // scrollable is at its top. Resolve the chain under the finger
+                // now; the sheet's direct child is rarely the scroller.
+                dragScrollChain = verticalScrollChainAt(content, event.x, event.y)
                 dragActive = false
                 dragVelocity?.recycle()
                 dragVelocity = VelocityTracker.obtain().also { it.addMovement(event) }
@@ -685,7 +691,12 @@ internal class PamModalHost @JvmOverloads constructor(
                     bottomSheetDragEnabled &&
                     !dragActive &&
                     kotlin.math.abs(delta) >= dp(8f) &&
-                    (dragFromHandle || delta > 0 && !sheet.canScrollVertically(-1))
+                    (
+                        dragFromHandle ||
+                            delta > 0 &&
+                            !sheet.canScrollVertically(-1) &&
+                            dragScrollChain.none { it.canScrollVertically(-1) }
+                        )
                 ) {
                     dragActive = true
                 }
@@ -717,6 +728,7 @@ internal class PamModalHost @JvmOverloads constructor(
                 dragVelocity?.recycle()
                 dragVelocity = null
                 dragActive = false
+                dragScrollChain = emptyList()
             }
         }
     }
@@ -1146,4 +1158,38 @@ private class PamModalContent(context: Context) : FrameLayout(context) {
         super.performClick()
         return true
     }
+}
+
+/**
+ * Vertically scrollable views under ([x], [y]) in [root]'s coordinates, from
+ * the outermost to the innermost, following the same child order and
+ * geometry (scroll offsets, translations) as touch dispatch.
+ */
+internal fun verticalScrollChainAt(root: View, x: Float, y: Float): List<View> {
+    val chain = ArrayList<View>()
+    var current: View = root
+    var localX = x
+    var localY = y
+    var depth = 0
+    while (depth++ < 64) {
+        if (current !== root && (current.canScrollVertically(1) || current.canScrollVertically(-1))) {
+            chain += current
+        }
+        val group = current as? ViewGroup ?: break
+        var next: View? = null
+        for (index in group.childCount - 1 downTo 0) {
+            val child = group.getChildAt(index)
+            if (child.visibility != View.VISIBLE) continue
+            val childX = localX + group.scrollX - child.left - child.translationX
+            val childY = localY + group.scrollY - child.top - child.translationY
+            if (childX >= 0f && childY >= 0f && childX < child.width && childY < child.height) {
+                next = child
+                localX = childX
+                localY = childY
+                break
+            }
+        }
+        current = next ?: break
+    }
+    return chain
 }

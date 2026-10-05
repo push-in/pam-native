@@ -2226,7 +2226,20 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         }
         let location = pan.location(in: self)
         let handleBottom = contentHost.frame.minY + 48
-        return location.y <= handleBottom || pan.velocity(in: self).y > 0
+        if location.y <= handleBottom { return true }
+        guard pan.velocity(in: self).y > 0 else { return false }
+        // gorhom/react-native-bottom-sheet: a downward drag on a nested
+        // scrollable moves the sheet only once that scrollable is at its top.
+        var candidate = hitTest(location, with: nil)
+        while let view = candidate, view !== self {
+            if let scroll = view as? UIScrollView,
+               scroll.isScrollEnabled,
+               scroll.contentOffset.y > -scroll.adjustedContentInset.top + 0.5 {
+                return false
+            }
+            candidate = view.superview
+        }
+        return true
     }
 
     func gestureRecognizer(

@@ -3716,10 +3716,20 @@ class PamRenderer(
                 bounds.height(),
                 dp(48f),
             )
-            bounds.left -= maxOf(left, minimumInsets.left)
-            bounds.top -= maxOf(top, minimumInsets.top)
-            bounds.right += maxOf(right, minimumInsets.right)
-            bounds.bottom += maxOf(bottom, minimumInsets.bottom)
+            val expandLeft = maxOf(left, minimumInsets.left)
+            val expandTop = maxOf(top, minimumInsets.top)
+            val expandRight = maxOf(right, minimumInsets.right)
+            val expandBottom = maxOf(bottom, minimumInsets.bottom)
+            if (expandLeft <= 0 && expandTop <= 0 && expandRight <= 0 && expandBottom <= 0) {
+                // Already a large enough target: regular hit testing reaches it
+                // and its descendants; a delegate would only pre-empt them.
+                clearHitSlop(view)
+                return@post
+            }
+            bounds.left -= expandLeft
+            bounds.top -= expandTop
+            bounds.right += expandRight
+            bounds.bottom += expandBottom
             val group = parent.touchDelegate as? PamTouchDelegateGroup
                 ?: PamTouchDelegateGroup(parent).also { parent.touchDelegate = it }
             group.update(view, bounds)
