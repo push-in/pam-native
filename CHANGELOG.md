@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.5.0 - 2026-10-05
+
+Gestures and animations on the UI thread (React Native Reanimated +
+gesture-handler parity for the Zé Chat rewrite). During a drag or an
+animation PHP receives no events; it gets the final semantic event only.
+
+- Press: `on:press`/`on:longPress` handlers typed `PressEvent` receive
+  `x`/`y` (RN locationX/Y) and `pageX`/`pageY`; untyped handlers keep the
+  empty payload. Hold-to-record works with `delayLongPress` + `on:longPress`
+  + `on:pressOut`.
+- Double tap: `on:doubleTap` (+ `doubleTapDelay`) defers and cancels the
+  single press natively; `tapEffect` (`TapEffect`) plays an animation
+  centred on the tap (Reels heart burst) before PHP is notified.
+- Drag (`Pam\Native\Animation\Drag`, `:drag` on a pan `GestureDetector`):
+  bounded one-axis drag with rubber band, per-frame drivers on `nativeRef`
+  views (opacity, translate, scale, rotate, borderRadius), snap points with
+  spring or timing settle, distance/velocity thresholds, haptic tick, groups
+  and programmatic `dragSnap="index@request"`. `GestureEvent` gains
+  `snapIndex`/`thresholdReached`; new `on:gestureSettle`
+  (`GestureSettleEvent`).
+- `Swipeable` (PHP and `<Swipeable>` tag): left/right action panels, spring
+  open/close, one open row per group, `closeRequest`.
+- Animation programs (`Pam\Native\Animation\Animation`): timing, spring,
+  set, wait, sequence, with, then, delay, repeat and replay `key()`, attached
+  with `:animation` on any element or `<Animated :animation>`; presets
+  `heartBurst`, `likeBounce`, `backToTop`, `shimmer`, `pulse`, `marquee`,
+  `fadeInUp`; `replayKey`; per-keyframe `easing`.
+- CSS transitions keep per-property durations, delays and timing functions
+  (delays no longer rejected) and accept `spring(mass stiffness damping)`;
+  `Element::transition()`.
+- Scroll: `on:scrollBeginDrag`, `on:scrollEndDrag` (velocity) and
+  `on:momentumScrollEnd` with the page index (`ScrollPhaseEvent`); lists
+  accept `pagingEnabled` (one item per page).
+- Text: `on:textLayout` (`TextLayoutEvent`: wrapped and visible lines,
+  truncation, line widths); `ellipsizeMode="marquee"`.
+- Modal: `animationType="slide-fade"` fades the backdrop while the content
+  slides independently.
+- Protocol: property IDs 509-522 and event kinds 70-75 (append-only).
+- Tests: PHP SDK (new gesture/animation suite), Rust, Android unit (spring
+  solver parity with PHP, release rules, bezier, programs) and Android API 26
+  instrumented suite 134/134, including drag/swipe/double-tap/paging/text
+  layout/modal/program tests that assert no PHP event while the finger moves
+  and UI-thread frame work within a 60 Hz budget (story drag p95 ~2 ms).
+  iOS decodes the protocol only; its native implementation is pending.
+
 ## 1.4.0 - 2026-10-05
 
 React Native typography and layout parity (Android). See
