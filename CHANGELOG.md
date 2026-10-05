@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.37 - 2026-10-05
+
+- Skip modal and rich-list synchronization on Android commits that do not
+  change their inputs. Maintain small indices of scroll containers, lists,
+  modals, pressables and inputs instead of walking the entire mounted tree.
+- Add opt-in `PamRendererPerf` phase timings for profiling real applications.
+  This patch has not yet been measured for ZéChat frame rate.
+- Android API 26 and API 36 instrumented suites passed locally. iOS device,
+  Xcode and APNs gates were not run for this Android-focused patch release.
+
 ## 1.0.36 - 2026-10-05
 
 - Add MIME filtering, an optional failure callback and an explicit import
