@@ -316,6 +316,7 @@ class PamActivity : FragmentActivity() {
         super.onConfigurationChanged(newConfig)
         if (!runtimeStarted) return
         applyDefaultSystemBars()
+        runtime.invalidateSystemBars()
         scheduleViewportUpdate(force = true)
     }
 
@@ -642,7 +643,10 @@ class PamActivity : FragmentActivity() {
         if (!PamAppearance.persist(this, mode)) return false
         PamAppearance.applyPlatformNightMode(this, mode)
         applyDefaultSystemBars()
-        if (runtimeStarted) scheduleViewportUpdate(force = true)
+        if (runtimeStarted) {
+            runtime.invalidateSystemBars()
+            scheduleViewportUpdate(force = true)
+        }
         return true
     }
 

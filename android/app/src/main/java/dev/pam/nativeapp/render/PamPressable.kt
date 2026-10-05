@@ -203,6 +203,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         drag.configure(config, onSettle)
     }
 
+    val hasLocalOnPress: Boolean
+        get() = localOnPress != null
+
     fun setLocalOnPress(callback: (() -> Unit)?) {
         localOnPress = callback
         updateClickable()

@@ -229,6 +229,10 @@ class PamRuntime(
         renderer.trimMemory(critical)
     }
 
+    fun invalidateSystemBars() {
+        if (attachedSurface) renderer.invalidateSystemBars()
+    }
+
     fun onHostPause() {
         renderer.onHostPause()
     }
@@ -326,12 +330,14 @@ class PamRuntime(
     override fun close() {
         if (!closed.compareAndSet(false, true)) return
         renderer.onNativeChildVisibility = null
-        synchronized(handleLock) {
-            val active = handle
-            handle = 0L
-            if (active != 0L) {
-                nativeStop(active)
-            }
+        val active = synchronized(handleLock) {
+            handle.also { handle = 0L }
+        }
+        if (active != 0L) {
+            // Stopping joins the PHP worker (and shuts PHP down). Never make
+            // the UI thread wait for it: a slow or stuck teardown would keep
+            // the next Activity on the splash window.
+            Thread({ nativeStop(active) }, "pam-runtime-stop").start()
         }
         main.removeCallbacksAndMessages(null)
         choreographer.removeFrameCallback(frameCallback)

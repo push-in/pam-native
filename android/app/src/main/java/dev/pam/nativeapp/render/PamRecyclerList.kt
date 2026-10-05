@@ -197,6 +197,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     fun boundContainer(id: Long): FrameLayout? =
         (adapter as? RichRecyclerAdapter)?.boundContainer(id)
 
+    /** Rebinds visible rows whose content was emptied, without a diff. */
+    fun remountEmptyRows() {
+        (adapter as? RichRecyclerAdapter)?.remountEmptyHolders()
+    }
+
     fun setRichItems(
         ids: List<Long>,
         extents: Map<Long, Float>,

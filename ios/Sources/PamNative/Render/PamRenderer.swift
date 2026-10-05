@@ -38,6 +38,8 @@ public final class PamRenderer {
     private var nodes: [Int64: NodeState] = [:]
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
+    /// Mounted list / section-list / virtual-list nodes (no per-commit scan).
+    private var virtualListIds = Set<Int64>()
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
     private var interactionBridges: [Int64: PamInteractionBridge] = [:]
     private var animationDelegates: [Int64: PamAnimationDelegate] = [:]
@@ -144,23 +146,43 @@ public final class PamRenderer {
         }
 
         var dirtyLayouts = Set<Int64>()
+        // Lists whose subtree, frames or own configuration changed; clean
+        // lists are not re-windowed and modal triggers are only re-bound when
+        // the structure or a marker changed (no full-tree passes per commit).
+        var dirtyLists = Set<Int64>()
+        var needsModalSync = false
+        func markList(of id: Int64) {
+            if let list = virtualListAncestor(of: id) { dirtyLists.insert(list) }
+        }
 
         for batch in batches {
             for mutation in batch {
                 switch mutation {
                 case let .create(node):
                     create(node)
+                    markList(of: node.id)
+                    needsModalSync = true
                 case let .remove(id):
+                    markList(of: id)
                     remove(id)
+                    needsModalSync = true
                 case let .update(id, key, value):
                     update(id: id, key: key, value: value)
+                    if virtualListIds.contains(id) { dirtyLists.insert(id) }
+                    if key == PamConstants.value { needsModalSync = true }
                 case let .move(id, parent, index):
+                    markList(of: id)
                     move(id: id, parent: parent, index: index)
+                    markList(of: id)
+                    needsModalSync = true
                 case let .layout(id, frame):
                     frames[id] = frame
                     dirtyLayouts.insert(id)
+                    markList(of: id)
                 case let .setRoot(id):
                     rootId = id
+                    dirtyLists.formUnion(virtualListIds)
+                    needsModalSync = true
                 }
             }
         }
@@ -168,8 +190,10 @@ public final class PamRenderer {
         dirtyLayouts.forEach { id in
             applyLayout(id)
         }
-        syncVirtualLists()
-        syncLocalModalTriggers()
+        dirtyLists.forEach { syncVirtualList($0) }
+        if needsModalSync {
+            syncLocalModalTriggers()
+        }
     }
 
     public func trimMemory(_ critical: Bool) {
@@ -245,6 +269,7 @@ public final class PamRenderer {
         }
 
         nodes.removeAll()
+        virtualListIds.removeAll()
         views.removeAll()
         frames.removeAll()
         children.removeAll()
@@ -277,6 +302,9 @@ public final class PamRenderer {
         )
         nextMountOrder += 1
         nodes[spec.id] = state
+        if spec.kind == .list || spec.kind == .sectionList || spec.kind == .virtualList {
+            virtualListIds.insert(spec.id)
+        }
         addChild(to: state.parent, child: state.id)
 
         if virtualListAncestor(of: state.parent) == nil {
@@ -302,6 +330,10 @@ public final class PamRenderer {
 
         for (nodeId, view) in views {
             guard let button = view as? UIButton else { continue }
+            let marker = nodes[nodeId]?.properties[PamConstants.value]?.textOrNil()
+            if localModalActions[nodeId] == nil && marker?.hasPrefix(triggerPrefix) != true {
+                continue
+            }
             if let identifier = localModalActions.removeValue(forKey: nodeId) {
                 button.removeAction(identifiedBy: identifier, for: .touchUpInside)
             }
@@ -363,6 +395,7 @@ public final class PamRenderer {
         removeChild(from: state.parent, child: id)
         views[id] = nil
         nodes[id] = nil
+        virtualListIds.remove(id)
         frames[id] = nil
         children[id] = nil
         imageLoadContexts = imageLoadContexts.filter { _, context in
@@ -443,7 +476,6 @@ public final class PamRenderer {
         } else if virtualListAncestor(of: parent) == nil {
             materializeSubtree(id)
         }
-        syncVirtualLists()
     }
 
     private func virtualListAncestor(of id: Int64) -> Int64? {
@@ -523,15 +555,7 @@ public final class PamRenderer {
     }
 
     private func syncVirtualLists(forceMinimal: Bool = false) {
-        let ids = nodes.values.compactMap { state -> Int64? in
-            switch state.kind {
-            case .list, .sectionList, .virtualList:
-                return state.id
-            default:
-                return nil
-            }
-        }
-        ids.forEach { syncVirtualList($0, forceMinimal: forceMinimal) }
+        virtualListIds.forEach { syncVirtualList($0, forceMinimal: forceMinimal) }
     }
 
     private func requestVirtualListScroll(_ list: PamVirtualListView, nodeId: Int64) {
@@ -942,16 +966,28 @@ public final class PamRenderer {
         PamViewEffects.of(view, create: false)?.syncSiblingShadow()
     }
 
+    /// Ordered insertion (binary search, in place). Re-sorting and copying
+    /// the sibling array on every insert made long lists and prepends
+    /// quadratic.
     private func addChild(to parent: Int64, child: Int64) {
-        var siblings = children[parent] ?? []
-        if let existing = siblings.firstIndex(of: child) {
-            siblings.remove(at: existing)
+        // Callers (create, move after removeChild) never pass a child that
+        // is already listed under this parent.
+        let index = nodes[child]?.index ?? Int.max
+        var low = 0
+        var high = children[parent]?.count ?? 0
+        if let last = children[parent]?.last, (nodes[last]?.index ?? Int.max) <= index {
+            low = high
         }
-        siblings.append(child)
-        siblings.sort {
-            (nodes[$0]?.index ?? Int.max) < (nodes[$1]?.index ?? Int.max)
+        while low < high {
+            let middle = (low + high) / 2
+            let sibling = children[parent]![middle]
+            if (nodes[sibling]?.index ?? Int.max) <= index {
+                low = middle + 1
+            } else {
+                high = middle
+            }
         }
-        children[parent] = siblings
+        children[parent, default: []].insert(child, at: low)
     }
 
     private func removeChild(from parent: Int64, child: Int64) {

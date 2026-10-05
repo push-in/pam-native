@@ -624,8 +624,11 @@ void dispatch_event(const Event& event) {
 }
 
 void set_ini(HashTable* configuration, const char* name, const std::string& value) {
+    // The configuration hash is persistent and php_shutdown_config() frees it
+    // with free(); a request-allocator (emalloc) string here corrupted the
+    // heap at shutdown (Scudo "corrupted chunk header" in zend_hash_destroy).
     zval entry;
-    ZVAL_STRINGL(&entry, value.data(), value.size());
+    ZVAL_NEW_STR(&entry, zend_string_init(value.data(), value.size(), 1));
     zend_hash_str_update(configuration, name, std::strlen(name), &entry);
 }
 

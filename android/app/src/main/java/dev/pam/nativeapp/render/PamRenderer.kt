@@ -439,6 +439,9 @@ class PamRenderer(
     private val localModalIds = LinkedHashSet<Long>()
     private val pressableIds = LinkedHashSet<Long>()
     private val inputIds = LinkedHashSet<Long>()
+    private val statusBarIds = LinkedHashSet<Long>()
+    private var appliedStatusBar: StatusBarConfig? = null
+    private var appliedHostBackground: Int? = null
     private val nodes = LongSparseArray<NodeState>()
 
     /** True while [id] is part of the committed tree (events for removed nodes are stale). */
@@ -552,8 +555,13 @@ class PamRenderer(
 
     fun isLayoutInProgress(): Boolean {
         if (host.isInLayout) return true
-        for (index in 0 until views.size()) {
-            if (views.valueAt(index).isInLayout) return true
+        // Batches are flushed from a Choreographer frame callback, before the
+        // traversal; only self-laying-out containers can still be mid-layout.
+        for (id in virtualListIds) {
+            if (views[id]?.isInLayout == true) return true
+        }
+        for (index in 0 until scrollContainers.size()) {
+            if (scrollContainers.valueAt(index).isInLayout) return true
         }
         return false
     }
@@ -593,6 +601,13 @@ class PamRenderer(
         val createdNodes = LinkedHashSet<Long>()
         var needsModalSync = false
         var needsVirtualListSync = false
+        // Lists whose rows, row extents or own configuration changed; every
+        // other list keeps its adapter untouched (no per-commit O(rows) pass).
+        val dirtyLists = HashSet<Long>()
+        fun markListOf(id: Long) {
+            val parent = nodes[id]?.parent ?: return
+            if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
+        }
         batches.forEach { batch ->
             batch.forEach { mutation ->
                 when (mutation) {
@@ -601,8 +616,11 @@ class PamRenderer(
                         createdNodes += mutation.node.id
                         needsModalSync = true
                         needsVirtualListSync = true
+                        if (mutation.node.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.node.id
+                        markListOf(mutation.node.id)
                     }
                     is Mutation.Remove -> {
+                        markListOf(mutation.id)
                         remove(mutation.id)
                         needsModalSync = true
                         needsVirtualListSync = true
@@ -617,24 +635,45 @@ class PamRenderer(
                         }
                         if (
                             mutation.key == PropKey.LIST_HORIZONTAL ||
-                            mutation.key == PropKey.LIST_ROW_HEIGHT
+                            mutation.key == PropKey.LIST_ROW_HEIGHT ||
+                            mutation.key == PropKey.LIST_FULL_SPAN ||
+                            mutation.key == PropKey.STICKY_HEADER
                         ) {
                             needsVirtualListSync = true
+                            if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.id
+                            markListOf(mutation.id)
                         }
                     }
                     is Mutation.Move -> {
+                        markListOf(mutation.id)
                         move(mutation.id, mutation.parent, mutation.index)
+                        markListOf(mutation.id)
                         needsVirtualListSync = true
                     }
                     is Mutation.Layout -> {
+                        val previous = frames[mutation.id]
                         frames.put(mutation.id, mutation.frame)
                         dirtyLayouts += mutation.id
-                        needsVirtualListSync = true
+                        if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) {
+                            dirtyLists += mutation.id
+                            needsVirtualListSync = true
+                        } else if (
+                            previous == null ||
+                            previous.width != mutation.frame.width ||
+                            previous.height != mutation.frame.height
+                        ) {
+                            // Only a row's extent feeds its list; a pure
+                            // offset (rows shifted by a prepend) does not.
+                            val before = dirtyLists.size
+                            markListOf(mutation.id)
+                            if (dirtyLists.size != before) needsVirtualListSync = true
+                        }
                     }
                     is Mutation.SetRoot -> {
                         rootId = mutation.id
                         needsModalSync = true
                         needsVirtualListSync = true
+                        dirtyLists += virtualListIds
                     }
                 }
             }
@@ -652,7 +691,7 @@ class PamRenderer(
         // authored StatusBar color must win at the end of every commit.
         applyMergedStatusBar()
         val virtualListStarted = if (profileCommit) System.nanoTime() else 0L
-        if (needsVirtualListSync) syncVirtualLists()
+        if (needsVirtualListSync) syncVirtualLists(dirtyLists) else remountEmptyListRows()
         val virtualListSyncNanos = if (profileCommit) System.nanoTime() - virtualListStarted else 0L
         // A stable row ID/extent does not trigger a RecyclerView rebind when
         // conditional descendants are inserted. Materialize only affected,
@@ -705,7 +744,22 @@ class PamRenderer(
     }
 
     private fun syncHostBackground() {
-        host.setBackgroundColor(resolveHostBackground(rootId, 0))
+        val color = resolveHostBackground(rootId, 0)
+        if (appliedHostBackground == color) return
+        appliedHostBackground = color
+        // The host background also paints the Android 15 status-bar surface:
+        // the authored StatusBar must be applied again afterwards.
+        appliedStatusBar = null
+        host.setBackgroundColor(color)
+    }
+
+    /**
+     * Forgets the last applied system-bar state so the next commit re-applies
+     * the authored StatusBar (the Activity repainted its default bars).
+     */
+    fun invalidateSystemBars() {
+        appliedStatusBar = null
+        applyMergedStatusBar()
     }
 
     private val localModalInputTargets =
@@ -751,6 +805,13 @@ class PamRenderer(
             val marker = state.properties[PropKey.VALUE]?.textOrNull()
             val accessibilityMarker =
                 state.properties[PropKey.ACCESSIBILITY_LABEL]?.textOrNull()
+            if (
+                marker == null &&
+                accessibilityMarker != MODAL_CLOSE_ACCESSIBILITY_LABEL &&
+                !trigger.hasLocalOnPress
+            ) {
+                continue
+            }
             val localPress = when {
                 marker == MODAL_CLOSE_MARKER ||
                     accessibilityMarker == MODAL_CLOSE_ACCESSIBILITY_LABEL -> {
@@ -938,6 +999,7 @@ class PamRenderer(
         scrollContainers.clear()
         virtualListIds.clear()
         localModalIds.clear()
+        statusBarIds.clear()
         pressableIds.clear()
         inputIds.clear()
         nodes.clear()
@@ -959,6 +1021,7 @@ class PamRenderer(
         nodes.put(spec.id, state)
         if (state.kind == NodeKind.VIRTUAL_LIST) virtualListIds.add(spec.id)
         if (state.kind == NodeKind.MODAL) localModalIds.add(spec.id)
+        if (state.kind == NodeKind.STATUS_BAR) statusBarIds.add(spec.id)
         addChild(state.parent, state.id, fresh = true)
         if (!state.virtual && virtualListAncestor(state.parent) == null) {
             val view = createView(spec.kind, state)
@@ -1120,6 +1183,7 @@ class PamRenderer(
         removeView(id)
         virtualListIds.remove(id)
         localModalIds.remove(id)
+        statusBarIds.remove(id)
         nodes.remove(id)
         frames.remove(id)
         if (id == rootId) rootId = 0L
@@ -1199,13 +1263,24 @@ class PamRenderer(
         val index = nodes[id]?.index ?: Int.MAX_VALUE
         if (fresh) {
             // Creation streams arrive in sibling order: append without the
-            // O(n) contains + O(n log n) sort per insert (quadratic for long
-            // lists); fall back to a full sort only when out of order.
+            // O(n) contains + O(n log n) sort per insert. Out-of-order inserts
+            // (prepending an older page) use a binary search, never a re-sort.
             val last = siblings.lastOrNull()
-            siblings += id
-            if (last != null && (nodes[last]?.index ?: Int.MAX_VALUE) > index) {
-                siblings.sortBy { child -> nodes[child]?.index ?: Int.MAX_VALUE }
+            if (last == null || (nodes[last]?.index ?: Int.MAX_VALUE) <= index) {
+                siblings += id
+                return
             }
+            var low = 0
+            var high = siblings.size
+            while (low < high) {
+                val middle = (low + high) ushr 1
+                if ((nodes[siblings[middle]]?.index ?: Int.MAX_VALUE) <= index) {
+                    low = middle + 1
+                } else {
+                    high = middle
+                }
+            }
+            siblings.add(low, id)
             return
         }
         if (!siblings.contains(id)) siblings += id
@@ -1217,10 +1292,21 @@ class PamRenderer(
         children[parent]?.remove(id)
     }
 
-    private fun syncVirtualLists() {
+    /** Repairs rows emptied by a re-materialization; O(visible rows). */
+    private fun remountEmptyListRows() {
+        for (id in virtualListIds) {
+            (views[id] as? PamRecyclerList)?.remountEmptyRows()
+        }
+    }
+
+    private fun syncVirtualLists(dirty: Set<Long>? = null) {
         for (id in virtualListIds) {
             val state = nodes[id] ?: continue
             val list = views[id] as? PamRecyclerList ?: continue
+            if (dirty != null && id !in dirty && state.virtualListItemIds.isNotEmpty()) {
+                list.remountEmptyRows()
+                continue
+            }
             val itemIds = children[id]?.toList().orEmpty()
             if (state.virtualListItemIds != itemIds) {
                 state.virtualListItemIds = itemIds
@@ -1492,7 +1578,39 @@ class PamRenderer(
         attach(view, parent, index)
     }
 
+    /**
+     * Index of [state]'s view among the views hosted by [parentId]: an
+     * in-order walk of the host's logical children that descends only into
+     * layout-only (virtual) nodes. Proportional to the host's children, not to
+     * the whole tree (the previous scan visited every node on every create,
+     * which made large commits and prepends quadratic).
+     */
     private fun hostedInsertionIndex(state: NodeState, parentId: Long): Int {
+        if (parentId != 0L) {
+            var index = 0
+            var depth = 0
+            fun visit(containerId: Long): Boolean {
+                val siblings = children[containerId] ?: return false
+                for (childId in siblings) {
+                    if (childId == state.id) return true
+                    val child = nodes[childId] ?: continue
+                    if (child.virtual) {
+                        check(++depth <= MAX_VIRTUAL_DEPTH) { "Virtual native hierarchy is too deep" }
+                        val found = visit(childId)
+                        depth--
+                        if (found) return true
+                    } else if (views[childId] != null) {
+                        index++
+                    }
+                }
+                return false
+            }
+            if (visit(parentId)) return index
+        }
+        return scanHostedInsertionIndex(state, parentId)
+    }
+
+    private fun scanHostedInsertionIndex(state: NodeState, parentId: Long): Int {
         val targetPath = hostedPath(state, parentId)
         var index = 0
         for (position in 0 until nodes.size()) {
@@ -1589,6 +1707,7 @@ class PamRenderer(
     }
 
     private fun applyLayout(id: Long) {
+        if (views[id] == null) return
         virtualCellRoot(id)?.let { rootId ->
             val rootFrame = frames[rootId] ?: return
             applyCellLayout(id, rootId, rootFrame)
@@ -7185,13 +7304,10 @@ class PamRenderer(
         val defaults = statusBarDefaults
             ?: captureStatusBarDefaults().also { statusBarDefaults = it }
         var merged = defaults
-        val mounted = ArrayList<NodeState>()
-        for (position in 0 until nodes.size()) {
-            val state = nodes.valueAt(position)
-            if (
-                state.kind == NodeKind.STATUS_BAR &&
-                views[state.id]?.let(::isInActiveNavigationRoute) == true
-            ) {
+        val mounted = ArrayList<NodeState>(statusBarIds.size)
+        for (id in statusBarIds) {
+            val state = nodes[id] ?: continue
+            if (views[state.id]?.let(::isInActiveNavigationRoute) == true) {
                 mounted += state
             }
         }
@@ -7240,9 +7356,13 @@ class PamRenderer(
                 )
             }
         }
+        // Re-applying unchanged bars every commit costs window/insets
+        // controller round trips (and inset dispatches) on the UI thread.
+        if (merged == appliedStatusBar) return
+        appliedStatusBar = merged
         applyStatusBarConfig(merged)
-        for (position in 0 until views.size()) {
-            (views.valueAt(position) as? PamModalHost)?.applyStatusBar(
+        for (id in localModalIds) {
+            (views[id] as? PamModalHost)?.applyStatusBar(
                 color = merged.color,
                 useDarkIcons = merged.appearance == STATUS_BAR_DARK,
                 hidden = merged.hidden,
