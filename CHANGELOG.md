@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-10-05
 
 - Complete the CSS compiler: `flex-basis` (length, %, `auto`, `content`) and
   the full `flex` shorthand (`flex: 1 1 0`, `auto`, `none`, `<basis>`) now
@@ -20,6 +20,11 @@
   gradients and skew transforms fail closed instead of silently rendering
   wrong. Repeated declarations act as CSS fallbacks.
 - See `docs/css.md` for the full support matrix.
+- Behaviour change: `flex: <number>` now compiles with a zero `flex-basis`
+  (`flex: 1` = `flex: 1 1 0`), so sibling items share the main axis equally
+  as in browsers. Use `flex: 1 1 auto` to keep content-sized starting points.
+- PHP, Rust and Android unit/lint gates and the Android API 26 and API 36
+  instrumented suites passed locally. iOS/Xcode gates were not run.
 
 ## 1.1.1 - 2026-10-05
 
