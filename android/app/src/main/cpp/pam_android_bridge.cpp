@@ -878,7 +878,11 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     jfloat width,
     jfloat height,
     jfloat text_scale,
-    jboolean dark_appearance
+    jboolean dark_appearance,
+    jfloat safe_left,
+    jfloat safe_top,
+    jfloat safe_right,
+    jfloat safe_bottom
 ) {
     log_debug("Starting the Pam Native worker.");
     if (
@@ -989,6 +993,9 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     if (state->on_measure_text != nullptr) {
         pam_native_engine_set_text_measurer(state->engine, measure_text, state.get());
     }
+    // The first PHP frame is laid out with the real window safe area, so
+    // SafeAreaView never starts in a different inset mode than later frames.
+    pam_native_engine_set_safe_area_insets(state->engine, safe_left, safe_top, safe_right, safe_bottom);
     RuntimeState* handle = state.release();
     handle->worker = std::thread(runtime_loop, handle);
     return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(handle));

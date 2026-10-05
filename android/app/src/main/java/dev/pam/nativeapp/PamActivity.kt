@@ -175,15 +175,26 @@ class PamActivity : FragmentActivity() {
             val widthDp = windowWidth / density
             val heightDp = windowHeight / density
             exportBootMetrics(widthDp, heightDp)
+            val safeArea = currentSafeAreaInsets()
+            dispatchedSafeArea = safeArea
             runtime.start(
                 entry,
                 widthDp,
                 heightDp,
                 resources.configuration.fontScale,
                 isDarkAppearance(),
+                floatArrayOf(
+                    safeArea.left / density,
+                    safeArea.top / density,
+                    safeArea.right / density,
+                    safeArea.bottom / density,
+                ),
             )
             runtimeStarted = true
             rootHost.onStableInsetsChanged = { scheduleViewportUpdate() }
+            // The runtime may start after the first window layout (assets are
+            // installed off the UI thread); reconcile insets and metrics now.
+            scheduleViewportUpdate(force = true)
             window.decorView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
                 scheduleViewportUpdate()
             }

@@ -65,9 +65,11 @@ class PamRuntime(
         heightDp: Float,
         textScale: Float,
         darkAppearance: Boolean,
+        safeArea: FloatArray = FloatArray(4),
     ) {
         synchronized(handleLock) {
             check(!closed.get()) { "Pam Runtime is closed" }
+            renderer.engineManagedSafeArea = true
             check(handle == 0L) { "Pam Runtime is already running" }
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
@@ -79,6 +81,10 @@ class PamRuntime(
                 heightDp,
                 textScale,
                 darkAppearance,
+                safeArea.getOrElse(0) { 0f },
+                safeArea.getOrElse(1) { 0f },
+                safeArea.getOrElse(2) { 0f },
+                safeArea.getOrElse(3) { 0f },
             )
             check(handle != 0L) { "Pam Runtime failed to start" }
             val display = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
@@ -99,6 +105,7 @@ class PamRuntime(
                 nativeSetSafeAreaInsets(active, left, top, right, bottom)
             }
         }
+        renderer.onEngineSafeAreaChanged()
     }
 
     fun updateViewport(
@@ -452,6 +459,10 @@ class PamRuntime(
         heightDp: Float,
         textScale: Float,
         darkAppearance: Boolean,
+        safeLeft: Float,
+        safeTop: Float,
+        safeRight: Float,
+        safeBottom: Float,
     ): Long
     private external fun nativeRelayout(
         handle: Long,

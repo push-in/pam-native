@@ -405,6 +405,33 @@ class PamRenderer(
      */
     @Volatile
     var engineManagedSafeArea: Boolean = false
+
+    /**
+     * Drops any native SafeAreaView padding applied before the engine owned
+     * the insets, so a view is never inset twice (or by a stale value).
+     */
+    fun onEngineSafeAreaChanged() {
+        if (!engineManagedSafeArea) return
+        main.post {
+            for (index in 0 until nodes.size()) {
+                val state = nodes.valueAt(index) ?: continue
+                if (state.kind != NodeKind.SAFE_AREA_VIEW) continue
+                val view = views[state.id] ?: continue
+                if (state.safeAreaLeftInset == 0 && state.safeAreaTopInset == 0 &&
+                    state.safeAreaRightInset == 0 && state.safeAreaBottomInset == 0 &&
+                    view.paddingLeft == 0 && view.paddingTop == 0 &&
+                    view.paddingRight == 0 && view.paddingBottom == 0
+                ) {
+                    continue
+                }
+                state.safeAreaLeftInset = 0
+                state.safeAreaTopInset = 0
+                state.safeAreaRightInset = 0
+                state.safeAreaBottomInset = 0
+                applySafeAreaLayout(view, state)
+            }
+        }
+    }
     private val main = Handler(Looper.getMainLooper())
     private val views = LongSparseArray<View>()
     private val scrollContainers = LongSparseArray<PamScrollContainer>()

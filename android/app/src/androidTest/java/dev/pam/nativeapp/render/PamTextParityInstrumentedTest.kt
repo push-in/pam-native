@@ -93,6 +93,27 @@ class PamTextParityInstrumentedTest {
     }
 
     @Test
+    fun lineHeightScalesWithTheAccessibilityFontScaleLikeReactNative() {
+        val text = "Linha um do corpo da mensagem que precisa quebrar em várias linhas para medir o espaçamento"
+        val output = FloatArray(4)
+        val scaled = PamTextStyle(null, 16f, 1.1f, 400, false, 0f, 21f, true, 1, 1, 1, 0, null)
+        PamTextLayout.measure(text, null, scaled, 200f, density, typefaces, output)
+        val pitch = kotlin.math.ceil(21f * 1.1f * density)
+        // Every line advances by ceil(21 × 1.1 × density); only the font
+        // padding of the first/last line may differ by a pixel or two.
+        assertEquals(output[3] * pitch, output[1] * density, 3.01f)
+        val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG)
+        PamTextLayout.configurePaint(paint, scaled, density, typefaces)
+        val layout = PamTextLayout.build(
+            PamTextLayout.content(text, null, scaled, density, typefaces),
+            paint,
+            (output[0] * density).toInt(),
+            scaled,
+        )
+        assertEquals(pitch.toInt(), layout.getLineBottom(1) - layout.getLineBottom(0))
+    }
+
+    @Test
     fun richSpansDrawExactlyLikeTheReactNativePipelineAndDispatchPresses() {
         val text = "Olá mundo https://zé.chat e @ana!"
         val spans = "4,25,,700;10,25,,700,,4279991118,,2,,,0;28,32,13,,,4278211071,4293848814,,,,1"
@@ -209,6 +230,14 @@ class PamTextParityInstrumentedTest {
                 )
             }
             instrumentation.waitForIdleSync()
+            repeat(50) {
+                var laidOut = false
+                instrumentation.runOnMainSync {
+                    laidOut = ((activity.host.getChildAt(0) as ViewGroup).getChildAt(0) as TextView).layout != null
+                }
+                if (laidOut) return@repeat
+                Thread.sleep(40)
+            }
             instrumentation.runOnMainSync {
                 assertions((activity.host.getChildAt(0) as ViewGroup).getChildAt(0) as TextView)
             }

@@ -54,11 +54,22 @@ final class Icon
         $definition = self::font($font);
         $codepoint = self::glyphs($font)[$name] ?? null;
 
-        return Text::make($codepoint === null ? '?' : mb_chr($codepoint, 'UTF-8'))
+        return Text::make($codepoint === null ? '?' : self::utf8($codepoint))
             ->property(PropKey::FontFamily, $definition['source'])
             ->property(PropKey::FontSize, $size > 0 ? $size : 12.0)
             ->property(PropKey::TextColor, $color)
             ->property(PropKey::TextAllowFontScaling, false);
+    }
+
+    private static function utf8(int $codepoint): string
+    {
+        return match (true) {
+            $codepoint < 0x80 => chr($codepoint),
+            $codepoint < 0x800 => chr(0xC0 | ($codepoint >> 6)).chr(0x80 | ($codepoint & 0x3F)),
+            $codepoint < 0x10000 => chr(0xE0 | ($codepoint >> 12)).chr(0x80 | (($codepoint >> 6) & 0x3F)).chr(0x80 | ($codepoint & 0x3F)),
+            default => chr(0xF0 | ($codepoint >> 18)).chr(0x80 | (($codepoint >> 12) & 0x3F))
+                .chr(0x80 | (($codepoint >> 6) & 0x3F)).chr(0x80 | ($codepoint & 0x3F)),
+        };
     }
 
     public static function has(string $name, string $font = 'Ionicons'): bool

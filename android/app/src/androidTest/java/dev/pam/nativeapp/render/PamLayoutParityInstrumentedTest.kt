@@ -110,6 +110,62 @@ class PamLayoutParityInstrumentedTest {
         }
     }
 
+    @Test
+    fun engineManagedSafeAreaNeverInsetsTwiceOrDescendants() {
+        // Zé chat: root SafeAreaView (top edge on, bottom off) → stage → header.
+        val top = 24f
+        val nodes = listOf(
+            NodeSpec(2, 1, 0, NodeKind.SAFE_AREA_VIEW, mapOf(PropKey.SAFE_AREA_BOTTOM_EDGE to PropValue.Flag(false))) to Frame(0f, 0f, 360f, 720f),
+            NodeSpec(3, 2, 0, NodeKind.COLUMN, mapOf(PropKey.OVERFLOW to PropValue.Integer(2))) to Frame(0f, top, 360f, 720f - top),
+            NodeSpec(4, 3, 0, NodeKind.ROW, mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFF))) to Frame(0f, top, 360f, 52f),
+            NodeSpec(5, 4, 0, NodeKind.PRESSABLE, mapOf(PropKey.ON_PRESS to PropValue.Flag(true))) to Frame(38f, top + 2f, 300f, 48f),
+            NodeSpec(6, 5, 0, NodeKind.COLUMN, mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF00FF00))) to Frame(74f, top + 4.3f, 200f, 43.4f),
+        )
+        val activity = instrumentation.startActivitySync(
+            Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as PamTestActivity
+        try {
+            lateinit var renderer: PamRenderer
+            instrumentation.runOnMainSync {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                // Legacy first frame (native SafeAreaView padding), then the
+                // engine takes over the insets: the order seen on slow starts.
+                renderer.commit(
+                    listOf(
+                        buildList {
+                            add(Mutation.Create(NodeSpec(1, 0, 0, NodeKind.SCREEN, emptyMap())))
+                            nodes.forEach { (spec, _) -> add(Mutation.Create(spec)) }
+                            add(Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)))
+                            nodes.forEach { (spec, frame) ->
+                                add(Mutation.Layout(spec.id, if (spec.id == 2L) frame else frame.copy(y = frame.y - top)))
+                            }
+                            add(Mutation.SetRoot(1))
+                        },
+                    ),
+                )
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                renderer.engineManagedSafeArea = true
+                renderer.onEngineSafeAreaChanged()
+                renderer.commit(listOf(nodes.map { (spec, frame) -> Mutation.Layout(spec.id, frame) }))
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val root = renderer.viewForNode(2)!!
+                val header = renderer.viewForNode(4)!!
+                val identity = renderer.viewForNode(5)!!
+                fun screenTop(view: View) = IntArray(2).also(view::getLocationOnScreen)[1] - IntArray(2).also(root::getLocationOnScreen)[1]
+                assertEquals(0, root.paddingTop)
+                assertEquals(Math.round(top * density), screenTop(header))
+                assertEquals(Math.round((top + 2f) * density), screenTop(identity))
+                assertEquals(Math.round(48f * density), identity.height)
+            }
+        } finally {
+            instrumentation.runOnMainSync { activity.finish() }
+        }
+    }
+
     private fun render(nodes: List<Pair<NodeSpec, Frame>>, assertions: (Map<Long, View>) -> Unit) {
         val activity = instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),

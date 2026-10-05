@@ -58,7 +58,7 @@ final class Text extends Element
         $append = static function (string|self $part, array $inherited) use (&$append, &$text, &$length, &$spans, &$handlers): void {
             if (is_string($part)) {
                 $text .= $part;
-                $length += mb_strlen($part, 'UTF-8');
+                $length += (int) preg_match_all('/./su', $part);
                 return;
             }
             if ($part->kind() !== NodeKind::Text) {

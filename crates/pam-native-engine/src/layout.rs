@@ -6617,6 +6617,177 @@ mod css_flex_tests {
     }
 
     #[test]
+    fn chat_header_under_a_top_safe_area_root_keeps_its_children_in_place() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let text = |id, parent, index, value: &str, size: f32| {
+            node(
+                id,
+                parent,
+                index,
+                NodeKind::Text,
+                vec![
+                    (PropKey::Text, PropValue::String(value.into())),
+                    (PropKey::FontSize, f(size)),
+                    (PropKey::NumberOfLines, i(1)),
+                ],
+            )
+        };
+        let off = PropValue::Boolean(false);
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::SafeAreaView,
+                        vec![
+                            (PropKey::SafeAreaBottomEdge, off.clone()),
+                            (PropKey::HeightPercent, f(100.0)),
+                        ],
+                    ),
+                ),
+                (2, node(2, 1, 0, NodeKind::StatusBar, vec![])),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::Column,
+                        vec![
+                            (PropKey::FlexGrow, f(1.0)),
+                            (PropKey::MinHeight, f(0.0)),
+                            (PropKey::Overflow, i(2)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Row,
+                        vec![
+                            (PropKey::AlignItems, i(2)),
+                            (PropKey::MinHeight, f(52.0)),
+                            (PropKey::PaddingLeft, f(2.0)),
+                            (PropKey::PaddingRight, f(2.0)),
+                        ],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        4,
+                        0,
+                        NodeKind::Pressable,
+                        vec![
+                            (PropKey::AlignItems, i(2)),
+                            (PropKey::JustifyContent, i(2)),
+                            (PropKey::Width, f(36.0)),
+                            (PropKey::Height, f(48.0)),
+                        ],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        4,
+                        1,
+                        NodeKind::Pressable,
+                        vec![
+                            (PropKey::FlexDirection, i(2)),
+                            (PropKey::AlignItems, i(2)),
+                            (PropKey::FlexGrow, f(1.0)),
+                            (PropKey::MinWidth, f(0.0)),
+                            (PropKey::MinHeight, f(48.0)),
+                        ],
+                    ),
+                ),
+                (
+                    7,
+                    node(
+                        7,
+                        6,
+                        0,
+                        NodeKind::View,
+                        vec![
+                            (PropKey::Width, f(36.0)),
+                            (PropKey::Height, f(36.0)),
+                            (PropKey::BorderWidth, f(1.5)),
+                            (PropKey::BorderRadius, f(18.0)),
+                        ],
+                    ),
+                ),
+                (
+                    8,
+                    node(
+                        8,
+                        6,
+                        1,
+                        NodeKind::Column,
+                        vec![
+                            (PropKey::FlexGrow, f(1.0)),
+                            (PropKey::MinWidth, f(0.0)),
+                            (PropKey::PaddingLeft, f(10.0)),
+                            (PropKey::PaddingRight, f(10.0)),
+                        ],
+                    ),
+                ),
+                (9, text(9, 8, 0, "Ana Souza", 19.0)),
+                (10, text(10, 8, 1, "online", 12.0)),
+                (
+                    11,
+                    node(
+                        11,
+                        3,
+                        1,
+                        NodeKind::Column,
+                        vec![(PropKey::FlexGrow, f(1.0))],
+                    ),
+                ),
+            ]),
+        };
+        let _scope =
+            crate::text_measure::ActiveScope::enter_with(None, Some([0.0, 24.0, 0.0, 48.0]));
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 868.0,
+            },
+        )
+        .unwrap();
+        // Only the root SafeAreaView is inset; its descendants keep their
+        // flex positions below the status bar (Zé chat header regression).
+        assert_eq!(layouts[&1].y, 0.0);
+        assert_eq!(layouts[&3].y, 24.0);
+        assert_eq!(
+            layouts[&4].y, 24.0,
+            "the header starts below the status bar"
+        );
+        assert_eq!(layouts[&6].y, 26.0);
+        assert!((layouts[&8].y - 28.3).abs() < 0.01 && (layouts[&8].height - 43.4).abs() < 0.01);
+        assert!(
+            layouts[&8].y >= layouts[&4].y
+                && layouts[&8].y + layouts[&8].height <= layouts[&4].y + layouts[&4].height + 0.01
+        );
+        assert!(layouts[&9].height > 15.0 && layouts[&9].y >= layouts[&8].y);
+    }
+
+    #[test]
     fn baseline_of_a_container_uses_its_first_text_descendant() {
         let text = |id, parent, size: f32| Node {
             id,
