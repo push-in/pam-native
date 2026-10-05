@@ -643,10 +643,9 @@ fn layout_node(
                     None => {
                         let mut tallest = 0.0_f32;
                         for child in row.iter().copied() {
-                            let populated = context
-                                .children
-                                .get(&child.id)
-                                .is_some_and(|cell| cell.iter().any(|grandchild| visible(grandchild)));
+                            let populated = context.children.get(&child.id).is_some_and(|cell| {
+                                cell.iter().any(|grandchild| visible(grandchild))
+                            });
                             if !populated {
                                 continue;
                             }

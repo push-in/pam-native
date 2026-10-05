@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.6.0 - 2026-10-05
+
+React Native component parity on Android. See
+[docs/react-native-components-parity.md](docs/react-native-components-parity.md).
+
+- `<Icon font name size color>` / `Pam\Native\UI\Icon`: react-native-vector-icons
+  glyph maps (`assets/fonts/{Font}.ttf` + `{Font}.json`, or `Icon::register()`)
+  rendered as icon-font text, measured like React Native.
+- Sticky headers (`stickyHeader="true"`, `Element::stickyHeader()`) in
+  `ScrollView` and `VirtualizedList`.
+- `VirtualizedList`: multi-column rows and horizontal cells are content-sized
+  too (tallest cell per row); `fullSpan="true" (`Element::fullSpan()`, protocol `ListFullSpan` 523) for
+  header/footer rows in multi-column lists.
+- `:active` now applies like `:pressed`; pressed-state `transform: translate…`
+  is in points and applies to `Pressable` (React Native `translateY: 1.1`).
+- `MediaPlayer`: `on:mediaLoadStart`, `on:buffering`, `on:ready` with
+  `MediaReadyEvent` (natural size, duration); existing handlers keep working.
+- `Toast::message()` in-app toast with title and message
+  (react-native-toast-message styling, position, duration, colors, font).
+  iOS shows the message with the system presentation.
+- `<ScrollView keyboardInset>`: keyboard-aware bottom content inset.
+- `overflow: hidden` clips to the padding box with inner radii, so border
+  rings stay visible around clipped content (avatars), like React Native.
+- Bottom sheets: backdrop fade and sheet slide animate independently;
+  percentage snap points resolve against the container minus the top inset.
+- A bare `fontFamily` resolves bundled files by React Native naming
+  conventions (`{Family}-{Weight}.ttf`, `_bold`, …) without synthetic bold
+  when an exact file exists.
+
 ## 1.5.2 - 2026-10-05
 
 Virtual list layout and scroll fixes (chat timelines).

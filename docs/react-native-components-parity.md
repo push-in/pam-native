@@ -36,9 +36,10 @@ is drawn from the last rendered frame.
 
 ## VirtualizedList
 
-- Without `rowHeight`, every cell is measured from its content (FlashList /
-  `VirtualizedList` behaviour); `rowHeight` keeps fixed-extent cells and
-  `estimatedRowHeight` stays a hint.
+- Cells are measured from their content (FlashList / `VirtualizedList`
+  behaviour), including multi-column rows (tallest cell) and horizontal lists
+  without `rowHeight`; `rowHeight`/`estimatedRowHeight` remain estimates for
+  cells that are not populated yet.
 - `fullSpan="true"` (`Element::fullSpan()`) makes a child span all columns
   — use it for `ListHeaderComponent`/`ListFooterComponent` equivalents placed
   first/last; they scroll with the list.
