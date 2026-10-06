@@ -34,8 +34,9 @@ final class Profiler
                 microtime(true),
                 $metadata,
             );
-            if (count(self::$spans) > self::LIMIT) {
-                array_shift(self::$spans);
+            // Trimmed in batches (amortized O(1)); spans() exposes the last LIMIT.
+            if (count(self::$spans) >= 2 * self::LIMIT) {
+                self::$spans = array_slice(self::$spans, -self::LIMIT);
             }
         }
     }
@@ -43,7 +44,9 @@ final class Profiler
     /** @return list<ProfileSpan> */
     public static function spans(): array
     {
-        return self::$spans;
+        return count(self::$spans) > self::LIMIT
+            ? array_slice(self::$spans, -self::LIMIT)
+            : self::$spans;
     }
 
     public static function enabled(bool $enabled): void

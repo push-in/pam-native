@@ -56,6 +56,9 @@ abstract class Component implements Renderable
     private static array $pamAlwaysRender = [];
 
     /** Component bookkeeping that never affects rendered output. */
+    /** @var array<string, true>|null mangled names of PAM_SNAPSHOT_EXCLUDED */
+    private static ?array $pamSnapshotExcludedKeys = null;
+
     private const PAM_SNAPSHOT_EXCLUDED = [
         'pamEventListeners',
         'pamEffects',
@@ -453,10 +456,13 @@ abstract class Component implements Renderable
      */
     private function pamOwnState(): array
     {
-        $values = (array) $this;
-        foreach (self::PAM_SNAPSHOT_EXCLUDED as $name) {
-            unset($values["\0".self::class."\0".$name]);
-        }
+        $values = array_diff_key((array) $this, self::$pamSnapshotExcludedKeys ??= array_fill_keys(
+            array_map(
+                static fn (string $name): string => "\0".self::class."\0".$name,
+                self::PAM_SNAPSHOT_EXCLUDED,
+            ),
+            true,
+        ));
 
         return self::pamExpandObjects($values, 0);
     }
