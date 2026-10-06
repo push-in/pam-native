@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.22.0 - 2026-10-06
+
+App icons, a React Native-style splash and a shorter cold start. Zé Chat on a
+Galaxy S10 (Android 12, dark mode) showed ~1.7 s of a dark splash with no
+logo while React Native showed its own splash: the app declared no splash
+logo, and Android 12 draws the launcher icon there, which could only be PAM's
+generic icon.
+
+- `android.icon` (new): adaptive launcher icon from `foreground`,
+  `background` (colour or image) and `monochrome` layers. The manifest icon
+  is now `@drawable/pam_launcher`; without `android.icon` it is the bundled
+  PAM icon as before. Notification small icons keep `pam_icon`. See
+  [App icon](docs/app-icon.md).
+- `ios.icon` (new): a 1024x1024 PNG written as `AppIcon.appiconset` with
+  `ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon`. iOS uncompiled on the
+  release machine; needs device validation.
+- `appearance.splash.android12Icon` (new): `"appIcon"` keeps the launcher
+  icon on the Android 12+ splash (no `windowSplashScreenAnimatedIcon`), the
+  way a React Native/Expo theme does, and the logo only paints the API 26-30
+  starting window, so `size` may reach 288 dp (an xxhdpi 864 px bitmap).
+  Default `"logo"` is unchanged.
+- Android cold start: PHP boots right after the runtime is created. The
+  native module registry (~13 ms of UI-thread work on the S10) is built while
+  PHP boots; a module call that arrives earlier waits for it. Edge-to-edge
+  and the bar colours, which do not change the boot metrics, are applied
+  after the launch. The error overlay (~30 views, ~7 ms) is built the first
+  time an error needs it.
+- iOS: `PamErrorOverlay` builds its toast, inspector and fallback on first
+  use. The module registry still starts with the runtime (the launch order
+  differs from Android).
+- Note for measurements: Android 12 shows the splash icon only for launches
+  from the launcher; `adb shell am start` and notification launches get a
+  plain `splashBackground` for every app.
+
 ## 1.21.0 - 2026-10-06
 
 Keep-alive routes give a stack navigator React Navigation tab-screen
