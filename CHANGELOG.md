@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.22.4 - 2026-10-06
+
+- Android keyboard-aware scroll views follow keyboard animations and native
+  focus changes while preserving the authored viewport height. The existing
+  `keyboardVerticalOffset` adds focused-field clearance to `keyboardInset`.
+- Repeated unchanged keyboard insets and keyboard dismissal preserve manual
+  scrolling. Deferred reveal requests ignore stale insets and old focus targets;
+  removing a scroll view or its keyboard-aware property releases its observers.
+- No PHP API, protocol identifiers or dependency requirements changed. See
+  [migration notes](docs/migration-1.22.4.md).
+
 ## 1.22.3 - 2026-10-06
 
 - Android media observes its route view lifecycle after attachment. A player

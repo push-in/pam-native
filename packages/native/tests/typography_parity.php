@@ -236,3 +236,5 @@ $assert(
 );
 $keyboardScroll = $typographyRender('<ScrollView keyboardInset="true"><Column /></ScrollView>', '');
 $assert(($keyboardScroll->properties()[PropKey::ScrollKeyboardInset->value] ?? null) === true, 'keyboardInset must reach the scroll view.');
+$offsetScroll = $typographyRender('<ScrollView keyboardInset="true" keyboardVerticalOffset="156"><Column /></ScrollView>', '');
+$assert(($offsetScroll->properties()[PropKey::KeyboardVerticalOffset->value] ?? null) == 156, 'Keyboard-aware scroll clearance must use the existing keyboard offset property.');

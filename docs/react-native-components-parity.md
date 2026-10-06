@@ -85,6 +85,13 @@ duration is configurable. `Toast::show()` keeps the system toast.
 content inset inside the scroll content and keeps the focused input revealed
 (`KeyboardAwareScrollView`).
 
+On Android, `keyboardVerticalOffset="156"` adds 156 dp to the default 24 dp
+focused-field clearance (180 dp in total). The viewport keeps its full height;
+only scroll content receives the IME inset. Native inset animations and focus
+changes reveal the editor without PHP callbacks. An unchanged inset or keyboard
+hide does not reset a manually scrolled position. Use this directly on the
+`ScrollView`, without a padding/resizing `KeyboardAvoidingView` around it.
+
 ## Bottom sheet
 
 Sheets present like `@gorhom/bottom-sheet`: the backdrop fades while the sheet

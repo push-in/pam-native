@@ -557,6 +557,7 @@ class PamRenderer(
     private val main = Handler(Looper.getMainLooper())
     private val views = LongSparseArray<View>()
     private val scrollContainers = LongSparseArray<PamScrollContainer>()
+    private val scrollKeyboardInsets = HashMap<PamScrollContainer, PamScrollKeyboardInset>()
     private val virtualListIds = LinkedHashSet<Long>()
     private val localModalIds = LinkedHashSet<Long>()
     private val pressableIds = LinkedHashSet<Long>()
@@ -651,6 +652,7 @@ class PamRenderer(
     }
 
     private fun removeView(id: Long) {
+        (views[id] as? PamScrollContainer)?.let { scrollKeyboardInsets.remove(it)?.close() }
         scrollContainers.remove(id)
         pressableIds.remove(id)
         inputIds.remove(id)
@@ -860,7 +862,11 @@ class PamRenderer(
                 // Scroll-offset restoration is posted during commit. Queueing
                 // this reconciliation afterwards makes keyboard visibility win
                 // over a stale retained offset from the reactive render.
-                ancestor.ensureViewportTargetVisible(input)
+                if (scrollKeyboardInsets.containsKey(ancestor)) {
+                    ancestor.ensureKeyboardTargetVisible(input)
+                } else {
+                    ancestor.ensureViewportTargetVisible(input)
+                }
                 return
             }
             ancestor = ancestor.parent as? View
@@ -1159,6 +1165,8 @@ class PamRenderer(
             parent.removeOnLayoutChangeListener(listener)
         }
         deferredViewportLayouts.clear()
+        scrollKeyboardInsets.values.forEach(PamScrollKeyboardInset::close)
+        scrollKeyboardInsets.clear()
         imageLoader.close()
         mediaCache.close()
         nativeViews.close()
@@ -2514,7 +2522,7 @@ class PamRenderer(
             }
             PropKey.STICKY_HEADER -> applyStickyHeader(view, value.flag())
             PropKey.SCROLL_KEYBOARD_INSET ->
-                (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, value.flag()) }
+                (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, state, value.flag()) }
             PropKey.VALUE -> when (view) {
                 is EditText -> applyInputValue(view, state, value.text(key))
                 is PamDrawingCanvas -> view.setDrawing(value.text(key))
@@ -2935,7 +2943,11 @@ class PamRenderer(
                 state.keyboardBehavior = value.integer().toInt()
                 applyKeyboardAvoidance(view, state)
             }
-            PropKey.KEYBOARD_VERTICAL_OFFSET,
+            PropKey.KEYBOARD_VERTICAL_OFFSET -> if (view is PamScrollContainer) {
+                configureScrollKeyboardInset(view, state, state.flag(PropKey.SCROLL_KEYBOARD_INSET, false))
+            } else {
+                applyKeyboardAvoidance(view, state)
+            }
             PropKey.KEYBOARD_AVOIDING_ENABLED,
             -> applyKeyboardAvoidance(view, state)
             PropKey.SAFE_AREA_TOP,
@@ -3599,7 +3611,11 @@ class PamRenderer(
                 state.keyboardBehavior = KEYBOARD_RESIZE
                 applyKeyboardAvoidance(view, state)
             }
-            PropKey.KEYBOARD_VERTICAL_OFFSET,
+            PropKey.KEYBOARD_VERTICAL_OFFSET -> if (view is PamScrollContainer) {
+                configureScrollKeyboardInset(view, state, state.flag(PropKey.SCROLL_KEYBOARD_INSET, false))
+            } else {
+                applyKeyboardAvoidance(view, state)
+            }
             PropKey.KEYBOARD_AVOIDING_ENABLED,
             -> applyKeyboardAvoidance(view, state)
             PropKey.SAFE_AREA_TOP,
@@ -3896,7 +3912,7 @@ class PamRenderer(
             PropKey.ON_LAYOUT -> lastLayoutEvents.remove(state.id)
             PropKey.STICKY_HEADER -> applyStickyHeader(view, false)
             PropKey.SCROLL_KEYBOARD_INSET ->
-                (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, false) }
+                (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, state, false) }
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, 1)
             PropKey.ANIMATION_DURATION_MS -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -5492,6 +5508,14 @@ class PamRenderer(
             applyNativeStyleState(input, state, NativeStyleState.FOCUSED, focused)
             if (focused) {
                 lastFocusedInput = input
+                var ancestor = input.parent as? View
+                while (ancestor != null) {
+                    if (ancestor is PamScrollContainer && scrollKeyboardInsets.containsKey(ancestor)) {
+                        ancestor.ensureKeyboardTargetVisible(input)
+                        break
+                    }
+                    ancestor = ancestor.parent as? View
+                }
                 if (state.properties[PropKey.ON_FOCUS] != null) dispatch(state.id, EVENT_FOCUS)
             } else {
                 // A normalized authored value may have arrived while editing.
@@ -6602,25 +6626,13 @@ class PamRenderer(
      * KeyboardAwareScrollView: the visible IME overlap becomes bottom content
      * inset inside the scroll content and the focused input stays revealed.
      */
-    private fun configureScrollKeyboardInset(scroll: PamScrollContainer, enabled: Boolean) {
+    private fun configureScrollKeyboardInset(scroll: PamScrollContainer, state: NodeState, enabled: Boolean) {
         if (!enabled) {
-            scroll.setOnApplyWindowInsetsListener(null)
-            scroll.setKeyboardAvoidanceInset(0)
+            scrollKeyboardInsets.remove(scroll)?.close()
             return
         }
-        scroll.setOnApplyWindowInsetsListener { target, insets ->
-            val ime = androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(insets, target)
-                .getInsets(androidx.core.view.WindowInsetsCompat.Type.ime()).bottom
-            val location = IntArray(2)
-            target.getLocationInWindow(location)
-            val below = (target.rootView.height - (location[1] + target.height)).coerceAtLeast(0)
-            val overlap = (ime - below).coerceAtLeast(0)
-            scroll.setKeyboardAvoidanceInset(overlap)
-            if (overlap > 0) {
-                target.findFocus()?.let { focused -> target.post { scroll.ensureKeyboardTargetVisible(focused) } }
-            }
-            insets
-        }
+        val observer = scrollKeyboardInsets.getOrPut(scroll) { PamScrollKeyboardInset(scroll) }
+        observer.extraInsetPx = dp(state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat())
         scroll.requestApplyInsets()
     }
 

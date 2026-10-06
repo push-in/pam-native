@@ -378,7 +378,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun ensureKeyboardTargetVisible(target: View) {
         if (keyboardAvoidanceInsetPx <= 0) return
-        ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true)
+        ensureTargetVisible(target, keyboardAvoidanceInsetPx, retry = true, keyboardGuard = true)
     }
 
     fun ensureViewportTargetVisible(target: View) {
@@ -389,13 +389,18 @@ internal class PamScrollContainer @JvmOverloads constructor(
         target: View,
         obscuredInsetPx: Int,
         retry: Boolean,
+        keyboardGuard: Boolean = false,
     ) {
         if (horizontal) return
         activeScroll.post {
             if (
                 !isAttachedToWindow ||
                 !target.isAttachedToWindow ||
-                !isDescendantOfContent(target)
+                !isDescendantOfContent(target) ||
+                keyboardGuard && (
+                    keyboardAvoidanceInsetPx != obscuredInsetPx ||
+                    target is android.widget.EditText && !target.hasFocus()
+                )
             ) {
                 return@post
             }
@@ -423,7 +428,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
             // left outside a newly reduced viewport after rotation.
             if (retry) {
                 activeScroll.postOnAnimation {
-                    ensureTargetVisible(target, obscuredInsetPx, retry = false)
+                    ensureTargetVisible(target, obscuredInsetPx, retry = false, keyboardGuard = keyboardGuard)
                 }
             }
         }
