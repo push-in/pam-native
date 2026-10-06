@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.20.1 - 2026-10-06
+
+A property that gives a node inside a virtualized-list cell its own native
+view, or takes it away, no longer rebuilds the whole cell on Android. In Zé
+Chat on a Galaxy S10 a double tap on a feed post liked it and its like button
+started its pop animation: that View had been flattened (no host property
+until the animation appeared), so the renderer dematerialized and rebuilt the
+entire post card. The media flashed for a frame, a carousel jumped back to
+page 1 while its dots stayed on page 2, the header's "⋯" could vanish and the
+double-tap heart, already playing on the UI thread, was dropped.
+
+- Android: when a node's hosting flips (`update()` of a host property such as
+  `animation`, `nativeRef`, `opacity` on a layout-only View) inside a mounted
+  cell whose root is hosted, only that node is promoted or demoted in place
+  (`promote()`/`demote()` with the hosted insertion index and the cell layout).
+  The rest of the cell keeps its decoded images, players, scroll offsets and
+  running motions. The cell is still rebuilt when the node is the cell root,
+  the cell root is itself flattened, or the cell is not mounted
+  (`virtualCellHostingRepair`, unit-tested). Verified on the S10: the
+  double-tap heart plays its full ~700 ms and a carousel keeps its page.
+- iOS: unchanged. It never flattens views, so the same update only applies
+  the property to the existing view.
+
 ## 1.20.0 - 2026-10-06
 
 Safe areas are per presentation surface. On Android a full-screen `Modal`
