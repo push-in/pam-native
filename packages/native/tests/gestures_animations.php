@@ -175,6 +175,37 @@ $assert(
         && GestureEvent::fromPayload(Wire::map(['type' => 1, 'state' => 3]))->snapIndex === -1,
     'Gesture end events must report the release snap and threshold.',
 );
+$assert(
+    $ended->nativeScale === null && $ended->nativeTranslationX === null && $ended->nativeTranslationY === null,
+    'Older native gesture payloads must keep the applied transform optional.',
+);
+$applied = GestureEvent::fromPayload(Wire::map([
+    'type' => GestureType::Pinch->value,
+    'state' => GestureState::Ended->value,
+    'scale' => 1.2,
+    'translationX' => 40.0,
+    'translationY' => 25.0,
+    'nativeScale' => 1.92,
+    'nativeTranslationX' => 18.5,
+    'nativeTranslationY' => -4,
+]));
+$assert(
+    $applied->nativeScale === 1.92 && $applied->nativeTranslationX === 18.5
+        && $applied->nativeTranslationY === -4.0 && $applied->scale === 1.2
+        && $applied->translationX === 40.0 && $applied->translationY === 25.0,
+    'Applied native transforms must decode separately from the unchanged relative gesture deltas.',
+);
+$invalidApplied = GestureEvent::fromPayload(Wire::map([
+    'type' => GestureType::Pan->value,
+    'state' => GestureState::Ended->value,
+    'nativeScale' => '1.92',
+    'nativeTranslationX' => false,
+]));
+$assert(
+    $invalidApplied->nativeScale === null && $invalidApplied->nativeTranslationX === null
+        && $invalidApplied->nativeTranslationY === null,
+    'Missing or nonnumeric applied transforms must remain absent instead of resetting a gesture to zero.',
+);
 $row = Swipeable::make(Text::make('Conversation'))
     ->rightActions(Text::make('Archive'), 160)
     ->leftActions(Text::make('Pin'), 80)

@@ -484,6 +484,10 @@ internal class PamMotionRunner(
             return
         }
         val duration = timeline.durationMs
+        val runners = runnersOn(view) ?: linkedSetOf<PamMotionRunner>().also {
+            view.setTag(dev.pam.nativeapp.R.id.pam_motion_runners, it)
+        }
+        runners += this
         animator = ValueAnimator.ofFloat(0f, 1f).apply {
             this.duration = duration
             interpolator = LinearInterpolator()
@@ -492,6 +496,7 @@ internal class PamMotionRunner(
             addUpdateListener { applyAt((it.animatedFraction * duration).toLong()) }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
+                    unregister()
                     if (cancelled) return
                     applyAt(duration)
                     onComplete?.invoke()
@@ -506,6 +511,32 @@ internal class PamMotionRunner(
         cancelled = true
         animator?.cancel()
         animator = null
+        unregister()
+    }
+
+    private fun unregister() {
+        val runners = runnersOn(view) ?: return
+        runners.remove(this)
+        if (runners.isEmpty()) view.setTag(dev.pam.nativeapp.R.id.pam_motion_runners, null)
+    }
+
+    companion object {
+        /** Cancels only runners that would compete with a native gesture. */
+        fun cancelTransforms(view: View) {
+            runnersOn(view)?.toList()?.forEach { runner ->
+                if (runner.timeline.tracks.keys.any { it in TRANSFORMS }) runner.cancel()
+            }
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        private fun runnersOn(view: View): MutableSet<PamMotionRunner>? =
+            view.getTag(dev.pam.nativeapp.R.id.pam_motion_runners) as? MutableSet<PamMotionRunner>
+
+        private val TRANSFORMS = setOf(
+            PamMotionProperty.TRANSLATE_X, PamMotionProperty.TRANSLATE_Y,
+            PamMotionProperty.SCALE, PamMotionProperty.SCALE_X, PamMotionProperty.SCALE_Y,
+            PamMotionProperty.ROTATE,
+        )
     }
 
     private fun applyAt(ms: Long) {

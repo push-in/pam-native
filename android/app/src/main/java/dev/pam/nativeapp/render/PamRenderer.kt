@@ -1484,6 +1484,16 @@ class PamRenderer(
 
     private fun move(id: Long, parent: Long, index: Int) {
         val state = nodes[id] ?: return
+        if (state.parent == parent && nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) {
+            // A keyed row keeps its holder and native subtree when a page or
+            // loading header changes its adapter index. RecyclerView's diff
+            // positions that holder; detaching here would cancel every image
+            // and empty all visible rows before the adapter can reconcile.
+            removeChild(parent, id)
+            state.index = index
+            addChild(parent, id)
+            return
+        }
         val wasVirtualized = virtualListAncestor(state.parent) != null
         val view = views[id]
         if (view?.parent != null && !wasVirtualized && moveKeepsHostedPosition(state, parent, index)) {
@@ -5399,7 +5409,11 @@ class PamRenderer(
                     "timestamp" to WireValue.Integer(payload.timestamp),
                     "snapIndex" to WireValue.Integer(payload.snapIndex.toLong()),
                     "thresholdReached" to WireValue.Flag(payload.thresholdReached),
-                ),
+                ).toMutableMap().apply {
+                    payload.nativeScale?.let { put("nativeScale", WireValue.Decimal(it.toDouble())) }
+                    payload.nativeTranslationX?.let { put("nativeTranslationX", WireValue.Decimal(it / density.toDouble())) }
+                    payload.nativeTranslationY?.let { put("nativeTranslationY", WireValue.Decimal(it / density.toDouble())) }
+                },
             ),
         )
     }

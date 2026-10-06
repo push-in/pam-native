@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.22.5 - 2026-10-06
+
+- Android virtual lists retain native cells when stable keyed rows move within
+  the same list. Inserting loading headers or prepending pages no longer
+  destroys visible text, decoded images or active row state before RecyclerView
+  applies its position changes.
+- Regression coverage checks view and decoded-image identity during header
+  insertion and pagination, and a delayed native image request without PHP
+  callbacks. Moves between different lists retain their existing lifecycle.
+- Native Android gestures take over the currently displayed transform instead
+  of competing with an unfinished CSS zoom or translation. Independent opacity
+  animations continue, and the decoded image remains mounted.
+- Adjacent native pan/pinch detectors share their content surface; an explicit
+  intervening View keeps independent targets. The iOS renderer implements the
+  same shared-target and component-preserving transform contract. UIKit tests
+  are provided; iOS execution requires an Xcode host.
+- Optional `GestureEvent::nativeScale`, `nativeTranslationX` and
+  `nativeTranslationY` report the applied native transform; existing relative
+  gesture deltas and positional constructor parameters remain compatible.
+- Rebuild the Android host after updating. See
+  [migration notes](docs/migration-1.22.5.md).
+
 ## 1.22.4 - 2026-10-06
 
 - Android keyboard-aware scroll views follow keyboard animations and native

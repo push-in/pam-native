@@ -217,6 +217,13 @@ enum PamMotionProperty: String, CaseIterable {
     case radius = "borderRadius"
 
     static func parse(_ token: String) -> PamMotionProperty? { PamMotionProperty(rawValue: token) }
+
+    var affectsTransform: Bool {
+        switch self {
+        case .opacity, .radius: return false
+        default: return true
+        }
+    }
 }
 
 /// A number in the property's unit (points for lengths) or a percentage of the
@@ -603,6 +610,7 @@ final class PamMotionRunner {
     private var cancelled = false
 
     var isRunning: Bool { link != nil }
+    var animatesTransform: Bool { timeline.properties.contains { $0.affectsTransform } }
 
     init(
         view: UIView,

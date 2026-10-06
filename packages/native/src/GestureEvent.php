@@ -25,6 +25,10 @@ final readonly class GestureEvent
         public int $timestamp,
         public int $snapIndex = -1,
         public bool $thresholdReached = false,
+        /** Applied native transform, when gestureNativeTransform is enabled. Lengths are dp. */
+        public ?float $nativeScale = null,
+        public ?float $nativeTranslationX = null,
+        public ?float $nativeTranslationY = null,
     ) {
     }
 
@@ -49,12 +53,20 @@ final readonly class GestureEvent
             timestamp: self::integer($values['timestamp'] ?? null),
             snapIndex: self::integer($values['snapIndex'] ?? null, -1),
             thresholdReached: ($values['thresholdReached'] ?? false) === true,
+            nativeScale: self::optionalNumber($values['nativeScale'] ?? null),
+            nativeTranslationX: self::optionalNumber($values['nativeTranslationX'] ?? null),
+            nativeTranslationY: self::optionalNumber($values['nativeTranslationY'] ?? null),
         );
     }
 
     private static function number(mixed $value, float $fallback = 0.0): float
     {
         return is_int($value) || is_float($value) ? (float) $value : $fallback;
+    }
+
+    private static function optionalNumber(mixed $value): ?float
+    {
+        return (is_int($value) || is_float($value)) && is_finite((float) $value) ? (float) $value : null;
     }
 
     private static function integer(mixed $value, int $fallback = 0): int

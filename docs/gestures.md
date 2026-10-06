@@ -84,7 +84,37 @@ stream as soon as the second pointer lands. This prevents an ancestor
 single-pointer paging before zoom starts.
 
 Increment `gestureNativeResetKey` when the displayed item changes or when the
-transform should return to its identity value.
+transform should return to its identity value. Keep it stable when committing
+the result of an ordinary gesture.
+
+Beginning a native transform stops transform animations on that
+child and captures its currently displayed value. A pinch can therefore take
+over an unfinished double-tap zoom without competing with its CSS transition.
+Independent opacity animations continue. Keep the same image element mounted
+and animate its container to retain the decoded bitmap.
+
+Adjacent native transform detectors compose on the same content surface:
+`pan detector → pinch detector → View → image` lets either gesture take over
+both scale and translation immediately. Both detectors must enable native
+transforms and neither may use `Drag`. An intermediate `View` between the
+detectors keeps their targets separate. For a shared surface, adopt all three
+applied values on end, including the scale after a pan, because the gesture
+may have interrupted an animation of another transform.
+
+Since 1.22.5, `GestureEvent` optionally exposes `nativeScale`,
+`nativeTranslationX` and `nativeTranslationY`: the applied child transform,
+after native bounds, with translations in dp. The existing `scale` and
+`translationX/Y` stay relative to the gesture. When committing an interrupted
+animation, prefer the applied value; multiplying a relative delta by the old
+authored target can jump away from the value currently on screen. These fields
+are null on older runtimes and when native transforms are disabled.
+
+```php
+public function commitZoom(GestureEvent $event): void
+{
+    $this->scale = $event->nativeScale ?? $this->scaleAtBegin * $event->scale;
+}
+```
 
 Gesture types, states, directions and composition modes are integer-backed,
 sequential enums. Pointer counts are bounded to `1...10`, distances are in

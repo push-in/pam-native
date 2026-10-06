@@ -73,6 +73,28 @@ final class PamMotionCoordinator {
 
     func existing(_ nodeId: Int64) -> PamNodeMotion? { nodes[nodeId] }
 
+    /// Direct manipulation adopts the displayed transform, leaving opacity alone.
+    func takeOverTransform(nodeId: Int64, view: UIView) {
+        let displayed = view.layer.animation(forKey: "transform") != nil
+            ? view.layer.presentation()?.affineTransform() : nil
+        if let motion = nodes[nodeId] {
+            for property in Array(motion.transitionRunners.keys) where property.affectsTransform {
+                motion.transitionRunners.removeValue(forKey: property)?.cancel()
+            }
+            if motion.runner?.animatesTransform == true {
+                motion.runner?.cancel()
+                motion.runner = nil
+            }
+            if motion.tapEffectRunner?.animatesTransform == true {
+                motion.tapEffectRunner?.cancel()
+                motion.tapEffectRunner = nil
+            }
+        }
+        view.layer.removeAnimation(forKey: "transform")
+        if let displayed { view.transform = displayed }
+        PamMotionTarget.setTransform(PamMotionTarget.transform(of: view), on: view)
+    }
+
     /// Node removed from the tree.
     func remove(_ nodeId: Int64) {
         guard let motion = nodes.removeValue(forKey: nodeId) else { return }

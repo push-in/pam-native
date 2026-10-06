@@ -54,6 +54,20 @@ public final class PamRenderer {
             return self.views[child]
         }
     )
+    /// Adjacent native detectors share their first managed content View.
+    /// An intermediate View or Drag keeps the previous independent target.
+    func nativeTransformTarget(_ nodeId: Int64) -> UIView? {
+        guard let childId = children[nodeId]?.first, let child = views[childId] else { return nil }
+        if nodes[nodeId]?.properties[PamConstants.gestureNativeTransform]?.boolOrNil() == true,
+           motion.existing(nodeId)?.drag?.config == nil,
+           let childState = nodes[childId], childState.kind == .pressable,
+           childState.properties[PamConstants.gestureNativeTransform]?.boolOrNil() == true,
+           motion.existing(childId)?.drag?.config == nil {
+            return nativeTransformTarget(childId) ?? child
+        }
+        return child
+    }
+
     private var keyboardInsetObservers: [Int64: PamKeyboardInsetObserver] = [:]
     private var viewPool: [String: [UIView]] = [:]
     private var viewPoolCount = 0
@@ -1248,6 +1262,10 @@ public final class PamRenderer {
                     state.properties[PamConstants.gestureNativeResetOnEnd]?.boolOrNil() ?? false
             )
             bridge.drag = motion.existing(nodeId)?.drag
+            bridge.nativeTransformTarget = { [weak self] in self?.nativeTransformTarget(nodeId) }
+            bridge.takeOverNativeTransform = { [weak self] child in
+                self?.motion.takeOverTransform(nodeId: Int64(child.tag), view: child)
+            }
             eventBridges[nodeId]?[EventKind.gestureUpdate.rawValue] = bridge
         }
 
@@ -2492,9 +2510,9 @@ public final class PamRenderer {
              PamConstants.gestureNativeResetOnEnd:
             installEvents(for: nodeId)
         case PamConstants.gestureNativeResetKey:
-            if let child = view.subviews.first {
-                child.layer.removeAllAnimations()
-                child.transform = .identity
+            if let child = nativeTransformTarget(nodeId) {
+                motion.takeOverTransform(nodeId: Int64(child.tag), view: child)
+                PamMotionTarget.setTransform(PamMotionTransform(), on: child)
             }
             installEvents(for: nodeId)
         case PamConstants.hostProperties:
@@ -4502,7 +4520,10 @@ public final class PamRenderer {
         private var nativeGestureMaximumScale: CGFloat = 4
         private var nativeGestureTranslationLimitX: CGFloat = 0
         private var nativeGestureResetOnEnd = false
-        private var nativeGestureBaseTransform = CGAffineTransform.identity
+        private var nativeGesture = PamNativeGestureTransform()
+        private var nativeGestureApplied: PamMotionTransform?
+        var nativeTransformTarget: (() -> UIView?)?
+        var takeOverNativeTransform: ((UIView) -> Void)?
         private var scrollGestureStart: CGFloat = 0
         private var doubleTapEnabled = false
         private var emitsSinglePress = true
@@ -5040,6 +5061,9 @@ public final class PamRenderer {
             self.pressOutKind = nil
             self.pressMoveKind = nil
             self.pendingGesturePayload = nil
+            self.nativeTransformTarget = nil
+            self.takeOverNativeTransform = nil
+            self.nativeGestureApplied = nil
             self.gestureUpdateScheduled = false
             self.semanticGestureBegan = false
             self.emitsScroll = false
@@ -5095,6 +5119,7 @@ public final class PamRenderer {
             // Drag runs on the main thread every frame; PHP only sees the
             // semantic begin/end (with the chosen snap) and the settle.
             let dragging = sender is UIPanGestureRecognizer && drag?.config != nil
+            nativeGestureApplied = nil
             if dragging, let drag {
                 switch sender.state {
                 case .began:
@@ -5228,42 +5253,22 @@ public final class PamRenderer {
             scale: CGFloat,
             rotation: CGFloat
         ) {
-            guard nativeGestureTransform, let child = sender.view?.subviews.first else {
-                return
-            }
+            guard nativeGestureTransform,
+                  let child = nativeTransformTarget?() ?? sender.view?.subviews.first else { return }
             if sender.state == .began {
-                nativeGestureBaseTransform = child.transform
+                takeOverNativeTransform?(child)
+                nativeGesture.begin(on: child)
             }
-            switch semanticGestureType {
-            case 2, 5:
-                let translatedX = nativeGestureTranslationLimitX > 0
-                    ? min(nativeGestureTranslationLimitX, max(-nativeGestureTranslationLimitX, translation.x))
-                    : translation.x
-                child.transform = nativeGestureBaseTransform.concatenating(
-                    CGAffineTransform(
-                        translationX: translatedX,
-                        y: translation.y
-                    )
-                )
-            case 3:
-                let baseScale = hypot(
-                    nativeGestureBaseTransform.a,
-                    nativeGestureBaseTransform.c
-                )
-                let target = min(
-                    nativeGestureMaximumScale,
-                    max(nativeGestureMinimumScale, baseScale * scale)
-                )
-                let relative = target / max(baseScale, 0.0001)
-                child.transform = nativeGestureBaseTransform.scaledBy(
-                    x: relative,
-                    y: relative
-                )
-            case 4:
-                child.transform = nativeGestureBaseTransform.rotated(by: rotation)
-            default:
-                break
-            }
+            nativeGestureApplied = nativeGesture.apply(
+                on: child,
+                type: semanticGestureType,
+                translation: translation,
+                scale: scale,
+                rotation: rotation,
+                minimumScale: nativeGestureMinimumScale,
+                maximumScale: nativeGestureMaximumScale,
+                translationLimitX: nativeGestureTranslationLimitX
+            )
             if nativeGestureResetOnEnd,
                sender.state == .ended || sender.state == .cancelled || sender.state == .failed {
                 UIView.animate(
@@ -5271,7 +5276,7 @@ public final class PamRenderer {
                     delay: 0,
                     options: [.curveEaseOut, .beginFromCurrentState]
                 ) {
-                    child.transform = self.nativeGestureBaseTransform
+                    PamMotionTarget.setTransform(self.nativeGesture.base, on: child)
                 }
             }
         }
@@ -5337,7 +5342,7 @@ public final class PamRenderer {
             rotation: CGFloat,
             pointers: Int
         ) -> Data {
-            (try? WireMap.encode([
+            var values: [String: WireValue] = [
                 "type": .integer(Int64(semanticGestureType)),
                 "state": .integer(Int64(state)),
                 "x": .decimal(viewPoint.x),
@@ -5356,7 +5361,11 @@ public final class PamRenderer {
                 ),
                 "snapIndex": .integer(Int64(dragRelease?.snapIndex ?? -1)),
                 "thresholdReached": .flag(dragRelease?.thresholdReached ?? false),
-            ])) ?? Data()
+            ]
+            if let applied = nativeGestureApplied {
+                values.merge(applied.gesturePayload) { _, native in native }
+            }
+            return (try? WireMap.encode(values)) ?? Data()
         }
 
         private func scheduleSemanticGestureUpdate() {

@@ -86,8 +86,14 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         updateClickable()
     }
 
-    private fun nativeTransformTarget(): View? =
-        nativeTransformTarget?.takeIf { it.parent === this } ?: getChildAt(0)
+    private fun nativeTransformTarget(): View? {
+        val child = nativeTransformTarget?.takeIf { it.parent === this } ?: getChildAt(0)
+        // Adjacent native detectors compose on one content surface. An explicit
+        // View between them preserves independent transform targets.
+        return if (nativeTransformEnabled && drag.config == null &&
+            child is PamPressable && child.nativeTransformEnabled && child.drag.config == null
+        ) child.nativeTransformTarget() ?: child else child
+    }
 
     private val singleTapRunnable = Runnable {
         val pointer = pendingSingleTap ?: return@Runnable
@@ -231,8 +237,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             resetNativeTransform()
         }
         gestureRecognizer.configure(config) { payload ->
-            val delivered = applyDrag(payload)
-            applyNativeTransform(delivered)
+            val delivered = applyNativeTransform(applyDrag(payload))
             callback?.invoke(delivered)
         }
         updateClickable()
@@ -259,12 +264,16 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         return payload
     }
 
-    private fun applyNativeTransform(payload: PamGesturePayload) {
-        if (!nativeTransformEnabled || drag.config != null) return
+    private fun applyNativeTransform(payload: PamGesturePayload): PamGesturePayload {
+        if (!nativeTransformEnabled || drag.config != null) return payload
         traceGesture("transform type=${payload.type} state=${payload.state} x=${payload.translationX}")
-        val child = nativeTransformTarget() ?: return
+        val child = nativeTransformTarget() ?: return payload
         val translationTarget = child
         if (payload.state == 1) {
+            // Direct manipulation owns the currently displayed transform,
+            // including a photo zoom interrupted before its spring settled.
+            PamMotionRunner.cancelTransforms(child)
+            child.animate().cancel()
             nativeBaseTranslationX = translationTarget.translationX
             nativeBaseTranslationY = translationTarget.translationY
             nativeBaseScaleX = child.scaleX
@@ -307,6 +316,11 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 .setDuration(180L)
                 .start()
         }
+        return payload.copy(
+            nativeScale = child.scaleX,
+            nativeTranslationX = translationTarget.translationX,
+            nativeTranslationY = translationTarget.translationY,
+        )
     }
 
     private fun resetNativeTransform() {

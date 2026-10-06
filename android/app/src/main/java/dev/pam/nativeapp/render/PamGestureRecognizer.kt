@@ -36,6 +36,9 @@ internal data class PamGesturePayload(
     val timestamp: Long,
     val snapIndex: Int = -1,
     val thresholdReached: Boolean = false,
+    val nativeScale: Float? = null,
+    val nativeTranslationX: Float? = null,
+    val nativeTranslationY: Float? = null,
 )
 
 internal class PamGestureRecognizer(private val view: View) {
