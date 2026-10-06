@@ -213,7 +213,7 @@ class PamTextClipInstrumentedTest {
                         "'$label' must not be ellipsized (w=${view.width} pad=${view.paddingLeft},${view.paddingRight} " +
                             "desired=${android.text.Layout.getDesiredWidth(label, view.paint)} " +
                             "flags=${view.paintFlags} size=${view.paint.textSize} ls=${view.paint.letterSpacing} " +
-                            "fake=${view.paint.isFakeBoldText} tf=${view.typeface?.weight} layoutW=${layout.width})",
+                            "fake=${view.paint.isFakeBoldText} tfStyle=${view.typeface?.style} layoutW=${layout.width})",
                         0,
                         layout.getEllipsisCount(0),
                     )

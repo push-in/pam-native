@@ -6,6 +6,9 @@ namespace Pam\Native\Internal;
 
 use Pam\Native\GestureEvent;
 use Pam\Native\GestureSettleEvent;
+use Pam\Native\ImageErrorEvent;
+use Pam\Native\ImageLoadEvent;
+use Pam\Native\ImageProgressEvent;
 use Pam\Native\PressEvent;
 use Pam\Native\ScrollPhaseEvent;
 use Pam\Native\TextLayoutEvent;
@@ -25,6 +28,9 @@ final class EventPayloads
         PressEvent::class => true,
         GestureEvent::class => true,
         GestureSettleEvent::class => true,
+        ImageErrorEvent::class => true,
+        ImageLoadEvent::class => true,
+        ImageProgressEvent::class => true,
         ScrollPhaseEvent::class => true,
         TextLayoutEvent::class => true,
     ];

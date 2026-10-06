@@ -6966,8 +6966,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.22.5',
-    'The runtime SDK contract must match the 1.22.5 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.22.6',
+    'The runtime SDK contract must match the 1.22.6 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7831,5 +7831,6 @@ require __DIR__.'/runtime_audit.php';
 require __DIR__.'/native_crypto.php';
 require __DIR__.'/navigation_lifecycle.php';
 require __DIR__.'/image_layers.php';
+require __DIR__.'/image_events.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

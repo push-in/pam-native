@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.22.6 - 2026-10-06
+
+- Compiled image handlers typed as `ImageLoadEvent`, `ImageErrorEvent` or
+  `ImageProgressEvent` receive decoded event objects instead of wire strings.
+  Direct handlers, explicit event arguments and generated/interpreted template
+  expressions share the existing decoder. String, untyped and zero-argument
+  handlers retain their contracts; forwarded event objects retain identity.
+- Android applies initial rich-text effects once after the complete property
+  pass, avoiding repeated content, font, sizing and letter-spacing work while
+  native cells materialize. Incremental mutations remain immediate.
+- Android batches initial PamContainer background requests and applies the
+  final authored colors once. Native controls, ImageBackground and custom views
+  keep their existing paths; drawable, ripple, clipping and shadow behavior
+  are unchanged.
+- Regression coverage exercises actual compiled image callbacks and checks
+  text assignments/spans, background pixels, interaction state and incremental
+  updates. Local application samples showed less initial main-thread work;
+  they do not establish sustained 60 FPS or remove cold shader costs.
+- No protocol identifiers or dependency requirements changed. Rebuild the
+  application bundle and Android host; see
+  [migration notes](docs/migration-1.22.6.md).
+
 ## 1.22.5 - 2026-10-06
 
 - Android virtual lists retain native cells when stable keyed rows move within

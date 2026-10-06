@@ -2496,13 +2496,36 @@ class PamRenderer(
      * Incremental updates still apply immediately.
      */
     private fun applyInitialProperties(view: View, state: NodeState) {
+        // Text state already holds its final style. Rebuilding spans for each
+        // font/size/line-height property repeats the same content and setText.
+        // Controls keep their immediate configuration and value semantics.
+        val text = (view as? TextView)?.takeIf { isRichTextView(it, state) }
+        val textUpdates = text?.let { PamInitialTextUpdates() }
+        val backgroundUpdate = if (
+            view is PamContainer &&
+            state.kind != NodeKind.IMAGE_BACKGROUND &&
+            state.kind != NodeKind.CUSTOM_VIEW
+        ) PamInitialBackgroundUpdate() else null
+        state.initialTextUpdates = textUpdates
+        state.initialBackgroundUpdate = backgroundUpdate
         state.applyingInitialProperties = true
         state.pressableConfiguredDuringInitialization = false
         try {
             state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
         } finally {
+            state.initialTextUpdates = null
+            state.initialBackgroundUpdate = null
             state.applyingInitialProperties = false
             state.pressableConfiguredDuringInitialization = false
+        }
+        if (text != null && textUpdates != null) {
+            if (textUpdates.typeface) applyTypeface(text, state)
+            if (textUpdates.size) applyTextSizing(text, state)
+            if (textUpdates.letterSpacing) applyLetterSpacing(text, state)
+            if (textUpdates.content) applyTextContent(text, state)
+        }
+        if (backgroundUpdate?.requested == true) {
+            updateBackground(view, state, backgroundUpdate.backgroundColor, backgroundUpdate.borderColor)
         }
     }
 
@@ -6069,6 +6092,10 @@ class PamRenderer(
         backgroundColorOverride: Int? = null,
         borderColorOverride: Int? = null,
     ) {
+        state.initialBackgroundUpdate?.let {
+            it.request(backgroundColorOverride, borderColorOverride)
+            return
+        }
         val defaultColor = if (
             state.kind == NodeKind.IMAGE ||
             state.kind == NodeKind.IMAGE_BACKGROUND ||
@@ -6441,6 +6468,7 @@ class PamRenderer(
         }
 
     private fun applyTextSizing(view: TextView, state: NodeState) {
+        state.initialTextUpdates?.let { it.size = true; return }
         view.setAutoSizeTextTypeWithDefaults(TextView.AUTO_SIZE_TEXT_TYPE_NONE)
         val baseSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat().coerceAtLeast(1f)
         val metrics = view.resources.displayMetrics
@@ -6511,6 +6539,7 @@ class PamRenderer(
     }
 
     private fun applyLetterSpacing(view: TextView, state: NodeState) {
+        state.initialTextUpdates?.let { it.letterSpacing = true; return }
         if (isRichTextView(view, state)) {
             view.letterSpacing = PamTextLayout.letterSpacingEm(textStyle(state), resourcesDensity())
             return
@@ -6740,6 +6769,7 @@ class PamRenderer(
         )
 
     private fun applyTextContent(view: TextView, state: NodeState) {
+        state.initialTextUpdates?.let { it.content = true; return }
         view.setLineSpacing(0f, 1f)
         view.transformationMethod = null
         val spans = (state.properties[PropKey.TEXT_SPANS] as? PropValue.Text)?.value
@@ -6805,6 +6835,7 @@ class PamRenderer(
     }
 
     private fun applyTypeface(view: TextView, state: NodeState) {
+        state.initialTextUpdates?.let { it.typeface = true; return }
         val weight = state.integer(PropKey.FONT_WEIGHT, 400L).coerceIn(1L, 1000L).toInt()
         val italic = state.integer(PropKey.FONT_STYLE, 1L) == 2L
         val family = (state.properties[PropKey.FONT_FAMILY] as? PropValue.Text)?.value
@@ -8922,6 +8953,8 @@ class PamRenderer(
         val mountOrder: Long,
         var updating: Boolean = false,
         var applyingInitialProperties: Boolean = false,
+        var initialTextUpdates: PamInitialTextUpdates? = null,
+        var initialBackgroundUpdate: PamInitialBackgroundUpdate? = null,
         var pressableConfiguredDuringInitialization: Boolean = false,
         var textWatcherInstalled: Boolean = false,
         var pendingChange: Runnable? = null,
