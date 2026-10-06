@@ -173,8 +173,16 @@ internal class PamEditText @JvmOverloads constructor(
         return super.onKeyDown(keyCode, event)
     }
 
+    /**
+     * Pending `autoFocus` keyboard request. The IME only accepts a show
+     * request for the view it is serving; it starts serving this view by
+     * creating its input connection, so the request is repeated right then.
+     */
+    var onInputConnectionCreated: (() -> Unit)? = null
+
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val target = super.onCreateInputConnection(outAttrs) ?: return null
+        onInputConnectionCreated?.let { post(it) }
         return object : InputConnectionWrapper(target, false) {
             override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
                 text?.toString()

@@ -3012,7 +3012,7 @@ class PamRenderer(
                 InputFilter.LengthFilter(value.integer().toInt()),
             )
             PropKey.AUTO_FOCUS -> if (value.flag()) {
-                requestAutoFocus(view)
+                requestAutoFocus(view, state.id)
             } else {
                 Unit
             }
@@ -7481,8 +7481,24 @@ class PamRenderer(
             ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
     }
 
-    private fun requestAutoFocus(view: View) {
+    private fun requestAutoFocus(view: View, id: Long) {
+        // The sheet/dialog window must let the IME show when it gains focus
+        // (see PamModalHost.prepareAutoFocusKeyboard).
+        if (view is PamEditText && view.showSoftInputOnFocus) {
+            modalAncestor(id)?.prepareAutoFocusKeyboard()
+        }
         attemptAutoFocus(view, attempt = 0)
+    }
+
+    private fun modalAncestor(id: Long): PamModalHost? {
+        var current = nodes[id]?.parent ?: return null
+        var depth = 0
+        while (current != 0L && depth++ < MAX_VIRTUAL_DEPTH) {
+            val state = nodes[current] ?: return null
+            if (state.kind == NodeKind.MODAL) return views[current] as? PamModalHost
+            current = state.parent
+        }
+        return null
     }
 
     private fun requestAutoFocusDescendant(rootId: Long) {
@@ -7497,7 +7513,7 @@ class PamRenderer(
                 view is PamEditText &&
                 view.visibility == View.VISIBLE
             ) {
-                requestAutoFocus(view)
+                requestAutoFocus(view, id)
                 return
             }
             children[id]?.forEach(pending::addLast)
@@ -7505,49 +7521,95 @@ class PamRenderer(
     }
 
     private fun attemptAutoFocus(view: View, attempt: Int) {
+        val deadline = SystemClock.uptimeMillis() + AUTO_FOCUS_DEADLINE_MS
+        attemptAutoFocus(view, deadline, retry = attempt > 0)
+    }
+
+    /**
+     * Focuses an `autoFocus` input once it is attached and focusable (inside a
+     * Modal/BottomSheet that is still being presented), bounded by wall-clock
+     * time rather than attempts: a busy UI thread can run many short retries
+     * in one burst after a long frame.
+     */
+    private fun attemptAutoFocus(view: View, deadline: Long, retry: Boolean) {
         view.postDelayed({
-            if (!view.isAttachedToWindow) {
-                if (attempt < AUTO_FOCUS_RETRIES) attemptAutoFocus(view, attempt + 1)
-                return@postDelayed
-            }
-            if (!view.hasFocus() && !view.requestFocus()) {
-                if (attempt < AUTO_FOCUS_RETRIES) attemptAutoFocus(view, attempt + 1)
+            if (!view.isAttachedToWindow || !view.hasFocus() && !view.requestFocus()) {
+                if (SystemClock.uptimeMillis() < deadline) {
+                    attemptAutoFocus(view, deadline, retry = true)
+                } else {
+                    Log.i(AUTO_FOCUS_LOG, "gave up focusing ${view.transitionName}: attached=${view.isAttachedToWindow}")
+                }
                 return@postDelayed
             }
             val input = view as? PamEditText ?: return@postDelayed
             if (!input.showSoftInputOnFocus) return@postDelayed
-            showAutoFocusKeyboard(input, attempt = 0)
-        }, if (attempt == 0) 0L else AUTO_FOCUS_RETRY_MS)
+            showAutoFocusKeyboard(input, SystemClock.uptimeMillis() + AUTO_FOCUS_DEADLINE_MS, retry = false)
+        }, if (retry) AUTO_FOCUS_RETRY_MS else 0L)
     }
 
     /**
      * Opens the IME for an auto-focused input. The IME ignores requests from a
-     * window that has no input focus yet (a Dialog/BottomSheet that was just
-     * shown, or an input remounted while it gains focus), and on Android 11-12
-     * a request right after the window gained focus can still be dropped. So
-     * wait for the input's own window focus, ask that window's insets
-     * controller, and re-ask until the IME is reported visible.
+     * window without input focus (a Dialog/BottomSheet that was just shown or
+     * is still under a closing overlay) and, on Android 11-12, requests for a
+     * view it does not serve yet: after the window gains focus the IME starts
+     * serving the view asynchronously. So: wait for the input's own window
+     * focus, ask again when the IME creates the view's input connection, and
+     * keep asking (insets controller + IMM) until the IME is reported visible
+     * or the deadline passes.
      */
-    private fun showAutoFocusKeyboard(input: PamEditText, attempt: Int) {
+    private fun showAutoFocusKeyboard(input: PamEditText, deadline: Long, retry: Boolean) {
+        input.onInputConnectionCreated = {
+            if (input.hasFocus() && input.hasWindowFocus() && !autoFocusImeVisible(input)) {
+                Log.i(AUTO_FOCUS_LOG, "input connection created; showing the IME")
+                requestAutoFocusIme(input)
+            }
+        }
         input.postDelayed({
-            if (!input.isAttachedToWindow || !input.hasFocus()) return@postDelayed
-            if (!input.hasWindowFocus()) {
-                awaitWindowFocus(input) { showAutoFocusKeyboard(input, attempt) }
+            if (!input.isAttachedToWindow || !input.hasFocus()) {
+                input.onInputConnectionCreated = null
                 return@postDelayed
             }
-            if (autoFocusImeVisible(input)) return@postDelayed
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                input.windowInsetsController?.show(WindowInsets.Type.ime())
+            if (!input.hasWindowFocus()) {
+                Log.i(AUTO_FOCUS_LOG, "waiting for window focus")
+                awaitWindowFocus(input) {
+                    showAutoFocusKeyboard(
+                        input,
+                        SystemClock.uptimeMillis() + AUTO_FOCUS_DEADLINE_MS,
+                        retry = false,
+                    )
+                }
+                return@postDelayed
             }
-            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+            if (autoFocusImeVisible(input)) {
+                Log.i(AUTO_FOCUS_LOG, "IME visible")
+                input.onInputConnectionCreated = null
+                return@postDelayed
+            }
+            Log.i(AUTO_FOCUS_LOG, "showing the IME (retry=$retry)")
+            requestAutoFocusIme(input)
             if (
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
-                attempt < AUTO_FOCUS_KEYBOARD_RETRIES
+                SystemClock.uptimeMillis() < deadline
             ) {
-                showAutoFocusKeyboard(input, attempt + 1)
+                showAutoFocusKeyboard(input, deadline, retry = true)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                input.onInputConnectionCreated = null
+            } else {
+                // Without IME visibility, keep only the connection hook armed.
+                val hook = input.onInputConnectionCreated
+                input.postDelayed({
+                    if (input.onInputConnectionCreated === hook) input.onInputConnectionCreated = null
+                }, (deadline - SystemClock.uptimeMillis()).coerceAtLeast(0L))
             }
-        }, if (attempt == 0) 0L else AUTO_FOCUS_KEYBOARD_RETRY_MS)
+        }, if (retry) AUTO_FOCUS_KEYBOARD_RETRY_MS else 0L)
+    }
+
+    private fun requestAutoFocusIme(input: PamEditText) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            input.windowInsetsController?.show(WindowInsets.Type.ime())
+        }
+        (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+            ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
     }
 
     private fun autoFocusImeVisible(input: View): Boolean =
@@ -8760,9 +8822,9 @@ class PamRenderer(
     private companion object {
         const val COMMIT_PERF_TAG = "PamRendererPerf"
         const val DRAG_SNAP_REQUEST_STRIDE = 64L
-        const val AUTO_FOCUS_RETRIES = 20
+        const val AUTO_FOCUS_DEADLINE_MS = 3_000L
+        const val AUTO_FOCUS_LOG = "PamAutoFocus"
         const val AUTO_FOCUS_RETRY_MS = 50L
-        const val AUTO_FOCUS_KEYBOARD_RETRIES = 12
         const val AUTO_FOCUS_KEYBOARD_RETRY_MS = 120L
         const val LOCAL_MODAL_PREFIX = "pam:local-modal:"
         const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"

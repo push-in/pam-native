@@ -122,7 +122,9 @@ class PamSheetKeyboardInstrumentedTest {
             }
             awaitKeyboard("edit-2")
 
-            // Remount inside the already-presented sheet (keyboard hidden first).
+            // Remount inside the already-presented sheet (keyboard hidden first,
+            // like a user would, a moment after it opened).
+            Thread.sleep(600)
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             waitUntil(instrumentation, "IME hidden") {
                 presentedModalContent(renderer)?.let { dialogImeTop(it) } == null
@@ -219,6 +221,127 @@ class PamSheetKeyboardInstrumentedTest {
                     android.graphics.Color.blue(above) < 30,
             )
             assertEquals("the Column is drawn white ($geometry)", 0xFFFFFFFF.toInt(), inside)
+            onMain(instrumentation) { renderer.close() }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    /**
+     * Zé's real flow: the message-actions overlay (a transparent full-screen
+     * Modal, recreated on every open, so its window is newer than the kept
+     * edit sheet's) stays up 150 ms while "Editar" presents the kept sheet
+     * and remounts its multiline, natively-synced input with `autoFocus`.
+     * The sheet window only gains focus once the overlay is removed.
+     */
+    @Test
+    fun autoFocusInAKeptSheetPresentedUnderAClosingOverlayOpensTheKeyboard() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        var width = 0f
+        var height = 0f
+        fun overlay(id: Long) = listOf(
+            Mutation.Create(node(id, 1, NodeKind.MODAL, mapOf(
+                PropKey.VISIBLE to PropValue.Flag(true),
+                PropKey.MODAL_PRESENTATION to PropValue.Integer(1),
+                PropKey.MODAL_ANIMATION_TYPE to PropValue.Integer(1),
+                PropKey.MODAL_TRANSPARENT to PropValue.Flag(true),
+                PropKey.ON_MODAL_REQUEST_CLOSE to PropValue.Flag(true),
+            ), index = 2)),
+            Mutation.Create(node(id + 1, id, NodeKind.PRESSABLE, mapOf(
+                PropKey.ON_PRESS to PropValue.Flag(true),
+                PropKey.BACKGROUND_COLOR to PropValue.Integer(0x6B0F1410L),
+            ))),
+            Mutation.Layout(id, Frame(0f, 0f, width, height)),
+            Mutation.Layout(id + 1, Frame(0f, 0f, width, height)),
+        )
+        fun input(id: Long, name: String) = listOf(
+            Mutation.Create(node(id, 7, NodeKind.INPUT, mapOf(
+                PropKey.TEST_ID to PropValue.Text(name),
+                PropKey.AUTO_FOCUS to PropValue.Flag(true),
+                PropKey.MULTILINE to PropValue.Flag(true),
+                PropKey.INPUT_SYNC_MODE to PropValue.Integer(1),
+                PropKey.VALUE to PropValue.Text("mensagem $name"),
+            ), index = 1)),
+            Mutation.Layout(id, Frame(16f, 64f, width - 32f, 110f)),
+        )
+        fun awaitKeyboard(name: String) {
+            waitUntil(instrumentation, "keyboard open for $name", timeoutMs = 10_000) {
+                val content = presentedModalContent(renderer, sheetId = 6) ?: return@waitUntil false
+                val field = content.findByTransitionName(name) as? EditText ?: return@waitUntil false
+                lastGeometry = "focus=${field.hasFocus()} windowFocus=${field.hasWindowFocus()} " +
+                    "ime=${dialogImeTop(field)}"
+                field.hasFocus() && dialogImeTop(field) != null
+            }
+        }
+        fun closeSheet() {
+            Thread.sleep(600)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            waitUntil(instrumentation, "IME hidden") {
+                presentedModalContent(renderer, sheetId = 6)?.let { dialogImeTop(it) } == null
+            }
+            onMain(instrumentation) {
+                renderer.commit(listOf(listOf(Mutation.Update(6, PropKey.VISIBLE, PropValue.Flag(false)))))
+            }
+            waitUntil(instrumentation, "sheet hidden") { presentedModalContent(renderer, sheetId = 6) == null }
+            Thread.sleep(300)
+        }
+        fun editFromOverlay(overlayId: Long, oldInput: Long?, newInput: Long, name: String) {
+            onMain(instrumentation) { renderer.commit(listOf(overlay(overlayId))) }
+            waitUntil(instrumentation, "overlay presented") {
+                presentedModalContent(renderer, sheetId = overlayId) != null
+            }
+            Thread.sleep(300)
+            onMain(instrumentation) {
+                renderer.commit(listOf(
+                    listOfNotNull(oldInput?.let { Mutation.Remove(it) }) + input(newInput, name) +
+                        Mutation.Update(6, PropKey.VISIBLE, PropValue.Flag(true)),
+                ))
+            }
+            Thread.sleep(150)
+            onMain(instrumentation) {
+                renderer.commit(listOf(listOf(Mutation.Remove(overlayId))))
+                // A long UI-thread frame (a heavy commit on a mid-range
+                // phone) while the sheet window gains focus.
+                activity.host.post { SystemClock.sleep(1_200) }
+            }
+            awaitKeyboard(name)
+        }
+        try {
+            onMain(instrumentation) {
+                activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val density = activity.host.resources.displayMetrics.density
+                width = activity.host.width / density
+                height = activity.host.height / density
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(6, 1, NodeKind.MODAL, mapOf(
+                        PropKey.VISIBLE to PropValue.Flag(false),
+                        PropKey.MODAL_PRESENTATION to PropValue.Integer(3),
+                        PropKey.BOTTOM_SHEET_KEYBOARD_BEHAVIOR to PropValue.Integer(1),
+                        PropKey.ON_MODAL_REQUEST_CLOSE to PropValue.Flag(true),
+                    ), index = 1)),
+                    Mutation.Create(node(7, 6, NodeKind.COLUMN, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFF7F6F2L),
+                    ))),
+                    Mutation.Create(node(10, 7, NodeKind.PRESSABLE, mapOf(
+                        PropKey.ON_PRESS to PropValue.Flag(true),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(6, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(7, Frame(0f, 0f, width, 260f)),
+                    Mutation.Layout(10, Frame(width - 60f, 8f, 44f, 44f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            editFromOverlay(overlayId = 100, oldInput = null, newInput = 20, name = "edit-1")
+            closeSheet()
+            editFromOverlay(overlayId = 110, oldInput = 20, newInput = 21, name = "edit-2")
+            closeSheet()
+            editFromOverlay(overlayId = 120, oldInput = 21, newInput = 22, name = "edit-3")
             onMain(instrumentation) { renderer.close() }
         } finally {
             onMain(instrumentation) { activity.finish() }
@@ -362,12 +485,16 @@ class PamSheetKeyboardInstrumentedTest {
         return location[1] + view.height
     }
 
-    private fun presentedModalContent(renderer: PamRenderer): View? {
+    private fun presentedModalContent(renderer: PamRenderer, sheetId: Long? = null): View? {
         val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
         @Suppress("UNCHECKED_CAST")
         val views = field.get(renderer) as android.util.LongSparseArray<View>
-        val modal = (0 until views.size()).mapNotNull { views.valueAt(it) as? PamModalHost }
-            .singleOrNull { it.isPresented() } ?: return null
+        val modal = if (sheetId != null) {
+            (views.get(sheetId) as? PamModalHost)?.takeIf { it.isPresented() }
+        } else {
+            (0 until views.size()).mapNotNull { views.valueAt(it) as? PamModalHost }
+                .singleOrNull { it.isPresented() }
+        } ?: return null
         val content = PamModalHost::class.java.getDeclaredField("content").apply { isAccessible = true }
         return content.get(modal) as? View
     }

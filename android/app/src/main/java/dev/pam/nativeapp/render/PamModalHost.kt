@@ -100,6 +100,8 @@ internal class PamModalHost @JvmOverloads constructor(
     private var statusBarTranslucent = false
     private var allowSwipeDismissal = false
     private var focusKeyboard = false
+    private var autoFocusKeyboardPending = false
+    private val clearAutoFocusKeyboard = Runnable { finishAutoFocusKeyboard() }
     private var onRequestClose: (() -> Unit)? = null
     private var onShow: (() -> Unit)? = null
     private var onDismiss: (() -> Unit)? = null
@@ -296,6 +298,29 @@ internal class PamModalHost @JvmOverloads constructor(
         focusKeyboard = value
     }
 
+    /**
+     * An `autoFocus` input is about to take focus in this window. The window
+     * keeps `adjustNothing` (interactive sheets), so with an unspecified
+     * soft-input state the system hides the IME whenever the window gains
+     * focus, which discarded the keyboard requested for the input (Android
+     * 11-12: the request raced the window-focus hide). Until the IME shows,
+     * ask the system itself to show it for the focused editor on focus gain.
+     */
+    fun prepareAutoFocusKeyboard() {
+        removeCallbacks(clearAutoFocusKeyboard)
+        postDelayed(clearAutoFocusKeyboard, AUTO_FOCUS_KEYBOARD_WINDOW_MS)
+        if (autoFocusKeyboardPending) return
+        autoFocusKeyboardPending = true
+        dialog?.let(::applyWindowConfiguration)
+    }
+
+    private fun finishAutoFocusKeyboard() {
+        removeCallbacks(clearAutoFocusKeyboard)
+        if (!autoFocusKeyboardPending) return
+        autoFocusKeyboardPending = false
+        dialog?.let(::applyWindowConfiguration)
+    }
+
     fun setCallbacks(
         onRequestClose: (() -> Unit)?,
         onShow: (() -> Unit)?,
@@ -447,6 +472,7 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun observeDialogIme(modal: Dialog) {
         val decor = modal.window?.decorView ?: return
         ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
+            if (insets.isVisible(WindowInsetsCompat.Type.ime())) finishAutoFocusKeyboard()
             if (!sheetImeAnimating) updateSheetKeyboardInset(sheetKeyboardLiftFor(insets))
             ViewCompat.onApplyWindowInsets(view, insets)
         }
@@ -633,7 +659,7 @@ internal class PamModalHost @JvmOverloads constructor(
             )
             setSoftInputMode(
                 adjustMode or
-                    if (focusKeyboard) {
+                    if (focusKeyboard || autoFocusKeyboardPending) {
                         WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
                     } else {
                         WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
@@ -1100,6 +1126,8 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun dismissNow(modal: Dialog, notify: Boolean) {
         if (dialog !== modal) return
         ++dialogGeneration
+        removeCallbacks(clearAutoFocusKeyboard)
+        autoFocusKeyboardPending = false
         backdropAnimator?.cancel()
         backdropDrawable.alpha = 255
         content.animate().cancel()
@@ -1199,6 +1227,7 @@ internal class PamModalHost @JvmOverloads constructor(
         const val MODAL_EXIT_DURATION_MS = 125L
         const val SHEET_ENTER_DURATION_MS = 250L
         const val SHEET_KEYBOARD_SETTLE_MS = 160L
+        const val AUTO_FOCUS_KEYBOARD_WINDOW_MS = 4_000L
         const val SHEET_EXIT_DURATION_MS = 200L
         const val SLIDE_DISTANCE_FRACTION = 0.25f
     }
