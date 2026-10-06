@@ -491,6 +491,32 @@ abstract class Element implements Renderable
     }
 
     /**
+     * @internal Applies DOM class tokens (when given) and resolved native
+     * properties (null entries skipped) with one copy.
+     *
+     * @param list<string>|null $classes
+     * @param array<int, string|int|float|bool|BinaryValue|null> $properties
+     */
+    final public function __pamDecorate(?array $classes, array $properties): static
+    {
+        $copy = clone $this;
+        if ($classes !== null) {
+            $copy->domClasses = $classes;
+        }
+        foreach ($properties as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+            if (is_string($value) && strlen($value) > 1_048_576) {
+                throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
+            }
+            $copy->properties[$key] = $value;
+        }
+
+        return $copy;
+    }
+
+    /**
      * @internal Sets already validated, de-duplicated DOM class tokens on an
      * element without classes.
      *

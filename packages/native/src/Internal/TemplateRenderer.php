@@ -213,6 +213,9 @@ final class TemplateRenderer
 
     private static int $propertyMemoSize = 0;
 
+    /** @var \WeakMap<Element, array<string, Element>>|null decorated component elements */
+    private static ?\WeakMap $decorations = null;
+
     /** @var array<string, ReflectionMethod> */
     private static array $methods = [];
 
@@ -1265,6 +1268,28 @@ final class TemplateRenderer
         } else {
             $checkedBinding = null;
         }
+        if ($entry !== null && $factory === null && $plan !== null) {
+            if (!array_key_exists('fast', $entry)) {
+                $entry['fast'] = self::fastEntry($tag, $plan, $entry['values'], $resolvedClass, $data);
+                if ($styleKey !== null && isset(self::$styleEntries[$styleKey])) {
+                    self::$styleEntries[$styleKey]['fast'] = $entry['fast'];
+                }
+            }
+            if ($entry['fast'] !== null) {
+                return self::fastTag(
+                    $tag,
+                    $plan,
+                    $entry,
+                    $entry['fast'],
+                    $resolvedClass,
+                    $attributes,
+                    $childNodes,
+                    $scope,
+                    $data,
+                    $prepared,
+                );
+            }
+        }
         $values = [];
         $evaluated = [];
 
@@ -1783,6 +1808,28 @@ final class TemplateRenderer
             default => self::custom($tag, $values, $children, $scope),
             };
 
+        $decorationKey = null;
+        if (
+            $factory !== null
+            && $ownHandlers === []
+            && $checkedBinding === null
+            && !isset($values['model'])
+        ) {
+            // A memoized component returns the same element every render;
+            // decorating it the same way must return the same copy so the
+            // encoder reuses the subtree instead of re-encoding it.
+            $decorationKey = self::decorationKey($element, $resolvedClass, $values, $sheet);
+            if ($decorationKey !== null) {
+                $decorated = (self::$decorations[$element] ?? [])[$decorationKey] ?? null;
+                if ($decorated !== null) {
+                    self::$freshElement = null;
+
+                    return $decorated;
+                }
+            }
+        }
+        $undecorated = $element;
+
         if ($factory === null && ($element instanceof Image || $element instanceof MediaPlayer)) {
             $element = self::mediaCacheAttributes($element, $values);
         }
@@ -1888,7 +1935,423 @@ final class TemplateRenderer
             );
         }
 
+        if (
+            $decorationKey !== null
+            && ($resolvedClass === null || self::localClasses($resolvedClass, $data))
+        ) {
+            self::$decorations ??= new \WeakMap();
+            $memo = self::$decorations[$undecorated] ?? [];
+            if (count($memo) >= 8) {
+                $memo = [];
+            }
+            $memo[$decorationKey] = $element;
+            self::$decorations[$undecorated] = $memo;
+        }
+
         self::$freshElement = $factory === null ? $element : null;
+
+        return $element;
+    }
+
+    /**
+     * Identity of the class/attribute decoration a component element gets
+     * from its tag, or null when it cannot be memoized.
+     *
+     * @param array<string, mixed> $values
+     */
+    private static function decorationKey(Element $element, ?string $resolvedClass, array $values, mixed $sheet): ?string
+    {
+        $relevant = [];
+        foreach (self::attributePlanFor($element, $values)['names'] as $name) {
+            $value = $values[$name] ?? null;
+            if ($value !== null && !is_scalar($value) && !is_array($value)) {
+                return null;
+            }
+            $relevant[$name] = $value;
+        }
+        try {
+            return (is_array($sheet) ? (string) ($sheet['__pamSheetId'] ?? '') : '')
+                ."\0".($resolvedClass ?? '')."\0".serialize($relevant);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /** @param array<string, mixed> $data */
+    private static function localClasses(string $classes, array $data): bool
+    {
+        $sheet = $data['__pamStyles'] ?? null;
+        $sheetId = is_array($sheet) ? ($sheet['__pamSheetId'] ?? null) : null;
+
+        return is_int($sheetId) && isset(self::$localClassStrings[$sheetId][$classes]);
+    }
+
+    /** Native tags rendered by fastTag() when their entry allows it. */
+    private const FAST_TAGS = [
+        'View' => true,
+        'Column' => true,
+        'Row' => true,
+        'Grid' => true,
+        'Screen' => true,
+        'SafeAreaView' => true,
+        'Text' => true,
+        'Span' => true,
+        'Image' => true,
+        'Pressable' => true,
+        'TouchableOpacity' => true,
+        'TouchableHighlight' => true,
+        'TouchableWithoutFeedback' => true,
+        'TouchableNativeFeedback' => true,
+    ];
+
+    private const RIPPLE_VALUES = [
+        'rippleColor' => true,
+        'rippleAlpha' => true,
+        'rippleBorderless' => true,
+        'rippleForeground' => true,
+        'rippleRadius' => true,
+    ];
+
+    /**
+     * Precomputes the value template, constant native properties and DOM
+     * class tokens of a common native element, or null when the element
+     * needs the general path.
+     *
+     * @param array<string, mixed> $plan
+     * @param list<array{0: string, 1: string, 2: int, 3: mixed, 4: bool}> $valueOps
+     * @return array<string, mixed>|null
+     */
+    private static function fastEntry(
+        string $tag,
+        array $plan,
+        array $valueOps,
+        ?string $resolvedClass,
+        array $data,
+    ): ?array {
+        if (!isset(self::FAST_TAGS[$tag]) || $plan['bindings']) {
+            return null;
+        }
+        // Final assignment of each value name: constants fill the template,
+        // the rest is evaluated (in attribute order) every render.
+        $last = [];
+        foreach ($valueOps as $position => [, $valueName]) {
+            $last[$valueName] = $position;
+        }
+        $template = [];
+        $ops = [];
+        foreach ($valueOps as $position => [$name, $valueName, $mode, $payload, $remember]) {
+            $final = $last[$valueName] === $position;
+            if (!array_key_exists($valueName, $template)) {
+                $template[$valueName] = null;
+            }
+            if ($mode === 0) {
+                if ($final) {
+                    $template[$valueName] = $payload;
+                }
+                continue;
+            }
+            $ops[] = [$name, $valueName, $mode, $payload, $final, $remember];
+        }
+        $ripple = $plan['attributes'][':p-ripple'] ?? $plan['attributes']['p-ripple'] ?? null;
+        if ($ripple !== null && array_intersect_key($template, self::RIPPLE_VALUES) !== []) {
+            return null;
+        }
+        $dynamicNames = [];
+        foreach ($ops as [, $valueName, , , $final]) {
+            if ($final) {
+                $dynamicNames[$valueName] = true;
+            }
+        }
+        $probe = match ($tag) {
+            'Text', 'Span' => Text::make(''),
+            'Image' => Image::make(''),
+            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
+            'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(),
+            'Column' => Column::make(),
+            'Row' => Row::make(),
+            'Grid' => Grid::make(),
+            'Screen' => Screen::make(),
+            'SafeAreaView' => SafeAreaView::make(),
+            default => NativeView::make(),
+        };
+        $names = $template;
+        if ($ripple !== null) {
+            $names += self::RIPPLE_VALUES;
+        }
+        $attributePlan = self::attributePlan($probe, $names);
+        if ($attributePlan['special']) {
+            return null;
+        }
+        $constant = [];
+        $dynamic = [];
+        $seen = [];
+        foreach ($attributePlan['properties'] as [$name, $key]) {
+            if (isset($seen[$key->value])) {
+                // Aliases of one native property keep the general path.
+                return null;
+            }
+            $seen[$key->value] = true;
+            if (isset($dynamicNames[$name]) || isset(self::RIPPLE_VALUES[$name])) {
+                $dynamic[] = [$name, $key];
+                // Placeholder keeps PROPERTIES order; null is never applied.
+                $constant[$key->value] = null;
+                continue;
+            }
+            try {
+                $converted = self::propertyValue($key, $template[$name]);
+            } catch (\Throwable) {
+                return null;
+            }
+            if ($converted !== null) {
+                if (is_string($converted) && strlen($converted) > 1_048_576) {
+                    return null;
+                }
+                $constant[$key->value] = $converted;
+            }
+        }
+        $inheritedNames = [];
+        foreach (self::INHERITED_STYLE_ATTRIBUTES as $attribute) {
+            if (array_key_exists($attribute, $template)) {
+                $inheritedNames[] = $attribute;
+            }
+        }
+        $classTokens = null;
+        $localClasses = true;
+        if ($resolvedClass !== null) {
+            try {
+                $classTokens = $probe->class($resolvedClass)->domClasses();
+                self::classes($probe, $resolvedClass, $data);
+            } catch (\Throwable) {
+                return null;
+            }
+            $localClasses = self::localClasses($resolvedClass, $data);
+        }
+
+        return [
+            'values' => $template,
+            'ops' => $ops,
+            'ripple' => $ripple !== null,
+            'constant' => $constant,
+            'dynamic' => $dynamic,
+            'inherited' => $inheritedNames,
+            'classTokens' => $classTokens,
+            'localClasses' => $localClasses,
+        ];
+    }
+
+    /**
+     * Common native elements: same semantics as tag(), with everything that
+     * only depends on the template node, its classes and style environment
+     * precomputed in the entry.
+     *
+     * @param array<string, mixed> $plan
+     * @param array<string, mixed> $entry
+     * @param array<string, mixed> $fast
+     * @param array<string, mixed> $attributes
+     * @param list<CompiledTemplateNode> $childNodes
+     * @param array<string, mixed> $data
+     * @param array<string, mixed>|null $prepared
+     */
+    private static function fastTag(
+        string $tag,
+        array $plan,
+        array $entry,
+        array $fast,
+        ?string $resolvedClass,
+        array $attributes,
+        array $childNodes,
+        ?object $scope,
+        array $data,
+        ?array $prepared,
+    ): Element {
+        $values = $fast['values'];
+        $evaluated = [];
+        foreach ($fast['ops'] as [$name, $valueName, $mode, $payload, $assign, $remember]) {
+            $value = $mode === 1
+                ? TemplateExpression::evaluate($payload, $scope, $data)
+                : self::value($payload, $scope, $data);
+            if ($assign) {
+                $values[$valueName] = $value;
+            }
+            if ($remember) {
+                $evaluated[$name] = $value;
+            }
+        }
+        if ($fast['ripple']) {
+            $rippleAttribute = $attributes[':p-ripple'] ?? $attributes['p-ripple'];
+            $rippleAttribute = array_key_exists(':p-ripple', $attributes)
+                ? self::dynamicValue($rippleAttribute, $scope, $data)
+                : self::value($rippleAttribute, $scope, $data);
+            if ($rippleAttribute !== null && $rippleAttribute !== false) {
+                $ripple = is_array($rippleAttribute) ? $rippleAttribute : [];
+                $values['rippleColor'] = $ripple['color']
+                    ?? (is_int($rippleAttribute) ? $rippleAttribute : 0);
+                $values['rippleAlpha'] = $ripple['alpha'] ?? 0.12;
+                $values['rippleBorderless'] = $ripple['borderless'] ?? false;
+                $values['rippleForeground'] = $ripple['foreground'] ?? false;
+                if (isset($ripple['radius'])) {
+                    $values['rippleRadius'] = $ripple['radius'];
+                }
+            }
+        }
+
+        $ownHandlers = [];
+        foreach ($plan['events'] as $name => $event) {
+            $eventRaw = $attributes[$name];
+            if (!is_string($eventRaw) && !is_bool($eventRaw)) {
+                throw new RuntimeException("Invalid template event expression {$name}.");
+            }
+            $ownHandlers[$event->value] = self::handler($eventRaw, $event, $scope, $data);
+        }
+
+        $inheritedChildStyles = [];
+        foreach ($fast['inherited'] as $attribute) {
+            $value = $values[$attribute];
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inheritedChildStyles[$attribute] = $value;
+            }
+        }
+        foreach ($entry['inherited'] as [$name, $attribute, $mode, $payload]) {
+            if ($mode === 0) {
+                $value = $payload;
+            } elseif (array_key_exists($name, $evaluated) && ($attributes[$name] ?? null) === $payload) {
+                $value = $evaluated[$name];
+            } else {
+                $value = $mode === 1
+                    ? self::dynamicValue($payload, $scope, $data)
+                    : self::value($payload, $scope, $data);
+            }
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inheritedChildStyles[$attribute] = $value;
+            }
+        }
+
+        $children = [];
+        $renderedChildren = [];
+        $text = '';
+        if ($childNodes !== []) {
+            $childData = $data;
+            if ($prepared === null || $prepared['usesAncestors']) {
+                $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
+                $ancestors[] = $entry['descriptor'];
+                $childData['__pamStyleAncestors'] = $ancestors;
+                $childData['__pamStyleChain'] = self::styleChain(
+                    $data['__pamStyleChain'] ?? 0,
+                    $entry['descriptorId'],
+                );
+            } else {
+                $childData['__pamStyleAncestors'] = [];
+            }
+            $childData['__pamContainerWidth'] = is_numeric($values['width'] ?? null)
+                ? (float) $values['width']
+                : ($data['__pamContainerWidth'] ?? null);
+            $childData['__pamContainerHeight'] = is_numeric($values['height'] ?? null)
+                ? (float) $values['height']
+                : ($data['__pamContainerHeight'] ?? null);
+            $childData['__pamInheritedStyles'] = $inheritedChildStyles;
+            $childData['__pamParentVariants'] = ParentVariants::extend(
+                $data['__pamParentVariants'] ?? null,
+                $values,
+            );
+            $eventContexts = $data['__pamEventContexts'] ?? [];
+            $childData['__pamEventContexts'] = is_array($eventContexts) ? $eventContexts : [];
+            $renderedChildren = self::nodes($childNodes, $scope, $childData);
+            foreach ($renderedChildren as $rendered) {
+                if ($rendered instanceof Element) {
+                    $children[] = $rendered;
+                } elseif (is_string($rendered)) {
+                    $text .= $rendered;
+                }
+            }
+        }
+
+        $textTag = $tag === 'Text' || $tag === 'Span';
+        if ($text !== '' && !$textTag) {
+            throw new RuntimeException("Text content is not valid inside {$tag}; wrap it in Text.");
+        }
+        $richParts = null;
+        if ($children !== [] && $textTag) {
+            $richParts = [];
+            foreach ($renderedChildren as $part) {
+                if (is_string($part) || $part instanceof Text) {
+                    $richParts[] = $part;
+                } else {
+                    throw new RuntimeException("{$tag} can only contain text and nested Text or Span elements.");
+                }
+            }
+        }
+        if ($richParts === null && $textTag) {
+            $text = trim($text);
+        }
+        if ($text !== '' && $richParts === null) {
+            $values['text'] ??= $text;
+        }
+
+        $element = match ($tag) {
+            'Column' => Column::make(...$children),
+            'Row' => Row::make(...$children),
+            'Grid' => Grid::make(...$children),
+            'Screen' => Screen::make(...$children),
+            'SafeAreaView' => SafeAreaView::make(...$children),
+            'Text', 'Span' => $richParts !== null
+                ? Text::rich(...$richParts)
+                : Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
+            'Image' => Image::make(self::stringValue($values['source'] ?? '', 'Image source')),
+            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
+            'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
+            default => NativeView::make(...$children),
+        };
+        if ($element instanceof Image) {
+            $element = self::mediaCacheAttributes($element, $values);
+        }
+        if ($resolvedClass !== null && !$fast['localClasses']) {
+            $element = self::classes($element, $resolvedClass, $data);
+        }
+
+        $properties = $fast['constant'];
+        foreach ($fast['dynamic'] as [$name, $key]) {
+            if (!array_key_exists($name, $values)) {
+                continue;
+            }
+            $value = self::propertyValue($key, $values[$name]);
+            if ($value !== null) {
+                $properties[$key->value] = $value;
+            }
+        }
+        $classTokens = $fast['classTokens'];
+        $element = $classTokens !== null && $element->domClasses() !== []
+            ? self::attributes(self::withDomClasses($element, (string) $resolvedClass), $values)
+            : $element->__pamDecorate($classTokens, $properties);
+
+        foreach ($plan['events'] as $name => $event) {
+            $handler = $ownHandlers[$event->value];
+            if ($element instanceof Pressable) {
+                $element = match ($event) {
+                    EventKind::PressIn => $element->onPressIn($handler),
+                    EventKind::PressOut => $element->onPressOut($handler),
+                    EventKind::PressMove => $element->onPressMove($handler),
+                    EventKind::DoubleTap => $element->onDoubleTap($handler),
+                    default => $element->on($event, $handler),
+                };
+            } else {
+                $element = $element->on($event, $handler);
+            }
+        }
+        if (isset($values['model'])) {
+            throw new RuntimeException('The model attribute is only valid on Input.');
+        }
+
+        self::$freshElement = $element;
 
         return $element;
     }
@@ -2360,15 +2823,7 @@ final class TemplateRenderer
      */
     private static function attributes(Element $element, array $attributes): Element
     {
-        $signature = $element::class.'|'.$element->kind()->value.'|'.implode('|', array_keys($attributes));
-        $plan = self::$attributePlans[$signature] ?? null;
-        if ($plan === null) {
-            $plan = self::attributePlan($element, $attributes);
-            if (count(self::$attributePlans) >= 4096) {
-                self::$attributePlans = [];
-            }
-            self::$attributePlans[$signature] = $plan;
-        }
+        $plan = self::attributePlanFor($element, $attributes);
         if ($plan['special']) {
             $element = self::specialAttributes($element, $attributes);
         }
@@ -2385,6 +2840,25 @@ final class TemplateRenderer
     }
 
     /**
+     * @param array<string, mixed> $attributes
+     * @return array{special: bool, properties: list<array{0: string, 1: PropKey}>, names: list<string>}
+     */
+    private static function attributePlanFor(Element $element, array $attributes): array
+    {
+        $signature = $element::class.'|'.$element->kind()->value.'|'.implode('|', array_keys($attributes));
+        $plan = self::$attributePlans[$signature] ?? null;
+        if ($plan === null) {
+            $plan = self::attributePlan($element, $attributes);
+            if (count(self::$attributePlans) >= 4096) {
+                self::$attributePlans = [];
+            }
+            self::$attributePlans[$signature] = $plan;
+        }
+
+        return $plan;
+    }
+
+    /**
      * Static part of attributes(): which special handlers apply and the
      * ordered native properties for one element class and value-name set.
      *
@@ -2394,10 +2868,11 @@ final class TemplateRenderer
     private static function attributePlan(Element $element, array $attributes): array
     {
         $special = false;
+        $names = [];
         foreach ($attributes as $name => $_) {
             if (isset(self::SPECIAL_ATTRIBUTES[$name]) || str_starts_with((string) $name, 'data-')) {
                 $special = true;
-                break;
+                $names[] = (string) $name;
             }
         }
         $properties = [];
@@ -2447,9 +2922,10 @@ final class TemplateRenderer
                 continue;
             }
             $properties[] = [$name, $key];
+            $names[] = $name;
         }
 
-        return ['special' => $special, 'properties' => $properties];
+        return ['special' => $special, 'properties' => $properties, 'names' => $names];
     }
 
     /** @param array<string, mixed> $attributes */
