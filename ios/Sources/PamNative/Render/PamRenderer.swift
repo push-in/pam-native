@@ -466,11 +466,22 @@ public final class PamRenderer {
             return
         }
 
-        views[id]?.removeFromSuperview()
+        // Only the logical index changed (a sibling before it was removed or
+        // inserted): keep the view where it is. Removing it from its superview
+        // resigns a focused input inside it (an autoFocus field of a sheet
+        // loses its keyboard) and restarts a presented Modal/BottomSheet.
+        let keepsPlace = views[id]?.superview != nil &&
+            state.parent == parent &&
+            virtualListAncestor(of: parent) == nil
+        let previousPosition = keepsPlace ? children[parent]?.firstIndex(of: id) : nil
         removeChild(from: state.parent, child: id)
         state.parent = parent
         state.index = index
         addChild(to: parent, child: id)
+        if let previousPosition, children[parent]?.firstIndex(of: id) == previousPosition {
+            return
+        }
+        views[id]?.removeFromSuperview()
         if let view = views[id] {
             attach(view, parentId: parent, index: index)
         } else if virtualListAncestor(of: parent) == nil {

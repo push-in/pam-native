@@ -139,6 +139,12 @@ internal class PamModalHost @JvmOverloads constructor(
         updateDialog()
     }
 
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private val destroyDetachedDialog = Runnable {
+        if (!isAttachedToWindow) destroyDialog(notify = false)
+    }
+
     init {
         visibility = View.INVISIBLE
         content.clipChildren = false
@@ -338,6 +344,7 @@ internal class PamModalHost @JvmOverloads constructor(
 
     fun close() {
         desiredVisible = false
+        mainHandler.removeCallbacks(destroyDetachedDialog)
         removeCallbacks(updateRunnable)
         updateScheduled = false
         destroyDialog(notify = false)
@@ -367,13 +374,30 @@ internal class PamModalHost @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        mainHandler.removeCallbacks(destroyDetachedDialog)
         scheduleUpdate()
     }
 
     override fun onDetachedFromWindow() {
         removeCallbacks(updateRunnable)
         updateScheduled = false
-        destroyDialog(notify = false)
+        // A presented window survives a detach that is undone in the same
+        // main-thread turn (the host re-attached elsewhere by one commit):
+        // tearing it down there re-created the window and lost its focused
+        // input and IME. A host that stays detached still closes its window.
+        val activity = pamActivity()
+        if (
+            dialog?.isShowing == true &&
+            activity != null &&
+            !activity.isFinishing &&
+            !activity.isDestroyed &&
+            !activity.isChangingConfigurations
+        ) {
+            mainHandler.removeCallbacks(destroyDetachedDialog)
+            mainHandler.post(destroyDetachedDialog)
+        } else {
+            destroyDialog(notify = false)
+        }
         super.onDetachedFromWindow()
     }
 

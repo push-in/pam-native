@@ -21,6 +21,7 @@ import dev.pam.nativeapp.protocol.NodeSpec
 import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -236,7 +237,23 @@ class PamSheetKeyboardInstrumentedTest {
      */
     @Test
     fun autoFocusInAKeptSheetPresentedUnderAClosingOverlayOpensTheKeyboard() {
+        runClosingOverlayScenario(overlayBeforeSheet = false)
+    }
+
+    /**
+     * The overlay precedes the sheet (Zé Chat: message actions, then the edit
+     * sheet). Removing it shifts the sheet's index, so the engine moves it;
+     * the move must keep the presented sheet window and its focused input.
+     */
+    @Test
+    fun autoFocusInASheetMovedByItsClosingOverlayKeepsWindowAndKeyboard() {
+        runClosingOverlayScenario(overlayBeforeSheet = true)
+    }
+
+    private fun runClosingOverlayScenario(overlayBeforeSheet: Boolean) {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        // Index 1 is the sheet's own slot; an overlay before it pushes it to 2.
+        val overlayIndex = if (overlayBeforeSheet) 1 else 2
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
         lateinit var renderer: PamRenderer
@@ -249,7 +266,7 @@ class PamSheetKeyboardInstrumentedTest {
                 PropKey.MODAL_ANIMATION_TYPE to PropValue.Integer(1),
                 PropKey.MODAL_TRANSPARENT to PropValue.Flag(true),
                 PropKey.ON_MODAL_REQUEST_CLOSE to PropValue.Flag(true),
-            ), index = 2)),
+            ), index = overlayIndex)),
             Mutation.Create(node(id + 1, id, NodeKind.PRESSABLE, mapOf(
                 PropKey.ON_PRESS to PropValue.Flag(true),
                 PropKey.BACKGROUND_COLOR to PropValue.Integer(0x6B0F1410L),
@@ -289,7 +306,14 @@ class PamSheetKeyboardInstrumentedTest {
             Thread.sleep(300)
         }
         fun editFromOverlay(overlayId: Long, oldInput: Long?, newInput: Long, name: String) {
-            onMain(instrumentation) { renderer.commit(listOf(overlay(overlayId))) }
+            onMain(instrumentation) {
+                renderer.commit(listOf(
+                    overlay(overlayId) +
+                        listOfNotNull(
+                            Mutation.Move(6, 1, 2).takeIf { overlayBeforeSheet },
+                        ),
+                ))
+            }
             waitUntil(instrumentation, "overlay presented") {
                 presentedModalContent(renderer, sheetId = overlayId) != null
             }
@@ -301,13 +325,25 @@ class PamSheetKeyboardInstrumentedTest {
                 ))
             }
             Thread.sleep(150)
+            var sheetWindow: android.view.View? = null
             onMain(instrumentation) {
-                renderer.commit(listOf(listOf(Mutation.Remove(overlayId))))
+                sheetWindow = presentedModalContent(renderer, sheetId = 6)?.rootView
+                renderer.commit(listOf(
+                    listOf(Mutation.Remove(overlayId)) +
+                        listOfNotNull(Mutation.Move(6, 1, 1).takeIf { overlayBeforeSheet }),
+                ))
                 // A long UI-thread frame (a heavy commit on a mid-range
                 // phone) while the sheet window gains focus.
                 activity.host.post { SystemClock.sleep(1_200) }
             }
             awaitKeyboard(name)
+            onMain(instrumentation) {
+                assertSame(
+                    "the sheet keeps the window it was presented in",
+                    sheetWindow,
+                    presentedModalContent(renderer, sheetId = 6)?.rootView,
+                )
+            }
         }
         try {
             onMain(instrumentation) {

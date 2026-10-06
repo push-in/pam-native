@@ -1364,6 +1364,14 @@ class PamRenderer(
         val state = nodes[id] ?: return
         val wasVirtualized = virtualListAncestor(state.parent) != null
         val view = views[id]
+        if (view?.parent != null && !wasVirtualized && moveKeepsHostedPosition(state, parent, index)) {
+            // Only the logical index changed (a sibling before it was removed
+            // or inserted): the view keeps its place among its host's views.
+            // Re-attaching it would drop its focus/IME connection and dismiss
+            // the window of a presented Modal/BottomSheet (which then comes
+            // back as a new window without the focused input).
+            return
+        }
         view?.let(::clearHitSlop)
         val sourceNavigation = view?.parent as? PamNavigationHost
         val destinationNavigation = views[effectiveParent(parent)] as? PamNavigationHost
@@ -1387,6 +1395,30 @@ class PamRenderer(
         } else {
             reattachHostedDescendants(id)
         }
+    }
+
+    /**
+     * Applies a move to the logical tree when it leaves [state]'s view at the
+     * same position under the same hosting view (returns false, with nothing
+     * changed, when the view must be re-attached).
+     */
+    private fun moveKeepsHostedPosition(state: NodeState, parent: Long, index: Int): Boolean {
+        if (virtualListAncestor(parent) != null) return false
+        val host = effectiveParent(state.parent)
+        if (effectiveParent(parent) != host) return false
+        val previousParent = state.parent
+        val previousIndex = state.index
+        val before = hostedInsertionIndex(state, host)
+        removeChild(previousParent, state.id)
+        state.parent = parent
+        state.index = index
+        addChild(parent, state.id)
+        if (hostedInsertionIndex(state, host) == before) return true
+        removeChild(parent, state.id)
+        state.parent = previousParent
+        state.index = previousIndex
+        addChild(previousParent, state.id)
+        return false
     }
 
     private fun addChild(parent: Long, id: Long, fresh: Boolean = false) {
@@ -7566,6 +7598,7 @@ class PamRenderer(
         }
         input.postDelayed({
             if (!input.isAttachedToWindow || !input.hasFocus()) {
+                Log.i(AUTO_FOCUS_LOG, "stopped: attached=${input.isAttachedToWindow} focused=${input.hasFocus()}")
                 input.onInputConnectionCreated = null
                 return@postDelayed
             }

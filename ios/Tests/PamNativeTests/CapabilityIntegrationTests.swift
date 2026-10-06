@@ -91,6 +91,46 @@ final class CapabilityIntegrationTests: XCTestCase {
         try assertSelection(1, 1)
     }
 
+    func testMoveThatKeepsThePositionLeavesTheFocusedInputInPlace() throws {
+        // Removing a sibling before a sheet shifts its index; the engine moves
+        // it. The move must not detach it (that resigned the focused field).
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let host = UIView(frame: window.bounds)
+        controller.view.addSubview(host)
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .view, properties: [:])),
+            .create(NodeSpec(id: 3, parent: 1, index: 1, kind: .view, properties: [:])),
+            .create(NodeSpec(id: 4, parent: 3, index: 0, kind: .input, properties: [
+                PamConstants.testId: .text("moved-sheet-input"),
+            ])),
+            .create(NodeSpec(id: 5, parent: 1, index: 2, kind: .view, properties: [:])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 390, height: 844)),
+            .layout(id: 3, frame: Frame(x: 0, y: 400, width: 390, height: 200)),
+            .layout(id: 4, frame: Frame(x: 16, y: 16, width: 300, height: 56)),
+            .setRoot(1),
+        ]])
+        let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "moved-sheet-input") as? UITextField)
+        let sheet = try XCTUnwrap(host.viewWithTag(3))
+        let screen = try XCTUnwrap(sheet.superview)
+        XCTAssertTrue(field.becomeFirstResponder())
+        renderer.commit([[
+            .remove(2),
+            .move(id: 3, parent: 1, index: 0),
+            .move(id: 5, parent: 1, index: 1),
+        ]])
+        XCTAssertTrue(field.isFirstResponder, "the moved sheet keeps its focused input")
+        XCTAssertTrue(sheet.superview === screen)
+        let order = screen.subviews.filter { $0.tag == 3 || $0.tag == 5 }.map(\.tag)
+        XCTAssertEqual(order, [3, 5], "the sheet still precedes its next sibling")
+    }
+
     func testSubmitBehaviorControlsActualFirstResponderLifecycle() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
