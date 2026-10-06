@@ -19,6 +19,9 @@
         "php": "^8.5"
     },
     "autoload": {
+        "files": [
+            "packages/native/src/Polyfill/mbstring.php"
+        ],
         "psr-4": {
             "Pam\\Native\\": "packages/native/src/"
         }
