@@ -52,8 +52,26 @@ class PamActivity : FragmentActivity() {
     private var hotReload: HotReloadClient? = null
     private var backCallback: OnBackInvokedCallback? = null
     private var suppressBackUntil = 0L
-    internal lateinit var errors: ErrorOverlay
-        private set
+    private var errorOverlay: ErrorOverlay? = null
+    private var errorOverlayParent: FrameLayout? = null
+
+    /**
+     * The LogBox-style overlay (~30 views, ~7 ms of UI-thread work on a
+     * Galaxy S10) is built the first time an error needs it; launches that
+     * never fail no longer pay for it before their first frame.
+     */
+    internal val errors: ErrorOverlay
+        get() = errorOverlay ?: ErrorOverlay(
+            context = this,
+            developerMode = ErrorOverlay.developerMode(this, BuildConfig.DEBUG),
+            safeArea = ::currentSafeAreaInsets,
+            dark = ::isDarkAppearance,
+            onReload = ::reloadAfterError,
+            onExit = ::finish,
+        ).also { overlay ->
+            errorOverlay = overlay
+            errorOverlayParent?.addView(overlay)
+        }
     private val permissionCallbacks = HashMap<Int, (Boolean) -> Unit>()
     private val activityResultCallbacks = HashMap<Int, (Int, Intent?) -> Unit>()
     private var nextPermissionRequest = 40_000
@@ -118,24 +136,7 @@ class PamActivity : FragmentActivity() {
         if (retainedAtCreate == null) PamStartup.prepare(applicationContext)
         super.onCreate(savedInstanceState)
         PamAppearance.applyPlatformNightMode(this)
-        // Keep one deterministic edge-to-edge contract on every supported
-        // Android version. Insets are consumed by PAM views, never implicitly
-        // by the decor view or an OEM-specific compatibility path.
-        WindowCompat.enableEdgeToEdge(window)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode =
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-                    } else {
-                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-                    }
-            }
-        }
-        // Paint the window in the effective scheme before any content exists,
-        // even when the system theme and the persisted override disagree, and
-        // export the same scheme to PHP before its first frame.
-        applyDefaultSystemBars()
+        // Export the effective scheme to PHP before its first frame.
         PamAppearance.exportEnvironment(this)
         val host = PamRootHost(this).also { rootHost = it }
         devTools = PamDevToolsOverlay(this)
@@ -144,7 +145,7 @@ class PamActivity : FragmentActivity() {
         }
         val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {
             devTools.update(it)
-            errors.onFrameCommitted()
+            errorOverlay?.onFrameCommitted()
             recoveryAttempts = 0
             recoveryRunnable?.let(window.decorView::removeCallbacks)
             recoveryRunnable = null
@@ -187,6 +188,7 @@ class PamActivity : FragmentActivity() {
                 reportError = { message -> handleRuntimeError(message) },
                 onFrameCommitted = onFrameCommitted,
                 onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
+                installModules = false,
             )
             // PHP reads its launch intent while booting.
             PamDeepLinks.captureInitial(intent?.dataString)
@@ -198,18 +200,31 @@ class PamActivity : FragmentActivity() {
             // traversal. Older releases learn insets from that traversal and
             // launch from the held pre-draw (see holdSplash).
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) launchRuntime()
+            // Built while PHP boots (~13 ms on a Galaxy S10); a module call
+            // that arrives first waits for it.
+            runtime.installModules()
         }
+        // Keep one deterministic edge-to-edge contract on every supported
+        // Android version. Insets are consumed by PAM views, never implicitly
+        // by the decor view or an OEM-specific compatibility path. Neither
+        // this nor the bar colours change the metrics PHP booted with.
+        WindowCompat.enableEdgeToEdge(window)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            window.attributes = window.attributes.apply {
+                layoutInDisplayCutoutMode =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                    } else {
+                        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                    }
+            }
+        }
+        // Paint the window in the effective scheme before any content exists,
+        // even when the system theme and the persisted override disagree.
+        applyDefaultSystemBars()
         // While PHP boots (or the retained tree is replayed) the UI thread is
         // idle: build the first frame's views ahead of its batch.
         renderer.prewarmViews()
-        errors = ErrorOverlay(
-            context = this,
-            developerMode = ErrorOverlay.developerMode(this, BuildConfig.DEBUG),
-            safeArea = ::currentSafeAreaInsets,
-            dark = ::isDarkAppearance,
-            onReload = ::reloadAfterError,
-            onExit = ::finish,
-        )
         val root = FrameLayout(this)
         root.addView(
             host,
@@ -225,7 +240,8 @@ class PamActivity : FragmentActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
             ),
         )
-        root.addView(errors)
+        errorOverlayParent = root
+        errorOverlay?.let(root::addView)
         setContentView(root)
         holdSplash(root)
         val (windowWidth, windowHeight) = resolvedViewportSize()
@@ -360,7 +376,7 @@ class PamActivity : FragmentActivity() {
                 hotReload = HotReloadClient(
                     context = this,
                     onReload = { receipt -> runOnUiThread {
-                        errors.clearError()
+                        errorOverlay?.clearError()
                         runtimeEntryPath = receipt.entryPath
                         runtime.reload(
                             receipt.entryPath,
@@ -455,7 +471,7 @@ class PamActivity : FragmentActivity() {
     @SuppressLint("GestureBackNavigation")
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
-            if (errors.consumeBack()) return true
+            if (errorOverlay?.consumeBack() == true) return true
             if (consumeSuppressedBack()) return true
             if (runtime.consumePresentedModalBack()) return true
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
@@ -469,7 +485,7 @@ class PamActivity : FragmentActivity() {
     @Suppress("DEPRECATION")
     @SuppressLint("GestureBackNavigation")
     override fun onBackPressed() {
-        if (errors.consumeBack()) return
+        if (errorOverlay?.consumeBack() == true) return
         if (!runtimeStarted) {
             super.onBackPressed()
             return
@@ -668,7 +684,7 @@ class PamActivity : FragmentActivity() {
                 private var interactive = false
 
                 override fun onBackStarted(backEvent: BackEvent) {
-                    interactive = if (errors.isBlocking || runtime.hasPresentedModal()) {
+                    interactive = if (errorOverlay?.isBlocking == true || runtime.hasPresentedModal()) {
                         false
                     } else {
                         rootHost.startPredictiveBack()
@@ -685,7 +701,7 @@ class PamActivity : FragmentActivity() {
                 }
 
                 override fun onBackInvoked() {
-                    if (errors.consumeBack()) {
+                    if (errorOverlay?.consumeBack() == true) {
                         if (interactive) rootHost.cancelPredictiveBack()
                         interactive = false
                         return
@@ -708,7 +724,7 @@ class PamActivity : FragmentActivity() {
         } else {
             OnBackInvokedCallback {
                 if (
-                    !errors.consumeBack()
+                    errorOverlay?.consumeBack() != true
                     && !consumeSuppressedBack()
                     && !runtime.consumePresentedModalBack()
                 ) {

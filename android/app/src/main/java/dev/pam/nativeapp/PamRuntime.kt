@@ -26,6 +26,7 @@ class PamRuntime(
     reportError: (String) -> Unit,
     onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {},
     onDiagnostic: (RuntimeDiagnostic) -> Unit = {},
+    installModules: Boolean = true,
 ) : AutoCloseable {
     // The PHP runtime is process scoped (embedded PHP cannot be restarted in
     // a live process), while the surface (Activity, renderer, modules bound
@@ -37,7 +38,23 @@ class PamRuntime(
     private var onDiagnostic: (RuntimeDiagnostic) -> Unit = onDiagnostic
     private val main = Handler(Looper.getMainLooper())
     private val choreographer = Choreographer.getInstance()
-    private var modules = NativeModuleRegistry(context)
+    @Volatile
+    private var installedModules: NativeModuleRegistry? = null
+    private val modulesInstalled = java.util.concurrent.CountDownLatch(1)
+
+    /**
+     * Native modules of the bound surface. A cold start boots PHP first and
+     * builds them on the UI thread meanwhile ([installModules]); a module call
+     * from the PHP thread that arrives earlier waits for them.
+     */
+    private var modules: NativeModuleRegistry
+        get() = installedModules ?: run {
+            modulesInstalled.await()
+            checkNotNull(installedModules)
+        }
+        set(value) {
+            installedModules = value
+        }
 
     /**
      * True between a surface change (detach/attach) and the arrival of the
@@ -75,6 +92,14 @@ class PamRuntime(
 
     init {
         bindRenderer(renderer)
+        if (installModules) installModules()
+    }
+
+    /** Builds the surface's native modules; idempotent, UI thread. */
+    fun installModules() {
+        if (installedModules != null) return
+        installedModules = NativeModuleRegistry(context)
+        modulesInstalled.countDown()
     }
 
     private fun bindRenderer(target: PamRenderer) {
@@ -105,7 +130,7 @@ class PamRuntime(
         check(Looper.myLooper() == Looper.getMainLooper())
         check(!closed.get()) { "Pam Runtime is closed" }
         val previousRenderer = this.renderer
-        val previousModules = modules
+        val previousModules = installedModules
         this.context = context
         this.reportError = reportError
         this.onFrameCommitted = onFrameCommitted
@@ -117,7 +142,9 @@ class PamRuntime(
             this.renderer = renderer
             bindRenderer(renderer)
         }
-        if (previousModules.boundContext !== context) {
+        if (previousModules == null) {
+            installModules()
+        } else if (previousModules.boundContext !== context) {
             modules = NativeModuleRegistry(context)
             previousModules.retire()
         }
@@ -389,7 +416,7 @@ class PamRuntime(
         pendingEvents.clear()
         pendingImmediateEvents.clear()
         ownedBatchHandles.toList().forEach(::releaseBatch)
-        modules.close()
+        installedModules?.close()
         renderer.close()
     }
 

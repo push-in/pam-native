@@ -63,6 +63,19 @@ public final class PamErrorOverlay: UIView {
         backgroundColor = .clear
         isHidden = true
         accessibilityViewIsModal = false
+        // The toast, inspector and fallback (dozens of views and constraints)
+        // are built the first time one is shown: launches that never fail do
+        // not pay for them before their first frame.
+        toast.isHidden = true
+        inspector.isHidden = true
+        fallback.isHidden = true
+    }
+
+    private var built = false
+
+    private func buildIfNeeded() {
+        guard !built else { return }
+        built = true
         buildToast()
         buildInspector()
         buildFallback()
@@ -104,6 +117,7 @@ public final class PamErrorOverlay: UIView {
 
     public func report(_ report: PamRuntimeErrorReport) {
         guard !dismissed.contains(report.fingerprint) else { return }
+        buildIfNeeded()
         if let existing = entries.firstIndex(where: { $0.report.fingerprint == report.fingerprint }) {
             entries[existing].count += 1
             entries[existing].report = report
@@ -159,6 +173,7 @@ public final class PamErrorOverlay: UIView {
     }
 
     public func showFallback() {
+        buildIfNeeded()
         superview?.bringSubviewToFront(self)
         isHidden = false
         toast.isHidden = true
@@ -326,6 +341,7 @@ public final class PamErrorOverlay: UIView {
 
     func showInspector() {
         guard entries.indices.contains(index) else { return close() }
+        buildIfNeeded()
         let entry = entries[index]
         let report = entry.report
         toast.isHidden = true
