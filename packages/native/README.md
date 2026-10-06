@@ -195,6 +195,12 @@ local `<style scoped>` rules win the cascade. Relative `.css` imports are
 expanded recursively from the file that declares them at compile time and
 invalidate compiled component caches when a dependency changes. Imports cannot
 leave the Composer project or load network resources.
+`pam-native build` (and update bundles) precompiles every component under
+`src/` into the bundle (`pam-prebuilt/components`: class, runtime template and
+template expressions as PHP closures, keyed by project-relative paths and
+validated by source and stylesheet fingerprints), so the first launch after an
+install or update compiles nothing. An edited component (hot reload) compiles
+into the writable cache passed to `App::components()` as before.
 Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules form the base, matching classes follow stylesheet
 source order regardless of class order in markup, and authored PAM attributes
