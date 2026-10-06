@@ -66,6 +66,29 @@ typedef int32_t (*PamNativeMeasureTextCallback)(
     float* output
 );
 
+/* PHP's pam_native_crypto() (Pam\Native\Crypto; the iOS PHP runtime has no
+ * ext-sodium or ext-openssl), called synchronously on the PHP worker thread.
+ * operation 1 = Ed25519 verify (key = public key, nonce = signature, input =
+ * message, no output); 2 = AES-256-GCM seal (output = ciphertext . 16-byte
+ * tag, capacity input_length + 16); 3 = AES-256-GCM open (input = ciphertext
+ * . tag, output = plaintext, capacity input_length - 16). Returns 1 and sets
+ * `output_length` on success / a valid signature, 0 to reject. Pointers are
+ * valid only during the call. */
+typedef int32_t (*PamNativeCryptoCallback)(
+    int32_t operation,
+    const uint8_t* key,
+    size_t key_length,
+    const uint8_t* nonce,
+    size_t nonce_length,
+    const uint8_t* aad,
+    size_t aad_length,
+    const uint8_t* input,
+    size_t input_length,
+    uint8_t* output,
+    size_t output_capacity,
+    size_t* output_length
+);
+
 typedef struct {
     PamNativeBatchCallback on_batch;
     PamNativeCallCallback on_call;
@@ -88,6 +111,11 @@ uint64_t pam_native_runtime_start(
 
 /* Installs the host text measurer for runtimes started afterwards. */
 void pam_native_ios_set_text_measurer(PamNativeMeasureTextCallback callback);
+
+/* Installs the CryptoKit provider behind PHP's pam_native_crypto(). Without
+ * one, pam_native_crypto() returns null and Pam\Native\Crypto raises
+ * CryptoUnavailableException. */
+void pam_native_ios_set_crypto_provider(PamNativeCryptoCallback callback);
 
 /* Window safe-area insets (points) applied to runtimes started afterwards so
  * the first layout already insets SafeAreaView like later relayouts. */

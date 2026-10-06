@@ -90,6 +90,7 @@ struct RuntimeState {
 thread_local RuntimeState* active_runtime = nullptr;
 
 std::atomic<PamNativeMeasureTextCallback> host_text_measurer{nullptr};
+std::atomic<PamNativeCryptoCallback> host_crypto_provider{nullptr};
 std::mutex boot_safe_area_mutex;
 bool boot_safe_area_set = false;
 std::array<float, 4> boot_safe_area{0.0F, 0.0F, 0.0F, 0.0F};
@@ -416,11 +417,88 @@ PHP_FUNCTION(pam_native_error) {
     report_error(state, std::string(message, message_length));
 }
 
+// Pam\Native\Crypto on the device: see PamNativeCryptoCallback in
+// pam_native_ios_bridge.h (CryptoKit, PamCrypto.swift). Ed25519 verify returns
+// a bool, AES-256-GCM a string; false rejects; null means no provider.
+constexpr zend_long kCryptoEd25519Verify = 1;
+constexpr zend_long kCryptoAes256GcmEncrypt = 2;
+constexpr zend_long kCryptoAes256GcmDecrypt = 3;
+constexpr std::size_t kMaxCryptoInputBytes = 64 * 1024 * 1024;
+constexpr std::size_t kCryptoTagBytes = 16;
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_pam_native_crypto, 0, 5, MAY_BE_STRING | MAY_BE_BOOL | MAY_BE_NULL)
+    ZEND_ARG_TYPE_INFO(0, operation, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, nonce, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, aad, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(pam_native_crypto) {
+    zend_long operation = 0;
+    char* key = nullptr;
+    size_t key_length = 0;
+    char* nonce = nullptr;
+    size_t nonce_length = 0;
+    char* aad = nullptr;
+    size_t aad_length = 0;
+    char* input = nullptr;
+    size_t input_length = 0;
+    ZEND_PARSE_PARAMETERS_START(5, 5)
+        Z_PARAM_LONG(operation)
+        Z_PARAM_STRING(key, key_length)
+        Z_PARAM_STRING(nonce, nonce_length)
+        Z_PARAM_STRING(aad, aad_length)
+        Z_PARAM_STRING(input, input_length)
+    ZEND_PARSE_PARAMETERS_END();
+
+    const auto provider = host_crypto_provider.load();
+    if (provider == nullptr) {
+        RETURN_NULL();
+    }
+    if (operation < kCryptoEd25519Verify || operation > kCryptoAes256GcmDecrypt
+        || key_length > 64 || nonce_length > 64 || aad_length > kMaxCryptoInputBytes
+        || input_length > kMaxCryptoInputBytes
+        || (operation == kCryptoAes256GcmDecrypt && input_length < kCryptoTagBytes)) {
+        RETURN_FALSE;
+    }
+    const std::size_t capacity = operation == kCryptoAes256GcmEncrypt ? input_length + kCryptoTagBytes
+        : operation == kCryptoAes256GcmDecrypt ? input_length - kCryptoTagBytes
+        : 0;
+    zend_string* output = zend_string_alloc(capacity, 0);
+    std::size_t output_length = 0;
+    const auto accepted = provider(
+        static_cast<std::int32_t>(operation),
+        reinterpret_cast<const std::uint8_t*>(key),
+        key_length,
+        reinterpret_cast<const std::uint8_t*>(nonce),
+        nonce_length,
+        reinterpret_cast<const std::uint8_t*>(aad),
+        aad_length,
+        reinterpret_cast<const std::uint8_t*>(input),
+        input_length,
+        reinterpret_cast<std::uint8_t*>(ZSTR_VAL(output)),
+        capacity,
+        &output_length
+    );
+    if (operation == kCryptoEd25519Verify) {
+        zend_string_efree(output);
+        RETURN_BOOL(accepted == 1);
+    }
+    if (accepted != 1 || output_length != capacity) {
+        zend_string_efree(output);
+        RETURN_FALSE;
+    }
+    ZSTR_VAL(output)[capacity] = '\0';
+    RETURN_NEW_STR(output);
+}
+
 const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_native_call, arginfo_pam_native_call)
     PHP_FE(pam_native_call_typed, arginfo_pam_native_call_typed)
     PHP_FE(pam_native_commit, arginfo_pam_native_commit)
     PHP_FE(pam_native_error, arginfo_pam_native_error)
+    PHP_FE(pam_native_crypto, arginfo_pam_native_crypto)
     PHP_FE_END
 };
 
@@ -828,6 +906,10 @@ uint64_t pam_native_runtime_start(
 
 void pam_native_ios_set_text_measurer(PamNativeMeasureTextCallback callback) {
     host_text_measurer.store(callback);
+}
+
+void pam_native_ios_set_crypto_provider(PamNativeCryptoCallback callback) {
+    host_crypto_provider.store(callback);
 }
 
 void pam_native_ios_set_boot_safe_area_insets(float left, float top, float right, float bottom) {
