@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.18.0 - 2026-10-06
+
+First launch after installing or updating an Android app: the PHP bundle is
+one asset and the prebuilt component cache is one file. Zé Chat on a Galaxy
+S10, release-optimized `.perf` build, process start → first commit (fresh
+install each run; the phone was shared with other apps, so runs vary):
+
+| | 1.14.0 | 1.18.0 |
+|---|---|---|
+| Bundle install (`bundleInstallMs`) | 1,720-2,167 ms | 164-278 ms |
+| First launch after install | 2,172-2,683 ms | 453-681 ms |
+| Normal cold start | 268-322 ms | 233-313 ms |
+| Files created on device by the install | 2,165 | 1,261 |
+| APK size | 69.1 MB | 67.9 MB |
+
+- Android CLI: `pam-native build` writes `assets/pam-bundle.pnb` instead of
+  ~2,000 `assets/pam/**` PHP assets (and drops 1.14's `pam-files.txt`): an
+  index (`<sha256> <size> <p|a> <path>`, `c <compressed> <size>` per chunk)
+  and the PHP code (`*.php`, `*.pam`, `pam-prebuilt/`) as independently
+  raw-deflated chunks of ~512 KB, stored uncompressed in the APK
+  (`noCompress "pnb"`). Images, fonts, CSS and every other file stay plain
+  `assets/pam/` entries (`asset://`, fonts and `Files.copyAsset` read them
+  from the APK as before) and are listed in the index with their SHA-256.
+- Android host: the install starts with the process (`PamBundleInstallProvider`,
+  before `Application.onCreate` and the Activity) instead of after the
+  Activity is created. One sequential read of the pack feeds compressed
+  chunks to 2-4 workers that inflate them and verify each file's size and
+  SHA-256 against the index before writing it; plain assets are copied on
+  their own thread; directories are created on first use. The index parser
+  is hand-written (Regex parsing alone cost ~110 ms on a cold process).
+  `PamStartup` (1.15.0) now waits for that install instead of running it.
+  Staging, content-addressed activation, release pruning, OTA bundles and
+  hot reload are unchanged. Debug/benchmark builds log `bundleInstallMs`
+  (the unpack itself) and `bundleWaitMs` (how long startup waited for it).
+- PHP SDK: `PamPhpCompiler::prebuild()` writes one
+  `pam-prebuilt/components/components.pack` (`PNC1`, JSON index with every
+  component's metadata, then class and template sources) instead of four
+  files per component (904 files in Zé Chat). A component's class and
+  template file (closures + template JSON in one opcode-cached file) are
+  written from the pack the first time they are used: beside the pack when
+  the bundle is writable (Android, per release), otherwise under
+  `PAM_NATIVE_STATE_DIR` (a read-only iOS app bundle), keeping only the
+  current pack's files. 1.14 prebuilt directories still load.
+- iOS: the app runs `PamBundle/` in place from the signed app bundle, so it
+  has no install step to speed up; it gets the same single-file prebuilt
+  cache (one bundle file instead of four per component). Uncompiled on this
+  release host; listed in `docs/ios-parity.md` for Mac validation.
+- What remains of the gap to a normal cold start: creating ~1,260 files on
+  f2fs + file-based encryption (~135 µs each, serialized by the kernel, so
+  more writer threads do not help) and the opcode compilation + file-cache
+  writes of the first PHP run (~130 ms).
+
 ## 1.17.0 - 2026-10-06
 
 The mobile PHP runtime has no ext-mbstring (and no intl), so `mb_*` calls in

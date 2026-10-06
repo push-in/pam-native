@@ -51,6 +51,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.15.0 | Splash held until the first PHP frame | ✅ (uncompiled) | The launch-screen cover is always installed (logo optional), hidden on the first committed frame, a fatal error or after 4 s; the first batch of a host mounts on arrival instead of the next display-link tick; PHP boots with the window safe area when the root view has not been laid out yet. |
 | 1.16.0 | Share Extension activation rule from `plugins.shareExtension` | ✅ (uncompiled) | Prepare writes `NSExtensionActivationRule` from the accepted MIME types (dictionary for text/URL, images, movies and `*/*`; `SUBQUERY` predicate for specific file types). Validate on a Mac that the extension is offered only for the configured types. |
 | 1.17.0 | ext-mbstring polyfill + extension audit | ✅ (PHP only) | The iOS runtime is built with the same `--disable-all` extension set as Android (no mbstring, no intl), so the SDK's PHP `mb_*` polyfill applies unchanged; no Swift change. |
+| 1.18.0 | Single-file prebuilt component cache | ✅ (uncompiled) | `PamBundle/pam-prebuilt/components/components.pack` replaces four files per component. The app bundle is read-only, so a component's class/template files are written on first use under `Documents/pam/state/prebuilt-components/<pack id>/` (other packs' directories are dropped). No Swift change: iOS runs `PamBundle/` in place, there is no bundle install to speed up. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -75,6 +76,11 @@ Visual checks that tests cannot fully cover:
   pressed (sibling shadow follows the press scale only at rest).
 - Splash: logo size/position matches between the launch screen and the
   first-frame overlay, in light and dark.
+- First launch after deleting and reinstalling the app (1.18.0): every
+  screen renders; `Documents/pam/state/prebuilt-components/` holds one
+  directory with `<key>.class.php`/`<key>.template.php` files only for the
+  components shown; a second launch writes nothing there; after installing a
+  build with changed components the old directory is gone.
 - Cold start (1.15.0): no frame between the launch screen and the first PHP
   frame, with and without `appearance.splash.logo`; the first frame already
   has the notch/home-indicator safe area (no inset jump right after launch);
