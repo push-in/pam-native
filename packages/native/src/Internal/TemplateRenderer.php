@@ -2008,6 +2008,68 @@ final class TemplateRenderer
         'TouchableNativeFeedback' => true,
     ];
 
+    /** @var array<string, class-string<Element>> */
+    private const FAST_CLASSES = [
+        'View' => NativeView::class,
+        'Column' => Column::class,
+        'Row' => Row::class,
+        'Grid' => Grid::class,
+        'Screen' => Screen::class,
+        'SafeAreaView' => SafeAreaView::class,
+        'Text' => Text::class,
+        'Span' => Text::class,
+        'Image' => Image::class,
+        'Pressable' => Pressable::class,
+        'TouchableOpacity' => Pressable::class,
+        'TouchableHighlight' => Pressable::class,
+        'TouchableWithoutFeedback' => Pressable::class,
+        'TouchableNativeFeedback' => Pressable::class,
+    ];
+
+    private const FAST_KINDS = [
+        'View' => NodeKind::View,
+        'Column' => NodeKind::Column,
+        'Row' => NodeKind::Row,
+        'Grid' => NodeKind::Row,
+        'Screen' => NodeKind::Screen,
+        'SafeAreaView' => NodeKind::SafeAreaView,
+        'Text' => NodeKind::Text,
+        'Span' => NodeKind::Text,
+        'Image' => NodeKind::Image,
+        'Pressable' => NodeKind::Pressable,
+        'TouchableOpacity' => NodeKind::Pressable,
+        'TouchableHighlight' => NodeKind::Pressable,
+        'TouchableWithoutFeedback' => NodeKind::Pressable,
+        'TouchableNativeFeedback' => NodeKind::Pressable,
+    ];
+
+    /** Events Pressable registers through its own methods. */
+    private const PRESSABLE_EVENTS = [
+        EventKind::PressIn->value => true,
+        EventKind::PressOut->value => true,
+        EventKind::PressMove->value => true,
+        EventKind::DoubleTap->value => true,
+    ];
+
+    private const MEDIA_CACHE_VALUES = [
+        'cache' => true,
+        'cacheKey' => true,
+        'cacheMaxAge' => true,
+        'cacheMaxBytes' => true,
+        'cacheTags' => true,
+        'checksum' => true,
+        'downloadWhilePlaying' => true,
+        'pinOffline' => true,
+        'preloadSeconds' => true,
+        'priority' => true,
+        'resizeHeight' => true,
+        'resizeWidth' => true,
+        'sharedTransition' => true,
+        'sharedTransitionStyle' => true,
+        'streamingCache' => true,
+        'thumbnail' => true,
+    ];
+
     /** specialAttributes() handled inline by fastTag(). */
     private const FAST_SPECIAL_ATTRIBUTES = [
         'key' => true,
@@ -2158,6 +2220,7 @@ final class TemplateRenderer
             'classTokens' => $classTokens,
             'localClasses' => $localClasses,
             'specials' => $specials,
+            'media' => $tag === 'Image' && array_intersect_key($template, self::MEDIA_CACHE_VALUES) !== [],
         ];
     }
 
@@ -2320,25 +2383,38 @@ final class TemplateRenderer
             $values['text'] ??= $text;
         }
 
-        $element = match ($tag) {
-            'Column' => Column::make(...$children),
-            'Row' => Row::make(...$children),
-            'Grid' => Grid::make(...$children),
-            'Screen' => Screen::make(...$children),
-            'SafeAreaView' => SafeAreaView::make(...$children),
-            'Text', 'Span' => $richParts !== null
-                ? Text::rich(...$richParts)
-                : Text::make(self::stringValue($values['text'] ?? $text, 'Text content')),
-            'Image' => Image::make(self::stringValue($values['source'] ?? '', 'Image source')),
-            'Pressable', 'TouchableOpacity', 'TouchableHighlight',
-            'TouchableWithoutFeedback', 'TouchableNativeFeedback' => Pressable::make(...$children),
-            default => NativeView::make(...$children),
-        };
-        if ($element instanceof Image) {
-            $element = self::mediaCacheAttributes($element, $values);
+        // Same inputs, checks and order as make() + mediaCacheAttributes() +
+        // classes() + class() + attributes() + on(), built with one object.
+        $base = [];
+        if ($textTag) {
+            if ($richParts === null) {
+                $content = self::stringValue($values['text'] ?? $text, 'Text content');
+                if (strlen($content) > 1_048_576) {
+                    throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
+                }
+                $base[PropKey::Text->value] = $content;
+            }
+        } elseif ($tag === 'Image') {
+            $source = self::stringValue($values['source'] ?? '', 'Image source');
+            if (strlen($source) > 1_048_576) {
+                throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
+            }
+            $base[PropKey::Source->value] = $source;
+        } elseif ($tag === 'Grid') {
+            $base[PropKey::GridColumns->value] = 12;
+        }
+        $prebuilt = null;
+        if ($richParts !== null) {
+            $prebuilt = Text::rich(...$richParts);
+        } elseif ($fast['media']) {
+            $prebuilt = self::mediaCacheAttributes(Image::__pamCreate(NodeKind::Image, [], $base), $values);
         }
         if ($resolvedClass !== null && !$fast['localClasses']) {
-            $element = self::classes($element, $resolvedClass, $data);
+            $prebuilt = self::classes(
+                $prebuilt ?? self::FAST_CLASSES[$tag]::__pamCreate(self::FAST_KINDS[$tag], $children, $base),
+                $resolvedClass,
+                $data,
+            );
         }
 
         $elementKey = null;
@@ -2352,13 +2428,13 @@ final class TemplateRenderer
                 }
             }
             if (isset($values['accessibilityLabel'])) {
-                $properties[PropKey::AccessibilityLabel->value] = self::stringValue(
+                $properties[PropKey::AccessibilityLabel->value] = self::boundedString(
                     $values['accessibilityLabel'],
                     'Accessibility label',
                 );
             }
             if (isset($values['testId'])) {
-                $properties[PropKey::TestId->value] = self::stringValue($values['testId'], 'Test ID');
+                $properties[PropKey::TestId->value] = self::boundedString($values['testId'], 'Test ID');
             }
             if (isset($values['disabled'])) {
                 $properties[PropKey::Enabled->value] = !self::boolValue($values['disabled'], 'Disabled');
@@ -2369,33 +2445,63 @@ final class TemplateRenderer
         } else {
             $properties = $fast['constant'];
         }
+        $dropped = null;
         foreach ($fast['dynamic'] as [$name, $key]) {
-            if (!array_key_exists($name, $values)) {
+            $value = array_key_exists($name, $values)
+                ? self::propertyValue($key, $values[$name])
+                : null;
+            if ($value === null) {
+                $dropped[$key->value] = true;
                 continue;
             }
-            $value = self::propertyValue($key, $values[$name]);
-            if ($value !== null) {
-                $properties[$key->value] = $value;
+            if (is_string($value) && strlen($value) > 1_048_576) {
+                throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
+            }
+            $properties[$key->value] = $value;
+        }
+        if ($dropped !== null) {
+            $properties = array_diff_key($properties, $dropped);
+        }
+        $events = [];
+        $pressEvents = null;
+        foreach ($plan['events'] as $event) {
+            $handler = $ownHandlers[$event->value];
+            if (isset(self::PRESSABLE_EVENTS[$event->value]) && self::FAST_KINDS[$tag] === NodeKind::Pressable) {
+                // Pressable-specific registration keeps its own semantics.
+                $pressEvents[] = [$event, $handler];
+                continue;
+            }
+            if ($pressEvents !== null) {
+                $pressEvents[] = [$event, $handler];
+                continue;
+            }
+            $events[$event->value] = $handler;
+        }
+        $element = $prebuilt === null
+            ? self::FAST_CLASSES[$tag]::__pamCreate(
+                self::FAST_KINDS[$tag],
+                $children,
+                $base === [] ? $properties : array_replace($base, $properties),
+                $fast['classTokens'],
+                $elementKey,
+                $events,
+            )
+            : ($prebuilt->domClasses() === []
+                ? $prebuilt->__pamDecorate($fast['classTokens'], $properties, $elementKey, $events)
+                : self::attributes(self::withDomClasses($prebuilt, (string) $resolvedClass), $values));
+        if ($prebuilt !== null && $prebuilt->domClasses() !== []) {
+            foreach ($events as $kind => $handler) {
+                $element = $element->on(EventKind::from($kind), $handler);
             }
         }
-        $classTokens = $fast['classTokens'];
-        $element = $classTokens !== null && $element->domClasses() !== []
-            ? self::attributes(self::withDomClasses($element, (string) $resolvedClass), $values)
-            : $element->__pamDecorate($classTokens, $properties, $elementKey);
-
-        foreach ($plan['events'] as $name => $event) {
-            $handler = $ownHandlers[$event->value];
-            if ($element instanceof Pressable) {
-                $element = match ($event) {
-                    EventKind::PressIn => $element->onPressIn($handler),
-                    EventKind::PressOut => $element->onPressOut($handler),
-                    EventKind::PressMove => $element->onPressMove($handler),
-                    EventKind::DoubleTap => $element->onDoubleTap($handler),
-                    default => $element->on($event, $handler),
-                };
-            } else {
-                $element = $element->on($event, $handler);
-            }
+        foreach ($pressEvents ?? [] as [$event, $handler]) {
+            $element = match ($event) {
+                EventKind::PressIn => $element->onPressIn($handler),
+                EventKind::PressOut => $element->onPressOut($handler),
+                EventKind::PressMove => $element->onPressMove($handler),
+                EventKind::DoubleTap => $element->onDoubleTap($handler),
+                default => $element->on($event, $handler),
+            };
         }
         if (isset($values['model'])) {
             throw new RuntimeException('The model attribute is only valid on Input.');
@@ -6520,6 +6626,17 @@ final class TemplateRenderer
                 'StatusBar navigationBarHidden',
             ))
             : $bar;
+    }
+
+    /** stringValue() limited like a string property (withProperty()). */
+    private static function boundedString(mixed $value, string $label): string
+    {
+        $string = self::stringValue($value, $label);
+        if (strlen($string) > 1_048_576) {
+            throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
+        }
+
+        return $string;
     }
 
     private static function stringValue(mixed $value, string $label): string

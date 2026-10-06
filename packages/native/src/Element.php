@@ -516,8 +516,12 @@ abstract class Element implements Renderable
      * @param list<string>|null $classes
      * @param array<int, string|int|float|bool|BinaryValue|null> $properties
      */
-    final public function __pamDecorate(?array $classes, array $properties, ?string $key = null): static
-    {
+    final public function __pamDecorate(
+        ?array $classes,
+        array $properties,
+        ?string $key = null,
+        array $events = [],
+    ): static {
         $copy = clone $this;
         if ($key !== null) {
             $copy->elementKey = $key;
@@ -525,17 +529,54 @@ abstract class Element implements Renderable
         if ($classes !== null) {
             $copy->domClasses = $classes;
         }
-        foreach ($properties as $key => $value) {
+        foreach ($properties as $property => $value) {
             if ($value === null) {
                 continue;
             }
             if (is_string($value) && strlen($value) > 1_048_576) {
                 throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
             }
-            $copy->properties[$key] = $value;
+            $copy->properties[$property] = $value;
+        }
+        foreach ($events as $kind => $handler) {
+            $copy->events[$kind] = $handler;
+            $copy->properties[\Pam\Native\Internal\EventProperties::MAP[$kind]] = true;
         }
 
         return $copy;
+    }
+
+    /**
+     * @internal Builds an element the template renderer resolved completely:
+     * validated children, final properties (in application order), DOM
+     * class tokens, key and events, as make() followed by the setters would.
+     *
+     * @param list<Element> $children
+     * @param array<int, string|int|float|bool|BinaryValue> $properties
+     * @param list<string>|null $classes
+     * @param array<int, Closure> $events
+     */
+    final public static function __pamCreate(
+        NodeKind $kind,
+        array $children,
+        array $properties,
+        ?array $classes = null,
+        ?string $key = null,
+        array $events = [],
+    ): static {
+        $element = new static($kind);
+        $element->children = $children;
+        $element->properties = $properties;
+        if ($classes !== null) {
+            $element->domClasses = $classes;
+        }
+        $element->elementKey = $key;
+        foreach ($events as $eventKind => $handler) {
+            $element->events[$eventKind] = $handler;
+            $element->properties[\Pam\Native\Internal\EventProperties::MAP[$eventKind]] = true;
+        }
+
+        return $element;
     }
 
     /**

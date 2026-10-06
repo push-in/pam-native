@@ -1,0 +1,86 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Pam\Native\Internal;
+
+use Pam\Native\EventKind;
+use Pam\Native\PropKey;
+
+/** @internal */
+final class EventProperties
+{
+    /** EventKind value => callback PropKey value. */
+    public const MAP = [
+        EventKind::Press->value => PropKey::OnPress->value,
+        EventKind::Change->value => PropKey::OnChange->value,
+        EventKind::LongPress->value => PropKey::OnLongPress->value,
+        EventKind::Focus->value => PropKey::OnFocus->value,
+        EventKind::Blur->value => PropKey::OnBlur->value,
+        EventKind::Submit->value => PropKey::OnSubmit->value,
+        EventKind::Scroll->value => PropKey::OnScroll->value,
+        EventKind::Refresh->value => PropKey::OnRefresh->value,
+        EventKind::Toggle->value => PropKey::OnToggle->value,
+        EventKind::EndReached->value => PropKey::OnEndReached->value,
+        EventKind::DrawerOpen->value => PropKey::OnDrawerOpen->value,
+        EventKind::DrawerClose->value => PropKey::OnDrawerClose->value,
+        EventKind::Native->value => PropKey::OnNativeEvent->value,
+        EventKind::ImageLoadStart->value => PropKey::OnImageLoadStart->value,
+        EventKind::ImageProgress->value => PropKey::OnImageProgress->value,
+        EventKind::ImageLoad->value => PropKey::OnImageLoad->value,
+        EventKind::ImageError->value => PropKey::OnImageError->value,
+        EventKind::ImageLoadEnd->value => PropKey::OnImageLoadEnd->value,
+        EventKind::InputEndEditing->value => PropKey::OnInputEndEditing->value,
+        EventKind::InputSelectionChange->value => PropKey::OnInputSelectionChange->value,
+        EventKind::InputContentSizeChange->value => PropKey::OnInputContentSizeChange->value,
+        EventKind::InputKeyPress->value => PropKey::OnInputKeyPress->value,
+        EventKind::PressIn->value => PropKey::OnPressIn->value,
+        EventKind::PressOut->value => PropKey::OnPressOut->value,
+        EventKind::PressMove->value => PropKey::OnPressMove->value,
+        EventKind::ModalRequestClose->value => PropKey::OnModalRequestClose->value,
+        EventKind::ModalShow->value => PropKey::OnModalShow->value,
+        EventKind::ModalDismiss->value => PropKey::OnModalDismiss->value,
+        EventKind::ModalOrientationChange->value => PropKey::OnModalOrientationChange->value,
+        EventKind::ClickOutside->value => PropKey::OnClickOutside->value,
+        EventKind::Intersect->value => PropKey::OnIntersect->value,
+        EventKind::Mutate->value => PropKey::OnMutate->value,
+        EventKind::Resize->value => PropKey::OnResize->value,
+        EventKind::TouchStart->value => PropKey::OnTouchStart->value,
+        EventKind::TouchMove->value => PropKey::OnTouchMove->value,
+        EventKind::TouchEnd->value => PropKey::OnTouchEnd->value,
+        EventKind::GestureBegin->value => PropKey::OnGestureBegin->value,
+        EventKind::GestureUpdate->value => PropKey::OnGestureUpdate->value,
+        EventKind::GestureEnd->value => PropKey::OnGestureEnd->value,
+        EventKind::GestureCancel->value => PropKey::OnGestureCancel->value,
+        EventKind::BottomSheetChange->value => PropKey::OnBottomSheetChange->value,
+        EventKind::BottomSheetDismiss->value => PropKey::OnBottomSheetDismiss->value,
+        EventKind::WebViewLoad->value => PropKey::OnWebViewLoad->value,
+        EventKind::WebViewError->value => PropKey::OnWebViewError->value,
+        EventKind::WebViewMessage->value => PropKey::OnWebViewMessage->value,
+        EventKind::MediaReady->value => PropKey::OnMediaReady->value,
+        EventKind::MediaProgress->value => PropKey::OnMediaProgress->value,
+        EventKind::MediaEnd->value => PropKey::OnMediaEnd->value,
+        EventKind::MediaError->value => PropKey::OnMediaError->value,
+        EventKind::DragStart->value => PropKey::OnDragStart->value,
+        EventKind::DragEnd->value => PropKey::OnDragEnd->value,
+        EventKind::Drop->value => PropKey::OnDrop->value,
+        EventKind::MenuAction->value => PropKey::OnMenuAction->value,
+        EventKind::NavigationGesturePop->value => PropKey::OnNavigationGesturePop->value,
+        EventKind::AnimationComplete->value => PropKey::OnAnimationComplete->value,
+        EventKind::MediaCacheHit->value => PropKey::OnMediaCacheHit->value,
+        EventKind::MediaCacheMiss->value => PropKey::OnMediaCacheMiss->value,
+        EventKind::MediaCacheProgress->value => PropKey::OnMediaCacheProgress->value,
+        EventKind::MediaCacheReady->value => PropKey::OnMediaCacheReady->value,
+        EventKind::AccessibilityAction->value => PropKey::OnAccessibilityAction->value,
+        EventKind::SpanPress->value => PropKey::OnSpanPress->value,
+        EventKind::Layout->value => PropKey::OnLayout->value,
+        EventKind::MediaBuffering->value => PropKey::OnMediaBuffering->value,
+        EventKind::MediaLoadStart->value => PropKey::OnMediaLoadStart->value,
+        EventKind::DoubleTap->value => PropKey::OnDoubleTap->value,
+        EventKind::GestureSettle->value => PropKey::OnGestureSettle->value,
+        EventKind::ScrollBeginDrag->value => PropKey::OnScrollBeginDrag->value,
+        EventKind::ScrollEndDrag->value => PropKey::OnScrollEndDrag->value,
+        EventKind::MomentumScrollEnd->value => PropKey::OnMomentumScrollEnd->value,
+        EventKind::TextLayout->value => PropKey::OnTextLayout->value,
+    ];
+}
