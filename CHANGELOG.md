@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.20.2 - 2026-10-06
+
+`MediaPlayer` on Android keeps the video's aspect ratio and a paused player
+stays paused. In Zé Chat on a Galaxy S10 a square (720x720) loop with
+`resizeMode="contain"` filled the whole portrait screen, stretched and
+upscaled (React Native letterboxes it), and the warm neighbour of the Loops
+pager (`autoPlay` false, muted) decoded and ran next to the visible loop:
+`dumpsys media.player` listed both players RUNNING.
+
+- Android, fit: the `TextureView` fills the player box, so every frame is
+  already stretched to the box; `resolveVideoScale` applied the fit scale on
+  top of that. The view scale is now the displayed size divided by the box:
+  `contain` letterboxes the whole frame, `cover` fills the box and crops the
+  overflow (it over-zoomed one axis), `fill` keeps the stretch and `center`
+  shows native pixels. Unit tests cover each mode.
+- Android, paused players: `MediaPlayer.setPlaybackParams` with a non-zero
+  speed starts a prepared or paused player, and every prepare applied the
+  playback rate. The rate is applied only when it differs from 1, and a player
+  that was not playing is paused again. Verified on the S10: one RUNNING
+  player per Loops page, the warm neighbour PREPARED.
+- iOS: unchanged. `AVPlayerLayer.videoGravity` already fits correctly and
+  `AVPlayer.rate` is only set while playing.
+
 ## 1.20.1 - 2026-10-06
 
 A property that gives a node inside a virtualized-list cell its own native
