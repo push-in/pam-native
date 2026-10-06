@@ -27,8 +27,7 @@ class AssetInstallerTest {
                 val file = source.resolve(path)
                 Files.createDirectories(file.parent)
                 file.writeText(text)
-                val sha = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+                val sha = hexDigest(java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()))
                 "$sha ${text.toByteArray().size} $path"
             }
             installListedBundle(parseBundleListing(lines), destination.toFile(), 3) { path ->
@@ -51,6 +50,111 @@ class AssetInstallerTest {
                 }
         } finally {
             source.toFile().deleteRecursively()
+            destination.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun installsPackedBundleAndVerifiesEveryFile() {
+        val assets = Files.createTempDirectory("pam-pack-assets")
+        val destination = Files.createTempDirectory("pam-pack-destination")
+        try {
+            val packed = linkedMapOf(
+                "index.php" to "<?php echo 1;",
+                "pam-prebuilt/components/abc.json" to "{}",
+                "src/Components/Row.pam" to "<template><View /></template>",
+                "src/Empty.php" to "",
+            )
+            val plain = mapOf("assets/logo.svg" to "<svg/>", "manifest.sha256" to "${"a".repeat(64)}\n")
+            plain.forEach { (path, text) ->
+                val file = assets.resolve(path)
+                Files.createDirectories(file.parent)
+                file.writeText(text)
+            }
+            fun sha(text: String) = hexDigest(
+                java.security.MessageDigest.getInstance("SHA-256").digest(text.toByteArray()),
+            )
+            fun deflate(data: ByteArray): ByteArray {
+                val deflater = java.util.zip.Deflater(9, true)
+                deflater.setInput(data)
+                deflater.finish()
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(1024)
+                while (!deflater.finished()) output.write(buffer, 0, deflater.deflate(buffer))
+                deflater.end()
+                return output.toByteArray()
+            }
+            // Two chunks: the first two files, then the rest.
+            fun pack(entries: Map<String, String>, data: String = entries.values.joinToString(""), trailing: ByteArray = ByteArray(0)): ByteArray {
+                val groups = entries.entries.toList().let { listOf(it.take(2), it.drop(2)) }
+                var cursor = 0
+                val chunks = groups.map { group ->
+                    val length = group.sumOf { it.value.toByteArray().size }
+                    val raw = data.toByteArray().copyOfRange(cursor, cursor + length).also { cursor += length }
+                    group to deflate(raw).let { it to raw.size }
+                }
+                val index = buildString {
+                    plain.forEach { (path, text) -> append("${sha(text)} ${text.toByteArray().size} a $path\n") }
+                    chunks.forEach { (group, chunk) ->
+                        append("c ${chunk.first.size} ${chunk.second}\n")
+                        group.forEach { (path, text) -> append("${sha(text)} ${text.toByteArray().size} p $path\n") }
+                    }
+                }.toByteArray()
+                return java.io.ByteArrayOutputStream().apply {
+                    write("PNB1".toByteArray())
+                    write(java.nio.ByteBuffer.allocate(4).order(java.nio.ByteOrder.LITTLE_ENDIAN).putInt(index.size).array())
+                    write(index)
+                    chunks.forEach { write(it.second.first) }
+                    write(trailing)
+                }.toByteArray()
+            }
+            val open = { path: String -> assets.resolve(path).toFile().inputStream() }
+            installPackedBundle(pack(packed).inputStream(), destination.toFile(), 3, open)
+            (packed + plain).forEach { (path, text) ->
+                assertEquals(text, destination.resolve(path).toFile().readText())
+            }
+
+            val tampered = pack(packed, packed.values.joinToString("").replace("echo 1", "echo 2"))
+            assertTrue(
+                "Packed contents that differ from the index must fail",
+                runCatching { installPackedBundle(tampered.inputStream(), destination.toFile(), 2, open) }.isFailure,
+            )
+            val truncated = pack(packed).let { it.copyOf(it.size - 3) }
+            assertTrue(
+                "A truncated pack must fail",
+                runCatching { installPackedBundle(truncated.inputStream(), destination.toFile(), 2, open) }.isFailure,
+            )
+            val trailing = pack(packed, trailing = byteArrayOf(1))
+            assertTrue(
+                "Trailing bytes must fail",
+                runCatching { installPackedBundle(trailing.inputStream(), destination.toFile(), 2, open) }.isFailure,
+            )
+            assets.resolve("assets/logo.svg").writeText("<svg>changed</svg>")
+            assertTrue(
+                "A plain asset that differs from the index must fail",
+                runCatching { installPackedBundle(pack(packed).inputStream(), destination.toFile(), 2, open) }.isFailure,
+            )
+            val sha = "a".repeat(64)
+            listOf(
+                "x 1 a a",
+                "$sha -1 a a",
+                "$sha 1 x a",
+                "${"A".repeat(64)} 1 a a",
+                "$sha 1 a ../a",
+                "$sha 1 a a//b",
+                "$sha 1 a a\n$sha 1 a a",
+                "$sha 1 p a",
+                "c 5 2\n$sha 1 p a",
+                "c 0 1\n$sha 1 p a",
+                "c 5\n$sha 1 p a",
+            ).forEach { index ->
+                assertTrue("Invalid index must fail: $index", runCatching { parsePackedBundleIndex(index) }.isFailure)
+            }
+            val parsed = parsePackedBundleIndex("$sha 3 a x.css\nc 5 3\n$sha 1 p a\n$sha 2 p b/c.php\n")
+            assertEquals(listOf("x.css"), parsed.plain.map { it.path })
+            assertEquals(listOf(listOf("a", "b/c.php")), parsed.chunks.map { chunk -> chunk.files.map { it.path } })
+        } finally {
+            assets.toFile().deleteRecursively()
             destination.toFile().deleteRecursively()
         }
     }

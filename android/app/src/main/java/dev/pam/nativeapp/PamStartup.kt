@@ -38,14 +38,17 @@ internal object PamStartup {
             val started = SystemClock.elapsedRealtime()
             loadNativeLibrary()
             val loaded = SystemClock.elapsedRealtime()
+            // The embedded install already started with the process
+            // (PamBundleInstallProvider); this only waits for it.
             val entry = ActiveUpdateInstaller(application).resolve(
-                AssetInstaller(application).install(),
+                PamBundleBootstrap.embeddedEntry(application),
             )
             if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
                 Log.d(
                     LOG_TAG,
                     "libraryLoadMs=${loaded - started} " +
-                        "bundleInstallMs=${SystemClock.elapsedRealtime() - loaded}",
+                        "bundleInstallMs=${PamBundleBootstrap.lastInstallMillis} " +
+                        "bundleWaitMs=${SystemClock.elapsedRealtime() - loaded}",
                 )
             }
             entry

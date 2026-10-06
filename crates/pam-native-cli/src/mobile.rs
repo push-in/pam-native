@@ -6373,19 +6373,72 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
 }
 
 fn stage_project(project: &Project, workspace: &Path, precompile: bool) -> Result<(), String> {
-    let destination = workspace.join("app/src/main/assets/pam");
-    stage_project_at(project, &destination, precompile)?;
-    write_bundle_listing(
-        &destination,
-        &workspace.join("app/src/main/assets/pam-files.txt"),
-    )
+    stage_android_bundle(project, workspace, precompile, |_| Ok(()))
 }
 
-/// `<sha256> <size> <path>` per bundle file: the Android host copies the
-/// bundle from this listing in parallel (no AssetManager directory walk)
-/// and verifies every file as it streams.
-fn write_bundle_listing(root: &Path, target: &Path) -> Result<(), String> {
-    let mut listing = String::new();
+/// Stages the bundle tree under `assets/pam`, lets `inspect` read the full
+/// tree (hot reload encodes it), then moves its PHP code into the single
+/// `PNB1` pack the Android host installs from (see [`write_bundle_pack`]).
+fn stage_android_bundle(
+    project: &Project,
+    workspace: &Path,
+    precompile: bool,
+    inspect: impl FnOnce(&Path) -> Result<(), String>,
+) -> Result<(), String> {
+    let assets = workspace.join("app/src/main/assets");
+    let destination = assets.join("pam");
+    stage_project_at(project, &destination, precompile)?;
+    inspect(&destination)?;
+    // 1.14 hosts installed from a per-file listing; the pack replaces it.
+    let legacy_listing = assets.join("pam-files.txt");
+    if legacy_listing.exists() {
+        fs::remove_file(&legacy_listing)
+            .map_err(|error| format!("cannot remove {}: {error}", legacy_listing.display()))?;
+    }
+    write_bundle_pack(&destination, &assets.join(ANDROID_BUNDLE_PACK))
+}
+
+const ANDROID_BUNDLE_PACK: &str = "pam-bundle.pnb";
+
+/// Bundle files the Android host may read straight from the APK
+/// (`asset://`, fonts, `Files.copyAsset`) stay plain assets; PHP code and
+/// the prebuilt component cache go into the pack.
+fn packed_bundle_path(relative: &str) -> bool {
+    relative.starts_with("pam-prebuilt/")
+        || relative.ends_with(".php")
+        || relative.ends_with(".pam")
+}
+
+/// Uncompressed bytes per independently deflated pack chunk.
+const BUNDLE_PACK_CHUNK_BYTES: usize = 512 * 1024;
+
+/// Writes the `PNB1` pack: `PNB1`, little-endian u32 index length, the UTF-8
+/// index, then raw-deflate chunks. Index lines: `<sha256> <size> a <path>`
+/// (plain APK asset `pam/<path>`), `c <compressed> <uncompressed>` (starts a
+/// chunk) and `<sha256> <size> p <path>` (a file of the current chunk, in
+/// order). Packed files are removed from `root`: the APK carries the PHP code
+/// as one asset (stored, since its chunks are already compressed) that the
+/// host installs with parallel workers instead of one AssetManager open per
+/// file.
+fn write_bundle_pack(root: &Path, target: &Path) -> Result<(), String> {
+    let mut plain = String::new();
+    let mut chunks = String::new();
+    let mut data = Vec::new();
+    let mut chunk_index = String::new();
+    let mut chunk = Vec::new();
+    let mut packed = Vec::new();
+    let flush =
+        |chunk: &mut Vec<u8>, chunk_index: &mut String, chunks: &mut String, data: &mut Vec<u8>| {
+            if chunk.is_empty() {
+                return;
+            }
+            let compressed = miniz_oxide::deflate::compress_to_vec(chunk, 9);
+            chunks.push_str(&format!("c {} {}\n", compressed.len(), chunk.len()));
+            chunks.push_str(chunk_index);
+            data.extend_from_slice(&compressed);
+            chunk.clear();
+            chunk_index.clear();
+        };
     for file in files_in(root)? {
         let relative = file
             .strip_prefix(root)
@@ -6394,14 +6447,58 @@ fn write_bundle_listing(root: &Path, target: &Path) -> Result<(), String> {
             .replace('\\', "/");
         let contents =
             fs::read(&file).map_err(|error| format!("cannot read {}: {error}", file.display()))?;
-        listing.push_str(&format!(
-            "{:x} {} {}\n",
-            Sha256::digest(&contents),
-            contents.len(),
-            relative
-        ));
+        let digest = Sha256::digest(&contents);
+        if packed_bundle_path(&relative) {
+            chunk_index.push_str(&format!("{digest:x} {} p {relative}\n", contents.len()));
+            chunk.extend_from_slice(&contents);
+            packed.push(file);
+            if chunk.len() >= BUNDLE_PACK_CHUNK_BYTES {
+                flush(&mut chunk, &mut chunk_index, &mut chunks, &mut data);
+            }
+        } else {
+            plain.push_str(&format!("{digest:x} {} a {relative}\n", contents.len()));
+        }
     }
-    write_atomic(target, listing.as_bytes())
+    flush(&mut chunk, &mut chunk_index, &mut chunks, &mut data);
+    let index = plain + &chunks;
+    let index_length =
+        u32::try_from(index.len()).map_err(|_| "bundle pack index is too large".to_owned())?;
+    let mut pack = Vec::with_capacity(8 + index.len() + data.len());
+    pack.extend_from_slice(b"PNB1");
+    pack.extend_from_slice(&index_length.to_le_bytes());
+    pack.extend_from_slice(index.as_bytes());
+    pack.extend_from_slice(&data);
+    write_atomic(target, &pack)?;
+    for file in packed {
+        fs::remove_file(&file)
+            .map_err(|error| format!("cannot remove {}: {error}", file.display()))?;
+    }
+    remove_empty_directories(root)
+}
+
+fn remove_empty_directories(directory: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(directory)
+        .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            let path = entry.path();
+            remove_empty_directories(&path)?;
+            if fs::read_dir(&path)
+                .map_err(|error| error.to_string())?
+                .next()
+                .is_none()
+            {
+                fs::remove_dir(&path)
+                    .map_err(|error| format!("cannot remove {}: {error}", path.display()))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The host PHP used for build-time steps: PAM_NATIVE_PHP, PAM_PHP, `pam`, then `php`.
@@ -8317,8 +8414,11 @@ fn refresh_dev_bundle(
     )?;
     generate_modules(project, workspace)?;
     generate_views(project, workspace)?;
-    stage_project(project, workspace, false)?;
-    let next = encode_dev_bundle(&workspace.join("app/src/main/assets/pam"))?;
+    let mut next = Vec::new();
+    stage_android_bundle(project, workspace, false, |tree| {
+        next = encode_dev_bundle(tree)?;
+        Ok(())
+    })?;
     if next.len() > MAX_DEV_BUNDLE_BYTES {
         return Err("hot reload bundle exceeds 16 MiB; reduce development assets".to_owned());
     }
@@ -8774,6 +8874,79 @@ mod tests {
                 .contains("unsafe hot reload path")
         );
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn android_bundle_pack_moves_php_code_into_one_indexed_asset() {
+        let assets = std::env::temp_dir().join(format!(
+            "pam-bundle-pack-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let root = assets.join("pam");
+        fs::create_dir_all(root.join("src/Screens")).expect("source");
+        fs::create_dir_all(root.join("pam-prebuilt/components")).expect("prebuilt");
+        fs::create_dir_all(root.join("assets")).expect("assets");
+        fs::write(root.join("index.php"), b"<?php require 'src/App.php';").expect("entry");
+        fs::write(root.join("src/Screens/Inbox.pam"), b"<template />").expect("component");
+        fs::write(root.join("pam-prebuilt/components/a.json"), b"{}").expect("cache");
+        fs::write(root.join("assets/logo.svg"), b"<svg/>").expect("asset");
+        fs::write(root.join("manifest.sha256"), b"abc\n").expect("manifest");
+
+        write_bundle_pack(&root, &assets.join(ANDROID_BUNDLE_PACK)).expect("pack");
+
+        let pack = fs::read(assets.join(ANDROID_BUNDLE_PACK)).expect("pack bytes");
+        assert!(pack.starts_with(b"PNB1"));
+        let index_length = u32::from_le_bytes(pack[4..8].try_into().expect("length")) as usize;
+        let index = std::str::from_utf8(&pack[8..8 + index_length]).expect("utf-8 index");
+        let lines = index.lines().collect::<Vec<_>>();
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| {
+                    let parts = line.splitn(4, ' ').collect::<Vec<_>>();
+                    if parts[0] == "c" {
+                        "c".to_owned()
+                    } else {
+                        format!("{} {}", parts[2], parts[3])
+                    }
+                })
+                .collect::<Vec<_>>(),
+            [
+                "a assets/logo.svg",
+                "a manifest.sha256",
+                "c",
+                "p index.php",
+                "p pam-prebuilt/components/a.json",
+                "p src/Screens/Inbox.pam",
+            ]
+        );
+        let chunk = lines[2].split(' ').collect::<Vec<_>>();
+        let compressed = chunk[1].parse::<usize>().expect("compressed");
+        let data = &pack[8 + index_length..];
+        assert_eq!(data.len(), compressed);
+        let inflated = miniz_oxide::inflate::decompress_to_vec(data).expect("raw deflate chunk");
+        assert_eq!(
+            inflated.len(),
+            chunk[2].parse::<usize>().expect("uncompressed")
+        );
+        assert_eq!(
+            inflated,
+            b"<?php require 'src/App.php';{}<template />".as_slice()
+        );
+        assert!(index.starts_with(&format!(
+            "{:x} 6 a assets/logo.svg\n",
+            Sha256::digest(b"<svg/>")
+        )));
+        // Packed files leave the plain asset tree; APK-read assets stay.
+        assert!(root.join("assets/logo.svg").is_file());
+        assert!(root.join("manifest.sha256").is_file());
+        assert!(!root.join("index.php").exists());
+        assert!(!root.join("src").exists());
+        assert!(!root.join("pam-prebuilt").exists());
+        fs::remove_dir_all(assets).expect("cleanup");
     }
 
     #[test]

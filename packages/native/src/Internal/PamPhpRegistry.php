@@ -470,6 +470,7 @@ final class PamPhpRegistry
         $file = self::$classFiles[$className] ?? null;
 
         if ($file !== null && !class_exists($className, false)) {
+            PamPhpCompiler::materializePrebuilt($file);
             require $file;
         }
     }

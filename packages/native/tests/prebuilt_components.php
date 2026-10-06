@@ -53,9 +53,10 @@ $prebuiltFiles = glob($prebuiltRoot.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/*')
 $prebuiltText = implode("\n", array_map(static fn (string $file): string => (string) file_get_contents($file), $prebuiltFiles));
 $assert(
     $prebuiltCount === 1
-        && count(glob($prebuiltRoot.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/*.expressions.php') ?: []) === 1
+        && $prebuiltFiles === [$prebuiltRoot.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/'.PamPhpCompiler::PREBUILT_PACK]
+        && str_starts_with($prebuiltText, 'PNC1')
         && !str_contains($prebuiltText, $prebuiltRoot),
-    'Prebuilt components must be written with project-relative identities and compiled expressions.',
+    'Prebuilt components must be written as one pack file with project-relative identities.',
 );
 exec('cp -R '.escapeshellarg($prebuiltRoot).' '.escapeshellarg($prebuiltCopy));
 $installedCache = $prebuiltCopy.'/.cache';
@@ -63,12 +64,21 @@ $installedComponents = PamPhpCompiler::compileDirectory($prebuiltCopy.'/src', $i
 $installedComponent = $installedComponents[0] ?? null;
 $assert(
     $installedComponent !== null
-        && str_starts_with($installedComponent->classFile, $prebuiltCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/')
+        && str_starts_with($installedComponent->classFile, $prebuiltCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/.')
+        && !is_file($installedComponent->classFile)
         && (glob($installedCache.'/*') ?: []) === []
         && $installedComponent->template->children[0]->source === $prebuiltCopy.'/src/Components/Badge.pam.php',
     'A relocated bundle must boot from its prebuilt components without compiling them.',
 );
 $installedElement = TemplateRenderer::render($installedComponent->template, null, ['active' => true, 'label' => 'Ok']);
+PamPhpCompiler::materializePrebuilt($installedComponent->classFile);
+require $installedComponent->classFile;
+$assert(
+    class_exists('Pam\\Native\\Tests\\Prebuilt\\Badge', false)
+        && count(glob(dirname($installedComponent->classFile).'/*') ?: []) === 2
+        && (glob($installedCache.'/*') ?: []) === [],
+    'Prebuilt class and template files must be written from the pack on first use only.',
+);
 $assert(
     $installedElement->domClasses() === ['badge', 'badge-active'],
     'Prebuilt templates must render like freshly compiled ones.',
@@ -82,6 +92,36 @@ $assert(
     str_starts_with($editedComponents[0]->classFile, $installedCache.'/'),
     'An edited component must ignore its stale prebuilt copy and compile into the writable cache.',
 );
+// A read-only bundle (an iOS app) writes its component files under the
+// runtime state directory instead, keeping only the current pack's files.
+$readOnlyCopy = $prebuiltRoot.'-readonly';
+$readOnlyState = $prebuiltRoot.'-state';
+exec('rm -rf '.escapeshellarg($readOnlyCopy).' '.escapeshellarg($readOnlyState));
+exec('cp -R '.escapeshellarg($prebuiltRoot).' '.escapeshellarg($readOnlyCopy));
+mkdir($readOnlyState.'/prebuilt-components/stale-pack', 0o755, true);
+chmod($readOnlyCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY, 0o555);
+$previousState = getenv('PAM_NATIVE_STATE_DIR');
+putenv('PAM_NATIVE_STATE_DIR='.$readOnlyState);
+try {
+    $readOnlyComponent = PamPhpCompiler::compileDirectory($readOnlyCopy.'/src', $readOnlyCopy.'-cache')[0] ?? null;
+    $readOnlyElement = $readOnlyComponent === null ? null
+        : TemplateRenderer::render($readOnlyComponent->template, null, ['active' => false, 'label' => 'Ro']);
+    $assert(
+        $readOnlyComponent !== null
+            && str_starts_with($readOnlyComponent->classFile, $readOnlyState.'/prebuilt-components/')
+            && !is_dir($readOnlyState.'/prebuilt-components/stale-pack')
+            && $readOnlyElement?->domClasses() === ['badge']
+            && (glob($readOnlyCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/.*', GLOB_ONLYDIR) ?: []) === [
+                $readOnlyCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/.',
+                $readOnlyCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/..',
+            ],
+        'A read-only bundle must write its prebuilt component files under the state directory.',
+    );
+} finally {
+    putenv($previousState === false ? 'PAM_NATIVE_STATE_DIR' : 'PAM_NATIVE_STATE_DIR='.$previousState);
+    chmod($readOnlyCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY, 0o755);
+    exec('rm -rf '.escapeshellarg($readOnlyCopy).' '.escapeshellarg($readOnlyCopy.'-cache').' '.escapeshellarg($readOnlyState));
+}
 foreach ([$prebuiltRoot, $prebuiltCopy] as $prebuiltDirectory) {
     exec('rm -rf '.escapeshellarg($prebuiltDirectory));
 }

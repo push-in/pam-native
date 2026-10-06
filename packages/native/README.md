@@ -196,11 +196,22 @@ expanded recursively from the file that declares them at compile time and
 invalidate compiled component caches when a dependency changes. Imports cannot
 leave the Composer project or load network resources.
 `pam-native build` (and update bundles) precompiles every component under
-`src/` into the bundle (`pam-prebuilt/components`: class, runtime template and
-template expressions as PHP closures, keyed by project-relative paths and
-validated by source and stylesheet fingerprints), so the first launch after an
-install or update compiles nothing. An edited component (hot reload) compiles
-into the writable cache passed to `App::components()` as before.
+`src/` into the bundle as one file (`pam-prebuilt/components/components.pack`:
+class, runtime template and template expressions as PHP closures, keyed by
+project-relative paths and validated by source and stylesheet fingerprints),
+so the first launch after an install or update compiles nothing. A
+component's class and template files are written from the pack the first
+time they are used (beside the pack, or under the runtime state directory
+when the bundle is read-only, as on iOS). An edited component (hot reload)
+compiles into the writable cache passed to `App::components()` as before.
+
+On Android the CLI ships the bundle's PHP code as one asset
+(`assets/pam-bundle.pnb`: an index plus independently deflated chunks, stored
+uncompressed in the APK). The first launch after an install or update starts
+unpacking it when the process starts (a content provider, before the
+Activity), with parallel workers that inflate the chunks and verify each
+file's size and SHA-256 against the index; images, fonts, CSS and other
+non-PHP files stay plain APK assets.
 Scoped styles are compiled into typed native properties and add no CSS runtime
 or selector pass. Tag rules form the base, matching classes follow stylesheet
 source order regardless of class order in markup, and authored PAM attributes

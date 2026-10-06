@@ -22,6 +22,9 @@ final class TemplateExpressionCatalog
     /** Key prefix of compiled `:class` lists in generated files. */
     public const CLASS_LIST_PREFIX = "\0class\0";
 
+    /** Key of the template JSON in a bundle template file (see bundleSource()). */
+    public const TEMPLATE_KEY = "\0template";
+
     private function __construct()
     {
     }
@@ -41,7 +44,28 @@ final class TemplateExpressionCatalog
      */
     public static function source(CompiledTemplateNode $tree): string
     {
-        $entries = [];
+        return self::generate($tree, []);
+    }
+
+    /**
+     * One bundle file per prebuilt component: the generated closures plus the
+     * runtime template JSON under TEMPLATE_KEY (one file to install and one
+     * opcode-cached include instead of a closure file and a JSON file).
+     */
+    public static function bundleSource(CompiledTemplateNode $tree, string $templateJson): string
+    {
+        $entry = '    '.var_export(self::TEMPLATE_KEY, true).' => '.var_export($templateJson, true).',';
+        try {
+            return self::generate($tree, [$entry]);
+        } catch (RuntimeException) {
+            // Expressions still compile on first use; the template must ship.
+            return "<?php\n\ndeclare(strict_types=1);\n\nreturn [\n".$entry."\n];\n";
+        }
+    }
+
+    /** @param list<string> $entries */
+    private static function generate(CompiledTemplateNode $tree, array $entries): string
+    {
         foreach (self::collect($tree) as $expression) {
             try {
                 $closure = TemplateExpressionCompiler::closureSource($expression);
@@ -75,9 +99,33 @@ final class TemplateExpressionCatalog
         } catch (Throwable) {
             return;
         }
-        if (!is_array($closures)) {
-            return;
+        if (is_array($closures)) {
+            self::register($closures);
         }
+    }
+
+    /**
+     * Registers the closures of a bundleSource() file and returns its
+     * template JSON (null when the file is missing or broken).
+     */
+    public static function loadBundle(string $file): ?string
+    {
+        try {
+            $entries = require $file;
+        } catch (Throwable) {
+            return null;
+        }
+        if (!is_array($entries) || !is_string($entries[self::TEMPLATE_KEY] ?? null)) {
+            return null;
+        }
+        self::register($entries);
+
+        return $entries[self::TEMPLATE_KEY];
+    }
+
+    /** @param array<array-key, mixed> $closures */
+    private static function register(array $closures): void
+    {
         $expressions = [];
         $classLists = [];
         foreach ($closures as $expression => $closure) {

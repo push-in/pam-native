@@ -65,6 +65,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/pam_file_paths" />
         </provider>
+        <!-- Starts the embedded bundle install with the process (first launch after install/update). -->
+        <provider
+            android:name="dev.pam.nativeapp.PamBundleInstallProvider"
+            android:authorities="${applicationId}.pam.bundle"
+            android:exported="false"
+            android:initOrder="1000" />
         <receiver
             android:name="dev.pam.nativeapp.modules.NotificationReceiver"
             android:exported="false" />

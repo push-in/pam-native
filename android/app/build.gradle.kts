@@ -223,6 +223,13 @@ android {
         buildConfig = true
     }
 
+    androidResources {
+        // The PHP bundle pack (pam-bundle.pnb) is already deflated in chunks
+        // that install workers inflate in parallel; storing it avoids a
+        // second, serial inflate through AssetManager on first launch.
+        noCompress += "pnb"
+    }
+
     packaging {
         jniLibs {
             useLegacyPackaging = false

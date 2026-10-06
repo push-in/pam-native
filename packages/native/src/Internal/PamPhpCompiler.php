@@ -417,7 +417,10 @@ final class PamPhpCompiler
      * A bundle-precompiled component whose source and stylesheets still have
      * the fingerprints recorded at build time, or null.
      */
-    private static function prebuiltComponent(string $source, string $sourceFingerprint): ?PamPhpComponent
+    private static function prebuiltComponent(
+        string $source,
+        string $sourceFingerprint,
+    ): ?PamPhpComponent
     {
         $root = self::projectRoot($source);
         if ($root === null) {
@@ -433,14 +436,14 @@ final class PamPhpCompiler
         }
         $key = hash('sha256', str_replace(DIRECTORY_SEPARATOR, '/', $relative));
         $base = $directory.DIRECTORY_SEPARATOR.$key;
-        $encoded = @file_get_contents($base.'.json');
-        if ($encoded === false) {
-            return null;
-        }
-        try {
-            $metadata = json_decode($encoded, true, 16, JSON_THROW_ON_ERROR);
-        } catch (JsonException) {
-            return null;
+        $pack = self::$prebuiltPacks[$directory] ??= self::readPrebuiltPack($directory);
+        if ($pack !== false) {
+            $entry = $pack['components'][$key] ?? null;
+            $metadata = is_array($entry) ? ($entry['metadata'] ?? null) : null;
+        } else {
+            // Bundles prebuilt by 1.14: one metadata file per component.
+            $entry = null;
+            $metadata = self::legacyPrebuiltMetadata($base.'.json');
         }
         if (
             !is_array($metadata)
@@ -474,6 +477,29 @@ final class PamPhpCompiler
                 return null;
             }
         }
+        if ($pack !== false) {
+            $class = $entry['class'] ?? null;
+            $template = $entry['template'] ?? null;
+            if (!self::validPackSlice($class, $pack['size']) || !self::validPackSlice($template, $pack['size'])) {
+                return null;
+            }
+            // Written from the pack the first time they are needed (class on
+            // autoload, template on first render), never all at boot.
+            $target = $pack['files'].DIRECTORY_SEPARATOR.$key;
+            $classFile = $target.'.class.php';
+            $templateFile = $target.'.template.php';
+            self::$pendingPrebuiltFiles[$classFile] = [$pack['path'], $pack['data'] + $class[0], $class[1]];
+            self::$pendingPrebuiltFiles[$templateFile] = [$pack['path'], $pack['data'] + $template[0], $template[1]];
+
+            return new PamPhpComponent(
+                className: $metadata['class'],
+                tag: $metadata['tag'],
+                source: $source,
+                classFile: $classFile,
+                template: self::lazyBundleTemplate($templateFile, $source),
+                language: $language,
+            );
+        }
         $classFile = $base.'.class.php';
         $templateFile = $base.'.template.json';
         if (!is_file($classFile) || !is_file($templateFile)) {
@@ -487,6 +513,180 @@ final class PamPhpCompiler
             classFile: $classFile,
             template: self::lazyTemplate($templateFile, $source, true),
             language: $language,
+        );
+    }
+
+    /**
+     * One file holding every prebuilt component of a bundle: `PNC1`, a
+     * little-endian u32 index length, the JSON index
+     * (`{"components": {key: {"metadata", "class": [offset, length],
+     * "template": [offset, length]}}}`), then the class and template sources.
+     * A bundle installs it as one file instead of hundreds.
+     */
+    public const PREBUILT_PACK = 'components.pack';
+
+    private const PREBUILT_PACK_MAGIC = 'PNC1';
+
+    private const PREBUILT_PACK_MAX_INDEX_BYTES = 64 * 1024 * 1024;
+
+    /** @var array<string, array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>}|false> */
+    private static array $prebuiltPacks = [];
+
+    /** @var array<string, array{0: string, 1: int, 2: int}> file => [pack, offset, length] */
+    private static array $pendingPrebuiltFiles = [];
+
+    /**
+     * Writes a prebuilt component file from its bundle pack if it is not on
+     * disk yet (an earlier launch may have written it). No-op for any other file.
+     */
+    public static function materializePrebuilt(string $file): void
+    {
+        $slice = self::$pendingPrebuiltFiles[$file] ?? null;
+        if ($slice === null) {
+            return;
+        }
+        unset(self::$pendingPrebuiltFiles[$file]);
+        if (is_file($file)) {
+            return;
+        }
+        [$pack, $offset, $length] = $slice;
+        $contents = file_get_contents($pack, false, null, $offset, $length);
+        if (!is_string($contents) || strlen($contents) !== $length) {
+            throw new RuntimeException("PAM prebuilt component pack {$pack} is truncated.");
+        }
+        // On the first frame's path: a plain write + rename (no tempnam,
+        // lock or chmod); the rename still never exposes a partial file.
+        $directory = dirname($file);
+        if (!is_dir($directory) && !@mkdir($directory, 0o755, true) && !is_dir($directory)) {
+            throw new RuntimeException("Cannot create PAM cache {$directory}.");
+        }
+        $temporary = $file.'.'.getmypid().'.tmp';
+        if (file_put_contents($temporary, $contents) !== $length || !rename($temporary, $file)) {
+            @unlink($temporary);
+            throw new RuntimeException("Cannot write PAM component cache {$file}.");
+        }
+    }
+
+    /** @return array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>}|false */
+    private static function readPrebuiltPack(string $directory): array|false
+    {
+        $file = $directory.DIRECTORY_SEPARATOR.self::PREBUILT_PACK;
+        $handle = @fopen($file, 'rb');
+        if ($handle === false) {
+            return false;
+        }
+        try {
+            $header = fread($handle, 8);
+            if (!is_string($header) || strlen($header) !== 8 || !str_starts_with($header, self::PREBUILT_PACK_MAGIC)) {
+                return false;
+            }
+            $length = unpack('V', substr($header, 4))[1] ?? 0;
+            if (!is_int($length) || $length < 2 || $length > self::PREBUILT_PACK_MAX_INDEX_BYTES) {
+                return false;
+            }
+            $encoded = stream_get_contents($handle, $length);
+            $size = fstat($handle)['size'] ?? 0;
+            if (!is_string($encoded) || strlen($encoded) !== $length) {
+                return false;
+            }
+            $index = json_decode($encoded, true, 32, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return false;
+        } finally {
+            fclose($handle);
+        }
+        if (!is_array($index) || !is_array($index['components'] ?? null)) {
+            return false;
+        }
+
+        // The index records every slice and fingerprint: a different pack
+        // never reuses files written from another one.
+        $id = hash('xxh128', $encoded);
+
+        return [
+            'path' => $file,
+            'files' => self::prebuiltFilesDirectory($directory, $id),
+            'data' => 8 + $length,
+            'size' => max(0, $size - 8 - $length),
+            'components' => $index['components'],
+        ];
+    }
+
+    /**
+     * Where a pack's component files are written: beside the pack when the
+     * bundle is writable (Android installs it per release, so it is pruned
+     * with the release), otherwise (an iOS app bundle is read-only) under the
+     * runtime state directory, where files of other packs are dropped the
+     * first time this one is used.
+     */
+    private static function prebuiltFilesDirectory(string $directory, string $id): string
+    {
+        if (is_writable($directory)) {
+            return $directory.DIRECTORY_SEPARATOR.'.'.$id;
+        }
+        $state = getenv('PAM_NATIVE_STATE_DIR');
+        if (!is_string($state) || $state === '' || str_contains($state, "\0")) {
+            $state = sys_get_temp_dir().DIRECTORY_SEPARATOR.'pam-native-state';
+        }
+        $root = rtrim($state, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR.'prebuilt-components';
+        $files = $root.DIRECTORY_SEPARATOR.$id;
+        if (!is_dir($files)) {
+            foreach (glob($root.DIRECTORY_SEPARATOR.'*', GLOB_ONLYDIR) ?: [] as $stale) {
+                self::removeTree($stale);
+            }
+        }
+
+        return $files;
+    }
+
+    private static function validPackSlice(mixed $slice, int $size): bool
+    {
+        return is_array($slice)
+            && is_int($slice[0] ?? null)
+            && is_int($slice[1] ?? null)
+            && $slice[0] >= 0
+            && $slice[1] > 0
+            && $slice[0] + $slice[1] <= $size;
+    }
+
+    /** @return array<string, mixed>|null */
+    private static function legacyPrebuiltMetadata(string $file): ?array
+    {
+        $encoded = @file_get_contents($file);
+        if ($encoded === false) {
+            return null;
+        }
+        try {
+            $metadata = json_decode($encoded, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+
+        return is_array($metadata) ? $metadata : null;
+    }
+
+    private static function lazyBundleTemplate(string $file, string $source): CompiledTemplateNode
+    {
+        return (new ReflectionClass(CompiledTemplateNode::class))->newLazyProxy(
+            static function () use ($file, $source): CompiledTemplateNode {
+                self::materializePrebuilt($file);
+                $encoded = TemplateExpressionCatalog::loadBundle($file);
+                try {
+                    $tree = $encoded === null ? null : CompiledTemplateNode::hydrate(json_decode(
+                        $encoded,
+                        true,
+                        512,
+                        JSON_THROW_ON_ERROR,
+                    ), $source);
+                } catch (JsonException $error) {
+                    throw new RuntimeException("PAM component cache for {$source} is corrupt.", previous: $error);
+                }
+                if ($tree === null) {
+                    throw new RuntimeException("PAM component cache for {$source} is corrupt.");
+                }
+
+                return $tree;
+            },
         );
     }
 
@@ -514,6 +714,7 @@ final class PamPhpCompiler
             if (!is_dir($output) && !mkdir($output, 0o755, true) && !is_dir($output)) {
                 throw new RuntimeException("Cannot create PAM prebuild directory {$output}.");
             }
+            $entries = [];
             foreach ($components as $component) {
                 $relative = self::relativeTo($root, $component->source);
                 if ($relative === null) {
@@ -550,20 +751,42 @@ final class PamPhpCompiler
                 $metadata['appStyle'] = $appStyle;
                 $metadata['dependencies'] = $dependencies;
                 $metadata['relocatable'] = true;
-                $base = $output.DIRECTORY_SEPARATOR.hash('sha256', $relative);
                 $template = self::bundleTemplate(
                     (string) file_get_contents($compiledBase.'.template.json'),
                     $root,
                 );
-                self::writeAtomic($base.'.class.php', (string) file_get_contents($component->classFile));
-                self::writeAtomic($base.'.template.json', $template);
-                self::writeExpressions($base.'.expressions.php', $component->template);
-                self::writeAtomic($base.'.json', json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n");
+                $entries[hash('sha256', $relative)] = [
+                    $metadata,
+                    (string) file_get_contents($component->classFile),
+                    TemplateExpressionCatalog::bundleSource($component->template, $template),
+                ];
             }
+            // Every bundle file is created on device at the first launch after
+            // an install: all components ship as one pack file (see PREBUILT_PACK).
+            ksort($entries, SORT_STRING);
+            $index = [];
+            $data = '';
+            foreach ($entries as $key => [$metadata, $class, $template]) {
+                $index[$key] = [
+                    'metadata' => $metadata,
+                    'class' => [strlen($data), strlen($class)],
+                    'template' => [strlen($data) + strlen($class), strlen($template)],
+                ];
+                $data .= $class.$template;
+            }
+            $encoded = json_encode(
+                ['version' => 1, 'components' => (object) $index],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+            );
+            self::writeAtomic(
+                $output.DIRECTORY_SEPARATOR.self::PREBUILT_PACK,
+                self::PREBUILT_PACK_MAGIC.pack('V', strlen($encoded)).$encoded.$data,
+            );
 
             self::$prebuiltDirectories = [];
+            self::$prebuiltPacks = [];
 
-            return count(glob($output.DIRECTORY_SEPARATOR.'*.class.php') ?: []);
+            return count($entries);
         } finally {
             if (is_dir($staging)) {
                 self::removeTree($staging);
