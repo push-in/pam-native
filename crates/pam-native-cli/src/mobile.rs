@@ -6404,17 +6404,9 @@ fn write_bundle_listing(root: &Path, target: &Path) -> Result<(), String> {
     write_atomic(target, listing.as_bytes())
 }
 
-/// Compiles the bundle's `.pam` components on the build host into the
-/// relocatable cache the runtime loads at boot (`pam-prebuilt/components`),
-/// so the first launch after an install or update compiles nothing.
-fn prebuild_components(destination: &Path) -> Result<(), String> {
-    if !destination.join("src").is_dir()
-        || !destination.join("composer.json").is_file()
-        || !destination.join("vendor/autoload.php").is_file()
-    {
-        return Ok(());
-    }
-    let php = std::env::var("PAM_NATIVE_PHP")
+/// The host PHP used for build-time steps: PAM_NATIVE_PHP, PAM_PHP, `pam`, then `php`.
+fn host_php() -> String {
+    std::env::var("PAM_NATIVE_PHP")
         .ok()
         .filter(|value| !value.is_empty())
         .or_else(|| {
@@ -6428,7 +6420,56 @@ fn prebuild_components(destination: &Path) -> Result<(), String> {
             } else {
                 "php".to_owned()
             }
-        });
+        })
+}
+
+const RUNTIME_EXTENSION_AUDIT: &str = "require 'vendor/autoload.php';\n\
+    $audit = 'Pam\\\\Native\\\\Tooling\\\\MobileRuntimeAudit';\n\
+    if (!class_exists($audit)) { exit(0); }\n\
+    exit($audit::run(getcwd(), (string) getenv('PAM_NATIVE_RUNTIME_EXTENSIONS')));\n";
+
+/// Warns, without failing the build, about functions and classes of PHP
+/// extensions the Android/iOS runtime does not compile (intl, iconv, gd...).
+/// ext-mbstring is covered by the SDK polyfill. See
+/// docs/platform-runtime.md#php-extensions.
+fn audit_runtime_extensions(project: &Project, destination: &Path) {
+    if !destination.join("vendor/autoload.php").is_file() {
+        return;
+    }
+    let extensions = pam_home()
+        .and_then(|home| resolve_runtime(project, &home))
+        .map(|runtime| runtime.release.extensions.join(","))
+        .unwrap_or_default();
+    match Command::new(host_php())
+        .arg("-r")
+        .arg(RUNTIME_EXTENSION_AUDIT)
+        .current_dir(destination)
+        .env("PAM_NATIVE_RUNTIME_EXTENSIONS", extensions)
+        .env_remove("PAM_NATIVE_MODE")
+        .env_remove("PAM_NATIVE_STRICT")
+        .status()
+    {
+        Ok(status) if status.success() => {}
+        Ok(status) => {
+            eprintln!("PAM Native warning: the mobile PHP extension audit stopped ({status})")
+        }
+        Err(error) => {
+            eprintln!("PAM Native warning: cannot run the mobile PHP extension audit: {error}")
+        }
+    }
+}
+
+/// Compiles the bundle's `.pam` components on the build host into the
+/// relocatable cache the runtime loads at boot (`pam-prebuilt/components`),
+/// so the first launch after an install or update compiles nothing.
+fn prebuild_components(destination: &Path) -> Result<(), String> {
+    if !destination.join("src").is_dir()
+        || !destination.join("composer.json").is_file()
+        || !destination.join("vendor/autoload.php").is_file()
+    {
+        return Ok(());
+    }
+    let php = host_php();
     let script = "require 'vendor/autoload.php';\n\
         $compiler = 'Pam\\\\Native\\\\Internal\\\\PamPhpCompiler';\n\
         if (!class_exists($compiler) || !method_exists($compiler, 'prebuild')) { exit(0); }\n\
@@ -6479,6 +6520,7 @@ fn stage_project_at(project: &Project, destination: &Path, precompile: bool) -> 
     }
     if precompile {
         prebuild_components(destination)?;
+        audit_runtime_extensions(project, destination);
     }
     let version = directory_digest(destination)?;
     write_atomic(
@@ -8649,6 +8691,19 @@ mod tests {
         fs::create_dir(root.join(".git")).expect("checkout marker");
         assert!(is_source_checkout(&root));
         fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn runtime_extension_audit_runs_the_sdk_audit_class() {
+        assert!(
+            RUNTIME_EXTENSION_AUDIT.contains("'Pam\\\\Native\\\\Tooling\\\\MobileRuntimeAudit'")
+        );
+        assert!(RUNTIME_EXTENSION_AUDIT.contains("PAM_NATIVE_RUNTIME_EXTENSIONS"));
+        assert!(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../packages/native/src/Tooling/MobileRuntimeAudit.php")
+                .is_file()
+        );
     }
 
     #[test]

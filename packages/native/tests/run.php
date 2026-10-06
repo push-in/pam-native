@@ -7739,5 +7739,7 @@ require __DIR__.'/conditional_identity.php';
 require __DIR__.'/expression_codegen.php';
 require __DIR__.'/prebuilt_components.php';
 require __DIR__.'/gesture_scope.php';
+require __DIR__.'/mbstring_polyfill.php';
+require __DIR__.'/runtime_audit.php';
 
 echo "Pam Native PHP SDK tests passed.\n";
