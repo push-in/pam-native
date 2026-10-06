@@ -62,9 +62,20 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     /** @var (Closure(string): bool)|null */
     private ?Closure $linkFilter;
     private NavigationTheme $theme;
+    /** @var array<string, true|Closure(RouteContext): bool> */
+    private array $keepAliveRoutes = [];
+    /**
+     * Keep-alive entries that left the stack, oldest first, keyed by route
+     * name and params: their screens stay mounted (hidden) until reused.
+     *
+     * @var array<string, array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>}>
+     */
+    private array $parked = [];
+    private const MAX_PARKED_PER_ROUTE = 3;
 
     /**
      * @param array<array-key, mixed> $routes
+     * @param array<array-key, string|true|Closure> $keepAliveRoutes route names, or name => true|Closure(RouteContext): bool
      */
     public function __construct(
         string|BackedEnum $initialRoute,
@@ -83,6 +94,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         private readonly ?string $guardFallback = null,
         ScreenOptions|Closure|null $defaultOptions = null,
         array $optionGroups = [],
+        array $keepAliveRoutes = [],
     )
     {
         $initialRoute = RouteName::value($initialRoute);
@@ -104,6 +116,15 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
 
         $this->routes = $validated;
+        foreach ($keepAliveRoutes as $route => $when) {
+            if (is_int($route)) {
+                [$route, $when] = [$when, true];
+            }
+            if (!is_string($route) || !isset($validated[$route]) || ($when !== true && !$when instanceof Closure)) {
+                throw new InvalidArgumentException('Keep-alive routes must be registered, with true or a RouteContext predicate.');
+            }
+            $this->keepAliveRoutes[$route] = $when;
+        }
         $this->navigationKey = 'stack.'.$persistenceKey;
         foreach ($deepLinks as $link) {
             if (!$link instanceof DeepLink || !isset($validated[$link->route])) {
@@ -224,7 +245,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $previous = $this->currentEntry();
         $this->setActionTransition($transition, $durationMs);
         $this->outgoing = null;
-        $this->stack[] = [
+        $this->stack[] = $this->unpark($route, $validatedParams) ?? [
             'name' => $route,
             'id' => $this->nextId++,
             'routeId' => $this->resolveRouteId($route, $validatedParams),
@@ -244,6 +265,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, NavigationAction::pop())) return false;
         $this->outgoing = array_pop($this->stack);
+        $this->park($this->outgoing);
         $this->operation = NavigationOperation::Pop;
         $this->revision++;
         $this->didNavigate($previous, NavigationAction::pop());
@@ -368,6 +390,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function render(): Renderable
     {
         $entries = [];
+        $outgoingKey = $this->outgoing === null ? null : $this->entryKey($this->outgoing);
 
         if ($this->operation === NavigationOperation::Push && count($this->stack) > 1) {
             $entries[] = $this->stack[count($this->stack) - 2];
@@ -381,6 +404,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $entries[] = $this->stack[count($this->stack) - 1];
         if ($this->operation === NavigationOperation::Pop && $this->outgoing !== null) {
             $entries[] = $this->outgoing;
+        }
+        if ($this->keepAliveRoutes !== []) {
+            $entries = [...$this->keptAliveBelow($entries, $outgoingKey), ...$entries];
         }
 
         $top = $this->stack[count($this->stack) - 1];
@@ -460,6 +486,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Replace, $route, $params))) return;
         $this->outgoing = array_pop($this->stack);
+        $this->park($this->outgoing);
         $this->stack[] = [
             'name' => $route,
             'id' => $this->nextId++,
@@ -485,6 +512,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $previous = $this->currentEntry();
         if (!$this->mayRemove($previous, new NavigationAction(NavigationActionType::Reset, $route, $params))) return;
         $this->outgoing = null;
+        $this->parked = [];
         $this->stack = [[
             'name' => $route,
             'id' => $this->nextId++,
@@ -547,6 +575,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if (!$this->mayRemove($previous, NavigationAction::navigate($route, $params, $merge))) return;
         $this->setActionTransition($transition, $durationMs);
         $this->outgoing = $this->stack[count($this->stack) - 1];
+        foreach (array_slice($this->stack, $target + 1) as $removed) {
+            $this->park($removed);
+        }
         $this->stack = array_slice($this->stack, 0, $target + 1);
         if ($params !== []) {
             $this->stack[$target]['params'] = $merge
@@ -610,6 +641,10 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             'routeId' => $this->resolveRouteId($route, $validatedParams),
             'params' => $validatedParams,
         ];
+        if (isset($this->parked[$this->parkKey($route, $validatedParams)])) {
+            // The kept-alive screen is reused as is: nothing to build ahead.
+            return true;
+        }
         $key = $this->preloadKey($route, $entry['params']);
         unset($this->preloaded[$key]);
         $this->preloaded[$key] = $this->createRoute($entry);
@@ -644,6 +679,9 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $action = NavigationAction::popToTop();
         if (!$this->mayRemove($previous, $action)) return false;
         $this->outgoing = $previous;
+        foreach (array_slice($this->stack, 1) as $removed) {
+            $this->park($removed);
+        }
         $this->stack = [$this->stack[0]];
         $this->operation = NavigationOperation::Pop;
         $this->revision++;
@@ -843,6 +881,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
             ];
         }
         $this->stack = $restored;
+        $this->parked = [];
         $this->operation = NavigationOperation::Reset;
         $this->revision++;
     }
@@ -1071,11 +1110,100 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $this->emitNavigation(NavigationEventType::State, ['state' => $this->getState(), 'action' => $action->toArray()]);
     }
 
+    /**
+     * Keep-alive screens rendered (hidden) under the normal entries: the
+     * parked ones, then the keep-alive entries deeper in the stack, so their
+     * native views, scroll offsets and state survive like React Navigation
+     * tab screens.
+     *
+     * @param list<array<string, mixed>> $entries
+     * @return list<array<string, mixed>>
+     */
+    private function keptAliveBelow(array $entries, ?string $outgoingKey): array
+    {
+        $included = [];
+        foreach ($entries as $entry) $included[$this->entryKey($entry)] = true;
+        $below = [];
+        foreach ($this->parked as $entry) {
+            $key = $this->entryKey($entry);
+            if ($key !== $outgoingKey && !isset($included[$key])) {
+                $below[] = $entry;
+                $included[$key] = true;
+            }
+        }
+        foreach ($this->stack as $entry) {
+            $key = $this->entryKey($entry);
+            if (!isset($included[$key]) && $this->keepsAlive($entry)) {
+                $below[] = $entry;
+                $included[$key] = true;
+            }
+        }
+
+        return $below;
+    }
+
+    /** @param array<string, string|int|float|bool|null> $params */
+    private function parkKey(string $route, array $params): string
+    {
+        return $route.'|'.json_encode($params, JSON_THROW_ON_ERROR | JSON_PRESERVE_ZERO_FRACTION);
+    }
+
+    /** A keep-alive entry leaving the stack keeps its mounted screen. */
+    private function park(array $entry): void
+    {
+        if (!isset($this->routeInstances[$this->entryKey($entry)]) || !$this->keepsAlive($entry)) {
+            return;
+        }
+        $parkKey = $this->parkKey($entry['name'], $entry['params']);
+        unset($this->parked[$parkKey]);
+        $this->parked[$parkKey] = $entry;
+        $same = array_keys(array_filter(
+            $this->parked,
+            static fn (array $candidate): bool => $candidate['name'] === $entry['name'],
+        ));
+        while (count($same) > self::MAX_PARKED_PER_ROUTE) {
+            unset($this->parked[array_shift($same)]);
+        }
+    }
+
+    /**
+     * @param array<string, string|int|float|bool|null> $params
+     * @return array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>}|null
+     */
+    private function unpark(string $route, array $params): ?array
+    {
+        if (!isset($this->keepAliveRoutes[$route])) return null;
+        $parkKey = $this->parkKey($route, $params);
+        $entry = $this->parked[$parkKey] ?? null;
+        if ($entry === null) return null;
+        unset($this->parked[$parkKey]);
+
+        return $entry;
+    }
+
+    /** @param array{name: string, id: int, params: array<string, string|int|float|bool|null>} $entry */
+    private function keepsAlive(array $entry): bool
+    {
+        $when = $this->keepAliveRoutes[$entry['name']] ?? null;
+
+        return $when === true || ($when instanceof Closure && $when($this->contextFor($entry)) === true);
+    }
+
+    private function isParked(string $key): bool
+    {
+        foreach ($this->parked as $entry) {
+            if ($this->entryKey($entry) === $key) return true;
+        }
+
+        return false;
+    }
+
     private function pruneRouteInstances(): void
     {
         $retained = [];
         foreach ($this->stack as $entry) $retained[$this->entryKey($entry)] = true;
         if ($this->outgoing !== null) $retained[$this->entryKey($this->outgoing)] = true;
+        foreach ($this->parked as $entry) $retained[$this->entryKey($entry)] = true;
         foreach (array_keys($this->routeInstances) as $key) {
             if (!isset($retained[$key])) {
                 unset(
@@ -1154,10 +1282,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $key = $this->entryKey($entry);
         $instance = $this->routeInstances[$key] ?? null;
-        if ($instance instanceof NavigationLifecycleAware) {
+        $kept = $this->isParked($key);
+        if (!$kept && $instance instanceof NavigationLifecycleAware) {
             $instance->navigationRemoved($this->contextFor($entry));
         }
-        if (!array_any($this->stack, fn (array $candidate): bool => $this->entryKey($candidate) === $key)) {
+        if (!$kept && !array_any($this->stack, fn (array $candidate): bool => $this->entryKey($candidate) === $key)) {
             unset(
                 $this->routeInstances[$key],
                 $this->childSubscriptions[$key],

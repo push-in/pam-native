@@ -110,7 +110,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     }
 
     func insert(_ view: UIView, index: Int) {
-        if !routeViews.contains(where: { $0 === view }) {
+        if let current = routeViews.firstIndex(where: { $0 === view }) {
+            // A move (a keep-alive route parked below the stack or coming
+            // back on top): the route keeps its controller and view state,
+            // only its order changes, which decides incoming/outgoing.
+            routeViews.remove(at: current)
+            routeViews.insert(view, at: min(max(index, 0), routeViews.count))
+        } else {
             routeViews.insert(view, at: min(max(index, 0), routeViews.count))
             routeControllers[ObjectIdentifier(view)] = PamRouteViewController(routeView: view)
         }

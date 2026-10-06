@@ -19,6 +19,7 @@ final class RouteDefinition
     public array $options = [];
     public ?Closure $guard = null;
     public ?Closure $getId = null;
+    public bool|Closure $keepAlive = false;
     /** @var list<string> */
     public array $deepLinks = [];
 

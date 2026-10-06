@@ -201,6 +201,29 @@ navigator declarations; it does not own or attach a native host. Stateless
 modules may be passed by class name, while modules with dependencies should be
 constructed explicitly. Closures remain supported for small inline modules.
 
+## Keep-alive destinations (tab screens)
+
+An app that draws its own bottom bar on top of a stack (each primary screen
+renders the bar and switches with `navigate()`) gets React Navigation tab
+semantics with `keepAlive()`:
+
+```php
+Route::screen(AppRoute::Feed, fn () => new FeedScreen($navigator))->keepAlive();
+Route::screen(AppRoute::Profile, fn (RouteContext $route) => new ProfileScreen($route))
+    ->keepAlive(fn (RouteContext $route): bool => $route->all() === []);
+```
+
+When navigation removes a kept-alive entry from the stack (`navigate()` back
+to another tab, `pop()`, `popToTop()`, `replace()`), its screen is parked: it
+stays mounted and hidden under the visible routes, with its component state,
+native views and scroll offsets. Pushing or navigating to the route again with
+the same params reuses that very screen instead of building a new one, without
+a visible jump. Kept-alive entries deeper in the stack also stay mounted (the
+stack otherwise keeps only its top two screens). The optional predicate limits
+it to some entries (the own-profile tab, not visited profiles). At most three
+entries per route are parked; `reset()` and restored state release them.
+Parked screens receive blur/focus events, not `navigationRemoved()`.
+
 ## Nested navigators
 
 Stacks and tabs may be declared inline and registered as ordinary named route

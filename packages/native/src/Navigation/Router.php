@@ -34,6 +34,8 @@ final class Router
     /** @var list<string> */
     private array $linkingPrefixes = [];
     private ?Closure $linkFilter = null;
+    /** @var array<string, true|Closure(RouteContext): bool> */
+    private array $keepAlive = [];
 
     private function __construct(string|BackedEnum $initialRoute)
     {
@@ -114,6 +116,22 @@ final class Router
         return $copy;
     }
 
+    /**
+     * Keeps the route's screen mounted when navigation removes it from the
+     * stack, like a React Navigation tab screen: going back to it (push or
+     * navigate with the same params) shows the very same screen, with its
+     * state and scroll offsets, instead of building a new one. `$when`
+     * limits it to some entries (e.g. the tab's own params).
+     *
+     * @param (Closure(RouteContext): bool)|null $when
+     */
+    public function keepAlive(string|BackedEnum $route, ?Closure $when = null): self
+    {
+        $copy = clone $this;
+        $copy->keepAlive[RouteName::value($route)] = $when ?? true;
+        return $copy;
+    }
+
     public function guardFallback(string|BackedEnum $route): self
     {
         $route = RouteName::value($route);
@@ -189,6 +207,7 @@ final class Router
             guardFallback: $this->guardFallback,
             defaultOptions: $this->defaultOptions,
             optionGroups: $this->optionGroups,
+            keepAliveRoutes: $this->keepAlive,
         );
     }
 }

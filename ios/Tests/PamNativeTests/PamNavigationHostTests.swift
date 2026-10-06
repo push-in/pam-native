@@ -92,6 +92,43 @@ final class PamNavigationHostTests: XCTestCase {
         }
     }
 
+    /// Keep-alive routes (Navigator::keepAlive, tab screens): a parked route
+    /// moved back on top keeps its view and controller, and the move decides
+    /// the destination like on Android (child order, not insertion order).
+    func testMovedKeepAliveRouteBecomesTheDestinationWithItsView() {
+        for attached in [false, true] {
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            let root = UIViewController()
+            window.rootViewController = root
+            if attached { window.makeKeyAndVisible() }
+            let host = PamNavigationHost(frame: root.view.bounds)
+            root.view.addSubview(host)
+            let inbox = UIView()
+            let feed = UIView()
+            host.insert(inbox, index: 0)
+            host.insert(feed, index: 1)
+            host.operation = 2
+            host.transition = 8
+            host.navigate(1)
+            // Feed popped, then parked under the Inbox (moved to index 0).
+            host.operation = 3
+            host.navigate(2)
+            feed.removeFromSuperview()
+            host.insert(feed, index: 0)
+            XCTAssertTrue(feed.isHidden, "attached=\(attached)")
+            XCTAssertFalse(inbox.isHidden, "attached=\(attached)")
+            // Back to the Feed tab: the same view moves on top.
+            feed.removeFromSuperview()
+            host.insert(feed, index: 1)
+            host.operation = 2
+            host.navigate(3)
+
+            XCTAssertEqual(host.routeControllerCount, 2, "attached=\(attached)")
+            XCTAssertFalse(feed.isHidden, "attached=\(attached)")
+            XCTAssertTrue(inbox.isHidden, "attached=\(attached)")
+        }
+    }
+
     func testAttachedRoutesReceiveNativeViewControllers() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let root = UIViewController()

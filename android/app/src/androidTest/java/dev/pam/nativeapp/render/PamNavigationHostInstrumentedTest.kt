@@ -347,6 +347,67 @@ class PamNavigationHostInstrumentedTest {
      * chat must still be the destination, whatever the commit timing.
      */
     @Test
+    fun movedKeepAliveRouteBecomesTheDestinationWithItsView() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var inbox: View
+            lateinit var feed: View
+            onMain(instrumentation) {
+                activity.host.removeAllViews()
+                navigation = PamNavigationHost(activity).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                    )
+                    transition = TRANSITION_NONE
+                }
+                activity.host.addView(navigation)
+                inbox = View(activity)
+                feed = View(activity)
+                navigation.insert(inbox, 0)
+                navigation.insert(feed, 1)
+                navigation.operation = OPERATION_PUSH
+                navigation.navigate(1)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                navigation.operation = OPERATION_POP
+                navigation.navigate(2)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                // Navigator::keepAlive parks the popped Feed under the Inbox.
+                navigation.detachRouteForMove(feed)
+                navigation.insert(feed, 0)
+                navigation.operation = OPERATION_IDLE
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertSame(feed, navigation.getChildAt(0))
+                assertEquals(View.INVISIBLE, feed.visibility)
+                assertTrue(navigation.isActiveRoute(inbox))
+                // Back to the Feed tab: the very same view moves on top.
+                navigation.detachRouteForMove(feed)
+                navigation.insert(feed, 1)
+                navigation.operation = OPERATION_PUSH
+                navigation.navigate(3)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertSame(feed, navigation.getChildAt(1))
+                assertTrue(navigation.isActiveRoute(feed))
+                assertEquals(View.VISIBLE, feed.visibility)
+                assertEquals(View.INVISIBLE, inbox.visibility)
+                assertEquals(2, navigation.routeControllerCount())
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun resetThenPushLandsOnThePushedRouteWhateverTheCommitTiming() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)

@@ -106,6 +106,12 @@ final class RouteRegistrar
             }
             $options = self::composeOptions($route->options);
             $router = $router->route($route->name, $route->factory, $options, $route->getId);
+            if ($route->keepAlive !== false) {
+                $router = $router->keepAlive(
+                    $route->name,
+                    $route->keepAlive instanceof Closure ? $route->keepAlive : null,
+                );
+            }
             $guard = self::composeGuards($route->groupGuards, $route->guard);
             if ($guard !== null) $router = $router->guard($route->name, $guard);
             foreach ($route->deepLinks as $pattern) {

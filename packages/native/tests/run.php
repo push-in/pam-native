@@ -6272,6 +6272,92 @@ $assert(
         && ($identifiedState['stack'][1]['id'] ?? null) === '1',
     'Versioned navigation state must persist semantic route identities.',
 );
+$keepAliveBuilds = ['inbox' => 0, 'feed' => 0, 'detail' => 0];
+$keepAliveNavigator = Router::stack('inbox')
+    ->route('inbox', static function () use (&$keepAliveBuilds) {
+        $keepAliveBuilds['inbox']++;
+        return Screen::make(Text::make('Inbox'));
+    })
+    ->route('feed', static function () use (&$keepAliveBuilds) {
+        $keepAliveBuilds['feed']++;
+        return Screen::make(Text::make('Feed'));
+    })
+    ->route('detail', static function () use (&$keepAliveBuilds) {
+        $keepAliveBuilds['detail']++;
+        return Screen::make(Text::make('Detail'));
+    })
+    ->keepAlive('feed')
+    ->build();
+$keepAliveKeys = static fn (Navigator $navigator): array => array_map(
+    static fn ($screen): string => (string) $screen->elementKey(),
+    $navigator->render()->toElement()->children(),
+);
+$keepAliveNavigator->navigate('feed');
+$keepAliveKeys($keepAliveNavigator);
+$feedKey = $keepAliveNavigator->current()->key;
+$keepAliveNavigator->navigate('inbox');
+$poppingKeys = $keepAliveKeys($keepAliveNavigator);
+$keepAliveNavigator->push('detail');
+$parkedKeys = $keepAliveKeys($keepAliveNavigator);
+$keepAliveNavigator->navigate('feed');
+$reusedKeys = $keepAliveKeys($keepAliveNavigator);
+$assert(
+    $keepAliveNavigator->current()->key === $feedKey
+        && $keepAliveBuilds['feed'] === 1
+        && $poppingKeys === ['navigation.1', 'navigation.2']
+        && $parkedKeys === ['navigation.2', 'navigation.1', 'navigation.3']
+        && $reusedKeys === ['navigation.3', 'navigation.2'],
+    'A keep-alive route leaving the stack stays mounted and is reused, like a tab screen: '
+        .json_encode([$poppingKeys, $parkedKeys, $reusedKeys, $keepAliveBuilds]),
+);
+$keepAliveNavigator->push('detail');
+$keepAliveNavigator->push('detail');
+$deepKeys = $keepAliveKeys($keepAliveNavigator);
+$assert(
+    $deepKeys === ['navigation.2', 'navigation.4', 'navigation.5'],
+    'A keep-alive entry deeper in the stack stays mounted under the visible screens: '.json_encode($deepKeys),
+);
+$keepAliveNavigator->navigate('inbox');
+$keepAliveKeys($keepAliveNavigator);
+$keepAliveNavigator->navigate('feed');
+$keepAliveKeys($keepAliveNavigator);
+$assert(
+    $keepAliveNavigator->current()->key === $feedKey && $keepAliveBuilds['feed'] === 1,
+    'A keep-alive screen popped from the middle of the stack is parked and reused too.',
+);
+$keepAliveNavigator->navigate('inbox');
+$keepAliveNavigator->push('feed', ['tab' => 'other']);
+$keepAliveKeys($keepAliveNavigator);
+$assert(
+    $keepAliveBuilds['feed'] === 2 && $keepAliveNavigator->current()->key !== $feedKey,
+    'A keep-alive screen is reused only for the same params.',
+);
+$keepAliveNavigator->reset('inbox');
+$keepAliveNavigator->navigate('feed');
+$keepAliveKeys($keepAliveNavigator);
+$assert(
+    $keepAliveBuilds['feed'] === 3,
+    'A reset releases every kept-alive screen.',
+);
+$predicateBuilds = 0;
+$predicateNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('profile', static function () use (&$predicateBuilds) {
+        $predicateBuilds++;
+        return Screen::make(Text::make('Profile'));
+    })
+    ->keepAlive('profile', static fn (RouteContext $route): bool => $route->all() === [])
+    ->build();
+foreach ([[], ['userId' => '7'], ['userId' => '7'], []] as $profileParams) {
+    $predicateNavigator->push('profile', $profileParams);
+    $predicateNavigator->render()->toElement();
+    $predicateNavigator->pop();
+    $predicateNavigator->render()->toElement();
+}
+$assert(
+    $predicateBuilds === 3,
+    'A keep-alive predicate keeps only the matching entries (the own-profile tab, not visited profiles).',
+);
 $layeredOptionsNavigator = Router::stack('home')
     ->screenOptions(new ScreenOptions(headerShown: true, headerTintColor: 0xFF102030))
     ->group(

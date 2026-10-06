@@ -65,6 +65,22 @@ final class PendingRoute
         return $this->options(ScreenOptionsPatch::one('secure', $enabled));
     }
 
+    /**
+     * Tab-screen lifetime (React Navigation bottom tabs): when navigation
+     * removes this route from the stack its screen stays mounted, hidden,
+     * and returning to it with the same params reuses that screen with its
+     * state and scroll offsets. While deeper in the stack it stays mounted
+     * too. Use it for the app's primary destinations; a predicate limits it
+     * to some entries (`fn (RouteContext $route) => $route->all() === []`).
+     *
+     * @param bool|(Closure(\Pam\Native\Navigation\RouteContext): bool) $when
+     */
+    public function keepAlive(bool|Closure $when = true): self
+    {
+        $this->definition->keepAlive = $when;
+        return $this;
+    }
+
     public function guard(Closure $guard): self
     {
         $this->definition->guard = $guard;
