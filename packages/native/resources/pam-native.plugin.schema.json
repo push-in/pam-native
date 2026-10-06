@@ -188,7 +188,7 @@
             "required": [
                 "configKey"
             ],
-            "description": "Content received from other apps' share sheets. Pam Native generates the Android SEND/SEND_MULTIPLE intent filters and the iOS Share Extension NSExtensionActivationRule from it; applications override accept and multiple under plugins.<configKey> in pam-native.json. Declare the plugins.share.v1 capability.",
+            "description": "Content received from other apps' share sheets. Pam Native generates the Android SEND/SEND_MULTIPLE intent filters and the iOS Share Extension NSExtensionActivationRule from it; applications override accept and multiple under plugins.<configKey> in pam-native.json. Requires PAM Native 1.16.0 or later.",
             "properties": {
                 "configKey": {
                     "type": "string",

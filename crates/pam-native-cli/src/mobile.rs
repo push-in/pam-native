@@ -21,10 +21,9 @@ const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_DEV_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_UPDATE_BUNDLE_BYTES: usize = 256 * 1024 * 1024;
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
-const PLUGIN_CAPABILITIES: [&str; 6] = [
+const PLUGIN_CAPABILITIES: [&str; 5] = [
     "compiler.freeze.v1",
     "plugins.composer.v1",
-    "plugins.share.v1",
     "renderer.incremental.v1",
     "runtime.modules.v1",
     "wire.binary.v1",
@@ -9794,6 +9793,19 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[test]
+    fn plugin_capabilities_are_ones_the_php_runtime_accepts() {
+        // The PHP PluginManager rejects a required capability missing from
+        // Protocol::CAPABILITIES at startup, so prepare must not accept more.
+        let protocol = include_str!("../../../packages/native/src/Protocol.php");
+        for capability in PLUGIN_CAPABILITIES {
+            assert!(
+                protocol.contains(&format!("'{capability}'")),
+                "{capability} is not in Protocol::CAPABILITIES"
+            );
+        }
+    }
+
     fn share_plugin(package: &str, config_key: &str) -> NativePlugin {
         NativePlugin {
             package: package.to_owned(),
@@ -9806,7 +9818,6 @@ mod tests {
                 "version": 1,
                 "protocol": 1,
                 "pamNative": {"minimum": "1.15.0", "maximumExclusive": "2.0.0"},
-                "capabilities": {"required": ["plugins.share.v1"]},
                 "share": {"configKey": config_key}
             }))
             .expect("plugin manifest"),

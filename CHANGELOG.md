@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.16.1 - 2026-10-06
+
+- Plugins no longer declare a `plugins.share.v1` capability for `share`. 1.16.0
+  accepted it at prepare, but the PHP runtime's `Protocol::CAPABILITIES` does
+  not list it, so a plugin requiring it failed discovery at startup
+  (`pam-native-share-extension` 0.3.0). Prepare now rejects it like any other
+  unknown capability, and a test keeps the CLI's plugin capabilities within
+  the runtime's. Gate `share` with `pamNative.minimum` 1.16.0 instead.
+
 ## 1.16.0 - 2026-10-06
 
 Plugins configure the content they receive from share sheets per

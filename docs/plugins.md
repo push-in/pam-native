@@ -176,13 +176,14 @@ the host target generator.
 ### Share sheets and per-application configuration
 
 A plugin that receives content from other applications' share sheets declares
-`share` instead of hardcoding intent filters or an activation rule. Each
+`share` instead of hardcoding intent filters or an activation rule. Set
+`pamNative.minimum` (and the Composer requirement) to 1.16.0 or later; no
+capability needs to be declared. Each
 application then chooses the accepted types under `plugins.<configKey>` in its
 `pam-native.json`:
 
 ```json
 {
-    "capabilities": {"required": ["plugins.share.v1"]},
     "share": {
         "configKey": "shareExtension",
         "accept": ["*/*"],
