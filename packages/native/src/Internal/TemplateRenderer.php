@@ -6099,7 +6099,14 @@ final class TemplateRenderer
         if (is_string($static)) {
             $classes[] = self::interpolate($static, $scope, $data);
         }
-        if (array_key_exists(':class', $attributes)) {
+        $list = array_key_exists(':class', $attributes) && is_string($attributes[':class'])
+            ? TemplateExpression::classList($attributes[':class'], $scope, $data)
+            : null;
+        if ($list !== null) {
+            foreach ($list as $class) {
+                $classes[] = $class;
+            }
+        } elseif (array_key_exists(':class', $attributes)) {
             $dynamic = self::dynamicValue(
                 $attributes[':class'],
                 $scope,

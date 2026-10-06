@@ -30,6 +30,9 @@ final class TemplateExpressionCompiler
     /** @var array<string, true> literal string/int codes (valid array keys) */
     private array $keyLiterals = [];
 
+    /** @var array<string, string|int> */
+    private array $literalValues = [];
+
     /** @var list<string> */
     private array $statements = [];
 
@@ -59,6 +62,66 @@ final class TemplateExpressionCompiler
         $body .= implode("\n", $compiler->statements);
 
         return "static function (array \$data, ?object \$scope): mixed {\n{$body}\nreturn {$result};\n}";
+    }
+
+    /**
+     * Source of `static function (array $data, ?object $scope): array`
+     * returning the enabled, non-blank class names of a `:class` array
+     * literal (`['a', 'b' => $on]`) in order, evaluating its operands exactly
+     * like the array literal; null when the expression is not such a list
+     * (dynamic keys or names, numeric or duplicate keys).
+     */
+    public static function classListSource(string $expression): ?string
+    {
+        try {
+            $compiler = new self(TemplateExpression::__pamTokens($expression));
+            if (!$compiler->take('[')) {
+                return null;
+            }
+            // Same depth as an array literal inside the top-level expression.
+            $compiler->coalescingDepth = 1;
+            $seen = [];
+            $compiler->emit('$p = [];');
+            if (!$compiler->take(']')) {
+                while (true) {
+                    $first = $compiler->ternary();
+                    $literal = $compiler->literalValues[$first] ?? null;
+                    if (!is_string($literal)) {
+                        return null;
+                    }
+                    if ($compiler->take(T_DOUBLE_ARROW)) {
+                        if ((string) (int) $literal === $literal || isset($seen[$literal])) {
+                            return null;
+                        }
+                        $seen[$literal] = true;
+                        $second = $compiler->ternary();
+                        if (trim($literal) !== '') {
+                            $compiler->emit("if ((bool) {$second}) { \$p[] = {$first}; }");
+                        }
+                    } elseif (trim($literal) !== '') {
+                        $compiler->emit("\$p[] = {$first};");
+                    }
+                    if ($compiler->take(']')) {
+                        break;
+                    }
+                    $compiler->expect(',');
+                    if ($compiler->take(']')) {
+                        break;
+                    }
+                }
+            }
+            if ($compiler->peek() !== null) {
+                return null;
+            }
+        } catch (RuntimeException) {
+            return null;
+        }
+        $body = $compiler->usesMissing
+            ? '$m = '.self::RUNTIME.'::__pamMissing();'."\n"
+            : '';
+        $body .= implode("\n", $compiler->statements);
+
+        return "static function (array \$data, ?object \$scope): array {\n{$body}\nreturn \$p;\n}";
     }
 
     private function temporary(): string
@@ -353,6 +416,7 @@ final class TemplateExpressionCompiler
         $code = '('.$code.')';
         if (is_string($value) || is_int($value)) {
             $this->keyLiterals[$code] = true;
+            $this->literalValues[$code] = $value;
         }
 
         return $code;

@@ -51,6 +51,9 @@ final class TemplateExpression
 
     private static bool $generated = true;
 
+    /** @var array<string, Closure|false> */
+    private static array $classLists = [];
+
     /** @var list<array{type: int|string, text: string}> */
     private array $tokens;
     private int $position = 0;
@@ -152,12 +155,51 @@ final class TemplateExpression
      *
      * @param array<string, Closure(array<string, mixed>, ?object): mixed> $closures
      */
-    public static function preload(array $closures): void
+    public static function preload(array $closures, array $classLists = []): void
     {
+        if (!self::$generated) {
+            return;
+        }
         if (count(self::$compiled) + count($closures) >= self::CACHE_LIMIT) {
             self::$compiled = [];
         }
         self::$compiled += $closures;
+        if (count(self::$classLists) + count($classLists) >= self::CACHE_LIMIT) {
+            self::$classLists = [];
+        }
+        self::$classLists += $classLists;
+    }
+
+    /**
+     * @internal Enabled class names of a `:class` array literal, in order
+     * (classValue() semantics), or null when the expression is not one.
+     *
+     * @param array<string, mixed> $data
+     * @return list<string>|null
+     */
+    public static function classList(string $expression, ?object $scope, array $data): ?array
+    {
+        if (!self::$generated) {
+            return null;
+        }
+        $compiled = self::$classLists[$expression] ?? null;
+        if ($compiled === null) {
+            $source = TemplateExpressionCompiler::classListSource($expression);
+            $compiled = false;
+            if ($source !== null) {
+                try {
+                    $compiled = eval('declare(strict_types=1); return '.$source.';');
+                } catch (\ParseError) {
+                    $compiled = false;
+                }
+            }
+            if (count(self::$classLists) >= self::CACHE_LIMIT) {
+                self::$classLists = [];
+            }
+            self::$classLists[$expression] = $compiled;
+        }
+
+        return $compiled === false ? null : $compiled($data, $scope);
     }
 
     /** @internal Disables generated closures (tests compare both forms). */
@@ -165,6 +207,7 @@ final class TemplateExpression
     {
         self::$generated = $enabled;
         self::$compiled = [];
+        self::$classLists = [];
     }
 
     /** @return Closure(array<string, mixed>, ?object): mixed */

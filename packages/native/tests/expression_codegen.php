@@ -99,3 +99,37 @@ try {
 } catch (RuntimeException) {
     $assert(true, 'Invalid expressions are rejected by the expression compiler.');
 }
+
+// `:class` array literals compile to class-name lists with the same result.
+$classListCases = [
+    "['message-row', 'message-row-selected' => \$row['selected'], 'dark' => \$row['selected'] && \$row['dark']]",
+    "['a', ' ', 'b' => \$row['missing'] ?? false, 'c' => \$row['nope'], '' => true, 'd' => 0]",
+    "['5' => true, 'x' => true]",
+    "['x' => true, 'x' => false]",
+    "[\$row['title'], 'y' => true]",
+    "['z' => \$undefinedVariable]",
+];
+foreach (['base', 'a', 'b', 'c', 'd', 'x', 'y', 'z', 'Ana', 'message-row', 'message-row-selected', 'dark'] as $classListName) {
+    \Pam\Native\TemplateRegistry::style($classListName, []);
+}
+foreach ($classListCases as $classListExpression) {
+    $classOutcomes = [];
+    foreach ([true, false] as $generated) {
+        TemplateExpression::useGeneratedCode($generated);
+        try {
+            $classTemplate = \Pam\Native\Internal\TemplateCompiler::compile(
+                '<View class=" base " :class="'.$classListExpression.'" />',
+                'ClassList.pam',
+            );
+            $classElement = \Pam\Native\Internal\TemplateRenderer::render($classTemplate, $codegenScope, ['row' => $codegenScope->row]);
+            $classOutcomes[] = implode(',', $classElement->domClasses());
+        } catch (Throwable $classError) {
+            $classOutcomes[] = 'error:'.$classError::class.':'.$classError->getMessage();
+        }
+    }
+    $assert(
+        $classOutcomes[0] === $classOutcomes[1],
+        "Compiled :class lists must match the reference: {$classListExpression} ({$classOutcomes[0]} vs {$classOutcomes[1]}).",
+    );
+}
+TemplateExpression::useGeneratedCode(true);
