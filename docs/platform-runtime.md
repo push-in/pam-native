@@ -8,6 +8,97 @@ hardware-accelerated vector drawing, and server-driven UI.
 Every status, type, kind, and opcode is an integer-backed enum. Every
 serialized structure is versioned and bounded before allocation.
 
+## PHP extensions
+
+Android and iOS embed the same PHP build (`runtime/catalog.json` in PAM,
+built by `runtime-builder/android/build.sh` and `runtime-builder/ios/build.sh`
+with `--disable-all`). Whatever is not in this list does not exist on the
+device, even when the desktop PHP running `pam dev` has it.
+
+| Extension | Android | iOS | Notes |
+| --- | --- | --- | --- |
+| Core, standard, date, pcre (JIT off), hash, json, random, Reflection, SPL | ✅ | ✅ | Always compiled. |
+| ctype, filter, session, tokenizer, Phar | ✅ | ✅ | |
+| Zend OPcache (no JIT) | ✅ | ✅ | PHP 8.5 runtime. |
+| uri (and lexbor) | ✅ | ✅ | PHP 8.5 runtime. |
+| **mbstring** | 🟡 polyfill | 🟡 polyfill | Not compiled. The SDK defines the `mb_*` functions in PHP (below). |
+| intl | ❌ | ❌ | Not bundled: ICU adds ~30 MB of data plus ~5 MB of code per ABI. |
+| iconv, zlib, openssl, sodium, curl, gd, dom/xml/simplexml, pdo/sqlite3, fileinfo, bcmath, gmp, posix, pcntl, sockets | ❌ | ❌ | Use the native modules (HTTP, database, crypto, media) instead. |
+
+### mbstring
+
+`pushinbr/pam-native` autoloads `src/Polyfill/mbstring.php` (Composer
+`autoload.files`) before any application or package code. It defines each
+function only when it is missing, so a real ext-mbstring (desktop, tests) or an
+application's own polyfill loaded first always wins. The implementation
+(`Pam\Native\Polyfill\Mbstring`) follows PHP 8.5's ext-mbstring, including
+malformed input (counted and replaced like mbstring, `mb_substitute_character()`
+modes), full Unicode case mapping with the Greek final sigma and Turkish
+ISO-8859-9 rules, East Asian widths, `mb_detect_encoding()` scoring and the same
+`ValueError`s:
+
+`mb_check_encoding`, `mb_chr`, `mb_convert_case` (all `MB_CASE_*`),
+`mb_convert_encoding`, `mb_convert_variables`, `mb_decode_numericentity`,
+`mb_detect_encoding`, `mb_detect_order`, `mb_encode_numericentity`,
+`mb_encoding_aliases`, `mb_get_info`, `mb_internal_encoding`, `mb_language`,
+`mb_lcfirst`, `mb_list_encodings`, `mb_ltrim`, `mb_ord`,
+`mb_preferred_mime_name`, `mb_rtrim`, `mb_scrub`, `mb_str_pad`, `mb_str_split`,
+`mb_strcut`, `mb_strimwidth`, `mb_stripos`, `mb_stristr`, `mb_strlen`,
+`mb_strpos`, `mb_strrchr`, `mb_strrichr`, `mb_strripos`, `mb_strrpos`,
+`mb_strstr`, `mb_strtolower`, `mb_strtoupper`, `mb_strwidth`,
+`mb_substitute_character`, `mb_substr`, `mb_substr_count`, `mb_trim`,
+`mb_ucfirst`.
+
+Encodings: UTF-8, UTF-16/UTF-32 (BE/LE), UCS-2/UCS-4 (BE/LE), ASCII, 8bit and
+every single-byte code page mbstring has (ISO-8859-1…16, Windows-1251/1252/1254,
+KOI8-R/U, CP866, CP850, ArmSCII-8). Not available: legacy multi-byte encodings
+(SJIS, EUC-*, BIG-5, GB18030, ISO-2022-*, UTF-7, which raise the usual
+"must be a valid encoding" `ValueError`), `mb_ereg*`/`mb_split`/`mb_regex_*`
+(use `preg_*` with the `u` modifier), `mb_convert_kana`, the MIME header
+functions, `mb_send_mail`, `mb_parse_str` and the HTTP I/O functions.
+
+Cost: none in the APK/IPA binary; the tables are ~120 KB of PHP loaded on first
+use and cached by OPcache. Typical calls take 1–5 µs on short UI strings.
+
+Why not compile ext-mbstring: measured on PHP 8.5.8 with the NDK 27 flags of
+`runtime-builder/android/build.sh` (`--enable-mbstring --disable-mbregex`, no
+Oniguruma), linked the way the app links `libphp.a` (`--gc-sections`, stripped):
+
+| ABI | Code + data | `.so` file | Compressed (download) |
+| --- | --- | --- | --- |
+| arm64-v8a | +1.14 MB | +0.03 MB (page padding absorbed it) | +0.63 MB |
+| x86_64 | +1.16 MB | +2.13 MB (16 KB page alignment) | +0.64 MB |
+
+Close to the 1.5 MB-per-ABI budget, and it would also need a new PAM runtime
+release (Linux and macOS PAM builds) and an iOS XCFramework rebuilt on a Mac.
+The polyfill covers both platforms today with the same behaviour.
+
+### Build-time audit
+
+While staging an Android or iOS build (`pam-native build`, `run`, `release`,
+update bundles) the CLI runs `Pam\Native\Tooling\MobileRuntimeAudit` over the
+bundle (application code and Composer packages; package tests, binaries and the
+SDK itself are skipped). Every function call or class use (`new`, `::`,
+`extends`, `implements`) that resolves to an extension the selected runtime
+lacks, and that no bundled file or the mbstring polyfill declares, is printed:
+
+```
+PAM Native warning: src/Money.php:14: class NumberFormatter comes from ext-intl, which the PAM mobile PHP runtime (Android/iOS) does not include
+```
+
+Uses guarded in the same file by `extension_loaded('…')`, `function_exists('…')`
+or `class_exists(X::class)` for that extension are trusted. Findings never fail
+the build.
+
+### Running PHP on a device
+
+`scripts/android-php-runtime-test.sh [script…]` builds a minimal embed host
+against the installed runtime's `libphp.a` for the connected device's ABI,
+pushes the SDK and runs the scripts there (default
+`packages/native/tests/device/mbstring_runtime.php`, which checks that
+ext-mbstring is absent and every recorded mbstring result comes out of the
+polyfill unchanged). It removes everything it pushed.
+
 ## Typed bridge IDL
 
 `IdlCompiler` accepts a versioned JSON contract and generates fingerprinted

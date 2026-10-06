@@ -50,6 +50,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.14.2 | Moved views stay attached | ✅ (uncompiled) | `move()` keeps a view in its superview when its sibling position is unchanged, so a sheet moved by a closing overlay before it keeps its focused `autoFocus` field and keyboard. `testMoveThatKeepsThePositionLeavesTheFocusedInputInPlace`. |
 | 1.15.0 | Splash held until the first PHP frame | ✅ (uncompiled) | The launch-screen cover is always installed (logo optional), hidden on the first committed frame, a fatal error or after 4 s; the first batch of a host mounts on arrival instead of the next display-link tick; PHP boots with the window safe area when the root view has not been laid out yet. |
 | 1.16.0 | Share Extension activation rule from `plugins.shareExtension` | ✅ (uncompiled) | Prepare writes `NSExtensionActivationRule` from the accepted MIME types (dictionary for text/URL, images, movies and `*/*`; `SUBQUERY` predicate for specific file types). Validate on a Mac that the extension is offered only for the configured types. |
+| 1.17.0 | ext-mbstring polyfill + extension audit | ✅ (PHP only) | The iOS runtime is built with the same `--disable-all` extension set as Android (no mbstring, no intl), so the SDK's PHP `mb_*` polyfill applies unchanged; no Swift change. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -79,3 +80,9 @@ Visual checks that tests cannot fully cover:
   has the notch/home-indicator safe area (no inset jump right after launch);
   a re-attached `PamNativeViewController` mounts its tree without waiting a
   display-link tick; a missing entry still shows its alert (splash removed).
+- mbstring (1.17.0): confirm the iOS runtime still has no ext-mbstring
+  (`runtime-builder/ios/build.sh` keeps `--disable-all` without
+  `--enable-mbstring`) and that a screen calling `mb_strlen()`/`mb_substr()`/
+  `mb_strtoupper()` on accented text and emoji renders the same values as on
+  Android; `pam-native build ios` prints no extension-audit warning for the
+  app.
