@@ -71,6 +71,30 @@ internal fun sheetKeyboardLift(contentBottom: Int, windowHeight: Int, imeInset: 
 
 internal fun blocksModalDismissal(dismissible: Boolean): Boolean = !dismissible
 
+/**
+ * Height a bottom sheet's percentage snap points resolve against
+ * (@gorhom/bottom-sheet: the container minus its top safe-area inset).
+ *
+ * An edge-to-edge sheet window spans the whole [windowHeight]: its snap base
+ * is the window minus the top inset, and the sheet reaches the screen bottom
+ * behind the navigation bar. A fitted (base) sheet window is laid out between
+ * the system bars, so its base is the window minus the top and bottom bar
+ * insets and the sheet rests on the navigation bar; the top inset is never
+ * subtracted twice. Once the window is laid out, [laidOutContainerHeight]
+ * (the real container) replaces the pre-layout window estimate.
+ */
+internal fun sheetAvailableHeight(
+    laidOutContainerHeight: Int?,
+    windowHeight: Int,
+    topInset: Int,
+    bottomInset: Int,
+    edgeToEdge: Boolean,
+): Int {
+    val container = laidOutContainerHeight?.takeIf { it > 0 }
+        ?: if (edgeToEdge) windowHeight else windowHeight - topInset - bottomInset
+    return (container - if (edgeToEdge) topInset else 0).coerceAtLeast(1)
+}
+
 internal fun isPointOutsideModalChild(
     x: Float,
     y: Float,
@@ -134,6 +158,10 @@ internal class PamModalHost @JvmOverloads constructor(
     private var modalBackdropPressed = false
     private var dragVelocity: VelocityTracker? = null
 
+    /** Container the current sheet size was resolved against (0 = pre-layout estimate). */
+    private var sheetLayoutContainerHeight = 0
+    private var sheetLayoutContainerWidth = 0
+
     private val updateRunnable = Runnable {
         updateScheduled = false
         updateDialog()
@@ -150,8 +178,21 @@ internal class PamModalHost @JvmOverloads constructor(
         content.clipChildren = false
         content.clipToPadding = false
         content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (dialog?.isShowing == true) {
+            val shown = dialog?.takeIf { it.isShowing }
+            if (shown != null) {
                 dispatchOrientation(force = false)
+                // The first presentation is sized before its window exists;
+                // re-resolve the snap point against the laid-out container
+                // (and after rotation or split screen) within this same
+                // traversal, before anything is drawn. IME-driven height
+                // changes keep their keyboard behavior.
+                if (
+                    presentation == PRESENTATION_SHEET &&
+                    content.height > 0 &&
+                    (sheetLayoutContainerHeight == 0 || content.width != sheetLayoutContainerWidth)
+                ) {
+                    applyWindowLayout(shown)
+                }
             }
             updateBottomSheetChrome()
         }
@@ -729,20 +770,20 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     private fun applyWindowLayout(modal: Dialog) {
-        // @gorhom/bottom-sheet: percentage snap points resolve against the
-        // container minus the top safe-area inset.
-        val containerHeight = content.height.takeIf { it > 0 }
-            ?: modal.window?.decorView?.height?.takeIf { it > 0 }
-            ?: resources.displayMetrics.heightPixels
-        val topInset = content.rootWindowInsets?.let { insets ->
-            androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(insets)
-                .getInsets(
-                    androidx.core.view.WindowInsetsCompat.Type.systemBars() or
-                        androidx.core.view.WindowInsetsCompat.Type.displayCutout(),
-                ).top
-        } ?: 0
+        val laidOut = content.height.takeIf { it > 0 }
+        sheetLayoutContainerHeight = laidOut ?: 0
+        sheetLayoutContainerWidth = if (laidOut != null) content.width else 0
         val availableHeight = if (presentation == PRESENTATION_SHEET) {
-            (containerHeight - topInset).coerceAtLeast(1)
+            val insets = sheetSystemBarInsets()
+            sheetAvailableHeight(
+                laidOutContainerHeight = laidOut,
+                windowHeight = rootView.height.takeIf { it > 0 }
+                    ?: modal.window?.decorView?.height?.takeIf { it > 0 }
+                    ?: resources.displayMetrics.heightPixels,
+                topInset = insets.top,
+                bottomInset = insets.bottom,
+                edgeToEdge = statusBarTranslucent || navigationBarTranslucent,
+            )
         } else {
             resources.displayMetrics.heightPixels
         }
@@ -779,6 +820,19 @@ internal class PamModalHost @JvmOverloads constructor(
             ViewGroup.LayoutParams.MATCH_PARENT,
         )
         updateBottomSheetChrome()
+    }
+
+    /**
+     * System-bar and cutout insets of the window the sheet covers. The
+     * dialog's own insets exist only after it is attached; until then the
+     * covered activity window reports the same edges.
+     */
+    private fun sheetSystemBarInsets(): androidx.core.graphics.Insets {
+        val types = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+        val source = content.rootWindowInsets ?: rootWindowInsets
+        return source?.let {
+            WindowInsetsCompat.toWindowInsetsCompat(it).getInsetsIgnoringVisibility(types)
+        } ?: androidx.core.graphics.Insets.NONE
     }
 
     private fun onModalMotion(event: MotionEvent) {
