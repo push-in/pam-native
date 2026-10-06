@@ -6272,7 +6272,11 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
 }
 
 fn stage_project(project: &Project, workspace: &Path, precompile: bool) -> Result<(), String> {
-    stage_project_at(project, &workspace.join("app/src/main/assets/pam"), precompile)
+    stage_project_at(
+        project,
+        &workspace.join("app/src/main/assets/pam"),
+        precompile,
+    )
 }
 
 /// Compiles the bundle's `.pam` components on the build host into the
@@ -6288,7 +6292,11 @@ fn prebuild_components(destination: &Path) -> Result<(), String> {
     let php = std::env::var("PAM_NATIVE_PHP")
         .ok()
         .filter(|value| !value.is_empty())
-        .or_else(|| std::env::var("PAM_PHP").ok().filter(|value| !value.is_empty()))
+        .or_else(|| {
+            std::env::var("PAM_PHP")
+                .ok()
+                .filter(|value| !value.is_empty())
+        })
         .unwrap_or_else(|| {
             if command_exists("pam") {
                 "pam".to_owned()
@@ -6792,11 +6800,14 @@ fn certify(options: ReleaseOptions) -> Result<u8, String> {
     generate_typed_contracts(&project)?;
     match options.platform {
         ReleasePlatform::Android => {
-            build(MobileOptions {
-                project: options.project,
-                mode: BuildMode::Release,
-                abis: default_abis(),
-            }, false)?;
+            build(
+                MobileOptions {
+                    project: options.project,
+                    mode: BuildMode::Release,
+                    abis: default_abis(),
+                },
+                false,
+            )?;
         }
         ReleasePlatform::Ios => {
             build_ios(options.project, true)?;
@@ -6807,11 +6818,14 @@ fn certify(options: ReleaseOptions) -> Result<u8, String> {
                     "--platform all requires macOS; use --platform android on this host".to_owned(),
                 );
             }
-            build(MobileOptions {
-                project: options.project.clone(),
-                mode: BuildMode::Release,
-                abis: default_abis(),
-            }, false)?;
+            build(
+                MobileOptions {
+                    project: options.project.clone(),
+                    mode: BuildMode::Release,
+                    abis: default_abis(),
+                },
+                false,
+            )?;
             build_ios(options.project, true)?;
         }
     }
