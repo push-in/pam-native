@@ -14,11 +14,15 @@ import android.graphics.drawable.ColorDrawable
 import android.util.DisplayMetrics
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.window.OnBackInvokedCallback
@@ -73,6 +77,27 @@ class PamActivity : FragmentActivity() {
     private var viewportUpdateReplayRequested = false
     private var forceScheduledViewportUpdate = false
 
+    /** Guards the hand-off between the runtime launch thread and onDestroy. */
+    private val launchLock = Any()
+    private var launchRequested = false
+    private var runtimeLaunched = false
+    private var surfaceDestroyed = false
+    private var retainedRuntime = false
+
+    /**
+     * The window's first draw (and so the dismissal of the system splash or
+     * starting window) waits for the first committed PHP frame: the user goes
+     * from the splash straight to the app, never through an empty window.
+     */
+    private var splashHold: ViewTreeObserver.OnPreDrawListener? = null
+    private var splashHoldRoot: View? = null
+    private val releaseSplashAfterTimeout = Runnable {
+        if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
+            Log.w(PERFORMANCE_TAG, "splash hold timed out after ${SPLASH_HOLD_TIMEOUT_MS}ms")
+        }
+        releaseSplash()
+    }
+
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(newBase)
         // Below Android 12 the persisted appearance must reach the activity
@@ -81,6 +106,16 @@ class PamActivity : FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
+            Log.d(
+                PERFORMANCE_TAG,
+                "activityCreateMs=${SystemClock.uptimeMillis() - processStartUptimeMillis()}",
+            )
+        }
+        // Library load and bundle resolution start before anything else so
+        // they overlap the native view setup below.
+        val retainedAtCreate = PamRuntimeHost.runtime?.takeIf(PamRuntime::isRunning)
+        if (retainedAtCreate == null) PamStartup.prepare(applicationContext)
         super.onCreate(savedInstanceState)
         PamAppearance.applyPlatformNightMode(this)
         // Keep one deterministic edge-to-edge contract on every supported
@@ -103,14 +138,6 @@ class PamActivity : FragmentActivity() {
         applyDefaultSystemBars()
         PamAppearance.exportEnvironment(this)
         val host = PamRootHost(this).also { rootHost = it }
-        errors = ErrorOverlay(
-            context = this,
-            developerMode = ErrorOverlay.developerMode(this, BuildConfig.DEBUG),
-            safeArea = ::currentSafeAreaInsets,
-            dark = ::isDarkAppearance,
-            onReload = ::reloadAfterError,
-            onExit = ::finish,
-        )
         devTools = PamDevToolsOverlay(this)
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->
             runtime.dispatchEvent(nodeId, kind, payload)
@@ -126,14 +153,24 @@ class PamActivity : FragmentActivity() {
             }
             if (!fullyDrawnReported) {
                 fullyDrawnReported = true
+                if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
+                    Log.d(
+                        PERFORMANCE_TAG,
+                        "firstFrameMs=${firstFrameUptimeMillis - processStartUptimeMillis()} " +
+                            "mountNs=${it.mountNanos}",
+                    )
+                }
                 reportFullyDrawn()
             }
+            // Same Choreographer frame: the traversal that follows draws it.
+            releaseSplash()
         }
         // Embedded PHP lives as long as the process. When the previous
         // Activity finished (Back at the root, system recreation) while the
         // process survived, re-attach to that runtime and remount its tree
         // instead of booting PHP a second time in the same process.
-        val retained = PamRuntimeHost.runtime?.takeIf(PamRuntime::isRunning)
+        val retained = retainedAtCreate?.takeIf(PamRuntime::isRunning)
+        retainedRuntime = retained != null
         if (retained != null) {
             runtime = retained
             retained.attach(
@@ -151,7 +188,28 @@ class PamActivity : FragmentActivity() {
                 onFrameCommitted = onFrameCommitted,
                 onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
             )
+            // PHP reads its launch intent while booting.
+            PamDeepLinks.captureInitial(intent?.dataString)
+            PamIncomingShares.captureInitial(this, intent)
+            reportNotificationOpen(intent)
+            // API 30+ reports the window bounds and system-bar/cutout insets
+            // before the first layout: PHP boots now, while the rest of the
+            // native surface is built and the window runs its first
+            // traversal. Older releases learn insets from that traversal and
+            // launch from the held pre-draw (see holdSplash).
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) launchRuntime()
         }
+        // While PHP boots (or the retained tree is replayed) the UI thread is
+        // idle: build the first frame's views ahead of its batch.
+        renderer.prewarmViews()
+        errors = ErrorOverlay(
+            context = this,
+            developerMode = ErrorOverlay.developerMode(this, BuildConfig.DEBUG),
+            safeArea = ::currentSafeAreaInsets,
+            dark = ::isDarkAppearance,
+            onReload = ::reloadAfterError,
+            onExit = ::finish,
+        )
         val root = FrameLayout(this)
         root.addView(
             host,
@@ -169,6 +227,7 @@ class PamActivity : FragmentActivity() {
         )
         root.addView(errors)
         setContentView(root)
+        holdSplash(root)
         val (windowWidth, windowHeight) = resolvedViewportSize()
         viewportWidth = windowWidth
         viewportHeight = windowHeight
@@ -188,66 +247,98 @@ class PamActivity : FragmentActivity() {
             scheduleViewportUpdate(force = true)
             return
         }
-        PamDeepLinks.captureInitial(intent?.dataString)
-        PamIncomingShares.captureInitial(this, intent)
-        reportNotificationOpen(intent)
+    }
 
-        // Bundle extraction/verification and OTA resolution touch the disk
-        // (a full copy + hash on first launch); keep them off the main thread
-        // so the first frame and input are never blocked (ANR on cold start).
+    /**
+     * Boots embedded PHP off the UI thread with the window geometry known now
+     * (bundle resolution overlapped the native setup, see [PamStartup]). The
+     * surface is bound on the UI thread before the first PHP batch arrives.
+     */
+    private fun launchRuntime() {
+        if (launchRequested || retainedRuntime) return
+        launchRequested = true
+        val (windowWidth, windowHeight) = resolvedViewportSize()
+        viewportWidth = windowWidth
+        viewportHeight = windowHeight
+        val density = resources.displayMetrics.density
+        val widthDp = windowWidth / density
+        val heightDp = windowHeight / density
+        val safeArea = currentSafeAreaInsets()
+        dispatchedSafeArea = safeArea
+        exportBootMetrics(widthDp, heightDp, safeArea)
+        val textScale = resources.configuration.fontScale
+        val dark = isDarkAppearance()
+        val safeAreaDp = floatArrayOf(
+            safeArea.left / density,
+            safeArea.top / density,
+            safeArea.right / density,
+            safeArea.bottom / density,
+        )
+        val bundle = PamStartup.prepare(applicationContext)
+        val main = Handler(Looper.getMainLooper())
         Thread(
             {
-                val installStarted = android.os.SystemClock.elapsedRealtime()
-                val resolved = runCatching {
-                    val embeddedEntry = AssetInstaller(this).install()
-                    ActiveUpdateInstaller(this).resolve(embeddedEntry)
-                }
-                if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
-                    android.util.Log.d(
-                        "PamNativePerf",
-                        "bundleInstallMs=${android.os.SystemClock.elapsedRealtime() - installStarted}",
-                    )
-                }
-                runOnUiThread {
-                    if (isFinishing || isDestroyed) return@runOnUiThread
-                    resolved.mapCatching { entry -> startRuntime(entry) }.onFailure {
-                        handleRuntimeError(it.message ?: "Pam Native failed to start")
+                // The PHP worker inherits this thread's priority.
+                runCatching { Process.setThreadPriority(Process.THREAD_PRIORITY_DISPLAY) }
+                val launched = runCatching {
+                    val entry = PamStartup.awaitEntry(bundle)
+                    synchronized(launchLock) {
+                        if (surfaceDestroyed) return@runCatching null
+                        runtime.start(entry, widthDp, heightDp, textScale, dark, safeAreaDp)
+                        // From here PHP lives as long as the process: a
+                        // destroyed surface detaches instead of closing it.
+                        PamRuntimeHost.runtime = runtime
+                        PamRuntimeHost.entryPath = entry.absolutePath
+                        runtimeLaunched = true
                     }
+                    if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
+                        Log.d(
+                            PERFORMANCE_TAG,
+                            "runtimeStartMs=${SystemClock.uptimeMillis() - processStartUptimeMillis()}",
+                        )
+                    }
+                    entry
+                }
+                main.postAtFrontOfQueue {
+                    if (isDestroyed) return@postAtFrontOfQueue
+                    launched
+                        .onSuccess { entry -> if (entry != null) onRuntimeLaunched(entry) }
+                        .onFailure { handleRuntimeError(it.message ?: "Pam Native failed to start") }
                 }
             },
-            "pam-asset-install",
+            "pam-runtime-launch",
         ).start()
     }
 
-    private fun startRuntime(entry: java.io.File) {
-        val windowWidth = viewportWidth
-        val windowHeight = viewportHeight
-        run {
-            runtimeEntryPath = entry.absolutePath
-            val density = resources.displayMetrics.density
-            val widthDp = windowWidth / density
-            val heightDp = windowHeight / density
-            exportBootMetrics(widthDp, heightDp)
-            val safeArea = currentSafeAreaInsets()
-            dispatchedSafeArea = safeArea
-            runtime.start(
-                entry,
-                widthDp,
-                heightDp,
-                resources.configuration.fontScale,
-                isDarkAppearance(),
-                floatArrayOf(
-                    safeArea.left / density,
-                    safeArea.top / density,
-                    safeArea.right / density,
-                    safeArea.bottom / density,
-                ),
-            )
-            PamRuntimeHost.runtime = runtime
-            PamRuntimeHost.entryPath = entry.absolutePath
-            runtimeStarted = true
-            bindRuntimeSurface()
+    private fun onRuntimeLaunched(entry: File) {
+        runtimeEntryPath = entry.absolutePath
+        runtimeStarted = true
+        bindRuntimeSurface()
+    }
+
+    private fun holdSplash(root: View) {
+        val observer = root.viewTreeObserver
+        val hold = ViewTreeObserver.OnPreDrawListener {
+            // Below API 30 the insets exist once this first traversal laid
+            // the window out; PHP boots before anything is drawn.
+            if (!launchRequested && !retainedRuntime) launchRuntime()
+            splashHold == null
         }
+        splashHold = hold
+        splashHoldRoot = root
+        observer.addOnPreDrawListener(hold)
+        root.postDelayed(releaseSplashAfterTimeout, SPLASH_HOLD_TIMEOUT_MS)
+    }
+
+    /** Lets the window draw: first PHP frame committed, an error, or the timeout. */
+    private fun releaseSplash() {
+        val hold = splashHold ?: return
+        splashHold = null
+        val root = splashHoldRoot
+        splashHoldRoot = null
+        root?.removeCallbacks(releaseSplashAfterTimeout)
+        root?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnPreDrawListener(hold)
+        root?.invalidate()
     }
 
     private fun bindRuntimeSurface() {
@@ -406,6 +497,7 @@ class PamActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
+        releaseSplash()
         recoveryRunnable?.let(window.decorView::removeCallbacks)
         recoveryRunnable = null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -416,7 +508,11 @@ class PamActivity : FragmentActivity() {
         devToolsReceiver?.let(::unregisterReceiver)
         devToolsReceiver = null
         diagnosticsExecutor.shutdownNow()
-        if (runtimeStarted && PamRuntimeHost.runtime === runtime) {
+        val launched = synchronized(launchLock) {
+            surfaceDestroyed = true
+            runtimeLaunched
+        }
+        if ((runtimeStarted || launched) && PamRuntimeHost.runtime === runtime) {
             // Keep PHP (and its state) alive for the next Activity; only this
             // surface goes away. Shutting embedded PHP down in a live process
             // is not restartable and crashed or hung the relaunch.
@@ -436,6 +532,9 @@ class PamActivity : FragmentActivity() {
      * fatal ones retry with backoff and then show the friendly fallback.
      */
     private fun handleRuntimeError(message: String) {
+        // Whatever the error UI is (overlay, fallback or a recovery frame),
+        // the window must be allowed to draw it.
+        releaseSplash()
         val report = RuntimeErrorReport.parse(message)
         devTools.record(RuntimeDiagnostic(RuntimeDiagnosticKind.ERROR, "${report.shortType}: ${report.message}".take(160)))
         Log.e(ERROR_TAG, report.copyText().take(4_000))
@@ -871,9 +970,12 @@ class PamActivity : FragmentActivity() {
     }
 
     /** Metrics exported to PHP before its first render (PAM_BOOT_METRICS). */
-    private fun exportBootMetrics(widthDp: Float, heightDp: Float) {
+    private fun exportBootMetrics(
+        widthDp: Float,
+        heightDp: Float,
+        insets: androidx.core.graphics.Insets,
+    ) {
         val density = resources.displayMetrics.density
-        val insets = currentSafeAreaInsets()
         val json = org.json.JSONObject()
             .put("width", widthDp.toDouble())
             .put("height", heightDp.toDouble())
@@ -957,5 +1059,14 @@ class PamActivity : FragmentActivity() {
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
         const val ERROR_TAG = "PamNativeErrors"
         const val BACK_SUPPRESSION_WINDOW_MS = 1_000L
+        const val PERFORMANCE_TAG = "PamNativePerf"
+
+        /**
+         * Safety net for the splash hold: a first launch that extracts the
+         * bundle or a stalled boot still reaches the window (and its error UI).
+         */
+        const val SPLASH_HOLD_TIMEOUT_MS = 4_000L
+
+        fun processStartUptimeMillis(): Long = Process.getStartUptimeMillis()
     }
 }

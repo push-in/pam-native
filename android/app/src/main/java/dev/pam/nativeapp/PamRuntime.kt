@@ -57,6 +57,13 @@ class PamRuntime(
     private val hotReloadLatency = HotReloadLatency()
     private var frameScheduled = false
     private var readyForEvents = false
+
+    /**
+     * Nothing is on screen for this surface yet (cold start or a re-attached
+     * Activity): its first batch mounts as soon as it arrives instead of
+     * waiting for the next vsync, so the window's next traversal draws it.
+     */
+    private var surfaceAwaitingFirstFrame = true
     private val frameCallback = Choreographer.FrameCallback {
         frameScheduled = false
         flushEvents()
@@ -115,6 +122,7 @@ class PamRuntime(
             previousModules.retire()
         }
         attachedSurface = true
+        surfaceAwaitingFirstFrame = true
         requestRemount()
         onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.LIFECYCLE, "surface attached"))
     }
@@ -181,6 +189,7 @@ class PamRuntime(
             layoutViewport = floatArrayOf(widthDp, heightDp, textScale)
             renderer.engineManagedSafeArea = true
             check(handle == 0L) { "Pam Runtime is already running" }
+            PamStartup.loadNativeLibrary()
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
             }
@@ -417,7 +426,7 @@ class PamRuntime(
                 ),
             )
             markReadyForEvents()
-            scheduleFrame()
+            if (surfaceAwaitingFirstFrame) flushFirstFrame() else scheduleFrame()
         }
         return true
     }
@@ -457,7 +466,7 @@ class PamRuntime(
                 )
             }
             markReadyForEvents()
-            scheduleFrame()
+            if (surfaceAwaitingFirstFrame && mutations != null) flushFirstFrame() else scheduleFrame()
         }
         return mutations != null
     }
@@ -693,6 +702,15 @@ class PamRuntime(
         choreographer.postFrameCallback(frameCallback)
     }
 
+    private fun flushFirstFrame() {
+        if (frameScheduled) {
+            choreographer.removeFrameCallback(frameCallback)
+            frameScheduled = false
+        }
+        flushEvents()
+        flushBatches()
+    }
+
     private fun flushEvents() {
         if (pendingEvents.isEmpty()) return
         if (closed.get()) {
@@ -789,6 +807,7 @@ class PamRuntime(
             )
         }
         if (committed) {
+            surfaceAwaitingFirstFrame = false
             completeHotReload(failed = false)
             onFrameCommitted(metrics)
         }
@@ -828,9 +847,8 @@ class PamRuntime(
             30, // pointer move
         )
 
-        init {
-            System.loadLibrary("pam_native_android")
-        }
+        // The engine library is loaded off the UI thread by PamStartup
+        // (start() waits for it); every JNI call below needs a live handle.
     }
 }
 
