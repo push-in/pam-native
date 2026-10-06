@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.14.0 - 2026-10-05
+
+Per-component render cost and first launch after install (Zé Chat inbox on a
+Galaxy S10, release-optimized `.perf` build, against 1.13.3):
+
+| | 1.13.3 | 1.14.0 |
+|---|---|---|
+| One inbox row (`ChatListItem`), render + encode | 1.79 ms | 0.44 ms |
+| Inbox first render (12 rows), render + encode | 43.4 ms | 13.1 ms |
+| PHP component discovery on the first launch after install | 2,066 ms | 28-38 ms |
+| First launch after install, process start → first commit | 3,396 ms | ~1,750 ms |
+
+Host (`scripts/benchmark-inbox-render.php` / `benchmark-chat-render.php`,
+PHP without JIT): inbox first render 9.6 → 2.7 ms, realtime row update
+7.7 → 1.9 ms, filter back 6.7 → 1.7 ms; chat first render 17.8 → 7.1 ms,
+incoming message 8.9 → 2.7 ms. Encoded frames are byte-identical.
+
+- Templates: every node's directives, attribute classification, events and
+  slot split are planned once; resolved styles/values are cached per (node,
+  sheet environment, class list, ancestor chain, inherited styles); common
+  native elements (View, Row, Column, Text, Image, Pressable...) and
+  compiled component tags take fast paths that build each element as one
+  object with precomputed constant properties, class tokens and inherited
+  text styles. Native property conversions are memoized.
+- Template expressions (and `:class` array literals) compile to plain PHP
+  closures with the same grammar, eager evaluation order, missing-value
+  rules and diagnostics; the closure-tree evaluator stays as reference and
+  fallback (a differential test compares both).
+- Encoder: memoized component subtrees (keyed rows and component elements)
+  are reused through C-level array unions with their callbacks and encoded
+  bytes, callback merging is incremental (was O(N) per reused subtree), and
+  patches skip unchanged node objects.
+- Build-time component cache: `pam-native build` and update bundles run
+  `PamPhpCompiler::prebuild()` on the host, writing `pam-prebuilt/components`
+  (class, runtime template, generated expressions) keyed by project-relative
+  paths and validated by source/stylesheet fingerprints, so an installed or
+  updated bundle compiles nothing at boot; an edited component (hot reload)
+  still compiles into the writable cache.
+- Android: the CLI writes `assets/pam-files.txt`; the first launch copies the
+  bundle from that listing in parallel and verifies each file's SHA-256 while
+  it streams (no `AssetManager.list()` walk). Debug/benchmark builds log
+  `bundleInstallMs` (`PamNativePerf`).
+- Runtime: press and gesture handlers that elements wrap to decode payloads
+  (`on:pressIn`, `on:pressOut`, `on:pressMove`, `on:doubleTap`, image, media,
+  input, modal and sheet events) now mark only their component, like
+  `on:press`: one double tap or press-in re-renders one memoized row instead
+  of the whole tree (no more `HoldPressable` workaround needed).
+- Component snapshots and profiler spans are cheaper per render.
+
 ## 1.13.3 - 2026-10-05
 
 - Android: `autoFocus` on an input inside a presented BottomSheet opens the
