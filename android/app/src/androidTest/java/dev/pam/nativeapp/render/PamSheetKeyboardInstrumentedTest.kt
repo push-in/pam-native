@@ -50,6 +50,181 @@ class PamSheetKeyboardInstrumentedTest {
         runSheetScenario(autoFocus = true)
     }
 
+    /**
+     * Zé's edit sheet: a header button precedes the field and the field is
+     * remounted (a new key) with `autoFocus` on every open, both when the
+     * sheet is re-presented and inside an already-presented sheet. The
+     * keyboard must open each time without a tap.
+     */
+    @Test
+    fun remountedAutoFocusInputOpensTheKeyboardOnEveryOpen() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        var width = 0f
+        fun input(id: Long, name: String) = listOf(
+            Mutation.Create(node(id, 7, NodeKind.INPUT, mapOf(
+                PropKey.TEST_ID to PropValue.Text(name),
+                PropKey.AUTO_FOCUS to PropValue.Flag(true),
+            ), index = 1)),
+            Mutation.Layout(id, Frame(16f, 64f, width - 32f, 48f)),
+        )
+        fun awaitKeyboard(name: String) {
+            waitUntil(instrumentation, "keyboard open for $name", timeoutMs = 10_000) {
+                val content = presentedModalContent(renderer) ?: return@waitUntil false
+                val field = content.findByTransitionName(name) as? EditText ?: return@waitUntil false
+                lastGeometry = "focus=${field.hasFocus()} windowFocus=${field.hasWindowFocus()} " +
+                    "focused=${field.rootView.findFocus()} ime=${dialogImeTop(field)}"
+                field.hasFocus() && dialogImeTop(field) != null &&
+                    screenBottom(field) <= requireNotNull(dialogImeTop(field)) + 1
+            }
+        }
+        try {
+            onMain(instrumentation) {
+                activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val density = activity.host.resources.displayMetrics.density
+                width = activity.host.width / density
+                val height = activity.host.height / density
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(6, 1, NodeKind.MODAL, mapOf(
+                        PropKey.VISIBLE to PropValue.Flag(true),
+                        PropKey.MODAL_PRESENTATION to PropValue.Integer(3),
+                        PropKey.BOTTOM_SHEET_KEYBOARD_BEHAVIOR to PropValue.Integer(1),
+                        PropKey.ON_MODAL_REQUEST_CLOSE to PropValue.Flag(true),
+                    ))),
+                    Mutation.Create(node(7, 6, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                    ))),
+                    // "Cancelar" header button: focusable and first in order.
+                    Mutation.Create(node(10, 7, NodeKind.BUTTON)),
+                    Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(6, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(7, Frame(0f, 0f, width, 200f)),
+                    Mutation.Layout(10, Frame(16f, 8f, 120f, 48f)),
+                ) + input(20, "edit-1") + listOf(Mutation.SetRoot(1))))
+            }
+            awaitKeyboard("edit-1")
+
+            // Close, then reopen with a remounted field in the same commit.
+            onMain(instrumentation) {
+                renderer.commit(listOf(listOf(Mutation.Update(6, PropKey.VISIBLE, PropValue.Flag(false)))))
+            }
+            waitUntil(instrumentation, "sheet dismissed") { presentedModalContent(renderer) == null }
+            Thread.sleep(300)
+            onMain(instrumentation) {
+                renderer.commit(listOf(
+                    listOf(Mutation.Remove(20)) + input(21, "edit-2") +
+                        Mutation.Update(6, PropKey.VISIBLE, PropValue.Flag(true)),
+                ))
+            }
+            awaitKeyboard("edit-2")
+
+            // Remount inside the already-presented sheet (keyboard hidden first).
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            waitUntil(instrumentation, "IME hidden") {
+                presentedModalContent(renderer)?.let { dialogImeTop(it) } == null
+            }
+            onMain(instrumentation) {
+                renderer.commit(listOf(listOf(Mutation.Remove(21)) + input(22, "edit-3")))
+            }
+            awaitKeyboard("edit-3")
+            onMain(instrumentation) { renderer.close() }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    /**
+     * Zé's OptionDialog: `<Modal transparent>` whose content is a short
+     * bottom-anchored Column. The window stays translucent (only the backdrop
+     * colour over the screen below) and the Column keeps its authored frame
+     * instead of being stretched into an opaque full-screen window.
+     */
+    @Test
+    fun transparentModalKeepsItsBottomAnchoredContentOverATranslucentBackdrop() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val density = activity.host.resources.displayMetrics.density
+                val width = activity.host.width / density
+                val height = activity.host.height / density
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFF0000L),
+                    ))),
+                    Mutation.Create(node(6, 1, NodeKind.MODAL, mapOf(
+                        PropKey.VISIBLE to PropValue.Flag(true),
+                        PropKey.MODAL_PRESENTATION to PropValue.Integer(1),
+                        PropKey.MODAL_TRANSPARENT to PropValue.Flag(true),
+                        PropKey.MODAL_BACKDROP_COLOR to PropValue.Integer(0x66000000L),
+                        PropKey.MODAL_ANIMATION_TYPE to PropValue.Integer(1),
+                    ))),
+                    // <Column heightPercent="100" justifyContent="end"> (flattened)
+                    Mutation.Create(node(7, 6, NodeKind.COLUMN)),
+                    Mutation.Create(node(8, 7, NodeKind.PRESSABLE, mapOf(
+                        PropKey.ON_PRESS to PropValue.Flag(true),
+                    ))),
+                    Mutation.Create(node(9, 7, NodeKind.COLUMN, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                        PropKey.TEST_ID to PropValue.Text("option-dialog"),
+                    ), index = 1)),
+                    Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(6, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(7, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(8, Frame(0f, 0f, width, height * 0.56f)),
+                    Mutation.Layout(9, Frame(0f, height * 0.56f, width, height * 0.44f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            lateinit var sheet: View
+            waitUntil(instrumentation, "transparent modal presented") {
+                val content = presentedModalContent(renderer)
+                lastGeometry = "content=$content"
+                if (content == null) return@waitUntil false
+                val found = content.findByTransitionName("option-dialog")
+                lastGeometry = "found=$found shown=${found?.isShown} h=${found?.height}"
+                sheet = found ?: return@waitUntil false
+                sheet.isShown && sheet.height > 0
+            }
+            Thread.sleep(600)
+            val screenshot = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            var sheetTop = 0
+            var sheetBottom = 0
+            var screenHeight = 0
+            onMain(instrumentation) {
+                val location = IntArray(2)
+                sheet.getLocationOnScreen(location)
+                sheetTop = location[1]
+                sheetBottom = location[1] + sheet.height
+                screenHeight = activity.host.height
+            }
+            val x = screenshot.width / 2
+            val above = screenshot.getPixel(x, sheetTop / 2)
+            val inside = screenshot.getPixel(x, (sheetTop + sheetBottom) / 2)
+            val geometry = "sheet=$sheetTop..$sheetBottom host=$screenHeight " +
+                "above=${Integer.toHexString(above)} inside=${Integer.toHexString(inside)}"
+            assertTrue("the Column keeps its 44% height ($geometry)", sheetTop > screenHeight / 2)
+            assertTrue("the Column stays on screen ($geometry)", sheetBottom <= screenshot.height)
+            // Red screen under a 40% black backdrop: about (153, 0, 0).
+            assertTrue(
+                "the area above shows the screen through the backdrop ($geometry)",
+                android.graphics.Color.red(above) in 120..185 &&
+                    android.graphics.Color.green(above) < 30 &&
+                    android.graphics.Color.blue(above) < 30,
+            )
+            assertEquals("the Column is drawn white ($geometry)", 0xFFFFFFFF.toInt(), inside)
+            onMain(instrumentation) { renderer.close() }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
     private fun runSheetScenario(autoFocus: Boolean) {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         val instrumentation = InstrumentationRegistry.getInstrumentation()

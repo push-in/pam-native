@@ -388,6 +388,45 @@ internal fun safeAreaInsetsForBounds(
     )
 }
 
+internal data class ModalChildPlacement(
+    val left: Int,
+    val top: Int,
+    val width: Int,
+    val height: Int,
+    val gravity: Int,
+)
+
+/**
+ * Layout of a child hosted by a full-screen Modal window, from its engine
+ * frame relative to the modal ([modalWidth] x [modalHeight] px). A child
+ * spanning the modal fills the window; a child ending at the modal's bottom
+ * stays bottom-anchored (the window can be shorter than the engine viewport
+ * when it fits the system bars); any other child keeps its frame.
+ */
+internal fun windowSizedModalChildPlacement(
+    left: Int,
+    top: Int,
+    width: Int,
+    height: Int,
+    modalWidth: Int,
+    modalHeight: Int,
+): ModalChildPlacement {
+    val match = ViewGroup.LayoutParams.MATCH_PARENT
+    val unknown = modalWidth <= 0 || modalHeight <= 0
+    val spansWidth = left <= 1 && width >= modalWidth - 1
+    val spansHeight = top <= 1 && height >= modalHeight - 1
+    if (unknown || spansWidth && spansHeight) {
+        return ModalChildPlacement(0, 0, match, match, PAM_PHYSICAL_FRAME_GRAVITY)
+    }
+    val childWidth = if (spansWidth) match else width
+    val childLeft = if (spansWidth) 0 else left
+    return if (top > 1 && top + height >= modalHeight - 1) {
+        ModalChildPlacement(childLeft, 0, childWidth, height, Gravity.BOTTOM or Gravity.LEFT)
+    } else {
+        ModalChildPlacement(childLeft, top, childWidth, height, PAM_PHYSICAL_FRAME_GRAVITY)
+    }
+}
+
 internal fun snappedPixelSpan(
     start: Float,
     extent: Float,
@@ -1985,25 +2024,39 @@ class PamRenderer(
                 height = (height - reduction).coerceAtLeast(0)
             },
         )
+        var frameGravity = PAM_PHYSICAL_FRAME_GRAVITY
         // Full-window modal content belongs to the Dialog viewport, not the
-        // activity's engine frame. IME resize can make those heights differ.
+        // activity's engine frame (system bars and IME resize can make those
+        // heights differ). Only content spanning the modal fills the window;
+        // a shorter child (a bottom-anchored options sheet inside a flattened
+        // full-height Column) keeps its frame and its anchoring edge.
         if (parentView is PamModalHost && parentView.usesWindowSizedContent()) {
-            width = ViewGroup.LayoutParams.MATCH_PARENT
-            height = ViewGroup.LayoutParams.MATCH_PARENT
-            leftPx = 0
-            topPx = 0
+            val placement = windowSizedModalChildPlacement(
+                left = leftPx,
+                top = topPx,
+                width = width,
+                height = height,
+                modalWidth = parentFrame?.let { snappedPixelSpan(it.x, it.width, 0f, density).extent } ?: 0,
+                modalHeight = parentFrame?.let { snappedPixelSpan(it.y, it.height, 0f, density).extent } ?: 0,
+            )
+            width = placement.width
+            height = placement.height
+            leftPx = placement.left
+            topPx = placement.top
+            frameGravity = placement.gravity
         }
-        val current = view.layoutParams as? ViewGroup.MarginLayoutParams
+        val current = view.layoutParams as? FrameLayout.LayoutParams
 
         val layoutChanged =
             current == null ||
             current.width != width ||
             current.height != height ||
             current.leftMargin != leftPx ||
-            current.topMargin != topPx
+            current.topMargin != topPx ||
+            current.gravity != frameGravity
         if (layoutChanged) {
             view.layoutParams = FrameLayout.LayoutParams(width, height).apply {
-                gravity = PAM_PHYSICAL_FRAME_GRAVITY
+                gravity = frameGravity
                 leftMargin = leftPx
                 topMargin = topPx
             }
@@ -7427,16 +7480,65 @@ class PamRenderer(
         }, if (attempt == 0) 0L else AUTO_FOCUS_RETRY_MS)
     }
 
+    /**
+     * Opens the IME for an auto-focused input. The IME ignores requests from a
+     * window that has no input focus yet (a Dialog/BottomSheet that was just
+     * shown, or an input remounted while it gains focus), and on Android 11-12
+     * a request right after the window gained focus can still be dropped. So
+     * wait for the input's own window focus, ask that window's insets
+     * controller, and re-ask until the IME is reported visible.
+     */
     private fun showAutoFocusKeyboard(input: PamEditText, attempt: Int) {
         input.postDelayed({
             if (!input.isAttachedToWindow || !input.hasFocus()) return@postDelayed
-            if (!input.hasWindowFocus() && attempt < AUTO_FOCUS_KEYBOARD_RETRIES) {
-                showAutoFocusKeyboard(input, attempt + 1)
+            if (!input.hasWindowFocus()) {
+                awaitWindowFocus(input) { showAutoFocusKeyboard(input, attempt) }
                 return@postDelayed
+            }
+            if (autoFocusImeVisible(input)) return@postDelayed
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                input.windowInsetsController?.show(WindowInsets.Type.ime())
             }
             (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+            if (
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+                attempt < AUTO_FOCUS_KEYBOARD_RETRIES
+            ) {
+                showAutoFocusKeyboard(input, attempt + 1)
+            }
         }, if (attempt == 0) 0L else AUTO_FOCUS_KEYBOARD_RETRY_MS)
+    }
+
+    private fun autoFocusImeVisible(input: View): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            input.rootWindowInsets?.isVisible(WindowInsets.Type.ime()) == true
+
+    /** Runs [action] once [view]'s window gains input focus (one pending wait per view). */
+    private fun awaitWindowFocus(view: View, action: () -> Unit) {
+        if (view.getTag(dev.pam.nativeapp.R.id.pam_await_window_focus) != null) return
+        val observer = view.viewTreeObserver
+        val listener = object : android.view.ViewTreeObserver.OnWindowFocusChangeListener {
+            override fun onWindowFocusChanged(hasFocus: Boolean) {
+                if (!hasFocus) return
+                view.setTag(dev.pam.nativeapp.R.id.pam_await_window_focus, null)
+                if (observer.isAlive) observer.removeOnWindowFocusChangeListener(this)
+                view.post(action)
+            }
+        }
+        view.setTag(dev.pam.nativeapp.R.id.pam_await_window_focus, listener)
+        observer.addOnWindowFocusChangeListener(listener)
+        view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+
+            override fun onViewDetachedFromWindow(v: View) {
+                v.removeOnAttachStateChangeListener(this)
+                if (v.getTag(dev.pam.nativeapp.R.id.pam_await_window_focus) === listener) {
+                    v.setTag(dev.pam.nativeapp.R.id.pam_await_window_focus, null)
+                    if (observer.isAlive) observer.removeOnWindowFocusChangeListener(listener)
+                }
+            }
+        })
     }
 
     private fun containedScrollContainer(
@@ -8620,8 +8722,8 @@ class PamRenderer(
         const val DRAG_SNAP_REQUEST_STRIDE = 64L
         const val AUTO_FOCUS_RETRIES = 20
         const val AUTO_FOCUS_RETRY_MS = 50L
-        const val AUTO_FOCUS_KEYBOARD_RETRIES = 20
-        const val AUTO_FOCUS_KEYBOARD_RETRY_MS = 50L
+        const val AUTO_FOCUS_KEYBOARD_RETRIES = 12
+        const val AUTO_FOCUS_KEYBOARD_RETRY_MS = 120L
         const val LOCAL_MODAL_PREFIX = "pam:local-modal:"
         const val LOCAL_MODAL_TRIGGER_PREFIX = "pam:local-modal-trigger:"
         const val MODAL_CLOSE_MARKER = "pam:modal-close"

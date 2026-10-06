@@ -39,6 +39,31 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun fullScreenModalChildrenKeepTheirFramesUnlessTheySpanTheModal() {
+        val match = android.view.ViewGroup.LayoutParams.MATCH_PARENT
+        val topLeft = android.view.Gravity.TOP or android.view.Gravity.LEFT
+        val bottomLeft = android.view.Gravity.BOTTOM or android.view.Gravity.LEFT
+        assertEquals(
+            ModalChildPlacement(0, 0, match, match, topLeft),
+            windowSizedModalChildPlacement(0, 0, 1_080, 2_400, 1_080, 2_400),
+        )
+        // OptionDialog: the short sheet stays bottom-anchored at its height.
+        assertEquals(
+            ModalChildPlacement(0, 0, match, 1_056, bottomLeft),
+            windowSizedModalChildPlacement(0, 1_344, 1_080, 1_056, 1_080, 2_400),
+        )
+        // Its tap-to-close area above keeps its top-anchored frame.
+        assertEquals(
+            ModalChildPlacement(0, 0, match, 1_344, topLeft),
+            windowSizedModalChildPlacement(0, 0, 1_080, 1_344, 1_080, 2_400),
+        )
+        assertEquals(
+            ModalChildPlacement(40, 600, 1_000, 800, topLeft),
+            windowSizedModalChildPlacement(40, 600, 1_000, 800, 1_080, 2_400),
+        )
+    }
+
+    @Test
     fun hiddenImeRestoresTheConfiguredDetent() {
         assertEquals(
             1_968 to 0f,

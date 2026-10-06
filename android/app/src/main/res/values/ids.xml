@@ -4,5 +4,6 @@
     <item name="pam_shared_transition_config" type="id" />
     <item name="pam_motion_radius" type="id" />
     <item name="pam_native_ref" type="id" />
+    <item name="pam_await_window_focus" type="id" />
     <item name="pam_motion_runners" type="id" />
 </resources>

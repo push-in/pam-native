@@ -518,7 +518,10 @@ internal class PamModalHost @JvmOverloads constructor(
 
     private fun focusModalContent(modal: Dialog) {
         content.post {
-            if (dialog === modal && modal.isShowing) {
+            // An auto-focused input that already took focus keeps it: moving
+            // focus to the first focusable (a header button) would drop the
+            // keyboard it is opening.
+            if (dialog === modal && modal.isShowing && (focusKeyboard || content.findFocus() == null)) {
                 val focus = if (focusKeyboard) {
                     content.findFirstEditText()
                 } else {
@@ -713,6 +716,10 @@ internal class PamModalHost @JvmOverloads constructor(
         repeat(content.childCount) { index ->
             val child = content.getChildAt(index)
             if (child === handle) return@repeat
+            // Full-screen content is placed by the renderer from its engine
+            // frames (windowSizedModalChildPlacement): forcing MATCH_PARENT
+            // here stretched a short bottom-anchored child over the window.
+            if (usesWindowSizedContent()) return@repeat
             child.layoutParams = modalChildLayoutParams(presentation, sheetHeight)
             if (!sheetAnimating) child.translationY = keyboardTranslation
         }
