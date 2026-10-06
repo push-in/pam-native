@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.13.3 - 2026-10-05
+
+- Android: `autoFocus` on an input inside a presented BottomSheet opens the
+  keyboard on Android 11-14 (Zé's "Editar mensagem" on a Galaxy S10, where
+  1.13.1 still issued no show request). The interactive sheet window keeps
+  `adjustNothing` with an unspecified soft-input state, so the system never
+  shows the IME when the window gains focus, and a request made before the
+  IME serves the remounted input is dropped by the client. While an
+  `autoFocus` input is pending, its modal window now asks for
+  `SOFT_INPUT_STATE_ALWAYS_VISIBLE` (the platform itself shows the IME for
+  the focused editor on focus gain) until the IME is visible (4 s at most);
+  the input asks again as soon as the IME creates its input connection; and
+  focus/keyboard retries are bounded by wall-clock time (3 s), not by attempt
+  counts that a long UI-thread frame could burn in one burst.
+- `PamAutoFocus` logcat lines (focus gave up, waiting for window focus,
+  connection created, show issued, IME visible) trace the path on devices.
+- `PamSheetKeyboardInstrumentedTest`: Zé's flow (kept sheet presented under
+  a closing transparent overlay, multiline natively-synced input remounted
+  with a new key and `autoFocus`, a 1.2 s UI-thread stall), passing on an
+  Android 12 (API 31) emulator with three-button navigation.
+
 ## 1.13.2 - 2026-10-05
 
 Zé Chat cold start on Android: a `position: absolute; top: -200px` child of
