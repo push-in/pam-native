@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.19.1 - 2026-10-06
+
+Inline icon images (`data:image/*`, the masks behind an app's icon
+component) paint in the frame that lays them out and can no longer vanish.
+In Zé Chat on a Galaxy S10 (Android 12), the tab bar "Buscar" magnifier, the
+Inbox search field magnifier and the ▶ badge of explore videos sometimes
+stayed blank until the screen was rebuilt, and a reopened Profile painted its
+first frame with no icons at all.
+
+- Cause (Android): a decode was shared through
+  `ConcurrentHashMap.computeIfAbsent` and removed itself from the map in its
+  completion stage. A tiny inline decode on the idle inline lane can finish
+  before `computeIfAbsent` returns; the completion stage then runs inside the
+  map update, `remove()` throws "Recursive update", and the future stored for
+  that key is already failed and never removed. While the bitmap stayed in
+  memory the 32 ms retry hid it; once photos evicted it (inline glyphs shared
+  the 32 MiB photo cache), every later load of that key (same source, same
+  64 px bucket: the 22 dp tab magnifier and the 20 dp field magnifier share
+  one) failed through the poisoned future, and after two retries the image
+  stayed empty for good.
+- Android: one load per decoded key is registered with `putIfAbsent` before
+  its work starts and unregisters itself by identity when it completes, on
+  any thread (`InFlightImageLoads`); a failed load is never reused. Inline
+  sources up to 16 KiB decode synchronously on the UI thread in the layout
+  pass (well under a millisecond for an icon mask), so an icon is in the
+  first frame like a font glyph; they live in their own 4 MiB memory cache,
+  which photos cannot evict and only a critical memory trim clears.
+- iOS: `data:image/*` sources were not decoded at all (the image stayed
+  empty) and `tintColor` on `<Image>` was ignored. Inline images now decode
+  synchronously into their own cache (`PamInlineImages`), and `tintColor`
+  renders the bitmap as a template in that color (Android `imageTintList`).
+  Uncompiled on this release host; listed in `docs/ios-parity.md` for Mac
+  validation.
+- Tests: `InFlightImageLoadsTest` (a load finishing before `share` returns,
+  a failed load, a throwing start, a shared pending load, the synchronous
+  inline threshold) with `NativeImagePriorityTest`; XCTest
+  `PamInlineImageTests`. Verified on the Galaxy S10 with Zé Chat: the
+  reopened Profile, the tab bar and the Inbox paint every icon in their
+  first frame.
+
 ## 1.19.0 - 2026-10-06
 
 The Android and iOS PHP runtimes have neither ext-sodium nor ext-openssl, yet
