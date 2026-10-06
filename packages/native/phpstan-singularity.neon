@@ -29,6 +29,9 @@ parameters:
     treatPhpDocTypesAsCertain: true
     reportUnmatchedIgnoredErrors: true
     scanFiles:
+        - src/Crypto.php
+        - src/CryptoBackend.php
+        - src/CryptoUnavailableException.php
         - src/State.php
         - src/UserInterfaceAppearance.php
         - src/Internal/Runtime.php

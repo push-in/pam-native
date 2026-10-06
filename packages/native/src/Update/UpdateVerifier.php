@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Pam\Native\Update;
 
 use JsonException;
+use Pam\Native\Crypto;
+use Pam\Native\CryptoUnavailableException;
 use Pam\Native\Protocol;
 use Throwable;
 
@@ -41,9 +43,15 @@ final class UpdateVerifier
 
         $signature = base64_decode($signatureBase64, true);
         $publicKey = base64_decode($publicKeyBase64, true);
-        if (!is_string($signature) || strlen($signature) !== SODIUM_CRYPTO_SIGN_BYTES
-            || !is_string($publicKey) || strlen($publicKey) !== SODIUM_CRYPTO_SIGN_PUBLICKEYBYTES
-            || !sodium_crypto_sign_verify_detached($signature, $manifestJson, $publicKey)) {
+        try {
+            // libsodium when loaded, the Android/iOS host otherwise (the mobile
+            // PHP runtimes have no ext-sodium); identical decisions.
+            $verified = is_string($signature) && is_string($publicKey)
+                && Crypto::ed25519Verify($signature, $manifestJson, $publicKey);
+        } catch (CryptoUnavailableException $error) {
+            return new UpdateDecision(UpdateDecisionStatus::InvalidSignature, $error->getMessage());
+        }
+        if (!$verified) {
             return new UpdateDecision(UpdateDecisionStatus::InvalidSignature, 'Update signature verification failed.');
         }
         if ($manifest->abiVersion !== Protocol::ABI_VERSION || !Protocol::supports($manifest->protocolVersion)

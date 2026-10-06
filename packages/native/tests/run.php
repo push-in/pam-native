@@ -7741,5 +7741,6 @@ require __DIR__.'/prebuilt_components.php';
 require __DIR__.'/gesture_scope.php';
 require __DIR__.'/mbstring_polyfill.php';
 require __DIR__.'/runtime_audit.php';
+require __DIR__.'/native_crypto.php';
 
 echo "Pam Native PHP SDK tests passed.\n";
