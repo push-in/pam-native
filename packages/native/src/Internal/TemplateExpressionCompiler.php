@@ -27,6 +27,9 @@ final class TemplateExpressionCompiler
     private int $temporaries = 0;
     private bool $usesMissing = false;
 
+    /** @var array<string, true> literal string/int codes (valid array keys) */
+    private array $keyLiterals = [];
+
     /** @var list<string> */
     private array $statements = [];
 
@@ -347,7 +350,12 @@ final class TemplateExpressionCompiler
             $code .= '.0';
         }
 
-        return '('.$code.')';
+        $code = '('.$code.')';
+        if (is_string($value) || is_int($value)) {
+            $this->keyLiterals[$code] = true;
+        }
+
+        return $code;
     }
 
     private function arrayLiteral(): string
@@ -359,7 +367,9 @@ final class TemplateExpressionCompiler
             while (true) {
                 $first = $this->ternary();
                 if ($this->take(T_DOUBLE_ARROW)) {
-                    $this->emit("if (!is_string({$first}) && !is_int({$first})) { throw new \\RuntimeException('Template array keys must be strings or integers.'); }");
+                    if (!isset($this->keyLiterals[$first])) {
+                        $this->emit("if (!is_string({$first}) && !is_int({$first})) { throw new \\RuntimeException('Template array keys must be strings or integers.'); }");
+                    }
                     $second = $this->ternary();
                     $this->emit("{$result}[{$first}] = {$second};");
                 } else {
@@ -397,22 +407,12 @@ final class TemplateExpressionCompiler
 
     private function variable(string $name): string
     {
-        $lenient = $this->coalescingDepth > 0;
+        $lenient = $this->coalescingDepth > 0 ? 'true' : 'false';
         $result = $this->temporary();
         $quoted = var_export($name, true);
         $runtime = self::RUNTIME;
-        $notInitialized = var_export("Template property \${$name} is not initialized.", true);
-        $undefined = var_export("Template expression \${$name} is undefined.", true);
-        $otherwise = $lenient
-            ? "{$result} = {$this->missing()};"
-            : "throw new \\RuntimeException({$undefined});";
         $this->emit(
-            "if (array_key_exists({$quoted}, \$data)) { {$result} = \$data[{$quoted}]; }"
-            ." elseif (\$scope !== null && property_exists(\$scope, {$quoted})) {"
-            ." \$p = {$runtime}::__pamProperty(\$scope, {$quoted});"
-            ." if (!\$p->isInitialized(\$scope)) { throw new \\RuntimeException({$notInitialized}); }"
-            ." {$result} = \$p->getValue(\$scope); }"
-            ." else { {$otherwise} }",
+            "{$result} = array_key_exists({$quoted}, \$data) ? \$data[{$quoted}] : {$runtime}::__pamVariable(\$scope, {$quoted}, {$lenient});",
         );
         $this->postfix($result);
 
@@ -421,7 +421,7 @@ final class TemplateExpressionCompiler
 
     private function postfix(string $value): void
     {
-        $lenient = $this->coalescingDepth > 0;
+        $lenient = $this->coalescingDepth > 0 ? 'true' : 'false';
         $runtime = self::RUNTIME;
 
         while (true) {
@@ -432,36 +432,49 @@ final class TemplateExpressionCompiler
                 }
                 $this->position++;
                 $step = var_export($segment['text'], true);
-                $unresolved = var_export("Cannot resolve template property {$segment['text']}.", true);
-                $missing = $this->missing();
-                $otherwise = $lenient
-                    ? "{$value} = {$missing};"
-                    : "throw new \\RuntimeException({$unresolved});";
                 $this->emit(
-                    "if ({$value} === {$missing}) { }"
-                    ." elseif (is_array({$value}) && array_key_exists({$step}, {$value})) { {$value} = {$value}[{$step}]; }"
-                    ." elseif (is_object({$value}) && property_exists({$value}, {$step})) { {$value} = {$runtime}::__pamProperty({$value}, {$step})->getValue({$value}); }"
-                    ." else { {$otherwise} }",
+                    "{$value} = is_array({$value}) && array_key_exists({$step}, {$value}) ? {$value}[{$step}] : {$runtime}::__pamPropertyStep({$value}, {$step}, {$lenient});",
                 );
                 continue;
             }
             if ($this->take('[')) {
+                $constant = $this->constantIndex();
+                if ($constant !== null) {
+                    $this->emit(
+                        "{$value} = is_array({$value}) && array_key_exists({$constant}, {$value}) ? {$value}[{$constant}] : {$runtime}::__pamIndex({$value}, {$constant}, {$lenient});",
+                    );
+                    continue;
+                }
                 $index = $this->ternary();
                 $this->expect(']');
-                $missing = $this->missing();
-                $failure = $lenient
-                    ? "if (is_string({$index}) || is_int({$index})) { {$value} = {$missing}; } else { throw new \\RuntimeException('Cannot resolve template array index.'); }"
-                    : "throw new \\RuntimeException('Cannot resolve template array index.');";
                 $this->emit(
-                    "if ({$value} !== {$missing}) {"
-                    ." if ((!is_string({$index}) && !is_int({$index})) || !is_array({$value}) || !array_key_exists({$index}, {$value})) { {$failure} }"
-                    ." else { {$value} = {$value}[{$index}]; } }",
+                    "{$value} = is_array({$value}) && (is_int({$index}) || is_string({$index})) && array_key_exists({$index}, {$value}) ? {$value}[{$index}] : {$runtime}::__pamIndex({$value}, {$index}, {$lenient});",
                 );
                 continue;
             }
 
             return;
         }
+    }
+
+    /** A literal string or integer index followed by "]", consumed; otherwise null. */
+    private function constantIndex(): ?string
+    {
+        $token = $this->tokens[$this->position] ?? null;
+        $next = $this->tokens[$this->position + 1] ?? null;
+        if ($token === null || ($next['type'] ?? null) !== ']') {
+            return null;
+        }
+        if ($token['type'] === T_CONSTANT_ENCAPSED_STRING) {
+            $value = TemplateExpression::__pamStringLiteral($token['text']);
+        } elseif ($token['type'] === T_LNUMBER) {
+            $value = (int) str_replace('_', '', $token['text']);
+        } else {
+            return null;
+        }
+        $this->position += 2;
+
+        return var_export($value, true);
     }
 
     private function staticEnumCase(string $name): string

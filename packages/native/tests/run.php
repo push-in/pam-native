@@ -7737,5 +7737,6 @@ require __DIR__.'/gestures_animations.php';
 require __DIR__.'/error_reporting.php';
 require __DIR__.'/conditional_identity.php';
 require __DIR__.'/expression_codegen.php';
+require __DIR__.'/prebuilt_components.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

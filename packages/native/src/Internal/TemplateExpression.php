@@ -255,6 +255,62 @@ final class TemplateExpression
         return self::invoke($name, $builtIn, $arguments, $scope);
     }
 
+    /** @internal A variable missing from the render data: component property or missing. */
+    public static function __pamVariable(?object $scope, string $name, bool $lenient): mixed
+    {
+        if ($scope !== null && property_exists($scope, $name)) {
+            $property = self::property($scope, $name);
+            if (!$property->isInitialized($scope)) {
+                throw new RuntimeException("Template property \${$name} is not initialized.");
+            }
+
+            return $property->getValue($scope);
+        }
+        if ($lenient) {
+            return self::missing();
+        }
+
+        throw new RuntimeException("Template expression \${$name} is undefined.");
+    }
+
+    /** @internal Property step that is not a plain array key. */
+    public static function __pamPropertyStep(mixed $value, string $step, bool $lenient): mixed
+    {
+        $missing = self::missing();
+
+        return match (true) {
+            $value === $missing => $missing,
+            is_array($value) && array_key_exists($step, $value) => $value[$step],
+            is_object($value) && property_exists($value, $step) =>
+                self::property($value, $step)->getValue($value),
+            $lenient => $missing,
+            default => throw new RuntimeException(
+                "Cannot resolve template property {$step}.",
+            ),
+        };
+    }
+
+    /** @internal Index step that is not a present array key. */
+    public static function __pamIndex(mixed $value, mixed $index, bool $lenient): mixed
+    {
+        $missing = self::missing();
+        if ($value === $missing) {
+            return $missing;
+        }
+        if (
+            (!is_string($index) && !is_int($index))
+            || !is_array($value)
+            || !array_key_exists($index, $value)
+        ) {
+            if ($lenient && (is_string($index) || is_int($index))) {
+                return $missing;
+            }
+            throw new RuntimeException('Cannot resolve template array index.');
+        }
+
+        return $value[$index];
+    }
+
     /** @internal */
     public static function __pamEnumCase(string $name, string $caseName, ?object $scope): mixed
     {

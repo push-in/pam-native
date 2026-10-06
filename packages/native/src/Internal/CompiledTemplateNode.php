@@ -66,7 +66,11 @@ final class CompiledTemplateNode
         ];
     }
 
-    public static function hydrate(mixed $raw): ?self
+    /**
+     * @param string|null $source replaces every node's source (relocated
+     *        bundle caches store project-relative paths)
+     */
+    public static function hydrate(mixed $raw, ?string $source = null): ?self
     {
         if (!is_array($raw)) {
             return null;
@@ -75,7 +79,7 @@ final class CompiledTemplateNode
         $name = $raw['name'] ?? null;
         $attributes = $raw['attributes'] ?? null;
         $children = $raw['children'] ?? null;
-        $source = $raw['source'] ?? null;
+        $nodeSource = $raw['source'] ?? null;
         $line = $raw['line'] ?? null;
         $column = $raw['column'] ?? null;
         $value = $raw['value'] ?? '';
@@ -84,7 +88,7 @@ final class CompiledTemplateNode
             || !is_string($name)
             || !is_array($attributes)
             || !is_array($children)
-            || !is_string($source)
+            || !is_string($nodeSource)
             || !is_int($line)
             || !is_int($column)
             || !is_string($value)
@@ -100,10 +104,10 @@ final class CompiledTemplateNode
 
             $safeAttributes[$key] = $attribute;
         }
-        $node = new self($kind, $name, $safeAttributes, $source, $line, $column, $value);
+        $node = new self($kind, $name, $safeAttributes, $source ?? $nodeSource, $line, $column, $value);
 
         foreach ($children as $child) {
-            $hydrated = self::hydrate($child);
+            $hydrated = self::hydrate($child, $source);
 
             if ($hydrated === null) {
                 return null;

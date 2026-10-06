@@ -147,6 +147,13 @@ final class PamPhpCompiler
             .DIRECTORY_SEPARATOR.$cacheKey.'.json';
         $sourceFingerprint = hash('xxh128', $contents);
 
+        // Components compiled into the application bundle at build time
+        // (relative identities, fingerprint-validated) need no compilation.
+        $prebuilt = self::prebuiltComponent($source, $sourceFingerprint);
+        if ($prebuilt !== null) {
+            return $prebuilt;
+        }
+
         // Boot fast path: an unchanged source (and unchanged stylesheets it
         // pulled in) reuses its compiled identity without tokenizing the
         // component again; the template tree is decoded on first render.
@@ -219,6 +226,7 @@ final class PamPhpCompiler
                 );
             }
             self::writeAtomic($templateFile, $encodedTree."\n");
+            self::writeExpressions(self::expressionsFile($templateFile), $tree);
             self::writeMetadata($metadataFile, $source, $hash, $className, $tag, $language, $fingerprint);
         }
 
@@ -322,17 +330,18 @@ final class PamPhpCompiler
         );
     }
 
-    private static function lazyTemplate(string $templateFile, string $source): CompiledTemplateNode
+    private static function lazyTemplate(string $templateFile, string $source, bool $relocated = false): CompiledTemplateNode
     {
         return (new ReflectionClass(CompiledTemplateNode::class))->newLazyProxy(
-            static function () use ($templateFile, $source): CompiledTemplateNode {
+            static function () use ($templateFile, $source, $relocated): CompiledTemplateNode {
+                TemplateExpressionCatalog::load(self::expressionsFile($templateFile));
                 try {
                     $tree = CompiledTemplateNode::hydrate(json_decode(
                         (string) file_get_contents($templateFile),
                         true,
                         512,
                         JSON_THROW_ON_ERROR,
-                    ));
+                    ), $relocated ? $source : null);
                 } catch (JsonException $error) {
                     throw new RuntimeException("PAM component cache for {$source} is corrupt.", previous: $error);
                 }
@@ -343,6 +352,266 @@ final class PamPhpCompiler
                 return $tree;
             },
         );
+    }
+
+    private static function expressionsFile(string $templateFile): string
+    {
+        return substr($templateFile, 0, -strlen('.template.json')).'.expressions.php';
+    }
+
+    private static function writeExpressions(string $file, CompiledTemplateNode $tree): void
+    {
+        try {
+            self::writeAtomic($file, TemplateExpressionCatalog::source($tree));
+        } catch (RuntimeException) {
+            // Expressions still compile on first use.
+        }
+    }
+
+    /**
+     * Directory of the components precompiled into the application bundle,
+     * relative to the project root (the directory holding composer.json).
+     */
+    public const PREBUILT_DIRECTORY = 'pam-prebuilt/components';
+
+    /** @var array<string, ?string> project root per component directory */
+    private static array $projectRoots = [];
+
+    /** @var array<string, bool> */
+    private static array $prebuiltDirectories = [];
+
+    private static function projectRoot(string $component): ?string
+    {
+        $directory = dirname($component);
+        if (array_key_exists($directory, self::$projectRoots)) {
+            return self::$projectRoots[$directory];
+        }
+        $root = null;
+        $cursor = $directory;
+        while (true) {
+            if (is_file($cursor.DIRECTORY_SEPARATOR.'composer.json')) {
+                $root = $cursor;
+                break;
+            }
+            $parent = dirname($cursor);
+            if ($parent === $cursor) {
+                break;
+            }
+            $cursor = $parent;
+        }
+        if (count(self::$projectRoots) >= 1024) {
+            self::$projectRoots = [];
+        }
+
+        return self::$projectRoots[$directory] = $root;
+    }
+
+    private static function relativeTo(string $root, string $path): ?string
+    {
+        $prefix = rtrim($root, DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR;
+
+        return str_starts_with($path, $prefix) ? substr($path, strlen($prefix)) : null;
+    }
+
+    /**
+     * A bundle-precompiled component whose source and stylesheets still have
+     * the fingerprints recorded at build time, or null.
+     */
+    private static function prebuiltComponent(string $source, string $sourceFingerprint): ?PamPhpComponent
+    {
+        $root = self::projectRoot($source);
+        if ($root === null) {
+            return null;
+        }
+        $directory = $root.DIRECTORY_SEPARATOR.self::PREBUILT_DIRECTORY;
+        if (!(self::$prebuiltDirectories[$directory] ??= is_dir($directory))) {
+            return null;
+        }
+        $relative = self::relativeTo($root, $source);
+        if ($relative === null) {
+            return null;
+        }
+        $key = hash('sha256', str_replace(DIRECTORY_SEPARATOR, '/', $relative));
+        $base = $directory.DIRECTORY_SEPARATOR.$key;
+        $encoded = @file_get_contents($base.'.json');
+        if ($encoded === false) {
+            return null;
+        }
+        try {
+            $metadata = json_decode($encoded, true, 16, JSON_THROW_ON_ERROR);
+        } catch (JsonException) {
+            return null;
+        }
+        if (
+            !is_array($metadata)
+            || ($metadata['version'] ?? null) !== self::CACHE_VERSION
+            || ($metadata['relocatable'] ?? null) !== true
+            || ($metadata['sourceFingerprint'] ?? null) !== $sourceFingerprint
+            || ($metadata['strict'] ?? null) !== BuildConfiguration::strict()
+            || !is_string($metadata['class'] ?? null)
+            || !is_string($metadata['tag'] ?? null)
+            || !is_int($metadata['language'] ?? null)
+            || !is_array($metadata['dependencies'] ?? null)
+            || !array_key_exists('appStyle', $metadata)
+        ) {
+            return null;
+        }
+        $appStyle = self::appStylePath($source);
+        $relativeAppStyle = $appStyle === null ? null : self::relativeTo($root, $appStyle);
+        if ($relativeAppStyle !== null) {
+            $relativeAppStyle = str_replace(DIRECTORY_SEPARATOR, '/', $relativeAppStyle);
+        }
+        if ($metadata['appStyle'] !== $relativeAppStyle) {
+            return null;
+        }
+        $language = LanguageVersion::tryFrom($metadata['language']);
+        if ($language === null || ($metadata['uiIr'] ?? null) !== UiIr::manifest($language)) {
+            return null;
+        }
+        foreach ($metadata['dependencies'] as $dependency => $fingerprint) {
+            $path = $root.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, (string) $dependency);
+            if (self::dependencyFingerprint($path) !== $fingerprint) {
+                return null;
+            }
+        }
+        $classFile = $base.'.class.php';
+        $templateFile = $base.'.template.json';
+        if (!is_file($classFile) || !is_file($templateFile)) {
+            return null;
+        }
+
+        return new PamPhpComponent(
+            className: $metadata['class'],
+            tag: $metadata['tag'],
+            source: $source,
+            classFile: $classFile,
+            template: self::lazyTemplate($templateFile, $source, true),
+            language: $language,
+        );
+    }
+
+    /**
+     * Precompiles every component under $sourcePath into the relocatable
+     * bundle cache of $projectRoot (PREBUILT_DIRECTORY): class, template and
+     * expression files keyed by project-relative source path, with metadata
+     * whose stylesheet dependencies are project-relative too.
+     *
+     * @return int number of components written
+     */
+    public static function prebuild(string $projectRoot, string $sourcePath): int
+    {
+        $root = realpath($projectRoot);
+        if ($root === false || !is_file($root.DIRECTORY_SEPARATOR.'composer.json')) {
+            throw new RuntimeException("PAM prebuild root {$projectRoot} is not a Composer project.");
+        }
+        $output = $root.DIRECTORY_SEPARATOR.self::PREBUILT_DIRECTORY;
+        $staging = sys_get_temp_dir().DIRECTORY_SEPARATOR.'pam-prebuild-'.bin2hex(random_bytes(8));
+        if (is_dir($output)) {
+            self::removeTree($output);
+        }
+        try {
+            $components = self::compileDirectory($sourcePath, $staging);
+            if (!is_dir($output) && !mkdir($output, 0o755, true) && !is_dir($output)) {
+                throw new RuntimeException("Cannot create PAM prebuild directory {$output}.");
+            }
+            foreach ($components as $component) {
+                $relative = self::relativeTo($root, $component->source);
+                if ($relative === null) {
+                    continue;
+                }
+                $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+                $compiledBase = substr($component->classFile, 0, -strlen('.class.php'));
+                $metadata = json_decode(
+                    (string) file_get_contents($compiledBase.'.json'),
+                    true,
+                    16,
+                    JSON_THROW_ON_ERROR,
+                );
+                if (!is_array($metadata)) {
+                    throw new RuntimeException("Invalid compiled metadata for {$component->source}.");
+                }
+                $dependencies = [];
+                foreach ((array) ($metadata['dependencies'] ?? []) as $dependency => $fingerprint) {
+                    $dependencyRelative = self::relativeTo($root, (string) $dependency);
+                    if ($dependencyRelative === null) {
+                        // Stylesheets outside the bundle cannot be validated on device.
+                        continue 2;
+                    }
+                    $dependencies[str_replace(DIRECTORY_SEPARATOR, '/', $dependencyRelative)] = $fingerprint;
+                }
+                $appStyle = $metadata['appStyle'] ?? null;
+                if (is_string($appStyle)) {
+                    $appStyle = self::relativeTo($root, $appStyle);
+                    if ($appStyle === null) {
+                        continue;
+                    }
+                    $appStyle = str_replace(DIRECTORY_SEPARATOR, '/', $appStyle);
+                }
+                $metadata['appStyle'] = $appStyle;
+                $metadata['dependencies'] = $dependencies;
+                $metadata['relocatable'] = true;
+                $base = $output.DIRECTORY_SEPARATOR.hash('sha256', $relative);
+                $template = self::bundleTemplate(
+                    (string) file_get_contents($compiledBase.'.template.json'),
+                    $root,
+                );
+                self::writeAtomic($base.'.class.php', (string) file_get_contents($component->classFile));
+                self::writeAtomic($base.'.template.json', $template);
+                self::writeExpressions($base.'.expressions.php', $component->template);
+                self::writeAtomic($base.'.json', json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n");
+            }
+
+            self::$prebuiltDirectories = [];
+
+            return count(glob($output.DIRECTORY_SEPARATOR.'*.class.php') ?: []);
+        } finally {
+            if (is_dir($staging)) {
+                self::removeTree($staging);
+            }
+        }
+    }
+
+    /**
+     * The runtime form of a compiled template: style IR, bytecode, source
+     * maps and compatibility reports serve tooling only, and diagnostic
+     * paths become project-relative (node sources are restored to the
+     * installed location when hydrated).
+     */
+    private static function bundleTemplate(string $encoded, string $root): string
+    {
+        $tree = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
+        if (is_array($tree) && is_string($tree['attributes']['__pamStyles'] ?? null)) {
+            $styles = json_decode($tree['attributes']['__pamStyles'], true, 512, JSON_THROW_ON_ERROR);
+            if (is_array($styles)) {
+                unset(
+                    $styles['styleIr'],
+                    $styles['styleBytecode'],
+                    $styles['styleSourceMap'],
+                    $styles['styleCompatibility'],
+                );
+                $tree['attributes']['__pamStyles'] = json_encode(
+                    $styles,
+                    JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
+                );
+            }
+            $encoded = json_encode($tree, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n";
+        }
+
+        return str_replace($root.DIRECTORY_SEPARATOR, '', $encoded);
+    }
+
+    private static function removeTree(string $directory): void
+    {
+        foreach (new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($directory, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        ) as $entry) {
+            if (!$entry instanceof SplFileInfo) {
+                continue;
+            }
+            $entry->isDir() && !$entry->isLink() ? rmdir($entry->getPathname()) : unlink($entry->getPathname());
+        }
+        rmdir($directory);
     }
 
     private static function dependencyFingerprint(string $path): ?string
