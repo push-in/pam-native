@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.19.0 - 2026-10-06
+
+The Android and iOS PHP runtimes have neither ext-sodium nor ext-openssl, yet
+the SDK called them directly: `Update\UpdateVerifier` (Ed25519 signature of
+signed OTA manifests) and `LocalFirst\EncryptedJournal` (AES-256-GCM) died
+with "Call to undefined function" on the device only. Both now go through
+`Pam\Native\Crypto`, which the native host backs on Android and iOS with the
+same bytes and decisions as libsodium and OpenSSL.
+
+- PHP SDK: `Pam\Native\Crypto::ed25519Verify()`, `aes256GcmEncrypt()`
+  (ciphertext . 16-byte tag) and `aes256GcmDecrypt()` (null when not
+  authentic). ext-sodium/ext-openssl are used when loaded (desktop, server,
+  tests); otherwise the host function `pam_native_crypto()`. With neither
+  (a device host older than 1.19.0) they throw `CryptoUnavailableException`:
+  `UpdateVerifier` refuses the update with `InvalidSignature`, and
+  `EncryptedJournal` throws. Envelopes and signatures are unchanged: a journal
+  sealed on desktop opens on a device and back.
+- Android: `PamCrypto.kt` behind `PamRuntime.onNativeCrypto` (JNI, synchronous
+  on the PHP worker). AES-256-GCM through the platform JCA/Conscrypt;
+  Ed25519 verified in Kotlin on every API level with libsodium's rules
+  (canonical S, no small-order R or public key, canonical public key,
+  cofactorless equation); the platform Ed25519 (API 33+) skips the
+  small-order checks, so it is not used. The 76 vectors take 235-291 ms on
+  x86_64 emulators (under 10 ms per full verification). R8 keeps the callback.
+- iOS: `PamCrypto.swift` installs the provider from `PamRuntime`: CryptoKit
+  `AES.GCM`, and `Curve25519.Signing` after libsodium's encoding checks.
+  Uncompiled here (Linux); `PamCryptoTests` to run on a Mac
+  (`docs/ios-parity.md`).
+- Why not compile the extensions: measured with the runtime's NDK flags,
+  libsodium 1.0.20 is +267 KB (arm64-v8a) / +406 KB (x86_64) of code per ABI
+  before ext-sodium's glue and its AES-256-GCM needs ARMv8 Crypto/AES-NI;
+  OpenSSL 3.5's libcrypto is +4.2 MB per ABI. Either also needs a new PAM
+  runtime and an iOS XCFramework rebuilt on a Mac.
+- CLI: the extension audit now scans the SDK like any package (its own
+  sources are clean and `tests/runtime_audit.php` keeps them so) and names the
+  device-ready replacement in findings, e.g. `sodium_crypto_sign_verify_detached()`
+  → `Pam\Native\Crypto::ed25519Verify()`, `openssl_encrypt()` →
+  `aes256GcmEncrypt()`, `sodium_bin2hex()` → `bin2hex()`.
+- Not covered: `Store\EncryptedStatePersistence` (XSalsa20-Poly1305
+  secretbox) still requires ext-sodium and throws on the device, as before.
+  HMAC/HKDF need nothing: `hash_hmac()`/`hash_hkdf()` are core.
+- Tests: `tests/Fixtures/crypto-vectors.json` (`scripts/generate-crypto-vectors.php`:
+  RFC 8032, GCM spec case 16, 76 Ed25519 and 48 AES-256-GCM vectors including
+  S + L, every small-order encoding with and without the sign bit,
+  non-canonical and off-curve keys, and mixed-order keys that separate
+  cofactored from cofactorless verification) is replayed by
+  `tests/native_crypto.php` (extensions, a fake of the host function, seeded
+  random cross-checks, journal and OTA interop, fail-closed paths), the
+  Android JVM test `PamCryptoTest`, the instrumented `NativeCryptoInstrumentedTest`
+  and `NativeCryptoBridgeInstrumentedTest` (PHP → JNI → Kotlin through the
+  real runtime) and the iOS `PamCryptoTests`. `tests/device/crypto_runtime.php`
+  runs inside the Android PHP runtime. Passing on Android 8.0 (API 26) and
+  Android 16 (API 36) x86_64 emulators.
+
 ## 1.18.0 - 2026-10-06
 
 First launch after installing or updating an Android app: the PHP bundle is
