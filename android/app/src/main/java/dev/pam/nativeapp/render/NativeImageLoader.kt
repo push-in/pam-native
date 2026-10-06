@@ -851,6 +851,10 @@ internal class NativeImageLoader(
         ) {
             "Unsupported image format."
         }
+        // Starts the GPU texture upload now, on the RenderThread, instead of
+        // inside the frame that first draws the image: a 1080x2042 feed photo
+        // spent 8.5 ms of a scroll frame in "Texture upload" on the S10.
+        bitmap.prepareToDraw()
         return DecodedBitmap(
             bitmap,
             bounds.outWidth,
