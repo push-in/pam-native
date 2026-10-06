@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.13.2 - 2026-10-05
+
+Zé Chat cold start on Android: a `position: absolute; top: -200px` child of
+the root crashed every launch.
+
+- Protocol: a layout frame's origin may be any finite value. CSS offsets and
+  negative margins (`top: -200px`, `left: -34px`, `margin-top: -14px`) put a
+  box outside its parent; only `width`/`height` must be finite and
+  non-negative. The Android decoder read all four values as non-negative and
+  threw `ProtocolException("Layout value must be finite and non-negative")`;
+  the iOS decoder had the same rule ("Invalid layout value"). Both now read
+  origins as finite coordinates and sizes as finite non-negative extents.
+- Rust: `Layout::is_valid()`/`sanitized()`. The layout engine sanitizes every
+  frame it emits (negative origins are kept), the encoder refuses an invalid
+  frame and `decode_batch` rejects one (`ProtocolError::InvalidLayout`).
+  `PROTOCOL.md` documents the rule.
+- Android: a rejected batch no longer cascades into "Node N cannot contain
+  children". The engine had already retained the dropped batch, so later
+  patches targeted nodes the host never created. The runtime now replays the
+  retained tree: a rejected batch, or a commit that throws part-way, clears
+  the renderer (`PamRenderer.resetTree()`) and applies a full remount. A
+  failing remount is reported and not retried.
+- iOS: a rejected batch replays the retained tree onto a fresh renderer on
+  the same host view.
+- Tests: one golden negative-origin batch pinned by Rust, Android and iOS;
+  invalid frames (NaN/infinite origins, negative/infinite sizes) rejected on
+  all three; engine negative offsets and margins; instrumented negative-origin
+  mount and reset + remount of a half-applied tree.
+
 ## 1.13.1 - 2026-10-05
 
 Zé Chat device QA on 1.12.2 (Galaxy S10, Android 12).
