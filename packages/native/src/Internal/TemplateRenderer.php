@@ -213,6 +213,9 @@ final class TemplateRenderer
 
     private static int $propertyMemoSize = 0;
 
+    /** @var array<string, ReflectionMethod> validated public component event handlers */
+    private static array $componentMethods = [];
+
     /** @var \WeakMap<Element, array<string, Element>>|null decorated component elements */
     private static ?\WeakMap $decorations = null;
 
@@ -1277,6 +1280,30 @@ final class TemplateRenderer
             $entry = null;
         } else {
             $checkedBinding = null;
+        }
+        if (
+            $entry !== null
+            && $factory !== null
+            && $plan !== null
+            && $planNode !== null
+            && $plan['componentFast']
+            && !$plan['bindings']
+            && TemplateRegistry::isCompiledComponent($tag)
+        ) {
+            return self::componentTag(
+                $tag,
+                $factory,
+                $planNode,
+                $plan,
+                $entry,
+                $resolvedClass,
+                $attributes,
+                $childNodes,
+                $scope,
+                $data,
+                $prepared,
+                $sheet,
+            );
         }
         if ($entry !== null && $factory === null && $plan !== null) {
             if (!array_key_exists('fast', $entry)) {
@@ -2520,6 +2547,216 @@ final class TemplateRenderer
     }
 
     /**
+     * Compiled .pam component tags (the common case inside lists): same
+     * semantics as tag() for a registered compiled component without native
+     * events, ripple or bindings.
+     *
+     * @param array<string, mixed> $plan
+     * @param array<string, mixed> $entry
+     * @param array<string, mixed> $attributes
+     * @param list<CompiledTemplateNode> $childNodes
+     * @param array<string, mixed> $data
+     * @param array<string, mixed>|null $prepared
+     */
+    private static function componentTag(
+        string $tag,
+        Closure $factory,
+        CompiledTemplateNode $planNode,
+        array $plan,
+        array $entry,
+        ?string $resolvedClass,
+        array $attributes,
+        array $childNodes,
+        ?object $scope,
+        array $data,
+        ?array $prepared,
+        mixed $sheet,
+    ): Element {
+        $values = [];
+        $evaluated = [];
+        foreach ($entry['values'] as [$name, $valueName, $mode, $payload, $remember]) {
+            $value = $mode === 0
+                ? $payload
+                : ($mode === 1
+                    ? TemplateExpression::evaluate($payload, $scope, $data)
+                    : self::value($payload, $scope, $data));
+            $values[$valueName] = $value;
+            if ($remember) {
+                $evaluated[$name] = $value;
+            }
+        }
+        if ($resolvedClass !== null) {
+            $values['className'] = $resolvedClass;
+        }
+        $values['__pamNodePath'] = $data['__pamNodePath'] ?? $tag;
+        $componentValues = array_intersect_key($values, $plan['declaredNames'] + self::COMPONENT_CONTEXT_VALUES);
+
+        $componentEvents = [];
+        foreach ($attributes as $name => $raw) {
+            if (!str_starts_with($name, '@')) {
+                continue;
+            }
+            if (!is_string($raw) && !is_bool($raw)) {
+                throw new RuntimeException("Invalid component event expression {$name}.");
+            }
+            $event = substr($name, 1);
+            if (
+                $event === ''
+                || preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/D', $event)
+                    !== 1
+            ) {
+                throw new RuntimeException(
+                    "Invalid component event {$name}.",
+                );
+            }
+            $componentEvents[$event] = self::componentHandler($raw, $scope, $data);
+        }
+
+        $inheritedChildStyles = [];
+        foreach (self::INHERITED_STYLE_ATTRIBUTES as $attribute) {
+            $value = $values[$attribute] ?? null;
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inheritedChildStyles[$attribute] = $value;
+            }
+        }
+        foreach ($entry['inherited'] as [$name, $attribute, $mode, $payload]) {
+            if ($mode === 0) {
+                $value = $payload;
+            } elseif (array_key_exists($name, $evaluated) && ($attributes[$name] ?? null) === $payload) {
+                $value = $evaluated[$name];
+            } else {
+                $value = $mode === 1
+                    ? self::dynamicValue($payload, $scope, $data)
+                    : self::value($payload, $scope, $data);
+            }
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inheritedChildStyles[$attribute] = $value;
+            }
+        }
+
+        $slotPlan = $plan['slots'];
+        if ($slotPlan === null) {
+            $slotPlan = self::componentSlotNodes($childNodes);
+            $planNode->pamTagPlans['f']['slots'] = $slotPlan;
+        }
+        [$defaultNodes, $slotNodes] = $slotPlan;
+        $children = [];
+        $slots = ['slot' => []];
+        if ($defaultNodes !== [] || $slotNodes !== []) {
+            $childData = $data;
+            if ($prepared === null || $prepared['usesAncestors']) {
+                $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
+                $ancestors[] = $entry['descriptor'];
+                $childData['__pamStyleAncestors'] = $ancestors;
+                $childData['__pamStyleChain'] = self::styleChain(
+                    $data['__pamStyleChain'] ?? 0,
+                    $entry['descriptorId'],
+                );
+            } else {
+                $childData['__pamStyleAncestors'] = [];
+            }
+            $childData['__pamContainerWidth'] = is_numeric($values['width'] ?? null)
+                ? (float) $values['width']
+                : ($data['__pamContainerWidth'] ?? null);
+            $childData['__pamContainerHeight'] = is_numeric($values['height'] ?? null)
+                ? (float) $values['height']
+                : ($data['__pamContainerHeight'] ?? null);
+            $childData['__pamInheritedStyles'] = $inheritedChildStyles;
+            $childData['__pamInheritedKey'] = $inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles);
+            $childData['__pamParentVariants'] = ParentVariants::extend(
+                $data['__pamParentVariants'] ?? null,
+                $componentValues,
+            );
+            $eventContexts = $data['__pamEventContexts'] ?? [];
+            $childData['__pamEventContexts'] = is_array($eventContexts) ? $eventContexts : [];
+            if ($defaultNodes !== []) {
+                foreach (self::nodes($defaultNodes, $scope, $childData) as $rendered) {
+                    if ($rendered instanceof Element) {
+                        $children[] = $rendered;
+                    }
+                }
+            }
+            $slots = ['slot' => $children];
+            foreach ($slotNodes as $slotName => $nodes) {
+                $renderedSlot = self::nodes($nodes, $scope, $childData);
+                $slotElements = array_values(array_filter(
+                    $renderedSlot,
+                    static fn (mixed $value): bool => $value instanceof Element,
+                ));
+                if (count($slotElements) !== count($renderedSlot)) {
+                    throw new RuntimeException(
+                        "Named slot {$slotName} must contain renderable elements.",
+                    );
+                }
+                $slots[$slotName] = $slotElements;
+            }
+        }
+
+        $contract = TemplateRegistry::tagContract($tag);
+        if ($contract !== null) {
+            ContractValidator::validate(
+                $contract,
+                array_filter(
+                    $componentValues,
+                    static fn (string $name): bool =>
+                        !str_starts_with($name, '__pam') && $name !== 'className',
+                    ARRAY_FILTER_USE_KEY,
+                ),
+                $slots,
+                $componentEvents,
+            );
+        }
+        $componentValues['__pamSlots'] = $slots;
+        $componentValues['__pamComponentEvents'] = $componentEvents;
+        $componentValues['__pamInheritedStyles'] = $inheritedChildStyles;
+
+        $element = $factory($componentValues, $children, $scope)->toElement();
+        self::$freshElement = null;
+
+        $decorationKey = self::decorationKey($element, $resolvedClass, $values, $sheet);
+        if ($decorationKey !== null) {
+            $decorated = (self::$decorations[$element] ?? [])[$decorationKey] ?? null;
+            if ($decorated !== null) {
+                return $decorated;
+            }
+        }
+        $undecorated = $element;
+        if ($resolvedClass !== null) {
+            $element = self::classes($element, $resolvedClass, $data);
+            $element = self::withDomClasses($element, $resolvedClass);
+        }
+        $element = self::attributes($element, $values);
+        if (
+            $decorationKey !== null
+            && ($resolvedClass === null || self::localClasses($resolvedClass, $data))
+        ) {
+            self::$decorations ??= new \WeakMap();
+            $memo = self::$decorations[$undecorated] ?? [];
+            if (count($memo) >= 8) {
+                $memo = [];
+            }
+            $memo[$decorationKey] = $element;
+            self::$decorations[$undecorated] = $memo;
+        }
+        self::$freshElement = null;
+
+        return $element;
+    }
+
+    /** Values every component receives besides its declared props. */
+    private const COMPONENT_CONTEXT_VALUES = ['className' => true, '__pamNodePath' => true];
+
+    /**
      * Static facts about one template element, derived once per node.
      *
      * @param array<string, string|bool> $attributes
@@ -2567,6 +2804,9 @@ final class TemplateRenderer
                 || isset($attributes['bind:checked']),
             'observed' => [],
             'slots' => null,
+            'componentFast' => $factory && $events === [] && $tag !== 'Animated'
+                && !array_key_exists('p-ripple', $attributes) && !array_key_exists(':p-ripple', $attributes)
+                && !array_key_exists('model', $attributes) && !array_key_exists(':model', $attributes),
         ];
     }
 
@@ -5912,16 +6152,23 @@ final class TemplateRenderer
             );
         }
         if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $raw) === 1) {
-            if (!method_exists($scope, $raw)) {
-                throw new RuntimeException(
-                    "Component event handler {$raw} does not exist.",
-                );
-            }
-            $method = new ReflectionMethod($scope, $raw);
-            if (!$method->isPublic()) {
-                throw new RuntimeException(
-                    "Component event handler {$raw} must be public.",
-                );
+            $method = self::$componentMethods[$scope::class.'::'.$raw] ?? null;
+            if ($method === null) {
+                if (!method_exists($scope, $raw)) {
+                    throw new RuntimeException(
+                        "Component event handler {$raw} does not exist.",
+                    );
+                }
+                $method = new ReflectionMethod($scope, $raw);
+                if (!$method->isPublic()) {
+                    throw new RuntimeException(
+                        "Component event handler {$raw} must be public.",
+                    );
+                }
+                if (count(self::$componentMethods) >= 4096) {
+                    self::$componentMethods = [];
+                }
+                self::$componentMethods[$scope::class.'::'.$raw] = $method;
             }
 
             return static function (mixed $payload = null) use (
