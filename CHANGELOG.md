@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.20.0 - 2026-10-06
+
+Safe areas are per presentation surface. On Android a full-screen `Modal`
+that was not `statusBarTranslucent`/`navigationBarTranslucent` showed an
+extra status-bar-tall gap at the top (and a doubled gap above the navigation
+bar): its Dialog window already starts below the status bar, and the
+`SafeAreaView` inside it padded the activity window's insets again. Zé Chat
+worked around it by making its modals translucent.
+
+- Engine: every `Modal`/`BottomSheet` is laid out on its own surface
+  (`surface.rs`). The surface viewport and the insets its `SafeAreaView`s
+  see come from the window insets and a host surface policy,
+  `pam_native_engine_set_surface_policy` (`SurfacePolicy`): `0` in-window
+  (iOS) - full-screen and dialog modals get every inset; `1` system windows
+  (Android 14 and older) - a non-translucent Dialog fits the system bars, so
+  its viewport excludes them and its insets are zero, a translucent one is
+  edge-to-edge and gets the real insets; `2` edge-to-edge windows (Android
+  15+ with target SDK 35+, where `setDecorFitsSystemWindows(true)` is
+  ignored) - every Dialog gets the real insets. Bottom sheets never get the
+  top inset (snap points resolve below the status bar), and neither does the
+  active route of a navigation `formSheet` (and, on iOS, `modal`, a page
+  sheet). `position: fixed` inside a modal now anchors to its surface.
+  Incremental layout keeps the surface insets.
+- Android: the host derives the policy from the release and target SDK
+  (`modalWindowSurfacePolicy`) and passes it to the engine before the first
+  frame. iOS: the bridge sets policy `0` explicitly.
+- Tests: Rust `surface::tests` and layout tests (fitted, translucent,
+  enforced edge-to-edge, sheets, content-sized dialogs, incremental relayout,
+  sheet routes, FFI). Android `PamSurfaceSafeAreaInstrumentedTest` lays
+  modals out with the real engine (debug-only JNI `PamEngineLayoutProbe`) and
+  shows them in real Dialog windows: on API 31 the fitted window starts at the
+  status bar and the header sits there once (it was twice); on API 36 the
+  window is edge-to-edge and the `SafeAreaView` pads once; translucent and
+  not, full screen and sheet, top and bottom. JVM `PamModalSurfacePolicyTest`.
+  XCTest `PamSurfaceSafeAreaTests` (uncompiled on this release host).
+- Apps: a translucent modal wrapped in `SafeAreaView` keeps rendering the
+  same; the translucency is no longer needed to avoid the doubled gap.
+
 ## 1.19.1 - 2026-10-06
 
 Inline icon images (`data:image/*`, the masks behind an app's icon

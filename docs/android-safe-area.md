@@ -52,7 +52,7 @@ their actual on-screen bounds.
 | Two/three-button navigation | The complete navigation-bar inset is reserved, including landscape side bars. |
 | Cutout, waterfall and rounded displays | Every non-zero safe edge is preserved and applied only where the view intersects it. |
 | Portrait, landscape and multi-window | Insets are recalculated from the current window bounds; physical display dimensions are not used for multi-window geometry. |
-| Full-screen transparent modal | The dialog uses the PAM full-screen modal theme and receives its own edge-to-edge insets. |
+| Full-screen modal and bottom sheet | Each Dialog is its own surface: a `SafeAreaView` inside it uses that window's insets (see *Per-surface safe areas*), never the activity's. |
 | IME open/close and animation | Composer movement follows geometric overlap and keeps input/button hit testing aligned throughout the transition. |
 
 This contract uses Android framework APIs instead of OEM detection and covers
@@ -136,6 +136,34 @@ fallback for every PAM safe-area consumer:
 
 The value (dp, 0–96, default 0) is used only when Android reports no bottom
 inset.
+
+## Per-surface safe areas (1.20)
+
+A `Modal` or `BottomSheet` is its own presentation surface, and a
+`SafeAreaView` inside it receives the insets of that surface, not of the
+activity window. The engine lays out every modal with the window insets and
+a host surface policy (`pam_native_engine_set_surface_policy`):
+
+| Surface | Edge the window extends under | Edge it does not extend under |
+| --- | --- | --- |
+| Android 14 and older, `statusBarTranslucent` or `navigationBarTranslucent` modal | Real inset on every edge (the Dialog is edge-to-edge) | — |
+| Android 14 and older, non-translucent modal | — | The Dialog fits the system bars: the surface viewport excludes them and every inset is zero |
+| Android 15+ (target SDK 35+) | Enforced edge-to-edge: real inset on every edge, translucent or not | — |
+| iOS `Modal` (in-window overlay) | Real inset on every edge | — |
+| Bottom sheet (any platform) | Bottom and side insets when its window reaches them | Top inset is always zero: snap points resolve below the status bar |
+| Navigation `formSheet` route (and `modal`, a page sheet, on iOS) | Bottom and side insets | Top inset is always zero |
+
+The status bar and the navigation bar are therefore cleared exactly once:
+by the window when it fits them, by `SafeAreaView` padding when it does not.
+Wrapping a non-translucent full-screen modal in `<SafeAreaView>` is correct
+on every Android release; `statusBarTranslucent` is no longer needed to avoid
+a doubled status-bar gap. Use it when the modal should draw its background
+under the status bar.
+
+`PamSurfaceSafeAreaInstrumentedTest` lays out modals with the real engine
+(debug-only `PamEngineLayoutProbe`) and shows them in real Dialog windows on
+API 31 (fitted) and API 36 (enforced edge-to-edge), translucent and not, full
+screen and sheet, top and bottom. iOS: `PamSurfaceSafeAreaTests`.
 
 ## Engine keyboard avoidance (1.12)
 
