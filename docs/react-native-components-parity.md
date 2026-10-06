@@ -31,9 +31,12 @@ $font, $size, $color)` and `Icon::has()`.
 Mark a direct child of a `ScrollView` or `VirtualizedList` with
 `stickyHeader="true"` (`Element::stickyHeader()`), the equivalent of
 `stickyHeaderIndices`: it pins to the top once scrolled past and is pushed
-away by the next sticky sibling. In a `ScrollView` the header stays
-interactive; in a `VirtualizedList` rows keep recycling and the pinned header
-is drawn from the last rendered frame.
+away by the next sticky sibling. The pinned header is a real, interactive
+view in a `ScrollView`, a `VirtualizedList` and a `VirtualGrid` (FlashList
+parity): presses, pressed state and accessibility reach it, a touch inside it
+never reaches the row scrolling underneath, and list rows keep recycling
+while it is pinned. Its native views move into the pinned holder and back, so
+their state (a horizontal tab rail offset, a focused input) is kept.
 
 ## VirtualizedList
 

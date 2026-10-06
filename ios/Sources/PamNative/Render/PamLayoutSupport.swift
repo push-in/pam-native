@@ -73,6 +73,21 @@ final class PamStickyRegistry {
         entries[ObjectIdentifier(view)] != nil
     }
 
+    /// Hit-tests the sticky children before the rows that scroll under them
+    /// (React Native / FlashList parity). `zPosition` only changes drawing
+    /// order; UIKit hit-tests subviews in array order, so a press on a
+    /// pinned header would otherwise reach the row underneath. A pinned
+    /// header owns every touch inside its bounds, including its own
+    /// non-interactive background.
+    func hitTest(_ point: CGPoint, in host: UIView, with event: UIEvent?) -> UIView? {
+        guard !entries.isEmpty else { return nil }
+        for entry in entries.values where entry.view.superview === host {
+            let local = entry.view.convert(point, from: host)
+            if let hit = entry.view.hitTest(local, with: event) { return hit }
+        }
+        return nil
+    }
+
     func update(offset: CGFloat, host: UIView) {
         guard !entries.isEmpty else { return }
         entries = entries.filter { $0.value.view.superview === host }

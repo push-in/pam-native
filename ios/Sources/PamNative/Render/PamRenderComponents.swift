@@ -239,6 +239,15 @@ final class PamAnchoredScrollView: UIScrollView {
     /// Sticky header children (`stickyHeader`).
     let pamSticky = PamStickyRegistry()
 
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if !pamSticky.isEmpty, isUserInteractionEnabled, !isHidden, alpha > 0.01,
+           self.point(inside: point, with: event),
+           let pinned = pamSticky.hitTest(point, in: self, with: event) {
+            return pinned
+        }
+        return super.hitTest(point, with: event)
+    }
+
     var primaryPageExtent: CGFloat {
         if pamSnapInterval > 0 {
             return pamSnapInterval
@@ -413,6 +422,15 @@ final class PamVirtualListView: UIScrollView {
     }
     /// Sticky header cells (`stickyHeader`).
     let pamSticky = PamStickyRegistry()
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if !pamSticky.isEmpty, isUserInteractionEnabled, !isHidden, alpha > 0.01,
+           self.point(inside: point, with: event),
+           let pinned = pamSticky.hitTest(point, in: self, with: event) {
+            return pinned
+        }
+        return super.hitTest(point, with: event)
+    }
     private var anchorOffset: CGFloat = 0
     private var anchorMaximum: CGFloat = -1
     private(set) var scrollVelocity: CGFloat = 0

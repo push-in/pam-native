@@ -146,6 +146,53 @@ final class PamLayoutParityTests: XCTestCase {
         XCTAssertEqual(uniform.layer.maskedCorners, [.layerMinXMinYCorner, .layerMaxXMinYCorner])
     }
 
+    func testPinnedVirtualListHeaderReceivesTouchesInsteadOfTheRowUnderIt() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 300))
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        defer { renderer.close() }
+        var mutations: [Mutation] = [
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .virtualList, properties: [:])),
+            .create(NodeSpec(id: 3, parent: 2, index: 0, kind: .view, properties: [
+                PamConstants.stickyHeader: .flag(true),
+                PamConstants.backgroundColor: .integer(0xFF00_FF00),
+            ])),
+            .create(NodeSpec(id: 4, parent: 3, index: 0, kind: .pressable, properties: [
+                PamConstants.onPress: .flag(true),
+            ])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 200, height: 300)),
+            .layout(id: 2, frame: Frame(x: 0, y: 0, width: 200, height: 300)),
+            .layout(id: 3, frame: Frame(x: 0, y: 0, width: 200, height: 40)),
+            .layout(id: 4, frame: Frame(x: 100, y: 0, width: 100, height: 40)),
+            .setRoot(1),
+        ]
+        for row in 0..<30 {
+            let id = Int64(10 + row)
+            mutations.append(.create(NodeSpec(id: id, parent: 2, index: row + 1, kind: .pressable, properties: [
+                PamConstants.onPress: .flag(true),
+            ])))
+            mutations.append(.layout(id: id, frame: Frame(x: 0, y: Float(40 + row * 50), width: 200, height: 50)))
+        }
+        renderer.commit([mutations])
+        let list = try XCTUnwrap(host.viewWithTag(2) as? PamVirtualListView)
+        list.contentOffset = CGPoint(x: 0, y: 400)
+        list.layoutIfNeeded()
+        let header = try XCTUnwrap(host.viewWithTag(3), "the pinned header stays mounted")
+        XCTAssertEqual(header.frame.minY, 400 + list.adjustedContentInset.top, accuracy: 0.5)
+        let row = try XCTUnwrap(host.viewWithTag(17), "the row scrolling under the header")
+        XCTAssertTrue(row.frame.contains(CGPoint(x: 50, y: 410)))
+        // The header's own background owns the touch, not the row under it.
+        let background = list.hitTest(CGPoint(x: 50, y: 410), with: nil)
+        XCTAssertTrue(background === header || background?.isDescendant(of: header) == true)
+        // A pressable inside the pinned header is reachable.
+        let button = try XCTUnwrap(host.viewWithTag(4))
+        let pressed = list.hitTest(CGPoint(x: 150, y: 420), with: nil)
+        XCTAssertTrue(pressed === button || pressed?.isDescendant(of: button) == true)
+        // Below the header the rows keep receiving touches.
+        let below = list.hitTest(CGPoint(x: 50, y: 470), with: nil)
+        XCTAssertFalse(below === header || below?.isDescendant(of: header) == true)
+    }
+
     func testRecycledCellViewsComeBackClean() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
         let renderer = PamRenderer(hostView: host) { _, _, _ in }

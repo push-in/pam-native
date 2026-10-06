@@ -46,6 +46,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.6.0 | Bottom sheet slide + fade, `%` snap points minus top inset | ✅ | Also `animationType="slide-fade"` for modals. |
 | 1.6.0 | Font family conventions | ✅ | `{Family}-{Weight}`, `_weight`, `_bold/_italic`, `{Family}` under `pam/assets/fonts` and `pam/fonts`. |
 | 1.7.0 | Error overlay | ✅ | Toast + inspector, Dismiss/Copy/Reload, queue/counter, release fallback with retry, `devErrorOverlay` (`PamDevErrorOverlay` in Info.plist). |
+| 1.14.1 | Interactive pinned sticky headers | ✅ (uncompiled) | ScrollView and VirtualizedList/VirtualGrid hosts hit-test the sticky children before the rows (`zPosition` only reorders drawing): presses reach the pinned header and never the row under it. `testPinnedVirtualListHeaderReceivesTouchesInsteadOfTheRowUnderIt`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -63,7 +64,10 @@ Visual checks that tests cannot fully cover:
   `lineHeight`, emoji, `fontScale` at the largest accessibility size.
 - Backdrop blur strength vs. Android, and that it survives app
   background/foreground.
-- Sticky headers in a chat list; shadows of `overflow: hidden` cards while
+- Sticky headers in a chat list, and a pinned VirtualizedList header with a
+  pressable tab rail: taps on the pinned tabs press them (pressed state
+  visible, VoiceOver reaches them), never the row underneath; shadows of
+  `overflow: hidden` cards while
   pressed (sibling shadow follows the press scale only at rest).
 - Splash: logo size/position matches between the launch screen and the
   first-frame overlay, in light and dark.

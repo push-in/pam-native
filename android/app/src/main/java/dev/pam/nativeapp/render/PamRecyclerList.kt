@@ -57,10 +57,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var richExtents: Map<Long, Int> = emptyMap()
     private val accessibilityModes = IdentityHashMap<View, Int>()
     private var stickyIds: Set<Long> = emptySet()
-    private val stickySnapshots = HashMap<Long, android.graphics.Bitmap>()
+    private val stickyPins = StickyPins()
 
     init {
-        addItemDecoration(StickyHeaderDecoration())
         itemAnimator = null
         // PamScrollContainer coordinates ownership explicitly so a bounded
         // list and its page never consume the same drag simultaneously.
@@ -117,8 +116,6 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     override fun onChildDetachedFromWindow(child: View) {
-        val id = getChildItemId(child)
-        if (id in stickyIds) snapshot(child)?.let { stickySnapshots[id] = it }
         accessibilityModes.remove(child)?.let { child.importantForAccessibility = it }
         super.onChildDetachedFromWindow(child)
     }
@@ -181,12 +178,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     fun setItems(items: PackedStringList?) {
+        stickyPins.release()
         adapter = items?.let { PackedStringRecyclerAdapter(context, it) }
         configureAdapter()
         applyInitialPosition()
     }
 
     fun setSections(sections: PackedSectionList?) {
+        stickyPins.release()
         adapter = sections?.let { PackedSectionRecyclerAdapter(context, it) }
         configureAdapter()
         updateHeaderSpans()
@@ -275,11 +274,6 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         return true
     }
 
-    /**
-     * React Native sticky headers for virtualized lists: the last sticky row at
-     * or above the top edge is drawn pinned there until the next sticky row
-     * pushes it away. Rows recycle normally; the pinned copy is visual.
-     */
     private var fullSpanIds: Set<Long> = emptySet()
 
     /** ListHeaderComponent/ListFooterComponent-style rows spanning every column. */
@@ -292,43 +286,170 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     fun setStickyIds(ids: Set<Long>) {
         if (stickyIds == ids) return
         stickyIds = ids
-        stickySnapshots.keys.retainAll(ids)
-        invalidateItemDecorations()
+        requestLayout()
     }
 
-    private fun snapshot(view: View): android.graphics.Bitmap? {
-        if (view.width <= 0 || view.height <= 0) return null
-        return android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
-            .also { view.draw(android.graphics.Canvas(it)) }
-    }
+    /** The pinned sticky header holder, or null when no header is pinned. */
+    internal fun pinnedStickyHeader(): View? = stickyPins.view
 
-    private inner class StickyHeaderDecoration : ItemDecoration() {
-        override fun onDrawOver(canvas: android.graphics.Canvas, parent: RecyclerView, state: State) {
-            if (stickyIds.isEmpty() || horizontal || inverted || childCount == 0) return
-            val positions = richIds
-            var topPosition = Int.MAX_VALUE
-            for (index in 0 until childCount) {
-                val child = getChildAt(index)
-                if (child.bottom <= 0) continue
-                val position = getChildAdapterPosition(child)
-                if (position in 0 until topPosition) topPosition = position
+    /**
+     * React Native sticky headers for virtualized lists (FlashList
+     * `stickyHeaderIndices`): the last sticky cell at or above the top edge
+     * stays pinned there until the next sticky cell pushes it away.
+     *
+     * The pinned header is a real RecyclerView child, not a picture: it is
+     * drawn last and hit-tested first, so presses, pressed state and
+     * accessibility reach it and the row scrolling underneath never receives
+     * the touch. The layout manager ignores it (it is never scrapped or
+     * recycled while pinned) and does not count it among its children, so
+     * the rows keep virtualizing normally. The cell's mounted views move into
+     * the pinned holder and back, so their native state (a horizontal tab
+     * rail offset, a focused input) survives pinning. Everything runs inside
+     * the layout manager's own scroll and layout passes: no PHP round trip
+     * and no bitmap copy per frame.
+     */
+    private inner class StickyPins {
+        var view: View? = null
+            private set
+        private var holder: RichRecyclerAdapter.RichHolder? = null
+        private var pinnedId = NO_ID
+        private var manager: LayoutManager? = null
+        private var recycler: Recycler? = null
+        private var positions = IntArray(0)
+        private var positionsIds: List<Long>? = null
+        private var positionsSticky: Set<Long>? = null
+
+        /**
+         * The layout manager never sees the pinned header: it stays the last
+         * child and is left out of the manager's count, so index-based
+         * scrap, recycle and fill passes keep addressing only the rows.
+         */
+        fun hidesLast(lastChild: View?): Boolean = lastChild != null && lastChild === view
+
+        /** Rows the layout manager appends land before the pinned header, which stays last. */
+        fun addIndex(child: View, index: Int, rows: Int): Int {
+            val pinned = view ?: return index
+            if (pinned === child || pinned.parent !== this@PamRecyclerList) return index
+            return if (index < 0 || index > rows) rows else index
+        }
+
+        /** Runs after every layout and scroll pass of the layout manager. */
+        fun place(manager: LayoutManager, recycler: Recycler, state: State) {
+            if (state.isPreLayout) return
+            this.manager = manager
+            this.recycler = recycler
+            val richAdapter = adapter as? RichRecyclerAdapter
+            if (richAdapter == null || horizontal || inverted || stickyIds.isEmpty()) {
+                release()
+                return
             }
-            if (topPosition == Int.MAX_VALUE) return
-            val stickyPosition = (topPosition downTo 0).firstOrNull { positions.getOrNull(it) in stickyIds } ?: return
-            val stickyId = positions[stickyPosition]
-            val attached = (0 until childCount).map(::getChildAt).firstOrNull { getChildItemId(it) == stickyId }
-            if (attached != null && attached.top >= 0) return
-            val bitmap = attached?.let(::snapshot)?.also { stickySnapshots[stickyId] = it }
-                ?: stickySnapshots[stickyId]
-                ?: return
-            val nextTop = (0 until childCount).map(::getChildAt)
-                .filter { child ->
-                    val position = getChildAdapterPosition(child)
-                    position > stickyPosition && positions.getOrNull(position) in stickyIds
+            val sticky = stickyPositions()
+            val top = topPosition(manager)
+            val slot = if (top < 0) -1 else lastAtOrBefore(sticky, top)
+            if (slot < 0) {
+                release()
+                return
+            }
+            val position = sticky[slot]
+            val id = richIds.getOrNull(position) ?: run {
+                release()
+                return
+            }
+            val natural = manager.findViewByPosition(position)
+            if (natural != null && manager.getDecoratedTop(natural) >= 0) {
+                release(natural)
+                return
+            }
+            var target = view
+            var targetHolder = holder
+            if (target == null || targetHolder == null || pinnedId != id || target.parent !== this@PamRecyclerList) {
+                release()
+                val created = recycler.getViewForPosition(position)
+                manager.addView(created)
+                manager.ignoreView(created)
+                targetHolder = getChildViewHolder(created) as? RichRecyclerAdapter.RichHolder
+                if (targetHolder == null) {
+                    manager.stopIgnoringView(created)
+                    manager.removeAndRecycleView(created, recycler)
+                    return
                 }
-                .minOfOrNull(View::getTop)
-            val y = if (nextTop != null && nextTop < bitmap.height) (nextTop - bitmap.height).toFloat() else 0f
-            canvas.drawBitmap(bitmap, paddingLeft.toFloat(), y, null)
+                target = created
+                view = created
+                holder = targetHolder
+                pinnedId = id
+                (created as? RichCellContainer)?.pinned = true
+                richAdapter.adoptPinned(targetHolder)
+                measureAndLayout(manager, created)
+            } else {
+                richAdapter.adoptPinned(targetHolder)
+                if (target.isLayoutRequested || target.width != manager.width - paddingLeft - paddingRight) {
+                    measureAndLayout(manager, target)
+                }
+            }
+            val next = sticky.getOrNull(slot + 1)?.let(manager::findViewByPosition)
+            val y = if (next == null) 0 else minOf(0, manager.getDecoratedTop(next) - target.height)
+            if (target.top != y) target.offsetTopAndBottom(y - target.top)
+        }
+
+        /** Keeps the pinned header in place while the layout manager offsets its rows. */
+        fun compensateOffset(dy: Int) {
+            view?.takeIf { it.parent === this@PamRecyclerList }?.offsetTopAndBottom(-dy)
+        }
+
+        /**
+         * Unpins the header. Its views return to [home] (the cell's own row)
+         * or any other holder bound to the cell; without one they unmount.
+         */
+        fun release(home: View? = null) {
+            val target = view ?: return
+            val targetHolder = holder
+            view = null
+            holder = null
+            pinnedId = NO_ID
+            (target as? RichCellContainer)?.pinned = false
+            val homeHolder = home?.takeIf { it.parent === this@PamRecyclerList }
+                ?.let(::getChildViewHolder) as? RichRecyclerAdapter.RichHolder
+            if (targetHolder != null) (adapter as? RichRecyclerAdapter)?.unpin(targetHolder, homeHolder)
+            val owner = manager
+            val pool = recycler
+            if (target.parent !== this@PamRecyclerList) return
+            if (owner != null && pool != null && owner === layoutManager) {
+                owner.stopIgnoringView(target)
+                owner.removeAndRecycleView(target, pool)
+            } else {
+                owner?.stopIgnoringView(target)
+                removeView(target)
+            }
+        }
+
+        private fun measureAndLayout(manager: LayoutManager, target: View) {
+            manager.measureChildWithMargins(target, 0, 0)
+            val left = paddingLeft
+            manager.layoutDecoratedWithMargins(
+                target,
+                left,
+                0,
+                left + target.measuredWidth,
+                target.measuredHeight,
+            )
+        }
+
+        private fun topPosition(manager: LayoutManager): Int {
+            for (index in 0 until manager.childCount) {
+                val child = manager.getChildAt(index) ?: continue
+                if (manager.getDecoratedBottom(child) <= 0) continue
+                return manager.getPosition(child)
+            }
+            return -1
+        }
+
+        private fun stickyPositions(): IntArray {
+            if (positionsIds !== richIds || positionsSticky !== stickyIds) {
+                positionsIds = richIds
+                positionsSticky = stickyIds
+                positions = stickyHeaderPositions(richIds, stickyIds)
+            }
+            return positions
         }
     }
 
@@ -614,18 +735,21 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
             ?: 0
         val orientation = if (horizontal) HORIZONTAL else VERTICAL
+        stickyPins.release()
         layoutManager = if (columns > 1 && !horizontal) {
             PamGridLayoutManager(
                 context,
                 columns,
                 orientation,
                 inverted,
+                stickyPins,
             )
         } else {
             PamLinearLayoutManager(
                 context,
                 orientation,
                 inverted,
+                stickyPins,
             )
         }
         (layoutManager as LinearLayoutManager).stackFromEnd = inverted
@@ -759,7 +883,33 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         context: Context,
         orientation: Int,
         reverseLayout: Boolean,
+        private val pins: StickyPins,
     ) : LinearLayoutManager(context, orientation, reverseLayout), PrefetchLayoutManager {
+        override fun getChildCount(): Int {
+            val raw = super.getChildCount()
+            return if (raw > 0 && pins.hidesLast(super.getChildAt(raw - 1))) raw - 1 else raw
+        }
+
+        override fun addView(child: View, index: Int) {
+            super.addView(child, pins.addIndex(child, index, childCount))
+        }
+
+        override fun offsetChildrenVertical(dy: Int) {
+            super.offsetChildrenVertical(dy)
+            pins.compensateOffset(dy)
+        }
+
+        override fun onLayoutChildren(recycler: Recycler, state: State) {
+            super.onLayoutChildren(recycler, state)
+            pins.place(this, recycler, state)
+        }
+
+        override fun scrollVerticallyBy(dy: Int, recycler: Recycler, state: State): Int {
+            val consumed = super.scrollVerticallyBy(dy, recycler, state)
+            pins.place(this, recycler, state)
+            return consumed
+        }
+
         override var prefetchCount = 5
             set(value) {
                 field = value
@@ -783,12 +933,38 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         spanCount: Int,
         orientation: Int,
         reverseLayout: Boolean,
+        private val pins: StickyPins,
     ) : GridLayoutManager(
         context,
         spanCount,
         orientation,
         reverseLayout,
     ), PrefetchLayoutManager {
+        override fun getChildCount(): Int {
+            val raw = super.getChildCount()
+            return if (raw > 0 && pins.hidesLast(super.getChildAt(raw - 1))) raw - 1 else raw
+        }
+
+        override fun addView(child: View, index: Int) {
+            super.addView(child, pins.addIndex(child, index, childCount))
+        }
+
+        override fun offsetChildrenVertical(dy: Int) {
+            super.offsetChildrenVertical(dy)
+            pins.compensateOffset(dy)
+        }
+
+        override fun onLayoutChildren(recycler: Recycler, state: State) {
+            super.onLayoutChildren(recycler, state)
+            pins.place(this, recycler, state)
+        }
+
+        override fun scrollVerticallyBy(dy: Int, recycler: Recycler, state: State): Int {
+            val consumed = super.scrollVerticallyBy(dy, recycler, state)
+            pins.place(this, recycler, state)
+            return consumed
+        }
+
         override var prefetchCount = 5
             set(value) {
                 field = value
@@ -825,6 +1001,28 @@ internal fun virtualScrollPosition(extents: List<Int>, target: Int): VirtualScro
         remaining -= safeExtent
     }
     return VirtualScrollPosition(extents.lastIndex, 0)
+}
+
+/** Adapter positions of the sticky cells, ascending. */
+internal fun stickyHeaderPositions(ids: List<Long>, sticky: Set<Long>): IntArray {
+    if (sticky.isEmpty()) return IntArray(0)
+    var count = 0
+    for (id in ids) if (id in sticky) count++
+    val result = IntArray(count)
+    var next = 0
+    for ((position, id) in ids.withIndex()) if (id in sticky) result[next++] = position
+    return result
+}
+
+/** Index in ascending [positions] of the last one at or before [position], or -1. */
+internal fun lastAtOrBefore(positions: IntArray, position: Int): Int {
+    var low = 0
+    var high = positions.size
+    while (low < high) {
+        val middle = (low + high) ushr 1
+        if (positions[middle] <= position) low = middle + 1 else high = middle
+    }
+    return low - 1
 }
 
 private class RichRecyclerAdapter(
@@ -895,9 +1093,13 @@ private class RichRecyclerAdapter(
     }
 
     fun remountEmptyHolders() {
+        // A row whose views currently live in the pinned sticky header (or
+        // the reverse) is empty on purpose.
+        val mounted = boundHolders.filter { it.container.childCount > 0 }.mapTo(HashSet()) { it.boundId }
         boundHolders
             .mapNotNull { holder ->
                 val id = holder.boundId
+                if (holder.container.childCount == 0 && id in mounted) return@mapNotNull null
                 val position = ids.indexOf(id)
                 position.takeIf {
                     richHolderNeedsResumeRebind(
@@ -926,7 +1128,7 @@ private class RichRecyclerAdapter(
     override fun getItemId(position: Int): Long = ids[position]
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RichHolder =
-        RichHolder(FrameLayout(context).apply {
+        RichHolder(RichCellContainer(context).apply {
             clipChildren = true
             clipToPadding = true
             importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
@@ -956,7 +1158,7 @@ private class RichRecyclerAdapter(
     override fun onViewRecycled(holder: RichHolder) {
         boundHolders.remove(holder)
         emptyRemountAttempts.remove(holder)
-        holder.boundId.takeIf { it != RecyclerView.NO_ID }?.let {
+        holder.boundId.takeIf { it != RecyclerView.NO_ID && ownsCell(holder, it) }?.let {
             unmount(it, holder.container)
         }
         holder.boundId = RecyclerView.NO_ID
@@ -968,7 +1170,7 @@ private class RichRecyclerAdapter(
         val previous = holder.boundId
         if (previous != RecyclerView.NO_ID && previous != id) {
             emptyRemountAttempts.remove(holder)
-            unmount(previous, holder.container)
+            if (ownsCell(holder, previous)) unmount(previous, holder.container)
             holder.container.removeAllViews()
         }
         applyLayout(holder.container, id)
@@ -1000,7 +1202,68 @@ private class RichRecyclerAdapter(
 
     /** Container currently bound to cell [id], if that cell is on screen. */
     fun boundContainer(id: Long): FrameLayout? =
-        boundHolders.firstOrNull { it.boundId == id }?.container
+        boundHolders.firstOrNull { it.boundId == id && it.container.childCount > 0 }?.container
+            ?: pinned?.takeIf { it.boundId == id }?.container
+            ?: boundHolders.firstOrNull { it.boundId == id }?.container
+
+    /** Holder pinned as the sticky header, if any. */
+    private var pinned: RichHolder? = null
+
+    /**
+     * A cell's views exist once. A holder without them must not unmount the
+     * cell while another holder bound to it (the pinned header, or the row
+     * the header returned to) still shows them.
+     */
+    private fun ownsCell(holder: RichHolder, id: Long): Boolean =
+        holder.container.childCount > 0 ||
+            boundHolders.none { it !== holder && it.boundId == id && it.container.childCount > 0 }
+
+    /** Moves the cell's views into the pinned [holder], mounting them when no holder has them. */
+    fun adoptPinned(holder: RichHolder) {
+        pinned = holder
+        val id = holder.boundId
+        if (id == RecyclerView.NO_ID || holder.container.childCount > 0) return
+        val source = boundHolders.firstOrNull {
+            it !== holder && it.boundId == id && it.container.childCount > 0
+        }
+        if (source != null) {
+            moveCellViews(source.container, holder.container)
+        } else {
+            mount(id, holder.container)
+        }
+    }
+
+    /**
+     * Returns the pinned [holder]'s views to [home] (the cell's own row) or
+     * to any other holder bound to the cell, unmounting them when the cell
+     * has no other holder, then unbinds [holder] for recycling.
+     */
+    fun unpin(holder: RichHolder, home: RichHolder?) {
+        if (pinned === holder) pinned = null
+        val id = holder.boundId
+        if (id != RecyclerView.NO_ID && holder.container.childCount > 0) {
+            val target = home?.takeIf { it !== holder && it.boundId == id }
+                ?: boundHolders.firstOrNull { it !== holder && it.boundId == id }
+            if (target != null) {
+                applyLayout(target.container, id)
+                moveCellViews(holder.container, target.container)
+            } else {
+                unmount(id, holder.container)
+            }
+        }
+        boundHolders.remove(holder)
+        emptyRemountAttempts.remove(holder)
+        holder.boundId = RecyclerView.NO_ID
+        holder.container.removeAllViews()
+    }
+
+    private fun moveCellViews(from: FrameLayout, to: FrameLayout) {
+        while (from.childCount > 0) {
+            val child = from.getChildAt(0)
+            from.removeViewAt(0)
+            to.addView(child)
+        }
+    }
 
     class RichHolder(val container: FrameLayout) : RecyclerView.ViewHolder(container) {
         var boundId: Long = RecyclerView.NO_ID
@@ -1009,6 +1272,17 @@ private class RichRecyclerAdapter(
     private companion object {
         val PAYLOAD_LAYOUT = Any()
     }
+}
+
+/**
+ * Virtual cell holder. While pinned as a sticky header it owns every touch
+ * inside its bounds, so a press never falls through to the row underneath.
+ */
+internal class RichCellContainer(context: Context) : FrameLayout(context) {
+    var pinned = false
+
+    @android.annotation.SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(event: MotionEvent): Boolean = super.onTouchEvent(event) || pinned
 }
 
 internal fun richHolderNeedsFullBind(boundId: Long, requestedId: Long, childCount: Int): Boolean =
