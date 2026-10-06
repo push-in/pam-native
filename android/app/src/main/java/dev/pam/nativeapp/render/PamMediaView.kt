@@ -241,7 +241,18 @@ internal class PamMediaView(
     }
     fun setPlaybackRate(value: Float) {
         rate = value.coerceIn(0.25f, 4f)
-        preparedPlayer?.let { it.playbackParams = it.playbackParams.setSpeed(rate) }
+        preparedPlayer?.takeIf { prepared }?.let(::applyRate)
+    }
+
+    /**
+     * `setPlaybackParams` with a non-zero speed starts a prepared or paused
+     * MediaPlayer: a paused (warm, autoPlay=false) player must stay paused.
+     */
+    private fun applyRate(player: MediaPlayer) {
+        if (rate == 1f && player.playbackParams.speed == 1f) return
+        val wasPlaying = player.isPlaying
+        player.playbackParams = player.playbackParams.setSpeed(rate)
+        if (!wasPlaying && player.isPlaying) player.pause()
     }
 
     fun setResizeMode(value: Int) {
@@ -277,7 +288,7 @@ internal class PamMediaView(
             prepared = true
             it.isLooping = looping
             applyAudio(it)
-            it.playbackParams = it.playbackParams.setSpeed(rate)
+            applyRate(it)
             if (currentTime > 0) it.seekTo((currentTime * 1_000).toInt())
             mediaController?.isEnabled = true
             applyVideoTransform()
