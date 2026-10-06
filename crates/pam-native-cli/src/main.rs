@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::process::ExitCode;
 
+mod app_icon;
 mod appearance;
 mod dev_event;
 mod mobile;

@@ -32,6 +32,7 @@ short end-to-end recipes.
 | Files, direct gallery, camera, notifications, SQLite, WebView, media, animation and device APIs | [Capability cookbook](examples.md) |
 | Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
 | Light/dark preference, first-frame theming and native window colours | [Appearance](appearance.md) |
+| Launcher icon (Android adaptive icon, iOS AppIcon) | [App icon](app-icon.md) |
 | iOS rendering parity status (1.2.0–1.7.0 features) | [iOS parity](ios-parity.md) |
 | Gestures, press events, drags, swipeable rows and paging | [Gestures](gestures.md) |
 | UI-thread animations, transitions and presets | [Animations](animations.md) |

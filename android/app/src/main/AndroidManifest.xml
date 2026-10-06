@@ -51,7 +51,7 @@
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="false"
-        android:icon="@drawable/pam_icon"
+        android:icon="@drawable/pam_launcher"
         android:label="${pamApplicationName}"
         android:supportsRtl="true"
         android:theme="@style/Theme.PamNative"

@@ -238,6 +238,10 @@ struct AndroidOptions {
     /// Native apps' `getBottomSafeInset()` fallback. 0 disables it.
     #[serde(default)]
     safe_area_bottom_fallback: u32,
+    /// Adaptive launcher icon; the system splash screen (Android 12+) draws
+    /// it too unless `appearance.splash` sets its own icon.
+    #[serde(default)]
+    icon: Option<crate::app_icon::AndroidIcon>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -345,6 +349,7 @@ impl Default for AndroidOptions {
             deep_links: Vec::new(),
             share_targets: Vec::new(),
             safe_area_bottom_fallback: 0,
+            icon: None,
         }
     }
 }
@@ -354,12 +359,16 @@ impl Default for AndroidOptions {
 struct IosOptions {
     #[serde(default = "default_ios_minimum_version")]
     minimum_version: String,
+    /// Project-relative 1024x1024 PNG for the home-screen/App Store icon.
+    #[serde(default)]
+    icon: Option<String>,
 }
 
 impl Default for IosOptions {
     fn default() -> Self {
         Self {
             minimum_version: default_ios_minimum_version(),
+            icon: None,
         }
     }
 }
@@ -1413,6 +1422,16 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
         return Err("applicationId must be a dot-separated Java package name".to_owned());
     }
     manifest.appearance.validate()?;
+    if let Some(icon) = &manifest.android.icon {
+        icon.validate()?;
+    }
+    if let Some(icon) = &manifest.ios.icon {
+        if crate::appearance::splash_extension(icon) != Some("png") {
+            return Err(format!(
+                "ios.icon must be a project-relative .png path, got {icon:?}"
+            ));
+        }
+    }
     if manifest
         .android
         .debug_application_id_suffix
@@ -3322,6 +3341,16 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
 
     let has_app_entitlements = merge_ios_app_metadata(project, &workspace)?;
     integrate_ios_extensions(project, &workspace)?;
+    let app_icon = if crate::app_icon::sync_ios_icon(
+        project.manifest.ios.icon.as_deref(),
+        &project.root,
+        &workspace.join("App/PamLaunch.xcassets"),
+        write_atomic,
+    )? {
+        "ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; "
+    } else {
+        ""
+    };
 
     let team = std::env::var("PAM_IOS_DEVELOPMENT_TEAM").unwrap_or_default();
     let code_sign_entitlements = if has_app_entitlements {
@@ -3351,6 +3380,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             ),
             ("__PAM_DEVELOPMENT_TEAM__", team.as_str()),
             ("__PAM_CODE_SIGN_ENTITLEMENTS__", code_sign_entitlements),
+            ("__PAM_APP_ICON__", app_icon),
         ],
     )?;
     replace_ios_placeholders(
@@ -5427,6 +5457,12 @@ fn configure_android(
         .appearance
         .write_android_resources(&workspace.join("app/src/main/res"), write_atomic)?;
     sync_splash_logos(project, &workspace.join("app/src/main/res"))?;
+    crate::app_icon::sync_android_icon(
+        project.manifest.android.icon.as_ref(),
+        &project.root,
+        &workspace.join("app/src/main/res"),
+        write_atomic,
+    )?;
     write_atomic(
         &workspace.join("app/src/main/res/values/pam_safe_area.xml"),
         safe_area_resources(project.manifest.android.safe_area_bottom_fallback).as_bytes(),

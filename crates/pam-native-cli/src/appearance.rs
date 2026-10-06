@@ -281,7 +281,7 @@ fn splash_resources(splash: &SplashOptions) -> Vec<(&'static str, String)> {
     ]
 }
 
-fn parse_color(value: &str) -> Option<u32> {
+pub(crate) fn parse_color(value: &str) -> Option<u32> {
     let hex = value.strip_prefix('#')?;
     if !hex.chars().all(|character| character.is_ascii_hexdigit()) {
         return None;
