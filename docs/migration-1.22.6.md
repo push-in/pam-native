@@ -1,5 +1,22 @@
 # Migrating to Pam Native 1.22.6
 
+## Native module callbacks across reload
+
+Rebuild the native host as well as the application bundle. Native module
+completions now resolve through an opaque callback ID tied to their originating
+PHP request. Starting a new request invalidates the old mapping, so queued or
+late callbacks from shutdown cannot consume a new request's reused PHP ID.
+Application code and the module/wire API do not change.
+
+The regression reproduced the failure on Android API 26: two empty timer-cancel
+results from shutdown reached the new entry and consumed its Linking IDs. With
+the fix, the real bridge test passed on Android APIs 26 and 36: only the new
+entry's two Linking results reached PHP, including a typed `canOpenUrl` result.
+The HTTPS fixture checks support without opening a URL or accessing the network.
+The equivalent iOS bridge change was reviewed in source; it was not executed
+on the Linux host. This fix addresses cross-request completion identity and
+does not imply that every malformed-payload error has the same cause.
+
 ## Typed image callbacks
 
 Update the SDK and rebuild/precompile the application bundle. Existing handlers

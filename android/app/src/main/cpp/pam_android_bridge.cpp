@@ -20,6 +20,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <unordered_map>
 
 #include "pam_native_engine.h"
 
@@ -85,6 +86,10 @@ struct RuntimeState {
     std::mutex queue_mutex;
     std::condition_variable queue_ready;
     std::deque<Event> events;
+    // Only the PHP worker accesses this map. Native completions enqueue opaque
+    // tokens; a new PHP request invalidates old callbacks before reusing IDs.
+    std::int64_t next_module_token = 1;
+    std::unordered_map<std::int64_t, std::int64_t> module_requests;
     std::thread worker;
     std::atomic<bool> stopping = false;
     std::mutex stats_mutex;
@@ -346,6 +351,12 @@ void publish_remount(RuntimeState* state) {
     }
 }
 
+std::int64_t retain_module_request(RuntimeState* state, std::int64_t request_id) {
+    const auto token = state->next_module_token++;
+    state->module_requests.emplace(token, request_id);
+    return token;
+}
+
 void publish_call(
     RuntimeState* state,
     std::int64_t request_id,
@@ -379,7 +390,7 @@ void publish_call(
     env->CallVoidMethod(
         state->runtime,
         state->on_call,
-        static_cast<jlong>(request_id),
+        static_cast<jlong>(retain_module_request(state, request_id)),
         java_module,
         java_method,
         java_payload
@@ -420,7 +431,7 @@ void publish_typed_call(
     env->CallVoidMethod(
         state->runtime,
         state->on_typed_call,
-        static_cast<jlong>(request_id),
+        static_cast<jlong>(retain_module_request(state, request_id)),
         static_cast<jint>(operation),
         java_payload
     );
@@ -720,7 +731,7 @@ bool call_runtime(
     return status == SUCCESS && !EG(exception);
 }
 
-void dispatch_event(const Event& event) {
+void dispatch_event(RuntimeState* state, const Event& event) {
     if (event.type == EventType::Ui) {
         zval arguments[3];
         ZVAL_LONG(&arguments[0], event.first);
@@ -729,8 +740,12 @@ void dispatch_event(const Event& event) {
         call_runtime("dispatchEvent", 3, arguments);
         zval_ptr_dtor(&arguments[2]);
     } else if (event.type == EventType::ModuleResult) {
+        const auto pending = state->module_requests.find(event.first);
+        if (pending == state->module_requests.end()) return;
+        const auto request_id = pending->second;
+        state->module_requests.erase(pending);
         zval arguments[3];
-        ZVAL_LONG(&arguments[0], event.first);
+        ZVAL_LONG(&arguments[0], request_id);
         ZVAL_LONG(&arguments[1], event.second);
         ZVAL_STRINGL(&arguments[2], event.payload.data(), event.payload.size());
         call_runtime("dispatchModuleResult", 3, arguments);
@@ -858,6 +873,9 @@ bool enable_deferred_rendering() {
 }
 
 bool run_php_request(RuntimeState* state) {
+    // Shutdown can still invoke native cleanup. Its queued or delayed results
+    // belong to the old PHP request, even when the new SDK starts IDs at one.
+    state->module_requests.clear();
     zend_file_handle file_handle;
     zend_stream_init_filename(&file_handle, state->entry.c_str());
     const int status = php_execute_script(&file_handle);
@@ -908,7 +926,7 @@ bool run_php_request(RuntimeState* state) {
         } else if (event.type == EventType::Remount) {
             publish_remount(state);
         } else {
-            dispatch_event(event);
+            dispatch_event(state, event);
         }
         if (EG(exception)) {
             report_error(state, "Unhandled PHP exception in a Pam Native event.");

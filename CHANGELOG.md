@@ -2,6 +2,11 @@
 
 ## 1.22.6 - 2026-10-06
 
+- Native module completions remain tied to the PHP request that issued them.
+  Android and iOS bridges discard callbacks from a previous request, including
+  cleanup callbacks and late asynchronous results after hot reload. Internal
+  opaque callback IDs prevent reused PHP IDs from consuming unrelated results;
+  the public module and wire contracts remain unchanged.
 - Compiled image handlers typed as `ImageLoadEvent`, `ImageErrorEvent` or
   `ImageProgressEvent` receive decoded event objects instead of wire strings.
   Direct handlers, explicit event arguments and generated/interpreted template

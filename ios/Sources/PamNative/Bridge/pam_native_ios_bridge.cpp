@@ -12,6 +12,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <unordered_map>
 
 #include <sapi/embed/php_embed.h>
 #include <Zend/zend_exceptions.h>
@@ -80,6 +81,10 @@ struct RuntimeState {
     std::mutex queue_mutex;
     std::condition_variable queue_ready;
     std::deque<Event> events;
+    // Only the PHP worker accesses this map. Native completions enqueue opaque
+    // tokens; a new PHP request invalidates old callbacks before reusing IDs.
+    std::int64_t next_module_token = 1;
+    std::unordered_map<std::int64_t, std::int64_t> module_requests;
 
     std::mutex engine_mutex;
     std::thread worker;
@@ -211,6 +216,12 @@ void publish_remount(RuntimeState* state) {
     }
 }
 
+std::int64_t retain_module_request(RuntimeState* state, std::int64_t request_id) {
+    const auto token = state->next_module_token++;
+    state->module_requests.emplace(token, request_id);
+    return token;
+}
+
 void publish_call(
     RuntimeState* state,
     std::int64_t request_id,
@@ -232,7 +243,7 @@ void publish_call(
     }
     state->callbacks.on_call(
         reinterpret_cast<std::uint64_t>(state),
-        request_id,
+        retain_module_request(state, request_id),
         module,
         method,
         reinterpret_cast<const std::uint8_t*>(payload),
@@ -255,7 +266,7 @@ void publish_typed_call(
     }
     state->callbacks.on_typed_call(
         reinterpret_cast<std::uint64_t>(state),
-        request_id,
+        retain_module_request(state, request_id),
         operation,
         reinterpret_cast<const std::uint8_t*>(payload),
         payload_length
@@ -571,7 +582,7 @@ bool enable_deferred_rendering() {
     return enabled;
 }
 
-void dispatch_event(const Event& event) {
+void dispatch_event(RuntimeState* state, const Event& event) {
     if (event.type == EventType::Ui) {
         zval arguments[3];
         ZVAL_LONG(&arguments[0], event.first);
@@ -580,8 +591,12 @@ void dispatch_event(const Event& event) {
         call_runtime("dispatchEvent", 3, arguments);
         zval_ptr_dtor(&arguments[2]);
     } else if (event.type == EventType::ModuleResult) {
+        const auto pending = state->module_requests.find(event.first);
+        if (pending == state->module_requests.end()) return;
+        const auto request_id = pending->second;
+        state->module_requests.erase(pending);
         zval arguments[3];
-        ZVAL_LONG(&arguments[0], event.first);
+        ZVAL_LONG(&arguments[0], request_id);
         ZVAL_LONG(&arguments[1], event.second);
         ZVAL_STRINGL(&arguments[2], event.payload.data(), event.payload.size());
         call_runtime("dispatchModuleResult", 3, arguments);
@@ -617,6 +632,9 @@ bool initialize_php(RuntimeState* state) {
 }
 
 bool run_php_request(RuntimeState* state) {
+    // Shutdown can still invoke native cleanup. Its queued or delayed results
+    // belong to the old PHP request, even when the new SDK starts IDs at one.
+    state->module_requests.clear();
     zend_file_handle file_handle;
     bool reload = false;
 
@@ -671,7 +689,7 @@ bool run_php_request(RuntimeState* state) {
         if (event.type == EventType::Remount) {
             publish_remount(state);
         } else {
-            dispatch_event(event);
+            dispatch_event(state, event);
         }
 
         if (EG(exception)) {
