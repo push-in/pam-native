@@ -9,6 +9,22 @@ final class CompiledTemplateNode
     /** @var list<self> */
     public array $children = [];
 
+    /**
+     * @internal Render plan derived once from this node (directives
+     * resolved, attribute classification); owned by TemplateRenderer.
+     *
+     * @var array<string, mixed>|null
+     */
+    public ?array $pamPlan = null;
+
+    /**
+     * @internal Element plans keyed by "n" (native tag) and "f" (registered
+     * component tag); owned by TemplateRenderer.
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    public array $pamTagPlans = [];
+
     /** @param array<string, string|bool> $attributes */
     public function __construct(
         public readonly int $kind,

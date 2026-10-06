@@ -148,6 +148,71 @@ final class TemplateRenderer
         'textShadowColor',
     ];
 
+    /** @var array<string, true> */
+    private const INHERITED_STYLE_SET = [
+        'textColor' => true,
+        'fontFamily' => true,
+        'fontSize' => true,
+        'fontWeight' => true,
+        'fontStyle' => true,
+        'letterSpacing' => true,
+        'lineHeight' => true,
+        'textAlign' => true,
+        'textTransform' => true,
+        'fontFeatureSettings' => true,
+        'textShadowOffsetX' => true,
+        'textShadowOffsetY' => true,
+        'textShadowRadius' => true,
+        'textShadowColor' => true,
+    ];
+
+    private static int $planSequence = 0;
+    private static int $identitySequence = 0;
+
+    /** Last native element built by tag(); nodes() places it without copying. */
+    private static ?Element $freshElement = null;
+
+    /** Set when a style resolution read the window/container environment. */
+    private static bool $dynamicStyles = false;
+
+    /** @var array<string, array<string, mixed>> Resolved style/value entries. */
+    private static array $styleEntries = [];
+
+    /** @var array<string, int> */
+    private static array $descriptorIds = [];
+
+    /** @var array<string, int> */
+    private static array $styleChains = [];
+
+    /** @var array<string, list<string>> */
+    private static array $domClassTokens = [];
+
+    /** @var array<string, string> */
+    private static array $camelNames = [];
+
+    /** @var array<int, bool> Sheets whose selectors use ancestor combinators. */
+    private static array $sheetAncestors = [];
+
+    /** @var array<int, array<string, true>> Class strings made only of a sheet's local classes. */
+    private static array $localClassStrings = [];
+
+    /** @var array<string, array<string, mixed>> attributes() plans by element and value names. */
+    private static array $attributePlans = [];
+
+    /** @var array<int, array<array-key, string|int|float|bool|null>> */
+    private static array $propertyStrings = [];
+
+    /** @var array<int, array<int, string|int|float|bool|null>> */
+    private static array $propertyInts = [];
+
+    /** @var array<int, array<string, string|int|float|bool|null>> */
+    private static array $propertyFloats = [];
+
+    /** @var array<int, array<int, string|int|float|bool|null>> */
+    private static array $propertyBools = [];
+
+    private static int $propertyMemoSize = 0;
+
     /** @var array<string, ReflectionMethod> */
     private static array $methods = [];
 
@@ -568,6 +633,25 @@ final class TemplateRenderer
         'translationYPercent' => PropKey::TranslationYPercent,
     ];
 
+    /** Attributes handled by specialAttributes() before native properties. */
+    private const SPECIAL_ATTRIBUTES = [
+        'id' => true,
+        'key' => true,
+        'accessibilityLabel' => true,
+        'accessibilityActions' => true,
+        'alt' => true,
+        'testId' => true,
+        'disabled' => true,
+        'enabled' => true,
+        'placeholder' => true,
+        'readOnly' => true,
+        'scrollEnabled' => true,
+        'pressRetentionOffset' => true,
+        'statusBarTranslucent' => true,
+        'horizontal' => true,
+        'contentOffset' => true,
+    ];
+
     /** @var array<string, EventKind> */
     private const EVENTS = [
         'on:press' => EventKind::Press,
@@ -683,39 +767,26 @@ final class TemplateRenderer
         $output = [];
 
         $branchMatched = false;
+        $parentPath = $data['__pamNodePath'] ?? 'root';
+        $parentPath = is_string($parentPath) || is_int($parentPath)
+            ? (string) $parentPath
+            : 'root';
 
         foreach ($nodes as $index => $node) {
             $slot = $slotPrefix.$index;
-            $nodeData = [
-                ...$data,
-                '__pamNodePath' => self::nodePath($data, $index),
-            ];
+            $nodeData = $data;
+            $nodeData['__pamNodePath'] = $parentPath.'.'.$index;
             if ($node->kind === 2) {
                 $output[] = self::interpolate($node->value, $scope, $nodeData);
                 $branchMatched = false;
                 continue;
             }
 
-            $tag = $node->name;
-            $attributes = self::directiveAliases($node->attributes);
-            $node = self::withAttributes($node, $attributes);
-            $children = $node->children;
+            $plan = $node->pamPlan ??= self::nodePlan($node);
 
-            if (isset($attributes['p-for'])) {
-                $directive = $attributes['p-for'];
-                if (
-                    !is_string($directive)
-                    || preg_match(
-                        '/^\s*\$?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+)\s*$/D',
-                        $directive,
-                        $match,
-                    ) !== 1
-                ) {
-                    throw new RuntimeException(
-                        'p-for must use "$item in $items" syntax.',
-                    );
-                }
-                $items = TemplateExpression::evaluate($match[2], $scope, $nodeData);
+            if ($plan['for'] !== null) {
+                [$variable, $source, $keyExpression, $staticKey, $indexName, $indexValid, $loopNode] = $plan['for'];
+                $items = TemplateExpression::evaluate($source, $scope, $nodeData);
                 if (is_int($items)) {
                     $items = $items > 0 ? range(1, $items) : [];
                 } elseif ($items instanceof Traversable) {
@@ -726,16 +797,9 @@ final class TemplateRenderer
                         'p-for source must resolve to an integer, array, or Traversable.',
                     );
                 }
-                // `:key` / `key` on a loop child is the item identity exactly
-                // like `p-key` (component instance, slot and native id).
-                $keyExpression = $attributes['p-key'] ?? $attributes[':key'] ?? null;
-                $staticKey = $keyExpression === null ? ($attributes['key'] ?? null) : null;
-                $indexName = $attributes['p-index'] ?? $match[1].'Index';
-                if (!is_string($indexName) || preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', ltrim($indexName, '$')) !== 1) {
+                if (!$indexValid) {
                     throw new RuntimeException('p-index must be a safe variable name.');
                 }
-                $indexName = ltrim($indexName, '$');
-                $loopNode = self::withoutAttributes($node, ['p-for', 'p-key', 'p-index']);
                 if (
                     $keyExpression === null
                     && $staticKey === null
@@ -747,12 +811,11 @@ final class TemplateRenderer
                     );
                 }
                 $seenKeys = [];
+                $loopPath = $nodeData['__pamNodePath'].'.';
                 foreach ($items as $itemIndex => $item) {
-                    $iterationData = [
-                        ...$nodeData,
-                        $match[1] => $item,
-                        $indexName => $itemIndex,
-                    ];
+                    $iterationData = $nodeData;
+                    $iterationData[$variable] = $item;
+                    $iterationData[$indexName] = $itemIndex;
                     $identity = $itemIndex;
                     if ($keyExpression !== null || $staticKey !== null) {
                         $identity = $keyExpression !== null
@@ -761,226 +824,70 @@ final class TemplateRenderer
                         if (!is_string($identity) && !is_int($identity)) {
                             throw new RuntimeException('p-key must resolve to a string or integer.');
                         }
-                        $fingerprint = get_debug_type($identity).':'.(string) $identity;
+                        $fingerprint = (is_int($identity) ? 'int:' : 'string:').$identity;
                         if (isset($seenKeys[$fingerprint])) {
                             throw new RuntimeException("Duplicate p-key {$identity} in loop.");
                         }
                         $seenKeys[$fingerprint] = true;
                     }
-                    array_push(
-                        $output,
-                        ...self::nodes([$loopNode], $scope, [
-                            ...$iterationData,
-                            '__pamNodePath' =>
-                                self::pathValue(
-                                    $nodeData['__pamNodePath'] ?? 'root',
-                                ).'.'.(string) $identity,
-                        ], $slot.'.'.(string) $identity.'.'),
-                    );
+                    $iterationData['__pamNodePath'] = $loopPath.$identity;
+                    foreach (self::nodes([$loopNode], $scope, $iterationData, $slot.'.'.$identity.'.') as $rendered) {
+                        $output[] = $rendered;
+                    }
                 }
                 $branchMatched = false;
                 continue;
             }
 
-            if (isset($attributes['p-if'])) {
-                $condition = self::dynamicValue(
-                    $attributes['p-if'],
-                    $scope,
-                    $nodeData,
-                );
-                $branchMatched = (bool) $condition;
-                if (!$branchMatched) {
-                    continue;
-                }
-            } elseif (isset($attributes['p-else-if'])) {
-                if ($branchMatched) {
-                    continue;
-                }
-                $branchMatched = (bool) self::dynamicValue(
-                    $attributes['p-else-if'],
-                    $scope,
-                    $nodeData,
-                );
-                if (!$branchMatched) {
-                    continue;
-                }
-            } elseif (isset($attributes['p-else'])) {
-                if ($branchMatched) {
-                    $branchMatched = false;
-                    continue;
-                }
-                $branchMatched = true;
-            } else {
-                $branchMatched = false;
-            }
-
-            $node = self::withoutAttributes(
-                $node,
-                ['p-if', 'p-else-if', 'p-else'],
-            );
-            $attributes = $node->attributes;
-
-            if ($tag === 'If') {
-                $condition = self::value(
-                    $attributes['condition'] ?? false,
-                    $scope,
-                    $nodeData,
-                );
-
-                if ((bool) $condition) {
-                    array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
-                }
-
-                continue;
-            }
-
-            if ($tag === 'Show') {
-                $condition = self::value(
-                    $attributes['when'] ?? $attributes['condition'] ?? false,
-                    $scope,
-                    $nodeData,
-                );
-                if ((bool) $condition) {
-                    array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
-                }
-                continue;
-            }
-
-            if ($tag === 'Match') {
-                $subject = self::value($attributes['value'] ?? null, $scope, $nodeData);
-                $fallback = null;
-                $fallbackIndex = 0;
-                foreach ($children as $candidateIndex => $candidate) {
-                    if ($candidate->kind !== 1) {
-                        continue;
-                    }
-                    if ($candidate->name === 'Default') {
-                        $fallback = $candidate;
-                        $fallbackIndex = $candidateIndex;
-                        continue;
-                    }
-                    if ($candidate->name !== 'Case') {
-                        throw new RuntimeException('Match accepts only Case and Default children.');
-                    }
-                    $case = self::value($candidate->attributes['value'] ?? null, $scope, $nodeData);
-                    if ($subject === $case) {
-                        array_push($output, ...self::nodes($candidate->children, $scope, $nodeData, $slot.'.'.$candidateIndex.'.'));
+            switch ($plan['condition']) {
+                case 1:
+                    $branchMatched = (bool) self::dynamicValue($plan['expression'], $scope, $nodeData);
+                    if (!$branchMatched) {
                         continue 2;
                     }
-                }
-                if ($fallback !== null) {
-                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData, $slot.'.'.$fallbackIndex.'.'));
-                }
-                continue;
+                    break;
+                case 2:
+                    if ($branchMatched) {
+                        continue 2;
+                    }
+                    $branchMatched = (bool) self::dynamicValue($plan['expression'], $scope, $nodeData);
+                    if (!$branchMatched) {
+                        continue 2;
+                    }
+                    break;
+                case 3:
+                    if ($branchMatched) {
+                        $branchMatched = false;
+                        continue 2;
+                    }
+                    $branchMatched = true;
+                    break;
+                default:
+                    $branchMatched = false;
             }
 
-            if ($tag === 'Await') {
-                $resource = self::value($attributes['value'] ?? null, $scope, $nodeData);
-                $async = $resource instanceof AsyncResource ? $resource->value() : $resource;
-                if (!$async instanceof AsyncValue) {
-                    throw new RuntimeException('Await value must resolve to AsyncResource or AsyncValue.');
-                }
-                $branch = match ($async->status) {
-                    AsyncStatus::Loading => 'Pending',
-                    AsyncStatus::Content => 'Content',
-                    AsyncStatus::Empty => 'Empty',
-                    AsyncStatus::Error => 'Error',
-                    AsyncStatus::Offline => 'Offline',
-                    AsyncStatus::Stale => 'Stale',
-                };
-                $fallback = null;
-                $fallbackIndex = 0;
-                foreach ($children as $candidateIndex => $candidate) {
-                    if ($candidate->kind !== 1) {
-                        continue;
-                    }
-                    if ($candidate->name === 'Default') {
-                        $fallback = $candidate;
-                        $fallbackIndex = $candidateIndex;
-                    }
-                    if ($candidate->name !== $branch) {
-                        continue;
-                    }
-                    array_push($output, ...self::nodes($candidate->children, $scope, [
-                        ...$nodeData,
-                        'data' => $async->data,
-                        'message' => $async->message,
-                        'retryable' => $async->retryable,
-                    ], $slot.'.'.$candidateIndex.'.'));
-                    continue 2;
-                }
-                if ($fallback !== null) {
-                    array_push($output, ...self::nodes($fallback->children, $scope, $nodeData, $slot.'.'.$fallbackIndex.'.'));
-                }
-                continue;
-            }
+            $node = $plan['node'];
+            $tag = $node->name;
+            $attributes = $node->attributes;
+            $children = $node->children;
 
-            if ($tag === 'Each') {
-                $items = self::value($attributes['items'] ?? [], $scope, $nodeData);
-                $name = (string) ($attributes['as'] ?? 'item');
-
-                if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
-                    throw new RuntimeException('Each "as" value must be a safe variable name.');
-                }
-
-                if ($items instanceof Traversable) {
-                    $items = iterator_to_array($items);
-                }
-
-                if (!is_array($items)) {
-                    throw new RuntimeException('Each items must resolve to an array or Traversable.');
-                }
-
-                foreach ($items as $itemIndex => $item) {
-                    array_push(
-                        $output,
-                        ...self::nodes($children, $scope, [
-                            ...$nodeData,
-                            $name => $item,
-                            $name.'Index' => $itemIndex,
-                        ], $slot.'.'.(string) $itemIndex.'.'),
-                    );
-                }
-
-                continue;
-            }
-
-            if ($tag === 'Slot') {
-                $name = (string) ($attributes['name'] ?? 'slot');
-                $slotContent = $nodeData[$name] ?? [];
-                if ($slotContent instanceof Renderable) {
-                    $slotContent = [$slotContent];
-                }
-                if (!is_array($slotContent)) {
-                    throw new RuntimeException("Slot {$name} must resolve to renderable content.");
-                }
-                if ($slotContent === [] && $children !== []) {
-                    array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
-                    continue;
-                }
-                foreach ($slotContent as $contentIndex => $content) {
-                    if ($content === null || $content === false) {
-                        continue;
-                    }
-                    if (!$content instanceof Renderable) {
-                        throw new RuntimeException("Slot {$name} contains non-renderable content.");
-                    }
-                    $element = $content->toElement();
-                    $output[] = $element->withIdentitySlot(
-                        $slot.'.'.($element->identitySlot() ?? (string) $contentIndex),
-                    );
-                }
+            if ($plan['control']) {
+                self::controlNode($output, $tag, $attributes, $children, $scope, $nodeData, $slot);
                 continue;
             }
 
             try {
-                $output[] = self::tag(
+                $element = self::tag(
                     $tag,
                     $attributes,
                     $children,
                     $scope,
                     $nodeData,
-                )->withIdentitySlot($slot);
+                    $node,
+                );
+                $output[] = $element->identitySlot() === null && self::$freshElement === $element
+                    ? $element->__pamPlaceAt($slot)
+                    : $element->withIdentitySlot($slot);
             } catch (TemplateException $error) {
                 throw $error;
             } catch (RuntimeException $error) {
@@ -994,6 +901,243 @@ final class TemplateRenderer
         }
 
         return $output;
+    }
+
+    /**
+     * Resolves a node's directives once: legacy aliases, the p-for header and
+     * the conditional kind, plus the attribute-stripped node rendered for it.
+     *
+     * @return array<string, mixed>
+     */
+    private static function nodePlan(CompiledTemplateNode $node): array
+    {
+        $attributes = self::directiveAliases($node->attributes);
+        $node = self::withAttributes($node, $attributes);
+
+        if (isset($attributes['p-for'])) {
+            $directive = $attributes['p-for'];
+            if (
+                !is_string($directive)
+                || preg_match(
+                    '/^\s*\$?([A-Za-z_][A-Za-z0-9_]*)\s+in\s+(.+)\s*$/D',
+                    $directive,
+                    $match,
+                ) !== 1
+            ) {
+                throw new RuntimeException(
+                    'p-for must use "$item in $items" syntax.',
+                );
+            }
+            // `:key` / `key` on a loop child is the item identity exactly
+            // like `p-key` (component instance, slot and native id).
+            $keyExpression = $attributes['p-key'] ?? $attributes[':key'] ?? null;
+            $staticKey = $keyExpression === null ? ($attributes['key'] ?? null) : null;
+            $indexName = $attributes['p-index'] ?? $match[1].'Index';
+            $indexValid = is_string($indexName)
+                && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', ltrim($indexName, '$')) === 1;
+
+            return [
+                'for' => [
+                    $match[1],
+                    $match[2],
+                    $keyExpression,
+                    $staticKey,
+                    $indexValid ? ltrim($indexName, '$') : '',
+                    $indexValid,
+                    self::withoutAttributes($node, ['p-for', 'p-key', 'p-index']),
+                ],
+            ];
+        }
+
+        $condition = 0;
+        $expression = null;
+        if (isset($attributes['p-if'])) {
+            $condition = 1;
+            $expression = $attributes['p-if'];
+        } elseif (isset($attributes['p-else-if'])) {
+            $condition = 2;
+            $expression = $attributes['p-else-if'];
+        } elseif (isset($attributes['p-else'])) {
+            $condition = 3;
+        }
+        $stripped = self::withoutAttributes($node, ['p-if', 'p-else-if', 'p-else']);
+
+        return [
+            'for' => null,
+            'condition' => $condition,
+            'expression' => $expression,
+            'node' => $stripped,
+            'control' => in_array($stripped->name, ['If', 'Show', 'Match', 'Await', 'Each', 'Slot'], true),
+        ];
+    }
+
+    /**
+     * Template control tags (If, Show, Match, Await, Each, Slot).
+     *
+     * @param list<Element|string> $output
+     * @param array<string, string|bool> $attributes
+     * @param list<CompiledTemplateNode> $children
+     * @param array<string, mixed> $nodeData
+     */
+    private static function controlNode(
+        array &$output,
+        string $tag,
+        array $attributes,
+        array $children,
+        ?object $scope,
+        array $nodeData,
+        string $slot,
+    ): void {
+        if ($tag === 'If') {
+            $condition = self::value(
+                $attributes['condition'] ?? false,
+                $scope,
+                $nodeData,
+            );
+
+            if ((bool) $condition) {
+                array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
+            }
+
+            return;
+        }
+
+        if ($tag === 'Show') {
+            $condition = self::value(
+                $attributes['when'] ?? $attributes['condition'] ?? false,
+                $scope,
+                $nodeData,
+            );
+            if ((bool) $condition) {
+                array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
+            }
+            return;
+        }
+
+        if ($tag === 'Match') {
+            $subject = self::value($attributes['value'] ?? null, $scope, $nodeData);
+            $fallback = null;
+            $fallbackIndex = 0;
+            foreach ($children as $candidateIndex => $candidate) {
+                if ($candidate->kind !== 1) {
+                    continue;
+                }
+                if ($candidate->name === 'Default') {
+                    $fallback = $candidate;
+                    $fallbackIndex = $candidateIndex;
+                    continue;
+                }
+                if ($candidate->name !== 'Case') {
+                    throw new RuntimeException('Match accepts only Case and Default children.');
+                }
+                $case = self::value($candidate->attributes['value'] ?? null, $scope, $nodeData);
+                if ($subject === $case) {
+                    array_push($output, ...self::nodes($candidate->children, $scope, $nodeData, $slot.'.'.$candidateIndex.'.'));
+                    return;
+                }
+            }
+            if ($fallback !== null) {
+                array_push($output, ...self::nodes($fallback->children, $scope, $nodeData, $slot.'.'.$fallbackIndex.'.'));
+            }
+            return;
+        }
+
+        if ($tag === 'Await') {
+            $resource = self::value($attributes['value'] ?? null, $scope, $nodeData);
+            $async = $resource instanceof AsyncResource ? $resource->value() : $resource;
+            if (!$async instanceof AsyncValue) {
+                throw new RuntimeException('Await value must resolve to AsyncResource or AsyncValue.');
+            }
+            $branch = match ($async->status) {
+                AsyncStatus::Loading => 'Pending',
+                AsyncStatus::Content => 'Content',
+                AsyncStatus::Empty => 'Empty',
+                AsyncStatus::Error => 'Error',
+                AsyncStatus::Offline => 'Offline',
+                AsyncStatus::Stale => 'Stale',
+            };
+            $fallback = null;
+            $fallbackIndex = 0;
+            foreach ($children as $candidateIndex => $candidate) {
+                if ($candidate->kind !== 1) {
+                    continue;
+                }
+                if ($candidate->name === 'Default') {
+                    $fallback = $candidate;
+                    $fallbackIndex = $candidateIndex;
+                }
+                if ($candidate->name !== $branch) {
+                    continue;
+                }
+                array_push($output, ...self::nodes($candidate->children, $scope, [
+                    ...$nodeData,
+                    'data' => $async->data,
+                    'message' => $async->message,
+                    'retryable' => $async->retryable,
+                ], $slot.'.'.$candidateIndex.'.'));
+                return;
+            }
+            if ($fallback !== null) {
+                array_push($output, ...self::nodes($fallback->children, $scope, $nodeData, $slot.'.'.$fallbackIndex.'.'));
+            }
+            return;
+        }
+
+        if ($tag === 'Each') {
+            $items = self::value($attributes['items'] ?? [], $scope, $nodeData);
+            $name = (string) ($attributes['as'] ?? 'item');
+
+            if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $name) !== 1) {
+                throw new RuntimeException('Each "as" value must be a safe variable name.');
+            }
+
+            if ($items instanceof Traversable) {
+                $items = iterator_to_array($items);
+            }
+
+            if (!is_array($items)) {
+                throw new RuntimeException('Each items must resolve to an array or Traversable.');
+            }
+
+            foreach ($items as $itemIndex => $item) {
+                array_push(
+                    $output,
+                    ...self::nodes($children, $scope, [
+                        ...$nodeData,
+                        $name => $item,
+                        $name.'Index' => $itemIndex,
+                    ], $slot.'.'.(string) $itemIndex.'.'),
+                );
+            }
+
+            return;
+        }
+
+        // Slot
+        $name = (string) ($attributes['name'] ?? 'slot');
+        $slotContent = $nodeData[$name] ?? [];
+        if ($slotContent instanceof Renderable) {
+            $slotContent = [$slotContent];
+        }
+        if (!is_array($slotContent)) {
+            throw new RuntimeException("Slot {$name} must resolve to renderable content.");
+        }
+        if ($slotContent === [] && $children !== []) {
+            array_push($output, ...self::nodes($children, $scope, $nodeData, $slot.'.'));
+            return;
+        }
+        foreach ($slotContent as $contentIndex => $content) {
+            if ($content === null || $content === false) {
+                continue;
+            }
+            if (!$content instanceof Renderable) {
+                throw new RuntimeException("Slot {$name} contains non-renderable content.");
+            }
+            $element = $content->toElement();
+            $output[] = $element->withIdentitySlot(
+                $slot.'.'.($element->identitySlot() ?? (string) $contentIndex),
+            );
+        }
     }
 
     /**
@@ -1046,109 +1190,129 @@ final class TemplateRenderer
         array $childNodes,
         ?object $scope,
         array $data,
+        ?CompiledTemplateNode $planNode = null,
     ): Element {
         $factory = TemplateRegistry::factory($tag);
-        if ($factory === null) {
+        $plan = null;
+        $variant = $factory === null ? 'n' : 'f';
+        if ($planNode !== null) {
+            $plan = $planNode->pamTagPlans[$variant]
+                ??= self::tagPlan($tag, $attributes, $factory !== null);
+            $attributes = $plan['attributes'];
+        } elseif ($factory === null) {
             $attributes = self::nativeEventAliases($attributes);
         }
         $declaredAttributes = $attributes;
-        $resolvedClass = self::classValue($attributes, $scope, $data);
-        $styleDescriptor = self::styleNodeDescriptor($tag, $resolvedClass, $attributes, $scope, $data);
+        $resolvedClass = $plan !== null && !$plan['dynamicClass'] && !$plan['interpolatedClass']
+            ? $plan['staticClass']
+            : self::classValue($attributes, $scope, $data);
         $inheritedStyles = $data['__pamInheritedStyles'] ?? [];
         if (!is_array($inheritedStyles)) {
             $inheritedStyles = [];
         }
-        $attributes = [
-            ...self::styleAttributes($inheritedStyles, 'inherited styles'),
-            ...self::scopedStyleAttributes(
-                $tag,
-                $resolvedClass,
-                $data,
-                $attributes,
-                $scope,
-                $styleDescriptor,
-            ),
-            ...$attributes,
-        ];
-        $unresolvedStyleAttributes = $attributes;
-        $attributes = self::resolveScopedFont(
-            $attributes,
-            self::styleSheetFonts($data),
-        );
-        if (isset($attributes['p-model'])) {
-            $binding = in_array($tag, ['Switch', 'Toggle'], true)
-                ? 'bind:checked'
-                : 'bind:value';
-            if (isset($attributes[$binding])) {
-                throw new RuntimeException(
-                    "p-model cannot be combined with {$binding} on {$tag}.",
-                );
+        $sheet = $data['__pamStyles'] ?? null;
+        $prepared = is_array($sheet) ? self::preparedStyleSheet($sheet, $data) : null;
+        $styleKey = null;
+        $entry = null;
+        if ($plan !== null && $plan['cacheable']) {
+            $styleKey = self::styleEntryKey($planNode, $variant, $plan, $sheet, $prepared, $resolvedClass, $inheritedStyles, $data);
+            if ($styleKey !== null) {
+                $entry = self::$styleEntries[$styleKey] ?? null;
             }
-            $attributes[$binding] = $attributes['p-model'];
-            unset($attributes['p-model']);
         }
-        if (isset($attributes['p-model:checked'])) {
-            if (isset($attributes['bind:checked'])) {
-                throw new RuntimeException(
-                    "p-model:checked cannot be combined with bind:checked on {$tag}.",
-                );
-            }
-            $attributes['bind:checked'] = $attributes['p-model:checked'];
-            unset($attributes['p-model:checked']);
-        }
-        if (isset($attributes['bind:value'])) {
-            $attributes[':value'] = $attributes['bind:value'];
-            $attributes['model'] = ltrim(
-                self::stringValue(
-                    $attributes['bind:value'],
-                    'bind:value target',
+        if ($entry === null) {
+            self::$dynamicStyles = false;
+            $styleDescriptor = self::styleNodeDescriptor($tag, $resolvedClass, $attributes, $scope, $data);
+            $attributes = [
+                ...self::styleAttributes($inheritedStyles, 'inherited styles'),
+                ...self::scopedStyleAttributes(
+                    $tag,
+                    $resolvedClass,
+                    $data,
+                    $attributes,
+                    $scope,
+                    $styleDescriptor,
+                    $prepared,
                 ),
-                '$',
+                ...$attributes,
+            ];
+            $unresolvedStyleAttributes = $attributes;
+            $attributes = self::resolveScopedFont(
+                $attributes,
+                self::styleSheetFonts($data),
             );
-            unset($attributes['bind:value']);
+            if ($styleKey !== null && !self::$dynamicStyles) {
+                $entry = self::styleEntry(
+                    $tag,
+                    $factory !== null,
+                    $styleDescriptor,
+                    $attributes,
+                    $unresolvedStyleAttributes,
+                );
+                if (count(self::$styleEntries) >= 8192) {
+                    self::$styleEntries = [];
+                }
+                self::$styleEntries[$styleKey] = $entry;
+            }
+        } else {
+            $styleDescriptor = $entry['descriptor'];
+            $attributes = $entry['attributes'];
+            $unresolvedStyleAttributes = $entry['unresolved'];
         }
-        $checkedBinding = null;
-        if (isset($attributes['bind:checked'])) {
-            $checkedBinding = self::stringValue(
-                $attributes['bind:checked'],
-                'bind:checked target',
-            );
-            $attributes[':checked'] = $attributes['bind:checked'];
-            unset($attributes['bind:checked']);
+        if ($plan === null || $plan['bindings']) {
+            [$attributes, $checkedBinding] = self::modelBindings($tag, $attributes);
+            $entry = null;
+        } else {
+            $checkedBinding = null;
         }
         $values = [];
+        $evaluated = [];
 
-        foreach ($attributes as $name => $raw) {
-            if (
-                isset(self::EVENTS[$name])
-                || $name === 'class'
-                || $name === ':class'
-                || $name === 'recipe'
-                || str_starts_with($name, 'variant:')
-                || $name === 'p-ripple'
-                || $name === ':p-ripple'
-                || str_starts_with($name, '@')
-            ) {
-                continue;
+        if ($entry !== null) {
+            foreach ($entry['values'] as [$name, $valueName, $mode, $payload, $remember]) {
+                $value = $mode === 0
+                    ? $payload
+                    : ($mode === 1
+                        ? TemplateExpression::evaluate($payload, $scope, $data)
+                        : self::value($payload, $scope, $data));
+                $values[$valueName] = $value;
+                if ($remember) {
+                    $evaluated[$name] = $value;
+                }
             }
+        } else {
+            foreach ($attributes as $name => $raw) {
+                if (
+                    isset(self::EVENTS[$name])
+                    || $name === 'class'
+                    || $name === ':class'
+                    || $name === 'recipe'
+                    || str_starts_with($name, 'variant:')
+                    || $name === 'p-ripple'
+                    || $name === ':p-ripple'
+                    || str_starts_with($name, '@')
+                ) {
+                    continue;
+                }
 
-            $valueName = ltrim($name, ':');
-            if ($factory === null && in_array($tag, ['Image', 'MediaPlayer'], true)) {
-                $valueName = preg_replace_callback(
-                    '/-([a-z])/',
-                    static fn (array $match): string => strtoupper($match[1]),
-                    $valueName,
-                ) ?? $valueName;
+                $valueName = ltrim($name, ':');
+                if ($factory === null && ($tag === 'Image' || $tag === 'MediaPlayer')) {
+                    $valueName = self::camelAttribute($valueName);
+                }
+                $value = str_starts_with($name, ':')
+                    ? self::dynamicValue($raw, $scope, $data)
+                    : self::value($raw, $scope, $data);
+                $values[$valueName] = $value;
+                $evaluated[$name] = $value;
             }
-            $values[$valueName] = str_starts_with($name, ':')
-                ? self::dynamicValue($raw, $scope, $data)
-                : self::value($raw, $scope, $data);
         }
         $rippleAttribute = $attributes[':p-ripple'] ?? $attributes['p-ripple'] ?? null;
-        if (array_key_exists(':p-ripple', $attributes)) {
-            $rippleAttribute = self::dynamicValue($rippleAttribute, $scope, $data);
-        } elseif (array_key_exists('p-ripple', $attributes)) {
-            $rippleAttribute = self::value($rippleAttribute, $scope, $data);
+        if ($rippleAttribute !== null) {
+            if (array_key_exists(':p-ripple', $attributes)) {
+                $rippleAttribute = self::dynamicValue($rippleAttribute, $scope, $data);
+            } elseif (array_key_exists('p-ripple', $attributes)) {
+                $rippleAttribute = self::value($rippleAttribute, $scope, $data);
+            }
         }
         if ($rippleAttribute !== null && $rippleAttribute !== false) {
             $ripple = is_array($rippleAttribute) ? $rippleAttribute : [];
@@ -1169,32 +1333,26 @@ final class TemplateRenderer
         }
         $componentValues = $values;
         if ($factory !== null) {
-            $declaredNames = [];
-            foreach (array_keys($declaredAttributes) as $name) {
-                $declaredNames[ltrim($name, ':')] = true;
+            $declaredNames = $plan['declaredNames'] ?? null;
+            if ($declaredNames === null) {
+                $declaredNames = [];
+                foreach (array_keys($declaredAttributes) as $name) {
+                    $declaredNames[ltrim($name, ':')] = true;
+                }
             }
             $componentValues = array_filter(
                 $values,
                 static fn (string $name): bool =>
                     isset($declaredNames[$name])
-                    || in_array($name, ['className', '__pamNodePath'], true),
+                    || $name === 'className'
+                    || $name === '__pamNodePath',
                 ARRAY_FILTER_USE_KEY,
             );
         }
 
-        $inheritedVariants = $data['__pamParentVariants'] ?? [];
-        if (!is_array($inheritedVariants)) {
-            $inheritedVariants = [];
-        }
-        $ownVariants = array_filter(
-            $factory !== null ? $componentValues : $values,
-            static fn (mixed $value, string $name): bool =>
-                !str_starts_with($name, '__pam')
-                && self::isDeclarativeContextValue($value),
-            ARRAY_FILTER_USE_BOTH,
-        );
+        $inheritedVariants = $data['__pamParentVariants'] ?? null;
         $ownHandlers = [];
-        foreach (self::EVENTS as $name => $event) {
+        foreach ($plan['events'] ?? self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
                 $eventRaw = $attributes[$name];
                 if (!is_string($eventRaw) && !is_bool($eventRaw)) {
@@ -1238,45 +1396,92 @@ final class TemplateRenderer
         if (!is_array($inheritedEventContexts)) {
             $inheritedEventContexts = [];
         }
+        $contextFactory = $factory !== null && !TemplateRegistry::isCompiledComponent($tag);
         $childEventContexts = $inheritedEventContexts;
         if ($factory !== null && $ownHandlers !== []) {
             $childEventContexts[$tag] = [
-                'props' => [...$inheritedVariants, ...$values],
+                'props' => [...ParentVariants::resolve($inheritedVariants), ...$values],
                 'events' => $ownHandlers,
             ];
         }
-        $childData = [
-            ...$data,
-            '__pamStyleAncestors' => [
-                ...(is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : []),
-                $styleDescriptor,
-            ],
-            '__pamContainerWidth' => is_numeric($values['width'] ?? null)
-                ? (float) $values['width']
-                : ($data['__pamContainerWidth'] ?? null),
-            '__pamContainerHeight' => is_numeric($values['height'] ?? null)
-                ? (float) $values['height']
-                : ($data['__pamContainerHeight'] ?? null),
-            '__pamInheritedStyles' => self::inheritedStyleAttributes(
-                $values,
-                $unresolvedStyleAttributes,
-                $scope,
-                $data,
-            ),
-            '__pamParentVariants' => [
-                ...$inheritedVariants,
-                ...$ownVariants,
-            ],
-            '__pamEventContexts' => $childEventContexts,
-        ];
-        [$defaultNodes, $slotNodes] = $factory === null
-            ? [$childNodes, []]
-            : self::componentSlotNodes($childNodes);
-        $renderedChildren = self::nodes($defaultNodes, $scope, $childData);
-        $children = array_values(array_filter(
-            $renderedChildren,
-            static fn (mixed $value): bool => $value instanceof Element,
-        ));
+        $inheritedChildStyles = [];
+        foreach (self::INHERITED_STYLE_ATTRIBUTES as $attribute) {
+            $value = $values[$attribute] ?? null;
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inheritedChildStyles[$attribute] = $value;
+            }
+        }
+        foreach ($entry['inherited'] ?? self::inheritedCandidates($unresolvedStyleAttributes) as [$name, $attribute, $mode, $payload]) {
+            if ($mode === 0) {
+                $value = $payload;
+            } elseif (array_key_exists($name, $evaluated) && ($attributes[$name] ?? null) === $payload) {
+                $value = $evaluated[$name];
+            } else {
+                $value = $mode === 1
+                    ? self::dynamicValue($payload, $scope, $data)
+                    : self::value($payload, $scope, $data);
+            }
+            if (
+                is_string($value)
+                || is_int($value)
+                || is_float($value)
+                || is_bool($value)
+            ) {
+                $inheritedChildStyles[$attribute] = $value;
+            }
+        }
+        $childData = $data;
+        if ($prepared === null || $prepared['usesAncestors']) {
+            $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
+            $ancestors[] = $styleDescriptor;
+            $childData['__pamStyleAncestors'] = $ancestors;
+            $childData['__pamStyleChain'] = self::styleChain(
+                $data['__pamStyleChain'] ?? 0,
+                $entry['descriptorId'] ?? self::descriptorId($styleDescriptor),
+            );
+        } else {
+            $childData['__pamStyleAncestors'] = [];
+        }
+        $childData['__pamContainerWidth'] = is_numeric($values['width'] ?? null)
+            ? (float) $values['width']
+            : ($data['__pamContainerWidth'] ?? null);
+        $childData['__pamContainerHeight'] = is_numeric($values['height'] ?? null)
+            ? (float) $values['height']
+            : ($data['__pamContainerHeight'] ?? null);
+        $childData['__pamInheritedStyles'] = $inheritedChildStyles;
+        $childData['__pamParentVariants'] = ParentVariants::extend(
+            $inheritedVariants,
+            $factory !== null ? $componentValues : $values,
+        );
+        $childData['__pamEventContexts'] = $childEventContexts;
+        if ($factory === null) {
+            $defaultNodes = $childNodes;
+            $slotNodes = [];
+        } elseif ($plan !== null && $planNode !== null) {
+            $slotPlan = $plan['slots'];
+            if ($slotPlan === null) {
+                $slotPlan = self::componentSlotNodes($childNodes);
+                $planNode->pamTagPlans[$variant]['slots'] = $slotPlan;
+            }
+            [$defaultNodes, $slotNodes] = $slotPlan;
+        } else {
+            [$defaultNodes, $slotNodes] = self::componentSlotNodes($childNodes);
+        }
+        $renderedChildren = $defaultNodes === [] ? [] : self::nodes($defaultNodes, $scope, $childData);
+        $children = [];
+        $text = '';
+        foreach ($renderedChildren as $rendered) {
+            if ($rendered instanceof Element) {
+                $children[] = $rendered;
+            } elseif (is_string($rendered)) {
+                $text .= $rendered;
+            }
+        }
         $slots = ['slot' => $children];
         foreach ($slotNodes as $slotName => $nodes) {
             $renderedSlot = self::nodes($nodes, $scope, $childData);
@@ -1291,12 +1496,8 @@ final class TemplateRenderer
             }
             $slots[$slotName] = $slotElements;
         }
-        $text = implode('', array_filter(
-            $renderedChildren,
-            static fn (mixed $value): bool => is_string($value),
-        ));
 
-        if ($factory === null && $text !== '' && !in_array($tag, ['Text', 'Span', 'Button'], true)) {
+        if ($factory === null && $text !== '' && $tag !== 'Text' && $tag !== 'Span' && $tag !== 'Button') {
             throw new RuntimeException("Text content is not valid inside {$tag}; wrap it in Text.");
         }
 
@@ -1304,7 +1505,8 @@ final class TemplateRenderer
             throw new RuntimeException("{$tag} cannot contain element children.");
         }
         $richParts = null;
-        if ($factory === null && $children !== [] && in_array($tag, ['Text', 'Span'], true)) {
+        $textTag = $tag === 'Text' || $tag === 'Span';
+        if ($factory === null && $children !== [] && $textTag) {
             $richParts = [];
             foreach ($renderedChildren as $part) {
                 if (is_string($part)) {
@@ -1316,7 +1518,7 @@ final class TemplateRenderer
                 }
             }
         }
-        if ($richParts === null && in_array($tag, ['Text', 'Span'], true)) {
+        if ($richParts === null && $textTag) {
             $text = trim($text);
         }
         if ($text !== '' && $richParts === null) {
@@ -1364,11 +1566,14 @@ final class TemplateRenderer
                 $componentEvents,
             );
         }
-        if ($factory !== null && $inheritedVariants !== []) {
-            $componentValues['__parentVariants'] = $inheritedVariants;
-        }
-        if ($factory !== null && $inheritedEventContexts !== []) {
-            $componentValues['__pamEventContexts'] = $inheritedEventContexts;
+        if ($contextFactory) {
+            $resolvedVariants = ParentVariants::resolve($inheritedVariants);
+            if ($resolvedVariants !== []) {
+                $componentValues['__parentVariants'] = $resolvedVariants;
+            }
+            if ($inheritedEventContexts !== []) {
+                $componentValues['__pamEventContexts'] = $inheritedEventContexts;
+            }
         }
         if ($factory !== null) {
             $componentValues['__pamSlots'] = $slots;
@@ -1588,12 +1793,12 @@ final class TemplateRenderer
 
         if ($resolvedClass !== null) {
             $element = self::classes($element, $resolvedClass, $data);
-            $element = $element->class($resolvedClass);
+            $element = self::withDomClasses($element, $resolvedClass);
         }
 
         $element = self::attributes($element, $values);
 
-        foreach (self::EVENTS as $name => $event) {
+        foreach ($plan['events'] ?? self::EVENTS as $name => $event) {
             if (isset($attributes[$name])) {
                 $handler = $ownHandlers[$event->value]
                     ?? throw new RuntimeException(
@@ -1683,7 +1888,314 @@ final class TemplateRenderer
             );
         }
 
+        self::$freshElement = $factory === null ? $element : null;
+
         return $element;
+    }
+
+    /**
+     * Static facts about one template element, derived once per node.
+     *
+     * @param array<string, string|bool> $attributes
+     * @return array<string, mixed>
+     */
+    private static function tagPlan(string $tag, array $attributes, bool $factory): array
+    {
+        if (!$factory) {
+            $attributes = self::nativeEventAliases($attributes);
+        }
+        $events = [];
+        foreach (self::EVENTS as $name => $event) {
+            if (isset($attributes[$name])) {
+                $events[$name] = $event;
+            }
+        }
+        $declared = [];
+        $observable = [];
+        $cacheable = !isset($attributes['recipe']);
+        foreach ($attributes as $name => $_) {
+            $declared[ltrim($name, ':')] = true;
+            if (!str_starts_with($name, '@') && !str_starts_with($name, 'on:')) {
+                $observable[ltrim($name, ':')] = true;
+            }
+            if (str_starts_with($name, 'variant:')) {
+                $cacheable = false;
+            }
+        }
+        $static = $attributes['class'] ?? null;
+
+        return [
+            'id' => ++self::$planSequence,
+            'tag' => $tag,
+            'attributes' => $attributes,
+            'events' => $events,
+            'declaredNames' => $declared,
+            'observable' => $observable,
+            'staticClass' => is_string($static) && trim($static) !== '' ? trim($static) : null,
+            'interpolatedClass' => is_string($static) && str_contains($static, '{{'),
+            'dynamicClass' => array_key_exists(':class', $attributes),
+            'cacheable' => $cacheable,
+            'bindings' => isset($attributes['p-model'])
+                || isset($attributes['p-model:checked'])
+                || isset($attributes['bind:value'])
+                || isset($attributes['bind:checked']),
+            'observed' => [],
+            'slots' => null,
+        ];
+    }
+
+    /**
+     * Cache key of the resolved style/attribute entry of one element, or null
+     * when the element's styles depend on evaluated attribute values.
+     *
+     * @param array<string, mixed> $plan
+     * @param array<string, mixed>|null $prepared
+     * @param array<string, mixed> $inheritedStyles
+     * @param array<string, mixed> $data
+     */
+    private static function styleEntryKey(
+        CompiledTemplateNode $planNode,
+        string $variant,
+        array $plan,
+        mixed $sheet,
+        ?array $prepared,
+        ?string $resolvedClass,
+        array $inheritedStyles,
+        array $data,
+    ): ?string {
+        $inherited = $inheritedStyles === [] ? '' : serialize($inheritedStyles);
+        if ($prepared === null) {
+            return $plan['id'].'|-|'.($resolvedClass ?? '').'|'.$inherited;
+        }
+        $preparedKey = $prepared['key'];
+        $sheetId = is_array($sheet) ? ($sheet['__pamSheetId'] ?? null) : null;
+        if ($preparedKey === null || !is_int($sheetId)) {
+            return null;
+        }
+        $observed = $plan['observed'][$sheetId] ?? null;
+        if ($observed === null) {
+            $observed = array_intersect_key(self::observedStyleAttributes($data), $plan['observable']) !== [];
+            $planNode->pamTagPlans[$variant]['observed'][$sheetId] = $observed;
+        }
+        if ($observed) {
+            return null;
+        }
+        $chain = $prepared['usesAncestors'] ? ($data['__pamStyleChain'] ?? 0) : 0;
+        if (!is_int($chain)) {
+            return null;
+        }
+
+        return $plan['id'].'|'.$preparedKey.'|'.($resolvedClass ?? '').'|'.$chain.'|'.$inherited;
+    }
+
+    /**
+     * @param array<string, mixed> $descriptor
+     * @param array<string, mixed> $attributes merged and font-resolved
+     * @param array<string, mixed> $unresolved merged before font resolution
+     * @return array<string, mixed>
+     */
+    private static function styleEntry(
+        string $tag,
+        bool $factory,
+        array $descriptor,
+        array $attributes,
+        array $unresolved,
+    ): array {
+        $inherited = self::inheritedCandidates($unresolved);
+        $remember = [];
+        foreach ($inherited as [$name, , $mode]) {
+            if ($mode !== 0) {
+                $remember[$name] = true;
+            }
+        }
+        $camel = !$factory && ($tag === 'Image' || $tag === 'MediaPlayer');
+        $values = [];
+        foreach ($attributes as $name => $raw) {
+            if (
+                isset(self::EVENTS[$name])
+                || $name === 'class'
+                || $name === ':class'
+                || $name === 'recipe'
+                || str_starts_with($name, 'variant:')
+                || $name === 'p-ripple'
+                || $name === ':p-ripple'
+                || str_starts_with($name, '@')
+            ) {
+                continue;
+            }
+            $valueName = ltrim($name, ':');
+            if ($camel) {
+                $valueName = self::camelAttribute($valueName);
+            }
+            [$mode, $payload] = self::valueMode($name, $raw);
+            $values[] = [$name, $valueName, $mode, $payload, isset($remember[$name])];
+        }
+
+        return [
+            'descriptor' => $descriptor,
+            'descriptorId' => self::descriptorId($descriptor),
+            'attributes' => $attributes,
+            'unresolved' => $unresolved,
+            'values' => $values,
+            'inherited' => $inherited,
+        ];
+    }
+
+    /**
+     * 0 = constant payload, 1 = dynamic expression, 2 = static value needing
+     * evaluation (paths, calls, interpolation).
+     *
+     * @return array{0: int, 1: mixed}
+     */
+    private static function valueMode(string $name, mixed $raw): array
+    {
+        if (str_starts_with($name, ':')) {
+            return is_string($raw) ? [1, $raw] : [0, $raw];
+        }
+        if (!is_string($raw)) {
+            return [0, $raw];
+        }
+        $kind = self::$valueKinds[$raw] ?? self::classifyValue($raw);
+
+        return $kind[0] === 1 ? [0, $kind[1]] : [2, $raw];
+    }
+
+    /**
+     * @param array<string, mixed> $unresolved
+     * @return list<array{0: string, 1: string, 2: int, 3: mixed}>
+     */
+    private static function inheritedCandidates(array $unresolved): array
+    {
+        $candidates = [];
+        foreach ($unresolved as $name => $raw) {
+            $attribute = ltrim($name, ':');
+            if (!isset(self::INHERITED_STYLE_SET[$attribute])) {
+                continue;
+            }
+            [$mode, $payload] = self::valueMode($name, $raw);
+            $candidates[] = [$name, $attribute, $mode, $payload];
+        }
+
+        return $candidates;
+    }
+
+    /**
+     * @param array<string, mixed> $attributes
+     * @return array{0: array<string, mixed>, 1: ?string}
+     */
+    private static function modelBindings(string $tag, array $attributes): array
+    {
+        if (isset($attributes['p-model'])) {
+            $binding = in_array($tag, ['Switch', 'Toggle'], true)
+                ? 'bind:checked'
+                : 'bind:value';
+            if (isset($attributes[$binding])) {
+                throw new RuntimeException(
+                    "p-model cannot be combined with {$binding} on {$tag}.",
+                );
+            }
+            $attributes[$binding] = $attributes['p-model'];
+            unset($attributes['p-model']);
+        }
+        if (isset($attributes['p-model:checked'])) {
+            if (isset($attributes['bind:checked'])) {
+                throw new RuntimeException(
+                    "p-model:checked cannot be combined with bind:checked on {$tag}.",
+                );
+            }
+            $attributes['bind:checked'] = $attributes['p-model:checked'];
+            unset($attributes['p-model:checked']);
+        }
+        if (isset($attributes['bind:value'])) {
+            $attributes[':value'] = $attributes['bind:value'];
+            $attributes['model'] = ltrim(
+                self::stringValue(
+                    $attributes['bind:value'],
+                    'bind:value target',
+                ),
+                '$',
+            );
+            unset($attributes['bind:value']);
+        }
+        $checkedBinding = null;
+        if (isset($attributes['bind:checked'])) {
+            $checkedBinding = self::stringValue(
+                $attributes['bind:checked'],
+                'bind:checked target',
+            );
+            $attributes[':checked'] = $attributes['bind:checked'];
+            unset($attributes['bind:checked']);
+        }
+
+        return [$attributes, $checkedBinding];
+    }
+
+    private static function camelAttribute(string $name): string
+    {
+        if (!str_contains($name, '-')) {
+            return $name;
+        }
+
+        return self::$camelNames[$name] ??= preg_replace_callback(
+            '/-([a-z])/',
+            static fn (array $match): string => strtoupper($match[1]),
+            $name,
+        ) ?? $name;
+    }
+
+    /** @param array<string, mixed> $descriptor */
+    private static function descriptorId(array $descriptor): int
+    {
+        $key = serialize($descriptor);
+        $id = self::$descriptorIds[$key] ?? null;
+        if ($id !== null) {
+            return $id;
+        }
+        if (count(self::$descriptorIds) >= 16384) {
+            self::resetStyleIdentities();
+        }
+
+        return self::$descriptorIds[$key] = ++self::$identitySequence;
+    }
+
+    private static function styleChain(mixed $parent, int $descriptor): int
+    {
+        $key = (is_int($parent) ? $parent : 0).'/'.$descriptor;
+        $id = self::$styleChains[$key] ?? null;
+        if ($id !== null) {
+            return $id;
+        }
+        if (count(self::$styleChains) >= 16384) {
+            self::resetStyleIdentities();
+        }
+
+        return self::$styleChains[$key] = ++self::$identitySequence;
+    }
+
+    private static function resetStyleIdentities(): void
+    {
+        // Entries are keyed by chain ids; ids are never reused (monotonic
+        // sequence), so dropping the maps only costs recomputation.
+        self::$descriptorIds = [];
+        self::$styleChains = [];
+        self::$styleEntries = [];
+    }
+
+    private static function withDomClasses(Element $element, string $classes): Element
+    {
+        if ($element->domClasses() !== []) {
+            return $element->class($classes);
+        }
+        $tokens = self::$domClassTokens[$classes] ?? null;
+        if ($tokens === null) {
+            $tokens = $element->class($classes)->domClasses();
+            if (count(self::$domClassTokens) >= 4096) {
+                self::$domClassTokens = [];
+            }
+            self::$domClassTokens[$classes] = $tokens;
+        }
+
+        return $element->__pamWithDomClasses($tokens);
     }
 
     /** @param array<string, mixed> $values */
@@ -1848,6 +2360,101 @@ final class TemplateRenderer
      */
     private static function attributes(Element $element, array $attributes): Element
     {
+        $signature = $element::class.'|'.$element->kind()->value.'|'.implode('|', array_keys($attributes));
+        $plan = self::$attributePlans[$signature] ?? null;
+        if ($plan === null) {
+            $plan = self::attributePlan($element, $attributes);
+            if (count(self::$attributePlans) >= 4096) {
+                self::$attributePlans = [];
+            }
+            self::$attributePlans[$signature] = $plan;
+        }
+        if ($plan['special']) {
+            $element = self::specialAttributes($element, $attributes);
+        }
+        $batch = [];
+        foreach ($plan['properties'] as [$name, $key]) {
+            $value = self::propertyValue($key, $attributes[$name]);
+
+            if ($value !== null) {
+                $batch[$key->value] = $value;
+            }
+        }
+
+        return $batch === [] ? $element : $element->__pamWithProperties($batch);
+    }
+
+    /**
+     * Static part of attributes(): which special handlers apply and the
+     * ordered native properties for one element class and value-name set.
+     *
+     * @param array<string, mixed> $attributes
+     * @return array{special: bool, properties: list<array{0: string, 1: PropKey}>}
+     */
+    private static function attributePlan(Element $element, array $attributes): array
+    {
+        $special = false;
+        foreach ($attributes as $name => $_) {
+            if (isset(self::SPECIAL_ATTRIBUTES[$name]) || str_starts_with((string) $name, 'data-')) {
+                $special = true;
+                break;
+            }
+        }
+        $properties = [];
+        // array_intersect_key keeps PROPERTIES order, so alias precedence is unchanged.
+        foreach (array_intersect_key(self::PROPERTIES, $attributes) as $name => $key) {
+            if (
+                ($element instanceof Image || $element instanceof MediaPlayer)
+                && in_array($name, [
+                    'cache',
+                    'cacheKey',
+                    'cacheMaxAge',
+                    'cacheTags',
+                    'pinOffline',
+                    'priority',
+                    'cacheMaxBytes',
+                    'checksum',
+                    'thumbnail',
+                    'resizeWidth',
+                    'resizeHeight',
+                    'streamingCache',
+                    'preloadSeconds',
+                    'downloadWhilePlaying',
+                ], true)
+            ) {
+                continue;
+            }
+            if (
+                $element instanceof BottomSheet
+                && in_array(
+                    $name,
+                    [
+                        'snapPoints',
+                        'index',
+                        'dismissible',
+                        'backdropDismiss',
+                        'handleVisible',
+                        'dragEnabled',
+                        'cornerRadius',
+                        'keyboardBehavior',
+                    ],
+                    true,
+                )
+            ) {
+                continue;
+            }
+            if (!self::propertyAppliesToKind($key, $element->kind())) {
+                continue;
+            }
+            $properties[] = [$name, $key];
+        }
+
+        return ['special' => $special, 'properties' => $properties];
+    }
+
+    /** @param array<string, mixed> $attributes */
+    private static function specialAttributes(Element $element, array $attributes): Element
+    {
         if (isset($attributes['id'])) {
             $element = $element->id(self::stringValue($attributes['id'], 'DOM id'));
         }
@@ -2001,59 +2608,6 @@ final class TemplateRenderer
                 $offsetKey,
                 max(0.0, (float) $attributes['contentOffset']),
             );
-        }
-
-        // array_intersect_key keeps PROPERTIES order, so alias precedence is unchanged.
-        foreach (array_intersect_key(self::PROPERTIES, $attributes) as $name => $key) {
-            if (
-                ($element instanceof Image || $element instanceof MediaPlayer)
-                && in_array($name, [
-                    'cache',
-                    'cacheKey',
-                    'cacheMaxAge',
-                    'cacheTags',
-                    'pinOffline',
-                    'priority',
-                    'cacheMaxBytes',
-                    'checksum',
-                    'thumbnail',
-                    'resizeWidth',
-                    'resizeHeight',
-                    'streamingCache',
-                    'preloadSeconds',
-                    'downloadWhilePlaying',
-                ], true)
-            ) {
-                continue;
-            }
-            if (
-                $element instanceof BottomSheet
-                && in_array(
-                    $name,
-                    [
-                        'snapPoints',
-                        'index',
-                        'dismissible',
-                        'backdropDismiss',
-                        'handleVisible',
-                        'dragEnabled',
-                        'cornerRadius',
-                        'keyboardBehavior',
-                    ],
-                    true,
-                )
-            ) {
-                continue;
-            }
-            if (!self::propertyAppliesToKind($key, $element->kind())) {
-                continue;
-            }
-
-            $value = self::propertyValue($key, $attributes[$name]);
-
-            if ($value !== null) {
-                $element = $element->property($key, $value);
-            }
         }
 
         return $element;
@@ -2226,6 +2780,67 @@ final class TemplateRenderer
     }
 
     private static function propertyValue(PropKey $key, mixed $value): string|int|float|bool|null
+    {
+        // Conversions of scalar inputs are pure; memoized per native key.
+        $id = $key->value;
+        if (is_string($value)) {
+            if (isset(self::$propertyStrings[$id]) && array_key_exists($value, self::$propertyStrings[$id])) {
+                return self::$propertyStrings[$id][$value];
+            }
+            $converted = self::convertPropertyValue($key, $value);
+            if (strlen($value) <= 256) {
+                self::rememberPropertyValue();
+                self::$propertyStrings[$id][$value] = $converted;
+            }
+
+            return $converted;
+        }
+        if (is_int($value)) {
+            if (isset(self::$propertyInts[$id]) && array_key_exists($value, self::$propertyInts[$id])) {
+                return self::$propertyInts[$id][$value];
+            }
+            self::rememberPropertyValue();
+
+            return self::$propertyInts[$id][$value] = self::convertPropertyValue($key, $value);
+        }
+        if (is_float($value)) {
+            $memo = (string) $value;
+            if (isset(self::$propertyFloats[$id]) && array_key_exists($memo, self::$propertyFloats[$id])) {
+                return self::$propertyFloats[$id][$memo];
+            }
+            $converted = self::convertPropertyValue($key, $value);
+            if (is_finite($value)) {
+                self::rememberPropertyValue();
+                self::$propertyFloats[$id][$memo] = $converted;
+            }
+
+            return $converted;
+        }
+        if (is_bool($value)) {
+            $memo = (int) $value;
+            if (isset(self::$propertyBools[$id]) && array_key_exists($memo, self::$propertyBools[$id])) {
+                return self::$propertyBools[$id][$memo];
+            }
+            self::rememberPropertyValue();
+
+            return self::$propertyBools[$id][$memo] = self::convertPropertyValue($key, $value);
+        }
+
+        return self::convertPropertyValue($key, $value);
+    }
+
+    private static function rememberPropertyValue(): void
+    {
+        if (++self::$propertyMemoSize > 16384) {
+            self::$propertyMemoSize = 1;
+            self::$propertyStrings = [];
+            self::$propertyInts = [];
+            self::$propertyFloats = [];
+            self::$propertyBools = [];
+        }
+    }
+
+    private static function convertPropertyValue(PropKey $key, mixed $value): string|int|float|bool|null
     {
         return match ($key) {
             PropKey::ScrollIndicatorStyle => self::named($value, [
@@ -2905,7 +3520,28 @@ final class TemplateRenderer
         array $data,
     ): Element
     {
+        $sheet = $data['__pamStyles'] ?? null;
+        $sheetId = is_array($sheet) ? ($sheet['__pamSheetId'] ?? null) : null;
+        if (is_int($sheetId) && isset(self::$localClassStrings[$sheetId][$classes])) {
+            return $element;
+        }
         $localClasses = self::styleSheetClasses($data);
+        $allLocal = true;
+        foreach (preg_split('/\\s+/', trim($classes)) ?: [] as $class) {
+            if ($class === '' || isset($localClasses[$class])) {
+                continue;
+            }
+            $allLocal = false;
+            break;
+        }
+        if ($allLocal && is_int($sheetId)) {
+            if (count(self::$localClassStrings) >= 512) {
+                self::$localClassStrings = [];
+            }
+            self::$localClassStrings[$sheetId][$classes] = true;
+
+            return $element;
+        }
         foreach (preg_split('/\\s+/', trim($classes)) ?: [] as $class) {
             if ($class === '') {
                 continue;
@@ -3084,12 +3720,13 @@ final class TemplateRenderer
         array $rawAttributes,
         ?object $scope,
         ?array $descriptor = null,
+        ?array $prepared = null,
     ): array {
         $sheet = $data['__pamStyles'] ?? null;
         if (!is_array($sheet)) {
             return [];
         }
-        $prepared = self::preparedStyleSheet($sheet, $data);
+        $prepared ??= self::preparedStyleSheet($sheet, $data);
         $sheet = $prepared['sheet'];
         $descriptor ??= self::styleNodeDescriptor($tag, $classes, $rawAttributes, $scope, $data);
         $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
@@ -3474,6 +4111,8 @@ final class TemplateRenderer
         [$compiledCascade, $cascadeBuckets] = self::indexStyleRules($cascade, true);
         [$compiledStates, $stateBuckets] = self::indexStyleRules($stateRules, false);
         $prepared = [
+            'key' => $key,
+            'usesAncestors' => self::sheetUsesAncestors($sheet),
             'sheet' => $effective,
             'hasCascade' => $cascade !== [],
             'cascade' => $compiledCascade,
@@ -3489,6 +4128,48 @@ final class TemplateRenderer
         }
 
         return $prepared;
+    }
+
+    /**
+     * True when any selector of the sheet (base or responsive) relates the
+     * subject to its ancestors; otherwise ancestor descriptors are not kept.
+     *
+     * @param array<string, mixed> $sheet
+     */
+    private static function sheetUsesAncestors(array $sheet): bool
+    {
+        $id = $sheet['__pamSheetId'] ?? null;
+        if (is_int($id) && isset(self::$sheetAncestors[$id])) {
+            return self::$sheetAncestors[$id];
+        }
+        $groups = [$sheet['cascadeRules'] ?? [], $sheet['stateRules'] ?? []];
+        $queries = $sheet['queries'] ?? [];
+        foreach (is_array($queries) ? $queries : [] as $query) {
+            $styles = is_array($query) ? ($query['styles'] ?? null) : null;
+            if (is_array($styles)) {
+                $groups[] = $styles['cascadeRules'] ?? [];
+                $groups[] = $styles['stateRules'] ?? [];
+            }
+        }
+        $uses = false;
+        foreach ($groups as $rules) {
+            foreach (is_array($rules) ? $rules : [] as $rule) {
+                $selector = is_array($rule) ? ($rule['selector'] ?? null) : null;
+                $compounds = is_array($selector) ? ($selector['compounds'] ?? null) : null;
+                if (is_array($compounds) && count($compounds) > 1) {
+                    $uses = true;
+                    break 2;
+                }
+            }
+        }
+        if (is_int($id)) {
+            if (count(self::$sheetAncestors) >= 512) {
+                self::$sheetAncestors = [];
+            }
+            self::$sheetAncestors[$id] = $uses;
+        }
+
+        return $uses;
     }
 
     /**
@@ -3870,6 +4551,7 @@ final class TemplateRenderer
         if (!$dynamic) {
             return $attributes;
         }
+        self::$dynamicStyles = true;
         $metrics = Runtime::windowMetrics();
         $containerWidth = self::styleDimension($data['__pamContainerWidth'] ?? $metrics->width, 'container width');
         $containerHeight = self::styleDimension($data['__pamContainerHeight'] ?? $metrics->height, 'container height');

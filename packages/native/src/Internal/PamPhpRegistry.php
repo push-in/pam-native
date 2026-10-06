@@ -69,7 +69,7 @@ final class PamPhpRegistry
             }
             self::$components[$className] = $component;
             self::$classFiles[$className] = $component->classFile;
-            TemplateRegistry::component(
+            TemplateRegistry::compiledComponent(
                 $component->tag,
                 static fn (
                     array $props,

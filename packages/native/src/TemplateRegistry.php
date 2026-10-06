@@ -30,6 +30,9 @@ final class TemplateRegistry
     /** @var array<string, TagContract> */
     private static array $contracts = [];
 
+    /** @var array<string, true> Tags rendered by compiled .pam components. */
+    private static array $compiled = [];
+
     private function __construct()
     {
     }
@@ -41,6 +44,25 @@ final class TemplateRegistry
     {
         self::assertName($tag);
         self::$components[$tag] = $factory;
+        unset(self::$compiled[$tag]);
+    }
+
+    /**
+     * @internal Registers a compiled .pam component; it receives no parent
+     * variant/event context (those exist only for PHP factories).
+     *
+     * @param Closure(array<string, mixed>, list<Element>, ?object): Renderable $factory
+     */
+    public static function compiledComponent(string $tag, Closure $factory): void
+    {
+        self::component($tag, $factory);
+        self::$compiled[$tag] = true;
+    }
+
+    /** @internal */
+    public static function isCompiledComponent(string $tag): bool
+    {
+        return isset(self::$compiled[$tag]);
     }
 
     /** Registers the machine-readable contract used by compiler, LSP and runtime. */
@@ -150,6 +172,7 @@ final class TemplateRegistry
     public static function reset(): void
     {
         self::$components = [];
+        self::$compiled = [];
         self::$eventAdapters = [];
         self::$classes = [];
         self::$styleResolvers = [];

@@ -461,6 +461,49 @@ abstract class Element implements Renderable
         return $copy;
     }
 
+    /**
+     * @internal Places an element the template renderer just built (and
+     * nobody else references yet) at its static slot without copying it.
+     */
+    final public function __pamPlaceAt(string $slot): static
+    {
+        $this->identitySlot = $slot;
+
+        return $this;
+    }
+
+    /**
+     * @internal Sets several resolved native properties with one copy.
+     *
+     * @param array<int, string|int|float|bool|BinaryValue> $properties
+     */
+    final public function __pamWithProperties(array $properties): static
+    {
+        $copy = clone $this;
+        foreach ($properties as $key => $value) {
+            if (is_string($value) && strlen($value) > 1_048_576) {
+                throw new InvalidArgumentException('String properties cannot exceed one megabyte.');
+            }
+            $copy->properties[$key] = $value;
+        }
+
+        return $copy;
+    }
+
+    /**
+     * @internal Sets already validated, de-duplicated DOM class tokens on an
+     * element without classes.
+     *
+     * @param list<string> $classes
+     */
+    final public function __pamWithDomClasses(array $classes): static
+    {
+        $copy = clone $this;
+        $copy->domClasses = $classes;
+
+        return $copy;
+    }
+
     /** @internal Visual DOM retained-tree operation. */
     final public function domWithIdentity(string $identity): static
     {
