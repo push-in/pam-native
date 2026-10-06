@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.15.0 - 2026-10-06
+
+Telegram-style cold start: the system splash goes straight to the app's first
+PHP frame, with nothing in between, and that frame arrives sooner. Measured on
+a Galaxy S10 (Android 12), release-optimized `.perf` Zé Chat build, START to
+the first frame with content (screen recording) and `Fully drawn`, 3+ cold
+starts each (the shared `.perf` install was logged out, so the measured screen
+is Auth; it streams in two PHP frames like the Inbox snapshot streams in one):
+
+| | 1.14.x | 1.15.0 |
+|---|---|---|
+| START → first content frame (video) | 316–399 ms | 269–302 ms |
+| Displayed (first window draw) | 213–238 ms, an empty window | = first PHP frame |
+| Fully drawn (first PHP frame) | 331–377 ms | 303–316 ms |
+| PHP worker start (from process start) | after the first draw | 77–101 ms, in onCreate |
+| First-frame view creation | 11–14 ms (spinner alone 10–12 ms) | pooled/warmed |
+
+- Android: the engine library and the bundle resolve on a startup thread from
+  the top of `PamActivity.onCreate`; on API 30+ PHP boots before the rest of
+  the native surface is built, with the window bounds and system-bar/cutout
+  insets from `WindowMetrics` (below API 30 it boots from the held first
+  pre-draw, once insets exist). The launch thread runs at display priority,
+  which the PHP worker inherits.
+- Android: the window's first draw is held (pre-draw) until the first PHP
+  frame is committed, so the system splash / starting window stays up until
+  the app has content. Released on runtime errors (the overlay or fallback
+  must show) and after a 4 s safety timeout. A re-created Activity holds until
+  its remount commits.
+- Android and iOS: a surface's first batch mounts as soon as it reaches the UI
+  thread instead of waiting for the next vsync / display-link tick.
+- Android: while PHP boots, the UI thread prebuilds the first frame's views in
+  2 ms slices (containers, text, pressables, images, inputs, one list) and
+  warms the spinner and scroll classes; the first commit takes them from the
+  pool. `ActivityIndicator`'s first instance cost 10–12 ms on the S10.
+- iOS: the launch-screen cover is always installed (logo optional) until the
+  first PHP frame, hidden on a fatal error and after 4 s; PHP boots with the
+  window's safe area when the root view has not been laid out yet. Uncompiled
+  on this release host; listed in `docs/ios-parity.md`.
+- BottomSheet (Android): the first presentation was sized from
+  `displayMetrics.heightPixels` before the dialog existed and never re-sized.
+  It now estimates from the covered window and its insets and re-resolves on
+  the first layout (and on width changes) within the same traversal. A fitted
+  (base) sheet no longer subtracts the status bar twice and rests on the
+  navigation bar; an edge-to-edge sheet (`navigationBarTranslucent` /
+  `statusBarTranslucent`) resolves against the window minus the top inset and
+  reaches the screen bottom. iOS already re-sized on layout.
+- Navigation: `Navigator::reset()` followed one tick later by a push could
+  land natively on the reset route while PHP's current route was the pushed
+  one (a cold-start deep link opened the Inbox instead of the chat). When both
+  reach the host in one commit, the new routes are created in node-id order
+  and Android took the last inserted route as the destination, while the
+  FragmentManager re-added each route after the previously added fragment's
+  view. Route views now keep the engine's order and the destination is read
+  from it, whatever the commit timing. iOS already used the route order.
+- Tests: `PamBottomSheetSizingTest`;
+  `resetThenPushLandsOnThePushedRouteWhateverTheCommitTiming` (fails on
+  1.14.2); XCTest `testResetThenPushInOneCommitLandsOnThePushedRoute`.
+
 ## 1.14.2 - 2026-10-05
 
 An `autoFocus` input in a Modal/BottomSheet presented while an overlay
