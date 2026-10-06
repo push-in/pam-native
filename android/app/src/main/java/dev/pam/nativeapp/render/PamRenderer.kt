@@ -396,6 +396,37 @@ internal data class ModalChildPlacement(
     val gravity: Int,
 )
 
+/** View kinds prebuilt for a cold start's first frame, with per-surface targets. */
+internal enum class PrewarmPool(val kind: NodeKind, val target: Int) {
+    // Costliest first instances first: the batch can arrive at any slice.
+    INPUT(NodeKind.INPUT, 2),
+    LIST(NodeKind.VIRTUAL_LIST, 1),
+    IMAGE(NodeKind.IMAGE, 24),
+    TEXT(NodeKind.TEXT, 48),
+    CONTAINER(NodeKind.VIEW, 64),
+    PRESSABLE(NodeKind.PRESSABLE, 16),
+    SPACER(NodeKind.SPACER, 4),
+    ;
+
+    companion object {
+        fun of(kind: NodeKind): PrewarmPool? = when (kind) {
+            NodeKind.SCREEN,
+            NodeKind.COLUMN,
+            NodeKind.ROW,
+            NodeKind.VIEW,
+            NodeKind.INPUT_ACCESSORY_VIEW,
+            -> CONTAINER
+            NodeKind.TEXT -> TEXT
+            NodeKind.PRESSABLE -> PRESSABLE
+            NodeKind.IMAGE -> IMAGE
+            NodeKind.SPACER -> SPACER
+            NodeKind.LIST, NodeKind.SECTION_LIST, NodeKind.VIRTUAL_LIST -> LIST
+            NodeKind.INPUT -> INPUT
+            else -> null
+        }
+    }
+}
+
 /**
  * Layout of a child hosted by a full-screen Modal window, from its engine
  * frame relative to the modal ([modalWidth] x [modalHeight] px). A child
@@ -661,6 +692,8 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
         }
+        // The frame the pool was built for has arrived: no more prewarming.
+        prewarmActive = false
         val profileCommit = BuildConfig.DEBUG && Log.isLoggable(COMMIT_PERF_TAG, Log.DEBUG)
         val commitStarted = if (profileCommit) System.nanoTime() else 0L
         val retainedScrollOffsets = buildMap {
@@ -1098,6 +1131,9 @@ class PamRenderer(
     override fun close() {
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null
+        prewarmActive = false
+        main.removeCallbacks(prewarmSlice)
+        prewarmedViews.clear()
         for (position in 0 until views.size()) {
             (views.valueAt(position) as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
             (views.valueAt(position) as? PamModalHost)?.close()
@@ -1167,7 +1203,66 @@ class PamRenderer(
         }
     }
 
+    /**
+     * Fresh, never-attached views built while the UI thread waits for PHP's
+     * first frame (see [prewarmViews]). A cold process otherwise pays class
+     * loading, style resolution and construction for every view of that frame
+     * on the critical path. Only kinds whose construction does not depend on
+     * node state are pooled; a pooled view is indistinguishable from a new one.
+     */
+    private val prewarmedViews = java.util.EnumMap<PrewarmPool, ArrayDeque<View>>(PrewarmPool::class.java)
+    private var prewarmActive = false
+
+    /**
+     * Builds the views a typical first frame needs, in short UI-thread slices
+     * that yield to input, vsync and the first PHP batch; stops as soon as a
+     * commit starts or the targets are reached.
+     */
+    fun prewarmViews() {
+        if (prewarmActive || nodes.size() > 0) return
+        prewarmActive = true
+        main.post(prewarmSlice)
+    }
+
+    private var prewarmedClasses = false
+
+    private val prewarmSlice: Runnable = object : Runnable {
+        override fun run() {
+            if (!prewarmActive) return
+            if (!prewarmedClasses) {
+                prewarmedClasses = true
+                // Not pooled (state-dependent or self-animating), only warmed:
+                // the first instance of each pays class loading and, for the
+                // spinner's ProgressBar base, the theme's progress drawable.
+                PamVuetifySpinner(context)
+                PamScrollContainer(
+                    context,
+                    initialHorizontal = false,
+                    initialPersistentScrollbar = false,
+                    initialIndicatorStyle = ScrollIndicatorStyle.AUTO,
+                )
+                main.post(this)
+                return
+            }
+            val deadline = System.nanoTime() + PREWARM_SLICE_NANOS
+            for (pool in PrewarmPool.entries) {
+                val queue = prewarmedViews.getOrPut(pool) { ArrayDeque(pool.target) }
+                while (queue.size < pool.target) {
+                    queue.addLast(newView(pool.kind, null))
+                    if (System.nanoTime() >= deadline) {
+                        main.post(this)
+                        return
+                    }
+                }
+            }
+            prewarmActive = false
+        }
+    }
+
     private fun createView(kind: NodeKind, state: NodeState? = null): View =
+        PrewarmPool.of(kind)?.let { prewarmedViews[it]?.removeFirstOrNull() } ?: newView(kind, state)
+
+    private fun newView(kind: NodeKind, state: NodeState?): View =
         when (kind) {
             NodeKind.SCREEN,
             NodeKind.COLUMN,
@@ -8854,6 +8949,8 @@ class PamRenderer(
 
     private companion object {
         const val COMMIT_PERF_TAG = "PamRendererPerf"
+        /** One prewarm slice; PHP's first batch waits at most this long behind it. */
+        const val PREWARM_SLICE_NANOS = 2_000_000L
         const val DRAG_SNAP_REQUEST_STRIDE = 64L
         const val AUTO_FOCUS_DEADLINE_MS = 3_000L
         const val AUTO_FOCUS_LOG = "PamAutoFocus"
