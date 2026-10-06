@@ -2,7 +2,10 @@ package dev.pam.nativeapp
 
 import android.content.Context
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 internal class AssetInstaller(private val context: Context) {
     fun install(): File {
@@ -23,8 +26,21 @@ internal class AssetInstaller(private val context: Context) {
         val staging = installationStagingDirectory(context.filesDir, version)
         staging.deleteRecursively()
         check(staging.mkdirs()) { "Cannot create Pam Native staging directory" }
-        copyDirectory(ASSET_ROOT, staging)
-        verifyManifest(staging, version)
+        val listing = runCatching {
+            context.assets.open(BUNDLE_LISTING).bufferedReader().use { it.readLines() }
+        }.getOrNull()
+        if (listing != null) {
+            // Build-time listing: no AssetManager.list() walk, files copied in
+            // parallel and each verified against its own SHA-256.
+            installListedBundle(
+                parseBundleListing(listing),
+                staging,
+                Runtime.getRuntime().availableProcessors().coerceIn(1, 4),
+            ) { path -> context.assets.open("$ASSET_ROOT/$path") }
+        } else {
+            copyDirectory(ASSET_ROOT, staging)
+            verifyManifest(staging, version)
+        }
         release.parentFile?.mkdirs()
         if (release.exists()) {
             check(release.deleteRecursively()) {
@@ -147,7 +163,77 @@ internal class AssetInstaller(private val context: Context) {
 
     private companion object {
         const val ASSET_ROOT = "pam"
+        const val BUNDLE_LISTING = "pam-files.txt"
         const val RETAINED_INACTIVE_RELEASES = 1
+    }
+}
+
+/** One bundle file of the build-time listing: path, byte size, SHA-256. */
+internal data class BundleFile(val path: String, val size: Long, val sha256: String)
+
+/** Parses `<sha256> <size> <relative path>` lines written by the CLI. */
+internal fun parseBundleListing(lines: List<String>): List<BundleFile> =
+    lines.filter { it.isNotBlank() }.map { line ->
+        val parts = line.split(' ', limit = 3)
+        require(parts.size == 3) { "Invalid Pam Native bundle listing" }
+        val (sha256, size, path) = parts
+        require(sha256.matches(Regex("[a-f0-9]{64}"))) { "Invalid Pam Native bundle listing" }
+        val bytes = size.toLongOrNull()
+        require(bytes != null && bytes >= 0) { "Invalid Pam Native bundle listing" }
+        require(
+            path.split('/').all { segment ->
+                segment.matches(Regex("[A-Za-z0-9._-]{1,255}")) && segment != "." && segment != ".."
+            },
+        ) { "Unsafe Pam Native asset path" }
+        BundleFile(path, bytes, sha256)
+    }
+
+/**
+ * Copies every listed file into [destination] with [threads] workers and
+ * verifies each copy's size and SHA-256 while it streams.
+ */
+internal fun installListedBundle(
+    files: List<BundleFile>,
+    destination: File,
+    threads: Int,
+    open: (String) -> InputStream,
+) {
+    files.mapNotNull { File(destination, it.path).parentFile }.toSet().forEach { directory ->
+        check(directory.mkdirs() || directory.isDirectory) { "Cannot create ${directory.path}" }
+    }
+    val pool = Executors.newFixedThreadPool(threads.coerceAtLeast(1))
+    try {
+        val tasks: List<Future<*>> = files.map { file ->
+            pool.submit {
+                val digest = MessageDigest.getInstance("SHA-256")
+                var copied = 0L
+                open(file.path).use { input ->
+                    File(destination, file.path).outputStream().use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            digest.update(buffer, 0, read)
+                            output.write(buffer, 0, read)
+                            copied += read
+                        }
+                    }
+                }
+                val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                require(copied == file.size && actual == file.sha256) {
+                    "Pam Native application bundle failed integrity verification"
+                }
+            }
+        }
+        tasks.forEach { task ->
+            try {
+                task.get()
+            } catch (error: java.util.concurrent.ExecutionException) {
+                throw error.cause ?: error
+            }
+        }
+    } finally {
+        pool.shutdownNow()
     }
 }
 

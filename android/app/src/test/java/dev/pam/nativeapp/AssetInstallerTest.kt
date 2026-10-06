@@ -14,6 +14,48 @@ import org.junit.Test
 
 class AssetInstallerTest {
     @Test
+    fun installsListedBundleInParallelAndVerifiesEveryFile() {
+        val source = Files.createTempDirectory("pam-listed-source")
+        val destination = Files.createTempDirectory("pam-listed-destination")
+        try {
+            val contents = mapOf(
+                "index.php" to "<?php echo 1;",
+                "src/Components/Row.pam.php" to "<?php ?><template><View /></template>",
+                "pam-prebuilt/components/abc.json" to "{}",
+            )
+            val lines = contents.map { (path, text) ->
+                val file = source.resolve(path)
+                Files.createDirectories(file.parent)
+                file.writeText(text)
+                val sha = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
+                "$sha ${text.toByteArray().size} $path"
+            }
+            installListedBundle(parseBundleListing(lines), destination.toFile(), 3) { path ->
+                source.resolve(path).toFile().inputStream()
+            }
+            contents.forEach { (path, text) ->
+                assertEquals(text, destination.resolve(path).toFile().readText())
+            }
+
+            source.resolve("index.php").writeText("<?php echo 2;")
+            val tampered = runCatching {
+                installListedBundle(parseBundleListing(lines), destination.toFile(), 2) { path ->
+                    source.resolve(path).toFile().inputStream()
+                }
+            }
+            assertTrue("A file that differs from its listing must fail", tampered.isFailure)
+            listOf("x 1 a", "${"a".repeat(64)} -1 a", "${"a".repeat(64)} 1 ../a", "${"a".repeat(64)} 1 a//b")
+                .forEach { line ->
+                    assertTrue("Invalid listing must fail: $line", runCatching { parseBundleListing(listOf(line)) }.isFailure)
+                }
+        } finally {
+            source.toFile().deleteRecursively()
+            destination.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun derivesPathsAgainstCanonicalSandboxRoot() {
         val parent = Files.createTempDirectory("pam-file-root-test")
         try {

@@ -6272,11 +6272,35 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
 }
 
 fn stage_project(project: &Project, workspace: &Path, precompile: bool) -> Result<(), String> {
-    stage_project_at(
-        project,
-        &workspace.join("app/src/main/assets/pam"),
-        precompile,
+    let destination = workspace.join("app/src/main/assets/pam");
+    stage_project_at(project, &destination, precompile)?;
+    write_bundle_listing(
+        &destination,
+        &workspace.join("app/src/main/assets/pam-files.txt"),
     )
+}
+
+/// `<sha256> <size> <path>` per bundle file: the Android host copies the
+/// bundle from this listing in parallel (no AssetManager directory walk)
+/// and verifies every file as it streams.
+fn write_bundle_listing(root: &Path, target: &Path) -> Result<(), String> {
+    let mut listing = String::new();
+    for file in files_in(root)? {
+        let relative = file
+            .strip_prefix(root)
+            .map_err(|error| error.to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let contents =
+            fs::read(&file).map_err(|error| format!("cannot read {}: {error}", file.display()))?;
+        listing.push_str(&format!(
+            "{:x} {} {}\n",
+            Sha256::digest(&contents),
+            contents.len(),
+            relative
+        ));
+    }
+    write_atomic(target, listing.as_bytes())
 }
 
 /// Compiles the bundle's `.pam` components on the build host into the
