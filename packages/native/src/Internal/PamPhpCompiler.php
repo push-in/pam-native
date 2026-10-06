@@ -580,6 +580,10 @@ final class PamPhpCompiler
     private static function bundleTemplate(string $encoded, string $root): string
     {
         $tree = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
+        if (is_array($tree)) {
+            // Node sources are restored from the installed component path.
+            $tree = self::withoutNodeSources($tree);
+        }
         if (is_array($tree) && is_string($tree['attributes']['__pamStyles'] ?? null)) {
             $styles = json_decode($tree['attributes']['__pamStyles'], true, 512, JSON_THROW_ON_ERROR);
             if (is_array($styles)) {
@@ -594,10 +598,30 @@ final class PamPhpCompiler
                     JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
                 );
             }
+        }
+        if (is_array($tree)) {
             $encoded = json_encode($tree, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)."\n";
         }
 
         return str_replace($root.DIRECTORY_SEPARATOR, '', $encoded);
+    }
+
+    /**
+     * @param array<string, mixed> $node
+     * @return array<string, mixed>
+     */
+    private static function withoutNodeSources(array $node): array
+    {
+        $node['source'] = '';
+        if (is_array($node['children'] ?? null)) {
+            foreach ($node['children'] as $index => $child) {
+                if (is_array($child)) {
+                    $node['children'][$index] = self::withoutNodeSources($child);
+                }
+            }
+        }
+
+        return $node;
     }
 
     private static function removeTree(string $directory): void

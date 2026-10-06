@@ -197,9 +197,16 @@ class PamActivity : FragmentActivity() {
         // so the first frame and input are never blocked (ANR on cold start).
         Thread(
             {
+                val installStarted = android.os.SystemClock.elapsedRealtime()
                 val resolved = runCatching {
                     val embeddedEntry = AssetInstaller(this).install()
                     ActiveUpdateInstaller(this).resolve(embeddedEntry)
+                }
+                if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
+                    android.util.Log.d(
+                        "PamNativePerf",
+                        "bundleInstallMs=${android.os.SystemClock.elapsedRealtime() - installStarted}",
+                    )
                 }
                 runOnUiThread {
                     if (isFinishing || isDestroyed) return@runOnUiThread
