@@ -91,3 +91,10 @@ evidence before GitHub Release creation.
 
 The distributable production bootstrap is available at
 `packages/native/resources/templates/production-capabilities.php.stub`.
+
+## Concurrent local Android verification
+
+Use `PAM_NATIVE_ANDROID_DEV_PORT=39102 pam dev .` when another project owns
+the default host port 39100. Accepted host ports are 1024–65535. Set
+`ANDROID_SERIAL` to isolate each project/device pair; the app keeps device
+port 39100 and ADB reverses it to the selected host port.

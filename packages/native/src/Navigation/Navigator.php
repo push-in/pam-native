@@ -34,6 +34,8 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private array $preloaded = [];
     /** @var array<string, Renderable> */
     private array $routeInstances = [];
+    /** @var array<string, RouteContext> Context survives until its route instance is released. */
+    private array $routeContexts = [];
     /** @var array<string, array{element: \Pam\Native\Element, components: list<Component>, epoch: int}> */
     private array $frozenScreens = [];
     private int $nextListenerId = 1;
@@ -882,8 +884,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $this->stack = $restored;
         $this->parked = [];
+        $this->outgoing = null;
+        $this->focusedEntryKey = null;
         $this->operation = NavigationOperation::Reset;
         $this->revision++;
+        $this->pruneRouteInstances();
     }
 
     public function saveState(): array
@@ -912,6 +917,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private function renderRoute(array $entry): Renderable
     {
         $key = $this->entryKey($entry);
+        $this->routeContexts[$key] = $this->contextFor($entry);
         if (isset($this->routeInstances[$key])) {
             $this->notifyRouteFocused($entry, $this->routeInstances[$key]);
             return $this->routeInstances[$key];
@@ -1189,29 +1195,27 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         return $when === true || ($when instanceof Closure && $when($this->contextFor($entry)) === true);
     }
 
-    private function isParked(string $key): bool
-    {
-        foreach ($this->parked as $entry) {
-            if ($this->entryKey($entry) === $key) return true;
-        }
-
-        return false;
-    }
-
     private function pruneRouteInstances(): void
     {
         $retained = [];
         foreach ($this->stack as $entry) $retained[$this->entryKey($entry)] = true;
         if ($this->outgoing !== null) $retained[$this->entryKey($this->outgoing)] = true;
         foreach ($this->parked as $entry) $retained[$this->entryKey($entry)] = true;
-        foreach (array_keys($this->routeInstances) as $key) {
+        foreach (array_keys($this->routeContexts + $this->routeInstances) as $key) {
             if (!isset($retained[$key])) {
+                $instance = $this->routeInstances[$key] ?? null;
+                $context = $this->routeContexts[$key] ?? null;
                 unset(
                     $this->routeInstances[$key],
+                    $this->routeContexts[$key],
                     $this->childSubscriptions[$key],
                     $this->pendingChildState[$key],
                     $this->dynamicOptions[$key],
+                    $this->frozenScreens[$key],
                 );
+                if ($instance instanceof NavigationLifecycleAware && $context !== null) {
+                    $instance->navigationRemoved($context);
+                }
             }
         }
     }
@@ -1280,24 +1284,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
             return;
         }
-        $key = $this->entryKey($entry);
-        $instance = $this->routeInstances[$key] ?? null;
-        $kept = $this->isParked($key);
-        if (!$kept && $instance instanceof NavigationLifecycleAware) {
-            $instance->navigationRemoved($this->contextFor($entry));
-        }
-        if (!$kept && !array_any($this->stack, fn (array $candidate): bool => $this->entryKey($candidate) === $key)) {
-            unset(
-                $this->routeInstances[$key],
-                $this->childSubscriptions[$key],
-                $this->pendingChildState[$key],
-                $this->dynamicOptions[$key],
-            );
-        }
         $this->outgoing = null;
         $this->operation = NavigationOperation::Idle;
         $this->actionTransition = null;
         $this->actionTransitionDurationMs = null;
+        $this->pruneRouteInstances();
     }
 
     private function setActionTransition(

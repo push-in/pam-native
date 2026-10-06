@@ -128,6 +128,11 @@ PHP with a synchronous bridge round-trip. Focus uses the existing native
 autofocus property; blur delegates to the existing keyboard authority. Resize,
 intersection and animation frames remain native-driven.
 
+On Android, intersection observes the drawn viewport, including ancestor
+scrolling and recycled-cell attachment. It emits only visibility transitions;
+moving a still-visible view does not generate PHP events for every frame.
+Detachment reports `false`, so callers can release visibility-scoped resources.
+
 ## Performance contract
 
 - DOM identities feed `TreeEncoder`, preserving mounted native views when

@@ -75,8 +75,15 @@ internal class ImageEditorModule(context: Context) : NativeModule, AutoCloseable
         if (adjusted !== filtered) filtered.recycle()
         val layered = composeTextLayers(adjusted, values.text("textLayers"))
         if (layered !== adjusted) adjusted.recycle()
-        val withText = compose(layered, values.text("overlayText").trim().take(120), false)
-        if (withText !== layered) layered.recycle()
+        val images = try {
+            ImageLayerCompositor.compose(layered, values.text("imageLayers"), ::resolve)
+        } catch (error: Throwable) {
+            layered.recycle()
+            throw error
+        }
+        if (images !== layered) layered.recycle()
+        val withText = compose(images, values.text("overlayText").trim().take(120), false)
+        if (withText !== images) images.recycle()
         val composed = compose(withText, values.text("sticker").trim().take(8), true)
         if (composed !== withText) withText.recycle()
         val resized = resize(composed, maxWidth, maxHeight)

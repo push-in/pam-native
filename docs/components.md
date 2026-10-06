@@ -1056,6 +1056,17 @@ ImageEditor::render(
 );
 ```
 
+`imageLayers` optionally composites up to 80 private image files after the text
+layers. Each map has `path`, normalized top-left `x`/`y`, normalized `width`
+(default `0.25`), optional normalized `height` (`0` preserves aspect ratio),
+and `rotation` in radians. Layers are fitted inside the image and clamped at
+its edges. Download remote stickers with `Files::download()` first; native
+resolution rejects files outside the private sandbox. Android and iOS decode
+one layer at a time, limited to 2048 pixels on its longest side. GIFs use their
+first frame. An unreadable layer fails the export instead of silently omitting it.
+Android bitmap tests cover aspect, placement, large inputs and GIF decoding;
+the corresponding iOS test requires an Xcode test run.
+
 ## Generators
 
 ```bash

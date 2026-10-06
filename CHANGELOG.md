@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.22.1 - 2026-10-06
+
+- Navigation sends removal notifications when route instances are actually
+  released, including reset, stack pruning and interrupted transitions. Kept-alive
+  routes retain their state while parked; ordinary pushes do not remove them.
+- Android `p-intersect` observes the drawn viewport through scrolling, detach and
+  reattach. It emits only visibility transitions, allowing media to release
+  decoders outside the viewport without PHP callbacks for every scroll pixel.
+- `ImageEditor::render(imageLayers: ...)` composes private bitmap overlays,
+  including a static GIF frame, with normalized geometry and bounded sequential
+  decoding. Existing calls remain compatible; Android and iOS implementations
+  share the contract. iOS source is included, but was not executed on this Linux host.
+- Android development accepts `PAM_NATIVE_ANDROID_DEV_PORT` for concurrent
+  projects. ADB maps the unchanged device port to the selected host port.
+- No protocol additions or dependency changes.
+
 ## 1.22.0 - 2026-10-06
 
 App icons, a React Native-style splash and a shorter cold start. Zé Chat on a

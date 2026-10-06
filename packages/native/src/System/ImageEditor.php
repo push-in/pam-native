@@ -37,6 +37,7 @@ final class ImageEditor
         int $outputQuality = 94,
         string $drawing = '',
         array $textLayers = [],
+        array $imageLayers = [],
     ): int {
         return NativeModules::call(
             'image-editor',
@@ -51,6 +52,7 @@ final class ImageEditor
                 'maxHeight' => max(0, $maxHeight),
                 'maxWidth' => max(0, $maxWidth),
                 'textLayers' => self::textLayers($textLayers),
+                'imageLayers' => self::imageLayers($imageLayers),
                 'overlayText' => mb_substr(trim($overlayText), 0, 120),
                 'outputQuality' => max(1, min(100, $outputQuality)),
                 'path' => $source->path,
@@ -82,6 +84,33 @@ final class ImageEditor
                 );
             },
         );
+    }
+
+    /** @param list<array{path: string, x?: float, y?: float, width?: float, height?: float, rotation?: float}> $layers */
+    private static function imageLayers(array $layers): string
+    {
+        if (count($layers) > 80) {
+            throw new InvalidArgumentException('Image editor accepts at most 80 image layers.');
+        }
+        $normalized = [];
+        foreach ($layers as $layer) {
+            if (!is_array($layer) || !is_string($layer['path'] ?? null)) {
+                throw new InvalidArgumentException('Image editor image layers require a private path.');
+            }
+            $item = ['path' => Files::privatePath($layer['path'], 'Image layer source')];
+            foreach (['x' => 0.0, 'y' => 0.0, 'width' => 0.25, 'height' => 0.0, 'rotation' => 0.0] as $key => $default) {
+                $value = $layer[$key] ?? $default;
+                if (!is_numeric($value) || !is_finite((float) $value)) {
+                    throw new InvalidArgumentException('Image layer geometry must contain finite numbers.');
+                }
+                $item[$key] = $key === 'rotation'
+                    ? max(-M_PI * 2, min(M_PI * 2, (float) $value))
+                    : max($key === 'width' ? 0.001 : 0.0, min(1.0, (float) $value));
+            }
+            $normalized[] = $item;
+        }
+
+        return json_encode($normalized, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
     }
 
     private static function adjustment(int $value): int

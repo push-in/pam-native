@@ -56,6 +56,7 @@ final class ImageEditorModule: NativeModule {
             saturation: Int(values["saturation"]?.imageEditorInteger ?? 0)
         )
         image = composeTextLayers(image, encoded: values["textLayers"]?.imageEditorText ?? "")
+        image = try ImageLayerCompositor.compose(image, encoded: values["imageLayers"]?.imageEditorText ?? "", resolve: resolve)
         image = compose(image, text: String((values["overlayText"]?.imageEditorText ?? "").prefix(120)), sticker: false)
         image = compose(image, text: String((values["sticker"]?.imageEditorText ?? "").prefix(8)), sticker: true)
         image = resize(
@@ -332,8 +333,8 @@ final class ImageEditorModule: NativeModule {
     }
 
     private func resolve(_ relative: String) throws -> URL {
-        let file = root.appendingPathComponent(relative).standardizedFileURL
-        guard file.path.hasPrefix(root.path + "/"), FileManager.default.fileExists(atPath: file.path) else {
+        let file = root.appendingPathComponent(relative).standardizedFileURL.resolvingSymlinksInPath()
+        guard file.path.hasPrefix(root.resolvingSymlinksInPath().path + "/"), FileManager.default.fileExists(atPath: file.path) else {
             throw ImageEditorError("Invalid editor source")
         }
         return file

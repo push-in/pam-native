@@ -1151,6 +1151,7 @@ class PamRenderer(
             state.directiveLayoutListener?.let { listener ->
                 views[state.id]?.removeOnLayoutChangeListener(listener)
             }
+            state.intersectionObserver?.close(notify = false)
         }
         statusBarDefaults?.let(::applyStatusBarConfig)
         statusBarColorAnimator?.cancel()
@@ -1388,6 +1389,7 @@ class PamRenderer(
         state.directiveLayoutListener?.let { listener ->
             view?.removeOnLayoutChangeListener(listener)
         }
+        state.intersectionObserver?.close()
         state.outsidePointerObserver?.let { observer ->
             (host as? PamRootHost)?.removePointerObserver(observer)
         }
@@ -1814,6 +1816,8 @@ class PamRenderer(
         children[id]?.forEach(::dematerializeSubtree)
         val view = views[id] ?: return
         val state = nodes[id] ?: return
+        state.intersectionObserver?.close()
+        state.intersectionObserver = null
         state.propertyAnimator?.cancel()
         state.keyframeAnimator?.cancel()
         state.workletAnimator?.cancel()
@@ -5064,15 +5068,25 @@ class PamRenderer(
     private fun installDirectiveEvents(view: View, state: NodeState) {
         state.directiveLayoutListener?.let(view::removeOnLayoutChangeListener)
         state.directiveLayoutListener = null
+        state.intersectionObserver?.close(notify = false)
+        state.intersectionObserver = null
         state.outsidePointerObserver?.let { observer ->
             (host as? PamRootHost)?.removePointerObserver(observer)
         }
         state.outsidePointerObserver = null
-        state.lastDirectiveIntersection = null
+        if (state.properties[PropKey.ON_INTERSECT] != null) {
+            state.intersectionObserver = PamIntersectionObserver(view) { intersecting ->
+                if (nodes[state.id] === state && state.lastDirectiveIntersection != intersecting) {
+                    state.lastDirectiveIntersection = intersecting
+                    dispatch(state.id, EventKind.INTERSECT.value, if (intersecting) "1" else "0")
+                }
+            }
+        } else {
+            state.lastDirectiveIntersection = null
+        }
         if (
             state.properties[PropKey.ON_RESIZE] == null &&
-            state.properties[PropKey.ON_MUTATE] == null &&
-            state.properties[PropKey.ON_INTERSECT] == null
+            state.properties[PropKey.ON_MUTATE] == null
         ) {
             if (state.properties[PropKey.ON_CLICK_OUTSIDE] == null) return
         }
@@ -5111,8 +5125,7 @@ class PamRenderer(
 
         if (
             state.properties[PropKey.ON_RESIZE] == null &&
-            state.properties[PropKey.ON_MUTATE] == null &&
-            state.properties[PropKey.ON_INTERSECT] == null
+            state.properties[PropKey.ON_MUTATE] == null
         ) {
             return
         }
@@ -5162,18 +5175,6 @@ class PamRenderer(
                         ),
                     ),
                 )
-            }
-            if (state.properties[PropKey.ON_INTERSECT] != null) {
-                val visibleRect = Rect()
-                val intersecting =
-                    target.isShown &&
-                        target.alpha > 0f &&
-                        target.getGlobalVisibleRect(visibleRect) &&
-                        !visibleRect.isEmpty
-                if (state.lastDirectiveIntersection != intersecting) {
-                    state.lastDirectiveIntersection = intersecting
-                    dispatch(state.id, EventKind.INTERSECT.value, if (intersecting) "1" else "0")
-                }
             }
         }
         state.directiveLayoutListener = listener
@@ -8905,6 +8906,7 @@ class PamRenderer(
         var imageProgressTotal: Long = 0L,
         var inputSelectionScheduled: Boolean = false,
         var directiveLayoutListener: View.OnLayoutChangeListener? = null,
+        var intersectionObserver: PamIntersectionObserver? = null,
         var nativeInteractionsInstalled: Boolean = false,
         var outsidePointerObserver: ((MotionEvent) -> Unit)? = null,
         var lastDirectiveIntersection: Boolean? = null,

@@ -224,6 +224,14 @@ it to some entries (the own-profile tab, not visited profiles). At most three
 entries per route are parked; `reset()` and restored state release them.
 Parked screens receive blur/focus events, not `navigationRemoved()`.
 
+`NavigationLifecycleAware::navigationRemoved()` runs once when a route instance
+leaves both the stack and keep-alive storage. Covering a route with `push()` only
+blurs it. An outgoing screen receives removal after its exit animation; discarded
+history, reset/restored state and evicted parked screens are released immediately.
+If another navigation interrupts the exit animation, the discarded outgoing
+screen is still released. Use this callback to cancel route-owned subscriptions
+and other work that must outlive a temporary blur.
+
 ## Nested navigators
 
 Stacks and tabs may be declared inline and registered as ordinary named route

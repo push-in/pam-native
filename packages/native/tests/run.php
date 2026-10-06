@@ -6966,8 +6966,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.22.0',
-    'The runtime SDK contract must match the 1.22.0 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.22.1',
+    'The runtime SDK contract must match the 1.22.1 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7121,10 +7121,10 @@ $assert(
         ) === [1, 2, 3, 4, 5]
         && array_map(
             static fn (ReflectionParameter $parameter): string => $parameter->getName(),
-            array_slice($imageEditorParameters, -5),
-        ) === ['maxWidth', 'maxHeight', 'outputQuality', 'drawing', 'textLayers']
-        && $imageEditorParameters[count($imageEditorParameters) - 3]->getDefaultValue() === 94
-        && $imageEditorParameters[count($imageEditorParameters) - 2]->getDefaultValue() === ''
+            array_slice($imageEditorParameters, -6),
+        ) === ['maxWidth', 'maxHeight', 'outputQuality', 'drawing', 'textLayers', 'imageLayers']
+        && $imageEditorParameters[count($imageEditorParameters) - 4]->getDefaultValue() === 94
+        && $imageEditorParameters[count($imageEditorParameters) - 3]->getDefaultValue() === ''
         && $imageEditorParameters[array_key_last($imageEditorParameters)]->getDefaultValue() === [],
     'The image editor contract must expose typed transforms, bounded output, drawing and text layers.',
 );
@@ -7828,5 +7828,7 @@ require __DIR__.'/gesture_scope.php';
 require __DIR__.'/mbstring_polyfill.php';
 require __DIR__.'/runtime_audit.php';
 require __DIR__.'/native_crypto.php';
+require __DIR__.'/navigation_lifecycle.php';
+require __DIR__.'/image_layers.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

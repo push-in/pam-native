@@ -13,6 +13,9 @@ use sha2::{Digest, Sha256};
 #[path = "plugin_share.rs"]
 mod plugin_share;
 
+#[path = "android_dev_port.rs"]
+mod android_dev_port;
+
 const MANIFEST_NAME: &str = "pam-native.json";
 const DEFAULT_PORT: u16 = 39_100;
 const MAX_PROJECT_FILES: usize = 10_000;
@@ -8343,6 +8346,7 @@ fn dev(options: MobileOptions) -> Result<u8, String> {
 }
 
 fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
+    let host_port = android_dev_port::resolve(DEFAULT_PORT)?;
     let apk = build_intermediate(options, true)?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionStarting,
@@ -8355,23 +8359,24 @@ fn dev_intermediate(options: MobileOptions) -> Result<u8, String> {
         &[
             "reverse",
             &format!("tcp:{DEFAULT_PORT}"),
-            &format!("tcp:{DEFAULT_PORT}"),
+            &format!("tcp:{host_port}"),
         ],
     )?;
     install_and_launch(&apk.project, &apk.path, BuildMode::Debug)?;
     let native_home = native_home()?;
     let workspace = apk.project.root.join(".pam-native/android");
-    println!("Pam Native hot reload listening on 127.0.0.1:{DEFAULT_PORT}. Press Ctrl+C to stop.");
-    hot_reload_server(&apk.project, &native_home, &workspace)
+    hot_reload_server(&apk.project, &native_home, &workspace, host_port)
 }
 
 fn hot_reload_server(
     project: &Project,
     native_home: &Path,
     workspace: &Path,
+    host_port: u16,
 ) -> Result<u8, String> {
-    let listener = TcpListener::bind(("127.0.0.1", DEFAULT_PORT))
+    let listener = TcpListener::bind(("127.0.0.1", host_port))
         .map_err(|error| format!("cannot bind hot reload server: {error}"))?;
+    println!("Pam Native hot reload listening on 127.0.0.1:{host_port}. Press Ctrl+C to stop.");
     listener
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
@@ -8383,7 +8388,7 @@ fn hot_reload_server(
         crate::dev_event::EventCode::SessionReady,
         crate::dev_event::SurfaceCode::Android,
         &project.root,
-        serde_json::json!({"port": DEFAULT_PORT, "bundleVersion": version}),
+        serde_json::json!({"port": host_port, "bundleVersion": version}),
     );
     loop {
         match listener.accept() {

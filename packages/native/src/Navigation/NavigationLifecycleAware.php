@@ -12,5 +12,6 @@ interface NavigationLifecycleAware
 
     public function navigationBeforeRemove(RouteContext $route, NavigationAction $action): bool;
 
+    /** Called once when the instance leaves both stack and keep-alive storage, after its exit transition. */
     public function navigationRemoved(RouteContext $route): void;
 }
