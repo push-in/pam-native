@@ -3,6 +3,7 @@ package dev.pam.nativeapp.render
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.ViewGroup
+import android.widget.TextView
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 import kotlin.math.sign
@@ -66,6 +67,9 @@ internal data class PamDragConfig(
     val haptic: Boolean,
     val group: String,
     val drivers: List<PamDragDriver>,
+    val textDrivers: List<PamDragTextDriver>,
+    val touchInset: Double?,
+    val snapOnRelease: Boolean,
 ) {
     fun settleFor(index: Int): PamDragSettle = snapSettles[index] ?: settle
 
@@ -73,11 +77,14 @@ internal data class PamDragConfig(
         fun parse(source: String): PamDragConfig? {
             val values = linkedMapOf<String, String>()
             val drivers = mutableListOf<PamDragDriver>()
+            val textDrivers = mutableListOf<PamDragTextDriver>()
             for (line in source.split('\n', ';').map(String::trim).filter(String::isNotEmpty)) {
                 val parts = line.split('=', limit = 2)
                 if (parts.size != 2) continue
                 if (parts[0] == "drive") {
                     parseDriver(parts[1])?.let(drivers::add)
+                } else if (parts[0] == "text") {
+                    PamDragTextDriver.parse(parts[1])?.let(textDrivers::add)
                 } else {
                     values[parts[0]] = parts[1]
                 }
@@ -110,6 +117,9 @@ internal data class PamDragConfig(
                 haptic = values["haptic"] == "1",
                 group = values["group"].orEmpty(),
                 drivers = drivers.take(16),
+                textDrivers = textDrivers.take(8),
+                touchInset = values["touch"]?.toDoubleOrNull()?.takeIf(Double::isFinite),
+                snapOnRelease = values["snapOnRelease"] != "0",
             )
         }
 
@@ -216,12 +226,14 @@ internal class PamDragController(private val host: ViewGroup) {
         config?.group?.takeIf(String::isNotEmpty)?.let(::unregister)
     }
 
-    fun begin() {
+    fun begin(x: Float = 0f, y: Float = 0f, translationX: Float = 0f, translationY: Float = 0f) {
         val current = config ?: return
         runner?.cancel()
         runner = null
         val target = target() ?: return
-        startPx = read(target, current)
+        startPx = current.touchInset?.let { inset ->
+            (if (current.horizontal) x - translationX else y - translationY).toDouble() - inset * density()
+        } ?: read(target, current)
         val snaps = snapPixels(target, current)
         origin = PamDragMath.nearest(snaps, startPx)
         thresholdReached = false
@@ -258,6 +270,10 @@ internal class PamDragController(private val host: ViewGroup) {
         val target = target() ?: return null
         val density = density()
         val position = read(target, current)
+        if (!current.snapOnRelease) {
+            onSettle?.invoke(-1, position / density())
+            return PamDragRelease(-1, false)
+        }
         val velocity = (if (current.horizontal) velocityX else velocityY).toDouble()
         val snaps = snapPixels(target, current)
         val index = if (cancelled) {
@@ -336,7 +352,7 @@ internal class PamDragController(private val host: ViewGroup) {
         current.snaps.map { PamMotionTarget.resolve(target, axisProperty(current), it) }
 
     private fun applyDrivers(target: View, current: PamDragConfig) {
-        if (current.drivers.isEmpty()) return
+        if (current.drivers.isEmpty() && current.textDrivers.isEmpty()) return
         val density = density()
         val positionDp = read(target, current) / density
         val extentDp = (if (current.horizontal) target.width else target.height) / density
@@ -345,6 +361,11 @@ internal class PamDragController(private val host: ViewGroup) {
             val input = driver.input.map { if (it.percent) extentDp * it.number / 100.0 else it.number }
             val output = driver.output.map { PamMotionTarget.resolve(view, driver.property, it) }
             PamMotionTarget.write(view, driver.property, PamDragMath.interpolate(input, output, positionDp))
+        }
+        for (driver in current.textDrivers) {
+            val view = findRef(host, driver.ref) as? TextView ?: continue
+            val label = driver.label(positionDp, extentDp)
+            if (view.text.toString() != label) view.text = label
         }
     }
 

@@ -63,18 +63,24 @@ struct PamDragConfig: Equatable {
     let haptic: Bool
     let group: String
     let drivers: [PamDragDriver]
+    let textDrivers: [PamDragTextDriver]
+    let touchInset: Double?
+    let snapOnRelease: Bool
 
     func settle(for index: Int) -> PamDragSettle { snapSettles[index] ?? settle }
 
     static func parse(_ source: String) -> PamDragConfig? {
         var values: [String: String] = [:]
         var drivers: [PamDragDriver] = []
+        var textDrivers: [PamDragTextDriver] = []
         for raw in source.split(whereSeparator: { $0 == "\n" || $0 == ";" }) {
             let line = raw.trimmingCharacters(in: .whitespaces)
             let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
             if parts[0] == "drive" {
                 if let driver = parseDriver(parts[1]) { drivers.append(driver) }
+            } else if parts[0] == "text" {
+                if let driver = PamDragTextDriver.parse(parts[1]) { textDrivers.append(driver) }
             } else {
                 values[parts[0]] = parts[1]
             }
@@ -110,7 +116,10 @@ struct PamDragConfig: Equatable {
             velocity: Swift.max(Double(values["velocity"] ?? "") ?? 0, 0),
             haptic: values["haptic"] == "1",
             group: values["group"] ?? "",
-            drivers: Array(drivers.prefix(16))
+            drivers: Array(drivers.prefix(16)),
+            textDrivers: Array(textDrivers.prefix(8)),
+            touchInset: finite("touch"),
+            snapOnRelease: values["snapOnRelease"] != "0"
         )
     }
 
@@ -238,11 +247,15 @@ final class PamDragController {
         if let group = config?.group, !group.isEmpty { unregister(group) }
     }
 
-    func begin() {
+    func begin(location: CGPoint = .zero, translation: CGPoint = .zero) {
         guard let current = config, let target = target() else { return }
         runner?.cancel()
         runner = nil
-        startPosition = read(target, current)
+        if let inset = current.touchInset {
+            startPosition = Double(current.horizontal ? location.x - translation.x : location.y - translation.y) - inset
+        } else {
+            startPosition = read(target, current)
+        }
         origin = PamDragMath.nearest(snapPositions(target, current), startPosition)
         thresholdReached = false
         if current.haptic { haptics.prepare() }
@@ -271,6 +284,10 @@ final class PamDragController {
     func end(velocity: CGPoint, cancelled: Bool) -> PamDragRelease? {
         guard let current = config, let target = target() else { return nil }
         let position = read(target, current)
+        if !current.snapOnRelease {
+            onSettle?(-1, position)
+            return PamDragRelease(snapIndex: -1, thresholdReached: false)
+        }
         let axisVelocity = Double(current.horizontal ? velocity.x : velocity.y)
         let index = cancelled ? origin : PamDragMath.release(
             snapPositions(target, current),
@@ -347,7 +364,7 @@ final class PamDragController {
     }
 
     private func applyDrivers(_ target: UIView, _ current: PamDragConfig) {
-        guard !current.drivers.isEmpty, let host else { return }
+        guard !current.drivers.isEmpty || !current.textDrivers.isEmpty, let host else { return }
         let position = read(target, current)
         let size = PamMotionTarget.size(of: target)
         let extent = Double(current.horizontal ? size.width : size.height)
@@ -357,6 +374,11 @@ final class PamDragController {
             let input = driver.input.map { $0.percent ? extent * $0.number / 100 : $0.number }
             let output = driver.output.map { PamMotionTarget.resolve(view, driver.property, $0) }
             PamMotionTarget.write(view, driver.property, PamDragMath.interpolate(input, output, position))
+        }
+        for driver in current.textDrivers {
+            guard let view = host.pamFindNativeRef(driver.ref) as? UILabel else { continue }
+            let label = driver.label(position: position, extent: extent)
+            if view.text != label { view.text = label }
         }
     }
 

@@ -48,6 +48,9 @@ final readonly class Drag implements Stringable
         private bool $haptic = false,
         private string $group = '',
         private array $drivers = [],
+        private array $textDrivers = [],
+        private ?float $touchInset = null,
+        private bool $snapOnRelease = true,
     ) {
     }
 
@@ -82,6 +85,9 @@ final readonly class Drag implements Stringable
             $this->haptic,
             $this->group,
             $this->drivers,
+            $this->textDrivers,
+            $this->touchInset,
+            $this->snapOnRelease,
         );
     }
 
@@ -172,6 +178,39 @@ final readonly class Drag implements Stringable
         return $this->with(drivers: [...$this->drivers, $driver]);
     }
 
+    /** Anchor translation to the pointer inside the detector, for continuous controls. */
+    public function atTouch(float $inset = 0.0): self
+    {
+        Motion::number($inset);
+        return $this->with(touchInset: $inset);
+    }
+
+    /** Keep the released translation instead of animating to a snap point. */
+    public function snapOnRelease(bool $enabled = true): self
+    {
+        return $this->with(snapOnRelease: $enabled);
+    }
+
+    /**
+     * Update a native Text label only when its formatted value changes.
+     * Inputs are translation dp/percent; outputs are finite numbers/seconds.
+     * ClockWithTotal uses the last output value for the total.
+     *
+     * @param list<float|int|string> $input
+     * @param list<float|int> $output
+     */
+    public function driveText(string $ref, array $input, array $output, DragTextFormat $format = DragTextFormat::Number, int $decimals = 0): self
+    {
+        if (count($input) < 2 || count($input) !== count($output) || count($input) > 8
+            || count($this->textDrivers) >= 8 || $decimals < 0 || $decimals > 3) {
+            throw new InvalidArgumentException('Text drivers require 2-8 matching points, at most 8 labels and 0-3 decimals.');
+        }
+        $driver = self::ref($ref).'|'.$format->value.'|'.$decimals.'|'
+            .implode(',', array_map(Motion::value(...), $input)).'|'
+            .implode(',', array_map(Motion::number(...), $output));
+        return $this->with(textDrivers: [...$this->textDrivers, $driver]);
+    }
+
     public function encode(): string
     {
         $lines = ['axis='.($this->horizontal ? 'x' : 'y')];
@@ -179,6 +218,8 @@ final readonly class Drag implements Stringable
         if ($this->maximum !== null) $lines[] = 'max='.Motion::number($this->maximum);
         if ($this->rubber > 0) $lines[] = 'rubber='.Motion::number($this->rubber);
         if ($this->target !== '') $lines[] = 'target='.$this->target;
+        if ($this->touchInset !== null) $lines[] = 'touch='.Motion::number($this->touchInset);
+        if (!$this->snapOnRelease) $lines[] = 'snapOnRelease=0';
         $lines[] = 'snaps='.implode(',', $this->snaps);
         $lines[] = 'settle='.$this->settle;
         $settles = $this->settles;
@@ -193,6 +234,7 @@ final readonly class Drag implements Stringable
         foreach ($this->drivers as $driver) {
             $lines[] = 'drive='.$driver;
         }
+        foreach ($this->textDrivers as $driver) $lines[] = 'text='.$driver;
 
         return implode("\n", $lines);
     }
@@ -263,6 +305,9 @@ final readonly class Drag implements Stringable
         ?bool $haptic = null,
         ?string $group = null,
         ?array $drivers = null,
+        ?array $textDrivers = null,
+        ?float $touchInset = null,
+        ?bool $snapOnRelease = null,
     ): self {
         return new self(
             $this->horizontal,
@@ -278,6 +323,9 @@ final readonly class Drag implements Stringable
             $haptic ?? $this->haptic,
             $group ?? $this->group,
             $drivers ?? $this->drivers,
+            $textDrivers ?? $this->textDrivers,
+            $touchInset ?? $this->touchInset,
+            $snapOnRelease ?? $this->snapOnRelease,
         );
     }
 }

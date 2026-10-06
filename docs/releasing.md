@@ -12,6 +12,11 @@ equivalent journeys for every other official template. `publish` explicitly
 depends on this gate, so a missing Gradle/SDK/runtime, early exit, or runtime
 error blocks the release.
 
+Device staging excludes host source/documentation directories from the official
+`vendor/pushinbr/pam-native` package. Its PHP SDK and resources, application files,
+other packages and development dependencies remain available. The community gate
+must work with the generated Composer manifest without a custom `.pamignore`.
+
 Application releases use one fail-closed entry point:
 
 ```bash

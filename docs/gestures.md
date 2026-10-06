@@ -289,3 +289,31 @@ vertical `GestureDetector`s) only begin on their axis so rows keep scrolling
 their list, and `ellipsizeMode="marquee"` scrolls single-line labels.
 `pressRetentionOffset` keeps UIKit's fixed touch-tracking slop on iOS. The iOS
 implementation has not been validated on a device yet.
+
+### Hold before a pan
+
+`gestureMinDurationMs="180"` on a pan waits at least 180 ms from touch-down before movement can recognize. The default `0` retains immediate pan recognition. Early scroll movement can be handled by the containing scroll view; cancelled or ended touches do not schedule later callbacks. Combine it with `gestureComposition="race"` for a media strip that scrolls normally and reorders after holding a thumbnail. Both renderers apply the same optional duration.
+
+Regression sources: Android `PamPanHoldInstrumentedTest` covers early movement, deadline, cancellation and a fresh touch. iOS `PamPanHoldTests` covers the shared hold clock; run it with the UIKit test target on macOS (not executed in the Linux parity workspace).
+
+## Continuous drags and native labels
+
+`Drag::atTouch(inset)` anchors translation to the pointer within the detector
+instead of the target's previous position. `snapOnRelease(false)` retains the
+released position for continuous controls; existing drags keep their snap rule.
+Use `driveText()` to interpolate a label in the native UI thread. Format codes
+are `DragTextFormat::Number` (1), `Clock` (2), `ClockWithTotal` (3); the latter
+uses the last output as total seconds. Text is assigned only when the formatted
+value changes. No update event needs to cross the PHP bridge.
+
+```php
+Drag::horizontal()->target('thumb')->atTouch(14)->bounds(0, 360)
+    ->snapOnRelease(false)
+    ->drive('fill', 'scaleX', [0, 360], [0, 1])
+    ->driveText('clock', [0, 360], [0, 125], DragTextFormat::ClockWithTotal);
+```
+
+Bind `on:gestureBegin` / `on:gestureEnd` / `on:gestureCancel` for ownership and
+commit the domain value on end. A continuous release reports `snapIndex = -1`.
+Labels accept 2–8 corresponding points and up to eight label drivers per drag;
+number formatting accepts 0–3 decimal places. Clock labels use `minutes:seconds` or `hours:minutes:seconds`.

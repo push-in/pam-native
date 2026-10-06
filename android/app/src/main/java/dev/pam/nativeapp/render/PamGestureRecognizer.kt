@@ -53,6 +53,17 @@ internal class PamGestureRecognizer(private val view: View) {
     private var velocity: VelocityTracker? = null
     private var pendingUpdate: PamGesturePayload? = null
     private var updateScheduled = false
+    private var heldPanOwnsParent = false
+
+    // A held thumbnail must retain the first MOVE before a horizontal scroll
+    // ancestor intercepts it. Holding alone emits no PHP gesture event.
+    private val holdPan = Runnable {
+        val current = config ?: return@Runnable
+        if (current.enabled && current.type == TYPE_PAN && active && !recognized) {
+            heldPanOwnsParent = true
+            view.parent?.requestDisallowInterceptTouchEvent(true)
+        }
+    }
 
     private val longPress = Runnable {
         val current = config ?: return@Runnable
@@ -127,6 +138,9 @@ internal class PamGestureRecognizer(private val view: View) {
     }
 
     fun cancel(emitCancel: Boolean = false, event: MotionEvent? = null) {
+        view.removeCallbacks(holdPan)
+        if (heldPanOwnsParent) view.parent?.requestDisallowInterceptTouchEvent(false)
+        heldPanOwnsParent = false
         view.removeCallbacks(longPress)
         view.removeCallbacks(update)
         if (emitCancel && recognized) {
@@ -154,6 +168,9 @@ internal class PamGestureRecognizer(private val view: View) {
         if (current.type == TYPE_LONG_PRESS) {
             view.postDelayed(longPress, current.minDurationMs.coerceAtLeast(1L))
         }
+        if (current.type == TYPE_PAN && current.minDurationMs > 0L) {
+            view.postDelayed(holdPan, current.minDurationMs)
+        }
         if (current.type == TYPE_PINCH || current.type == TYPE_ROTATION) {
             captureMultiPointer(event)
         }
@@ -167,7 +184,9 @@ internal class PamGestureRecognizer(private val view: View) {
         val distance = hypot(dx, dy)
         when (current.type) {
             TYPE_PAN -> {
-                if (!recognized && distance >= current.minDistance && matchesDirection(current, dx, dy)) {
+                if (!recognized && event.eventTime - beganAt >= current.minDurationMs &&
+                    distance >= current.minDistance && matchesDirection(current, dx, dy)
+                ) {
                     recognized = true
                     emitNow(payload(current, STATE_BEGAN, event))
                 }

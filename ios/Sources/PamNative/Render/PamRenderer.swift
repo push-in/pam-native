@@ -4727,10 +4727,11 @@ public final class PamRenderer {
                 tap.numberOfTouchesRequired = minimum
                 recognizer = tap
             case 2, 5:
-                let pan = UIPanGestureRecognizer(
+                let pan = PamHeldPanGestureRecognizer(
                     target: self,
                     action: #selector(onSemanticGesture(_:))
                 )
+                pan.minimumHoldDuration = type == 2 ? max(0, minimumDuration) : 0
                 pan.minimumNumberOfTouches = minimum
                 pan.maximumNumberOfTouches = maximum
                 recognizer = pan
@@ -5097,7 +5098,7 @@ public final class PamRenderer {
             if dragging, let drag {
                 switch sender.state {
                 case .began:
-                    drag.begin()
+                    drag.begin(location: viewPoint, translation: translation)
                     drag.update(translation: translation)
                 case .changed:
                     drag.update(translation: translation)

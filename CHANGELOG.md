@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.22.2 - 2026-10-06
+
+- Device bundles omit the official SDK's host sources and documentation while
+  retaining PHP, resources and Composer dependencies. Fresh native/native-ui
+  templates stay within the development hot-reload limit without manual ignores.
+- Pan gestures honor an explicit minimum hold duration before activation.
+  The default zero-duration behavior remains immediate. This enables media
+  reordering after a hold without dispatching move events to PHP beforehand.
+- Android media keeps playback intent separate from host/attachment visibility.
+  A late prepare or playback-rate update cannot start sound in the background;
+  native pause controls remain respected after resume and hidden views pause.
+- Drag can update a referenced numeric/clock label on the native UI thread,
+  follow the absolute touch position and retain a continuous release position.
+  Existing drag contracts keep their defaults. Android and iOS share the API;
+  iOS source validation requires a macOS/Xcode host and was not run here.
+- No protocol identifiers or dependency requirements changed.
+
 ## 1.22.1 - 2026-10-06
 
 - Navigation sends removal notifications when route instances are actually

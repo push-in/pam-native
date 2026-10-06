@@ -242,7 +242,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         if (drag.config == null || payload.type != GESTURE_PAN) return payload
         when (payload.state) {
             1 -> {
-                drag.begin()
+                drag.begin(payload.x, payload.y, payload.translationX, payload.translationY)
                 drag.update(payload.translationX, payload.translationY)
             }
             2 -> drag.update(payload.translationX, payload.translationY)

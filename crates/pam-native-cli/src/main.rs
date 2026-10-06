@@ -3,6 +3,7 @@ use std::process::ExitCode;
 
 mod app_icon;
 mod appearance;
+mod bundle_paths;
 mod dev_event;
 mod mobile;
 

@@ -6779,7 +6779,8 @@ fn ignored_project_path(path: &Path) -> bool {
         return false;
     };
 
-    first.starts_with('.')
+    crate::bundle_paths::is_sdk_host_material(path)
+        || first.starts_with('.')
         || components
             .iter()
             .any(|component| component.starts_with('.'))
@@ -10500,6 +10501,49 @@ mod tests {
 #[cfg(test)]
 mod bundle_exclusion_tests {
     use super::*;
+
+    #[test]
+    fn community_bundle_keeps_php_resources_and_omits_sdk_host_material() {
+        let root = std::env::temp_dir().join(format!("pam-sdk-bundle-{}", std::process::id()));
+        let source = root.join("source");
+        let output = root.join("output");
+        let retained = [
+            "index.php",
+            "src/android/Screen.php",
+            "vendor/autoload.php",
+            "vendor/composer/autoload_real.php",
+            "vendor/phpunit/phpunit/src/Framework/TestCase.php",
+            "vendor/other/plugin/android/template.json",
+            "vendor/pushinbr/pam-native/composer.json",
+            "vendor/pushinbr/pam-native/packages/native/src/Component.php",
+            "vendor/pushinbr/pam-native/packages/native/resources/icons.svg",
+        ];
+        for path in retained {
+            let path = source.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "<?php // retained runtime file").unwrap();
+        }
+        let sdk = source.join("vendor/pushinbr/pam-native");
+        // A clean Composer distribution can contain more than the hot-reload
+        // limit in host sources. Their bytes must never reach the device bundle.
+        for directory in ["android", "crates", "ios", "docs", "runtime", "scripts"] {
+            fs::create_dir_all(sdk.join(directory)).unwrap();
+            fs::write(
+                sdk.join(directory).join("host-source"),
+                vec![0; 3 * 1024 * 1024],
+            )
+            .unwrap();
+        }
+        fs::create_dir_all(&output).unwrap();
+        let mut budget = CopyBudget::default();
+        copy_project_files(&source, &source, &output, &mut budget, &[]).unwrap();
+        for path in retained {
+            assert!(output.join(path).is_file(), "runtime file missing: {path}");
+        }
+        assert_eq!(budget.files, retained.len());
+        assert!(encode_dev_bundle(&output).unwrap().len() < 4096);
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn staging_omits_exclusions_and_preserves_application_files() {

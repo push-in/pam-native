@@ -50,6 +50,8 @@ The **[PAM documentation](https://push-in.github.io/pam-docs/native/overview/)**
 Every build follows the mandatory [build hygiene contract](docs/build-hygiene.md):
 final APK/AAB/IPA/app deliverables are preserved in `dist`, while regenerable
 Gradle, Cargo and Xcode intermediates are removed when the command exits.
+Device bundles keep the PHP SDK and its resources; the SDK's native host sources
+and documentation stay on the development machine.
 <!-- pam:product-page:end -->
 
 PAM Native lets PHP developers ship native mobile applications without adding

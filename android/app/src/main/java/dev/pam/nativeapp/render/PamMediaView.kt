@@ -10,6 +10,10 @@ import android.os.Looper
 import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
+import android.view.View
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.findViewTreeLifecycleOwner
 import android.widget.FrameLayout
 import android.widget.MediaController
 import java.io.File
@@ -73,22 +77,21 @@ internal class PamMediaView(
     private val poster = PamImageView(context)
     private val main = Handler(Looper.getMainLooper())
     private var source = ""
-    private var autoPlay = false
+    private val playback = MediaPlaybackLifecycle()
     private var controls = true
     private var looping = false
     private var muted = false
     private var volume = 1f
-    private var rate = 1f
+    @Volatile private var rate = 1f
     private var resizeMode = 1
     private var currentTime = 0.0
-    private var preparedPlayer: MediaPlayer? = null
-    private var prepared = false
+    @Volatile private var preparedPlayer: MediaPlayer? = null
+    @Volatile private var prepared = false
     private var bufferedPercentage = 0
     private var videoSurface: Surface? = null
     private var mediaController: MediaController? = null
-    private var resumeAfterPause = false
     private var creatingPlayer = false
-    private var playerGeneration = 0L
+    @Volatile private var playerGeneration = 0L
     var onReady: (() -> Unit)? = null
 
     /** Ready with natural video size (px) and duration (s). */
@@ -136,7 +139,10 @@ internal class PamMediaView(
     /** Runs a player command off the UI thread, in order with creation and release. */
     private fun command(block: (MediaPlayer) -> Unit) {
         val player = preparedPlayer ?: return
-        mediaExecutor.execute { runCatching { block(player) } }
+        val generation = playerGeneration
+        mediaExecutor.execute {
+            if (generation == playerGeneration && preparedPlayer === player) runCatching { block(player) }
+        }
     }
 
     init {
@@ -229,9 +235,8 @@ internal class PamMediaView(
     }
 
     fun setAutoPlay(value: Boolean) {
-        autoPlay = value
-        if (!prepared) return
-        if (value) start() else pause()
+        playback.autoPlay(value)
+        syncPlayback()
     }
 
     fun setControls(value: Boolean) {
@@ -270,9 +275,7 @@ internal class PamMediaView(
     }
     fun setPlaybackRate(value: Float) {
         rate = value.coerceIn(0.25f, 4f)
-        if (!prepared) return
-        val speed = rate
-        command { applyRate(it, speed) }
+        syncPlayback()
     }
 
     fun setResizeMode(value: Int) {
@@ -287,14 +290,34 @@ internal class PamMediaView(
     }
 
     fun onHostPause() {
-        resumeAfterPause = prepared && autoPlay
-        pause()
+        playback.hostActive(false)
+        syncPlayback()
     }
 
     fun onHostResume() {
-        if (resumeAfterPause) {
-            resumeAfterPause = false
-            start()
+        playback.hostActive(true)
+        syncVisibility()
+    }
+
+    private fun syncVisibility() {
+        playback.visibility(isAttachedToWindow, isShown && windowVisibility == VISIBLE)
+        syncPlayback()
+    }
+
+    private fun syncPlayback() {
+        if (prepared) command(::applyPlayback)
+    }
+
+    /** The only start path, evaluated on the worker immediately before playback. */
+    private fun applyPlayback(player: MediaPlayer) {
+        if (!prepared || preparedPlayer !== player) return
+        if (playback.mayPlay) {
+            // PlaybackParams itself can start Android MediaPlayer. Set it only
+            // inside this same foreground/visibility gate, including warm players.
+            applyRate(player, rate)
+            if (!player.isPlaying) player.start()
+        } else if (player.isPlaying) {
+            player.pause()
         }
     }
 
@@ -354,16 +377,14 @@ internal class PamMediaView(
             videoHeightPx = it.videoHeight
             val loop = looping
             val level = audioLevel()
-            val speed = rate
             val startAt = currentTime
-            val play = autoPlay
             mediaExecutor.execute {
+                if (generation != playerGeneration || preparedPlayer !== it) return@execute
                 runCatching {
                     it.isLooping = loop
                     it.setVolume(level, level)
-                    applyRate(it, speed)
                     if (startAt > 0) it.seekTo((startAt * 1_000).toInt())
-                    if (play) it.start()
+                    applyPlayback(it)
                 }
             }
             mediaController?.isEnabled = true
@@ -389,8 +410,9 @@ internal class PamMediaView(
         }
         player.setOnCompletionListener {
             if (generation != playerGeneration) return@setOnCompletionListener
+            playback.completed(looping)
             onEnd?.invoke()
-            if (looping) command { player -> player.start() }
+            syncPlayback()
         }
         player.setOnBufferingUpdateListener { _, percentage ->
             if (generation == playerGeneration) bufferedPercentage = percentage.coerceIn(0, 100)
@@ -510,11 +532,13 @@ internal class PamMediaView(
     }
 
     override fun start() {
-        if (prepared) command { it.start() }
+        playback.request(true)
+        syncPlayback()
     }
 
     override fun pause() {
-        if (prepared) command { it.pause() }
+        playback.request(false)
+        syncPlayback()
     }
 
     override fun getDuration(): Int =
@@ -545,6 +569,10 @@ internal class PamMediaView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        (findViewTreeLifecycleOwner() ?: context as? LifecycleOwner)?.lifecycle?.let {
+            playback.hostActive(it.currentState.isAtLeast(Lifecycle.State.RESUMED))
+        }
+        syncVisibility()
         main.removeCallbacks(progress)
         main.post(progress)
         if (source.isNotEmpty() && preparedPlayer == null && !creatingPlayer) {
@@ -554,7 +582,18 @@ internal class PamMediaView(
         }
     }
 
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        syncVisibility()
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        syncVisibility()
+    }
+
     override fun onDetachedFromWindow() {
+        playback.visibility(false, false)
         main.removeCallbacks(progress)
         sourceGeneration++
         releasePlayer()
