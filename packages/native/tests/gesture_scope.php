@@ -47,7 +47,23 @@ final class GestureScopeRow extends Component
 ?>
 
 <template>
-    <Pressable :accessibilityLabel="$name" on:doubleTap="like" on:pressIn="like">
+    <Pressable
+        :accessibilityLabel="$name"
+        on:press="like"
+        on:longPress="like"
+        on:pressIn="like"
+        on:pressOut="like"
+        on:pressMove="like"
+        on:doubleTap="like"
+        on:gestureBegin="like"
+        on:gestureUpdate="like"
+        on:gestureEnd="like"
+        on:gestureCancel="like"
+        on:gestureSettle="like"
+        p-touch-start="like"
+        p-touch-move="like"
+        p-touch-end="like"
+    >
         <Text>{{ $name }} {{ $likes }}</Text>
     </Pressable>
 </template>
@@ -86,7 +102,22 @@ $gestureFeed = App::make('Pam\\Native\\Tests\\GestureScope\\GestureScopeFeed');
 App::run($gestureFeed);
 $gestureCallbacks = (new ReflectionProperty(Runtime::class, 'eventCallbacks'))->getValue();
 $rowRenders = 'Pam\\Native\\Tests\\GestureScope\\GestureScopeRow';
-foreach ([EventKind::DoubleTap, EventKind::PressIn] as $gestureKind) {
+foreach ([
+    EventKind::Press,
+    EventKind::LongPress,
+    EventKind::PressIn,
+    EventKind::PressOut,
+    EventKind::PressMove,
+    EventKind::DoubleTap,
+    EventKind::GestureBegin,
+    EventKind::GestureUpdate,
+    EventKind::GestureEnd,
+    EventKind::GestureCancel,
+    EventKind::GestureSettle,
+    EventKind::TouchStart,
+    EventKind::TouchMove,
+    EventKind::TouchEnd,
+] as $gestureKind) {
     $gestureNode = null;
     foreach (array_keys($gestureCallbacks) as $gestureKey) {
         [$nodeId, $kind] = array_map(intval(...), explode(':', (string) $gestureKey));
