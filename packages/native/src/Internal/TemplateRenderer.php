@@ -1307,7 +1307,7 @@ final class TemplateRenderer
         }
         if ($entry !== null && $factory === null && $plan !== null) {
             if (!array_key_exists('fast', $entry)) {
-                $entry['fast'] = self::fastEntry($tag, $plan, $entry['values'], $resolvedClass, $data);
+                $entry['fast'] = self::fastEntry($tag, $plan, $entry['values'], $resolvedClass, $data, $entry['inherited']);
                 if ($styleKey !== null && isset(self::$styleEntries[$styleKey])) {
                     self::$styleEntries[$styleKey]['fast'] = $entry['fast'];
                 }
@@ -2136,6 +2136,7 @@ final class TemplateRenderer
         array $valueOps,
         ?string $resolvedClass,
         array $data,
+        array $inheritedCandidates = [],
     ): ?array {
         if (!isset(self::FAST_TAGS[$tag]) || $plan['bindings']) {
             return null;
@@ -2232,6 +2233,34 @@ final class TemplateRenderer
                 $inheritedNames[] = $attribute;
             }
         }
+        // Inherited text styles made only of constants are computed once.
+        $staticInherited = null;
+        $constantInherited = true;
+        foreach ($inheritedNames as $attribute) {
+            if (isset($dynamicNames[$attribute])) {
+                $constantInherited = false;
+            }
+        }
+        foreach ($inheritedCandidates as [, , $mode]) {
+            if ($mode !== 0) {
+                $constantInherited = false;
+            }
+        }
+        if ($constantInherited) {
+            $staticInherited = [];
+            foreach ($inheritedNames as $attribute) {
+                $value = $template[$attribute];
+                if (is_string($value) || is_int($value) || is_float($value) || is_bool($value)) {
+                    $staticInherited[$attribute] = $value;
+                }
+            }
+            foreach ($inheritedCandidates as [, $attribute, , $payload]) {
+                if (is_string($payload) || is_int($payload) || is_float($payload) || is_bool($payload)) {
+                    $staticInherited[$attribute] = $payload;
+                }
+            }
+            $staticInherited = [$staticInherited, $staticInherited === [] ? '' : serialize($staticInherited)];
+        }
         $classTokens = null;
         $localClasses = true;
         if ($resolvedClass !== null) {
@@ -2251,6 +2280,7 @@ final class TemplateRenderer
             'constant' => $constant,
             'dynamic' => $dynamic,
             'inherited' => $inheritedNames,
+            'staticInherited' => $staticInherited,
             'classTokens' => $classTokens,
             'localClasses' => $localClasses,
             'specials' => $specials,
@@ -2323,6 +2353,10 @@ final class TemplateRenderer
             $ownHandlers[$event->value] = self::handler($eventRaw, $event, $scope, $data);
         }
 
+        $inheritedKey = null;
+        if ($fast['staticInherited'] !== null) {
+            [$inheritedChildStyles, $inheritedKey] = $fast['staticInherited'];
+        } else {
         $inheritedChildStyles = [];
         foreach ($fast['inherited'] as $attribute) {
             $value = $values[$attribute];
@@ -2354,6 +2388,7 @@ final class TemplateRenderer
                 $inheritedChildStyles[$attribute] = $value;
             }
         }
+        }
 
         $children = [];
         $renderedChildren = [];
@@ -2378,7 +2413,8 @@ final class TemplateRenderer
                 ? (float) $values['height']
                 : ($data['__pamContainerHeight'] ?? null);
             $childData['__pamInheritedStyles'] = $inheritedChildStyles;
-            $childData['__pamInheritedKey'] = $inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles);
+            $childData['__pamInheritedKey'] = $inheritedKey
+                ?? ($inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles));
             $childData['__pamParentVariants'] = ParentVariants::extend(
                 $data['__pamParentVariants'] ?? null,
                 $values,
