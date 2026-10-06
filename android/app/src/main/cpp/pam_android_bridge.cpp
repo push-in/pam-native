@@ -72,6 +72,7 @@ struct RuntimeState {
     jmethodID on_error = nullptr;
     jmethodID on_measure_text = nullptr;
     jmethodID on_remount = nullptr;
+    jmethodID on_crypto = nullptr;
     std::string entry;
     std::string state_dir;
     std::string php_executable = "pam-native";
@@ -554,6 +555,107 @@ PHP_FUNCTION(pam_native_call_typed) {
     RETURN_TRUE;
 }
 
+// Pam\Native\Crypto on the device (the PHP runtime has no ext-sodium or
+// ext-openssl): 1 = Ed25519 verify (key = public key, nonce = signature,
+// input = message) -> bool; 2 = AES-256-GCM seal -> ciphertext . tag | false;
+// 3 = AES-256-GCM open (input = ciphertext . tag) -> plaintext | false.
+// null: this host has no crypto provider. Runs synchronously on the PHP
+// worker through PamRuntime.onNativeCrypto (PamCrypto.kt).
+constexpr zend_long kCryptoEd25519Verify = 1;
+constexpr zend_long kCryptoAes256GcmEncrypt = 2;
+constexpr zend_long kCryptoAes256GcmDecrypt = 3;
+constexpr std::size_t kMaxCryptoInputBytes = 64 * 1024 * 1024;
+
+jbyteArray new_byte_array(JNIEnv* env, const char* data, std::size_t length) {
+    jbyteArray array = env->NewByteArray(static_cast<jsize>(length));
+    if (array != nullptr && length > 0) {
+        env->SetByteArrayRegion(array, 0, static_cast<jsize>(length), reinterpret_cast<const jbyte*>(data));
+    }
+    return array;
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(arginfo_pam_native_crypto, 0, 5, MAY_BE_STRING | MAY_BE_BOOL | MAY_BE_NULL)
+    ZEND_ARG_TYPE_INFO(0, operation, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, key, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, nonce, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, aad, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, input, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+PHP_FUNCTION(pam_native_crypto) {
+    zend_long operation = 0;
+    char* key = nullptr;
+    size_t key_length = 0;
+    char* nonce = nullptr;
+    size_t nonce_length = 0;
+    char* aad = nullptr;
+    size_t aad_length = 0;
+    char* input = nullptr;
+    size_t input_length = 0;
+    ZEND_PARSE_PARAMETERS_START(5, 5)
+        Z_PARAM_LONG(operation)
+        Z_PARAM_STRING(key, key_length)
+        Z_PARAM_STRING(nonce, nonce_length)
+        Z_PARAM_STRING(aad, aad_length)
+        Z_PARAM_STRING(input, input_length)
+    ZEND_PARSE_PARAMETERS_END();
+
+    RuntimeState* state = active_runtime;
+    if (state == nullptr || state->on_crypto == nullptr) {
+        RETURN_NULL();
+    }
+    if (operation < kCryptoEd25519Verify || operation > kCryptoAes256GcmDecrypt
+        || key_length > 64 || nonce_length > 64 || aad_length > kMaxCryptoInputBytes
+        || input_length > kMaxCryptoInputBytes) {
+        RETURN_FALSE;
+    }
+    AttachedEnvironment attached(state->vm);
+    JNIEnv* env = attached.get();
+    if (env == nullptr || env->PushLocalFrame(8) != JNI_OK) {
+        if (env != nullptr) {
+            env->ExceptionClear();
+        }
+        RETURN_FALSE;
+    }
+    jbyteArray java_key = new_byte_array(env, key, key_length);
+    jbyteArray java_nonce = new_byte_array(env, nonce, nonce_length);
+    jbyteArray java_aad = new_byte_array(env, aad, aad_length);
+    jbyteArray java_input = new_byte_array(env, input, input_length);
+    jbyteArray output = nullptr;
+    if (java_key != nullptr && java_nonce != nullptr && java_aad != nullptr && java_input != nullptr) {
+        output = static_cast<jbyteArray>(env->CallObjectMethod(
+            state->runtime,
+            state->on_crypto,
+            static_cast<jint>(operation),
+            java_key,
+            java_nonce,
+            java_aad,
+            java_input
+        ));
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionDescribe();
+        env->ExceptionClear();
+        output = nullptr;
+    }
+    std::string result;
+    const bool succeeded = output != nullptr;
+    if (succeeded) {
+        result.resize(static_cast<std::size_t>(env->GetArrayLength(output)));
+        if (!result.empty()) {
+            env->GetByteArrayRegion(output, 0, static_cast<jsize>(result.size()), reinterpret_cast<jbyte*>(result.data()));
+        }
+    }
+    env->PopLocalFrame(nullptr);
+    if (!succeeded) {
+        RETURN_FALSE;
+    }
+    if (operation == kCryptoEd25519Verify) {
+        RETURN_BOOL(result.size() == 1 && result[0] == 1);
+    }
+    RETVAL_STRINGL(result.data(), result.size());
+}
+
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_native_error, 0, 1, IS_VOID, 0)
     ZEND_ARG_TYPE_INFO(0, message, IS_STRING, 0)
 ZEND_END_ARG_INFO()
@@ -574,6 +676,7 @@ const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_native_call, arginfo_pam_native_call)
     PHP_FE(pam_native_call_typed, arginfo_pam_native_call_typed)
     PHP_FE(pam_native_error, arginfo_pam_native_error)
+    PHP_FE(pam_native_crypto, arginfo_pam_native_crypto)
     PHP_FE_END
 };
 
@@ -1039,6 +1142,16 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
         if (env->ExceptionCheck()) {
             env->ExceptionClear();
             state->on_remount = nullptr;
+        }
+        state->on_crypto = env->GetMethodID(
+            runtime_class,
+            "onNativeCrypto",
+            "(I[B[B[B[B)[B"
+        );
+        if (env->ExceptionCheck()) {
+            // Hosts without it: Pam\Native\Crypto raises CryptoUnavailableException.
+            env->ExceptionClear();
+            state->on_crypto = nullptr;
         }
     }
     if (runtime_class != nullptr) {

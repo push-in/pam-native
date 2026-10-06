@@ -629,6 +629,25 @@ class PamRuntime(
         false
     }
 
+    /**
+     * JNI: PHP's synchronous `pam_native_crypto()` (Pam\Native\Crypto), on the
+     * PHP worker thread. Null rejects (invalid signature, failed
+     * authentication, malformed input).
+     */
+    @Suppress("unused")
+    private fun onNativeCrypto(
+        operation: Int,
+        key: ByteArray,
+        nonce: ByteArray,
+        aad: ByteArray,
+        input: ByteArray,
+    ): ByteArray? = try {
+        PamCrypto.perform(operation, key, nonce, aad, input)
+    } catch (error: RuntimeException) {
+        Log.w("PamNativeCrypto", "Crypto operation $operation failed", error)
+        null
+    }
+
     @Suppress("unused")
     private fun onNativeError(message: String) {
         completeHotReload(failed = true)
