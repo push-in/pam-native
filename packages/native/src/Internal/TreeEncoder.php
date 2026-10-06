@@ -169,23 +169,26 @@ final class TreeEncoder
         $propertyBytes = '';
 
         foreach ($properties as $property => $value) {
-            $encoded = match (true) {
-                is_string($value) => self::$encodedStrings[$value] ?? $this->encodeString($value),
-                is_int($value) => "\x02".pack('P', $value),
-                is_bool($value) => $value ? "\x04\x01" : "\x04\x00",
-                default => $this->encodeValue($value),
-            };
+            if (is_string($value)) {
+                $encoded = self::$encodedStrings[$value] ?? $this->encodeString($value);
+            } elseif (is_int($value)) {
+                $encoded = "\x02".pack('P', $value);
+            } elseif (is_bool($value)) {
+                $encoded = $value ? "\x04\x01" : "\x04\x00";
+            } else {
+                $encoded = $this->encodeValue($value);
+            }
             $encodedProperties[$property] = $encoded;
             $propertyBytes .= pack('v', $property).$encoded;
         }
 
         $this->nodes[$id] = new EncodedNode(
-            id: $id,
-            parent: $parent,
-            index: $index,
-            kind: $kind,
-            properties: $encodedProperties,
-            propertyBytes: Wire::u16(count($encodedProperties)).$propertyBytes,
+            $id,
+            $parent,
+            $index,
+            $kind,
+            $encodedProperties,
+            Wire::u16(count($encodedProperties)).$propertyBytes,
         );
 
         $segments = [];
@@ -208,7 +211,18 @@ final class TreeEncoder
             }
             $segments[$segment] = true;
             $childPath = $path.'/'.$segment;
-            $childId = $this->nodeId($childPath, $childDom, $childKind);
+            $identity = ($childDom === null ? $childPath : 'dom:'.$childDom).'|'.$childKind;
+            $childId = $this->identityIds[$identity] ?? null;
+            if ($childId === null) {
+                $childId = $this->nodeId($childPath, $childDom, $childKind);
+            } else {
+                // nodeId() inlined for identities seen in earlier frames.
+                if ($childId === 0 || isset($this->ids[$childId]) || ($this->idIdentities[$childId] ?? $identity) !== $identity) {
+                    throw new LogicException("Element identity collision at {$childPath}; assign a unique key.");
+                }
+                $this->idIdentities[$childId] = $identity;
+                $this->ids[$childId] = true;
+            }
             $this->encodeNode($child, $childInfo, $childId, $id, $childIndex, $childPath);
         }
 
@@ -217,12 +231,12 @@ final class TreeEncoder
             || (($dom !== null || $key !== null || $reusable) && $children !== [])
         ) {
             $this->cacheCandidates[] = new SubtreeCacheCandidate(
-                element: $element,
-                path: $path,
-                start: $start,
-                length: count($this->nodes) - $start,
-                callbackStart: $callbackStart,
-                callbackLength: count($this->callbacks) - $callbackStart,
+                $element,
+                $path,
+                $start,
+                count($this->nodes) - $start,
+                $callbackStart,
+                count($this->callbacks) - $callbackStart,
             );
         }
     }
