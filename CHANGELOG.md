@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.22.7 - 2026-10-06
+
+- Android scroll views consume an authored content offset once that axis reaches
+  its requested position. Later child layouts or insertions no longer replay a
+  completed initial offset after the user reaches the last page or scrolls away.
+- Requests clamped by insufficient content remain pending until content grows
+  enough to reach them. Explicit property changes can request another position;
+  end anchoring, keyboard clearance and tokenized scroll requests retain their
+  existing contracts.
+- Three regressions fail on 1.22.6 and pass with the correction on Android
+  APIs 26 and 36; the twelve existing scroll-container regressions also pass.
+  Final application swipe/zoom acceptance is separate from these native tests.
+- No PHP API, numeric protocol identifiers or dependency requirements changed.
+  Rebuild the Android host; see [migration notes](docs/migration-1.22.7.md).
+
 ## 1.22.6 - 2026-10-06
 
 - Prebuilt PHP class/template caches recover empty or truncated derived files

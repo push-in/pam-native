@@ -576,6 +576,15 @@ internal class PamScrollContainer @JvmOverloads constructor(
         val x = if (hasRequestedOffsetX) requestedOffsetX else scrollXOf(activeScroll)
         val y = if (hasRequestedOffsetY) requestedOffsetY else scrollYOf(activeScroll)
         activeScroll.scrollTo(x, y)
+        // A reached request is one-shot. Leaving it armed would replay the
+        // initial offset after the user reaches the end and a child relayouts.
+        // Keep clamped requests pending until later content makes them reachable.
+        if (hasRequestedOffsetX && scrollXOf(activeScroll) == requestedOffsetX) {
+            hasRequestedOffsetX = false
+        }
+        if (hasRequestedOffsetY && scrollYOf(activeScroll) == requestedOffsetY) {
+            hasRequestedOffsetY = false
+        }
     }
 
     private fun requestOffsetApplication() {
