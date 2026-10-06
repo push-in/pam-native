@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.21.0 - 2026-10-06
+
+Keep-alive routes give a stack navigator React Navigation tab-screen
+lifetime, and four Android fixes from the Zé Chat device QA on a Galaxy S10:
+carousels page one page per fling, a swipe past the last loop no longer
+pauses it, and decoded images and video players stop blocking scroll frames.
+
+- Navigation: `Route::screen(...)->keepAlive()` (`Router::keepAlive()`). An
+  app that draws its own bottom bar and switches tabs with `navigate()` lost
+  the Feed scroll offset on every tab switch: the popped route was destroyed
+  and rebuilt at offset zero. A kept-alive entry removed from the stack
+  (`navigate()`, `pop()`, `popToTop()`, `replace()`) is now parked mounted
+  and hidden, and a push or navigate with the same params reuses it with its
+  state, native views and scroll offsets, without a visible jump. Kept-alive
+  entries deeper in the stack stay mounted too. An optional `RouteContext`
+  predicate limits it to some entries (the own-profile tab, not visited
+  profiles); at most three entries per route are parked and `reset()`
+  releases them. Parked screens get blur/focus events, not
+  `navigationRemoved()`. PHP tests cover parking, reuse, deep entries,
+  params and the predicate; instrumented tests cover the native host.
+- iOS, navigation: `PamNavigationHost.insert()` reorders a moved route view
+  instead of ignoring the move, so a parked route coming back on top is the
+  transition destination (Android already moved it). Uncompiled here: needs
+  Mac validation.
+- Android, paging: Pressable pages consume `ACTION_DOWN`, so a paging
+  `HorizontalScrollView`/`ScrollView` first saw the gesture at the
+  intercepted move and paged from the dragged offset. A 700 px/250 ms fling
+  on a feed carousel skipped two pages; a stale fling flag also skipped the
+  snap of a later slow drag. The start page is now recorded in
+  `onInterceptTouchEvent`. iOS already reads it in
+  `scrollViewWillBeginDragging`.
+- Android, lists: at its boundary a virtualized list released every drag to
+  its parent even with no scrollable ancestor, so a row Pressable received
+  the swipe as a press: each swipe up on the last Zé Chat loop toggled it to
+  paused. The list now hands the drag only to an ancestor that can still
+  scroll that way; otherwise it keeps it (overscroll), like React Native.
+- Android, images: decoded bitmaps call `prepareToDraw()` on the decode
+  thread, so the RenderThread texture upload (8.5 ms for a 1080x2042 photo)
+  no longer lands in the scroll frame that first draws them.
+- Android, video: `MediaPlayer` creation, data source, surface attach and
+  detach, commands, progress polling and release run in order on one worker
+  thread without a Looper (callbacks stay on the main thread). A feed settle
+  that swapped the playing video blocked the UI thread 95-97 ms in binder
+  calls to mediaserver. iOS is unaffected: AVPlayer item loading is already
+  asynchronous.
+
+Verified on the S10 (Zé Chat QA debug build, feed cold pass of 8 flings):
+the Feed keeps its offset across tab switches with no visible jump, and the
+remaining cold-pass jank is cell binding of the debug (JIT) build.
+
 ## 1.20.2 - 2026-10-06
 
 `MediaPlayer` on Android keeps the video's aspect ratio and a paused player
