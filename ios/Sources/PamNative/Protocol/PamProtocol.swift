@@ -801,10 +801,10 @@ public enum BatchDecoder {
                 case 5:
                     let id = try reader.positiveId()
                     let frame = Frame(
-                        x: try reader.f32(),
-                        y: try reader.f32(),
-                        width: try reader.f32(),
-                        height: try reader.f32(),
+                        x: try reader.coordinate(),
+                        y: try reader.coordinate(),
+                        width: try reader.extent(),
+                        height: try reader.extent(),
                     )
                     mutations.append(.layout(id: id, frame: frame))
                 case 6:
@@ -869,9 +869,24 @@ struct BinaryReader {
     }
 
     mutating func f32() throws -> Float {
-        let value = Float(bitPattern: UInt32(truncatingIfNeeded: try unsigned(4)))
+        Float(bitPattern: UInt32(truncatingIfNeeded: try unsigned(4)))
+    }
+
+    /// A layout origin. CSS offsets and margins move a box outside its parent
+    /// (`top: -200px`, `margin-top: -14px`), so any finite value is valid.
+    mutating func coordinate() throws -> Float {
+        let value = try f32()
+        guard value.isFinite else {
+            throw PamProtocolError.invalidPayload("Layout coordinate must be finite")
+        }
+        return value
+    }
+
+    /// A layout width or height: finite and never negative.
+    mutating func extent() throws -> Float {
+        let value = try f32()
         guard value.isFinite && value >= 0 else {
-            throw PamProtocolError.invalidPayload("Invalid layout value")
+            throw PamProtocolError.invalidPayload("Layout size must be finite and non-negative")
         }
         return value
     }

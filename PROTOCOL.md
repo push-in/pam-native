@@ -44,6 +44,14 @@ Rust, Android and iOS decoders reject malformed sequences instead of replacing
 bytes or silently producing empty strings. Opaque tag-`5` values remain binary.
 Floating-point properties and module-map decimals must be finite; `NaN` and
 positive/negative infinity are rejected by producers and consumers.
+Layout frames (`PNB1` mutation `5`) carry `x`, `y`, `width` and `height` as
+`f32` points. The origin may be any finite value, negative included: CSS
+offsets and negative margins place a box outside its parent (`top: -200px`).
+Width and height must be finite and non-negative. The Rust layout engine
+never emits anything else, the Rust encoder refuses it and the Rust, Android
+and iOS decoders reject it. A host that rejects a batch (or fails part-way
+through mounting one) clears its tree and asks the engine for a full remount
+of the retained tree, so later patches never target nodes it never created.
 Wire maps encode portable ASCII keys in ascending byte order. PHP, Kotlin and
 Swift pin the same all-value-type golden bytes, so insertion order cannot alter
 payload hashes or snapshots; decoders remain compatible with valid legacy maps

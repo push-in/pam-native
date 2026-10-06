@@ -298,7 +298,11 @@ fn layout_node(
         }
     } else {
         bounds
-    };
+    }
+    // Hosts reject a non-finite origin or a negative/non-finite size; a
+    // degenerate computation (for example an over-constrained box) must
+    // never ship one. Negative origins are valid and kept.
+    .sanitized();
     if context
         .previous
         .is_some_and(|previous| previous.get(&id) == Some(&frame))
@@ -3777,6 +3781,75 @@ mod tests {
 
         assert_eq!(child.x, 38.0);
         assert_eq!(child.y, 86.0);
+    }
+
+    #[test]
+    fn negative_offsets_and_margins_keep_negative_origins() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, [])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::View,
+                        [
+                            (PropKey::PositionType, PropValue::Integer(2)),
+                            (PropKey::Top, PropValue::Float(-200.0)),
+                            (PropKey::Left, PropValue::Float(-34.0)),
+                            (PropKey::Width, PropValue::Float(390.0)),
+                            (PropKey::Height, PropValue::Float(200.0)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        1,
+                        1,
+                        NodeKind::View,
+                        [
+                            (PropKey::MarginTop, PropValue::Float(-14.0)),
+                            (PropKey::Height, PropValue::Float(20.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        };
+
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("negative origins");
+
+        assert_eq!(
+            layouts[&2],
+            Layout {
+                x: -34.0,
+                y: -200.0,
+                width: 390.0,
+                height: 200.0,
+            }
+        );
+        assert_eq!(layouts[&3].y, -14.0);
+        assert!(layouts.values().all(Layout::is_valid));
+        let mutations = layouts
+            .iter()
+            .map(|(id, frame)| pam_native_protocol::Mutation::Layout {
+                id: *id,
+                frame: *frame,
+            })
+            .collect::<Vec<_>>();
+        let encoded = pam_native_protocol::encode_batch(&mutations).expect("encodable");
+        assert_eq!(pam_native_protocol::decode_batch(&encoded), Ok(mutations));
     }
 
     #[test]

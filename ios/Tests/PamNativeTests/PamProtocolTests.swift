@@ -159,6 +159,41 @@ final class PamProtocolTests: XCTestCase {
         XCTAssertEqual(root, 1)
     }
 
+    func testRustGoldenLayoutWithNegativeOriginDecodesOnSwift() throws {
+        // `position: absolute; top: -200px; left: -34px` child of the root.
+        let bytes = Data(hex: "504e4231010001000000050200000000000000000008c2000048c30000c34300004843")
+        let mutations = try BatchDecoder.decode(bytes)
+        guard mutations.count == 1, case let .layout(id, frame) = mutations[0] else {
+            return XCTFail("Expected one Layout mutation")
+        }
+        XCTAssertEqual(id, 2)
+        XCTAssertEqual(frame.x, -34)
+        XCTAssertEqual(frame.y, -200)
+        XCTAssertEqual(frame.width, 390)
+        XCTAssertEqual(frame.height, 200)
+    }
+
+    func testLayoutOriginsAcceptAnyFiniteValueAndSizesMustBeNonNegative() throws {
+        let accepted = try BatchDecoder.decode(layoutBatch(x: -0.5, y: -1e6, width: 0, height: 0))
+        guard case let .layout(_, frame)? = accepted.first else {
+            return XCTFail("Expected a Layout mutation")
+        }
+        XCTAssertEqual(frame.x, -0.5)
+        XCTAssertEqual(frame.y, -1e6)
+        for (x, y, width, height) in [
+            (Float.nan, 0, 1, 1),
+            (0, -Float.infinity, 1, 1),
+            (0, 0, -1, 1),
+            (0, 0, 1, -0.01),
+            (0, 0, Float.infinity, 1),
+            (0, 0, 1, Float.nan),
+        ] as [(Float, Float, Float, Float)] {
+            XCTAssertThrowsError(
+                try BatchDecoder.decode(layoutBatch(x: x, y: y, width: width, height: height))
+            )
+        }
+    }
+
     func testDecoderEnforcesSharedPropertyAndNodeLimits() throws {
         let acceptedText = try BatchDecoder.decode(textBatch(length: 1024 * 1024))
         guard case let .create(textNode)? = acceptedText.first,
@@ -376,6 +411,18 @@ private func batch(propertyCount: Int, payloadBytes: Int) -> Data {
     data.appendLittleEndian(UInt32(0))
     data.append(UInt8(NodeKind.screen.rawValue))
     data.appendLittleEndian(UInt16(propertyCount))
+    return data
+}
+
+private func layoutBatch(x: Float, y: Float, width: Float, height: Float) -> Data {
+    var data = Data("PNB1".utf8)
+    data.appendLittleEndian(UInt16(1))
+    data.appendLittleEndian(UInt32(1))
+    data.append(UInt8(5))
+    data.appendLittleEndian(UInt64(2))
+    for value in [x, y, width, height] {
+        data.appendLittleEndian(value.bitPattern)
+    }
     return data
 }
 

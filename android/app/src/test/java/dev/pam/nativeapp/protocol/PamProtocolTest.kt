@@ -30,6 +30,40 @@ class PamProtocolTest {
     }
 
     @Test
+    fun rustGoldenLayoutWithNegativeOriginDecodesOnAndroid() {
+        // `position: absolute; top: -200px; left: -34px` child of the root.
+        val mutations = BatchDecoder.decode(
+            ByteBuffer.wrap(
+                "504e4231010001000000050200000000000000000008c2000048c30000c34300004843"
+                    .hexBytes(),
+            ),
+        )
+
+        assertEquals(
+            listOf(Mutation.Layout(2, Frame(x = -34f, y = -200f, width = 390f, height = 200f))),
+            mutations,
+        )
+    }
+
+    @Test
+    fun layoutOriginsAcceptAnyFiniteValueAndSizesMustBeNonNegative() {
+        assertEquals(
+            Frame(-0.5f, -1e6f, 0f, 0f),
+            (BatchDecoder.decode(layoutBatch(-0.5f, -1e6f, 0f, 0f)).single() as Mutation.Layout).frame,
+        )
+        listOf(
+            layoutBatch(Float.NaN, 0f, 1f, 1f),
+            layoutBatch(0f, Float.NEGATIVE_INFINITY, 1f, 1f),
+            layoutBatch(0f, 0f, -1f, 1f),
+            layoutBatch(0f, 0f, 1f, -0.01f),
+            layoutBatch(0f, 0f, Float.POSITIVE_INFINITY, 1f),
+            layoutBatch(0f, 0f, 1f, Float.NaN),
+        ).forEach { batch ->
+            assertThrows(ProtocolException::class.java) { BatchDecoder.decode(batch) }
+        }
+    }
+
+    @Test
     fun decoderRejectsVersionMismatchAndTrailingBytes() {
         val golden = "504e4231010001000000060100000000000000".hexBytes()
         val wrongVersion = golden.copyOf().also { it[4] = 2 }
@@ -202,6 +236,20 @@ class PamProtocolTest {
         }
         assertThrows(IllegalArgumentException::class.java) { PackedSectionList.decode(aggregate) }
     }
+
+    private fun layoutBatch(x: Float, y: Float, width: Float, height: Float): ByteBuffer =
+        ByteBuffer.allocate(35).order(ByteOrder.LITTLE_ENDIAN).apply {
+            put("PNB1".toByteArray())
+            putShort(1.toShort())
+            putInt(1)
+            put(5.toByte())
+            putLong(2L)
+            putFloat(x)
+            putFloat(y)
+            putFloat(width)
+            putFloat(height)
+            flip()
+        }
 
     private fun textBatch(length: Int): ByteBuffer =
         textBatch(ByteArray(length) { 'a'.code.toByte() })

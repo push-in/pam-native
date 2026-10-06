@@ -1539,12 +1539,52 @@ impl Tree {
     }
 }
 
+/// A node frame in density-independent points, relative to the viewport.
+///
+/// `x`/`y` may be any finite value: CSS offsets and negative margins move a
+/// box outside its parent (`top: -200px`). `width`/`height` are finite and
+/// never negative. Producers and host decoders enforce the same rule.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Layout {
     pub x: f32,
     pub y: f32,
     pub width: f32,
     pub height: f32,
+}
+
+impl Layout {
+    /// True when the frame satisfies the wire rule (finite origin, finite
+    /// non-negative size).
+    pub fn is_valid(&self) -> bool {
+        self.x.is_finite()
+            && self.y.is_finite()
+            && self.width.is_finite()
+            && self.height.is_finite()
+            && self.width >= 0.0
+            && self.height >= 0.0
+    }
+
+    /// The closest valid frame: a non-finite origin becomes 0 and a negative
+    /// or non-finite size becomes 0. Valid frames are returned unchanged.
+    pub fn sanitized(self) -> Self {
+        if self.is_valid() {
+            return self;
+        }
+        let origin = |value: f32| if value.is_finite() { value } else { 0.0 };
+        let extent = |value: f32| {
+            if value.is_finite() {
+                value.max(0.0)
+            } else {
+                0.0
+            }
+        };
+        Self {
+            x: origin(self.x),
+            y: origin(self.y),
+            width: extent(self.width),
+            height: extent(self.height),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1624,6 +1664,9 @@ fn encode_batch_with_writer(
                 writer.u32(*index);
             }
             Mutation::Layout { id, frame } => {
+                if !frame.is_valid() {
+                    return Err(ProtocolError::InvalidLayout(*id));
+                }
                 writer.u8(5);
                 writer.u64(*id);
                 writer.f32(frame.x);
@@ -1676,15 +1719,19 @@ pub fn decode_batch(frame: &[u8]) -> Result<Vec<Mutation>, ProtocolError> {
                 parent: reader.u64()?,
                 index: reader.u32()?,
             },
-            5 => Mutation::Layout {
-                id: reader.u64()?,
-                frame: Layout {
+            5 => {
+                let id = reader.u64()?;
+                let frame = Layout {
                     x: reader.f32()?,
                     y: reader.f32()?,
                     width: reader.f32()?,
                     height: reader.f32()?,
-                },
-            },
+                };
+                if !frame.is_valid() {
+                    return Err(ProtocolError::InvalidLayout(id));
+                }
+                Mutation::Layout { id, frame }
+            }
             6 => Mutation::SetRoot { id: reader.u64()? },
             other => return Err(ProtocolError::UnknownMutation(other)),
         });
@@ -1829,6 +1876,8 @@ pub enum ProtocolError {
     InvalidUtf8,
     InvalidBoolean,
     InvalidFloat,
+    /// A layout frame with a non-finite origin or a negative/non-finite size.
+    InvalidLayout(u64),
     UnknownNodeKind(u8),
     UnknownProperty(u16),
     UnknownValueTag(u8),
@@ -1836,12 +1885,21 @@ pub enum ProtocolError {
     UnknownMutation(u8),
     DuplicateNode(u64),
     DuplicateProperty(u16),
-    DuplicatePatchProperty { node: u64, property: u16 },
-    DuplicateSiblingIndex { parent: u64, index: u32 },
+    DuplicatePatchProperty {
+        node: u64,
+        property: u16,
+    },
+    DuplicateSiblingIndex {
+        parent: u64,
+        index: u32,
+    },
     ZeroNodeId,
     MissingRoot(u64),
     RootHasParent,
-    MissingParent { node: u64, parent: u64 },
+    MissingParent {
+        node: u64,
+        parent: u64,
+    },
     Cycle(u64),
     Disconnected(u64),
     LimitExceeded(&'static str),
@@ -1863,6 +1921,10 @@ impl fmt::Display for ProtocolError {
             Self::InvalidUtf8 => formatter.write_str("string property is not valid UTF-8"),
             Self::InvalidBoolean => formatter.write_str("boolean property is neither 0 nor 1"),
             Self::InvalidFloat => formatter.write_str("floating property must be finite"),
+            Self::InvalidLayout(id) => write!(
+                formatter,
+                "layout of node {id} needs a finite origin and a finite non-negative size"
+            ),
             Self::UnknownNodeKind(kind) => write!(formatter, "unknown node kind {kind}"),
             Self::UnknownProperty(property) => write!(formatter, "unknown property {property}"),
             Self::UnknownValueTag(tag) => write!(formatter, "unknown property value tag {tag}"),
@@ -2280,6 +2342,75 @@ mod tests {
             .expect("floating bytes")
             .copy_from_slice(&f64::INFINITY.to_le_bytes());
         assert_eq!(Tree::decode(&encoded), Err(ProtocolError::InvalidFloat));
+    }
+
+    #[test]
+    fn layout_origin_may_be_negative_but_size_must_be_finite_non_negative() {
+        // `position: absolute; top: -200px; left: -34px` child of the root.
+        // Android and iOS pin the same golden bytes.
+        let negative = Mutation::Layout {
+            id: 2,
+            frame: Layout {
+                x: -34.0,
+                y: -200.0,
+                width: 390.0,
+                height: 200.0,
+            },
+        };
+        let encoded = encode_batch(std::slice::from_ref(&negative)).expect("negative origin");
+        assert_eq!(
+            hex(&encoded),
+            "504e4231010001000000050200000000000000000008c2000048c30000c34300004843",
+        );
+        assert_eq!(decode_batch(&encoded), Ok(vec![negative]));
+
+        let frame = |x: f32, y: f32, width: f32, height: f32| Mutation::Layout {
+            id: 7,
+            frame: Layout {
+                x,
+                y,
+                width,
+                height,
+            },
+        };
+        for invalid in [
+            frame(f32::NAN, 0.0, 1.0, 1.0),
+            frame(0.0, f32::NEG_INFINITY, 1.0, 1.0),
+            frame(0.0, 0.0, -1.0, 1.0),
+            frame(0.0, 0.0, 1.0, -0.01),
+            frame(0.0, 0.0, f32::INFINITY, 1.0),
+            frame(0.0, 0.0, 1.0, f32::NAN),
+        ] {
+            assert_eq!(
+                encode_batch(std::slice::from_ref(&invalid)),
+                Err(ProtocolError::InvalidLayout(7)),
+            );
+            let Mutation::Layout { frame, .. } = invalid else {
+                unreachable!()
+            };
+            let mut bytes = encode_batch(&[frame_with(7, Layout::default())]).expect("valid");
+            let start = bytes.len() - 16;
+            for (offset, value) in [frame.x, frame.y, frame.width, frame.height]
+                .into_iter()
+                .enumerate()
+            {
+                bytes[start + offset * 4..start + offset * 4 + 4]
+                    .copy_from_slice(&value.to_le_bytes());
+            }
+            assert_eq!(decode_batch(&bytes), Err(ProtocolError::InvalidLayout(7)));
+            assert!(frame.sanitized().is_valid());
+        }
+        let kept = Layout {
+            x: -1.0e6,
+            y: -0.5,
+            width: 0.0,
+            height: 0.0,
+        };
+        assert_eq!(kept.sanitized(), kept);
+    }
+
+    fn frame_with(id: u64, frame: Layout) -> Mutation {
+        Mutation::Layout { id, frame }
     }
 
     #[test]

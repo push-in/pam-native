@@ -877,10 +877,10 @@ object BatchDecoder {
                 5 -> Mutation.Layout(
                     id = reader.positiveId(),
                     frame = Frame(
-                        x = reader.f32(),
-                        y = reader.f32(),
-                        width = reader.f32(),
-                        height = reader.f32(),
+                        x = reader.coordinate(),
+                        y = reader.coordinate(),
+                        width = reader.extent(),
+                        height = reader.extent(),
                     ),
                 )
                 6 -> Mutation.SetRoot(reader.positiveId())
@@ -931,10 +931,24 @@ private class BinaryReader(bytes: ByteBuffer) {
             }
         }
 
-    fun f32(): Float =
-        buffer.getFloat(advance(Float.SIZE_BYTES)).also { value ->
+    private fun f32(): Float = buffer.getFloat(advance(Float.SIZE_BYTES))
+
+    /**
+     * A layout origin. CSS offsets and margins move a box outside its parent
+     * (`top: -200px`, `margin-top: -14px`), so any finite value is valid.
+     */
+    fun coordinate(): Float =
+        f32().also { value ->
+            if (!value.isFinite()) {
+                throw ProtocolException("Layout coordinate must be finite")
+            }
+        }
+
+    /** A layout width or height: finite and never negative. */
+    fun extent(): Float =
+        f32().also { value ->
             if (!value.isFinite() || value < 0f) {
-                throw ProtocolException("Layout value must be finite and non-negative")
+                throw ProtocolException("Layout size must be finite and non-negative")
             }
         }
 

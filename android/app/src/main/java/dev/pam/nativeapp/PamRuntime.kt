@@ -142,6 +142,17 @@ class PamRuntime(
         onDiagnostic = {}
     }
 
+    /**
+     * The mounted tree diverged from the engine's retained tree (a batch was
+     * rejected or only partly mounted). Drops queued patches and replays the
+     * retained tree onto a cleared renderer. A pending remount already does
+     * that; a detached surface remounts on its next [attach].
+     */
+    private fun resynchronize() {
+        if (closed.get() || !attachedSurface || awaitingRemount) return
+        requestRemount()
+    }
+
     private fun requestRemount() {
         awaitingRemount = true
         while (pendingBatches.isNotEmpty()) {
@@ -383,6 +394,10 @@ class PamRuntime(
             }.getOrElse { error ->
                 ownedBatchHandles.remove(batchHandle)
                 onNativeError(error.message ?: "Cannot decode native batch")
+                // The engine already retained this batch: later patches would
+                // target nodes this host never created ("Node N cannot
+                // contain children"). Replay the retained tree instead.
+                main.post(::resynchronize)
                 return false
             }
         } finally {
@@ -437,7 +452,9 @@ class PamRuntime(
                 releaseBatch(pendingBatches.removeFirst().handle)
             }
             if (mutations != null) {
-                pendingBatches.addLast(PendingBatch(mutations, batchHandle, decodeNanos))
+                pendingBatches.addLast(
+                    PendingBatch(mutations, batchHandle, decodeNanos, remount = true),
+                )
             }
             markReadyForEvents()
             scheduleFrame()
@@ -734,9 +751,13 @@ class PamRuntime(
         }
         val started = System.nanoTime()
         var committed = false
+        // A remount replays the whole retained tree: whatever is mounted
+        // (nothing on a fresh surface, a diverged tree after a failure) goes.
+        val remount = current.any(PendingBatch::remount)
         Trace.beginSection("PamNative.mount")
         try {
             runCatching {
+                if (remount) renderer.resetTree()
                 renderer.commit(current.map(PendingBatch::mutations))
             }.onSuccess {
                 committed = true
@@ -747,6 +768,9 @@ class PamRuntime(
             Trace.endSection()
         }
         current.forEach { batch -> releaseBatch(batch.handle) }
+        // A commit that threw part-way left a half-applied tree. Resynchronize
+        // once from the retained tree; a failing remount is not retried.
+        if (!committed && !remount) resynchronize()
         val runtimeStats = stats()
         val metrics = RuntimeFrameMetrics(
             batches = current.size,
@@ -854,6 +878,8 @@ private data class PendingBatch(
     val mutations: List<Mutation>,
     val handle: Long,
     val decodeNanos: Long,
+    /** The engine's full mount of its retained tree (see [PamRuntime.onNativeRemount]). */
+    val remount: Boolean = false,
 )
 
 /** Process-wide owner of the embedded PHP runtime (see [PamRuntime.attach]). */

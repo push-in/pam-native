@@ -1055,6 +1055,46 @@ class PamRenderer(
         return false
     }
 
+    /**
+     * Unmounts every node but keeps the renderer usable (loaders, caches and
+     * host stay alive). The runtime calls this before replaying the engine's
+     * retained tree after the host tree diverged from it, for example when a
+     * batch was rejected or only partly mounted. Deepest nodes go first so no
+     * parent is released before its children.
+     */
+    fun resetTree() {
+        check(Looper.myLooper() == Looper.getMainLooper()) {
+            "Native mutations must be mounted on the Android UI thread"
+        }
+        if (nodes.size() > 0) {
+            val count = nodes.size()
+            val depths = HashMap<Long, Int>(count)
+            for (position in 0 until count) {
+                var depth = 0
+                var parent = nodes.valueAt(position).parent
+                while (parent != 0L && depth <= count) {
+                    depth++
+                    parent = nodes[parent]?.parent ?: 0L
+                }
+                depths[nodes.keyAt(position)] = depth
+            }
+            depths.entries
+                .sortedByDescending { it.value }
+                .forEach { (id, _) -> remove(id) }
+        }
+        views.clear()
+        scrollContainers.clear()
+        virtualListIds.clear()
+        localModalIds.clear()
+        statusBarIds.clear()
+        pressableIds.clear()
+        inputIds.clear()
+        nodes.clear()
+        frames.clear()
+        children.clear()
+        rootId = 0L
+    }
+
     override fun close() {
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null

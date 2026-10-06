@@ -431,6 +431,20 @@ public final class PamRuntime {
         renderer?.close()
     }
 
+    /// The mounted tree diverged from the engine's retained tree (a batch was
+    /// rejected). Drops queued patches and replays the retained tree onto a
+    /// fresh renderer on the same host view. A pending remount already does
+    /// that; a detached host remounts on its next `attach(hostView:)`.
+    private func resynchronize() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard !closed, !awaitingRemount, currentHandle() != 0,
+              let previous = renderer, let hostView = previous.hostView else { return }
+        previous.onNativeChildVisibility = nil
+        previous.close()
+        renderer = makeRenderer(hostView: hostView)
+        requestRemount()
+    }
+
     private func requestRemount() {
         awaitingRemount = true
         dropPendingBatches()
@@ -972,6 +986,11 @@ public final class PamRuntime {
         } catch {
             onNativeError(error.localizedDescription)
             releaseBatch(batchHandle)
+            // The engine already retained this batch: later patches would
+            // target nodes this host never created. Replay the retained tree.
+            DispatchQueue.main.async { [weak self] in
+                self?.resynchronize()
+            }
             return false
         }
         let decodeNanos = Int64(DispatchTime.now().uptimeNanoseconds - start)
