@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.17.0 - 2026-10-06
+
+The mobile PHP runtime has no ext-mbstring (and no intl), so `mb_*` calls in
+apps and community packages (`pam-native-calls`'s `Calls::text()`) died with
+"Call to undefined function" on the device only; Zé Chat carried its own
+partial polyfill. PAM Native now covers it in the SDK and warns at build time
+about the extensions it cannot cover.
+
+- PHP SDK: `src/Polyfill/mbstring.php` is autoloaded by Composer before any
+  application code and defines 41 `mb_*` functions (every one in common use:
+  length/width, substr/strcut/str_split/strimwidth/str_pad/trim, the strpos
+  and strstr families, case conversion with all `MB_CASE_*` modes, ucfirst,
+  convert_encoding/variables, detect_encoding, check_encoding/scrub,
+  ord/chr, numeric entities, settings) and the `MB_CASE_*` constants, each
+  only when missing: a real ext-mbstring or an app's own polyfill loaded
+  first wins. `Pam\Native\Polyfill\Mbstring` follows PHP 8.5's
+  ext-mbstring, including malformed input, substitution modes, full Unicode
+  case mapping (final sigma, Turkish ISO-8859-9), East Asian widths and the
+  same `ValueError`s, for UTF-8/16/32, UCS-2/4, ASCII, 8bit and every
+  single-byte code page. Not covered: SJIS/EUC/BIG-5/GB18030/ISO-2022/UTF-7,
+  `mb_ereg*`, `mb_convert_kana`, MIME headers, `mb_send_mail`.
+- Why not compile ext-mbstring: +1.14 MB (arm64-v8a) / +1.16 MB (x86_64) of
+  code and data per ABI (+2.1 MB of `.so` on x86_64 after page alignment,
+  +0.63 MB compressed), measured with the runtime's NDK flags and no
+  Oniguruma; it would also need a new PAM runtime release and an iOS
+  XCFramework rebuilt on a Mac. intl (ICU, ~35 MB per ABI) stays out.
+- CLI: staging an Android/iOS build runs
+  `Pam\Native\Tooling\MobileRuntimeAudit` and prints a warning with file
+  and line for each function or class (new, ::, extends, implements) of an
+  extension the selected runtime does not compile (intl, iconv, zlib, gd,
+  curl, dom...) that no bundled file or polyfill declares. Guarded uses,
+  package tests/binaries and the SDK itself are skipped; findings never fail
+  the build.
+- Docs: `docs/platform-runtime.md#php-extensions` lists what Android and iOS
+  have (identical sets), the polyfill coverage and the audit.
+- iOS: same runtime extension set, so the PHP polyfill applies unchanged; no
+  Swift change. Listed in `docs/ios-parity.md` for Mac validation.
+- Tests: `tests/mbstring_polyfill.php` (recorded ext-mbstring results; with
+  ext-mbstring on the host, every function compared over seeded valid and
+  malformed strings in every encoding and substitution mode),
+  `tests/runtime_audit.php`, and
+  `scripts/android-php-runtime-test.sh`, which runs
+  `tests/device/mbstring_runtime.php` inside the real Android runtime: passing
+  on an Android 8.0 (API 26) x86_64 emulator and a Galaxy S10 (API 31,
+  arm64-v8a). All 1.1M code points were also compared with ext-mbstring
+  through every case mode, `mb_strlen()` and `mb_strwidth()`.
+
 ## 1.16.1 - 2026-10-06
 
 - Plugins no longer declare a `plugins.share.v1` capability for `share`. 1.16.0
