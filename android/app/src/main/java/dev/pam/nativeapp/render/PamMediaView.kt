@@ -87,6 +87,8 @@ internal class PamMediaView(
     private var videoSurface: Surface? = null
     private var mediaController: MediaController? = null
     private var resumeAfterPause = false
+    private var creatingPlayer = false
+    private var playerGeneration = 0L
     var onReady: (() -> Unit)? = null
 
     /** Ready with natural video size (px) and duration (s). */
@@ -103,17 +105,38 @@ internal class PamMediaView(
     private var cacheRequest = MediaCacheRequest("", MEDIA_CACHE_NONE, null, 0, 0, null, false, false, false)
     private var sourceGeneration = 0L
 
+    /** Natural video size, cached from the prepared/size callbacks (no player query per layout). */
+    private var videoWidthPx = 0
+    private var videoHeightPx = 0
+
+    /**
+     * Progress polling: the player is queried on [mediaExecutor] (each query
+     * is a binder call), the result is delivered on the main thread.
+     */
     private val progress = object : Runnable {
         override fun run() {
             val player = preparedPlayer
-            if (prepared && player?.isPlaying == true) {
-                onProgress?.invoke(
-                    player.currentPosition / 1_000.0,
-                    player.duration.coerceAtLeast(0) / 1_000.0,
-                )
+            if (prepared && player != null && onProgress != null) {
+                val generation = playerGeneration
+                mediaExecutor.execute {
+                    val sample = runCatching {
+                        if (player.isPlaying) player.currentPosition to player.duration else null
+                    }.getOrNull() ?: return@execute
+                    main.post {
+                        if (generation == playerGeneration && prepared) {
+                            onProgress?.invoke(sample.first / 1_000.0, sample.second.coerceAtLeast(0) / 1_000.0)
+                        }
+                    }
+                }
             }
             main.postDelayed(this, 250)
         }
+    }
+
+    /** Runs a player command off the UI thread, in order with creation and release. */
+    private fun command(block: (MediaPlayer) -> Unit) {
+        val player = preparedPlayer ?: return
+        mediaExecutor.execute { runCatching { block(player) } }
     }
 
     init {
@@ -227,13 +250,19 @@ internal class PamMediaView(
 
     fun setLoop(value: Boolean) {
         looping = value
-        preparedPlayer?.isLooping = value
+        command { it.isLooping = value }
     }
 
-    fun setMuted(value: Boolean) { muted = value; preparedPlayer?.let(::applyAudio) }
+    fun setMuted(value: Boolean) {
+        muted = value
+        val actual = audioLevel()
+        command { it.setVolume(actual, actual) }
+    }
+
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
-        preparedPlayer?.let(::applyAudio)
+        val actual = audioLevel()
+        command { it.setVolume(actual, actual) }
     }
     fun seek(seconds: Double) {
         currentTime = seconds.coerceAtLeast(0.0)
@@ -241,18 +270,9 @@ internal class PamMediaView(
     }
     fun setPlaybackRate(value: Float) {
         rate = value.coerceIn(0.25f, 4f)
-        preparedPlayer?.takeIf { prepared }?.let(::applyRate)
-    }
-
-    /**
-     * `setPlaybackParams` with a non-zero speed starts a prepared or paused
-     * MediaPlayer: a paused (warm, autoPlay=false) player must stay paused.
-     */
-    private fun applyRate(player: MediaPlayer) {
-        if (rate == 1f && player.playbackParams.speed == 1f) return
-        val wasPlaying = player.isPlaying
-        player.playbackParams = player.playbackParams.setSpeed(rate)
-        if (!wasPlaying && player.isPlaying) player.pause()
+        if (!prepared) return
+        val speed = rate
+        command { applyRate(it, speed) }
     }
 
     fun setResizeMode(value: Int) {
@@ -267,7 +287,7 @@ internal class PamMediaView(
     }
 
     fun onHostPause() {
-        resumeAfterPause = isPlaying
+        resumeAfterPause = prepared && autoPlay
         pause()
     }
 
@@ -278,76 +298,137 @@ internal class PamMediaView(
         }
     }
 
+    /**
+     * MediaPlayer construction, data source, surface, prepare and release
+     * are binder round-trips to mediaserver: on the S10 a feed settle that
+     * swapped the playing video blocked the UI thread ~95 ms inside one
+     * mount. They run on [mediaExecutor] (a thread without a Looper, so the
+     * player's callbacks still arrive on the main thread); [playerGeneration]
+     * drops a player whose source changed while it was being created.
+     */
     private fun prepareMedia(uri: Uri) {
         releasePlayer()
-        val player = MediaPlayer()
-        preparedPlayer = player
-        player.setSurface(videoSurface)
+        val generation = playerGeneration
+        val surface = videoSurface
+        val appContext = context.applicationContext
+        creatingPlayer = true
+        onLoadStart?.invoke()
+        mediaExecutor.execute {
+            val player = MediaPlayer()
+            installListeners(player, generation)
+            val failure = runCatching {
+                player.setSurface(surface)
+                if (mediaDataSourceUsesNetworkString(uri.scheme)) {
+                    player.setDataSource(uri.toString())
+                } else {
+                    player.setDataSource(appContext, uri)
+                }
+                player.prepareAsync()
+            }.exceptionOrNull()
+            main.post {
+                if (generation != playerGeneration) {
+                    discard(player)
+                    return@post
+                }
+                creatingPlayer = false
+                if (failure != null) {
+                    discard(player)
+                    onError?.invoke(failure.message ?: "Media source could not be prepared.")
+                    poster.visibility = VISIBLE
+                    return@post
+                }
+                preparedPlayer = player
+                if (videoSurface !== surface) runCatching { player.setSurface(videoSurface) }
+            }
+        }
+    }
+
+    private fun installListeners(player: MediaPlayer, generation: Long) {
         player.setOnPreparedListener {
+            if (generation != playerGeneration) return@setOnPreparedListener
+            // Prepared before the creation hand-off ran: adopt it now.
+            if (preparedPlayer == null) preparedPlayer = it
             if (preparedPlayer !== it) return@setOnPreparedListener
             prepared = true
-            it.isLooping = looping
-            applyAudio(it)
-            applyRate(it)
-            if (currentTime > 0) it.seekTo((currentTime * 1_000).toInt())
+            videoWidthPx = it.videoWidth
+            videoHeightPx = it.videoHeight
+            val loop = looping
+            val level = audioLevel()
+            val speed = rate
+            val startAt = currentTime
+            val play = autoPlay
+            mediaExecutor.execute {
+                runCatching {
+                    it.isLooping = loop
+                    it.setVolume(level, level)
+                    applyRate(it, speed)
+                    if (startAt > 0) it.seekTo((startAt * 1_000).toInt())
+                    if (play) it.start()
+                }
+            }
             mediaController?.isEnabled = true
             applyVideoTransform()
-            if (autoPlay) it.start()
             onReady?.invoke()
             onReadyDetails?.invoke(it.videoWidth, it.videoHeight, it.duration.coerceAtLeast(0) / 1_000.0)
         }
+        player.setOnVideoSizeChangedListener { _, width, height ->
+            if (generation == playerGeneration && width > 0 && height > 0) {
+                videoWidthPx = width
+                videoHeightPx = height
+                applyVideoTransform()
+            }
+        }
         player.setOnInfoListener { _, what, _ ->
-            when (what) {
-                MediaPlayer.MEDIA_INFO_BUFFERING_START -> onBuffering?.invoke(true)
-                MediaPlayer.MEDIA_INFO_BUFFERING_END -> onBuffering?.invoke(false)
+            if (generation == playerGeneration) {
+                when (what) {
+                    MediaPlayer.MEDIA_INFO_BUFFERING_START -> onBuffering?.invoke(true)
+                    MediaPlayer.MEDIA_INFO_BUFFERING_END -> onBuffering?.invoke(false)
+                }
             }
             false
         }
         player.setOnCompletionListener {
+            if (generation != playerGeneration) return@setOnCompletionListener
             onEnd?.invoke()
-            if (looping) it.start()
+            if (looping) command { player -> player.start() }
         }
         player.setOnBufferingUpdateListener { _, percentage ->
-            bufferedPercentage = percentage.coerceIn(0, 100)
+            if (generation == playerGeneration) bufferedPercentage = percentage.coerceIn(0, 100)
         }
         player.setOnErrorListener { _, what, extra ->
-            prepared = false
-            showPoster()
-            mediaController?.isEnabled = false
-            onError?.invoke("Media playback failed ($what/$extra)")
-            true
-        }
-        onLoadStart?.invoke()
-        runCatching {
-            if (mediaDataSourceUsesNetworkString(uri.scheme)) {
-                player.setDataSource(uri.toString())
-            } else {
-                player.setDataSource(context, uri)
+            if (generation == playerGeneration) {
+                prepared = false
+                showPoster()
+                mediaController?.isEnabled = false
+                onError?.invoke("Media playback failed ($what/$extra)")
             }
-            player.prepareAsync()
-        }.onFailure {
-            releasePlayer()
-            onError?.invoke(it.message ?: "Media source could not be prepared.")
+            true
         }
     }
 
     private fun releasePlayer() {
         showPoster()
         prepared = false
+        videoWidthPx = 0
+        videoHeightPx = 0
+        creatingPlayer = false
+        playerGeneration++
         bufferedPercentage = 0
         mediaController?.isEnabled = false
-        preparedPlayer?.let { player ->
-            runCatching { player.setSurface(null) }
-            runCatching { player.reset() }
-            player.release()
-        }
+        preparedPlayer?.let(::discard)
         preparedPlayer = null
     }
 
-    private fun applyAudio(player: MediaPlayer) {
-        val actual = if (muted) 0f else volume
-        player.setVolume(actual, actual)
+    /** Stops and frees a player off the UI thread (release() waits for mediaserver). */
+    private fun discard(player: MediaPlayer) {
+        mediaExecutor.execute {
+            runCatching { player.setSurface(null) }
+            runCatching { player.reset() }
+            runCatching { player.release() }
+        }
     }
+
+    private fun audioLevel(): Float = if (muted) 0f else volume
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
@@ -359,8 +440,8 @@ internal class PamMediaView(
             resizeMode,
             width,
             height,
-            preparedPlayer?.videoWidth ?: 0,
-            preparedPlayer?.videoHeight ?: 0,
+            videoWidthPx,
+            videoHeightPx,
         )
         video.pivotX = video.width / 2f
         video.pivotY = video.height / 2f
@@ -370,8 +451,9 @@ internal class PamMediaView(
 
     override fun onSurfaceTextureAvailable(texture: SurfaceTexture, width: Int, height: Int) {
         videoSurface?.release()
-        videoSurface = Surface(texture)
-        preparedPlayer?.setSurface(videoSurface)
+        val surface = Surface(texture)
+        videoSurface = surface
+        command { it.setSurface(surface) }
     }
 
     override fun onSurfaceTextureSizeChanged(
@@ -382,11 +464,26 @@ internal class PamMediaView(
         applyVideoTransform()
     }
 
+    /**
+     * `setSurface(null)` waits for mediaserver to stop rendering into it (41
+     * ms of a settle frame on the S10): it runs off the UI thread, and the
+     * surface and its texture are released once the player let go of them.
+     */
     override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
-        preparedPlayer?.setSurface(null)
-        videoSurface?.release()
+        val surface = videoSurface
         videoSurface = null
-        return true
+        val player = preparedPlayer ?: run {
+            surface?.release()
+            return true
+        }
+        mediaExecutor.execute {
+            runCatching { player.setSurface(null) }
+            main.post {
+                surface?.release()
+                texture.release()
+            }
+        }
+        return false
     }
 
     override fun onSurfaceTextureUpdated(texture: SurfaceTexture) {
@@ -413,11 +510,11 @@ internal class PamMediaView(
     }
 
     override fun start() {
-        if (prepared) preparedPlayer?.start()
+        if (prepared) command { it.start() }
     }
 
     override fun pause() {
-        if (prepared) preparedPlayer?.pause()
+        if (prepared) command { it.pause() }
     }
 
     override fun getDuration(): Int =
@@ -428,7 +525,10 @@ internal class PamMediaView(
 
     override fun seekTo(position: Int) {
         currentTime = position.coerceAtLeast(0) / 1_000.0
-        if (prepared) preparedPlayer?.seekTo(position.coerceAtLeast(0))
+        if (prepared) {
+            val target = position.coerceAtLeast(0)
+            command { it.seekTo(target) }
+        }
     }
 
     override fun isPlaying(): Boolean = prepared && preparedPlayer?.isPlaying == true
@@ -447,7 +547,7 @@ internal class PamMediaView(
         super.onAttachedToWindow()
         main.removeCallbacks(progress)
         main.post(progress)
-        if (source.isNotEmpty() && preparedPlayer == null) {
+        if (source.isNotEmpty() && preparedPlayer == null && !creatingPlayer) {
             val current = source
             source = ""
             setSource(current)
@@ -462,6 +562,22 @@ internal class PamMediaView(
         videoSurface = null
         super.onDetachedFromWindow()
     }
+}
+
+/**
+ * `setPlaybackParams` with a non-zero speed starts a prepared or paused
+ * MediaPlayer: a paused (warm, autoPlay=false) player must stay paused.
+ */
+private fun applyRate(player: MediaPlayer, rate: Float) {
+    if (rate == 1f && player.playbackParams.speed == 1f) return
+    val wasPlaying = player.isPlaying
+    player.playbackParams = player.playbackParams.setSpeed(rate)
+    if (!wasPlaying && player.isPlaying) player.pause()
+}
+
+/** Player setup/teardown thread (no Looper: callbacks stay on the main thread). */
+private val mediaExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
+    Thread(runnable, "PamMediaPlayer").apply { isDaemon = true }
 }
 
 internal fun mediaDataSourceUsesNetworkString(scheme: String?): Boolean =
