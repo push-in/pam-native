@@ -3241,7 +3241,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
             .map_err(|error| format!("cannot replace {}: {error}", host_plugins.display()))?;
     }
     copy_tree(&generated_plugins, &host_plugins, &[".build", ".swiftpm"])?;
-    stage_project_at(project, &runtime_destination.join("PamBundle"))?;
+    stage_project_at(project, &runtime_destination.join("PamBundle"), true)?;
 
     let has_app_entitlements = merge_ios_app_metadata(project, &workspace)?;
     integrate_ios_extensions(project, &workspace)?;
@@ -4326,7 +4326,7 @@ fn refresh_ios_dev_bundle(
     version: &mut String,
     bundle: &mut Vec<u8>,
 ) -> Result<(), String> {
-    stage_project_at(project, workspace)?;
+    stage_project_at(project, workspace, false)?;
     let next = encode_dev_bundle(workspace)?;
     if next.len() > MAX_DEV_BUNDLE_BYTES {
         return Err("iOS hot reload bundle exceeds 16 MiB; reduce development assets".to_owned());
@@ -5163,7 +5163,7 @@ fn prepare(project: &Project, native_home: &Path, abis: &[AndroidAbi]) -> Result
     configure_android(project, native_home, &runtime, &workspace, abis)?;
     generate_modules(project, &workspace)?;
     generate_views(project, &workspace)?;
-    stage_project(project, &workspace)?;
+    stage_project(project, &workspace, true)?;
     Ok(workspace)
 }
 
@@ -6271,11 +6271,53 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
     write_atomic(&target, source.as_bytes())
 }
 
-fn stage_project(project: &Project, workspace: &Path) -> Result<(), String> {
-    stage_project_at(project, &workspace.join("app/src/main/assets/pam"))
+fn stage_project(project: &Project, workspace: &Path, precompile: bool) -> Result<(), String> {
+    stage_project_at(project, &workspace.join("app/src/main/assets/pam"), precompile)
 }
 
-fn stage_project_at(project: &Project, destination: &Path) -> Result<(), String> {
+/// Compiles the bundle's `.pam` components on the build host into the
+/// relocatable cache the runtime loads at boot (`pam-prebuilt/components`),
+/// so the first launch after an install or update compiles nothing.
+fn prebuild_components(destination: &Path) -> Result<(), String> {
+    if !destination.join("src").is_dir()
+        || !destination.join("composer.json").is_file()
+        || !destination.join("vendor/autoload.php").is_file()
+    {
+        return Ok(());
+    }
+    let php = std::env::var("PAM_NATIVE_PHP")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var("PAM_PHP").ok().filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| {
+            if command_exists("pam") {
+                "pam".to_owned()
+            } else {
+                "php".to_owned()
+            }
+        });
+    let script = "require 'vendor/autoload.php';\n\
+        $compiler = 'Pam\\\\Native\\\\Internal\\\\PamPhpCompiler';\n\
+        if (!class_exists($compiler) || !method_exists($compiler, 'prebuild')) { exit(0); }\n\
+        $count = $compiler::prebuild(getcwd(), getcwd().'/src');\n\
+        fwrite(STDOUT, \"Precompiled {$count} PAM components\\n\");\n";
+    // The device runs in the default (non-strict) mode; compile under the
+    // same configuration or the runtime would ignore the prebuilt cache.
+    let status = Command::new(&php)
+        .arg("-r")
+        .arg(script)
+        .current_dir(destination)
+        .env_remove("PAM_NATIVE_MODE")
+        .env_remove("PAM_NATIVE_STRICT")
+        .status()
+        .map_err(|error| format!("cannot start {php} to precompile PAM components: {error}"))?;
+    if !status.success() {
+        return Err(format!("precompiling PAM components failed ({status})"));
+    }
+    Ok(())
+}
+
+fn stage_project_at(project: &Project, destination: &Path, precompile: bool) -> Result<(), String> {
     if destination.exists() {
         fs::remove_dir_all(destination)
             .map_err(|error| format!("cannot clean {}: {error}", destination.display()))?;
@@ -6301,6 +6343,9 @@ fn stage_project_at(project: &Project, destination: &Path) -> Result<(), String>
             format!("<?php\n\ndeclare(strict_types=1);\n\nrequire __DIR__.'/{entry}';\n")
                 .as_bytes(),
         )?;
+    }
+    if precompile {
+        prebuild_components(destination)?;
     }
     let version = directory_digest(destination)?;
     write_atomic(
@@ -8091,7 +8136,7 @@ fn refresh_dev_bundle(
     )?;
     generate_modules(project, workspace)?;
     generate_views(project, workspace)?;
-    stage_project(project, workspace)?;
+    stage_project(project, workspace, false)?;
     let next = encode_dev_bundle(&workspace.join("app/src/main/assets/pam"))?;
     if next.len() > MAX_DEV_BUNDLE_BYTES {
         return Err("hot reload bundle exceeds 16 MiB; reduce development assets".to_owned());
@@ -8162,7 +8207,7 @@ fn build_update_bundle((project_path, output): (PathBuf, PathBuf)) -> Result<u8,
             .as_nanos()
     ));
     let result = (|| {
-        stage_project_at(&project, &staging)?;
+        stage_project_at(&project, &staging, true)?;
         let bundle = encode_bundle(&staging, MAX_UPDATE_BUNDLE_BYTES, "update")?;
         let destination = if output.is_absolute() {
             output
