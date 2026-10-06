@@ -154,3 +154,38 @@ logos, a `PamSplashLogo` image set (light/dark) whose scale is chosen so its
 point size is closest to `size`; `UILaunchScreen` shows both. The host keeps
 the same logo centered on screen until the first PHP frame is committed.
 WebP logos are Android-only (the iOS launch screen then shows the background).
+
+### Keeping the launcher icon on Android 12+ (1.21.0)
+
+A React Native or Expo app usually sets no `windowSplashScreenAnimatedIcon`:
+Android 12+ then draws the launcher icon on its splash screen, and only the
+API 26–30 starting window paints the theme's `windowBackground` logo. Port such
+an app with `android.icon` (its adaptive icon layers, see
+[App icon](app-icon.md)) and `"android12Icon": "appIcon"`:
+
+```json
+{
+    "android": {
+        "icon": { "foreground": "assets/icon/foreground.webp", "background": "#000000" }
+    },
+    "appearance": {
+        "light": { "splashBackground": "#FFFFFF" },
+        "dark": { "splashBackground": "#FFFFFF" },
+        "splash": {
+            "logo": "assets/icon/splash-logo.webp",
+            "size": 288,
+            "android12Icon": "appIcon"
+        }
+    }
+}
+```
+
+The Android 12+ splash keeps the launcher icon, drawn by the same system code
+as the original app, and the logo only paints the legacy starting window, so
+`size` may go up to 288 dp (an `xxhdpi` 864 px `<bitmap>` is 288 dp). The
+default, `"logo"`, keeps the 1.9 behaviour.
+
+Android 12 shows the icon only for launches from the launcher. Launches
+from `adb shell am start`, notifications or other
+apps get a solid `splashBackground` without icon, for every app; measure the
+icon splash by tapping the launcher icon.

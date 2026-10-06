@@ -142,6 +142,39 @@
                     "maximum": 96,
                     "default": 0,
                     "description": "Bottom safe-area inset in dp used when Android reports none (e.g. some gesture-navigation configurations), like React Native apps' getBottomSafeInset() fallback of 48. 0 disables it."
+                },
+                "icon": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "foreground"
+                    ],
+                    "description": "Adaptive launcher icon (API 26+). The Android 12+ system splash screen draws it too unless appearance.splash sets its own icon.",
+                    "properties": {
+                        "foreground": {
+                            "type": "string",
+                            "pattern": "^[^/][^\\\\]*\\.(?:png|webp|PNG|WEBP)$",
+                            "description": "Project-relative PNG/WebP foreground on the 108 dp adaptive canvas (432 px or larger)."
+                        },
+                        "background": {
+                            "type": "string",
+                            "anyOf": [
+                                {
+                                    "pattern": "^#(?:[0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$"
+                                },
+                                {
+                                    "pattern": "^[^/][^\\\\]*\\.(?:png|webp|PNG|WEBP)$"
+                                }
+                            ],
+                            "default": "#FFFFFF",
+                            "description": "Background layer: #RGB/#RRGGBB colour or a project-relative PNG/WebP."
+                        },
+                        "monochrome": {
+                            "type": "string",
+                            "pattern": "^[^/][^\\\\]*\\.(?:png|webp|PNG|WEBP)$",
+                            "description": "Optional single-colour layer for Android 13+ themed icons."
+                        }
+                    }
                 }
             }
         },
@@ -153,14 +186,27 @@
                     "type": "string",
                     "pattern": "^(?:1[5-9]|[2-9][0-9])\\.[0-9]+$",
                     "default": "15.0"
+                },
+                "icon": {
+                    "type": "string",
+                    "pattern": "^[^/][^\\\\]*\\.(?:png|PNG)$",
+                    "description": "Project-relative 1024x1024 PNG used as the home-screen and App Store icon (AppIcon)."
                 }
             }
         },
         "devErrorOverlay": {
             "description": "Runtime error overlay (LogBox-style). true: debug builds only (default). false: never, debug builds show the release fallback. \"always\": also in release builds, for internal QA builds. Release builds otherwise never show stacks: fatal errors show a friendly retry screen and every error reaches App::onError().",
             "oneOf": [
-                { "type": "boolean" },
-                { "enum": ["debug", "off", "always"] }
+                {
+                    "type": "boolean"
+                },
+                {
+                    "enum": [
+                        "debug",
+                        "off",
+                        "always"
+                    ]
+                }
             ],
             "default": true
         },
@@ -260,9 +306,17 @@
                         "size": {
                             "type": "integer",
                             "minimum": 24,
-                            "maximum": 240,
+                            "maximum": 288,
                             "default": 96,
-                            "description": "Logo box edge in dp. Android 12+ masks splash icons to a 160 dp circle inside 240 dp."
+                            "description": "Logo box edge in dp (24-240). Android 12+ masks splash icons to a 160 dp circle inside 240 dp. Up to 288 with android12Icon \"appIcon\", where only the API 26-30 starting window draws the logo."
+                        },
+                        "android12Icon": {
+                            "enum": [
+                                "logo",
+                                "appIcon"
+                            ],
+                            "default": "logo",
+                            "description": "Android 12+ splash icon: the logo, or the launcher icon (android.icon) like a theme without windowSplashScreenAnimatedIcon (React Native/Expo). With appIcon the logo only paints the API 26-30 starting window."
                         }
                     }
                 }

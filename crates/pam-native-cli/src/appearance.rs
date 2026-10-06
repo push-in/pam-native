@@ -50,6 +50,18 @@ pub enum LegacyStartingWindow {
     None,
 }
 
+/// Icon of the Android 12+ system splash screen when `appearance.splash.logo`
+/// is set: the logo itself, or the launcher icon (`android.icon`) like an app
+/// whose theme sets no `windowSplashScreenAnimatedIcon` (React Native,
+/// Expo). The logo then only paints the API 26–30 starting window.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SplashAndroid12Icon {
+    #[default]
+    Logo,
+    AppIcon,
+}
+
 /// `appearance.splash`: a centered logo on the Android 12+ splash screen and
 /// on the legacy (API 26–30) starting window, per light/dark scheme.
 #[derive(Clone, Debug, Deserialize)]
@@ -61,9 +73,13 @@ pub struct SplashOptions {
     pub logo: Option<String>,
     #[serde(default)]
     pub dark_logo: Option<String>,
-    /// Logo box edge in dp (24–240; Android 12 masks icons to a 160 dp circle).
+    /// Logo box edge in dp (24–240; Android 12 masks icons to a 160 dp
+    /// circle). Up to 288 when `android12Icon` is `appIcon`, since only the
+    /// legacy starting window draws the logo then.
     #[serde(default = "default_splash_size")]
     pub size: u32,
+    #[serde(default, rename = "android12Icon")]
+    pub android12_icon: SplashAndroid12Icon,
 }
 
 const fn default_splash_size() -> u32 {
@@ -76,14 +92,21 @@ impl Default for SplashOptions {
             logo: None,
             dark_logo: None,
             size: default_splash_size(),
+            android12_icon: SplashAndroid12Icon::Logo,
         }
     }
 }
 
 impl SplashOptions {
     fn validate(&self) -> Result<(), String> {
-        if !(24..=240).contains(&self.size) {
-            return Err("appearance.splash.size must be between 24 and 240 dp".into());
+        let maximum = match self.android12_icon {
+            SplashAndroid12Icon::Logo => 240,
+            SplashAndroid12Icon::AppIcon => 288,
+        };
+        if !(24..=maximum).contains(&self.size) {
+            return Err(format!(
+                "appearance.splash.size must be between 24 and {maximum} dp"
+            ));
         }
         if self.dark_logo.is_some() && self.logo.is_none() {
             return Err("appearance.splash.darkLogo requires appearance.splash.logo".into());
@@ -262,9 +285,15 @@ fn splash_resources(splash: &SplashOptions) -> Vec<(&'static str, String)> {
         ),
         (
             "values-v31/pam_splash.xml",
-            format!(
-                "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@color/pam_window_background</item>\n        <item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/pam_splash_icon</item>\n    </style>\n</resources>\n"
-            ),
+            match splash.android12_icon {
+                SplashAndroid12Icon::Logo => format!(
+                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@color/pam_window_background</item>\n        <item name=\"android:windowSplashScreenAnimatedIcon\">@drawable/pam_splash_icon</item>\n    </style>\n</resources>\n"
+                ),
+                // The system splash keeps drawing the launcher icon.
+                SplashAndroid12Icon::AppIcon => format!(
+                    "{header}<resources>\n    <style name=\"Theme.PamNative.Splash\" parent=\"Theme.PamNative.Base\">\n        <item name=\"android:windowBackground\">@color/pam_window_background</item>\n    </style>\n</resources>\n"
+                ),
+            },
         ),
         (
             "drawable/pam_window_background.xml",
@@ -433,10 +462,35 @@ mod tests {
             r#"{"splash":{"logo":"x.png","size":8}}"#,
             r#"{"splash":{"darkLogo":"x.png"}}"#,
             r#"{"splash":{"logo":"x.png","darkLogo":"y.webp"}}"#,
+            r#"{"splash":{"logo":"x.png","size":288}}"#,
+            r#"{"splash":{"logo":"x.png","size":289,"android12Icon":"appIcon"}}"#,
+            r#"{"splash":{"logo":"x.png","android12Icon":"launcher"}}"#,
         ] {
-            let options: AppearanceOptions = serde_json::from_str(invalid).expect("parse");
-            assert!(options.validate().is_err(), "{invalid} must be rejected");
+            if let Ok(options) = serde_json::from_str::<AppearanceOptions>(invalid) {
+                assert!(options.validate().is_err(), "{invalid} must be rejected");
+            }
         }
+    }
+
+    #[test]
+    fn splash_app_icon_keeps_the_launcher_icon_on_android_12() {
+        let options: AppearanceOptions = serde_json::from_str(
+            r#"{"splash":{"logo":"assets/splash.webp","size":288,"android12Icon":"appIcon"}}"#,
+        )
+        .expect("appearance");
+        options.validate().expect("valid splash");
+        let files = splash_resources(&options.splash);
+        let get = |name: &str| {
+            files
+                .iter()
+                .find(|(path, _)| *path == name)
+                .unwrap()
+                .1
+                .clone()
+        };
+        assert!(!get("values-v31/pam_splash.xml").contains("windowSplashScreenAnimatedIcon"));
+        assert!(get("values/pam_splash.xml").contains("@drawable/pam_window_background"));
+        assert!(get("drawable/pam_window_background.xml").contains("android:width=\"288dp\""));
     }
 
     #[test]
