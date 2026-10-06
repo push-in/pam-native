@@ -105,29 +105,40 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         return true
     }
 
-    /// `appearance.splash`: keeps the launch-screen logo (same asset, same
-    /// point size, centered in the safe area) until the first PHP frame.
+    /// `appearance.splash`: keeps the launch screen (its background and, when
+    /// configured, the same logo asset at the same point size, centered in the
+    /// safe area) until the first PHP frame is committed, so the app goes from
+    /// the launch screen straight to its first frame. A stalled boot still
+    /// reaches the window after `splashHoldTimeout` (Android parity:
+    /// PamActivity.SPLASH_HOLD_TIMEOUT_MS).
     private func installSplash(on controller: UIViewController) {
-        guard let logo = UIImage(named: "PamSplashLogo") else { return }
         let cover = UIView(frame: controller.view.bounds)
         cover.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         cover.backgroundColor = UIColor(named: "PamSplashBackground") ?? PamAppearance.backgroundColor
         cover.isUserInteractionEnabled = false
-        let image = UIImageView(image: logo)
-        image.contentMode = .scaleAspectFit
-        image.translatesAutoresizingMaskIntoConstraints = false
-        cover.addSubview(image)
-        NSLayoutConstraint.activate([
-            image.centerXAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.centerXAnchor),
-            image.centerYAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.centerYAnchor),
-            image.widthAnchor.constraint(equalToConstant: logo.size.width),
-            image.heightAnchor.constraint(equalToConstant: logo.size.height),
-        ])
+        if let logo = UIImage(named: "PamSplashLogo") {
+            let image = UIImageView(image: logo)
+            image.contentMode = .scaleAspectFit
+            image.translatesAutoresizingMaskIntoConstraints = false
+            cover.addSubview(image)
+            NSLayoutConstraint.activate([
+                image.centerXAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.centerXAnchor),
+                image.centerYAnchor.constraint(equalTo: cover.safeAreaLayoutGuide.centerYAnchor),
+                image.widthAnchor.constraint(equalToConstant: logo.size.width),
+                image.heightAnchor.constraint(equalToConstant: logo.size.height),
+            ])
+        }
         controller.view.addSubview(cover)
         splashView = cover
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.splashHoldTimeout) { [weak self] in
+            self?.hideSplash()
+        }
     }
 
+    private static let splashHoldTimeout: TimeInterval = 4
+
     private func hideSplash() {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let splash = splashView else { return }
         splashView = nil
         UIView.animate(withDuration: 0.18, animations: { splash.alpha = 0 }, completion: { _ in
@@ -220,6 +231,7 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
 #endif
 
     private func presentFatalError(_ message: String) {
+        hideSplash()
         guard let controller = window?.rootViewController,
               controller.presentedViewController == nil else { return }
         let alert = UIAlertController(title: "PAM Native", message: message, preferredStyle: .alert)

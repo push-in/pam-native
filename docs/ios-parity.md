@@ -48,6 +48,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.7.0 | Error overlay | ✅ | Toast + inspector, Dismiss/Copy/Reload, queue/counter, release fallback with retry, `devErrorOverlay` (`PamDevErrorOverlay` in Info.plist). |
 | 1.14.1 | Interactive pinned sticky headers | ✅ (uncompiled) | ScrollView and VirtualizedList/VirtualGrid hosts hit-test the sticky children before the rows (`zPosition` only reorders drawing): presses reach the pinned header and never the row under it. `testPinnedVirtualListHeaderReceivesTouchesInsteadOfTheRowUnderIt`. |
 | 1.14.2 | Moved views stay attached | ✅ (uncompiled) | `move()` keeps a view in its superview when its sibling position is unchanged, so a sheet moved by a closing overlay before it keeps its focused `autoFocus` field and keyboard. `testMoveThatKeepsThePositionLeavesTheFocusedInputInPlace`. |
+| 1.15.0 | Splash held until the first PHP frame | ✅ (uncompiled) | The launch-screen cover is always installed (logo optional), hidden on the first committed frame, a fatal error or after 4 s; the first batch of a host mounts on arrival instead of the next display-link tick; PHP boots with the window safe area when the root view has not been laid out yet. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -72,3 +73,8 @@ Visual checks that tests cannot fully cover:
   pressed (sibling shadow follows the press scale only at rest).
 - Splash: logo size/position matches between the launch screen and the
   first-frame overlay, in light and dark.
+- Cold start (1.15.0): no frame between the launch screen and the first PHP
+  frame, with and without `appearance.splash.logo`; the first frame already
+  has the notch/home-indicator safe area (no inset jump right after launch);
+  a re-attached `PamNativeViewController` mounts its tree without waiting a
+  display-link tick; a missing entry still shows its alert (splash removed).

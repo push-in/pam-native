@@ -300,6 +300,12 @@ public final class PamRuntime {
     /// and are dropped; the remount mounts the whole retained tree.
     private var awaitingRemount = false
 
+    /// Nothing is on screen for this host yet (cold start or a re-attached
+    /// host view): its first batch mounts as soon as it reaches the main
+    /// thread instead of waiting for the next display-link tick (Android
+    /// parity: PamRuntime.surfaceAwaitingFirstFrame). Main thread only.
+    private var surfaceAwaitingFirstFrame = true
+
     private let coalescedEvents: Set<Int> = [
         EventKind.scroll.rawValue,
         EventKind.dimensions.rawValue,
@@ -418,6 +424,7 @@ public final class PamRuntime {
         previous?.onNativeChildVisibility = nil
         previous?.close()
         renderer = makeRenderer(hostView: hostView)
+        surfaceAwaitingFirstFrame = true
         requestRemount()
     }
 
@@ -501,7 +508,11 @@ public final class PamRuntime {
                 self.stateLock.unlock()
             }
             self.markReadyForEvents()
-            self.scheduleFrame()
+            if self.surfaceAwaitingFirstFrame && decoded != nil {
+                self.flushFirstFrame()
+            } else {
+                self.scheduleFrame()
+            }
         }
         return decoded != nil
     }
@@ -727,8 +738,17 @@ public final class PamRuntime {
 
     /// Window safe area seen by the runtime host view (points).
     private func currentSafeAreaInsets() -> UIEdgeInsets {
-        if let host = renderer.hostView, host.window != nil {
-            return host.safeAreaInsets
+        if let host = renderer.hostView, let window = host.window {
+            let insets = host.safeAreaInsets
+            // The runtime boots from didFinishLaunching, before the root view
+            // has been laid out: it still reports zero insets while its window
+            // already knows the system bars. A host covering the whole window
+            // boots with the window's edges so PHP's first frame (the one the
+            // splash reveals) already has the real safe area.
+            if insets == .zero, host.convert(host.bounds, to: window) == window.bounds {
+                return window.safeAreaInsets
+            }
+            return insets
         }
         let window = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -1016,7 +1036,11 @@ public final class PamRuntime {
             self.stateLock.unlock()
 
             self.markReadyForEvents()
-            self.scheduleFrame()
+            if self.surfaceAwaitingFirstFrame {
+                self.flushFirstFrame()
+            } else {
+                self.scheduleFrame()
+            }
         }
 
         return true
@@ -1265,6 +1289,14 @@ public final class PamRuntime {
         }
     }
 
+    /// Mounts the pending first frame of this host now; a later tick (if one
+    /// is already scheduled) finds nothing left to flush.
+    private func flushFirstFrame() {
+        flushEvents()
+        flushBatches()
+        schedulePauseIfNeeded()
+    }
+
     fileprivate func didTick() {
         stateLock.lock()
         guard !closed else {
@@ -1337,6 +1369,7 @@ public final class PamRuntime {
         let mutations = toProcess.map { $0.mutations }
 
         renderer.commit(mutations)
+        surfaceAwaitingFirstFrame = false
         let mountNanos = Int64(DispatchTime.now().uptimeNanoseconds - started)
         let metrics = RuntimeFrameMetrics(
             batches: mutations.count,
