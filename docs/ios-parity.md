@@ -47,6 +47,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.6.0 | Font family conventions | ✅ | `{Family}-{Weight}`, `_weight`, `_bold/_italic`, `{Family}` under `pam/assets/fonts` and `pam/fonts`. |
 | 1.7.0 | Error overlay | ✅ | Toast + inspector, Dismiss/Copy/Reload, queue/counter, release fallback with retry, `devErrorOverlay` (`PamDevErrorOverlay` in Info.plist). |
 | 1.14.1 | Interactive pinned sticky headers | ✅ (uncompiled) | ScrollView and VirtualizedList/VirtualGrid hosts hit-test the sticky children before the rows (`zPosition` only reorders drawing): presses reach the pinned header and never the row under it. `testPinnedVirtualListHeaderReceivesTouchesInsteadOfTheRowUnderIt`. |
+| 1.14.2 | Moved views stay attached | ✅ (uncompiled) | `move()` keeps a view in its superview when its sibling position is unchanged, so a sheet moved by a closing overlay before it keeps its focused `autoFocus` field and keyboard. `testMoveThatKeepsThePositionLeavesTheFocusedInputInPlace`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac

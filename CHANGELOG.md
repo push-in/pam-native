@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.14.2 - 2026-10-05
+
+An `autoFocus` input in a Modal/BottomSheet presented while an overlay
+before it closes gets the keyboard again. In Zé Chat, long-press on one's own
+message → Editar opened the "Editar mensagem" sheet without the keyboard on a
+Galaxy S10 (Android 12), 3 out of 3 times.
+
+- Cause: removing the closing overlay shifts the sheet's index, so the engine
+  emits a Move for it. The renderer detached and re-attached the moved view
+  even though it kept its place among its host's views. Detaching a
+  `PamModalHost` dismissed its Dialog and re-created the window 40 ms after
+  it was shown, so the IME the autofocus pipeline had already requested was
+  hidden (`HIDE_UNSPECIFIED_WINDOW`) and the new window had no focused
+  editor (`SOFT_INPUT_STATE_ALWAYS_VISIBLE is ignored`).
+- Android: `move()` leaves the view attached when its hosted position does
+  not change; `PamModalHost` keeps its window across a detach that is undone
+  in the same main-thread turn (a host that stays detached still closes it);
+  the autofocus pipeline logs why it stops (`PamAutoFocus`).
+- iOS: `move()` keeps the view in its superview when its sibling position
+  does not change (removing it resigned the focused field). Uncompiled on
+  this release host; listed in `docs/ios-parity.md` for Mac validation.
+- Tests: `PamSheetKeyboardInstrumentedTest.autoFocusInASheetMovedByItsClosingOverlayKeepsWindowAndKeyboard`
+  (fails on 1.14.1 with `focus=false`), passing with the rest of the
+  render suite on an Android 12 (API 31) emulator; XCTest
+  `testMoveThatKeepsThePositionLeavesTheFocusedInputInPlace`. Verified on the
+  Galaxy S10: 3/3 openings with the keyboard up and the sheet above it.
+
 ## 1.14.1 - 2026-10-05
 
 Pinned sticky headers in `VirtualizedList` and `VirtualGrid` are real,
