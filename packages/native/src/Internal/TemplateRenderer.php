@@ -891,9 +891,16 @@ final class TemplateRenderer
                     $nodeData,
                     $node,
                 );
-                $output[] = $element->identitySlot() === null && self::$freshElement === $element
-                    ? $element->__pamPlaceAt($slot)
-                    : $element->withIdentitySlot($slot);
+                if ($element->identitySlot() === null && self::$freshElement === $element) {
+                    $output[] = $element->__pamPlaceAt($slot);
+                } else {
+                    // A component's element: the same object while the
+                    // component stays memoized, so the encoder keeps its
+                    // encoded subtree.
+                    $placed = $element->withIdentitySlot($slot);
+                    $placed->__pamMarkReusable();
+                    $output[] = $placed;
+                }
             } catch (TemplateException $error) {
                 throw $error;
             } catch (RuntimeException $error) {

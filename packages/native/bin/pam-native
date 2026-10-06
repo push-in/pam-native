@@ -99,6 +99,12 @@ if (is_string($override) && $override !== '') {
     }
 }
 
+// The Native CLI precompiles .pam components with this same PHP runtime.
+$configuredPhp = getenv('PAM_NATIVE_PHP');
+if ((!is_string($configuredPhp) || $configuredPhp === '') && PHP_BINARY !== '') {
+    putenv('PAM_NATIVE_PHP=' . PHP_BINARY);
+}
+
 $process = proc_open(
     array_merge([$binary], array_slice($argv, 1)),
     [0 => STDIN, 1 => STDOUT, 2 => STDERR],

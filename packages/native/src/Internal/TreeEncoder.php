@@ -107,7 +107,7 @@ final class TreeEncoder
     }
 
     /**
-     * @param array{0: int, 1: array<int, mixed>, 2: array<int, Closure>, 3: list<Element>, 4: ?string, 5: ?string, 6: ?string} $info
+     * @param array{0: int, 1: array<int, mixed>, 2: array<int, Closure>, 3: list<Element>, 4: ?string, 5: ?string, 6: ?string, 7: bool} $info
      */
     private function encodeNode(
         Element $element,
@@ -117,10 +117,10 @@ final class TreeEncoder
         int $index,
         string $path,
     ): void {
-        [$kind, $properties, $events, $children, $key, $dom] = $info;
+        [$kind, $properties, $events, $children, $key, $dom, , $reusable] = $info;
 
-        // Only the root and keyed/DOM subtrees are ever cached.
-        if ($key !== null || $dom !== null || $path === 'root') {
+        // Only the root, keyed/DOM and reusable (component) subtrees are cached.
+        if ($key !== null || $dom !== null || $reusable || $path === 'root') {
             $cached = ($this->subtreeCache[$element] ?? [])[$path] ?? null;
 
             if ($cached !== null) {
@@ -214,7 +214,7 @@ final class TreeEncoder
 
         if (
             $path === 'root'
-            || (($dom !== null || $key !== null) && $children !== [])
+            || (($dom !== null || $key !== null || $reusable) && $children !== [])
         ) {
             $this->cacheCandidates[] = new SubtreeCacheCandidate(
                 element: $element,

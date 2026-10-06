@@ -40,6 +40,9 @@ abstract class Element implements Renderable
      */
     private ?string $identitySlot = null;
 
+    /** Likely to be the same object in the next frame (memoized component). */
+    private bool $reusable = false;
+
     /** @var \WeakMap<Element, array<string, Element>>|null */
     private static ?\WeakMap $slottedCopies = null;
 
@@ -430,9 +433,10 @@ abstract class Element implements Renderable
 
     /**
      * @internal Everything the tree encoder reads, in one call:
-     * [kind, properties, events, children, key, DOM identity, identity slot].
+     * [kind, properties, events, children, key, DOM identity, identity slot,
+     * reusable].
      *
-     * @return array{0: int, 1: array<int, string|int|float|bool|BinaryValue>, 2: array<int, Closure>, 3: list<Element>, 4: ?string, 5: ?string, 6: ?string}
+     * @return array{0: int, 1: array<int, string|int|float|bool|BinaryValue>, 2: array<int, Closure>, 3: list<Element>, 4: ?string, 5: ?string, 6: ?string, 7: bool}
      */
     final public function __pamEncoding(): array
     {
@@ -444,7 +448,14 @@ abstract class Element implements Renderable
             $this->elementKey,
             $this->domIdentity,
             $this->identitySlot,
+            $this->reusable,
         ];
+    }
+
+    /** @internal Marks an element the renderer expects to reuse across frames. */
+    final public function __pamMarkReusable(): void
+    {
+        $this->reusable = true;
     }
 
     /** @internal Static slot used by the tree encoder for unkeyed identity. */
