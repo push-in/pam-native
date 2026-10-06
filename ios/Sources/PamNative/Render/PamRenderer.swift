@@ -919,6 +919,7 @@ public final class PamRenderer {
         view.isHidden = false
         if let image = view as? PamImageView {
             image.pamFilter = PamImageFilter()
+            image.pamTintColor = nil
             image.image = nil
         }
         if let text = view as? PamTextView {
@@ -1995,6 +1996,10 @@ public final class PamRenderer {
             if let imageView = imageView(for: view), let source = value.textOrNil() {
                 loadImage(source, into: imageView, nodeId: nodeId)
             }
+        case PamConstants.tintColor:
+            if let color = value.integerOrNil() {
+                (imageView(for: view) as? PamImageView)?.pamTintColor = UIColor(argb: color)
+            }
         case PamConstants.imageFit:
             let mode = Int(value.integerOrNil() ?? 1)
             if let imageView = imageView(for: view) {
@@ -2590,6 +2595,8 @@ public final class PamRenderer {
             applyInputSelection(view: view, nodeId: nodeId)
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
+        case PamConstants.tintColor:
+            (imageView(for: view) as? PamImageView)?.pamTintColor = nil
         case PamConstants.imageFit:
             imageView(for: view)?.contentMode = .scaleAspectFill
             (view as? PamMediaView)?.setResizeMode(1)
@@ -3869,6 +3876,9 @@ public final class PamRenderer {
     }
 
     private func localImage(_ source: String) -> UIImage? {
+        if let image = PamInlineImages.image(source) {
+            return image
+        }
         if source.lowercased().hasPrefix("asset://") {
             guard let path = try? normalizedPamAssetPath(source) else {
                 return nil

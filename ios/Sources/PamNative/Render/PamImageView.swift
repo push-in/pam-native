@@ -50,7 +50,9 @@ struct PamImageFilter: Equatable {
     }
 }
 
-/// Image host that keeps the original bitmap and displays it filtered.
+/// Image host that keeps the original bitmap and displays it filtered and,
+/// with `tintColor`, as a template mask in that color (Android
+/// `ImageView.imageTintList`, SRC_IN): one decoded icon serves every color.
 final class PamImageView: UIImageView {
     private var original: UIImage?
 
@@ -61,25 +63,35 @@ final class PamImageView: UIImageView {
         }
     }
 
+    var pamTintColor: UIColor? {
+        didSet {
+            guard pamTintColor != oldValue else { return }
+            refilter()
+        }
+    }
+
     override var image: UIImage? {
         get { super.image }
         set {
             original = newValue
-            guard let newValue, !pamFilter.isIdentity else {
-                super.image = newValue
-                return
-            }
-            super.image = pamFilter.apply(to: newValue, displayScale: window?.screen.scale ?? 2)
+            super.image = newValue.map(displayed)
         }
     }
 
     /// The unfiltered bitmap last assigned by the renderer.
     var originalImage: UIImage? { original }
 
+    private func displayed(_ image: UIImage) -> UIImage {
+        let filtered = pamFilter.isIdentity
+            ? image
+            : pamFilter.apply(to: image, displayScale: window?.screen.scale ?? 2)
+        guard let pamTintColor else { return filtered }
+        tintColor = pamTintColor
+        return filtered.withRenderingMode(.alwaysTemplate)
+    }
+
     private func refilter() {
         guard let original else { return }
-        super.image = pamFilter.isIdentity
-            ? original
-            : pamFilter.apply(to: original, displayScale: window?.screen.scale ?? 2)
+        super.image = displayed(original)
     }
 }

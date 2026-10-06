@@ -107,6 +107,46 @@ internal fun resolvePamImageFile(root: File, source: String): File {
 internal fun isInlineImageSource(source: String): Boolean =
     source.regionMatches(0, "data:image/", 0, "data:image/".length, ignoreCase = true)
 
+/** Inline sources this small (icon masks) decode on the UI thread, in the frame. */
+internal const val INLINE_SYNC_MAX_CHARS = 16 * 1024
+
+internal fun isSynchronousInlineSource(source: String): Boolean =
+    source.length <= INLINE_SYNC_MAX_CHARS && isInlineImageSource(source)
+
+/**
+ * One shared load per decoded key. The future is registered before its work
+ * starts and leaves the map by identity when it completes, on whichever
+ * thread completes it. A load that finished before its caller returned used
+ * to remove itself inside ConcurrentHashMap.computeIfAbsent ("Recursive
+ * update"): the failed future stayed registered and failed every later load
+ * of that key once its bitmap left the memory cache.
+ */
+internal class InFlightImageLoads<T> {
+    private val loads = ConcurrentHashMap<String, CompletableFuture<T>>()
+
+    fun share(key: String, start: () -> CompletableFuture<T>): CompletableFuture<T> {
+        loads[key]?.let { return it }
+        val created = CompletableFuture<T>()
+        loads.putIfAbsent(key, created)?.let { return it }
+        created.whenComplete { _, _ -> loads.remove(key, created) }
+        try {
+            start().whenComplete { value, error ->
+                if (error != null) created.completeExceptionally(error) else created.complete(value)
+            }
+        } catch (error: Throwable) {
+            created.completeExceptionally(error)
+        }
+        return created
+    }
+
+    fun cancelAll() {
+        loads.values.forEach { future -> future.cancel(true) }
+        loads.clear()
+    }
+
+    val size: Int get() = loads.size
+}
+
 internal class NativeImageLoader(
     private val context: Context,
 ) : AutoCloseable {
@@ -124,8 +164,13 @@ internal class NativeImageLoader(
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
             value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
     }
-    private val inFlight =
-        ConcurrentHashMap<String, CompletableFuture<NativeImageResult>>()
+    // Inline icon masks live apart from photos: a feed or an inbox of
+    // avatars must never evict the glyphs of the next screen's first frame.
+    private val inlineCache = object : LruCache<String, DecodedBitmap>(INLINE_MEMORY_CACHE_BYTES) {
+        override fun sizeOf(key: String, value: DecodedBitmap): Int =
+            value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
+    }
+    private val inFlight = InFlightImageLoads<NativeImageResult>()
     private val active = WeakHashMap<PamImageView, ActiveRequest>()
     private val generation = AtomicLong()
     private val closed = AtomicBoolean()
@@ -205,6 +250,9 @@ internal class NativeImageLoader(
                 cache.trimToSize(cache.maxSize() / 2)
             }
         }
+        // Inline glyphs are tiny and decode again synchronously; only a
+        // critical trim drops them.
+        if (critical) synchronized(inlineCache) { inlineCache.evictAll() }
     }
 
     override fun close() {
@@ -215,11 +263,11 @@ internal class NativeImageLoader(
         active.clear()
         connections.toList().forEach(HttpURLConnection::disconnect)
         connections.clear()
-        inFlight.values.forEach { future -> future.cancel(true) }
+        inFlight.cancelAll()
         executor.shutdownNow()
         inlineExecutor.shutdownNow()
-        inFlight.clear()
         synchronized(cache) { cache.evictAll() }
+        synchronized(inlineCache) { inlineCache.evictAll() }
     }
 
     private fun begin(
@@ -251,6 +299,7 @@ internal class NativeImageLoader(
         )
         if (pending.decodedKey == key) return
         pending.decodedKey = key
+        val memory = memoryCacheFor(source)
 
         if (
             pending.request.cachePolicy !in setOf(IMAGE_CACHE_RELOAD, IMAGE_CACHE_NONE) &&
@@ -258,7 +307,7 @@ internal class NativeImageLoader(
             pending.request.mediaCachePolicy != MEDIA_CACHE_DISK &&
             pending.request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
         ) {
-            synchronized(cache) { cache.get(key) }?.let { bitmap ->
+            synchronized(memory) { memory.get(key) }?.let { bitmap ->
                 pending.callbacks.onCacheHit(false, cacheIdentity(source, pending.request))
                 finishSuccess(
                     view,
@@ -276,8 +325,46 @@ internal class NativeImageLoader(
             }
         }
 
+        if (isSynchronousInlineSource(source)) {
+            // A bundled glyph (tens of bytes to a few KiB) decodes in well
+            // under a millisecond: paint it in the frame that lays the view
+            // out, like a font glyph, instead of a frame later.
+            val decoded = runCatching {
+                decode(
+                    loadDataUri(source),
+                    measuredWidth,
+                    measuredHeight,
+                    pending.request.resizeMethod,
+                    pending.request.resizeMultiplier,
+                )
+            }.getOrElse { error ->
+                finishError(view, pending, safeError(error))
+                return
+            }
+            if (
+                pending.request.cachePolicy != IMAGE_CACHE_NONE &&
+                pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+                pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
+            ) {
+                synchronized(memory) { memory.put(key, decoded) }
+            }
+            finishSuccess(
+                view,
+                pending,
+                NativeImageResult(
+                    source,
+                    decoded.bitmap,
+                    decoded.width,
+                    decoded.height,
+                    decoded.animatedBytes,
+                ),
+                animate = false,
+            )
+            return
+        }
+
         val future = runCatching {
-            inFlight.computeIfAbsent(key) {
+            inFlight.share(key) {
                 CompletableFuture.supplyAsync(
                     {
                         val bytes = loadBytes(
@@ -319,7 +406,7 @@ internal class NativeImageLoader(
                             pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
                             pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
                         ) {
-                            synchronized(cache) { cache.put(key, decoded) }
+                            synchronized(memory) { memory.put(key, decoded) }
                         }
                         NativeImageResult(
                             source,
@@ -330,7 +417,7 @@ internal class NativeImageLoader(
                         )
                     },
                     imageExecutor(source),
-                ).whenComplete { _, _ -> inFlight.remove(key) }
+                )
             }
         }.getOrElse { error ->
             finishError(view, pending, safeError(error))
@@ -405,6 +492,9 @@ internal class NativeImageLoader(
 
     private fun imageExecutor(source: String) =
         if (isInlineImageSource(source)) inlineExecutor else executor
+
+    private fun memoryCacheFor(source: String) =
+        if (isInlineImageSource(source)) inlineCache else cache
 
     private fun finishSuccess(
         view: PamImageView,
@@ -1077,6 +1167,7 @@ internal class NativeImageLoader(
         /** Shared by every loader instance so prefetch and rendering never race on one file. */
         val DISK_LOCK = Any()
         const val MEMORY_CACHE_BYTES = 32 * 1024 * 1024
+        const val INLINE_MEMORY_CACHE_BYTES = 4 * 1024 * 1024
         const val DISK_CACHE_BYTES = 96L * 1024 * 1024
         const val MAX_DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024
         const val DISK_DIRECTORY = "pam-images-v1"

@@ -120,8 +120,12 @@ remove downloaded offline content as well.
 - Android retries bounded transient failures while an image view stays attached.
   A completed request is reused only if it still owns a drawable, so an image
   cannot remain blank until its virtualized cell is recycled.
-- Android decodes inline `data:image/*` assets on an isolated worker lane, so
-  bundled UI icons are not queued behind remote or animated media work.
+- Inline `data:image/*` assets up to 16 KiB (icon masks) decode synchronously on
+  the UI thread in the layout pass, so they paint in the first frame, and stay in
+  their own memory cache that photos cannot evict. Larger inline assets decode on
+  an isolated Android worker lane, never queued behind remote or animated media.
+- One Android load per decoded key is shared; it unregisters itself by identity
+  when it completes, so a failed load is never handed to a later request.
 - Android validates redirect count, origin-sensitive headers, response type, decoded
   image bounds, byte limits, and checksums.
 - iOS stores cache files under the application cache sandbox and uses ImageIO

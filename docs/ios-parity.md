@@ -53,6 +53,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.17.0 | ext-mbstring polyfill + extension audit | ✅ (PHP only) | The iOS runtime is built with the same `--disable-all` extension set as Android (no mbstring, no intl), so the SDK's PHP `mb_*` polyfill applies unchanged; no Swift change. |
 | 1.18.0 | Single-file prebuilt component cache | ✅ (uncompiled) | `PamBundle/pam-prebuilt/components/components.pack` replaces four files per component. The app bundle is read-only, so a component's class/template files are written on first use under `Documents/pam/state/prebuilt-components/<pack id>/` (other packs' directories are dropped). No Swift change: iOS runs `PamBundle/` in place, there is no bundle install to speed up. |
 | 1.19.0 | Native crypto for `Pam\Native\Crypto` | ✅ (uncompiled) | `PamCrypto.swift` installs the `pam_native_crypto()` provider (CryptoKit `AES.GCM`, `Curve25519.Signing` after libsodium's S/small-order/canonical checks) from `PamRuntime`; `PamCryptoTests` replays `packages/native/tests/Fixtures/crypto-vectors.json`. |
+| 1.19.1 | Inline `data:image/*` images and `<Image tintColor>` | ✅ (uncompiled) | Data URIs decode synchronously into their own `NSCache` (`PamInlineImages`) instead of staying empty; `tintColor` renders the bitmap as an `.alwaysTemplate` image in that color (Android `imageTintList`). `PamInlineImageTests`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
