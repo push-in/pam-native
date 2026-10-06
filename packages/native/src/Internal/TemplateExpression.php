@@ -49,6 +49,8 @@ final class TemplateExpression
 
     private static ?object $missingSentinel = null;
 
+    private static bool $generated = true;
+
     /** @var list<array{type: int|string, text: string}> */
     private array $tokens;
     private int $position = 0;
@@ -144,8 +146,51 @@ final class TemplateExpression
         return $parts;
     }
 
+    /**
+     * @internal Registers closures compiled ahead of time (component cache)
+     * for their expression sources.
+     *
+     * @param array<string, Closure(array<string, mixed>, ?object): mixed> $closures
+     */
+    public static function preload(array $closures): void
+    {
+        if (count(self::$compiled) + count($closures) >= self::CACHE_LIMIT) {
+            self::$compiled = [];
+        }
+        self::$compiled += $closures;
+    }
+
+    /** @internal Disables generated closures (tests compare both forms). */
+    public static function useGeneratedCode(bool $enabled): void
+    {
+        self::$generated = $enabled;
+        self::$compiled = [];
+    }
+
     /** @return Closure(array<string, mixed>, ?object): mixed */
     private static function compile(string $expression): Closure
+    {
+        if (self::$generated) {
+            $closure = null;
+            try {
+                $closure = eval('declare(strict_types=1); return '.TemplateExpressionCompiler::closureSource($expression).';');
+            } catch (RuntimeException|\ParseError) {
+                // Invalid expressions report through the reference parser.
+            }
+            if ($closure instanceof Closure) {
+                if (count(self::$compiled) >= self::CACHE_LIMIT) {
+                    self::$compiled = [];
+                }
+
+                return self::$compiled[$expression] = $closure;
+            }
+        }
+
+        return self::compileTree($expression);
+    }
+
+    /** @return Closure(array<string, mixed>, ?object): mixed */
+    private static function compileTree(string $expression): Closure
     {
         $parser = new self($expression);
         $compiled = $parser->ternary();
@@ -160,6 +205,69 @@ final class TemplateExpression
         }
 
         return self::$compiled[$expression] = $compiled;
+    }
+
+    /**
+     * @internal
+     * @return list<array{type: int|string, text: string}>
+     */
+    public static function __pamTokens(string $expression): array
+    {
+        return self::tokenize($expression);
+    }
+
+    /** @internal */
+    public static function __pamStringLiteral(string $literal): string
+    {
+        return self::stringLiteral($literal);
+    }
+
+    /** @internal */
+    public static function __pamMissing(): object
+    {
+        return self::$missingSentinel ??= new \stdClass();
+    }
+
+    /** @internal */
+    public static function __pamProperty(object $target, string $name): ReflectionProperty
+    {
+        return self::property($target, $name);
+    }
+
+    /** @internal */
+    public static function __pamString(mixed $value): string
+    {
+        return self::stringOperand($value);
+    }
+
+    /** @internal */
+    public static function __pamNumeric(mixed $value, string $operator): void
+    {
+        self::requireNumeric($value, $operator);
+    }
+
+    /**
+     * @internal
+     * @param list<mixed> $arguments
+     */
+    public static function __pamInvoke(string $name, string $builtIn, array $arguments, ?object $scope): mixed
+    {
+        return self::invoke($name, $builtIn, $arguments, $scope);
+    }
+
+    /** @internal */
+    public static function __pamEnumCase(string $name, string $caseName, ?object $scope): mixed
+    {
+        $class = self::resolveScopedClassName($name, $scope);
+        if ($class === null || !enum_exists($class)) {
+            throw new RuntimeException("Template enum {$name} does not exist.");
+        }
+        $constant = $class.'::'.$caseName;
+        if (!defined($constant)) {
+            throw new RuntimeException("Template enum case {$constant} does not exist.");
+        }
+
+        return constant($constant);
     }
 
     private static function missing(): object

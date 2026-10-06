@@ -5880,10 +5880,13 @@ final class TemplateRenderer
             }
         }
 
-        $value = trim(implode(' ', array_filter(
-            $classes,
-            static fn (string $class): bool => trim($class) !== '',
-        )));
+        $parts = [];
+        foreach ($classes as $class) {
+            if (trim($class) !== '') {
+                $parts[] = $class;
+            }
+        }
+        $value = trim(implode(' ', $parts));
 
         return $value === '' ? null : $value;
     }
