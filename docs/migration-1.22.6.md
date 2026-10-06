@@ -1,5 +1,22 @@
 # Migrating to Pam Native 1.22.6
 
+## Recovering incomplete prebuilt caches
+
+Update and rebuild the application bundle. On first materialization, the PHP
+compiler compares each derived class/template file's size with the existing
+pack index. Empty or truncated files are restored atomically from the pack;
+only the repaired file's opcode is invalidated. A valid cache is reused
+without rewriting, and later renders do not repeat the check or read the pack.
+
+This addresses the zero-byte Feed class observed after an emulator crash while
+its source and bundled pack remained intact. The host regression reproduces
+class autoload and template rendering with empty/truncated caches, checks
+byte-for-byte restoration and reuse of valid files, and verifies that a failed
+pack read remains retryable. An incomplete pack still raises an explicit error;
+the fix does not reconstruct missing source data or claim recovery of all forms
+of corruption. Device validation of the integrated candidate is recorded
+separately from this host regression.
+
 ## Native module callbacks across reload
 
 Rebuild the native host as well as the application bundle. Native module

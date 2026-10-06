@@ -536,8 +536,9 @@ final class PamPhpCompiler
     private static array $pendingPrebuiltFiles = [];
 
     /**
-     * Writes a prebuilt component file from its bundle pack if it is not on
-     * disk yet (an earlier launch may have written it). No-op for any other file.
+     * Reuses a complete prebuilt file or restores it from its bundle pack.
+     * An interrupted device write can leave an empty/truncated derived file
+     * across launches; validate its size once, never on the render hot path.
      */
     public static function materializePrebuilt(string $file): void
     {
@@ -545,14 +546,28 @@ final class PamPhpCompiler
         if ($slice === null) {
             return;
         }
-        unset(self::$pendingPrebuiltFiles[$file]);
-        if (is_file($file)) {
+        [$pack, $offset, $length] = $slice;
+        clearstatcache(true, $file);
+        $cached = is_file($file);
+        if ($cached && filesize($file) === $length) {
+            unset(self::$pendingPrebuiltFiles[$file]);
             return;
         }
-        [$pack, $offset, $length] = $slice;
         $contents = file_get_contents($pack, false, null, $offset, $length);
         if (!is_string($contents) || strlen($contents) !== $length) {
             throw new RuntimeException("PAM prebuilt component pack {$pack} is truncated.");
+        }
+        if ($cached) {
+            // Recovery is exceptional: use the compiler's unique temporary
+            // file and atomic publication, keeping first-install writes lean.
+            self::writeAtomic($file, $contents);
+            if (function_exists('opcache_invalidate')) {
+                // The empty PHP file may already have been compiled before
+                // recovery. Invalidate only this repaired derived file.
+                @opcache_invalidate($file, true);
+            }
+            unset(self::$pendingPrebuiltFiles[$file]);
+            return;
         }
         // On the first frame's path: a plain write + rename (no tempnam,
         // lock or chmod); the rename still never exposes a partial file.
@@ -565,6 +580,7 @@ final class PamPhpCompiler
             @unlink($temporary);
             throw new RuntimeException("Cannot write PAM component cache {$file}.");
         }
+        unset(self::$pendingPrebuiltFiles[$file]);
     }
 
     /** @return array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>}|false */
@@ -1259,7 +1275,7 @@ final class PamPhpCompiler
 
         if (
             $temporary === false
-            || file_put_contents($temporary, $contents, LOCK_EX) === false
+            || file_put_contents($temporary, $contents, LOCK_EX) !== strlen($contents)
             || !rename($temporary, $path)
         ) {
             if (is_string($temporary)) {

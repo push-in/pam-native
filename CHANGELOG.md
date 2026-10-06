@@ -2,6 +2,11 @@
 
 ## 1.22.6 - 2026-10-06
 
+- Prebuilt PHP class/template caches recover empty or truncated derived files
+  from their unchanged bundle pack on first materialization. Complete caches
+  remain untouched; repairs use atomic publication and invalidate only the
+  repaired opcode. Failed pack reads remain retryable without adding checks
+  to the render hot path.
 - Native module completions remain tied to the PHP request that issued them.
   Android and iOS bridges discard callbacks from a previous request, including
   cleanup callbacks and late asynchronous results after hot reload. Internal

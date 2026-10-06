@@ -7825,6 +7825,7 @@ require __DIR__.'/error_reporting.php';
 require __DIR__.'/conditional_identity.php';
 require __DIR__.'/expression_codegen.php';
 require __DIR__.'/prebuilt_components.php';
+require __DIR__.'/prebuilt_recovery.php';
 require __DIR__.'/gesture_scope.php';
 require __DIR__.'/mbstring_polyfill.php';
 require __DIR__.'/runtime_audit.php';
