@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.13.1 - 2026-10-05
+
+Zé Chat device QA on 1.12.2 (Galaxy S10, Android 12).
+
+- Android: `autoFocus` on an input inside a just-presented BottomSheet or
+  Modal opens the keyboard, also when the input is remounted (a new key per
+  open) in a re-presented or already-presented sheet. The renderer waited at
+  most 200 ms for window focus and asked the IME once; on Android 11-12 a
+  request from a window that is still gaining focus is dropped. It now waits
+  for the input's own window focus (`OnWindowFocusChangeListener`), asks that
+  window's insets controller (`show(ime())`) and the IMM, and re-asks until
+  the IME is reported visible. The modal no longer moves focus to its first
+  focusable (a header button) when an input already took it.
+- Android: a `<Modal transparent presentation="fullScreen">` whose flattened
+  full-height Column ends in a short options sheet (Zé's OptionDialog) is a
+  short sheet over the translucent backdrop again. Every child hosted by a
+  full-screen modal was forced to `MATCH_PARENT`, which drew the sheet as an
+  opaque full-screen window with its title at the top. Only a child spanning
+  the modal fills the window now; a bottom-anchored child keeps its height
+  at the window bottom and other children keep their frames.
+- `PamSheetKeyboardInstrumentedTest`: remounted `autoFocus` input with a
+  focusable header button (first open, re-open, remount in an open sheet),
+  and a screenshot pixel test of the transparent options modal (backdrop
+  over the screen above, white sheet in its 44 % frame).
+- iOS needs no change for either issue beyond 1.12.2 (`autoFocus` retried
+  after presentation; no layout-only flattening).
+
 ## 1.13.0 - 2026-10-05
 
 Cold start (Zé Chat on a Galaxy S10, release build): first PAM frame
