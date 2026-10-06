@@ -609,6 +609,21 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     internal fun hasScrollableContent(): Boolean = canConsumeScrollGesture()
 
+    /** An ancestor that can still scroll along this list's axis in [direction]. */
+    private fun outerCanScroll(direction: Int): Boolean {
+        var current = parent
+        while (current is View) {
+            val scrolls = if (horizontal) {
+                current.canScrollHorizontally(direction)
+            } else {
+                current.canScrollVertically(direction)
+            }
+            if (scrolls) return true
+            current = current.parent
+        }
+        return false
+    }
+
     internal fun canScrollInDirection(direction: Int): Boolean {
         val manager = layoutManager as? LinearLayoutManager ?: return false
         val count = adapter?.itemCount ?: 0
@@ -655,7 +670,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 }
                 val direction = if (delta < 0f) 1 else -1
                 val canScroll = canScrollInDirection(direction)
-                if (abs(delta) > touchSlop && !canScroll) {
+                // At its boundary the list hands the drag to an outer scroll
+                // container that can still move. Without one it keeps the drag
+                // (overscroll), like a React Native list: a row Pressable must
+                // not turn a swipe past the last page into a tap (the Zé Chat
+                // Loops paused their last loop on every swipe up).
+                if (abs(delta) > touchSlop && !canScroll && outerCanScroll(direction)) {
                     parent?.requestDisallowInterceptTouchEvent(false)
                     return false
                 }
