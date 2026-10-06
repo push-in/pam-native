@@ -1428,9 +1428,24 @@ class PamRenderer(
         val cellRoot = virtualCellRoot(id)
         if (cellRoot != null && state.virtual != shouldBeVirtual) {
             val holder = virtualCellHolder(cellRoot)
-            state.virtual = shouldBeVirtual
-            dematerializeSubtree(cellRoot)
-            if (holder != null) materializeCell(cellRoot, holder)
+            when (
+                virtualCellHostingRepair(
+                    isCellRoot = id == cellRoot,
+                    cellMounted = holder != null,
+                    cellRootHosted = views[cellRoot] != null,
+                )
+            ) {
+                // Only this node gains or loses its native view: the rest of
+                // the cell (decoded images, players, scroll offsets, running
+                // motions such as a double-tap heart) stays mounted.
+                VirtualCellHostingRepair.IN_PLACE ->
+                    if (shouldBeVirtual) demote(state) else promote(state)
+                VirtualCellHostingRepair.REMOUNT_CELL -> {
+                    state.virtual = shouldBeVirtual
+                    dematerializeSubtree(cellRoot)
+                    if (holder != null) materializeCell(cellRoot, holder)
+                }
+            }
             return
         }
         if (state.virtual && !shouldBeVirtual) {

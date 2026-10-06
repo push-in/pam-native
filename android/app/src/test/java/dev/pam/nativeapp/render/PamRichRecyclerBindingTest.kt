@@ -27,4 +27,24 @@ class PamRichRecyclerBindingTest {
         assertFalse(richHolderNeedsResumeRebind(41L, 0, 2, 41L))
         assertTrue(richHolderNeedsResumeRebind(41L, 0, 2, 40L))
     }
+
+    @Test
+    fun hostingFlipInsideAMountedCellNeverRemountsTheCell() {
+        assertTrue(
+            virtualCellHostingRepair(isCellRoot = false, cellMounted = true, cellRootHosted = true) ==
+                VirtualCellHostingRepair.IN_PLACE,
+        )
+        assertTrue(
+            virtualCellHostingRepair(isCellRoot = true, cellMounted = true, cellRootHosted = true) ==
+                VirtualCellHostingRepair.REMOUNT_CELL,
+        )
+        assertTrue(
+            virtualCellHostingRepair(isCellRoot = false, cellMounted = false, cellRootHosted = false) ==
+                VirtualCellHostingRepair.REMOUNT_CELL,
+        )
+        assertTrue(
+            virtualCellHostingRepair(isCellRoot = false, cellMounted = true, cellRootHosted = false) ==
+                VirtualCellHostingRepair.REMOUNT_CELL,
+        )
+    }
 }

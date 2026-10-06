@@ -1285,6 +1285,30 @@ internal class RichCellContainer(context: Context) : FrameLayout(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean = super.onTouchEvent(event) || pinned
 }
 
+internal enum class VirtualCellHostingRepair {
+    /** Promote/demote the node alone; its hosted ancestor inside the cell is mounted. */
+    IN_PLACE,
+
+    /** Rebuild the cell: its root is the node, the root is flattened, or nothing is mounted. */
+    REMOUNT_CELL,
+}
+
+/**
+ * A property that makes a node inside a virtual-list cell gain or lose its
+ * native view (an animation appearing on a flattened View, a `nativeRef`...)
+ * re-hosts only that node while the cell is on screen under a hosted root.
+ */
+internal fun virtualCellHostingRepair(
+    isCellRoot: Boolean,
+    cellMounted: Boolean,
+    cellRootHosted: Boolean,
+): VirtualCellHostingRepair =
+    if (!isCellRoot && cellMounted && cellRootHosted) {
+        VirtualCellHostingRepair.IN_PLACE
+    } else {
+        VirtualCellHostingRepair.REMOUNT_CELL
+    }
+
 internal fun richHolderNeedsFullBind(boundId: Long, requestedId: Long, childCount: Int): Boolean =
     boundId != requestedId || childCount == 0
 
