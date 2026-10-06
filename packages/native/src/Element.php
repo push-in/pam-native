@@ -497,9 +497,12 @@ abstract class Element implements Renderable
      * @param list<string>|null $classes
      * @param array<int, string|int|float|bool|BinaryValue|null> $properties
      */
-    final public function __pamDecorate(?array $classes, array $properties): static
+    final public function __pamDecorate(?array $classes, array $properties, ?string $key = null): static
     {
         $copy = clone $this;
+        if ($key !== null) {
+            $copy->elementKey = $key;
+        }
         if ($classes !== null) {
             $copy->domClasses = $classes;
         }

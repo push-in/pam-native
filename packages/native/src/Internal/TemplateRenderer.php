@@ -2004,6 +2004,15 @@ final class TemplateRenderer
         'TouchableNativeFeedback' => true,
     ];
 
+    /** specialAttributes() handled inline by fastTag(). */
+    private const FAST_SPECIAL_ATTRIBUTES = [
+        'key' => true,
+        'accessibilityLabel' => true,
+        'testId' => true,
+        'disabled' => true,
+        'enabled' => true,
+    ];
+
     private const RIPPLE_VALUES = [
         'rippleColor' => true,
         'rippleAlpha' => true,
@@ -2079,8 +2088,16 @@ final class TemplateRenderer
             $names += self::RIPPLE_VALUES;
         }
         $attributePlan = self::attributePlan($probe, $names);
+        $specials = false;
         if ($attributePlan['special']) {
-            return null;
+            foreach ($names as $name => $_) {
+                if (isset(self::SPECIAL_ATTRIBUTES[$name]) || str_starts_with((string) $name, 'data-')) {
+                    if (!isset(self::FAST_SPECIAL_ATTRIBUTES[$name])) {
+                        return null;
+                    }
+                    $specials = true;
+                }
+            }
         }
         $constant = [];
         $dynamic = [];
@@ -2136,6 +2153,7 @@ final class TemplateRenderer
             'inherited' => $inheritedNames,
             'classTokens' => $classTokens,
             'localClasses' => $localClasses,
+            'specials' => $specials,
         ];
     }
 
@@ -2318,7 +2336,34 @@ final class TemplateRenderer
             $element = self::classes($element, $resolvedClass, $data);
         }
 
-        $properties = $fast['constant'];
+        $elementKey = null;
+        if ($fast['specials']) {
+            // specialAttributes() order: key, accessibilityLabel, testId, enabled.
+            $properties = [];
+            if (isset($values['key'])) {
+                $elementKey = self::stringValue($values['key'], 'Element key');
+                if ($elementKey === '' || strlen($elementKey) > 128) {
+                    throw new InvalidArgumentException('Element keys must contain between 1 and 128 bytes.');
+                }
+            }
+            if (isset($values['accessibilityLabel'])) {
+                $properties[PropKey::AccessibilityLabel->value] = self::stringValue(
+                    $values['accessibilityLabel'],
+                    'Accessibility label',
+                );
+            }
+            if (isset($values['testId'])) {
+                $properties[PropKey::TestId->value] = self::stringValue($values['testId'], 'Test ID');
+            }
+            if (isset($values['disabled'])) {
+                $properties[PropKey::Enabled->value] = !self::boolValue($values['disabled'], 'Disabled');
+            } elseif (isset($values['enabled'])) {
+                $properties[PropKey::Enabled->value] = self::boolValue($values['enabled'], 'Enabled');
+            }
+            $properties += $fast['constant'];
+        } else {
+            $properties = $fast['constant'];
+        }
         foreach ($fast['dynamic'] as [$name, $key]) {
             if (!array_key_exists($name, $values)) {
                 continue;
@@ -2331,7 +2376,7 @@ final class TemplateRenderer
         $classTokens = $fast['classTokens'];
         $element = $classTokens !== null && $element->domClasses() !== []
             ? self::attributes(self::withDomClasses($element, (string) $resolvedClass), $values)
-            : $element->__pamDecorate($classTokens, $properties);
+            : $element->__pamDecorate($classTokens, $properties, $elementKey);
 
         foreach ($plan['events'] as $name => $event) {
             $handler = $ownHandlers[$event->value];
