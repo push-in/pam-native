@@ -10,6 +10,9 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+#[path = "plugin_share.rs"]
+mod plugin_share;
+
 const MANIFEST_NAME: &str = "pam-native.json";
 const DEFAULT_PORT: u16 = 39_100;
 const MAX_PROJECT_FILES: usize = 10_000;
@@ -18,9 +21,10 @@ const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_DEV_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_UPDATE_BUNDLE_BYTES: usize = 256 * 1024 * 1024;
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
-const PLUGIN_CAPABILITIES: [&str; 5] = [
+const PLUGIN_CAPABILITIES: [&str; 6] = [
     "compiler.freeze.v1",
     "plugins.composer.v1",
+    "plugins.share.v1",
     "renderer.incremental.v1",
     "runtime.modules.v1",
     "wire.binary.v1",
@@ -134,6 +138,10 @@ struct NativeManifest {
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
+    /// Per-application plugin configuration, keyed by the `configKey` a
+    /// plugin declares (for example `plugins.shareExtension`).
+    #[serde(default)]
+    plugins: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -450,6 +458,10 @@ struct PluginManifest {
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
+    /// Content received from other applications' share sheets, configured
+    /// per application under `plugins.<configKey>`.
+    #[serde(default)]
+    share: Option<plugin_share::PluginShare>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -1723,7 +1735,73 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
 
     plugins.sort_by(|left, right| left.package.cmp(&right.package));
     validate_plugin_bindings(app, &plugins)?;
+    validate_plugin_config(app, &plugins)?;
     Ok(plugins)
+}
+
+fn validate_plugin_config(app: &NativeManifest, plugins: &[NativePlugin]) -> Result<(), String> {
+    let mut keys = BTreeMap::new();
+    for plugin in plugins {
+        let Some(share) = &plugin.manifest.share else {
+            continue;
+        };
+        if !plugin_share::valid_config_key(&share.config_key) {
+            return Err(format!(
+                "plugin {} share configKey {:?} must be a lowerCamelCase identifier",
+                plugin.package, share.config_key
+            ));
+        }
+        if let Some(other) = keys.insert(share.config_key.as_str(), plugin.package.as_str()) {
+            return Err(format!(
+                "plugins {other} and {} both use the configuration key {:?}",
+                plugin.package, share.config_key
+            ));
+        }
+        plugin_share_types(app, plugin)?;
+    }
+    for key in app.plugins.keys() {
+        if !keys.contains_key(key.as_str()) {
+            return Err(format!(
+                "{MANIFEST_NAME} plugins.{key} is not used by any installed plugin"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The MIME types a plugin receives through share sheets, after applying the
+/// application's `plugins.<configKey>` configuration.
+fn plugin_share_types(
+    app: &NativeManifest,
+    plugin: &NativePlugin,
+) -> Result<Option<Vec<plugin_share::ShareType>>, String> {
+    plugin
+        .manifest
+        .share
+        .as_ref()
+        .map(|share| {
+            plugin_share::resolve(&plugin.package, share, app.plugins.get(&share.config_key))
+        })
+        .transpose()
+}
+
+/// Every MIME type the Android launcher activity accepts from share sheets:
+/// the application's `android.shareTargets` and each plugin's `share`.
+fn android_share_types(project: &Project) -> Result<Vec<plugin_share::ShareType>, String> {
+    let mut types = project
+        .manifest
+        .android
+        .share_targets
+        .iter()
+        .map(|mime| plugin_share::ShareType {
+            mime: mime.clone(),
+            multiple: true,
+        })
+        .collect::<Vec<_>>();
+    for plugin in &project.plugins {
+        types.extend(plugin_share_types(&project.manifest, plugin)?.unwrap_or_default());
+    }
+    Ok(plugin_share::merge(types))
 }
 
 fn installed_pam_native_version(root: &Path) -> Result<String, String> {
@@ -3610,6 +3688,11 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
                 &format!("plugin {} extension {name} Info.plist", plugin.package),
             )?;
         }
+        if extension.kind == IosExtensionKind::Share
+            && let Some(types) = plugin_share_types(&project.manifest, plugin)?
+        {
+            set_ios_share_activation_rule(&mut info, &types)?;
+        }
         normalize_ios_extension_plist(&mut info, extension.kind)?;
         write_apple_plist(&info_path, &info)?;
 
@@ -3901,6 +3984,30 @@ fn ios_extension_base_plist(
     };
     plist[extension_key] = serde_json::json!({point_key: point});
     plist
+}
+
+/// Replaces the Share Extension's `NSExtensionActivationRule` with the one
+/// generated from the plugin's resolved share types.
+fn set_ios_share_activation_rule(
+    plist: &mut serde_json::Value,
+    types: &[plugin_share::ShareType],
+) -> Result<(), String> {
+    let rule = plugin_share::ios_activation_rule(types)?;
+    let extension = plist
+        .as_object_mut()
+        .ok_or_else(|| "iOS extension Info.plist must be a dictionary".to_owned())?
+        .entry("NSExtension")
+        .or_insert_with(|| serde_json::json!({}));
+    let attributes = extension
+        .as_object_mut()
+        .ok_or_else(|| "iOS Share Extension NSExtension must be a dictionary".to_owned())?
+        .entry("NSExtensionAttributes")
+        .or_insert_with(|| serde_json::json!({}));
+    attributes
+        .as_object_mut()
+        .ok_or_else(|| "iOS Share Extension NSExtensionAttributes must be a dictionary".to_owned())?
+        .insert("NSExtensionActivationRule".to_owned(), rule);
+    Ok(())
 }
 
 fn normalize_ios_extension_plist(
@@ -4717,11 +4824,14 @@ fn collect_mobile_audit_findings(project: &Project) -> Vec<MobileAuditFinding> {
             "Validate every incoming route and parameter, and keep verified domain ownership current.",
         ));
     }
-    if !project.manifest.android.share_targets.is_empty() {
+    let share_types = android_share_types(project)
+        .map(|types| types.len())
+        .unwrap_or(project.manifest.android.share_targets.len());
+    if share_types > 0 {
         findings.push(MobileAuditFinding::new(
             MobileAuditSeverity::Warning,
             "android.share-target",
-            format!("{} MIME types", project.manifest.android.share_targets.len()),
+            format!("{share_types} MIME types"),
             "Other applications can send content into this application.",
             "Accept only necessary MIME types and validate size, content and provenance before processing.",
         ));
@@ -5349,7 +5459,7 @@ fn configure_android(
     )?;
     add_share_targets(
         &workspace.join("app/src/main/AndroidManifest.xml"),
-        &project.manifest.android.share_targets,
+        &android_share_types(project)?,
     )
 }
 
@@ -5492,7 +5602,10 @@ fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), Stri
     write_atomic(manifest, contents.as_bytes())
 }
 
-fn add_share_targets(manifest: &Path, mime_types: &[String]) -> Result<(), String> {
+fn add_share_targets(
+    manifest: &Path,
+    share_types: &[plugin_share::ShareType],
+) -> Result<(), String> {
     const START: &str = "            <!-- pam-native:share-targets:start -->";
     const END: &str = "            <!-- pam-native:share-targets:end -->";
 
@@ -5508,21 +5621,10 @@ fn add_share_targets(manifest: &Path, mime_types: &[String]) -> Result<(), Strin
     let mut filters = String::new();
     filters.push_str(START);
     filters.push('\n');
-    for mime_type in mime_types {
-        filters.push_str("            <intent-filter>\n");
-        filters
-            .push_str("                <action android:name=\"android.intent.action.SEND\" />\n");
-        filters.push_str(
-            "                <action android:name=\"android.intent.action.SEND_MULTIPLE\" />\n",
-        );
-        filters.push_str(
-            "                <category android:name=\"android.intent.category.DEFAULT\" />\n",
-        );
-        filters.push_str("                <data android:mimeType=\"");
-        filters.push_str(mime_type);
-        filters.push_str("\" />\n");
-        filters.push_str("            </intent-filter>\n");
-    }
+    filters.push_str(&plugin_share::android_intent_filters(
+        share_types,
+        "            ",
+    ));
     filters.push_str(END);
     contents.replace_range(start..end, &filters);
     write_atomic(manifest, contents.as_bytes())
@@ -9689,6 +9791,160 @@ mod tests {
         assert!(!root.join(".pam-native/android").exists());
         assert!(source.is_file());
         assert!(clean_dev_paths(&root, &[root.join("vendor")]).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    fn share_plugin(package: &str, config_key: &str) -> NativePlugin {
+        NativePlugin {
+            package: package.to_owned(),
+            package_version: "1.0.0".to_owned(),
+            root: PathBuf::from("/nonexistent"),
+            descriptor: PathBuf::from("/nonexistent/pam-native.plugin.json"),
+            descriptor_digest: String::new(),
+            idl_digest: None,
+            manifest: serde_json::from_value(serde_json::json!({
+                "version": 1,
+                "protocol": 1,
+                "pamNative": {"minimum": "1.15.0", "maximumExclusive": "2.0.0"},
+                "capabilities": {"required": ["plugins.share.v1"]},
+                "share": {"configKey": config_key}
+            }))
+            .expect("plugin manifest"),
+        }
+    }
+
+    fn share_app(plugins: serde_json::Value) -> NativeManifest {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "applicationId": "app.pam.share",
+            "name": "Share",
+            "entry": "index.php",
+            "android": {"shareTargets": ["image/*"]},
+            "plugins": plugins
+        }))
+        .expect("app manifest")
+    }
+
+    #[test]
+    fn plugin_share_types_come_from_the_application_config() {
+        let plugin = share_plugin("vendor/share", "shareExtension");
+        let default = share_app(serde_json::json!({}));
+        validate_plugin_config(&default, std::slice::from_ref(&plugin)).expect("default");
+        let default_types = plugin_share_types(&default, &plugin)
+            .expect("types")
+            .expect("share");
+        assert_eq!(default_types.len(), 1);
+        assert_eq!(default_types[0].mime, "*/*");
+        assert!(default_types[0].multiple);
+
+        let configured = share_app(serde_json::json!({
+            "shareExtension": {
+                "accept": ["text/plain", "image/*", "video/*"],
+                "multiple": ["image/*", "video/*"]
+            }
+        }));
+        validate_plugin_config(&configured, std::slice::from_ref(&plugin)).expect("configured");
+        let project = Project {
+            root: PathBuf::from("/nonexistent"),
+            manifest: configured,
+            plugins: vec![plugin],
+        };
+        let android = android_share_types(&project).expect("android types");
+        assert_eq!(
+            android
+                .iter()
+                .map(|item| (item.mime.as_str(), item.multiple))
+                .collect::<Vec<_>>(),
+            [("image/*", true), ("text/plain", false), ("video/*", true)]
+        );
+
+        let mut info = serde_json::json!({
+            "NSExtension": {
+                "NSExtensionPointIdentifier": "com.apple.share-services",
+                "NSExtensionAttributes": {"NSExtensionActivationRule": {
+                    "NSExtensionActivationSupportsFileWithMaxCount": 32
+                }}
+            }
+        });
+        let types = plugin_share_types(&project.manifest, &project.plugins[0])
+            .expect("types")
+            .expect("share");
+        set_ios_share_activation_rule(&mut info, &types).expect("rule");
+        assert_eq!(
+            info["NSExtension"]["NSExtensionAttributes"]["NSExtensionActivationRule"],
+            serde_json::json!({
+                "NSExtensionActivationSupportsText": true,
+                "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+                "NSExtensionActivationSupportsImageWithMaxCount": 32,
+                "NSExtensionActivationSupportsMovieWithMaxCount": 8
+            })
+        );
+        assert_eq!(
+            info["NSExtension"]["NSExtensionPointIdentifier"],
+            "com.apple.share-services"
+        );
+    }
+
+    #[test]
+    fn plugin_share_config_rejects_unknown_keys_and_collisions() {
+        let plugin = share_plugin("vendor/share", "shareExtension");
+        let unknown = share_app(serde_json::json!({"share": {"accept": ["image/*"]}}));
+        assert!(validate_plugin_config(&unknown, std::slice::from_ref(&plugin)).is_err());
+        assert!(validate_plugin_config(&unknown, &[]).is_err());
+        let invalid = share_app(serde_json::json!({"shareExtension": {"accept": ["image"]}}));
+        assert!(validate_plugin_config(&invalid, std::slice::from_ref(&plugin)).is_err());
+        let empty = share_app(serde_json::json!({}));
+        assert!(
+            validate_plugin_config(
+                &empty,
+                &[plugin, share_plugin("vendor/other", "shareExtension")]
+            )
+            .is_err()
+        );
+        assert!(
+            validate_plugin_config(&empty, &[share_plugin("vendor/bad", "Share-Ext")]).is_err()
+        );
+    }
+
+    #[test]
+    fn share_targets_render_send_multiple_only_where_allowed() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-share-targets-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let manifest = root.join("AndroidManifest.xml");
+        fs::create_dir_all(&root).expect("manifest directory");
+        fs::write(
+            &manifest,
+            include_str!("../../../android/app/src/main/AndroidManifest.xml"),
+        )
+        .expect("manifest");
+        let types = [
+            plugin_share::ShareType {
+                mime: "text/plain".to_owned(),
+                multiple: false,
+            },
+            plugin_share::ShareType {
+                mime: "image/*".to_owned(),
+                multiple: true,
+            },
+        ];
+        add_share_targets(&manifest, &types).expect("share targets");
+        add_share_targets(&manifest, &types).expect("idempotent share targets");
+        let generated = fs::read_to_string(&manifest).expect("generated manifest");
+        assert_eq!(generated.matches("android.intent.action.SEND\"").count(), 2);
+        assert_eq!(
+            generated
+                .matches("android.intent.action.SEND_MULTIPLE")
+                .count(),
+            1
+        );
+        let text = generated.find("text/plain").expect("text filter");
+        let multiple = generated.find("SEND_MULTIPLE").expect("multiple filter");
+        assert!(multiple > text);
         fs::remove_dir_all(root).expect("cleanup");
     }
 

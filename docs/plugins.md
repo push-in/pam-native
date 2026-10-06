@@ -173,6 +173,55 @@ still require signed Xcode application targets; their canonical source paths,
 plist, entitlements, kind and bundle suffix are emitted in `plugins.json` for
 the host target generator.
 
+### Share sheets and per-application configuration
+
+A plugin that receives content from other applications' share sheets declares
+`share` instead of hardcoding intent filters or an activation rule. Each
+application then chooses the accepted types under `plugins.<configKey>` in its
+`pam-native.json`:
+
+```json
+{
+    "capabilities": {"required": ["plugins.share.v1"]},
+    "share": {
+        "configKey": "shareExtension",
+        "accept": ["*/*"],
+        "multiple": true
+    }
+}
+```
+
+```json
+{
+    "plugins": {
+        "shareExtension": {
+            "accept": ["text/plain", "image/*", "video/*"],
+            "multiple": ["image/*", "video/*"]
+        }
+    }
+}
+```
+
+`accept` lists 1 to 16 lowercase MIME types and defaults to the plugin's
+value. `multiple` is `true` (every accepted type may arrive several at once),
+`false`, or the accepted types that may. During prepare Pam Native:
+
+- adds one Android `SEND` intent filter per type to the launcher activity,
+  with `SEND_MULTIPLE` only for the types in `multiple`, merged with
+  `android.shareTargets`;
+- replaces the `NSExtensionActivationRule` of the plugin's Share Extensions
+  (kind `1`). `*/*` enables text, web URLs, files, images and movies;
+  `text/plain` enables text and web URLs (Android delivers links as
+  `text/plain`); `image/*` and `video/*` enable images and movies. Specific
+  types such as `application/pdf` produce a `SUBQUERY` predicate over their
+  type identifiers. Counts are 1 for single items and 8 (text, URLs, movies)
+  or 32 (files, images) otherwise.
+
+A `plugins` key that no installed plugin declares, two plugins sharing a
+`configKey`, an invalid MIME type or a `multiple` type missing from `accept`
+fails prepare. Keep validating received content in PHP: share sheets are an
+untrusted input.
+
 ## PHP provider
 
 Providers are registered in package-name order before the first render.
