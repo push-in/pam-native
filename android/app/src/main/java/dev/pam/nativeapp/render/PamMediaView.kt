@@ -47,13 +47,18 @@ internal fun resolveVideoScale(
     if (containerWidth <= 0 || containerHeight <= 0 || videoWidth <= 0 || videoHeight <= 0) {
         return 1f to 1f
     }
-    val scaleX = containerWidth.toFloat() / videoWidth
-    val scaleY = containerHeight.toFloat() / videoHeight
-    return when (resizeMode) {
-        1 -> maxOf(scaleX, scaleY).let { it to it }
-        3 -> scaleX to scaleY
-        else -> 1f to 1f
+    // The TextureView fills the container, so the decoder stretches every
+    // frame to the container box. The view scale turns that stretched box
+    // back into the requested fit: the displayed size divided by the box.
+    val fitX = containerWidth.toFloat() / videoWidth
+    val fitY = containerHeight.toFloat() / videoHeight
+    val scale = when (resizeMode) {
+        1 -> maxOf(fitX, fitY) // cover: fills the box, crops the overflow
+        2 -> minOf(fitX, fitY) // contain: whole frame, letterboxed
+        3 -> return 1f to 1f // fill: the stretched box itself
+        else -> 1f // center / repeat: native pixel size
     }
+    return (videoWidth * scale / containerWidth) to (videoHeight * scale / containerHeight)
 }
 
 @SuppressLint("ViewConstructor") // Programmatic renderer injects its shared cache coordinator.
