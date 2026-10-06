@@ -8,6 +8,10 @@
 - Repeated unchanged keyboard insets and keyboard dismissal preserve manual
   scrolling. Deferred reveal requests ignore stale insets and old focus targets;
   removing a scroll view or its keyboard-aware property releases its observers.
+- Android 26–29 detects the real keyboard while the Activity keeps
+  `adjustNothing`. Scroll and keyboard-avoiding overlays share one invisible,
+  non-interactive measurement window per root, released when unused. Dialogs
+  retain their own compatible window-inset path.
 - No PHP API, protocol identifiers or dependency requirements changed. See
   [migration notes](docs/migration-1.22.4.md).
 

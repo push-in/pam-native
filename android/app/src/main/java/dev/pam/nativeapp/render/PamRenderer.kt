@@ -1158,6 +1158,7 @@ class PamRenderer(
                 views[state.id]?.removeOnLayoutChangeListener(listener)
             }
             state.intersectionObserver?.close(notify = false)
+            state.legacyKeyboardSubscription?.close()
         }
         statusBarDefaults?.let(::applyStatusBarConfig)
         statusBarColorAnimator?.cancel()
@@ -1402,6 +1403,7 @@ class PamRenderer(
             (host as? PamRootHost)?.removePointerObserver(observer)
         }
         if (state.kind == NodeKind.KEYBOARD_AVOIDING_VIEW) {
+            state.legacyKeyboardSubscription?.close()
             if (state.keyboardAvoidingScrollId != 0L) {
                 views[state.keyboardAvoidingScrollId]
                     ?.let { it as? PamScrollContainer }
@@ -2949,7 +2951,10 @@ class PamRenderer(
                 applyKeyboardAvoidance(view, state)
             }
             PropKey.KEYBOARD_AVOIDING_ENABLED,
-            -> applyKeyboardAvoidance(view, state)
+            -> {
+                configureLegacyKeyboardInsets(view, state)
+                applyKeyboardAvoidance(view, state)
+            }
             PropKey.SAFE_AREA_TOP,
             PropKey.SAFE_AREA_RIGHT,
             PropKey.SAFE_AREA_BOTTOM_EDGE,
@@ -3617,7 +3622,10 @@ class PamRenderer(
                 applyKeyboardAvoidance(view, state)
             }
             PropKey.KEYBOARD_AVOIDING_ENABLED,
-            -> applyKeyboardAvoidance(view, state)
+            -> {
+                configureLegacyKeyboardInsets(view, state)
+                applyKeyboardAvoidance(view, state)
+            }
             PropKey.SAFE_AREA_TOP,
             PropKey.SAFE_AREA_RIGHT,
             PropKey.SAFE_AREA_BOTTOM_EDGE,
@@ -6631,7 +6639,7 @@ class PamRenderer(
             scrollKeyboardInsets.remove(scroll)?.close()
             return
         }
-        val observer = scrollKeyboardInsets.getOrPut(scroll) { PamScrollKeyboardInset(scroll) }
+        val observer = scrollKeyboardInsets.getOrPut(scroll) { PamScrollKeyboardInset(scroll, host as? PamRootHost) }
         observer.extraInsetPx = dp(state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat())
         scroll.requestApplyInsets()
     }
@@ -7221,7 +7229,22 @@ class PamRenderer(
         applyHostedChildLayouts(state.id)
     }
 
+    private fun configureLegacyKeyboardInsets(view: View, state: NodeState) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return
+        if (!state.flag(PropKey.KEYBOARD_AVOIDING_ENABLED, true)) {
+            state.legacyKeyboardSubscription?.close()
+            state.legacyKeyboardSubscription = null
+            return
+        }
+        if (state.legacyKeyboardSubscription != null) return
+        state.legacyKeyboardSubscription = (host as? PamRootHost)?.legacyImeInsets?.subscribe(view) { inset ->
+            state.keyboardInset = ownWindowImeInset(view, inset, state.keyboardInset)
+            if (!state.keyboardAnimating) applyKeyboardAvoidance(view, state)
+        }
+    }
+
     private fun installKeyboardInsets(view: View, state: NodeState) {
+        configureLegacyKeyboardInsets(view, state)
         val layoutListener = View.OnLayoutChangeListener {
                 _,
                 _,
@@ -7238,11 +7261,7 @@ class PamRenderer(
                 state.keyboardBaseHeight = height
             }
             if (oldBottom != bottom && state.keyboardBaseHeight > 0) {
-                val platformInset = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    currentPlatformImeInset()
-                } else {
-                    0
-                }
+                val platformInset = currentPlatformImeInset()
                 state.keyboardInset = resolvedKeyboardInset(
                     platformInset = platformInset,
                     baselineHeight = state.keyboardBaseHeight,
@@ -7348,7 +7367,7 @@ class PamRenderer(
         if (inset > 0 && !view.hasWindowFocus()) minOf(previous, inset) else inset
 
     private fun currentPlatformImeInset(): Int {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return (host as? PamRootHost)?.legacyImeInsets?.bottom ?: 0
         val insets = host.rootWindowInsets ?: return 0
         return visibleImeInset(
             rawInset = insets.getInsets(WindowInsets.Type.ime()).bottom,
@@ -8913,6 +8932,7 @@ class PamRenderer(
         var keyboardAnimating: Boolean = false,
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
+        var legacyKeyboardSubscription: AutoCloseable? = null,
         var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null,
         val inputInFlight: ArrayDeque<Pair<String, Long>> = ArrayDeque(),
         var keyboardViewportReconcileGeneration: Int = 0,

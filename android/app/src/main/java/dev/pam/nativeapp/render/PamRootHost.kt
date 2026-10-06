@@ -34,6 +34,7 @@ internal fun isEligibleTranslatedTouchOccluder(
 private const val IME_RECONCILE_DELAY_MS = 350L
 
 internal class PamRootHost(context: Context) : FrameLayout(context) {
+    internal val legacyImeInsets by lazy(LazyThreadSafetyMode.NONE) { PamLegacyImeInsets(this) }
     private val statusBarSurfacePaint = Paint()
     private val observers = LinkedHashSet<(MotionEvent) -> Unit>()
     private val translatedTouchContainers = LinkedHashMap<View, Boolean>()

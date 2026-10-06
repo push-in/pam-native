@@ -1,13 +1,23 @@
 package dev.pam.nativeapp.render
 
 import android.app.Instrumentation
+import android.app.Dialog
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.graphics.Insets
+import android.graphics.Bitmap
+import android.graphics.Rect
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import android.os.Build
 import android.os.SystemClock
 import android.view.WindowInsets
 import android.view.WindowManager
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.EditText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -63,13 +73,8 @@ class PamKeyboardAwareScrollInstrumentedTest {
 
     @Test
     fun realImeFocusAndAuthoredResizeKeep180dpClearanceAndFullViewport() {
-        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         fixture { f ->
-            f.onMain {
-                f.first.requestFocus()
-                f.first.context.getSystemService(InputMethodManager::class.java)
-                    .showSoftInput(f.first, InputMethodManager.SHOW_IMPLICIT)
-            }
+            f.showFirstKeyboard()
             f.waitFor("real keyboard and first input") {
                 val ime = f.imePixels()
                 ime > 0 && f.visiblePixels(f.first, ime, f.dp(180))
@@ -94,8 +99,78 @@ class PamKeyboardAwareScrollInstrumentedTest {
         }
     }
 
+    @Test
+    fun legacyScrollAndPanningOverlayShareImeDetectionAcrossDisableAndRemount() {
+        assumeTrue(Build.VERSION.SDK_INT < Build.VERSION_CODES.R)
+        fixture { f ->
+            f.showFirstKeyboard()
+            f.waitFor("legacy scroll sees real IME") { f.visiblePixels(f.first, f.imePixels(), f.dp(180)) }
+            lateinit var overlay: View
+            f.onMain {
+                f.renderer.commit(listOf(listOf(
+                    Mutation.Create(NodeSpec(6, 1, 1, NodeKind.KEYBOARD_AVOIDING_VIEW, mapOf(
+                        PropKey.KEYBOARD_BEHAVIOR to PropValue.Integer(2),
+                    ))),
+                    Mutation.Layout(6, Frame(0f, f.height - 48f, f.width, 48f)),
+                )))
+                overlay = requireNotNull(f.renderer.viewForNode(6))
+            }
+            f.waitFor("late mounted feedback overlay follows existing keyboard") {
+                val location = IntArray(2).also(overlay::getLocationInWindow)
+                val expectedBottom = overlay.rootView.height - f.imePixels()
+                overlay.translationY < 0 && kotlin.math.abs(location[1] + overlay.height - expectedBottom) <= 2
+            }
+            f.onMain {
+                assertEquals(f.initialHeight, f.scroll.height)
+                f.renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.SCROLL_KEYBOARD_INSET, PropValue.Flag(false)))))
+                assertEquals(0, f.scroll.keyboardAvoidanceInsetPixels())
+                assertTrue("overlay retains the shared measurement after scroll disables", overlay.translationY < 0)
+                f.renderer.commit(listOf(listOf(Mutation.Update(6, PropKey.KEYBOARD_AVOIDING_ENABLED, PropValue.Flag(false)))))
+                assertEquals(0f, overlay.translationY, 0f)
+                assertTrue("disabling consumers must not take input focus", f.first.hasFocus())
+                f.renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.SCROLL_KEYBOARD_INSET, PropValue.Flag(true)))))
+            }
+            f.waitFor("new observer reads an already open keyboard") { f.visiblePixels(f.first, f.imePixels(), f.dp(180)) }
+            lateinit var dialog: Dialog
+            f.onMain {
+                dialog = Dialog(f.activity).apply {
+                    setContentView(View(f.activity))
+                    show()
+                }
+            }
+            try {
+                f.waitFor("another window suspends the main-window observer") {
+                    !f.activity.hasWindowFocus() && f.scroll.keyboardAvoidanceInsetPixels() == 0
+                }
+            } finally {
+                f.onMain { dialog.dismiss() }
+            }
+            f.showFirstKeyboard()
+            f.waitFor("observer resumes after its popup was detached") { f.visiblePixels(f.first, f.imePixels(), f.dp(180)) }
+            f.onMain {
+                val parent = f.scroll.parent as ViewGroup
+                val index = parent.indexOfChild(f.scroll)
+                parent.removeView(f.scroll)
+                assertEquals("detach releases the keyboard content inset", 0, f.scroll.keyboardAvoidanceInsetPixels())
+                parent.addView(f.scroll, index)
+                f.first.requestFocus()
+                f.first.context.getSystemService(InputMethodManager::class.java).showSoftInput(f.first, InputMethodManager.SHOW_IMPLICIT)
+            }
+            f.waitFor("reattached consumer measures the keyboard again") { f.visiblePixels(f.first, f.imePixels(), f.dp(180)) }
+            f.onMain {
+                f.first.context.getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(f.first.windowToken, 0)
+            }
+            f.waitFor("legacy hide clears content inset") { f.imePixels() == 0 && f.scroll.keyboardAvoidanceInsetPixels() == 0 }
+        }
+    }
+
     private fun fixture(block: (Fixture) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        val originalFlags = automation.serviceInfo.flags
+        automation.serviceInfo = automation.serviceInfo.apply {
+            flags = flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        }
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, PamTestActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }) as PamTestActivity
@@ -112,6 +187,7 @@ class PamKeyboardAwareScrollInstrumentedTest {
                 current?.renderer?.close()
                 activity.finish()
             }
+            automation.serviceInfo = automation.serviceInfo.apply { flags = originalFlags }
         }
     }
 
@@ -124,6 +200,7 @@ class PamKeyboardAwareScrollInstrumentedTest {
         val first: EditText
         val second: EditText
         var initialHeight = 0
+        var imeShowAccepted = false
 
         init {
             activity.window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
@@ -153,7 +230,47 @@ class PamKeyboardAwareScrollInstrumentedTest {
 
         fun dp(value: Number): Int = (value.toFloat() * density).roundToInt()
         fun onMain(block: () -> Unit) = instrumentation.runOnMainSync(block)
-        fun imePixels(): Int = activity.host.rootWindowInsets?.getInsets(WindowInsets.Type.ime())?.bottom ?: 0
+        fun showFirstKeyboard() {
+            waitFor("activity window focus before user input") { activity.hasWindowFocus() && first.isAttachedToWindow }
+            tap(first)
+            onMain {
+                first.requestFocus()
+                imeShowAccepted = first.context.getSystemService(InputMethodManager::class.java)
+                    .showSoftInput(first, InputMethodManager.SHOW_IMPLICIT)
+            }
+        }
+        fun tap(input: EditText) {
+            val location = IntArray(2)
+            var x = 0f
+            var y = 0f
+            onMain {
+                input.showSoftInputOnFocus = true
+                input.getLocationOnScreen(location)
+                x = location[0] + input.width / 2f
+                y = location[1] + input.height / 2f
+            }
+            val down = SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) {
+                val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0)
+                instrumentation.sendPointerSync(event)
+                event.recycle()
+            }
+            instrumentation.waitForIdleSync()
+        }
+        fun imePixels(): Int {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                return ViewCompat.getRootWindowInsets(activity.host)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0
+            }
+            // Independent oracle: API26's adjustNothing insets report zero even
+            // when the real IME window covers the input. Read the system-owned
+            // accessibility window, not the observer under test.
+            val ime = instrumentation.uiAutomation.windows.firstOrNull { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+                ?: return 0
+            val bounds = Rect().also(ime::getBoundsInScreen)
+            val root = activity.host.rootView
+            val location = IntArray(2).also(root::getLocationOnScreen)
+            return (location[1] + root.height - bounds.top).coerceAtLeast(0)
+        }
         fun insets(heightDp: Int, animated: Boolean = false) {
             onMain { dispatchInsets(heightDp, animated) }
             instrumentation.waitForIdleSync()
@@ -189,7 +306,14 @@ class PamKeyboardAwareScrollInstrumentedTest {
                 input.getLocationInWindow(location)
                 "${location[1]}..${location[1] + input.height} scrollY=${input.scrollY} focused=${input.hasFocus()}"
             }
-            throw AssertionError("$label: root=${scroll.rootView.height} scroll=${scroll.height} inset=${scroll.keyboardAvoidanceInsetPixels()} ime=${imePixels()} offset=${scroll.snapshotOffsetPixels()} remaining=${scroll.remainingPrimaryPixels()} inputs=[$bounds]")
+            val visibleFrame = Rect().also(activity.window.decorView::getWindowVisibleDisplayFrame)
+            val screenshot = java.io.File(activity.getExternalFilesDir(null), "ime26-probe-before-finish.png")
+            instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
+                screenshot.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+                bitmap.recycle()
+            }
+            val imm = activity.getSystemService(InputMethodManager::class.java)
+            throw AssertionError("$label: windowFocus=${activity.hasWindowFocus()} showAccepted=$imeShowAccepted activeInput=${imm.isActive(first)} acceptingText=${imm.isAcceptingText} screenshot=$screenshot visibleFrame=$visibleFrame root=${scroll.rootView.height} scroll=${scroll.height} inset=${scroll.keyboardAvoidanceInsetPixels()} ime=${imePixels()} offset=${scroll.snapshotOffsetPixels()} remaining=${scroll.remainingPrimaryPixels()} inputs=[$bounds]")
         }
         private fun node(id: Long, parent: Long, kind: NodeKind, properties: Map<PropKey, PropValue> = emptyMap(), index: Int = 0) =
             NodeSpec(id, parent, index, kind, properties)
