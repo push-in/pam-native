@@ -103,7 +103,7 @@ $directory = sys_get_temp_dir().'/pam-native-runtime-audit-'.getmypid();
 @mkdir($directory.'/vendor/acme/tool/tests', 0777, true);
 file_put_contents($directory.'/index.php', "<?php\necho iconv_strlen('x');\n");
 file_put_contents($directory.'/src/Ok.php', "<?php\necho mb_strtoupper('ação');\n");
-file_put_contents($directory.'/vendor/pushinbr/pam-native/src/Sdk.php', "<?php\necho sodium_bin2hex('x');\n");
+file_put_contents($directory.'/vendor/pushinbr/pam-native/src/Sdk.php', "<?php\necho sodium_bin2hex('x');\nif (function_exists('openssl_encrypt')) { openssl_encrypt('', 'aes-256-gcm', ''); }\n");
 file_put_contents($directory.'/vendor/acme/tool/tests/ToolTest.php', "<?php\necho curl_init();\n");
 $directoryFindings = (new MobileRuntimeAudit())->auditDirectory($directory);
 array_map('unlink', [
@@ -114,6 +114,25 @@ foreach (['/vendor/acme/tool/tests', '/vendor/acme/tool', '/vendor/acme', '/vend
     @rmdir($directory.$child);
 }
 $assert(
-    count($directoryFindings) === 1 && str_starts_with($directoryFindings[0], 'index.php:2: function iconv_strlen() comes from ext-iconv'),
-    "The directory audit must skip the SDK and package tests:\n".implode("\n", $directoryFindings),
+    count($directoryFindings) === 2 && str_starts_with($directoryFindings[0], 'index.php:2: function iconv_strlen() comes from ext-iconv')
+        && $directoryFindings[1] === 'vendor/pushinbr/pam-native/src/Sdk.php:2: function sodium_bin2hex() comes from ext-sodium, which the PAM mobile PHP runtime (Android/iOS) does not include; use bin2hex(), which works on the device',
+    "The directory audit must skip package tests and audit the SDK like any package (guards trusted):\n".implode("\n", $directoryFindings),
+);
+
+// The SDK's own sources are clean: its sodium/openssl use is guarded and
+// falls back to the native host (Pam\Native\Crypto), so apps never get a
+// warning they cannot act on and the device never meets an undefined function.
+$sdkFindings = (new MobileRuntimeAudit())->auditDirectory(dirname(__DIR__).'/src');
+$assert($sdkFindings === [], "The PHP SDK must not use extensions the mobile runtime lacks unguarded:\n".implode("\n", $sdkFindings));
+
+// Crypto calls point at the API that works on the device.
+$cryptoAudit = new MobileRuntimeAudit();
+$cryptoAudit->scan('src/Ota.php', "<?php\n\$ok = sodium_crypto_sign_verify_detached(\$s, \$m, \$k);\n\$c = openssl_encrypt(\$p, 'aes-256-gcm', \$k, OPENSSL_RAW_DATA, \$n, \$t);\n\$x = sodium_crypto_box_seal(\$p, \$k);\n");
+$cryptoFindings = $cryptoAudit->findings();
+$assert(
+    count($cryptoFindings) === 3
+        && str_ends_with($cryptoFindings[0], 'ext-sodium, which the PAM mobile PHP runtime (Android/iOS) does not include; use Pam\\Native\\Crypto::ed25519Verify(), which works on the device')
+        && str_ends_with($cryptoFindings[1], '; use Pam\\Native\\Crypto::aes256GcmEncrypt() for AES-256-GCM, which works on the device')
+        && str_ends_with($cryptoFindings[2], 'ext-sodium, which the PAM mobile PHP runtime (Android/iOS) does not include'),
+    "Crypto findings must name Pam\\Native\\Crypto when it covers the call:\n".implode("\n", $cryptoFindings),
 );

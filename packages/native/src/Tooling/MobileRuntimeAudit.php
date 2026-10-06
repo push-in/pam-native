@@ -24,7 +24,9 @@ use ReflectionFunction;
  * extension the runtime lacks and that no scanned file or polyfill declares.
  * Calls guarded by function_exists()/class_exists()/extension_loaded() in the
  * same file are skipped. The pam-native CLI runs it while staging a build and
- * prints the findings as warnings.
+ * prints the findings as warnings. The SDK itself is audited like any package
+ * and is kept free of findings (its sodium/openssl use goes through
+ * Pam\Native\Crypto, which falls back to the native host on a device).
  */
 final class MobileRuntimeAudit
 {
@@ -60,6 +62,24 @@ final class MobileRuntimeAudit
         'uconverter' => 'intl', 'domdocument' => 'dom', 'simplexmlelement' => 'simplexml',
         'xmlreader' => 'xmlreader', 'xmlwriter' => 'xmlwriter', 'pdo' => 'pdo', 'sqlite3' => 'sqlite3',
         'ziparchive' => 'zip', 'finfo' => 'fileinfo', 'curlfile' => 'curl', 'gdimage' => 'gd',
+    ];
+
+    /**
+     * Calls with a PAM Native equivalent that works on Android and iOS; the
+     * finding names it.
+     */
+    private const array REPLACEMENTS = [
+        'sodium_crypto_sign_verify_detached' => 'Pam\\Native\\Crypto::ed25519Verify()',
+        'openssl_encrypt' => 'Pam\\Native\\Crypto::aes256GcmEncrypt() for AES-256-GCM',
+        'openssl_decrypt' => 'Pam\\Native\\Crypto::aes256GcmDecrypt() for AES-256-GCM',
+        'sodium_crypto_aead_aes256gcm_encrypt' => 'Pam\\Native\\Crypto::aes256GcmEncrypt()',
+        'sodium_crypto_aead_aes256gcm_decrypt' => 'Pam\\Native\\Crypto::aes256GcmDecrypt()',
+        'openssl_random_pseudo_bytes' => 'random_bytes()',
+        'sodium_memcmp' => 'hash_equals()',
+        'sodium_bin2hex' => 'bin2hex()',
+        'sodium_hex2bin' => 'hex2bin()',
+        'sodium_bin2base64' => 'base64_encode()',
+        'sodium_base642bin' => 'base64_decode()',
     ];
 
     /** Package directories that never run on the device. */
@@ -129,10 +149,6 @@ final class MobileRuntimeAudit
                                 return false;
                             }
                             if (count($parts) >= 4 && in_array($parts[count($parts) - 1], self::SKIPPED_DIRECTORIES, true)) {
-                                return false;
-                            }
-                            // The SDK guards its own optional extension use and is tested for it.
-                            if (($parts[1] ?? '') === 'pushinbr' && ($parts[2] ?? '') === 'pam-native') {
                                 return false;
                             }
                         } elseif (in_array($parts[count($parts) - 1], ['tests', 'Tests', 'scripts', 'benchmarks'], true)) {
@@ -313,13 +329,15 @@ final class MobileRuntimeAudit
                 continue;
             }
             $seen[$key] = true;
+            $replacement = $use['kind'] === 'function' ? (self::REPLACEMENTS[$global] ?? null) : null;
             $findings[] = sprintf(
-                '%s:%d: %s %s comes from ext-%s, which the PAM mobile PHP runtime (Android/iOS) does not include',
+                '%s:%d: %s %s comes from ext-%s, which the PAM mobile PHP runtime (Android/iOS) does not include%s',
                 $use['file'],
                 $use['line'],
                 $use['kind'],
                 $use['display'],
                 strtolower($extension),
+                $replacement === null ? '' : "; use {$replacement}, which works on the device",
             );
         }
 
