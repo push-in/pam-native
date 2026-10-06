@@ -204,6 +204,7 @@ class PamRuntime(
                 safeArea.getOrElse(1) { 0f },
                 safeArea.getOrElse(2) { 0f },
                 safeArea.getOrElse(3) { 0f },
+                dev.pam.nativeapp.render.modalWindowSurfacePolicy(context),
             )
             check(handle != 0L) { "Pam Runtime failed to start" }
             val display = (context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager)
@@ -670,6 +671,7 @@ class PamRuntime(
         safeTop: Float,
         safeRight: Float,
         safeBottom: Float,
+        surfacePolicy: Int,
     ): Long
     private external fun nativeSetKeyboardInset(
         handle: Long,

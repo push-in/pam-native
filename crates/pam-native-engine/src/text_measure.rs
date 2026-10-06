@@ -109,6 +109,8 @@ thread_local! {
     static ACTIVE: Cell<*const HostTextMeasurer> = const { Cell::new(std::ptr::null()) };
     static SAFE_AREA: Cell<Option<[f32; 4]>> = const { Cell::new(None) };
     static KEYBOARD_INSET: Cell<f32> = const { Cell::new(0.0) };
+    static SURFACE_POLICY: Cell<crate::surface::SurfacePolicy> =
+        const { Cell::new(crate::surface::SurfacePolicy::InWindow) };
 }
 
 /// Installs host layout inputs (text measurer, window safe area) for layout
@@ -117,6 +119,7 @@ pub(crate) struct ActiveScope {
     previous: *const HostTextMeasurer,
     previous_safe_area: Option<[f32; 4]>,
     previous_keyboard_inset: f32,
+    previous_surface_policy: crate::surface::SurfacePolicy,
 }
 
 impl ActiveScope {
@@ -135,7 +138,14 @@ impl ActiveScope {
             previous: ACTIVE.with(|active| active.replace(pointer)),
             previous_safe_area: SAFE_AREA.with(|area| area.replace(safe_area)),
             previous_keyboard_inset: KEYBOARD_INSET.with(|inset| inset.replace(keyboard_inset)),
+            previous_surface_policy: SURFACE_POLICY.with(Cell::get),
         }
+    }
+
+    /// Lays out presentation surfaces with `policy` while this scope lives.
+    pub(crate) fn with_surface_policy(self, policy: crate::surface::SurfacePolicy) -> Self {
+        SURFACE_POLICY.with(|current| current.set(policy));
+        self
     }
 }
 
@@ -144,7 +154,33 @@ impl Drop for ActiveScope {
         ACTIVE.with(|active| active.set(self.previous));
         SAFE_AREA.with(|area| area.set(self.previous_safe_area));
         KEYBOARD_INSET.with(|inset| inset.set(self.previous_keyboard_inset));
+        SURFACE_POLICY.with(|policy| policy.set(self.previous_surface_policy));
     }
+}
+
+/// Replaces the safe area seen by `SafeAreaView`s while a presentation
+/// surface (modal window, sheet route) is laid out; restores it on drop.
+pub(crate) struct SurfaceInsetsScope {
+    previous: Option<[f32; 4]>,
+}
+
+impl SurfaceInsetsScope {
+    pub(crate) fn enter(insets: Option<[f32; 4]>) -> Self {
+        Self {
+            previous: SAFE_AREA.with(|area| area.replace(insets)),
+        }
+    }
+}
+
+impl Drop for SurfaceInsetsScope {
+    fn drop(&mut self) {
+        SAFE_AREA.with(|area| area.set(self.previous));
+    }
+}
+
+/// How presentation surfaces relate to the window's system bars.
+pub(crate) fn surface_policy() -> crate::surface::SurfacePolicy {
+    SURFACE_POLICY.with(Cell::get)
 }
 
 /// Window safe-area insets (left, top, right, bottom) in points, when the

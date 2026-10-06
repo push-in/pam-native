@@ -42,7 +42,9 @@ struct LayoutContext<'a> {
     previous: Option<&'a BTreeMap<u64, Layout>>,
     dirty_path: Option<&'a BTreeSet<u64>>,
     visited_nodes: Cell<usize>,
-    viewport: Layout,
+    /// Window of the surface being laid out (root window, or a modal's own
+    /// presentation surface).
+    viewport: Cell<Layout>,
 }
 
 #[derive(Clone, Copy)]
@@ -92,12 +94,12 @@ pub fn calculate_with_text_metrics(
         previous: None,
         dirty_path: None,
         visited_nodes: Cell::new(0),
-        viewport: Layout {
+        viewport: Cell::new(Layout {
             x: 0.0,
             y: 0.0,
             width: viewport.width,
             height: viewport.height,
-        },
+        }),
     };
     let mut result = BTreeMap::new();
     layout_node(
@@ -113,25 +115,7 @@ pub fn calculate_with_text_metrics(
         0,
         &mut result,
     )?;
-    for modal in tree
-        .nodes
-        .values()
-        .filter(|node| node.kind == NodeKind::Modal && visible(node) && node.id != tree.root)
-    {
-        layout_node(
-            &context,
-            modal.id,
-            Layout {
-                x: 0.0,
-                y: 0.0,
-                width: viewport.width,
-                height: viewport.height,
-            },
-            false,
-            0,
-            &mut result,
-        )?;
-    }
+    layout_modal_surfaces(&context, &mut result)?;
     Ok(result)
 }
 
@@ -177,12 +161,12 @@ pub fn calculate_incremental_with_text_metrics(
         previous: Some(previous),
         dirty_path: Some(&dirty_path),
         visited_nodes: Cell::new(0),
-        viewport: Layout {
+        viewport: Cell::new(Layout {
             x: 0.0,
             y: 0.0,
             width: viewport.width,
             height: viewport.height,
-        },
+        }),
     };
     let mut result = previous.clone();
     let mut pending = dirty_nodes.iter().copied().collect::<Vec<_>>();
@@ -205,26 +189,33 @@ pub fn calculate_incremental_with_text_metrics(
         0,
         &mut result,
     )?;
-    for modal in tree
-        .nodes
-        .values()
-        .filter(|node| node.kind == NodeKind::Modal && visible(node) && node.id != tree.root)
-    {
-        layout_node(
-            &context,
-            modal.id,
-            Layout {
-                x: 0.0,
-                y: 0.0,
-                width: viewport.width,
-                height: viewport.height,
-            },
-            false,
-            0,
-            &mut result,
-        )?;
-    }
+    layout_modal_surfaces(&context, &mut result)?;
     Ok((result, context.visited_nodes.get()))
+}
+
+/// Lays out every visible `Modal`/`BottomSheet` on its own presentation
+/// surface: the surface viewport and safe area come from the window insets
+/// and the host's [`SurfacePolicy`](crate::surface::SurfacePolicy), so a
+/// `SafeAreaView` inside a modal window never re-applies an inset the window
+/// already excludes.
+fn layout_modal_surfaces(
+    context: &LayoutContext<'_>,
+    output: &mut BTreeMap<u64, Layout>,
+) -> Result<(), LayoutError> {
+    let window = context.viewport.get();
+    let window_insets = crate::text_measure::safe_area();
+    let policy = crate::text_measure::surface_policy();
+    for modal in context.tree.nodes.values().filter(|node| {
+        node.kind == NodeKind::Modal && visible(node) && node.id != context.tree.root
+    }) {
+        let surface = crate::surface::modal_surface(modal, window, window_insets, policy);
+        let _insets = crate::text_measure::SurfaceInsetsScope::enter(surface.insets);
+        context.viewport.set(surface.viewport);
+        let laid_out = layout_node(context, modal.id, surface.viewport, false, 0, output);
+        context.viewport.set(window);
+        laid_out?;
+    }
+    Ok(())
 }
 
 fn layout_node(
@@ -339,7 +330,7 @@ fn layout_node(
     let padding_right = padding_right + border_right;
     let padding_bottom = padding_bottom + border_bottom;
     let (safe_left, safe_top, safe_right, safe_bottom) =
-        safe_area_padding(node, frame, context.viewport);
+        safe_area_padding(node, frame, context.viewport.get());
     let padding_left = padding_left + safe_left;
     let padding_top = padding_top + safe_top;
     let padding_right = padding_right + safe_right;
@@ -499,8 +490,27 @@ fn layout_node(
         node.kind,
         NodeKind::RefreshControl | NodeKind::NavigationHost | NodeKind::TabHost
     ) {
+        // The active route of a sheet-presented navigation stack sits on its
+        // own sheet surface, which starts below the status bar.
+        let route_insets = (node.kind == NodeKind::NavigationHost)
+            .then(|| {
+                crate::surface::navigation_route_insets(
+                    node,
+                    crate::text_measure::safe_area(),
+                    crate::text_measure::surface_policy(),
+                )
+            })
+            .flatten();
+        let active_route = node_children
+            .iter()
+            .rev()
+            .find(|child| visible(child))
+            .map(|child| child.id);
         for child in node_children {
             if visible(child) {
+                let _sheet = route_insets
+                    .filter(|_| Some(child.id) == active_route)
+                    .map(crate::text_measure::SurfaceInsetsScope::enter);
                 layout_node(context, child.id, inner, true, depth + 1, output)?;
             }
         }
@@ -900,7 +910,7 @@ fn layout_node(
 
     for child in absolute_children {
         let inner = if integer(child, PropKey::PositionType) == Some(3) {
-            context.viewport
+            context.viewport.get()
         } else {
             inner
         };
@@ -3380,7 +3390,8 @@ fn reserve_keyboard_space(
     let offset = number(trailing, PropKey::KeyboardVerticalOffset)
         .filter(|value| value.is_finite())
         .unwrap_or(0.0);
-    let below_content = (context.viewport.y + context.viewport.height) - (inner.y + inner.height);
+    let viewport = context.viewport.get();
+    let below_content = (viewport.y + viewport.height) - (inner.y + inner.height);
     let reserve = (keyboard + offset - below_content.max(0.0)).clamp(0.0, inner.height);
     Layout {
         height: inner.height - reserve,
@@ -7462,5 +7473,293 @@ mod css_flex_tests {
         .expect("layout");
         assert_eq!(layouts[&2].width, 140.0);
         assert_eq!(layouts[&4].x, 70.0);
+    }
+
+    fn node(id: u64, parent: u64, index: u32, kind: NodeKind, properties: Props) -> Node {
+        Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        }
+    }
+
+    /// Screen with a root SafeAreaView, plus a Modal (id 10) whose content is a
+    /// SafeAreaView (11) with a 56pt header (12), a flexible body (13) and a
+    /// 50pt footer (14).
+    fn modal_safe_area_tree(modal_props: Vec<(PropKey, PropValue)>) -> Tree {
+        Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, vec![])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::SafeAreaView,
+                        vec![(PropKey::FlexGrow, f(1.0))],
+                    ),
+                ),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::View, vec![(PropKey::Height, f(40.0))]),
+                ),
+                (10, node(10, 1, 1, NodeKind::Modal, modal_props)),
+                (
+                    11,
+                    node(
+                        11,
+                        10,
+                        0,
+                        NodeKind::SafeAreaView,
+                        vec![(PropKey::FlexGrow, f(1.0))],
+                    ),
+                ),
+                (
+                    12,
+                    node(12, 11, 0, NodeKind::View, vec![(PropKey::Height, f(56.0))]),
+                ),
+                (
+                    13,
+                    node(13, 11, 1, NodeKind::View, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                (
+                    14,
+                    node(14, 11, 2, NodeKind::View, vec![(PropKey::Height, f(50.0))]),
+                ),
+            ]),
+        }
+    }
+
+    const SURFACE_WINDOW: Size = Size {
+        width: 400.0,
+        height: 800.0,
+    };
+    const SURFACE_INSETS: [f32; 4] = [0.0, 24.0, 0.0, 48.0];
+
+    fn surface_layout(tree: &Tree, policy: crate::surface::SurfacePolicy) -> BTreeMap<u64, Layout> {
+        let _scope = crate::text_measure::ActiveScope::enter_with(None, Some(SURFACE_INSETS), 0.0)
+            .with_surface_policy(policy);
+        calculate(tree, SURFACE_WINDOW).expect("layout")
+    }
+
+    fn full_screen() -> Vec<(PropKey, PropValue)> {
+        vec![(PropKey::ModalPresentation, PropValue::Integer(1))]
+    }
+
+    #[test]
+    fn in_window_full_screen_modal_safe_area_uses_the_window_insets() {
+        let layouts = surface_layout(
+            &modal_safe_area_tree(full_screen()),
+            crate::surface::SurfacePolicy::InWindow,
+        );
+        assert_eq!(
+            layouts[&10],
+            Layout {
+                x: 0.0,
+                y: 0.0,
+                width: 400.0,
+                height: 800.0
+            }
+        );
+        assert_eq!(layouts[&12].y, 24.0);
+        assert_eq!(layouts[&14].y + layouts[&14].height, 800.0 - 48.0);
+        assert_eq!(layouts[&3].y, 24.0);
+    }
+
+    #[test]
+    fn fitted_system_window_modal_never_applies_the_status_bar_twice() {
+        let layouts = surface_layout(
+            &modal_safe_area_tree(full_screen()),
+            crate::surface::SurfacePolicy::SystemWindows,
+        );
+        // The dialog window is laid out between the system bars.
+        assert_eq!(
+            layouts[&10],
+            Layout {
+                x: 0.0,
+                y: 24.0,
+                width: 400.0,
+                height: 728.0
+            }
+        );
+        assert_eq!(layouts[&11], layouts[&10]);
+        // Header at the window content top (status bar applied once, by the
+        // window), footer at the window content bottom (navigation bar once).
+        assert_eq!(layouts[&12].y, 24.0);
+        assert_eq!(layouts[&14].y + layouts[&14].height, 752.0);
+        assert_eq!(layouts[&13].height, 728.0 - 56.0 - 50.0);
+        // Content outside the modal keeps the activity window insets.
+        assert_eq!(layouts[&3].y, 24.0);
+    }
+
+    #[test]
+    fn enforced_edge_to_edge_modal_pads_the_real_insets_without_translucency() {
+        let layouts = surface_layout(
+            &modal_safe_area_tree(full_screen()),
+            crate::surface::SurfacePolicy::EdgeToEdgeWindows,
+        );
+        assert_eq!(
+            layouts[&10],
+            Layout {
+                x: 0.0,
+                y: 0.0,
+                width: 400.0,
+                height: 800.0
+            }
+        );
+        assert_eq!(layouts[&12].y, 24.0);
+        assert_eq!(layouts[&14].y + layouts[&14].height, 800.0 - 48.0);
+    }
+
+    #[test]
+    fn translucent_system_window_modal_safe_area_uses_the_real_insets() {
+        for key in [
+            PropKey::ModalStatusBarTranslucent,
+            PropKey::ModalNavigationBarTranslucent,
+        ] {
+            let mut props = full_screen();
+            props.push((key, PropValue::Boolean(true)));
+            let layouts = surface_layout(
+                &modal_safe_area_tree(props),
+                crate::surface::SurfacePolicy::SystemWindows,
+            );
+            assert_eq!(
+                layouts[&10],
+                Layout {
+                    x: 0.0,
+                    y: 0.0,
+                    width: 400.0,
+                    height: 800.0
+                }
+            );
+            assert_eq!(layouts[&12].y, 24.0, "{key:?}");
+            assert_eq!(
+                layouts[&14].y + layouts[&14].height,
+                800.0 - 48.0,
+                "{key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn bottom_sheet_safe_area_keeps_the_bottom_inset_but_never_the_status_bar() {
+        let sheet = vec![(PropKey::ModalPresentation, PropValue::Integer(3))];
+        let layouts = surface_layout(
+            &modal_safe_area_tree(sheet.clone()),
+            crate::surface::SurfacePolicy::InWindow,
+        );
+        assert_eq!(layouts[&12].y, 0.0);
+        assert_eq!(layouts[&14].y + layouts[&14].height, 800.0 - 48.0);
+
+        let fitted = surface_layout(
+            &modal_safe_area_tree(sheet.clone()),
+            crate::surface::SurfacePolicy::SystemWindows,
+        );
+        assert_eq!(fitted[&12].y, fitted[&10].y);
+        assert_eq!(fitted[&14].y + fitted[&14].height, 752.0);
+
+        let mut edge_to_edge = sheet;
+        edge_to_edge.push((
+            PropKey::ModalNavigationBarTranslucent,
+            PropValue::Boolean(true),
+        ));
+        let layouts = surface_layout(
+            &modal_safe_area_tree(edge_to_edge),
+            crate::surface::SurfacePolicy::SystemWindows,
+        );
+        assert_eq!(layouts[&12].y, 0.0);
+        assert_eq!(layouts[&14].y + layouts[&14].height, 800.0 - 48.0);
+    }
+
+    #[test]
+    fn content_sized_safe_area_in_a_fitted_dialog_does_not_grow_by_window_insets() {
+        let mut tree = modal_safe_area_tree(vec![]);
+        // Dialog content: a content-sized SafeAreaView holding a 100pt card.
+        tree.nodes
+            .insert(11, node(11, 10, 0, NodeKind::SafeAreaView, vec![]));
+        tree.nodes.retain(|id, _| !matches!(id, 13 | 14));
+        tree.nodes.insert(
+            12,
+            node(12, 11, 0, NodeKind::View, vec![(PropKey::Height, f(100.0))]),
+        );
+        let fitted = surface_layout(&tree, crate::surface::SurfacePolicy::SystemWindows);
+        assert_eq!(fitted[&11].height, 100.0);
+        let overlay = surface_layout(&tree, crate::surface::SurfacePolicy::InWindow);
+        assert_eq!(overlay[&11].height, 100.0 + 24.0 + 48.0);
+    }
+
+    #[test]
+    fn incremental_modal_relayout_keeps_the_surface_insets() {
+        let tree = modal_safe_area_tree(full_screen());
+        let metrics = TextMetrics::new();
+        let _scope = crate::text_measure::ActiveScope::enter_with(None, Some(SURFACE_INSETS), 0.0)
+            .with_surface_policy(crate::surface::SurfacePolicy::SystemWindows);
+        let full = calculate_with_text_metrics(&tree, SURFACE_WINDOW, 1.0, &metrics).expect("full");
+        let (incremental, _) = calculate_incremental_with_text_metrics(
+            &tree,
+            SURFACE_WINDOW,
+            1.0,
+            &metrics,
+            &full,
+            &BTreeSet::from([12]),
+        )
+        .expect("incremental");
+        assert_eq!(incremental, full);
+        assert_eq!(incremental[&12].y, 24.0);
+    }
+
+    #[test]
+    fn sheet_presented_routes_start_below_the_status_bar() {
+        let route_tree = |presentation| Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::NavigationHost,
+                        vec![(
+                            PropKey::NavigationPresentation,
+                            PropValue::Integer(presentation),
+                        )],
+                    ),
+                ),
+                // Previous route, still visible under the presented one.
+                (2, node(2, 1, 0, NodeKind::SafeAreaView, vec![])),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::View, vec![(PropKey::Height, f(10.0))]),
+                ),
+                // Active route.
+                (4, node(4, 1, 1, NodeKind::SafeAreaView, vec![])),
+                (
+                    5,
+                    node(5, 4, 0, NodeKind::View, vec![(PropKey::Height, f(10.0))]),
+                ),
+            ]),
+        };
+        use crate::surface::SurfacePolicy::{EdgeToEdgeWindows, InWindow, SystemWindows};
+        for (presentation, policy, active_top) in [
+            (7, InWindow, 0.0),
+            (2, InWindow, 0.0),
+            (4, InWindow, 24.0),
+            (1, InWindow, 24.0),
+            (7, SystemWindows, 0.0),
+            (2, SystemWindows, 24.0),
+            (7, EdgeToEdgeWindows, 0.0),
+            (2, EdgeToEdgeWindows, 24.0),
+        ] {
+            let layouts = surface_layout(&route_tree(presentation), policy);
+            assert_eq!(layouts[&5].y, active_top, "{presentation} {policy:?}");
+            assert_eq!(layouts[&3].y, 24.0, "{presentation} {policy:?}");
+            // The bottom inset still applies where the route reaches it.
+            assert_eq!(layouts[&4].height, 800.0, "{presentation} {policy:?}");
+        }
     }
 }

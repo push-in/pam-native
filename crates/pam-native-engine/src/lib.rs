@@ -7,6 +7,7 @@ mod layout;
 pub mod performance;
 pub mod reactive;
 pub mod scheduler;
+mod surface;
 mod text_measure;
 pub mod transaction;
 pub mod ui_language;
@@ -27,9 +28,10 @@ pub use ffi::{
     pam_native_engine_remount, pam_native_engine_set_asset_root,
     pam_native_engine_set_keyboard_inset, pam_native_engine_set_native_child_visibility,
     pam_native_engine_set_refresh_rate, pam_native_engine_set_safe_area_insets,
-    pam_native_engine_set_text_measurer, pam_native_engine_set_text_scale,
-    pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_surface_policy, pam_native_engine_set_text_measurer,
+    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
 };
+pub use surface::SurfacePolicy;
 pub use text_measure::{PamTextMeasureCallback, PamTextMeasureRequest, PamTextMeasureResult};
 
 #[derive(Debug)]
@@ -41,6 +43,7 @@ pub struct Engine {
     text_measurer: Option<text_measure::HostTextMeasurer>,
     safe_area: Option<[f32; 4]>,
     keyboard_inset: f32,
+    surface_policy: surface::SurfacePolicy,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
     created: u64,
@@ -67,6 +70,7 @@ impl Default for Engine {
             text_measurer: None,
             safe_area: None,
             keyboard_inset: 0.0,
+            surface_policy: surface::SurfacePolicy::InWindow,
             layouts: BTreeMap::new(),
             commits: 0,
             created: 0,
@@ -166,6 +170,17 @@ impl Engine {
         Ok(changed)
     }
 
+    /// How the host presents `Modal`/`BottomSheet` surfaces (see
+    /// [`SurfacePolicy`]). A `SafeAreaView` inside a modal uses the insets of
+    /// that surface: zero for edges its window does not extend under, the
+    /// window insets for translucent/edge-to-edge edges. Returns whether the
+    /// policy changed; the host relayouts afterwards.
+    pub fn set_surface_policy(&mut self, policy: SurfacePolicy) -> bool {
+        let changed = self.surface_policy != policy;
+        self.surface_policy = policy;
+        changed
+    }
+
     /// Drops cached host text measurements (fonts or configuration changed).
     pub fn invalidate_text_measurements(&mut self) {
         if let Some(measurer) = &self.text_measurer {
@@ -210,7 +225,8 @@ impl Engine {
             self.text_measurer.as_ref(),
             self.safe_area,
             self.keyboard_inset,
-        );
+        )
+        .with_surface_policy(self.surface_policy);
         let text_metrics = self.font_metrics.measure_tree(current);
         let next_layouts = layout::calculate_with_text_metrics(
             current,
@@ -339,7 +355,8 @@ impl Engine {
             self.text_measurer.as_ref(),
             self.safe_area,
             self.keyboard_inset,
-        );
+        )
+        .with_surface_policy(self.surface_policy);
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -455,7 +472,8 @@ impl Engine {
                 self.text_measurer.as_ref(),
                 self.safe_area,
                 self.keyboard_inset,
-            );
+            )
+            .with_surface_policy(self.surface_policy);
             let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
             let calculated = layout::calculate_incremental_with_text_metrics(
                 current,
@@ -576,7 +594,8 @@ impl Engine {
             self.text_measurer.as_ref(),
             self.safe_area,
             self.keyboard_inset,
-        );
+        )
+        .with_surface_policy(self.surface_policy);
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,

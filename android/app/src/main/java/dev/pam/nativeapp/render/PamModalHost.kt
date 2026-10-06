@@ -50,6 +50,30 @@ internal fun modalSoftInputAdjustMode(
     else -> WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
 }
 
+/** Engine surface policy: Modal/BottomSheet Dialogs fit the system bars unless translucent. */
+internal const val SURFACE_POLICY_SYSTEM_WINDOWS = 1
+
+/** Engine surface policy: Modal/BottomSheet Dialogs are always edge-to-edge. */
+internal const val SURFACE_POLICY_EDGE_TO_EDGE_WINDOWS = 2
+
+/**
+ * How the engine must treat PamModalHost's Dialog windows, so a SafeAreaView
+ * inside a modal uses that window's own insets. Up to Android 14 a
+ * non-translucent Dialog fits the system bars (it already starts below the
+ * status bar and ends above the navigation bar). Android 15+ enforces
+ * edge-to-edge for apps targeting SDK 35+, which ignores
+ * `setDecorFitsSystemWindows(true)`: every Dialog then extends under the bars.
+ */
+internal fun modalWindowSurfacePolicy(sdkInt: Int, targetSdk: Int): Int =
+    if (sdkInt >= 35 && targetSdk >= 35) {
+        SURFACE_POLICY_EDGE_TO_EDGE_WINDOWS
+    } else {
+        SURFACE_POLICY_SYSTEM_WINDOWS
+    }
+
+internal fun modalWindowSurfacePolicy(context: android.content.Context): Int =
+    modalWindowSurfacePolicy(Build.VERSION.SDK_INT, context.applicationInfo.targetSdkVersion)
+
 internal fun interactiveBottomSheetLayout(
     baseHeight: Int,
     keyboardInset: Int,

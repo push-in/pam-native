@@ -884,6 +884,9 @@ uint64_t pam_native_runtime_start(
     if (host_text_measurer.load() != nullptr) {
         pam_native_engine_set_text_measurer(state->engine, measure_text, state.get());
     }
+    // Modal/BottomSheet hosts are views inside the PAM window: full-screen
+    // modals overlay every safe edge and sheets never reach the top edge.
+    pam_native_engine_set_surface_policy(state->engine, 0, nullptr);
     {
         std::lock_guard<std::mutex> lock(boot_safe_area_mutex);
         if (boot_safe_area_set) {

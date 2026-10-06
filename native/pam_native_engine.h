@@ -114,6 +114,17 @@ PamStatus pam_native_engine_set_safe_area_insets(
     float right,
     float bottom
 );
+/* How Modal/BottomSheet surfaces are presented: 0 = views inside the host
+ * window (iOS), 1 = own windows that fit the system bars unless
+ * statusBarTranslucent/navigationBarTranslucent (Android 14 and older
+ * dialogs), 2 = own edge-to-edge windows (Android 15+ enforcement). A
+ * SafeAreaView inside a modal then uses that surface's insets. Writes 1 to
+ * `changed` when the policy changed; relayout afterwards. */
+PamStatus pam_native_engine_set_surface_policy(
+    PamNativeEngineHandle *handle,
+    uint32_t policy,
+    uint8_t *changed
+);
 /* Visible IME height in points from the window bottom (0 when hidden). A
  * trailing pan KeyboardAvoidingView is then laid out above the keyboard.
  * Writes 1 to `changed` when the value changed; relayout afterwards. */

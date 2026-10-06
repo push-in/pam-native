@@ -59,6 +59,8 @@ target_compile_definitions(pam_native_android PRIVATE
     ANDROID
     _GNU_SOURCE
     _FILE_OFFSET_BITS=64
+    # Instrumented-test hook (PamEngineLayoutProbe); never in release builds.
+    $<$<CONFIG:Debug>:PAM_ENGINE_LAYOUT_PROBE>
 )
 
 target_include_directories(pam_native_android PRIVATE

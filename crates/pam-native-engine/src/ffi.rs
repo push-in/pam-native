@@ -176,6 +176,34 @@ pub unsafe extern "C" fn pam_native_engine_set_safe_area_insets(
 }
 
 #[unsafe(no_mangle)]
+/// Sets how the host presents `Modal`/`BottomSheet` surfaces: `0` in-window
+/// views (iOS), `1` own windows that fit the system bars unless translucent
+/// (Android 14 and older dialogs), `2` own edge-to-edge windows (Android 15+
+/// enforced edge-to-edge). Writes 1 to `changed` when the policy changed.
+///
+/// # Safety
+///
+/// `handle` must point to a live engine and `changed` must be null or point to
+/// writable memory.
+pub unsafe extern "C" fn pam_native_engine_set_surface_policy(
+    handle: *mut PamNativeEngineHandle,
+    policy: u32,
+    changed: *mut u8,
+) -> PamStatus {
+    let Some(handle) = (unsafe { handle.as_mut() }) else {
+        return PamStatus::InvalidArgument;
+    };
+    let Some(policy) = crate::SurfacePolicy::from_raw(policy) else {
+        return PamStatus::InvalidArgument;
+    };
+    let value = handle.engine.set_surface_policy(policy);
+    if let Some(changed) = unsafe { changed.as_mut() } {
+        *changed = u8::from(value);
+    }
+    PamStatus::Success
+}
+
+#[unsafe(no_mangle)]
 /// Sets the visible IME height (points from the window bottom, 0 when hidden).
 /// Writes 1 to `changed` when the value differs from the previous one; the
 /// host then relayouts with [`pam_native_engine_relayout_with_metrics`].
@@ -619,6 +647,34 @@ mod tests {
         TEST_LOCK
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    #[test]
+    fn ffi_sets_the_surface_policy_and_rejects_unknown_values() {
+        let handle = pam_native_engine_new();
+        let mut changed = 9_u8;
+        // SAFETY: The handle is live and `changed` is writable.
+        unsafe {
+            assert_eq!(
+                pam_native_engine_set_surface_policy(handle, 1, &raw mut changed),
+                PamStatus::Success
+            );
+            assert_eq!(changed, 1);
+            assert_eq!(
+                pam_native_engine_set_surface_policy(handle, 1, &raw mut changed),
+                PamStatus::Success
+            );
+            assert_eq!(changed, 0);
+            assert_eq!(
+                pam_native_engine_set_surface_policy(handle, 3, std::ptr::null_mut()),
+                PamStatus::InvalidArgument
+            );
+            assert_eq!(
+                pam_native_engine_set_surface_policy(std::ptr::null_mut(), 0, std::ptr::null_mut()),
+                PamStatus::InvalidArgument
+            );
+            pam_native_engine_free(handle);
+        }
     }
 
     #[test]

@@ -1063,7 +1063,8 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     jfloat safe_left,
     jfloat safe_top,
     jfloat safe_right,
-    jfloat safe_bottom
+    jfloat safe_bottom,
+    jint surface_policy
 ) {
     log_debug("Starting the Pam Native worker.");
     if (
@@ -1196,6 +1197,14 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
     // The first PHP frame is laid out with the real window safe area, so
     // SafeAreaView never starts in a different inset mode than later frames.
     pam_native_engine_set_safe_area_insets(state->engine, safe_left, safe_top, safe_right, safe_bottom);
+    // Every Modal/BottomSheet is its own Dialog window (fitted to the system
+    // bars unless translucent, or edge-to-edge on Android 15+), so a
+    // SafeAreaView inside it uses that window's insets, never the activity's.
+    pam_native_engine_set_surface_policy(
+        state->engine,
+        static_cast<std::uint32_t>(surface_policy),
+        nullptr
+    );
     RuntimeState* handle = state.release();
     handle->worker = std::thread(runtime_loop, handle);
     return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(handle));
@@ -1507,6 +1516,66 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStop(JNIEnv*, jobject, jlong handle) {
     }
     pam_native_engine_free(state->engine);
 }
+
+#ifdef PAM_ENGINE_LAYOUT_PROBE
+// Debug builds only: lays out an encoded tree with the Android surface
+// policy and returns the engine batch, so instrumented tests drive the real
+// renderer and Dialog windows with real engine frames (no PHP involved).
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_dev_pam_nativeapp_render_PamEngineLayoutProbe_nativeLayout(
+    JNIEnv* env,
+    jclass,
+    jbyteArray tree,
+    jfloat width,
+    jfloat height,
+    jfloatArray insets,
+    jint surface_policy
+) {
+    if (tree == nullptr || insets == nullptr || env->GetArrayLength(insets) != 4) {
+        return nullptr;
+    }
+    std::array<jfloat, 4> safe{};
+    env->GetFloatArrayRegion(insets, 0, 4, safe.data());
+    const jsize length = env->GetArrayLength(tree);
+    std::string frame(static_cast<std::size_t>(length), '\0');
+    env->GetByteArrayRegion(tree, 0, length, reinterpret_cast<jbyte*>(frame.data()));
+    PamNativeEngineHandle* engine = pam_native_engine_new();
+    if (engine == nullptr) {
+        return nullptr;
+    }
+    PamNativeBuffer batch{nullptr, 0, 0};
+    const bool laid_out =
+        pam_native_engine_set_viewport(engine, width, height) == PAM_STATUS_SUCCESS
+        && pam_native_engine_set_safe_area_insets(engine, safe[0], safe[1], safe[2], safe[3])
+            == PAM_STATUS_SUCCESS
+        && pam_native_engine_set_surface_policy(
+            engine,
+            static_cast<std::uint32_t>(surface_policy),
+            nullptr
+        ) == PAM_STATUS_SUCCESS
+        && pam_native_engine_commit(
+            engine,
+            reinterpret_cast<const std::uint8_t*>(frame.data()),
+            frame.size(),
+            &batch
+        ) == PAM_STATUS_SUCCESS;
+    jbyteArray result = nullptr;
+    if (laid_out && batch.data != nullptr) {
+        result = env->NewByteArray(static_cast<jsize>(batch.length));
+        if (result != nullptr) {
+            env->SetByteArrayRegion(
+                result,
+                0,
+                static_cast<jsize>(batch.length),
+                reinterpret_cast<const jbyte*>(batch.data)
+            );
+        }
+    }
+    pam_native_buffer_free(batch);
+    pam_native_engine_free(engine);
+    return result;
+}
+#endif
 
 JNIEXPORT jint JNI_OnLoad(JavaVM*, void*) {
     return JNI_VERSION_1_6;
