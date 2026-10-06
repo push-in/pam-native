@@ -339,6 +339,81 @@ class PamNavigationHostInstrumentedTest {
         }
     }
 
+    /**
+     * Zé Chat cold-start deep link: Navigator::reset(Inbox) then, one tick
+     * later, a push of the chat. When both PHP frames reach the engine before
+     * it diffs, one commit removes the launch route and creates the new
+     * routes in node-id order (the chat before the Inbox it sits on). The
+     * chat must still be the destination, whatever the commit timing.
+     */
+    @Test
+    fun resetThenPushLandsOnThePushedRouteWhateverTheCommitTiming() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            for (coalesced in listOf(true, false)) {
+                lateinit var navigation: PamNavigationHost
+                lateinit var inbox: View
+                lateinit var chat: View
+                onMain(instrumentation) {
+                    activity.host.removeAllViews()
+                    navigation = PamNavigationHost(activity).apply {
+                        layoutParams = FrameLayout.LayoutParams(
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                            FrameLayout.LayoutParams.MATCH_PARENT,
+                        )
+                        transition = TRANSITION_NONE
+                    }
+                    activity.host.addView(navigation)
+                    navigation.insert(View(activity), 0)
+                }
+                instrumentation.waitForIdleSync()
+                onMain(instrumentation) {
+                    inbox = View(activity)
+                    chat = View(activity)
+                    // Engine order: removes, then creates by ascending node id.
+                    navigation.removeRoute(navigation.getChildAt(0))
+                    if (coalesced) {
+                        navigation.insert(chat, 0)
+                        navigation.insert(inbox, 0)
+                        navigation.operation = OPERATION_PUSH
+                        navigation.navigate(2)
+                    } else {
+                        navigation.insert(inbox, 0)
+                        navigation.operation = OPERATION_RESET
+                        navigation.navigate(1)
+                    }
+                }
+                instrumentation.waitForIdleSync()
+                if (!coalesced) {
+                    onMain(instrumentation) {
+                        navigation.insert(chat, 1)
+                        navigation.operation = OPERATION_PUSH
+                        navigation.navigate(2)
+                    }
+                    instrumentation.waitForIdleSync()
+                }
+                onMain(instrumentation) {
+                    // The transition end lets PHP settle the stack (Idle).
+                    navigation.operation = OPERATION_IDLE
+                    navigation.navigate(3)
+                }
+                instrumentation.waitForIdleSync()
+                onMain(instrumentation) {
+                    val label = if (coalesced) "coalesced" else "separate commits"
+                    assertSame("$label: engine order", inbox, navigation.getChildAt(0))
+                    assertSame("$label: engine order", chat, navigation.getChildAt(1))
+                    assertTrue("$label: chat is the active route", navigation.isActiveRoute(chat))
+                    assertEquals("$label: chat shown", View.VISIBLE, chat.visibility)
+                    assertEquals("$label: inbox hidden", View.INVISIBLE, inbox.visibility)
+                    assertEquals(2, navigation.routeControllerCount())
+                }
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     @Test
     fun predictiveBackProgressStaysNativeAndCommitsWithoutSecondAnimation() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -638,8 +713,10 @@ class PamNavigationHostInstrumentedTest {
     }
 
     private companion object {
+        const val OPERATION_IDLE = 1
         const val OPERATION_PUSH = 2
         const val OPERATION_POP = 3
+        const val OPERATION_RESET = 5
         const val TRANSITION_SLIDE_FROM_RIGHT = 2
         const val TRANSITION_NONE = 8
         const val TYPE_PERMANENT = 4

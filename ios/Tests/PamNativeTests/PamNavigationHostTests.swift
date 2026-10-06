@@ -61,6 +61,37 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertFalse(second.isHidden)
     }
 
+    /// Android parity (PamNavigationHostInstrumentedTest
+    /// resetThenPushLandsOnThePushedRouteWhateverTheCommitTiming): a reset and
+    /// a push folded into one commit create the routes in node-id order (the
+    /// pushed chat before the Inbox under it); the destination is the top of
+    /// the engine's route order, not the last inserted route.
+    func testResetThenPushInOneCommitLandsOnThePushedRoute() {
+        for attached in [false, true] {
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+            let root = UIViewController()
+            window.rootViewController = root
+            if attached { window.makeKeyAndVisible() }
+            let host = PamNavigationHost(frame: root.view.bounds)
+            root.view.addSubview(host)
+            let launch = UIView()
+            host.insert(launch, index: 0)
+            host.removeRoute(launch)
+            let chat = UIView()
+            let inbox = UIView()
+            host.insert(chat, index: 0)
+            host.insert(inbox, index: 0)
+            host.operation = 2
+            host.transition = 8
+            host.navigate(1)
+            host.operation = 1
+            host.navigate(2)
+
+            XCTAssertFalse(chat.isHidden, "attached=\(attached)")
+            XCTAssertTrue(inbox.isHidden, "attached=\(attached)")
+        }
+    }
+
     func testAttachedRoutesReceiveNativeViewControllers() {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let root = UIViewController()

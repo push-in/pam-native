@@ -58,7 +58,6 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
     private var activeRoute: View? = null
-    private var pendingIncomingRoute: View? = null
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingObserver: ViewTreeObserver? = null
@@ -118,10 +117,15 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         clipToPadding = true
     }
 
+    /**
+     * Child order is the engine's route order (the navigator renders its top
+     * route last, before an outgoing route only while popping), so the
+     * destination of a transition is always read from position, never from
+     * which route happened to be inserted last: a reset and a push folded
+     * into one commit create their routes in node-id order, not stack order.
+     */
     fun insert(view: View, index: Int) {
         val isInitialRoute = childCount == 0
-        val isRetainedRoute = view === activeRoute || routeControllers.containsKey(view)
-        if (!isInitialRoute && !isRetainedRoute) pendingIncomingRoute = view
         val isVisibleRoute = isInitialRoute || view === activeRoute
         view.visibility = if (isVisibleRoute) View.VISIBLE else View.INVISIBLE
         view.importantForAccessibility = if (isVisibleRoute) {
@@ -154,9 +158,6 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     override fun onViewRemoved(child: View) {
         super.onViewRemoved(child)
         if (suppressControllerRemoval) return
-        if (child === pendingIncomingRoute) {
-            pendingIncomingRoute = null
-        }
         if (child === activeRoute) {
             activeRoute = null
             if (childCount > 0) {
@@ -442,9 +443,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val incoming: View
         when (operation) {
             OPERATION_PUSH, OPERATION_REPLACE -> {
-                incoming = pendingIncomingRoute
-                    ?.takeIf { it.parent === this }
-                    ?: getChildAt(childCount - 1)
+                incoming = getChildAt(childCount - 1)
                 outgoing = activeRoute
                     ?.takeIf { it !== incoming && it.parent === this }
                     ?: childrenSnapshot().lastOrNull { it !== incoming }
@@ -454,7 +453,6 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 outgoing = if (childCount > 1) getChildAt(childCount - 1) else null
             }
             else -> {
-                pendingIncomingRoute = null
                 showOnlyTop()
                 return
             }
@@ -730,7 +728,6 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun finish(incoming: View, outgoing: View?) {
         clearSharedElements()
         running = null
-        pendingIncomingRoute = null
         setActiveRoute(incoming)
         reset(incoming)
         outgoing?.let {
@@ -773,6 +770,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (manager.isStateSaved) return
         val fragment = PamRouteFragment().also { it.bind(view) }
         routeControllers[view] = fragment
+        val position = indexOfChild(view)
         suppressControllerRemoval = true
         if (view.parent === this) removeView(view)
         suppressControllerRemoval = false
@@ -784,6 +782,22 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 if (view === activeRoute) Lifecycle.State.RESUMED else Lifecycle.State.STARTED,
             )
             .commitNow()
+        // The FragmentManager re-adds the view right after the previously
+        // added route fragment's view, not where the engine placed it.
+        if (position >= 0) restoreRoutePosition(view, position)
+    }
+
+    private fun restoreRoutePosition(view: View, position: Int) {
+        if (view.parent !== this) return
+        val target = position.coerceIn(0, childCount - 1)
+        if (indexOfChild(view) == target) return
+        suppressControllerRemoval = true
+        try {
+            removeView(view)
+            addView(view, target)
+        } finally {
+            suppressControllerRemoval = false
+        }
     }
 
     private fun updateControllerLifecycles() {
