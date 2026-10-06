@@ -9,7 +9,7 @@ use Closure;
 final readonly class EncodedSubtree
 {
     /**
-     * @param list<EncodedNode> $nodes
+     * @param array<int, EncodedNode> $nodes encoded nodes by id, in frame order
      * @param array<string, Closure> $callbacks
      */
     public function __construct(

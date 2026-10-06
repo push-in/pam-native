@@ -17,6 +17,80 @@ final class TreeEncoder
 {
     private const MAX_NODES = 100_000;
 
+    /** EventKind value => callback PropKey value. */
+    private const EVENT_PROPERTIES = [
+        EventKind::Press->value => PropKey::OnPress->value,
+        EventKind::Change->value => PropKey::OnChange->value,
+        EventKind::LongPress->value => PropKey::OnLongPress->value,
+        EventKind::Focus->value => PropKey::OnFocus->value,
+        EventKind::Blur->value => PropKey::OnBlur->value,
+        EventKind::Submit->value => PropKey::OnSubmit->value,
+        EventKind::Scroll->value => PropKey::OnScroll->value,
+        EventKind::Refresh->value => PropKey::OnRefresh->value,
+        EventKind::Toggle->value => PropKey::OnToggle->value,
+        EventKind::EndReached->value => PropKey::OnEndReached->value,
+        EventKind::DrawerOpen->value => PropKey::OnDrawerOpen->value,
+        EventKind::DrawerClose->value => PropKey::OnDrawerClose->value,
+        EventKind::Native->value => PropKey::OnNativeEvent->value,
+        EventKind::ImageLoadStart->value => PropKey::OnImageLoadStart->value,
+        EventKind::ImageProgress->value => PropKey::OnImageProgress->value,
+        EventKind::ImageLoad->value => PropKey::OnImageLoad->value,
+        EventKind::ImageError->value => PropKey::OnImageError->value,
+        EventKind::ImageLoadEnd->value => PropKey::OnImageLoadEnd->value,
+        EventKind::InputEndEditing->value => PropKey::OnInputEndEditing->value,
+        EventKind::InputSelectionChange->value => PropKey::OnInputSelectionChange->value,
+        EventKind::InputContentSizeChange->value => PropKey::OnInputContentSizeChange->value,
+        EventKind::InputKeyPress->value => PropKey::OnInputKeyPress->value,
+        EventKind::PressIn->value => PropKey::OnPressIn->value,
+        EventKind::PressOut->value => PropKey::OnPressOut->value,
+        EventKind::PressMove->value => PropKey::OnPressMove->value,
+        EventKind::ModalRequestClose->value => PropKey::OnModalRequestClose->value,
+        EventKind::ModalShow->value => PropKey::OnModalShow->value,
+        EventKind::ModalDismiss->value => PropKey::OnModalDismiss->value,
+        EventKind::ModalOrientationChange->value => PropKey::OnModalOrientationChange->value,
+        EventKind::ClickOutside->value => PropKey::OnClickOutside->value,
+        EventKind::Intersect->value => PropKey::OnIntersect->value,
+        EventKind::Mutate->value => PropKey::OnMutate->value,
+        EventKind::Resize->value => PropKey::OnResize->value,
+        EventKind::TouchStart->value => PropKey::OnTouchStart->value,
+        EventKind::TouchMove->value => PropKey::OnTouchMove->value,
+        EventKind::TouchEnd->value => PropKey::OnTouchEnd->value,
+        EventKind::GestureBegin->value => PropKey::OnGestureBegin->value,
+        EventKind::GestureUpdate->value => PropKey::OnGestureUpdate->value,
+        EventKind::GestureEnd->value => PropKey::OnGestureEnd->value,
+        EventKind::GestureCancel->value => PropKey::OnGestureCancel->value,
+        EventKind::BottomSheetChange->value => PropKey::OnBottomSheetChange->value,
+        EventKind::BottomSheetDismiss->value => PropKey::OnBottomSheetDismiss->value,
+        EventKind::WebViewLoad->value => PropKey::OnWebViewLoad->value,
+        EventKind::WebViewError->value => PropKey::OnWebViewError->value,
+        EventKind::WebViewMessage->value => PropKey::OnWebViewMessage->value,
+        EventKind::MediaReady->value => PropKey::OnMediaReady->value,
+        EventKind::MediaProgress->value => PropKey::OnMediaProgress->value,
+        EventKind::MediaEnd->value => PropKey::OnMediaEnd->value,
+        EventKind::MediaError->value => PropKey::OnMediaError->value,
+        EventKind::DragStart->value => PropKey::OnDragStart->value,
+        EventKind::DragEnd->value => PropKey::OnDragEnd->value,
+        EventKind::Drop->value => PropKey::OnDrop->value,
+        EventKind::MenuAction->value => PropKey::OnMenuAction->value,
+        EventKind::NavigationGesturePop->value => PropKey::OnNavigationGesturePop->value,
+        EventKind::AnimationComplete->value => PropKey::OnAnimationComplete->value,
+        EventKind::MediaCacheHit->value => PropKey::OnMediaCacheHit->value,
+        EventKind::MediaCacheMiss->value => PropKey::OnMediaCacheMiss->value,
+        EventKind::MediaCacheProgress->value => PropKey::OnMediaCacheProgress->value,
+        EventKind::MediaCacheReady->value => PropKey::OnMediaCacheReady->value,
+        EventKind::AccessibilityAction->value => PropKey::OnAccessibilityAction->value,
+        EventKind::SpanPress->value => PropKey::OnSpanPress->value,
+        EventKind::Layout->value => PropKey::OnLayout->value,
+        EventKind::MediaBuffering->value => PropKey::OnMediaBuffering->value,
+        EventKind::MediaLoadStart->value => PropKey::OnMediaLoadStart->value,
+        EventKind::DoubleTap->value => PropKey::OnDoubleTap->value,
+        EventKind::GestureSettle->value => PropKey::OnGestureSettle->value,
+        EventKind::ScrollBeginDrag->value => PropKey::OnScrollBeginDrag->value,
+        EventKind::ScrollEndDrag->value => PropKey::OnScrollEndDrag->value,
+        EventKind::MomentumScrollEnd->value => PropKey::OnMomentumScrollEnd->value,
+        EventKind::TextLayout->value => PropKey::OnTextLayout->value,
+    ];
+
     /** @var array<int, true> */
     private array $ids = [];
 
@@ -43,6 +117,9 @@ final class TreeEncoder
 
     private ?int $previousRoot = null;
     private int $nodeCount = 0;
+
+    /** @var array<string, string> encoded short strings (validated UTF-8) */
+    private static array $encodedStrings = [];
 
     public function __construct()
     {
@@ -110,33 +187,35 @@ final class TreeEncoder
         $cached = ($this->subtreeCache[$element] ?? [])[$path] ?? null;
 
         if ($cached !== null) {
-            if ($this->nodeCount + count($cached->nodes) > self::MAX_NODES) {
+            $count = count($cached->nodes);
+            if ($this->nodeCount + $count > self::MAX_NODES) {
                 throw new LogicException('Pam Native trees cannot exceed 100,000 nodes.');
             }
-
-            foreach ($cached->nodes as $offset => $node) {
-                $isReservedRoot = $offset === 0 && $node->id === $id;
-
-                if (isset($this->ids[$node->id]) && !$isReservedRoot) {
-                    throw new LogicException("Element identity collision at {$path}; assign a unique key.");
-                }
-
-                if ($offset === 0 && ($node->index !== $index || $node->parent !== $parent)) {
-                    // A reused (memoized or keyed) subtree can sit at a new
-                    // sibling position under the same path; only its root's
-                    // placement changes, its descendants are unchanged.
-                    $node = new EncodedNode($node->id, $parent, $index, $node->kind, $node->properties);
-                }
-                $this->ids[$node->id] = true;
-                $this->nodes[$node->id] = $node;
+            // The subtree root id was reserved by nodeId(); any other overlap
+            // is an identity collision.
+            $overlap = array_intersect_key($cached->nodes, $this->ids);
+            if ($overlap !== [] && (count($overlap) > 1 || array_key_first($overlap) !== $id || array_key_first($cached->nodes) !== $id)) {
+                throw new LogicException("Element identity collision at {$path}; assign a unique key.");
             }
-            $this->nodeCount += count($cached->nodes);
-            $this->callbacks = [...$this->callbacks, ...$cached->callbacks];
+            $this->ids += $cached->nodes;
+            $this->nodes += $cached->nodes;
+            $root = $cached->nodes[array_key_first($cached->nodes)];
+            if ($root->index !== $index || $root->parent !== $parent) {
+                // A reused (memoized or keyed) subtree can sit at a new
+                // sibling position under the same path; only its root's
+                // placement changes, its descendants are unchanged.
+                $this->nodes[$root->id] = $root->placedAt($parent, $index);
+            }
+            $this->nodeCount += $count;
+            if ($cached->callbacks !== []) {
+                $this->callbacks += $cached->callbacks;
+            }
 
             return;
         }
 
         $start = count($this->nodes);
+        $callbackStart = count($this->callbacks);
 
         if (++$this->nodeCount > self::MAX_NODES) {
             throw new LogicException('Pam Native trees cannot exceed 100,000 nodes.');
@@ -146,97 +225,20 @@ final class TreeEncoder
 
         foreach ($element->events() as $kind => $callback) {
             $this->callbacks[$id.':'.$kind] = $callback;
-            $property = match (EventKind::from($kind)) {
-                EventKind::Press => PropKey::OnPress,
-                EventKind::Change => PropKey::OnChange,
-                EventKind::LongPress => PropKey::OnLongPress,
-                EventKind::Focus => PropKey::OnFocus,
-                EventKind::Blur => PropKey::OnBlur,
-                EventKind::Submit => PropKey::OnSubmit,
-                EventKind::Scroll => PropKey::OnScroll,
-                EventKind::Refresh => PropKey::OnRefresh,
-                EventKind::Toggle => PropKey::OnToggle,
-                EventKind::EndReached => PropKey::OnEndReached,
-                EventKind::DrawerOpen => PropKey::OnDrawerOpen,
-                EventKind::DrawerClose => PropKey::OnDrawerClose,
-                EventKind::Native => PropKey::OnNativeEvent,
-                EventKind::ImageLoadStart => PropKey::OnImageLoadStart,
-                EventKind::ImageProgress => PropKey::OnImageProgress,
-                EventKind::ImageLoad => PropKey::OnImageLoad,
-                EventKind::ImageError => PropKey::OnImageError,
-                EventKind::ImageLoadEnd => PropKey::OnImageLoadEnd,
-                EventKind::InputEndEditing => PropKey::OnInputEndEditing,
-                EventKind::InputSelectionChange =>
-                    PropKey::OnInputSelectionChange,
-                EventKind::InputContentSizeChange =>
-                    PropKey::OnInputContentSizeChange,
-                EventKind::InputKeyPress => PropKey::OnInputKeyPress,
-                EventKind::PressIn => PropKey::OnPressIn,
-                EventKind::PressOut => PropKey::OnPressOut,
-                EventKind::PressMove => PropKey::OnPressMove,
-                EventKind::ModalRequestClose => PropKey::OnModalRequestClose,
-                EventKind::ModalShow => PropKey::OnModalShow,
-                EventKind::ModalDismiss => PropKey::OnModalDismiss,
-                EventKind::ModalOrientationChange =>
-                    PropKey::OnModalOrientationChange,
-                EventKind::ClickOutside => PropKey::OnClickOutside,
-                EventKind::Intersect => PropKey::OnIntersect,
-                EventKind::Mutate => PropKey::OnMutate,
-                EventKind::Resize => PropKey::OnResize,
-                EventKind::TouchStart => PropKey::OnTouchStart,
-                EventKind::TouchMove => PropKey::OnTouchMove,
-                EventKind::TouchEnd => PropKey::OnTouchEnd,
-                EventKind::GestureBegin => PropKey::OnGestureBegin,
-                EventKind::GestureUpdate => PropKey::OnGestureUpdate,
-                EventKind::GestureEnd => PropKey::OnGestureEnd,
-                EventKind::GestureCancel => PropKey::OnGestureCancel,
-                EventKind::BottomSheetChange => PropKey::OnBottomSheetChange,
-                EventKind::BottomSheetDismiss => PropKey::OnBottomSheetDismiss,
-                EventKind::WebViewLoad => PropKey::OnWebViewLoad,
-                EventKind::WebViewError => PropKey::OnWebViewError,
-                EventKind::WebViewMessage => PropKey::OnWebViewMessage,
-                EventKind::MediaReady => PropKey::OnMediaReady,
-                EventKind::MediaProgress => PropKey::OnMediaProgress,
-                EventKind::MediaEnd => PropKey::OnMediaEnd,
-                EventKind::MediaError => PropKey::OnMediaError,
-                EventKind::DragStart => PropKey::OnDragStart,
-                EventKind::DragEnd => PropKey::OnDragEnd,
-                EventKind::Drop => PropKey::OnDrop,
-                EventKind::MenuAction => PropKey::OnMenuAction,
-                EventKind::NavigationGesturePop => PropKey::OnNavigationGesturePop,
-                EventKind::AnimationComplete => PropKey::OnAnimationComplete,
-                EventKind::MediaCacheHit => PropKey::OnMediaCacheHit,
-                EventKind::MediaCacheMiss => PropKey::OnMediaCacheMiss,
-                EventKind::MediaCacheProgress => PropKey::OnMediaCacheProgress,
-                EventKind::MediaCacheReady => PropKey::OnMediaCacheReady,
-                EventKind::AccessibilityAction => PropKey::OnAccessibilityAction,
-                EventKind::SpanPress => PropKey::OnSpanPress,
-                EventKind::Layout => PropKey::OnLayout,
-                EventKind::MediaBuffering => PropKey::OnMediaBuffering,
-                EventKind::MediaLoadStart => PropKey::OnMediaLoadStart,
-                EventKind::DoubleTap => PropKey::OnDoubleTap,
-                EventKind::GestureSettle => PropKey::OnGestureSettle,
-                EventKind::ScrollBeginDrag => PropKey::OnScrollBeginDrag,
-                EventKind::ScrollEndDrag => PropKey::OnScrollEndDrag,
-                EventKind::MomentumScrollEnd => PropKey::OnMomentumScrollEnd,
-                EventKind::TextLayout => PropKey::OnTextLayout,
-                EventKind::Back,
-                EventKind::ModuleResult,
-                EventKind::AppState,
-                EventKind::Dimensions,
-                EventKind::MemoryPressure,
-                => throw new LogicException(
-                    'Runtime events cannot be encoded as element callbacks.',
-                ),
-            };
-            $properties[$property->value] = true;
+            $property = self::EVENT_PROPERTIES[$kind] ?? self::eventProperty($kind);
+            $properties[$property] = true;
         }
 
         ksort($properties, SORT_NUMERIC);
         $encodedProperties = [];
 
         foreach ($properties as $key => $value) {
-            $encodedProperties[$key] = $this->encodeValue($value);
+            $encodedProperties[$key] = match (true) {
+                is_string($value) => self::$encodedStrings[$value] ?? $this->encodeString($value),
+                is_int($value) => "\x02".pack('P', $value),
+                is_bool($value) => $value ? "\x04\x01" : "\x04\x00",
+                default => $this->encodeValue($value),
+            };
         }
 
         $this->nodes[$id] = new EncodedNode(
@@ -272,6 +274,8 @@ final class TreeEncoder
                 path: $path,
                 start: $start,
                 length: count($this->nodes) - $start,
+                callbackStart: $callbackStart,
+                callbackLength: count($this->callbacks) - $callbackStart,
             );
         }
     }
@@ -282,26 +286,11 @@ final class TreeEncoder
             return;
         }
 
-        $orderedNodes = array_values($this->nodes);
-
         foreach ($this->cacheCandidates as $candidate) {
-            $nodes = array_slice($orderedNodes, $candidate->start, $candidate->length);
-            $nodeIds = [];
-
-            foreach ($nodes as $node) {
-                $nodeIds[$node->id] = true;
-            }
-
-            $callbacks = [];
-
-            foreach ($this->callbacks as $key => $callback) {
-                $separator = strpos($key, ':');
-                $nodeId = $separator === false ? 0 : (int) substr($key, 0, $separator);
-
-                if (isset($nodeIds[$nodeId])) {
-                    $callbacks[$key] = $callback;
-                }
-            }
+            $nodes = array_slice($this->nodes, $candidate->start, $candidate->length, true);
+            $callbacks = $candidate->callbackLength === 0
+                ? []
+                : array_slice($this->callbacks, $candidate->callbackStart, $candidate->callbackLength, true);
 
             $entries = $this->subtreeCache[$candidate->element] ?? [];
             $entries[$candidate->path] = new EncodedSubtree($nodes, $callbacks);
@@ -311,32 +300,20 @@ final class TreeEncoder
 
     private function fullFrame(int $rootId): string
     {
-        return Protocol::TREE_MAGIC
+        $frame = Protocol::TREE_MAGIC
             .Wire::u16(Protocol::VERSION)
             .Wire::u64($rootId)
-            .Wire::u32($this->nodeCount)
-            .implode('', array_map(
-                $this->encodeNodeBytes(...),
-                $this->nodes,
-            ));
+            .Wire::u32($this->nodeCount);
+        foreach ($this->nodes as $node) {
+            $frame .= $node->bytes();
+        }
+
+        return $frame;
     }
 
     private function encodeNodeBytes(EncodedNode $node): string
     {
-        $chunks = [
-            Wire::u64($node->id),
-            Wire::u64($node->parent),
-            Wire::u32($node->index),
-            chr($node->kind),
-            Wire::u16(count($node->properties)),
-        ];
-
-        foreach ($node->properties as $key => $value) {
-            $chunks[] = Wire::u16($key);
-            $chunks[] = $value;
-        }
-
-        return implode('', $chunks);
+        return $node->bytes();
     }
 
     private function patchFrame(int $rootId): ?string
@@ -352,35 +329,35 @@ final class TreeEncoder
         $moves = [];
         $updates = [];
 
-        foreach ($previousNodes as $id => $_previous) {
-            if (!isset($this->nodes[$id])) {
-                $removals[] = "\x02".Wire::u64($id);
-            }
+        foreach (array_diff_key($previousNodes, $this->nodes) as $id => $_previous) {
+            $removals[] = "\x02".pack('P', $id);
         }
 
         foreach ($this->nodes as $id => $node) {
             $previous = $previousNodes[$id] ?? null;
 
+            if ($previous === $node) {
+                continue;
+            }
+
             if ($previous === null) {
-                $creates[] = "\x01".$this->encodeNodeBytes($node);
+                $creates[] = "\x01".$node->bytes();
 
                 continue;
             }
 
             if (!$node->hasSameTopology($previous)) {
-                $moves[] = "\x04"
-                    .Wire::u64($id)
-                    .Wire::u64($node->parent)
-                    .Wire::u32($node->index);
+                $moves[] = "\x04".pack('PPV', $id, $node->parent, $node->index);
             }
 
-            $keys = array_values(array_unique([
-                ...array_keys($previous->properties),
-                ...array_keys($node->properties),
-            ]));
-            sort($keys, SORT_NUMERIC);
+            if ($previous->properties === $node->properties) {
+                continue;
+            }
 
-            foreach ($keys as $key) {
+            $keys = $previous->properties + $node->properties;
+            ksort($keys, SORT_NUMERIC);
+
+            foreach ($keys as $key => $_) {
                 $hadValue = array_key_exists($key, $previous->properties);
                 $hasValue = array_key_exists($key, $node->properties);
                 $previousValue = $hadValue ? $previous->properties[$key] : null;
@@ -391,8 +368,7 @@ final class TreeEncoder
                 }
 
                 $operation = "\x03"
-                    .Wire::u64($id)
-                    .Wire::u16($key)
+                    .pack('Pv', $id, $key)
                     .($hasValue ? "\x01" : "\x02");
 
                 if ($nextValue !== null) {
@@ -458,6 +434,28 @@ final class TreeEncoder
         $this->ids[$id] = true;
 
         return $id;
+    }
+
+    private function encodeString(string $value): string
+    {
+        $encoded = "\x01".Wire::sized($this->validatedText($value));
+        if (strlen($value) <= 256) {
+            if (count(self::$encodedStrings) >= 8192) {
+                self::$encodedStrings = [];
+            }
+            self::$encodedStrings[$value] = $encoded;
+        }
+
+        return $encoded;
+    }
+
+    private static function eventProperty(int $kind): int
+    {
+        EventKind::from($kind);
+
+        throw new LogicException(
+            'Runtime events cannot be encoded as element callbacks.',
+        );
     }
 
     private function encodeValue(string|int|float|bool|BinaryValue $value): string

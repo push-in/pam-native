@@ -13,6 +13,8 @@ final readonly class SubtreeCacheCandidate
         public string $path,
         public int $start,
         public int $length,
+        public int $callbackStart = 0,
+        public int $callbackLength = 0,
     ) {
     }
 }
