@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.16.0 - 2026-10-06
+
+Plugins configure the content they receive from share sheets per
+application. Before, `pam-native-share-extension` hardcoded `*/*` (Android
+`SEND` and `SEND_MULTIPLE`, iOS any file), so every app using it was offered
+for every share, PDFs included.
+
+- Plugin manifests declare `share` (`configKey`, default `accept` and
+  `multiple`) with the new `plugins.share.v1` capability. Applications
+  override `accept`/`multiple` under `plugins.<configKey>` in
+  `pam-native.json` (new `plugins` section).
+- Android prepare adds one `SEND` intent filter per accepted type to the
+  launcher activity, with `SEND_MULTIPLE` only for the types in `multiple`,
+  merged with `android.shareTargets`.
+- iOS prepare replaces the plugin Share Extension's
+  `NSExtensionActivationRule`: text/URL, image and movie counts for
+  `text/plain`, `image/*`, `video/*` and `*/*` (unchanged legacy rule), and a
+  `SUBQUERY` type-identifier predicate for specific types such as
+  `application/pdf`. Uncompiled on this release host; listed in
+  `docs/ios-parity.md` for Mac validation.
+- Prepare fails on a `plugins` key no installed plugin declares, duplicate
+  `configKey`s, invalid MIME types and `multiple` types missing from
+  `accept`. JSON schemas and `docs/plugins.md` describe the contract.
+- Tests: resolution, merge, Android filters on the real manifest template,
+  legacy/media/predicate activation rules, invalid configuration.
+
 ## 1.15.0 - 2026-10-06
 
 Telegram-style cold start: the system splash goes straight to the app's first
