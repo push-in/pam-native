@@ -232,6 +232,9 @@ final class TemplateRenderer
     /** @var array<string, array<string, mixed>> Prepared (indexed) effective sheets. */
     private static array $preparedStyles = [];
 
+    /** @var array<int, array{0: int, 1: array<string, mixed>}> Prepared query-free sheets by id. */
+    private static array $plainPrepared = [];
+
     /** @var array<int, array<string, array<string, string|int|bool>>> */
     private static array $sheetClasses = [];
 
@@ -1479,6 +1482,7 @@ final class TemplateRenderer
             ? (float) $values['height']
             : ($data['__pamContainerHeight'] ?? null);
         $childData['__pamInheritedStyles'] = $inheritedChildStyles;
+        $childData['__pamInheritedKey'] = $inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles);
         $childData['__pamParentVariants'] = ParentVariants::extend(
             $inheritedVariants,
             $factory !== null ? $componentValues : $values,
@@ -2277,6 +2281,7 @@ final class TemplateRenderer
                 ? (float) $values['height']
                 : ($data['__pamContainerHeight'] ?? null);
             $childData['__pamInheritedStyles'] = $inheritedChildStyles;
+            $childData['__pamInheritedKey'] = $inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles);
             $childData['__pamParentVariants'] = ParentVariants::extend(
                 $data['__pamParentVariants'] ?? null,
                 $values,
@@ -2471,7 +2476,9 @@ final class TemplateRenderer
         array $inheritedStyles,
         array $data,
     ): ?string {
-        $inherited = $inheritedStyles === [] ? '' : serialize($inheritedStyles);
+        $inherited = $inheritedStyles === []
+            ? ''
+            : (is_string($data['__pamInheritedKey'] ?? null) ? $data['__pamInheritedKey'] : serialize($inheritedStyles));
         if ($prepared === null) {
             return $plan['id'].'|-|'.($resolvedClass ?? '').'|'.$inherited;
         }
@@ -4614,11 +4621,23 @@ final class TemplateRenderer
     private static function preparedStyleSheet(array $sheet, array $data): array
     {
         $id = $sheet['__pamSheetId'] ?? null;
+        if (is_int($id) && ($sheet['queries'] ?? null) === []) {
+            // No responsive queries: the prepared sheet only depends on the
+            // style-variable revision.
+            $plain = self::$plainPrepared[$id] ?? null;
+            if ($plain !== null && $plain[0] === StyleVariables::revision()) {
+                return $plain[1];
+            }
+        }
         $matched = self::matchedStyleQueries($sheet, $data);
         $key = is_int($id)
             ? $id.':'.StyleVariables::revision().':'.implode(',', $matched)
             : null;
         if ($key !== null && isset(self::$preparedStyles[$key])) {
+            if (($sheet['queries'] ?? null) === []) {
+                self::$plainPrepared[$id] = [StyleVariables::revision(), self::$preparedStyles[$key]];
+            }
+
             return self::$preparedStyles[$key];
         }
         $effective = self::applyStyleQueries(
@@ -4644,8 +4663,12 @@ final class TemplateRenderer
         if ($key !== null) {
             if (count(self::$preparedStyles) >= 512) {
                 self::$preparedStyles = [];
+                self::$plainPrepared = [];
             }
             self::$preparedStyles[$key] = $prepared;
+            if (($sheet['queries'] ?? null) === []) {
+                self::$plainPrepared[$id] = [StyleVariables::revision(), $prepared];
+            }
         }
 
         return $prepared;

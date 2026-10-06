@@ -428,6 +428,25 @@ abstract class Element implements Renderable
         return $this->domDataset;
     }
 
+    /**
+     * @internal Everything the tree encoder reads, in one call:
+     * [kind, properties, events, children, key, DOM identity, identity slot].
+     *
+     * @return array{0: int, 1: array<int, string|int|float|bool|BinaryValue>, 2: array<int, Closure>, 3: list<Element>, 4: ?string, 5: ?string, 6: ?string}
+     */
+    final public function __pamEncoding(): array
+    {
+        return [
+            $this->kind->value,
+            $this->properties,
+            $this->events,
+            $this->children,
+            $this->elementKey,
+            $this->domIdentity,
+            $this->identitySlot,
+        ];
+    }
+
     /** @internal Static slot used by the tree encoder for unkeyed identity. */
     final public function identitySlot(): ?string
     {
