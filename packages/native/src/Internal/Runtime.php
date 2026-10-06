@@ -475,10 +475,49 @@ final class Runtime
         }
     }
 
-    private static function marksItsScope(Closure $callback): bool
+    /**
+     * Template handlers mark their own component dirty. Elements wrap
+     * handlers to decode gesture payloads (Pressable doubleTap/pressIn/
+     * pressOut/pressMove, image, media, input events...); such a wrapper
+     * marks its scope when every handler it wraps does.
+     */
+    private static function marksItsScope(Closure $callback, int $depth = 0): bool
     {
-        return (new \ReflectionFunction($callback))->getClosureScopeClass()?->getName()
-            === TemplateRenderer::class;
+        $function = new \ReflectionFunction($callback);
+        $scope = $function->getClosureScopeClass()?->getName();
+        if ($scope === TemplateRenderer::class) {
+            return true;
+        }
+        if (
+            $depth >= 3
+            || $scope === null
+            || !str_starts_with($scope, 'Pam\\Native\\')
+            || !is_a($scope, Element::class, true)
+        ) {
+            return false;
+        }
+        $wrapped = [];
+        foreach ($function->getClosureUsedVariables() as $variable) {
+            if ($variable instanceof Closure) {
+                $wrapped[] = $variable;
+            } elseif (is_array($variable)) {
+                foreach ($variable as $item) {
+                    if ($item instanceof Closure) {
+                        $wrapped[] = $item;
+                    }
+                }
+            }
+        }
+        if ($wrapped === []) {
+            return false;
+        }
+        foreach ($wrapped as $inner) {
+            if (!self::marksItsScope($inner, $depth + 1)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static function styleEnvironmentKeyword(mixed $value, string $fallback): string
