@@ -803,6 +803,16 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false
+            // A child that consumes ACTION_DOWN hides it from onTouchEvent:
+            // the paging start offset is recorded here too.
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    flingStarted = false
+                    gestureStartScroll = scrollY
+                    gestureActive = true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> gestureActive = false
+            }
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
                 nestedGestureList = overflowingListAt(event)
                 nestedGestureDownY = event.y
@@ -933,6 +943,10 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false
+            // Pressable pages consume ACTION_DOWN, so onTouchEvent first sees
+            // the gesture at the intercepted MOVE: the page it started on is
+            // only known here (else a fling pages from the dragged offset).
+            trackInterceptedGesture(event)
             val intercepted = super.onInterceptTouchEvent(event)
             if (
                 intercepted &&
@@ -942,6 +956,17 @@ internal class PamScrollContainer @JvmOverloads constructor(
                 dismissKeyboard()
             }
             return intercepted
+        }
+
+        private fun trackInterceptedGesture(event: MotionEvent) {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    flingStarted = false
+                    gestureStartScroll = scrollX
+                    gestureActive = true
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> gestureActive = false
+            }
         }
 
         override fun onTouchEvent(event: MotionEvent): Boolean {

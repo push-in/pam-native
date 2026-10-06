@@ -5,9 +5,12 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import android.widget.LinearLayout
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
@@ -507,6 +510,63 @@ class PamScrollContainerInstrumentedTest {
             onMain(instrumentation) {
                 assertEquals(1_000, scroll.snapshotOffsetPixels().second)
             }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun fastFlingOverPressablePagesMovesOnePage() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var scroll: PamScrollContainer
+        try {
+            onMain(instrumentation) {
+                scroll = PamScrollContainer(activity).apply {
+                    setHorizontal(true)
+                    setPagingEnabled(true)
+                    insert(LinearLayout(activity).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        repeat(5) {
+                            // Pressable pages: they consume ACTION_DOWN, so the
+                            // scroll view first sees the gesture when it intercepts.
+                            addView(View(activity).apply {
+                                isClickable = true
+                                setOnClickListener {}
+                            }, LinearLayout.LayoutParams(300, 400))
+                        }
+                    })
+                }
+                activity.host.addView(scroll, FrameLayout.LayoutParams(300, 400))
+                relayout(activity.host)
+            }
+            instrumentation.waitForIdleSync()
+            // RN pagingEnabled: a 700 px/250 ms-class fling that drags past half
+            // a page still lands on the next page, never two pages ahead.
+            onMain(instrumentation) {
+                val start = SystemClock.uptimeMillis()
+                val xs = floatArrayOf(280f, 262f, 226f, 172f, 118f, 64f, 40f)
+                xs.forEachIndexed { index, x ->
+                    val action = if (index == 0) MotionEvent.ACTION_DOWN else MotionEvent.ACTION_MOVE
+                    MotionEvent.obtain(start, start + index * 8L, action, x, 200f, 0).also {
+                        activity.host.dispatchTouchEvent(it)
+                        it.recycle()
+                    }
+                }
+                MotionEvent.obtain(start, start + xs.size * 8L, MotionEvent.ACTION_UP, 24f, 200f, 0).also {
+                    activity.host.dispatchTouchEvent(it)
+                    it.recycle()
+                }
+            }
+            val deadline = SystemClock.uptimeMillis() + 2_000L
+            var offset = -1
+            while (SystemClock.uptimeMillis() < deadline) {
+                instrumentation.waitForIdleSync()
+                onMain(instrumentation) { offset = scroll.snapshotOffsetPixels().first }
+                if (offset == 300) break
+                SystemClock.sleep(50)
+            }
+            assertEquals(300, offset)
         } finally {
             activity.finish()
         }

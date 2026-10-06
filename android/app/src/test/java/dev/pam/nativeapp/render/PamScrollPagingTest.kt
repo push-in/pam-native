@@ -24,4 +24,10 @@ class PamScrollPagingTest {
     fun nonPagingExtentPreservesClampedPosition() {
         assertEquals(600, pamOnePageTarget(0, 900, 0, 0, 600))
     }
+
+    @Test
+    fun flingPagesFromThePageTheGestureStartedOn() {
+        // Dragged 700 px of a 1000 px page before the fling: one page, not two.
+        assertEquals(1_000, pamOnePageTarget(0, 700, 4_000, 1_000, 4_000))
+    }
 }
