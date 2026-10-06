@@ -10,6 +10,14 @@
 - [UI Language 2](ui-language-2.md)
 - [Migrating to UI Language 2](migration-ui-language-2.md)
 
+The published guides at <https://push-in.github.io/pam-docs/native/overview/>
+are built from these files: [Performance and memoization](https://push-in.github.io/pam-docs/native/performance/),
+[Gestures and animation](https://push-in.github.io/pam-docs/native/gestures-and-animation/),
+[Keyboard, sheets and safe areas](https://push-in.github.io/pam-docs/native/keyboard-and-sheets/),
+[Appearance and theming](https://push-in.github.io/pam-docs/native/appearance/) and the
+[CSS reference](https://push-in.github.io/pam-docs/native/css/). Update both when a
+behaviour changes.
+
 Every public feature added to Pam Native must include a copyable example. Start
 with the focused guide below or use the [capability cookbook](examples.md) for
 short end-to-end recipes.
@@ -25,9 +33,14 @@ short end-to-end recipes.
 | Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
 | Light/dark preference, first-frame theming and native window colours | [Appearance](appearance.md) |
 | iOS rendering parity status (1.2.0–1.7.0 features) | [iOS parity](ios-parity.md) |
-| Gestures and composition | [Gestures](gestures.md) |
+| Gestures, press events, drags, swipeable rows and paging | [Gestures](gestures.md) |
 | UI-thread animations, transitions and presets | [Animations](animations.md) |
 | Bottom sheets | [Bottom Sheet](bottom-sheet.md) |
+| Edge-to-edge, safe areas, keyboard avoidance and IME | [Android safe area](android-safe-area.md) |
+| Text measurement, nested spans, hairlines and fonts | [Typography](typography.md) |
+| Icons, sticky headers, content-sized lists, toasts and other React Native parity | [React Native components parity](react-native-components-parity.md) |
+| Runtime error overlay, `App::onError()` and module failures | [Error overlay](error-overlay.md) |
+| Native modules added in 1.1.x (multipart, secure screens, conversation notifications) | [Native capabilities](native-capabilities.md) |
 | Image, video and audio cache | [Native media cache](media-cache.md) |
 | Scheduler, compiler fast paths, profiling and recovery | [Runtime performance](runtime-performance.md) |
 | Typed IDL, Suspense, worklets, jobs, offline sync, Canvas and server-driven UI | [Platform runtime](platform-runtime.md) |

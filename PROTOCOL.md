@@ -67,7 +67,7 @@ The canonical enum tables live in:
 - PHP: `NodeKind`, `PropKey`, `EventKind`, `NativeOperation`;
 - Rust: `pam-native-protocol/src/lib.rs`;
 - Android: `PamProtocol.kt`, `PamRenderer.kt`, `NativeModuleRegistry.kt`.
-- iOS: `PamProtocol.swift`, `PamRenderer.swift`, `PamModuleRegistry.swift`.
+- iOS: `PamProtocol.swift`, `PamRenderer.swift`, `NativeModuleRegistry.swift`.
 
 ## Golden compatibility gates
 
