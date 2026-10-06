@@ -22,8 +22,9 @@ device, even when the desktop PHP running `pam dev` has it.
 | Zend OPcache (no JIT) | ✅ | ✅ | PHP 8.5 runtime. |
 | uri (and lexbor) | ✅ | ✅ | PHP 8.5 runtime. |
 | **mbstring** | 🟡 polyfill | 🟡 polyfill | Not compiled. The SDK defines the `mb_*` functions in PHP (below). |
+| **sodium, openssl** | 🟡 native | 🟡 native | Not compiled. `Pam\Native\Crypto` covers Ed25519 verification and AES-256-GCM through the host (below). |
 | intl | ❌ | ❌ | Not bundled: ICU adds ~30 MB of data plus ~5 MB of code per ABI. |
-| iconv, zlib, openssl, sodium, curl, gd, dom/xml/simplexml, pdo/sqlite3, fileinfo, bcmath, gmp, posix, pcntl, sockets | ❌ | ❌ | Use the native modules (HTTP, database, crypto, media) instead. |
+| iconv, zlib, curl, gd, dom/xml/simplexml, pdo/sqlite3, fileinfo, bcmath, gmp, posix, pcntl, sockets | ❌ | ❌ | Use the native modules (HTTP, database, media) instead. |
 
 ### mbstring
 
@@ -73,18 +74,69 @@ Close to the 1.5 MB-per-ABI budget, and it would also need a new PAM runtime
 release (Linux and macOS PAM builds) and an iOS XCFramework rebuilt on a Mac.
 The polyfill covers both platforms today with the same behaviour.
 
+### Crypto (sodium, openssl)
+
+`Pam\Native\Crypto` is the SDK's crypto API and what `UpdateVerifier` (signed
+OTA manifests) and `LocalFirst\EncryptedJournal` use:
+
+```php
+use Pam\Native\Crypto;
+
+Crypto::ed25519Verify($signature, $message, $publicKey); // bool, raw 64/32 bytes
+$sealed = Crypto::aes256GcmEncrypt($plaintext, $key, $nonce, $aad); // ciphertext . 16-byte tag
+$plaintext = Crypto::aes256GcmDecrypt($sealed, $key, $nonce, $aad); // ?string, null when not authentic
+```
+
+| Runtime | Ed25519 verify | AES-256-GCM |
+| --- | --- | --- |
+| Desktop / server / tests | ext-sodium | ext-openssl (or ext-sodium's AES-256-GCM) |
+| Android | Kotlin verifier (`PamCrypto.kt`), every API level | Platform JCA/Conscrypt `AES/GCM/NoPadding` |
+| iOS | CryptoKit `Curve25519.Signing` after libsodium's encoding checks | CryptoKit `AES.GCM` |
+
+On a device the host provides the synchronous PHP function
+`pam_native_crypto(int $operation, string $key, string $nonce, string $aad,
+string $input): string|bool|null` (1 = Ed25519 verify, 2 = seal, 3 = open;
+`null` when the host has no provider); `Crypto::ed25519Backend()` and
+`aes256GcmBackend()` report which `CryptoBackend` is used. Every backend gives
+the same bytes and the same decisions as libsodium/OpenSSL, including
+libsodium's Ed25519 rules (S < L, no small-order R or public key, canonical
+public key, cofactorless equation): `packages/native/tests/Fixtures/crypto-vectors.json`
+(`pam scripts/generate-crypto-vectors.php`, 76 Ed25519 and 48 AES-256-GCM
+vectors) is replayed by the PHP tests, the Android JVM and instrumented tests
+and the iOS XCTests. Without any backend (a device host older than 1.19.0) the
+calls throw `CryptoUnavailableException`, `UpdateVerifier` refuses the update
+and `EncryptedJournal` throws; nothing dies with "Call to undefined function".
+
+HMAC and HKDF need no host: `hash_hmac()`, `hash_hkdf()` and `random_bytes()`
+are core. `Store\EncryptedStatePersistence` (XSalsa20-Poly1305
+`sodium_crypto_secretbox`) still needs ext-sodium and throws on the device.
+
+Why not compile the extensions into the runtime: libsodium 1.0.20 alone is
++267 KB (arm64-v8a) / +406 KB (x86_64) of code per ABI before ext-sodium's
+glue, and its AES-256-GCM needs the ARMv8 Crypto/AES-NI extensions; OpenSSL
+3.5's libcrypto is +4.2 MB per ABI (arm64-v8a), measured with the runtime's NDK
+flags. Either would also need a new PAM runtime release and an iOS
+XCFramework rebuilt on a Mac, while the platform crypto ships today on both.
+
 ### Build-time audit
 
 While staging an Android or iOS build (`pam-native build`, `run`, `release`,
 update bundles) the CLI runs `Pam\Native\Tooling\MobileRuntimeAudit` over the
-bundle (application code and Composer packages; package tests, binaries and the
-SDK itself are skipped). Every function call or class use (`new`, `::`,
+bundle (application code and Composer packages, the SDK included; package
+tests and binaries are skipped). Every function call or class use (`new`, `::`,
 `extends`, `implements`) that resolves to an extension the selected runtime
 lacks, and that no bundled file or the mbstring polyfill declares, is printed:
 
 ```
 PAM Native warning: src/Money.php:14: class NumberFormatter comes from ext-intl, which the PAM mobile PHP runtime (Android/iOS) does not include
+PAM Native warning: src/Ota.php:9: function sodium_crypto_sign_verify_detached() comes from ext-sodium, which the PAM mobile PHP runtime (Android/iOS) does not include; use Pam\Native\Crypto::ed25519Verify(), which works on the device
 ```
+
+Calls with a device-ready equivalent name it (`Pam\Native\Crypto` for
+Ed25519 verification and AES-256-GCM, `random_bytes()`, `bin2hex()`,
+`base64_encode()`...). The SDK's own sources produce no finding (its
+sodium/openssl use is guarded and goes through `Pam\Native\Crypto`), and
+`tests/runtime_audit.php` keeps it that way.
 
 Uses guarded in the same file by `extension_loaded('…')`, `function_exists('…')`
 or `class_exists(X::class)` for that extension are trusted. Findings never fail
@@ -97,7 +149,13 @@ against the installed runtime's `libphp.a` for the connected device's ABI,
 pushes the SDK and runs the scripts there (default
 `packages/native/tests/device/mbstring_runtime.php`, which checks that
 ext-mbstring is absent and every recorded mbstring result comes out of the
-polyfill unchanged). It removes everything it pushed.
+polyfill unchanged). `packages/native/tests/device/crypto_runtime.php` checks
+that the runtime has no ext-sodium/ext-openssl and that, in this bare host
+without `pam_native_crypto()`, updates and journals fail closed. The host's
+crypto itself runs in the instrumented tests `NativeCryptoInstrumentedTest`
+(vectors through `PamCrypto`) and `NativeCryptoBridgeInstrumentedTest` (a PHP
+entry calling `pam_native_crypto()` through the real runtime; run that class on
+its own). It removes everything it pushed.
 
 ## Typed bridge IDL
 

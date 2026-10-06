@@ -52,6 +52,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.16.0 | Share Extension activation rule from `plugins.shareExtension` | ✅ (uncompiled) | Prepare writes `NSExtensionActivationRule` from the accepted MIME types (dictionary for text/URL, images, movies and `*/*`; `SUBQUERY` predicate for specific file types). Validate on a Mac that the extension is offered only for the configured types. |
 | 1.17.0 | ext-mbstring polyfill + extension audit | ✅ (PHP only) | The iOS runtime is built with the same `--disable-all` extension set as Android (no mbstring, no intl), so the SDK's PHP `mb_*` polyfill applies unchanged; no Swift change. |
 | 1.18.0 | Single-file prebuilt component cache | ✅ (uncompiled) | `PamBundle/pam-prebuilt/components/components.pack` replaces four files per component. The app bundle is read-only, so a component's class/template files are written on first use under `Documents/pam/state/prebuilt-components/<pack id>/` (other packs' directories are dropped). No Swift change: iOS runs `PamBundle/` in place, there is no bundle install to speed up. |
+| 1.19.0 | Native crypto for `Pam\Native\Crypto` | ✅ (uncompiled) | `PamCrypto.swift` installs the `pam_native_crypto()` provider (CryptoKit `AES.GCM`, `Curve25519.Signing` after libsodium's S/small-order/canonical checks) from `PamRuntime`; `PamCryptoTests` replays `packages/native/tests/Fixtures/crypto-vectors.json`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -92,3 +93,8 @@ Visual checks that tests cannot fully cover:
   `mb_strtoupper()` on accented text and emoji renders the same values as on
   Android; `pam-native build ios` prints no extension-audit warning for the
   app.
+- Crypto (1.19.0): `swift test --filter PamCryptoTests` must pass, in
+  particular the two mixed-order Ed25519 vectors (they fail if CryptoKit's
+  verification were cofactored) and the small-order ones; then a signed OTA
+  manifest must be approved on a device and an `EncryptedJournal` sealed on
+  iOS must open on Android and on desktop PHP.

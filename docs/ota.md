@@ -13,6 +13,11 @@ channel and decision status. `UpdateVerifier` requires:
 - only capabilities already present in that host;
 - a deterministic rollout bucket from `0` through `9,999`.
 
+The signature is checked by `Pam\Native\Crypto::ed25519Verify()`: ext-sodium
+where it is loaded, the Android/iOS host on a device (the mobile PHP runtimes
+have no ext-sodium), with libsodium's exact rules on both. A device host older
+than 1.19.0 cannot verify, so every update is refused (`InvalidSignature`).
+
 Manifests are capped at 64 KiB and bundles at 256 MiB. Unknown fields,
 non-canonical JSON, invalid keys, mismatched bytes, or incompatible capabilities
 fail closed before staging.
