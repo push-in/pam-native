@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.14.1 - 2026-10-05
+
+Pinned sticky headers in `VirtualizedList` and `VirtualGrid` are real,
+interactive views (FlashList parity). Zé Chat's ChatDetails had to host its
+sticky tab bar in a `ScrollView` because a tap on the pinned tabs reached the
+row scrolling underneath.
+
+- Android: the pinned header was a bitmap copy of the sticky cell drawn over
+  the list (and re-captured on every frame), so presses, pressed state and
+  accessibility went to the row below. It is now a real RecyclerView child:
+  the layout manager ignores it (never scrapped or recycled while pinned),
+  leaves it out of its child count and appends rows before it, so it stays
+  the last child, drawn and hit-tested first. The cell's native views move
+  into the pinned holder and back to their row (or unmount when the row is
+  gone), so their state (a horizontal tab rail offset) survives pinning. A
+  pinned holder owns every touch inside its bounds, its non-interactive
+  background included. The next sticky cell still pushes it away. All of it
+  runs inside the layout manager's scroll and layout passes: no PHP call and
+  no bitmap copy per frame; rows keep virtualizing.
+- iOS: ScrollView and VirtualizedList/VirtualGrid hosts hit-test their
+  sticky children before the rows (`zPosition` only reorders drawing), so a
+  press on a pinned header never reaches the row under it. Uncompiled on
+  this release host; listed in `docs/ios-parity.md` for Mac validation.
+- Tests: `PamVirtualListStickyHeaderInstrumentedTest` (press on the pinned
+  button, background tap that no row receives, pressed state, accessibility
+  visibility, push by the next header, VirtualGrid, stepping through the
+  list with no blank row and exactly one mounted header, a commit while
+  pinned), passing on an Android 12 (API 31) emulator;
+  `PamStickyHeaderPositionsTest`; XCTest
+  `testPinnedVirtualListHeaderReceivesTouchesInsteadOfTheRowUnderIt`.
+
 ## 1.14.0 - 2026-10-05
 
 Per-component render cost and first launch after install (Zé Chat inbox on a
