@@ -85,6 +85,19 @@ Use the overlay alongside `pam mobile benchmark` and `pam mobile profile`.
 The overlay helps identify an expensive interactive path; the benchmark and
 baseline-profile commands provide repeatable evidence suitable for CI.
 
+## Android hot reload
+
+From 1.22.3, hot reload keeps the current and incoming bundles until the native
+worker confirms that the previous PHP request has shut down. Shutdown handlers
+can still autoload classes from the old bundle. The client waits for that
+confirmation before processing another version and removes obsolete bundles
+only afterward. Reattaching an Activity reuses an existing immutable bundle.
+
+No application changes are required. Regenerate the Android host with `pam dev`
+after updating the SDK. When validating development reloads, wait for the new
+server's ready status, edit a source file, observe the changed screen, restore
+the file and observe the restored screen in the same application process.
+
 ## iOS
 
 Custom UIKit hosts can install the reusable `PamDevToolsOverlay` over their PAM

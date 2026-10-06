@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.22.3 - 2026-10-06
+
+- Android media observes its route view lifecycle after attachment. A player
+  created before the route resumes can start when it becomes visible, while
+  host backgrounding, route suspension and manual pause remain respected.
+- Initial press and gesture properties are configured together, avoiding
+  repeated gesture reconstruction for every property of virtualized rows.
+  Subsequent property updates retain their immediate behavior.
+- Android packages TTF/OTF font assets without ZIP compression, preserving
+  their bytes and allowing the platform to map them directly.
+- Android hot reload retains the executing PHP bundle until request shutdown
+  finishes. Edits and restores are serialized around that acknowledgement;
+  old files remain available for lazy autoloads and obsolete bundles are removed.
+- No PHP API, protocol identifiers or dependency requirements changed.
+
 ## 1.22.2 - 2026-10-06
 
 - Device bundles omit the official SDK's host sources and documentation while

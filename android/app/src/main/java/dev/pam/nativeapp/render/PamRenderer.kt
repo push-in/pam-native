@@ -1198,7 +1198,7 @@ class PamRenderer(
             }
             putView(spec.id, view)
             attachHosted(view, state)
-            state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
+            applyInitialProperties(view, state)
             (view as? TextView)?.let { applyTextAlignment(it, state) }
             installEvents(view, state)
         }
@@ -1734,9 +1734,7 @@ class PamRenderer(
             if (view is TextView) state.defaultHighlightColor = view.highlightColor
             putView(id, view)
             attachCellView(view, state, rootId, holder)
-            state.properties.forEach { (key, value) ->
-                applyProperty(view, state, key, value)
-            }
+            applyInitialProperties(view, state)
             installEvents(view, state)
             applyCellLayout(id, rootId, rootFrame)
         }
@@ -1966,7 +1964,7 @@ class PamRenderer(
         val view = createView(state.kind, state)
         putView(state.id, view)
         attachHosted(view, state)
-        state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
+        applyInitialProperties(view, state)
         installEvents(view, state)
         frames[state.id]?.let { applyLayout(state.id) }
         reattachHostedDescendants(state.id)
@@ -2468,6 +2466,24 @@ class PamRenderer(
             }
         }
         return null
+    }
+
+    /**
+     * NodeState already contains all authored properties. Gesture properties
+     * therefore configure the same recognizer/drag program repeatedly during
+     * mounting. Keep the first configuration (an initial snap may need it),
+     * then let installEvents apply the final press feedback after this pass.
+     * Incremental updates still apply immediately.
+     */
+    private fun applyInitialProperties(view: View, state: NodeState) {
+        state.applyingInitialProperties = true
+        state.pressableConfiguredDuringInitialization = false
+        try {
+            state.properties.forEach { (key, value) -> applyProperty(view, state, key, value) }
+        } finally {
+            state.applyingInitialProperties = false
+            state.pressableConfiguredDuringInitialization = false
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -5222,6 +5238,10 @@ class PamRenderer(
 
     private fun configurePressable(view: View, state: NodeState) {
         val pressable = view as? PamPressable ?: return
+        if (state.applyingInitialProperties) {
+            if (state.pressableConfiguredDuringInitialization) return
+            state.pressableConfiguredDuringInitialization = true
+        }
         pressable.onPressedStateChanged = if (state.properties[PropKey.NATIVE_STATE_STYLES] != null) {
             { pressed -> applyNativeStyleState(pressable, state, NativeStyleState.PRESSED, pressed) }
         } else {
@@ -8856,6 +8876,8 @@ class PamRenderer(
         val properties: MutableMap<PropKey, PropValue>,
         val mountOrder: Long,
         var updating: Boolean = false,
+        var applyingInitialProperties: Boolean = false,
+        var pressableConfiguredDuringInitialization: Boolean = false,
         var textWatcherInstalled: Boolean = false,
         var pendingChange: Runnable? = null,
         var nativeValue: String = "",

@@ -74,4 +74,29 @@ class MediaPlaybackLifecycleTest {
         lifecycle.request(true)
         assertTrue(lifecycle.mayPlay)
     }
+
+    @Test fun routeResumeStartsInitialPlaybackWithoutActivityResume() {
+        val lifecycle = playing()
+        lifecycle.ownerActive(false)
+        assertFalse(lifecycle.mayPlay)
+        lifecycle.ownerActive(true)
+        assertTrue(lifecycle.mayPlay)
+        lifecycle.request(false)
+        lifecycle.ownerActive(false)
+        lifecycle.ownerActive(true)
+        assertFalse(lifecycle.mayPlay)
+    }
+
+    @Test fun routeAndHostMustBothBeResumed() {
+        val lifecycle = playing()
+        lifecycle.hostActive(false)
+        lifecycle.ownerActive(false)
+        lifecycle.ownerActive(true)
+        assertFalse(lifecycle.mayPlay)
+        lifecycle.ownerActive(false)
+        lifecycle.hostActive(true)
+        assertFalse(lifecycle.mayPlay)
+        lifecycle.ownerActive(true)
+        assertTrue(lifecycle.mayPlay)
+    }
 }

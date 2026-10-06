@@ -70,6 +70,7 @@ struct RuntimeState {
     jmethodID on_call = nullptr;
     jmethodID on_typed_call = nullptr;
     jmethodID on_error = nullptr;
+    jmethodID on_request_released = nullptr;
     jmethodID on_measure_text = nullptr;
     jmethodID on_remount = nullptr;
     jmethodID on_crypto = nullptr;
@@ -958,6 +959,16 @@ void runtime_loop(RuntimeState* state) {
         ) {
             log_debug("Restarting PHP request for hot reload.");
             php_request_shutdown(nullptr);
+            // Runtime::shutdown may autoload classes from the old bundle.
+            // Only now may the reload client remove that request's files.
+            if (worker_env != nullptr && state->on_request_released != nullptr) {
+                jstring entry = worker_env->NewStringUTF(state->entry.c_str());
+                if (entry != nullptr) {
+                    worker_env->CallVoidMethod(state->runtime, state->on_request_released, entry);
+                    worker_env->DeleteLocalRef(entry);
+                }
+                if (worker_env->ExceptionCheck()) worker_env->ExceptionClear();
+            }
             SG(request_info).argc = 2;
             SG(request_info).argv = state->php_arguments.data();
             if (php_request_startup() == FAILURE) {
@@ -1125,6 +1136,15 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStart(
         );
     }
     if (state->on_error != nullptr && !env->ExceptionCheck()) {
+        state->on_request_released = env->GetMethodID(
+            runtime_class,
+            "onNativeRequestReleased",
+            "(Ljava/lang/String;)V"
+        );
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            state->on_request_released = nullptr;
+        }
         state->on_measure_text = env->GetMethodID(
             runtime_class,
             "onMeasureText",

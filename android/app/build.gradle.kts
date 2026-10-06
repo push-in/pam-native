@@ -228,6 +228,9 @@ android {
         // that install workers inflate in parallel; storing it avoids a
         // second, serial inflate through AssetManager on first launch.
         noCompress += "pnb"
+        // Typeface.Builder can map stored fonts directly. A deflated variable
+        // font otherwise inflates synchronously on its first native use.
+        noCompress += listOf("ttf", "otf")
     }
 
     packaging {

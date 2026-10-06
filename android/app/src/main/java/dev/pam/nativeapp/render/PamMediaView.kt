@@ -13,6 +13,7 @@ import android.view.TextureView
 import android.view.View
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import android.widget.FrameLayout
 import android.widget.MediaController
@@ -78,6 +79,8 @@ internal class PamMediaView(
     private val main = Handler(Looper.getMainLooper())
     private var source = ""
     private val playback = MediaPlaybackLifecycle()
+    private var viewLifecycle: Lifecycle? = null
+    private val viewLifecycleObserver = LifecycleEventObserver { _, _ -> syncViewLifecycle() }
     private var controls = true
     private var looping = false
     private var muted = false
@@ -302,6 +305,13 @@ internal class PamMediaView(
     private fun syncVisibility() {
         playback.visibility(isAttachedToWindow, isShown && windowVisibility == VISIBLE)
         syncPlayback()
+    }
+
+    private fun syncViewLifecycle() {
+        // Route fragments attach their view before RESUMED. Observe the later
+        // transition independently of Activity callbacks and playback intent.
+        playback.ownerActive(viewLifecycle?.currentState?.isAtLeast(Lifecycle.State.RESUMED) != false)
+        syncVisibility()
     }
 
     private fun syncPlayback() {
@@ -569,10 +579,9 @@ internal class PamMediaView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        (findViewTreeLifecycleOwner() ?: context as? LifecycleOwner)?.lifecycle?.let {
-            playback.hostActive(it.currentState.isAtLeast(Lifecycle.State.RESUMED))
-        }
-        syncVisibility()
+        viewLifecycle = (findViewTreeLifecycleOwner() ?: context as? LifecycleOwner)?.lifecycle
+        viewLifecycle?.addObserver(viewLifecycleObserver)
+        syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
         if (source.isNotEmpty() && preparedPlayer == null && !creatingPlayer) {
@@ -594,6 +603,8 @@ internal class PamMediaView(
 
     override fun onDetachedFromWindow() {
         playback.visibility(false, false)
+        viewLifecycle?.removeObserver(viewLifecycleObserver)
+        viewLifecycle = null
         main.removeCallbacks(progress)
         sourceGeneration++
         releasePlayer()

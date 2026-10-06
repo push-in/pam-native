@@ -382,6 +382,7 @@ class PamActivity : FragmentActivity() {
                             receipt.entryPath,
                             receipt.confirmedAtNanos,
                             receipt.bundleBytes,
+                            receipt.previousRequestReleased,
                         )
                     } },
                     onError = { message ->

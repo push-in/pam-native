@@ -20,7 +20,7 @@ internal class HotReloadClient(
     private val executor = Executors.newSingleThreadScheduledExecutor { runnable ->
         Thread(runnable, "pam-hot-reload").apply { isDaemon = true }
     }
-    private var version: String? = null
+    private val bundles = HotReloadBundles(context.filesDir.resolve("pam/dev"))
 
     fun start() {
         executor.scheduleWithFixedDelay(::poll, 200, 300, TimeUnit.MILLISECONDS)
@@ -33,20 +33,23 @@ internal class HotReloadClient(
     }
 
     private fun poll() {
-        if (closed.get()) return
+        if (closed.get() || bundles.hasPendingRequest) return
         runCatching {
-            val next = request("$BASE_URL/status?version=$version", 128)
+            val next = request("$BASE_URL/status?version=${bundles.currentVersion}", 128)
                 .toString(Charsets.UTF_8)
                 .trim()
-            if (next.isEmpty() || next == version) return
+            if (next.isEmpty() || next == bundles.currentVersion) return
             require(next.matches(Regex("[a-f0-9]{16,64}"))) { "Invalid hot reload version" }
             val confirmedAtNanos = System.nanoTime()
             val bundle = request("$BASE_URL/bundle?version=$next", MAX_BUNDLE_BYTES)
-            val destination = context.filesDir.resolve("pam/dev/$next")
-            val entry = DevBundle.extract(bundle, destination)
-            version = next
-            onReload(HotReloadReceipt(entry.absolutePath, confirmedAtNanos, bundle.size))
-            cleanupExcept(next)
+            val entry = bundles.prepare(next, bundle)
+            onReload(HotReloadReceipt(entry.absolutePath, confirmedAtNanos, bundle.size) {
+                if (!closed.get()) {
+                    runCatching {
+                        executor.execute { bundles.previousRequestReleased(next) }
+                    }
+                }
+            })
         }.onFailure {
             if (it !is HotReloadTransportException) {
                 onError(it.message ?: "Hot reload failed")
@@ -89,14 +92,6 @@ internal class HotReloadClient(
     private class HotReloadTransportException(cause: IOException) :
         RuntimeException(cause)
 
-    private fun cleanupExcept(active: String) {
-        context.filesDir.resolve("pam/dev").listFiles()?.forEach {
-            if (it.name != active) {
-                it.deleteRecursively()
-            }
-        }
-    }
-
     private companion object {
         const val BASE_URL = "http://127.0.0.1:39100"
         const val MAX_BUNDLE_BYTES = 16 * 1024 * 1024
@@ -107,4 +102,5 @@ internal data class HotReloadReceipt(
     val entryPath: String,
     val confirmedAtNanos: Long,
     val bundleBytes: Int,
+    val previousRequestReleased: () -> Unit,
 )

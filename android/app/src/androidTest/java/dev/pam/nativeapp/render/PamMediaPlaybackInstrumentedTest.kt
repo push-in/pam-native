@@ -7,6 +7,9 @@ import android.view.View
 import android.widget.FrameLayout
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.findViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import dev.pam.nativeapp.PamTestActivity
@@ -16,6 +19,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -92,7 +96,43 @@ class PamMediaPlaybackInstrumentedTest {
         awaitPlaying(media, true)
     }
 
-    private fun withMedia(initiallyPaused: Boolean = false, block: (PamMediaView, FrameLayout, String) -> Unit) {
+    @Test fun routeViewResumesAfterAttachWithoutAnActivityResumeCallback() = withMedia(routeState = Lifecycle.State.CREATED) { media, parent, source ->
+        val ready = CountDownLatch(1)
+        lateinit var lifecycle: LifecycleRegistry
+        main {
+            lifecycle = parent.findViewTreeLifecycleOwner()!!.lifecycle as LifecycleRegistry
+            media.onReady = { ready.countDown() }
+            media.setAutoPlay(true)
+            media.setSource(source)
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        assertStopped(media)
+        // PamRouteFragment reaches RESUMED only after the view attaches.
+        main { lifecycle.currentState = Lifecycle.State.RESUMED }
+        awaitPlaying(media, true)
+        main { lifecycle.currentState = Lifecycle.State.STARTED }
+        awaitPlaying(media, false)
+        main { media.pause(); lifecycle.currentState = Lifecycle.State.RESUMED }
+        assertStopped(media)
+        main { media.start() }
+        awaitPlaying(media, true)
+        main {
+            media.onHostPause()
+            lifecycle.currentState = Lifecycle.State.STARTED
+            lifecycle.currentState = Lifecycle.State.RESUMED
+        }
+        awaitPlaying(media, false)
+        main { media.onHostResume() }
+        awaitPlaying(media, true)
+        main {
+            assertEquals(1, lifecycle.observerCount)
+            parent.removeView(media)
+            assertEquals("Detached media releases its lifecycle observer", 0, lifecycle.observerCount)
+        }
+        assertStopped(media)
+    }
+
+    private fun withMedia(initiallyPaused: Boolean = false, routeState: Lifecycle.State? = null, block: (PamMediaView, FrameLayout, String) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -112,6 +152,11 @@ class PamMediaPlaybackInstrumentedTest {
             main {
                 if (initiallyPaused) (activity.lifecycle as LifecycleRegistry).currentState = Lifecycle.State.STARTED
                 parent = FrameLayout(activity)
+                if (routeState != null) {
+                    parent.setViewTreeLifecycleOwner(object : LifecycleOwner {
+                        override val lifecycle = LifecycleRegistry(this).apply { currentState = routeState }
+                    })
+                }
                 media = PamMediaView(activity, cache, loader)
                 media.setMuted(true)
                 parent.addView(media, FrameLayout.LayoutParams(200, 120))

@@ -5,6 +5,7 @@ internal class MediaPlaybackLifecycle {
     private var autoPlay = false
     private var requested = false
     private var hostActive = true
+    private var ownerActive = true
     private var attached = false
     private var visible = false
 
@@ -23,6 +24,7 @@ internal class MediaPlaybackLifecycle {
 
     fun request(value: Boolean) { requested = value; update() }
     fun hostActive(value: Boolean) { hostActive = value; update() }
+    fun ownerActive(value: Boolean) { ownerActive = value; update() }
     fun visibility(attached: Boolean, visible: Boolean) {
         this.attached = attached
         this.visible = visible
@@ -34,5 +36,5 @@ internal class MediaPlaybackLifecycle {
         update()
     }
 
-    private fun update() { mayPlay = requested && hostActive && attached && visible }
+    private fun update() { mayPlay = requested && hostActive && ownerActive && attached && visible }
 }

@@ -72,6 +72,7 @@ class PamRuntime(
     private val pendingImmediateEvents = ArrayDeque<PendingEvent>()
     private val pendingEvents = LinkedHashMap<EventIdentity, ByteArray>()
     private val hotReloadLatency = HotReloadLatency()
+    private val reloadReleases = mutableMapOf<String, () -> Unit>()
     private var frameScheduled = false
     private var readyForEvents = false
 
@@ -353,6 +354,7 @@ class PamRuntime(
         entryPath: String,
         confirmedAtNanos: Long? = null,
         bundleBytes: Int = 0,
+        previousRequestReleased: (() -> Unit)? = null,
     ) {
         synchronized(handleLock) {
             val active = handle
@@ -360,11 +362,17 @@ class PamRuntime(
                 if (confirmedAtNanos != null) {
                     hotReloadLatency.begin(confirmedAtNanos, bundleBytes)
                 }
+                if (previousRequestReleased != null) reloadReleases[entryPath] = previousRequestReleased
                 readyForEvents = false
                 modules.prepareReload()
                 nativeReload(active, entryPath)
             }
         }
+    }
+
+    @Suppress("unused") // JNI: shutdown has finished, including lazy PHP autoloads.
+    private fun onNativeRequestReleased(entryPath: String) {
+        main.post { reloadReleases.remove(entryPath)?.invoke() }
     }
 
     fun stats(): RuntimeStats {
@@ -408,6 +416,7 @@ class PamRuntime(
             Thread({ nativeStop(active) }, "pam-runtime-stop").start()
         }
         main.removeCallbacksAndMessages(null)
+        reloadReleases.clear()
         choreographer.removeFrameCallback(frameCallback)
         frameScheduled = false
         while (pendingBatches.isNotEmpty()) {
