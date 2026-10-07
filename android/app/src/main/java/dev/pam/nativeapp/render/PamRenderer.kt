@@ -314,6 +314,42 @@ internal fun hostedContentExtent(
 internal fun usesNativeViewGroupPadding(kind: NodeKind): Boolean =
     kind == NodeKind.CUSTOM_VIEW
 
+/** Physical margins of a virtualized cell root (auto margins count as zero). */
+internal data class CellRootMargins(
+    val left: Float = 0f,
+    val top: Float = 0f,
+    val right: Float = 0f,
+    val bottom: Float = 0f,
+)
+
+internal fun cellRootMargins(properties: Map<PropKey, PropValue>?): CellRootMargins {
+    if (properties == null) return CellRootMargins()
+    fun value(key: PropKey, fallback: Double): Double {
+        val resolved = when (val raw = properties[key]) {
+            is PropValue.Decimal -> raw.value
+            is PropValue.Integer -> raw.value.toDouble()
+            else -> fallback
+        }
+        return if (resolved.isFinite()) resolved else 0.0
+    }
+    val all = value(PropKey.MARGIN, 0.0)
+    val horizontal = value(PropKey.MARGIN_HORIZONTAL, all)
+    val vertical = value(PropKey.MARGIN_VERTICAL, all)
+    return CellRootMargins(
+        left = value(PropKey.MARGIN_LEFT, horizontal).toFloat(),
+        top = value(PropKey.MARGIN_TOP, vertical).toFloat(),
+        right = value(PropKey.MARGIN_RIGHT, horizontal).toFloat(),
+        bottom = value(PropKey.MARGIN_BOTTOM, vertical).toFloat(),
+    )
+}
+
+internal fun cellSlotFrame(rootFrame: Frame, margins: CellRootMargins): Frame = Frame(
+    x = rootFrame.x - margins.left,
+    y = rootFrame.y - margins.top,
+    width = rootFrame.width + margins.left + margins.right,
+    height = rootFrame.height + margins.top + margins.bottom,
+)
+
 internal fun engineFrameMargin(offset: Int, nativeFramePadding: Int): Int =
     offset - nativeFramePadding
 
@@ -1622,9 +1658,16 @@ class PamRenderer(
             }
             val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
             val fallbackExtent = state.number(PropKey.LIST_ROW_HEIGHT, 48.0).toFloat()
+            // A cell slot is its root's margin box, like a React Native cell
+            // around an item with margins (the engine insets the root frame).
             val itemExtents = itemIds.associateWith { id ->
                 frames[id]?.let { frame ->
-                    if (horizontal) frame.width else frame.height
+                    val margins = cellRootMargins(nodes[id]?.properties)
+                    if (horizontal) {
+                        frame.width + margins.left + margins.right
+                    } else {
+                        frame.height + margins.top + margins.bottom
+                    }
                 }?.coerceAtLeast(1f) ?: fallbackExtent
             }
             list.setRichItems(
@@ -1750,8 +1793,14 @@ class PamRenderer(
     }
 
     private fun materializeCell(id: Long, holder: FrameLayout) {
-        val rootFrame = frames[id] ?: return
-        materializeCellNode(id, id, rootFrame, holder)
+        val slotFrame = cellSlotFrame(id) ?: return
+        materializeCellNode(id, id, slotFrame, holder)
+    }
+
+    /** The cell holder's frame: the root frame outset by the root's margins. */
+    private fun cellSlotFrame(rootId: Long): Frame? {
+        val frame = frames[rootId] ?: return null
+        return cellSlotFrame(frame, cellRootMargins(nodes[rootId]?.properties))
     }
 
     private fun materializeCellNode(
@@ -1833,10 +1882,11 @@ class PamRenderer(
             // Cell frames are physical engine coordinates too; START would
             // mirror them a second time inside an RTL holder.
             gravity = PAM_PHYSICAL_FRAME_GRAVITY
-            leftMargin = if (id == rootId) 0 else engineFrameMargin(
+            // The root sits at its margins inside the holder (the slot).
+            leftMargin = if (id == rootId) horizontal.offset else engineFrameMargin(
                 horizontal.offset, paddedHost?.paddingLeft ?: 0,
             )
-            topMargin = if (id == rootId) 0 else engineFrameMargin(
+            topMargin = if (id == rootId) vertical.offset else engineFrameMargin(
                 vertical.offset, paddedHost?.paddingTop ?: 0,
             )
         }
@@ -2029,8 +2079,8 @@ class PamRenderer(
     private fun applyLayout(id: Long) {
         if (views[id] == null) return
         virtualCellRoot(id)?.let { rootId ->
-            val rootFrame = frames[rootId] ?: return
-            applyCellLayout(id, rootId, rootFrame)
+            val slotFrame = cellSlotFrame(rootId) ?: return
+            applyCellLayout(id, rootId, slotFrame)
             return
         }
         val frame = frames[id] ?: return
@@ -2567,7 +2617,7 @@ class PamRenderer(
                 lastLayoutEvents.remove(state.id)
                 queueLayoutEvent(state.id)
             }
-            PropKey.STICKY_HEADER -> applyStickyHeader(view, value.flag())
+            PropKey.STICKY_HEADER -> applyStickyHeader(view, value.flag(), state)
             PropKey.SCROLL_KEYBOARD_INSET ->
                 (view as? PamScrollContainer)?.let { configureScrollKeyboardInset(it, state, value.flag()) }
             PropKey.VALUE -> when (view) {
@@ -3323,11 +3373,6 @@ class PamRenderer(
             PropKey.GESTURE_NATIVE_TRANSLATION_LIMIT_X,
             PropKey.GESTURE_NATIVE_RESET_ON_END,
             -> configurePressable(view, state)
-            PropKey.WIDTH,
-            PropKey.HEIGHT,
-            PropKey.FLEX_GROW,
-            PropKey.FLEX_SHRINK,
-            PropKey.GAP,
             PropKey.MARGIN,
             PropKey.MARGIN_HORIZONTAL,
             PropKey.MARGIN_VERTICAL,
@@ -3335,6 +3380,12 @@ class PamRenderer(
             PropKey.MARGIN_TOP,
             PropKey.MARGIN_RIGHT,
             PropKey.MARGIN_BOTTOM,
+            -> if (state.flag(PropKey.STICKY_HEADER, false)) applyStickyHeader(view, true, state)
+            PropKey.WIDTH,
+            PropKey.HEIGHT,
+            PropKey.FLEX_GROW,
+            PropKey.FLEX_SHRINK,
+            PropKey.GAP,
             PropKey.MIN_WIDTH,
             PropKey.MIN_HEIGHT,
             PropKey.MAX_WIDTH,
@@ -6702,10 +6753,17 @@ class PamRenderer(
     /** Materialized native view of a node (instrumentation and diagnostics). */
     internal fun viewForNode(id: Long): View? = views[id]
 
-    private fun applyStickyHeader(view: View, sticky: Boolean) {
+    private fun applyStickyHeader(view: View, sticky: Boolean, state: NodeState? = null) {
         var parent = view.parent
         while (parent != null && parent !is PamScrollContainer) parent = parent.parent
-        (parent as? PamScrollContainer)?.setSticky(view, sticky)
+        val margins = cellRootMargins(state?.properties)
+        val density = resourcesDensity()
+        (parent as? PamScrollContainer)?.setSticky(
+            view,
+            sticky,
+            marginTopPx = (margins.top * density).roundToInt(),
+            marginBottomPx = (margins.bottom * density).roundToInt(),
+        )
     }
 
     private val lastLayoutEvents = HashMap<Long, Frame>()

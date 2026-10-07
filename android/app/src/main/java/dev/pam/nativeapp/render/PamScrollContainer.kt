@@ -95,28 +95,41 @@ internal class PamScrollContainer @JvmOverloads constructor(
      * pinned to the top of the viewport after it scrolls past it until the
      * next sticky child pushes it away.
      */
-    fun setSticky(child: View, sticky: Boolean) {
+    fun setSticky(child: View, sticky: Boolean, marginTopPx: Int = 0, marginBottomPx: Int = 0) {
+        val margins = marginTopPx to marginBottomPx
+        val marginsChanged = if (sticky) stickyMargins.put(child, margins) != margins else {
+            stickyMargins.remove(child) != null
+        }
         val changed = if (sticky) stickyChildren.add(child) else stickyChildren.remove(child)
         if (!sticky) child.translationY = 0f
-        if (changed) {
+        if (changed || marginsChanged) {
             content.invalidate()
             updateStickyChildren()
         }
     }
 
+    /** Vertical margins of each sticky child, in pixels. */
+    private val stickyMargins = HashMap<View, Pair<Int, Int>>()
+
     private fun updateStickyChildren() {
         if (stickyChildren.isEmpty()) return
         stickyChildren.retainAll { it.parent === content }
+        stickyMargins.keys.retainAll(stickyChildren)
         val offset = if (horizontal) 0 else scrollYOf(activeScroll)
+        // Like React Native's sticky header wrapper, a header pins and is
+        // pushed by its margin box (the margins stay around the header).
         val ordered = stickyChildren.sortedBy(View::getTop)
         ordered.forEachIndexed { index, child ->
-            val top = child.top
-            val nextTop = ordered.getOrNull(index + 1)?.top ?: Int.MAX_VALUE
-            val pinned = if (horizontal || offset <= top) {
-                0
-            } else {
-                minOf(offset - top, (nextTop - top - child.height).coerceAtLeast(0))
-            }
+            val (marginTop, marginBottom) = stickyMargins[child] ?: (0 to 0)
+            val pinned = stickyPinOffset(
+                scrollOffset = offset,
+                top = child.top - marginTop,
+                extent = child.height + marginTop + marginBottom,
+                nextTop = ordered.getOrNull(index + 1)?.let { next ->
+                    next.top - (stickyMargins[next]?.first ?: 0)
+                },
+                horizontal = horizontal,
+            )
             if (child.translationY != pinned.toFloat()) child.translationY = pinned.toFloat()
         }
     }
@@ -1153,4 +1166,21 @@ internal fun pamOnePageTarget(
         else -> 0
     }
     return ((startPage + direction) * extent).coerceIn(0, maxScroll)
+}
+
+/**
+ * Translation of a sticky ScrollView child whose margin box starts at [top]
+ * and spans [extent]: pinned at the viewport top once scrolled past, pushed
+ * away by the next sticky margin box at [nextTop].
+ */
+internal fun stickyPinOffset(
+    scrollOffset: Int,
+    top: Int,
+    extent: Int,
+    nextTop: Int?,
+    horizontal: Boolean,
+): Int {
+    if (horizontal || scrollOffset <= top) return 0
+    val limit = nextTop?.let { (it - top - extent).coerceAtLeast(0) } ?: Int.MAX_VALUE
+    return minOf(scrollOffset - top, limit)
 }

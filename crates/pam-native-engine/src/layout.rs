@@ -596,25 +596,33 @@ fn layout_node(
         if horizontal {
             let mut cursor = inner.x;
             for child in visible_children {
+                // Like a React Native cell, the slot includes the root's
+                // margins and the root is inset by them. An authored width
+                // stays the root's own width; rowHeight stays the slot.
+                let margins = cell_margins(child);
                 let item_width = match (number(child, PropKey::Width), authored_row) {
-                    (Some(width), _) | (None, Some(width)) => width,
-                    (None, None) => intrinsic_extent(
-                        context.children,
-                        child,
-                        Axis::Horizontal,
-                        f32::INFINITY,
-                        inner.height,
-                        context.text_scale,
-                        context.text_metrics,
-                        depth + 1,
-                    )?,
+                    (Some(width), _) => width + margins.left + margins.right,
+                    (None, Some(width)) => width,
+                    (None, None) => {
+                        intrinsic_extent(
+                            context.children,
+                            child,
+                            Axis::Horizontal,
+                            f32::INFINITY,
+                            (inner.height - margins.top - margins.bottom).max(0.0),
+                            context.text_scale,
+                            context.text_metrics,
+                            depth + 1,
+                        )? + margins.left
+                            + margins.right
+                    }
                 }
                 .max(1.0);
                 let item_frame = Layout {
-                    x: cursor,
-                    y: inner.y,
-                    width: item_width,
-                    height: inner.height,
+                    x: cursor + margins.left,
+                    y: inner.y + margins.top,
+                    width: (item_width - margins.left - margins.right).max(0.0),
+                    height: (inner.height - margins.top - margins.bottom).max(0.0),
                 };
                 layout_node(context, child.id, item_frame, false, depth + 1, output)?;
                 cursor += item_width;
@@ -644,9 +652,17 @@ fn layout_node(
             for row in &rows {
                 let full_span = row.len() == 1 && boolean(row[0], PropKey::ListFullSpan);
                 let cell_width = if full_span { inner.width } else { cell_width };
+                // The slot of a cell includes its root's margins (React
+                // Native/Yoga measure the cell around the item's margin box);
+                // an authored height stays the root's own height.
                 let authored = row
                     .iter()
-                    .filter_map(|child| number(child, PropKey::Height))
+                    .filter_map(|child| {
+                        number(child, PropKey::Height).map(|height| {
+                            let margins = cell_margins(child);
+                            height + margins.top + margins.bottom
+                        })
+                    })
                     .reduce(f32::max);
                 let item_height = match authored {
                     Some(height) => height,
@@ -663,27 +679,32 @@ fn layout_node(
                             if !populated {
                                 continue;
                             }
-                            tallest = tallest.max(constrained_intrinsic_extent(
-                                context.children,
-                                child,
-                                Axis::Vertical,
-                                cell_width,
-                                inner.height,
-                                context.text_scale,
-                                context.text_metrics,
-                                depth + 1,
-                            )?);
+                            let margins = cell_margins(child);
+                            tallest = tallest.max(
+                                constrained_intrinsic_extent(
+                                    context.children,
+                                    child,
+                                    Axis::Vertical,
+                                    (cell_width - margins.left - margins.right).max(0.0),
+                                    inner.height,
+                                    context.text_scale,
+                                    context.text_metrics,
+                                    depth + 1,
+                                )? + margins.top
+                                    + margins.bottom,
+                            );
                         }
                         if tallest > 0.0 { tallest } else { row_height }
                     }
                 }
                 .max(1.0);
                 for (column, child) in row.iter().copied().enumerate() {
+                    let margins = cell_margins(child);
                     let item_frame = Layout {
-                        x: inner.x + column as f32 * cell_width,
-                        y: cursor,
-                        width: cell_width,
-                        height: item_height,
+                        x: inner.x + column as f32 * cell_width + margins.left,
+                        y: cursor + margins.top,
+                        width: (cell_width - margins.left - margins.right).max(0.0),
+                        height: (item_height - margins.top - margins.bottom).max(0.0),
                     };
                     layout_node(context, child.id, item_frame, false, depth + 1, output)?;
                 }
@@ -3094,6 +3115,28 @@ fn margin_main(node: &Node, axis: Axis) -> (f32, f32) {
             number(node, PropKey::MarginLeft).unwrap_or(horizontal),
             number(node, PropKey::MarginRight).unwrap_or(horizontal),
         ),
+    }
+}
+
+/// Physical margins of a virtualized cell root. Auto margins resolve to zero
+/// (a cell slot has no free space to distribute).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct CellMargins {
+    left: f32,
+    top: f32,
+    right: f32,
+    bottom: f32,
+}
+
+fn cell_margins(node: &Node) -> CellMargins {
+    let finite = |value: f32| if value.is_finite() { value } else { 0.0 };
+    let (top, bottom) = margin_main(node, Axis::Vertical);
+    let (left, right) = margin_cross(node, Axis::Vertical);
+    CellMargins {
+        left: finite(left),
+        top: finite(top),
+        right: finite(right),
+        bottom: finite(bottom),
     }
 }
 
@@ -6353,6 +6396,179 @@ mod tests {
         assert_eq!(layout[&2].width, 140.0);
         assert_eq!(layout[&3].x, 140.0);
         assert_eq!(layout[&3].width, 80.0);
+    }
+
+    fn margin_cell(id: u64, parent: u64, index: u32, extra: &[(PropKey, PropValue)]) -> Node {
+        let mut props = vec![
+            (PropKey::MarginTop, PropValue::Float(6.0)),
+            (PropKey::MarginBottom, PropValue::Float(10.0)),
+            (PropKey::MarginHorizontal, PropValue::Float(12.0)),
+        ];
+        props.extend(extra.iter().cloned());
+        node(id, parent, index, NodeKind::Column, props)
+    }
+
+    fn fixed_box(id: u64, parent: u64, height: f64) -> Node {
+        node(
+            id,
+            parent,
+            0,
+            NodeKind::View,
+            [(PropKey::Height, PropValue::Float(height))],
+        )
+    }
+
+    #[test]
+    fn virtual_list_cell_extent_includes_root_margins() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(1, node(1, 0, 0, NodeKind::VirtualList, []));
+        nodes.insert(2, margin_cell(2, 1, 0, &[]));
+        nodes.insert(3, fixed_box(3, 2, 40.0));
+        nodes.insert(4, node(4, 1, 1, NodeKind::Column, []));
+        nodes.insert(5, fixed_box(5, 4, 30.0));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("margin cells");
+
+        // Slot 0 is 6 + 40 + 10; the root is inset by its margins.
+        assert_eq!(layout[&2].x, 12.0);
+        assert_eq!(layout[&2].y, 6.0);
+        assert_eq!(layout[&2].width, 336.0);
+        assert_eq!(layout[&2].height, 40.0);
+        assert_eq!(layout[&3].y, 6.0);
+        assert_eq!(layout[&3].width, 336.0);
+        assert_eq!(layout[&4].y, 56.0);
+        assert_eq!(layout[&4].height, 30.0);
+    }
+
+    #[test]
+    fn virtual_list_explicit_cell_height_stays_authoritative_with_margins() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListRowHeight, PropValue::Float(120.0))],
+            ),
+        );
+        nodes.insert(
+            2,
+            margin_cell(2, 1, 0, &[(PropKey::Height, PropValue::Float(64.0))]),
+        );
+        nodes.insert(3, fixed_box(3, 2, 200.0));
+        nodes.insert(4, node(4, 1, 1, NodeKind::Column, []));
+        nodes.insert(5, fixed_box(5, 4, 30.0));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("explicit margin cells");
+
+        assert_eq!(layout[&2].y, 6.0);
+        assert_eq!(layout[&2].height, 64.0);
+        assert_eq!(layout[&4].y, 80.0);
+    }
+
+    #[test]
+    fn virtual_grid_and_full_span_cells_include_root_margins() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListNumColumns, PropValue::Integer(2))],
+            ),
+        );
+        nodes.insert(
+            2,
+            margin_cell(
+                2,
+                1,
+                0,
+                &[(PropKey::ListFullSpan, PropValue::Boolean(true))],
+            ),
+        );
+        nodes.insert(3, fixed_box(3, 2, 20.0));
+        nodes.insert(4, margin_cell(4, 1, 1, &[]));
+        nodes.insert(5, fixed_box(5, 4, 50.0));
+        nodes.insert(6, node(6, 1, 2, NodeKind::Column, []));
+        nodes.insert(7, fixed_box(7, 6, 30.0));
+        nodes.insert(8, node(8, 1, 3, NodeKind::Column, []));
+        nodes.insert(9, fixed_box(9, 8, 10.0));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("margin grid");
+
+        // Full-span header: slot 6 + 20 + 10.
+        assert_eq!(layout[&2].x, 12.0);
+        assert_eq!(layout[&2].y, 6.0);
+        assert_eq!(layout[&2].width, 336.0);
+        // Grid row: the tallest slot is 6 + 50 + 10.
+        assert_eq!(layout[&4].x, 12.0);
+        assert_eq!(layout[&4].y, 42.0);
+        assert_eq!(layout[&4].width, 156.0);
+        assert_eq!(layout[&4].height, 50.0);
+        assert_eq!(layout[&6].x, 180.0);
+        assert_eq!(layout[&6].y, 36.0);
+        assert_eq!(layout[&6].height, 66.0);
+        assert_eq!(layout[&8].y, 102.0);
+    }
+
+    #[test]
+    fn horizontal_virtual_list_cell_extent_includes_root_margins() {
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListHorizontal, PropValue::Boolean(true))],
+            ),
+        );
+        nodes.insert(
+            2,
+            margin_cell(2, 1, 0, &[(PropKey::Width, PropValue::Float(100.0))]),
+        );
+        nodes.insert(3, node(3, 1, 1, NodeKind::Column, []));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 200.0,
+            },
+        )
+        .expect("horizontal margin cells");
+
+        assert_eq!(layout[&2].x, 12.0);
+        assert_eq!(layout[&2].y, 6.0);
+        assert_eq!(layout[&2].width, 100.0);
+        assert_eq!(layout[&2].height, 184.0);
+        assert_eq!(layout[&3].x, 124.0);
     }
 
     #[test]

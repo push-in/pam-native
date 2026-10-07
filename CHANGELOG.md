@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.25.1 - 2026-10-07
+
+- VirtualizedList/VirtualGrid cells include their root's margins, like React
+  Native/Yoga: a content-sized cell's slot (row height, or column width in a
+  horizontal list) is the root's margin box, and the root is inset by its
+  margins on every side. An authored `height` (`width` horizontally) stays
+  the root's own height and the margins are added around it; `rowHeight` of
+  a horizontal list stays the slot extent. Applies to grid rows (the tallest
+  margin box) and `fullSpan` cells. Before, the margins were dropped from the
+  slot and the root sat at its top-left corner.
+- Android and iOS size and position cell holders from the margin box
+  (content size, item starts and the visible window on iOS).
+- Sticky children of a `ScrollView` (and sticky virtual list cells on iOS)
+  pin and are pushed by their margin box, like React Native's sticky header
+  wrapper: a pinned header keeps its top margin above it.
+- No PHP API or protocol identifiers changed. See
+  [migration notes](docs/migration-1.25.1.md).
+
 ## 1.25.0 - 2026-10-07
 
 - `Navigator::prewarm($route, $params)` mounts a screen ahead of navigation,

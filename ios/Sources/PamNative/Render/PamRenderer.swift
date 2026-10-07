@@ -657,15 +657,20 @@ public final class PamRenderer {
             .properties[PamConstants.scrollHorizontal]?.boolOrNil() ?? false
         list.horizontal = horizontal
         let cellIds = children[id] ?? []
+        // Cell slots are the roots' margin boxes (React Native cells): the
+        // engine insets each root frame by its margins, and the content size,
+        // item starts and visible window follow the slots.
         let localFrames = cellIds.compactMap { cellId -> (Int64, CGRect)? in
             guard let frame = frames[cellId] else { return nil }
             return (
                 cellId,
-                CGRect(
-                    x: CGFloat(frame.x - listFrame.x),
-                    y: CGFloat(frame.y - listFrame.y),
-                    width: CGFloat(max(0, frame.width)),
-                    height: CGFloat(max(0, frame.height))
+                PamCellMargins(properties: nodes[cellId]?.properties).slot(
+                    CGRect(
+                        x: CGFloat(frame.x - listFrame.x),
+                        y: CGFloat(frame.y - listFrame.y),
+                        width: CGFloat(max(0, frame.width)),
+                        height: CGFloat(max(0, frame.height))
+                    )
                 )
             )
         }
@@ -933,7 +938,11 @@ public final class PamRenderer {
         guard let registry, let scroll = parentView as? UIScrollView else { return }
         let sticky = state.properties[PamConstants.stickyHeader]?.pamFlag ?? false
         guard sticky || registry.contains(view) else { return }
-        registry.set(view, frame: sticky ? frame : nil)
+        registry.set(
+            view,
+            frame: sticky ? frame : nil,
+            margins: PamCellMargins(properties: state.properties)
+        )
         registry.update(offset: scroll.contentOffset.y + scroll.adjustedContentInset.top, host: scroll)
     }
 

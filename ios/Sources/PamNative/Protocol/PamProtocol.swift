@@ -556,6 +556,12 @@ public enum PamConstants {
     public static let borderRightWidth = 124
     public static let borderBottomWidth = 125
     public static let margin = 26
+    public static let marginHorizontal = 27
+    public static let marginVertical = 28
+    public static let marginLeft = 108
+    public static let marginTop = 109
+    public static let marginRight = 110
+    public static let marginBottom = 111
     public static let testId = 18
     public static let padding = 8
     public static let flexGrow = 7

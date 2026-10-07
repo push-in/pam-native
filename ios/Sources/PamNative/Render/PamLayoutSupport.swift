@@ -51,17 +51,67 @@ enum PamStickyHeaders {
     }
 }
 
+/// Physical margins of a virtualized cell root or sticky child (auto margins
+/// count as zero). React Native/Yoga size a cell around its root's margin
+/// box; the engine insets the root frame by these margins.
+struct PamCellMargins: Equatable {
+    var left: CGFloat = 0
+    var top: CGFloat = 0
+    var right: CGFloat = 0
+    var bottom: CGFloat = 0
+
+    static let zero = PamCellMargins()
+
+    init(left: CGFloat = 0, top: CGFloat = 0, right: CGFloat = 0, bottom: CGFloat = 0) {
+        self.left = left
+        self.top = top
+        self.right = right
+        self.bottom = bottom
+    }
+
+    init(properties: [Int: PropValue]?) {
+        guard let properties else { return }
+        func value(_ key: Int, _ fallback: CGFloat) -> CGFloat {
+            let resolved: Double
+            switch properties[key] {
+            case let .decimal(number)?: resolved = number
+            case let .integer(number)?: resolved = Double(number)
+            default: return fallback
+            }
+            return resolved.isFinite ? CGFloat(resolved) : 0
+        }
+        let all = value(PamConstants.margin, 0)
+        let horizontal = value(PamConstants.marginHorizontal, all)
+        let vertical = value(PamConstants.marginVertical, all)
+        left = value(PamConstants.marginLeft, horizontal)
+        top = value(PamConstants.marginTop, vertical)
+        right = value(PamConstants.marginRight, horizontal)
+        bottom = value(PamConstants.marginBottom, vertical)
+    }
+
+    /// The margin box (cell slot) around a root frame.
+    func slot(_ frame: CGRect) -> CGRect {
+        CGRect(
+            x: frame.minX - left,
+            y: frame.minY - top,
+            width: max(0, frame.width + left + right),
+            height: max(0, frame.height + top + bottom)
+        )
+    }
+}
+
 /// Sticky children of one scroll host, positioned through `center` so their
-/// own transforms keep working.
+/// own transforms keep working. Like React Native's sticky header wrapper, a
+/// child pins and is pushed by its margin box.
 final class PamStickyRegistry {
-    private var entries: [ObjectIdentifier: (view: UIView, frame: CGRect)] = [:]
+    private var entries: [ObjectIdentifier: (view: UIView, frame: CGRect, margins: PamCellMargins)] = [:]
 
     var isEmpty: Bool { entries.isEmpty }
 
-    func set(_ view: UIView, frame: CGRect?) {
+    func set(_ view: UIView, frame: CGRect?, margins: PamCellMargins = .zero) {
         let key = ObjectIdentifier(view)
         if let frame {
-            entries[key] = (view, frame)
+            entries[key] = (view, frame, margins)
             view.layer.zPosition = 1
         } else if let previous = entries.removeValue(forKey: key) {
             previous.view.layer.zPosition = 0
@@ -92,7 +142,7 @@ final class PamStickyRegistry {
         guard !entries.isEmpty else { return }
         entries = entries.filter { $0.value.view.superview === host }
         let ordered = Array(entries.values)
-        let shifts = PamStickyHeaders.shifts(frames: ordered.map { $0.frame }, offset: offset)
+        let shifts = PamStickyHeaders.shifts(frames: ordered.map { $0.margins.slot($0.frame) }, offset: offset)
         for (index, entry) in ordered.enumerated() {
             let center = CGPoint(x: entry.frame.midX, y: entry.frame.midY + shifts[index])
             if entry.view.center != center { entry.view.center = center }
