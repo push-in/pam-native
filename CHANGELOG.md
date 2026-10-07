@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.30.1 - 2026-10-07
+
+- Commits between frames: a batch that builds something (32 mutations or
+  more: a page of older chat rows, a reel's chrome) and any batch while a
+  virtual list is dragged or flinging is committed right after the running
+  frame instead of inside its animation callback, then the virtual lists it
+  dirtied are measured and laid out there too, at their current size. The
+  frame keeps only what was already running (the scroll, a playing video);
+  the work uses the idle time before the next vsync while the render thread
+  draws, and the next traversal shows the rows. Small batches (a keystroke
+  echo, a toggle) still land in the frame that asked for them. iOS defers the
+  same heavy batches to a one-shot `beforeWaiting` observer ordered after
+  Core Animation's commit.
+- Android `ActivityIndicator`: the spinner is a plain `View` drawing the same
+  Vuetify-style arc instead of a `ProgressBar`, whose constructor loaded the
+  platform's indeterminate AnimatedVectorDrawable even without a style
+  (15-25 ms on the UI thread for every new spinner, e.g. a list's "loading
+  older rows" cell, on Samsung). Accessibility still reports a ProgressBar.
+- Android text cells: a pooled `TextView` taken for a new list cell no longer
+  keeps the previous cell's size, so `setText` defers to the single
+  measure instead of laying the text out at the old width and again at the
+  new one.
+- Runtime statistics (`RuntimeFrameMetrics.stats`) are read from the engine on
+  first access (the dev tools) instead of on every commit, where the JNI call
+  cost up to milliseconds on the UI thread. Benchmark builds log
+  `batches/decodeNs/mountNs` per commit without them; debug builds keep the
+  full line. iOS reads them lazily too.
+
 ## 1.30.0 - 2026-10-07
 
 - Layout: `aspect-ratio` follows Yoga's rules with min/max constraints on both

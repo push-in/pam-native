@@ -11,22 +11,48 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.Animatable
 import android.graphics.drawable.Drawable
+import android.view.View
 import android.view.animation.LinearInterpolator
 import android.widget.ProgressBar
 import kotlin.math.cos
 
 /**
- * No default style: the theme's ProgressBar style inflates an
- * AnimatedVectorDrawable this view replaces at once (15-25 ms on the UI
- * thread for every new spinner, e.g. a list's "loading older rows" cell).
- * Only that style's tint is kept.
+ * A plain view, not a ProgressBar: the ProgressBar constructor loads the
+ * platform's indeterminate AnimatedVectorDrawable even without a style (some
+ * vendors' ProgressBar always does), 15-25 ms on the UI thread for every new
+ * spinner, e.g. a list's "loading older rows" cell. Only the theme's progress
+ * tint is kept; accessibility still reports a ProgressBar.
  */
-internal class PamVuetifySpinner(context: Context) : ProgressBar(context, null, 0, 0) {
+internal class PamVuetifySpinner(context: Context) : View(context) {
+    val indeterminateDrawable: Drawable = PamVuetifySpinnerDrawable(context)
+
+    var indeterminateTintList: ColorStateList? = null
+        set(value) {
+            field = value
+            value?.let { indeterminateDrawable.setTint(it.getColorForState(drawableState, it.defaultColor)) }
+        }
+
     init {
-        isIndeterminate = true
-        indeterminateDrawable = PamVuetifySpinnerDrawable(context)
-        themeProgressTint(context)?.let { indeterminateTintList = it }
+        indeterminateDrawable.callback = this
+        indeterminateTintList = themeProgressTint(context)
     }
+
+    override fun verifyDrawable(who: Drawable): Boolean =
+        who === indeterminateDrawable || super.verifyDrawable(who)
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        indeterminateDrawable.setBounds(paddingLeft, paddingTop, width - paddingRight, height - paddingBottom)
+        indeterminateDrawable.draw(canvas)
+    }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        // Like ProgressBar: animate while shown, stop when hidden or detached.
+        indeterminateDrawable.setVisible(isVisible, false)
+    }
+
+    override fun getAccessibilityClassName(): CharSequence = ProgressBar::class.java.name
 }
 
 private val PROGRESS_TINT_ATTRS = intArrayOf(android.R.attr.colorControlActivated)

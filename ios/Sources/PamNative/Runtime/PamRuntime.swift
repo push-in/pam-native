@@ -277,11 +277,52 @@ public struct RuntimeStats {
     public let deadlineMisses: Int64
 }
 
+extension RuntimeStats {
+    static let pamZero = RuntimeStats(
+        commits: 0, nodes: 0, created: 0, removed: 0, updated: 0, retainedBytes: 0,
+        fullCommits: 0, patchCommits: 0, inputBytes: 0, outputBytes: 0,
+        decodeP95Micros: 0, reconcileP95Micros: 0, layoutP95Micros: 0, encodeP95Micros: 0,
+        coalescedCommands: 0, bufferReuses: 0, reusedBufferBytes: 0, measuredFrames: 0,
+        deadlineMisses: 0,
+    )
+}
+
 public struct RuntimeFrameMetrics {
     public let batches: Int
     public let decodeNanos: Int64
     public let mountNanos: Int64
-    public let stats: RuntimeStats
+    private let lazyStats: PamLazyRuntimeStats
+
+    /// Read from the engine on first access: a commit does not pay for it.
+    public var stats: RuntimeStats { lazyStats.value }
+
+    public init(batches: Int, decodeNanos: Int64, mountNanos: Int64, stats: RuntimeStats) {
+        self.init(batches: batches, decodeNanos: decodeNanos, mountNanos: mountNanos) { stats }
+    }
+
+    init(batches: Int, decodeNanos: Int64, mountNanos: Int64, statsProvider: @escaping () -> RuntimeStats) {
+        self.batches = batches
+        self.decodeNanos = decodeNanos
+        self.mountNanos = mountNanos
+        self.lazyStats = PamLazyRuntimeStats(statsProvider)
+    }
+}
+
+private final class PamLazyRuntimeStats {
+    private var provider: (() -> RuntimeStats)?
+    private var cached: RuntimeStats?
+
+    init(_ provider: @escaping () -> RuntimeStats) {
+        self.provider = provider
+    }
+
+    var value: RuntimeStats {
+        if let cached { return cached }
+        let value = provider?() ?? RuntimeStats.pamZero
+        cached = value
+        provider = nil
+        return value
+    }
 }
 
 public final class PamRuntime {
@@ -1357,8 +1398,47 @@ public final class PamRuntime {
         stateLock.unlock()
 
         flushEvents()
+        if deferHeavyCommitPastFrame() { return }
         flushBatches()
         schedulePauseIfNeeded()
+    }
+
+    /// Parity with Android PamRuntime.deferCommitPastFrame: a batch that
+    /// builds something (a page of older rows, a reel's chrome: tens of
+    /// mutations) is committed after this frame's Core Animation commit (a
+    /// one-shot beforeWaiting observer ordered after CA's), in the idle time
+    /// before the next tick, instead of lengthening the frame that is running.
+    /// Small batches (a keystroke echo, a toggle) stay in this frame.
+    private var commitAfterFrameScheduled = false
+    private static let heavyCommitMutations = 32
+
+    private func deferHeavyCommitPastFrame() -> Bool {
+        stateLock.lock()
+        if commitAfterFrameScheduled {
+            stateLock.unlock()
+            return true
+        }
+        let mutations = pendingBatches.reduce(0) { $0 + $1.mutations.count }
+        let heavy = !closed && !surfaceAwaitingFirstFrame && mutations >= Self.heavyCommitMutations
+        if heavy { commitAfterFrameScheduled = true }
+        stateLock.unlock()
+        guard heavy else { return false }
+        // CA commits the frame's implicit transaction at order 2_000_000.
+        let observer = CFRunLoopObserverCreateWithHandler(
+            kCFAllocatorDefault,
+            CFRunLoopActivity.beforeWaiting.rawValue,
+            false,
+            2_000_001,
+        ) { [weak self] _, _ in
+            guard let self else { return }
+            self.stateLock.lock()
+            self.commitAfterFrameScheduled = false
+            self.stateLock.unlock()
+            self.flushBatches()
+            self.schedulePauseIfNeeded()
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        return true
     }
 
     private func flushEvents() {
@@ -1442,7 +1522,7 @@ public final class PamRuntime {
             batches: mutations.count,
             decodeNanos: toProcess.reduce(0) { $0 + $1.decodeNanos },
             mountNanos: mountNanos,
-            stats: stats(),
+            statsProvider: { [weak self] in self?.stats() ?? RuntimeStats.pamZero },
         )
 
         onFrameCommitted(metrics)

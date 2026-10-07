@@ -713,6 +713,10 @@ class PamRenderer(
         val pool = cellViewPool[shape] ?: return null
         val view = pool.removeLastOrNull() ?: return null
         cellViewShapes.remove(view)
+        // A pooled text view keeps the previous cell's size: setText would lay
+        // the new text out at that width, then measure lays it out again at
+        // the new one. With no size, setText defers to the single measure.
+        if (view is TextView) view.layout(0, 0, 0, 0)
         return view
     }
 
@@ -800,6 +804,42 @@ class PamRenderer(
             if (scrollContainers.valueAt(index).isInLayout) return true
         }
         return false
+    }
+
+    /** A visible virtual list is being dragged or is flinging. */
+    fun isListScrolling(): Boolean {
+        for (id in virtualListIds) {
+            val list = views[id] as? androidx.recyclerview.widget.RecyclerView ?: continue
+            if (list.scrollState != androidx.recyclerview.widget.RecyclerView.SCROLL_STATE_IDLE && list.isShown) return true
+        }
+        return false
+    }
+
+    /**
+     * Lays out, now, the shown virtual lists a commit made dirty, at their
+     * current size: called between frames (see PamRuntime's deferred commit)
+     * so binding the new rows does not wait for, and lengthen, the next
+     * traversal. That traversal finds the lists laid out and skips them
+     * unless their own frame changed.
+     */
+    fun layoutDirtyListsNow() {
+        for (id in virtualListIds) {
+            val list = views[id] as? PamRecyclerList ?: continue
+            if (!list.isLayoutRequested || !list.isShown || list.isInLayout) continue
+            val width = list.width
+            val height = list.height
+            if (width <= 0 || height <= 0) continue
+            android.os.Trace.beginSection("PamList.layoutBetweenFrames")
+            try {
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY),
+                )
+                list.layout(list.left, list.top, list.right, list.bottom)
+            } finally {
+                android.os.Trace.endSection()
+            }
+        }
     }
 
     /** Ancestors already invalidated by [applyLayout] in the running commit. */

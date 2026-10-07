@@ -65,6 +65,9 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.30.0 | `aspect-ratio` with min/max (Yoga rules) | ✅ | Rust layout engine, shared by both hosts. |
 | 1.30.0 | A Modal's navigation bar follows the app theme | n/a | Android-only (Dialog window navigation bar); iOS has no navigation bar. |
 | 1.30.0 | `StatusBar` on iOS | ✅ (uncompiled) | `PamStatusBarCoordinator` resolves the active `StatusBar` nodes (visible route, open or opening modals) in mount order; `PamHostViewController`, `PamNativeViewController` and presented route controllers report `preferredStatusBarStyle`/`prefersStatusBarHidden`/`preferredStatusBarUpdateAnimation` and every change calls `setNeedsStatusBarAppearanceUpdate()` (animated with `animated`). `UIViewControllerBasedStatusBarAppearance` NO falls back to the application status bar like RN. `PamStatusBarTests`. |
+| 1.30.1 | Heavy batches committed after the frame | ✅ (uncompiled) | `PamRuntime.deferHeavyCommitPastFrame`: a batch of 32+ mutations runs in a one-shot `beforeWaiting` run loop observer ordered after Core Animation's commit (2_000_001) instead of inside the display link tick. Android also defers any batch while a list scrolls and lays the dirtied lists out between frames (RecyclerView passes). |
+| 1.30.1 | Runtime statistics read lazily | ✅ (uncompiled) | `RuntimeFrameMetrics.stats` is read from the engine on first access (`PamLazyRuntimeStats`); the public memberwise-style initializer is kept. |
+| 1.30.1 | Spinner without ProgressBar, pooled TextView size reset | n/a | Android-only causes (the ProgressBar constructor's AnimatedVectorDrawable, a pooled TextView's stale width laying text out twice). |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -120,3 +123,8 @@ Visual checks that tests cannot fully cover:
   back swipe), and a route presented as a full-screen modal keeps the bar it
   declares. With the key set to NO the same screens must drive the bar
   through the application API (no console warning about the key).
+- Heavy commits after the frame (1.30.1): `swift build` and the runtime tests
+  must pass; then in Ze Chat, scrolling a chat until older pages load and
+  swiping Reels must show each new page on the frame after it is ready (no
+  blank cell, no flash), typing in the composer must echo in the same frame
+  as before, and the dev tools overlay must still show commit statistics.

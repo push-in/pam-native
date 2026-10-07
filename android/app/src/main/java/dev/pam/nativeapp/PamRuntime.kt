@@ -95,7 +95,39 @@ class PamRuntime(
     private val frameCallback = Choreographer.FrameCallback {
         frameScheduled = false
         flushEvents()
+        if (deferCommitPastFrame()) return@FrameCallback
         flushBatches()
+    }
+
+    /**
+     * A batch that builds something (a page of older rows, a reel's chrome:
+     * tens of mutations, 5-15 ms), or any batch while a list scrolls, is
+     * committed right after this frame instead of inside it. The frame keeps
+     * only what was already running (the scroll, a playing video), the commit
+     * runs in the idle time before the next vsync while the render thread
+     * draws, and dirty lists bind their new rows there too; the next
+     * traversal shows the result. Small batches (a keystroke echo, a
+     * toggle) still land in the frame that asked for them.
+     */
+    private var commitAfterFrameScheduled = false
+    private val commitAfterFrame = Runnable {
+        commitAfterFrameScheduled = false
+        flushBatches()
+        if (!closed.get()) renderer.layoutDirtyListsNow()
+    }
+
+    private fun deferCommitPastFrame(): Boolean {
+        if (commitAfterFrameScheduled) return true
+        if (pendingBatches.isEmpty() || surfaceAwaitingFirstFrame || closed.get()) return false
+        if (pendingBatches.any(PendingBatch::remount)) return false
+        if (pendingBatches.sumOf { it.mutations.size } < HEAVY_COMMIT_MUTATIONS && !renderer.isListScrolling()) {
+            return false
+        }
+        commitAfterFrameScheduled = true
+        val message = android.os.Message.obtain(main, commitAfterFrame)
+        message.isAsynchronous = true
+        main.sendMessageAtFrontOfQueue(message)
+        return true
     }
 
     @Volatile
@@ -196,6 +228,8 @@ class PamRuntime(
         surfaceContext.clear()
         awaitingRemount = true
         choreographer.removeFrameCallback(frameCallback)
+        main.removeCallbacks(commitAfterFrame)
+        commitAfterFrameScheduled = false
         frameScheduled = false
         while (pendingBatches.isNotEmpty()) {
             releaseBatch(pendingBatches.removeFirst().handle)
@@ -480,6 +514,8 @@ class PamRuntime(
         main.removeCallbacksAndMessages(null)
         reloadReleases.clear()
         choreographer.removeFrameCallback(frameCallback)
+        main.removeCallbacks(commitAfterFrame)
+        commitAfterFrameScheduled = false
         frameScheduled = false
         while (pendingBatches.isNotEmpty()) {
             releaseBatch(pendingBatches.removeFirst().handle)
@@ -835,6 +871,8 @@ class PamRuntime(
     private fun flushFirstFrame() {
         if (frameScheduled) {
             choreographer.removeFrameCallback(frameCallback)
+            main.removeCallbacks(commitAfterFrame)
+            commitAfterFrameScheduled = false
             frameScheduled = false
         }
         flushEvents()
@@ -903,6 +941,10 @@ class PamRuntime(
         // (nothing on a fresh surface, a diverged tree after a failure) goes.
         val remount = current.any(PendingBatch::remount)
         Trace.beginSection("PamNative.mount")
+        if (Trace.isEnabled()) {
+            Trace.beginSection("mutations=" + current.sumOf { it.mutations.size })
+            Trace.endSection()
+        }
         try {
             runCatching {
                 if (remount) renderer.resetTree()
@@ -919,14 +961,16 @@ class PamRuntime(
         // A commit that threw part-way left a half-applied tree. Resynchronize
         // once from the retained tree; a failing remount is not retried.
         if (!committed && !remount) resynchronize()
-        val runtimeStats = stats()
+        // Engine statistics cross JNI under the handle lock (milliseconds
+        // while PHP renders): read only when the dev tools or a debug log ask.
         val metrics = RuntimeFrameMetrics(
             batches = current.size,
             decodeNanos = current.sumOf(PendingBatch::decodeNanos),
             mountNanos = System.nanoTime() - started,
-            stats = runtimeStats,
+            statsProvider = ::stats,
         )
-        if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
+        if (BuildConfig.DEBUG) {
+            val runtimeStats = metrics.stats
             Log.d(
                 PERFORMANCE_LOG_TAG,
                 "batches=${metrics.batches} decodeNs=${metrics.decodeNanos} " +
@@ -934,6 +978,11 @@ class PamRuntime(
                     "full=${runtimeStats.fullCommits} patch=${runtimeStats.patchCommits} " +
                     "inBytes=${runtimeStats.inputBytes} outBytes=${runtimeStats.outputBytes} " +
                     "buffers=${ownedBatchHandles.size}",
+            )
+        } else if (BuildConfig.BUILD_TYPE == "benchmark") {
+            Log.d(
+                PERFORMANCE_LOG_TAG,
+                "batches=${metrics.batches} decodeNs=${metrics.decodeNanos} mountNs=${metrics.mountNanos}",
             )
         }
         if (committed) {
@@ -968,6 +1017,7 @@ class PamRuntime(
         private const val MAX_PAYLOAD_BYTES = 1024 * 1024
         private const val MAX_PENDING_EVENTS = 256
         private const val PERFORMANCE_LOG_TAG = "PamNativePerf"
+        private const val HEAVY_COMMIT_MUTATIONS = 32
         private val COALESCED_EVENTS = setOf(
             9, // scroll
             17, // dimensions
@@ -1015,12 +1065,18 @@ data class RuntimeStats(
     val deadlineMisses: Long = 0,
 )
 
-data class RuntimeFrameMetrics(
+class RuntimeFrameMetrics(
     val batches: Int,
     val decodeNanos: Long,
     val mountNanos: Long,
-    val stats: RuntimeStats,
-)
+    statsProvider: () -> RuntimeStats,
+) {
+    constructor(batches: Int, decodeNanos: Long, mountNanos: Long, stats: RuntimeStats) :
+        this(batches, decodeNanos, mountNanos, { stats })
+
+    /** Read from the engine on first access (the commit's frame stays free of it). */
+    val stats: RuntimeStats by lazy(LazyThreadSafetyMode.NONE, statsProvider)
+}
 
 private data class PendingBatch(
     val mutations: List<Mutation>,
