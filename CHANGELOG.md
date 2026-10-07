@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.23.1 - 2026-10-06
+
+- iOS: `PamHeldPanGestureRecognizer` imports `UIKit.UIGestureRecognizerSubclass`,
+  which declares the `touchesBegan`/`touchesMoved`/`reset` overrides it uses;
+  without it the iOS host does not compile ("method does not override any
+  method from its superclass"). Found by a Linux Swift 6.4 pre-check (every
+  Swift file parses; Foundation-only sources type-check); a full Xcode build
+  still needs the Mac.
+- No PHP API, protocol identifiers, Android code or dependency requirements
+  changed. Rebuild the iOS host; see [migration notes](docs/migration-1.23.1.md).
+
 ## 1.23.0 - 2026-10-06
 
 - Notification action endpoints authenticate per account while the app is

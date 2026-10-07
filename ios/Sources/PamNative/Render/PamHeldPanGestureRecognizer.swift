@@ -1,4 +1,5 @@
 import UIKit
+import UIKit.UIGestureRecognizerSubclass
 
 struct PamPanHold {
     private var beganAt: TimeInterval?
