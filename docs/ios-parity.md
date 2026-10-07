@@ -62,6 +62,9 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.29.0 | Boot from the bundle's component pack listing | ✅ | PHP SDK change, shared by both hosts. |
 | 1.29.1 | In-cell moves keep their views | ✅ | iOS `move` already re-attaches the existing views of a list cell. |
 | 1.29.2 | A Modal's `StatusBar` reaches its window | n/a | Android-only cause (the Dialog window is created after the StatusBar commits and `enableEdgeToEdge` resets its icons); the iOS `StatusBar` node does not drive the status bar yet. |
+| 1.30.0 | `aspect-ratio` with min/max (Yoga rules) | ✅ | Rust layout engine, shared by both hosts. |
+| 1.30.0 | A Modal's navigation bar follows the app theme | n/a | Android-only (Dialog window navigation bar); iOS has no navigation bar. |
+| 1.30.0 | `StatusBar` on iOS | ✅ (uncompiled) | `PamStatusBarCoordinator` resolves the active `StatusBar` nodes (visible route, open or opening modals) in mount order; `PamHostViewController`, `PamNativeViewController` and presented route controllers report `preferredStatusBarStyle`/`prefersStatusBarHidden`/`preferredStatusBarUpdateAnimation` and every change calls `setNeedsStatusBarAppearanceUpdate()` (animated with `animated`). `UIViewControllerBasedStatusBarAppearance` NO falls back to the application status bar like RN. `PamStatusBarTests`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -70,7 +73,7 @@ Run `swift test` (or the `PamNativeTests` scheme on an iOS simulator) for
 `ios/Package.swift`, then a generated app (`pam run ios`). New XCTest files
 mirror the Android instrumented tests: `PamCssPaintTests`,
 `PamCssEffectsTests`, `PamTextParityTests`, `PamLayoutParityTests`,
-`PamComponentParityTests`, `PamErrorOverlayTests`.
+`PamComponentParityTests`, `PamErrorOverlayTests`, `PamStatusBarTests`.
 
 Visual checks that tests cannot fully cover:
 
@@ -107,3 +110,13 @@ Visual checks that tests cannot fully cover:
   verification were cofactored) and the small-order ones; then a signed OTA
   manifest must be approved on a device and an `EncryptedJournal` sealed on
   iOS must open on Android and on desktop PHP.
+- `StatusBar` (1.30.0): `swift test --filter PamStatusBarTests`; then in a
+  generated app (Info.plist has `UIViewControllerBasedStatusBarAppearance`
+  YES) a screen with `barStyle="dark-content"` shows dark icons in light mode,
+  a full-screen `Modal` with `barStyle="light-content"` switches them to
+  light while it opens and back as it closes, `hidden="true"` hides the bar
+  (fading with `animated="true"`), a pushed route's bar replaces the one
+  below it and the previous one returns on pop (also after an interactive
+  back swipe), and a route presented as a full-screen modal keeps the bar it
+  declares. With the key set to NO the same screens must drive the bar
+  through the application API (no console warning about the key).

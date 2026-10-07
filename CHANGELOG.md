@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.30.0 - 2026-10-07
+
+- Layout: `aspect-ratio` follows Yoga's rules with min/max constraints on both
+  axes. In a flex container the main size comes from the cross size (the
+  authored one, or the stretched line for an item with neither size) and is
+  bounded by the main-axis min/max; the cross size is then derived from that
+  bounded main size (over an authored cross size, like Yoga) and bounded by
+  its own min/max. An absolutely positioned item whose width or height comes
+  from both insets drives the other through the ratio. A `width: 100%;
+  max-height: 100%; aspect-ratio` stage now narrows, keeping its ratio, when
+  its parent shrinks above the keyboard instead of keeping its width and
+  overflowing under the status bar. Rust tests replay Yoga's
+  `YGAspectRatioTest` reference cases.
+- Android `Modal`: the navigation bar follows the app's light/dark appearance
+  like React Native's Modal instead of the Dialog theme's black bar with light
+  icons. An edge-to-edge (`navigationBarTranslucent` or
+  `statusBarTranslucent`) modal gets RN's transparent, system-scrimmed bar
+  (RN's translucent colours before Android 10) with icons for the app theme;
+  a fitted modal paints the app window background; the declared
+  `navigationBarHidden` hides it. Re-applied after each window configuration.
+- iOS `StatusBar`: `barStyle` (`light-content`/`dark-content`), `hidden` and
+  `animated` now drive the status bar like React Native. The active
+  `StatusBar` nodes (visible route, open or opening modals) stack in mount
+  order, the latest winning property by property; the host, brownfield and
+  presented route controllers report `preferredStatusBarStyle`,
+  `prefersStatusBarHidden` and `preferredStatusBarUpdateAnimation`, and each
+  change calls `setNeedsStatusBarAppearanceUpdate()` (inside an animation
+  when `animated`). With `UIViewControllerBasedStatusBarAppearance` NO the
+  application status bar is driven instead, as RN does. The host template
+  declares the key YES. Written without Xcode: `PamStatusBarTests` and the
+  Mac checklist in `docs/ios-parity.md` must pass on a Mac.
+
 ## 1.29.2 - 2026-10-07
 
 - Android `Modal`: the `StatusBar` declared by a modal's content (or the

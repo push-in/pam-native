@@ -447,6 +447,11 @@ public enum PamConstants {
     public static let workletDurationMs = 443
     public static let workletIterations = 444
     public static let navigationBarHidden = 445
+    public static let statusBarColor = 59
+    public static let statusBarStyle = 60
+    public static let statusBarHidden = 61
+    public static let statusBarAnimated = 170
+    public static let statusBarTranslucent = 171
     public static let borderStyle = 446
     public static let scrollTargetAlignment = 447
     public static let pressScale = 448

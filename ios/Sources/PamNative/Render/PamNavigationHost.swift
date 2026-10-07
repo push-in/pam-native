@@ -17,6 +17,20 @@ private final class PamRouteViewController: UIViewController, UISearchResultsUpd
         view = routeView
     }
 
+    // A route presented as a full-screen modal owns the status bar; it
+    // reports the resolved StatusBar stack like the root controller.
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        PamStatusBarCoordinator.shared.config.style
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        PamStatusBarCoordinator.shared.config.hidden
+    }
+
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
+        PamStatusBarCoordinator.shared.config.updateAnimation
+    }
+
     func updateSearchResults(for searchController: UISearchController) {
         onSearchChange?(searchController.searchBar.text ?? "")
     }
@@ -579,6 +593,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         outgoing?.transform = .identity
         outgoing?.isHidden = true
         onTransitionEnd?()
+        PamStatusBarCoordinator.invalidate()
     }
 
     private func showOnlyTop() {

@@ -848,6 +848,7 @@ fn layout_node(
     let total_gap = main_gap * flow_children.len().saturating_sub(1) as f32;
     let resolved_main = resolved_child_main_sizes(
         context.children,
+        node,
         &flow_children,
         axis,
         available_main,
@@ -1045,10 +1046,15 @@ fn layout_node(
                 .unwrap_or(0.0)
             }
         });
-        if let Some(ratio) = number(child, PropKey::AspectRatio).filter(|value| *value > 0.0) {
-            if explicit_width.is_some() && explicit_height.is_none() {
+        // Yoga `layoutAbsoluteChild`: a size set by both insets counts as
+        // definite, and exactly one definite size drives the other through
+        // the aspect ratio.
+        if let Some(ratio) = aspect_ratio(child) {
+            let width_definite = explicit_width.is_some() || (left.is_some() && right.is_some());
+            let height_definite = explicit_height.is_some() || (top.is_some() && bottom.is_some());
+            if width_definite && !height_definite {
                 height = width / ratio;
-            } else if explicit_height.is_some() && explicit_width.is_none() {
+            } else if height_definite && !width_definite {
                 width = height * ratio;
             }
         }
@@ -1127,6 +1133,7 @@ fn layout_wrapped_children(
     for child in children {
         let item = flex_item(
             context.children,
+            node,
             child,
             axis,
             available_main,
@@ -1979,6 +1986,7 @@ fn intrinsic_extent(
     let allocated_widths = if flow_axis == Axis::Horizontal && requested_axis == Axis::Vertical {
         Some(resolved_child_main_sizes(
             children,
+            node,
             &node_children,
             flow_axis,
             inner_width,
@@ -2790,6 +2798,7 @@ struct FlexItem {
 #[allow(clippy::too_many_arguments)]
 fn flex_item(
     children_index: &BTreeMap<u64, Vec<&Node>>,
+    parent: &Node,
     child: &Node,
     axis: Axis,
     available_main: f32,
@@ -2804,16 +2813,21 @@ fn flex_item(
     let base = match explicit_flex_basis(child, available_main) {
         Some(FlexBasisValue::Points(points)) => points,
         None if growing_starts_at_zero && grow > 0.0 => 0.0,
-        Some(FlexBasisValue::Content) | None => child_main(
-            children_index,
-            child,
-            axis,
-            available_main,
-            available_cross,
-            text_scale,
-            text_metrics,
-            depth,
-        )?,
+        Some(FlexBasisValue::Content) | None => {
+            match stretched_aspect_main(parent, child, axis, available_main, available_cross) {
+                Some(main) => main,
+                None => child_main(
+                    children_index,
+                    child,
+                    axis,
+                    available_main,
+                    available_cross,
+                    text_scale,
+                    text_metrics,
+                    depth,
+                )?,
+            }
+        }
     };
     let (before, after) = margin_main(child, axis);
     Ok(FlexItem {
@@ -2936,6 +2950,7 @@ fn resolve_flexible_lengths(items: &[FlexItem], space: f32) -> BTreeMap<u64, f32
 #[allow(clippy::too_many_arguments)]
 fn resolved_child_main_sizes(
     children_index: &BTreeMap<u64, Vec<&Node>>,
+    parent: &Node,
     children: &[&Node],
     axis: Axis,
     available_main: f32,
@@ -2951,6 +2966,7 @@ fn resolved_child_main_sizes(
         .map(|child| {
             flex_item(
                 children_index,
+                parent,
                 child,
                 axis,
                 available_main,
@@ -2963,6 +2979,68 @@ fn resolved_child_main_sizes(
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(resolve_flexible_lengths(&items, available_main - total_gap))
+}
+
+/// A positive `aspectRatio`, if any.
+fn aspect_ratio(node: &Node) -> Option<f32> {
+    number(node, PropKey::AspectRatio).filter(|value| value.is_finite() && *value > 0.0)
+}
+
+/// Yoga `computeFlexBasisForChild`: an item with an aspect ratio and no
+/// definite main or cross size that stretches on the cross axis takes the
+/// parent's inner cross size (minus its cross margins) and derives its flex
+/// basis from it. The main-axis min/max then bound that basis like any
+/// other, and the cross size is re-derived from the bounded main size.
+fn stretched_aspect_main(
+    parent: &Node,
+    child: &Node,
+    axis: Axis,
+    available_main: f32,
+    available_cross: f32,
+) -> Option<f32> {
+    let ratio = aspect_ratio(child)?;
+    let (explicit_main, explicit_cross) = match axis {
+        Axis::Vertical => (
+            dimension(
+                child,
+                PropKey::Height,
+                PropKey::HeightPercent,
+                available_main,
+            ),
+            dimension(
+                child,
+                PropKey::Width,
+                PropKey::WidthPercent,
+                available_cross,
+            ),
+        ),
+        Axis::Horizontal => (
+            dimension(child, PropKey::Width, PropKey::WidthPercent, available_main),
+            dimension(
+                child,
+                PropKey::Height,
+                PropKey::HeightPercent,
+                available_cross,
+            ),
+        ),
+    };
+    if explicit_main.is_some() || explicit_cross.is_some() || !available_cross.is_finite() {
+        return None;
+    }
+    let alignment = auto_cross_alignment(child, axis).unwrap_or_else(|| {
+        integer(child, PropKey::AlignSelf)
+            .map(cross_alignment)
+            .unwrap_or_else(|| cross_alignment(integer(parent, PropKey::AlignItems).unwrap_or(4)))
+    });
+    if alignment != CrossAlignment::Stretch {
+        return None;
+    }
+    let (before, after) = margin_cross(child, axis);
+    let cross = (available_cross - before - after).max(0.0);
+    Some(match axis {
+        Axis::Vertical => cross / ratio,
+        Axis::Horizontal => cross * ratio,
+    })
 }
 
 fn flex_main_bounds(
@@ -3041,7 +3119,7 @@ fn child_main(
             available_cross,
         ),
     };
-    let ratio = number(node, PropKey::AspectRatio).filter(|value| *value > 0.0);
+    let ratio = aspect_ratio(node);
     let main = explicit_main.unwrap_or_else(|| match (axis, explicit_cross, ratio) {
         (Axis::Vertical, Some(width), Some(ratio)) => width / ratio,
         (Axis::Horizontal, Some(height), Some(ratio)) => height * ratio,
@@ -3126,13 +3204,16 @@ fn child_cross(
             available_cross,
         ),
     };
-    let ratio = number(node, PropKey::AspectRatio).filter(|value| *value > 0.0);
-    let resolved = explicit.or_else(|| {
-        ratio.map(|ratio| match axis {
+    // Yoga derives an aspect-ratio item's cross size from its resolved
+    // (min/max-bounded) main size, even over an authored cross size: a
+    // `width: 100%; aspectRatio` box whose height hits `maxHeight` narrows
+    // to keep its ratio.
+    let resolved = aspect_ratio(node)
+        .map(|ratio| match axis {
             Axis::Vertical => resolved_main * ratio,
             Axis::Horizontal => resolved_main / ratio,
         })
-    });
+        .or(explicit);
     let Some(resolved) = resolved else {
         return Ok(None);
     };
@@ -3858,6 +3939,265 @@ mod tests {
         assert_eq!(child.height, 156.0);
         assert_eq!(child.x, 114.0);
         assert_eq!(child.y, 200.0);
+    }
+
+    /// Lays out one child under a root of `viewport` and returns its frame.
+    fn aspect_child(
+        viewport: (f32, f32),
+        root: &[(PropKey, PropValue)],
+        child: &[(PropKey, PropValue)],
+    ) -> Layout {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::View, root.to_vec())),
+                (2, node(2, 1, 0, NodeKind::View, child.to_vec())),
+            ]),
+        };
+        calculate(
+            &tree,
+            Size {
+                width: viewport.0,
+                height: viewport.1,
+            },
+        )
+        .expect("layout")[&2]
+    }
+
+    fn f(key: PropKey, value: f64) -> (PropKey, PropValue) {
+        (key, PropValue::Float(value))
+    }
+
+    fn i(key: PropKey, value: i64) -> (PropKey, PropValue) {
+        (key, PropValue::Integer(value))
+    }
+
+    fn size_of(frame: Layout) -> (f32, f32) {
+        (frame.width, frame.height)
+    }
+
+    /// Yoga `YGAspectRatioTest` reference cases (100x100 root).
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn aspect_ratio_matches_yoga_reference_cases() {
+        let start = [i(PropKey::AlignItems, 1)];
+        let row_start = [i(PropKey::FlexDirection, 2), i(PropKey::AlignItems, 1)];
+        let row = [i(PropKey::FlexDirection, 2)];
+        let ratio = |value| f(PropKey::AspectRatio, value);
+        let cases: Vec<(
+            &str,
+            &[(PropKey, PropValue)],
+            Vec<(PropKey, PropValue)>,
+            (f32, f32),
+        )> = vec![
+            (
+                "cross_defined",
+                &start,
+                vec![f(PropKey::Width, 50.0), ratio(1.0)],
+                (50.0, 50.0),
+            ),
+            (
+                "main_defined",
+                &start,
+                vec![f(PropKey::Height, 50.0), ratio(1.0)],
+                (50.0, 50.0),
+            ),
+            (
+                "both_dimensions_defined_row",
+                &row_start,
+                vec![
+                    f(PropKey::Width, 100.0),
+                    f(PropKey::Height, 50.0),
+                    ratio(1.0),
+                ],
+                (100.0, 100.0),
+            ),
+            (
+                "both_dimensions_defined_column",
+                &start,
+                vec![
+                    f(PropKey::Width, 50.0),
+                    f(PropKey::Height, 100.0),
+                    ratio(1.0),
+                ],
+                (100.0, 100.0),
+            ),
+            ("align_stretch", &[], vec![ratio(1.0)], (100.0, 100.0)),
+            (
+                "flex_grow",
+                &start,
+                vec![
+                    f(PropKey::Height, 50.0),
+                    f(PropKey::FlexGrow, 1.0),
+                    ratio(1.0),
+                ],
+                (100.0, 100.0),
+            ),
+            (
+                "flex_shrink",
+                &start,
+                vec![
+                    f(PropKey::Height, 150.0),
+                    f(PropKey::FlexShrink, 1.0),
+                    ratio(1.0),
+                ],
+                (100.0, 100.0),
+            ),
+            (
+                "basis",
+                &start,
+                vec![f(PropKey::FlexBasis, 50.0), ratio(1.0)],
+                (50.0, 50.0),
+            ),
+            (
+                "with_max_cross_defined",
+                &start,
+                vec![
+                    f(PropKey::Height, 50.0),
+                    f(PropKey::MaxWidth, 40.0),
+                    ratio(1.0),
+                ],
+                (40.0, 50.0),
+            ),
+            (
+                "with_max_main_defined",
+                &start,
+                vec![
+                    f(PropKey::Width, 50.0),
+                    f(PropKey::MaxHeight, 40.0),
+                    ratio(1.0),
+                ],
+                (40.0, 40.0),
+            ),
+            (
+                "with_min_cross_defined",
+                &start,
+                vec![
+                    f(PropKey::Height, 30.0),
+                    f(PropKey::MinWidth, 40.0),
+                    ratio(1.0),
+                ],
+                (40.0, 30.0),
+            ),
+            (
+                "with_min_main_defined",
+                &start,
+                vec![
+                    f(PropKey::Width, 30.0),
+                    f(PropKey::MinHeight, 40.0),
+                    ratio(1.0),
+                ],
+                (40.0, 40.0),
+            ),
+            (
+                "double_cross",
+                &start,
+                vec![f(PropKey::Height, 50.0), ratio(2.0)],
+                (100.0, 50.0),
+            ),
+            (
+                "half_cross",
+                &start,
+                vec![f(PropKey::Height, 100.0), ratio(0.5)],
+                (50.0, 100.0),
+            ),
+            (
+                "double_main",
+                &start,
+                vec![f(PropKey::Width, 50.0), ratio(0.5)],
+                (50.0, 100.0),
+            ),
+            (
+                "half_main",
+                &start,
+                vec![f(PropKey::Width, 100.0), ratio(2.0)],
+                (100.0, 50.0),
+            ),
+            (
+                "row_with_max_main_defined",
+                &row_start,
+                vec![
+                    f(PropKey::Height, 50.0),
+                    f(PropKey::MaxWidth, 40.0),
+                    ratio(1.0),
+                ],
+                (40.0, 40.0),
+            ),
+            (
+                "row_with_min_main_defined",
+                &row_start,
+                vec![
+                    f(PropKey::Height, 30.0),
+                    f(PropKey::MinWidth, 40.0),
+                    ratio(1.0),
+                ],
+                (40.0, 40.0),
+            ),
+            (
+                "stretch_with_max_main",
+                &[],
+                vec![f(PropKey::MaxHeight, 40.0), ratio(1.0)],
+                (40.0, 40.0),
+            ),
+            (
+                "row_stretch_with_max_main",
+                &row,
+                vec![f(PropKey::MaxWidth, 50.0), ratio(2.0)],
+                (50.0, 25.0),
+            ),
+            (
+                "absolute_layout_width_defined",
+                &[],
+                vec![
+                    i(PropKey::PositionType, 2),
+                    f(PropKey::Left, 0.0),
+                    f(PropKey::Top, 0.0),
+                    f(PropKey::Width, 50.0),
+                    ratio(1.0),
+                ],
+                (50.0, 50.0),
+            ),
+            (
+                "absolute_layout_width_from_insets",
+                &[],
+                vec![
+                    i(PropKey::PositionType, 2),
+                    f(PropKey::Left, 10.0),
+                    f(PropKey::Right, 10.0),
+                    f(PropKey::Top, 0.0),
+                    ratio(2.0),
+                ],
+                (80.0, 40.0),
+            ),
+        ];
+        for (name, root, child, expected) in cases {
+            assert_eq!(
+                size_of(aspect_child((100.0, 100.0), root, &child)),
+                expected,
+                "{name}"
+            );
+        }
+    }
+
+    /// RN `MediaLayerComposerModal` stage: `width: 100%`, `aspectRatio`,
+    /// `maxHeight/maxWidth: 100%` in a centred column. When the column
+    /// shrinks (keyboard open) the stage keeps its ratio and narrows.
+    #[test]
+    fn aspect_ratio_stage_narrows_when_max_height_binds() {
+        let root = [i(PropKey::AlignItems, 2), i(PropKey::JustifyContent, 2)];
+        let stage = [
+            f(PropKey::WidthPercent, 100.0),
+            f(PropKey::MaxWidthPercent, 100.0),
+            f(PropKey::MaxHeightPercent, 100.0),
+            f(PropKey::AspectRatio, 0.5625),
+        ];
+        let open = aspect_child((360.0, 800.0), &root, &stage);
+        assert_eq!(size_of(open), (360.0, 640.0));
+        assert_eq!((open.x, open.y), (0.0, 80.0));
+
+        let keyboard = aspect_child((360.0, 400.0), &root, &stage);
+        assert_eq!(size_of(keyboard), (225.0, 400.0));
+        assert_eq!((keyboard.x, keyboard.y), (67.5, 0.0));
     }
 
     #[test]

@@ -117,6 +117,11 @@ public final class PamRenderer {
     private var rootId: Int64 = 0
     private var nextMountOrder: Int64 = 1
     private let maxEventBytes = 1024 * 1024
+    /// Mounted `StatusBar` nodes; PamStatusBarCoordinator resolves them.
+    private var statusBarIds = Set<Int64>()
+    private var statusBarDirty = false
+    private var statusBarResolveScheduled = false
+    private var statusBarObserver: NSObjectProtocol?
 
     public init(
         hostView: UIView,
@@ -134,6 +139,21 @@ public final class PamRenderer {
             delegateQueue: OperationQueue.main,
         )
         sessionDelegate.renderer = self
+        // A modal shown or hidden, or a finished route transition, changes
+        // which StatusBar nodes are active without a commit.
+        statusBarObserver = NotificationCenter.default.addObserver(
+            forName: PamStatusBarCoordinator.invalidated,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleStatusBarResolve()
+        }
+    }
+
+    deinit {
+        if let statusBarObserver {
+            NotificationCenter.default.removeObserver(statusBarObserver)
+        }
     }
 
     /// The view the runtime renders into.
@@ -197,10 +217,17 @@ public final class PamRenderer {
                     needsModalSync = true
                 case let .update(id, key, value):
                     update(id: id, key: key, value: value)
+                    // A StatusBar changed, or a modal or an ancestor was
+                    // shown or hidden over one.
+                    if statusBarIds.contains(id)
+                        || (key == PamConstants.visible && !statusBarIds.isEmpty) {
+                        statusBarDirty = true
+                    }
                     if virtualListIds.contains(id) { dirtyLists.insert(id) }
                     if key == PamConstants.listSection { markList(of: id) }
                     if key == PamConstants.value { needsModalSync = true }
                 case let .move(id, parent, index):
+                    if !statusBarIds.isEmpty { statusBarDirty = true }
                     markList(of: id)
                     move(id: id, parent: parent, index: index)
                     markList(of: id)
@@ -211,6 +238,7 @@ public final class PamRenderer {
                     markList(of: id)
                 case let .setRoot(id):
                     rootId = id
+                    statusBarDirty = true
                     dirtyLists.formUnion(virtualListIds)
                     needsModalSync = true
                 }
@@ -224,6 +252,56 @@ public final class PamRenderer {
         if needsModalSync {
             syncLocalModalTriggers()
         }
+        if statusBarDirty {
+            statusBarDirty = false
+            resolveStatusBar()
+            // A modal made visible in this commit presents on the next turn.
+            scheduleStatusBarResolve()
+        }
+    }
+
+    private func scheduleStatusBarResolve() {
+        guard !statusBarResolveScheduled else { return }
+        statusBarResolveScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.statusBarResolveScheduled = false
+            self.resolveStatusBar()
+        }
+    }
+
+    /// RN `StatusBar` stack: the active nodes, merged in mount order.
+    private func resolveStatusBar() {
+        guard !statusBarIds.isEmpty || PamStatusBarCoordinator.shared.config != .initial else { return }
+        let declarations = statusBarIds
+            .compactMap { nodes[$0] }
+            .filter { state in views[state.id].map(Self.isStatusBarActive) ?? false }
+            .sorted { $0.mountOrder < $1.mountOrder }
+            .map { state in
+                PamStatusBarDeclaration(
+                    appearance: state.properties[PamConstants.statusBarStyle]?
+                        .integerOrNil().map { Int($0) },
+                    hidden: state.properties[PamConstants.statusBarHidden]?.boolOrNil(),
+                    animated: state.properties[PamConstants.statusBarAnimated]?.boolOrNil()
+                )
+            }
+        PamStatusBarCoordinator.shared.apply(PamStatusBarCoordinator.merge(declarations))
+    }
+
+    /// In a window, in no hidden ancestor (an inactive route) and in no
+    /// modal that is closed or closing.
+    static func isStatusBarActive(_ view: UIView) -> Bool {
+        guard view.window != nil else { return false }
+        var current: UIView? = view
+        while let candidate = current {
+            if let modal = candidate as? PamModalHost {
+                if !modal.showsContent { return false }
+            } else if candidate.isHidden {
+                return false
+            }
+            current = candidate.superview
+        }
+        return true
     }
 
     public func trimMemory(_ critical: Bool) {
@@ -313,6 +391,8 @@ public final class PamRenderer {
 
         rootId = 0
         nextMountOrder = 1
+        statusBarIds.removeAll()
+        resolveStatusBar()
     }
 
     private func create(_ spec: NodeSpec) {
@@ -336,6 +416,10 @@ public final class PamRenderer {
         )
         nextMountOrder += 1
         nodes[spec.id] = state
+        if spec.kind == .statusBar {
+            statusBarIds.insert(spec.id)
+            statusBarDirty = true
+        }
         if spec.kind == .list || spec.kind == .sectionList || spec.kind == .virtualList {
             virtualListIds.insert(spec.id)
         }
@@ -399,6 +483,9 @@ public final class PamRenderer {
         let childIds = children[id] ?? []
         for childId in childIds {
             remove(childId)
+        }
+        if statusBarIds.remove(id) != nil {
+            statusBarDirty = true
         }
 
         eventBridges[id]?.forEach { _, bridge in

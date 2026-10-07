@@ -8442,6 +8442,7 @@ class PamRenderer(
             useDarkIcons = config.appearance == STATUS_BAR_DARK,
             hidden = config.hidden,
             translucent = config.translucent,
+            navigationBarHidden = config.navigationBarHidden,
         )
     }
 

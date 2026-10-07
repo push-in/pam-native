@@ -32,6 +32,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import dev.pam.nativeapp.R
 import dev.pam.nativeapp.PamActivity
+import dev.pam.nativeapp.PamAppearance
 import java.lang.ref.WeakReference
 
 // The legacy soft-input flags remain necessary for the API 26 compatibility
@@ -135,6 +136,47 @@ internal fun sheetAvailableHeight(
         ?: if (edgeToEdge) windowHeight else windowHeight - topInset - bottomInset
     return (container - if (edgeToEdge) topInset else 0).coerceAtLeast(1)
 }
+
+/** The navigation bar a modal window draws, see [modalNavigationBarStyle]. */
+internal data class ModalNavigationBarStyle(
+    val color: Int,
+    val contrastEnforced: Boolean,
+    val lightAppearance: Boolean,
+)
+
+/**
+ * React Native's Modal navigation bar. A `navigationBarTranslucent` modal
+ * goes edge to edge like RN's `WindowUtil.enableEdgeToEdge`: a transparent
+ * bar the system scrims (contrast enforced, API 29+), or RN's translucent
+ * light/dark colour before it, with icons that follow the app's light/dark
+ * appearance. A fitted modal paints the app's window background behind the
+ * bar instead of the Dialog theme's black. Light icons need API 26; below
+ * it a light bar would hide them, so the dark colour is kept.
+ */
+internal fun modalNavigationBarStyle(
+    sdkInt: Int,
+    translucent: Boolean,
+    lightAppearance: Boolean,
+    windowBackground: Int,
+): ModalNavigationBarStyle {
+    val light = lightAppearance && sdkInt >= Build.VERSION_CODES.O
+    val color = when {
+        translucent && sdkInt >= Build.VERSION_CODES.Q -> Color.TRANSPARENT
+        translucent && light -> MODAL_LIGHT_NAVIGATION_BAR
+        translucent -> MODAL_DARK_NAVIGATION_BAR
+        !light && lightAppearance -> MODAL_DARK_NAVIGATION_BAR
+        else -> windowBackground
+    }
+    return ModalNavigationBarStyle(
+        color = color,
+        contrastEnforced = translucent,
+        lightAppearance = light,
+    )
+}
+
+/** RN `WindowUtil` LightNavigationBarColor / DarkNavigationBarColor. */
+internal const val MODAL_LIGHT_NAVIGATION_BAR = 0xE6FFFFFF.toInt()
+internal const val MODAL_DARK_NAVIGATION_BAR = 0x801B1B1B.toInt()
 
 internal fun isPointOutsideModalChild(
     x: Float,
@@ -373,6 +415,7 @@ internal class PamModalHost @JvmOverloads constructor(
         val useDarkIcons: Boolean,
         val hidden: Boolean,
         val translucent: Boolean,
+        val navigationBarHidden: Boolean,
     )
 
     fun applyStatusBar(
@@ -380,9 +423,46 @@ internal class PamModalHost @JvmOverloads constructor(
         useDarkIcons: Boolean,
         hidden: Boolean,
         translucent: Boolean,
+        navigationBarHidden: Boolean = false,
     ) {
-        statusBarConfig = ModalStatusBar(color, useDarkIcons, hidden, translucent)
-        dialog?.let(::applyStoredStatusBar)
+        statusBarConfig = ModalStatusBar(color, useDarkIcons, hidden, translucent, navigationBarHidden)
+        dialog?.let {
+            applyStoredStatusBar(it)
+            applyNavigationBar(it)
+        }
+    }
+
+    /**
+     * The Dialog theme gives a modal window a black navigation bar with light
+     * icons whatever the app's appearance; RN's Modal follows the app's
+     * light/dark (see [modalNavigationBarStyle]) and the declared
+     * `navigationBarHidden`. Re-applied after each window configuration.
+     */
+    @Suppress("DEPRECATION")
+    private fun applyNavigationBar(modal: Dialog) {
+        val window = modal.window ?: return
+        val dark = PamAppearance.isDark(context)
+        val style = modalNavigationBarStyle(
+            sdkInt = Build.VERSION.SDK_INT,
+            // An edge-to-edge window (either bar translucent) draws its
+            // content under the navigation bar too.
+            translucent = statusBarTranslucent || navigationBarTranslucent,
+            lightAppearance = PamAppearance.bool(context, R.bool.pam_light_navigation_bar, dark),
+            windowBackground = PamAppearance.color(context, R.color.pam_window_background, dark),
+        )
+        window.navigationBarColor = style.color
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = style.contrastEnforced
+        }
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightNavigationBars = style.lightAppearance
+        if (statusBarConfig?.navigationBarHidden == true) {
+            controller.systemBarsBehavior =
+                androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.navigationBars())
+        } else {
+            controller.show(WindowInsetsCompat.Type.navigationBars())
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -892,6 +972,7 @@ internal class PamModalHost @JvmOverloads constructor(
             }
         }
         applyStoredStatusBar(modal)
+        applyNavigationBar(modal)
         applyBackdrop()
     }
 

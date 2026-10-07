@@ -495,6 +495,13 @@ Supported CSS covers PAM's common native layout and paint contracts:
   decoration and case;
 - `object-fit`, `box-sizing: border-box`, and `aspect-ratio: 16 / 9`.
 
+`aspect-ratio` follows Yoga's rules: in a flex container the main size comes
+from the cross size (authored, or the stretched line) and is bounded by the
+main-axis min/max, then the cross size is derived from that bounded main size
+and bounded by its own min/max. A `width: 100%; max-height: 100%;
+aspect-ratio: 9 / 16` box therefore narrows, keeping its ratio, when its
+parent gets shorter (for example above the keyboard).
+
 Plain numbers and `px`, `dp`, or `pt` all represent PAM logical points. `rem`
 uses a stable native root of 16 logical points.
 Percentages are supported for width, height, max-width, and max-height.
@@ -537,6 +544,13 @@ icon surface, and application content below the inset remains untouched.
 version, including Android 15 and newer where edge-to-edge is enforced by the
 platform. Use it over a light status-bar background; `appearance="light"`
 keeps light icons for dark backgrounds.
+On iOS, `barStyle` (`light-content`/`dark-content`), `hidden` and `animated`
+drive the status bar like React Native (`backgroundColor` and `translucent`
+are Android-only): the active `StatusBar` nodes of the visible route and open
+modals stack in mount order, the latest winning, and the PAM controllers
+report the result through `preferredStatusBarStyle`/`prefersStatusBarHidden`.
+With `UIViewControllerBasedStatusBarAppearance` NO in Info.plist the
+application-level status bar is used instead.
 Set `navigationBarHidden="true"` to enter Android immersive navigation mode
 without hiding the status bar. System navigation remains transiently available
 with an edge swipe, and the bottom safe-area inset updates after the bar hides
@@ -639,6 +653,11 @@ On Android, a `StatusBar` rendered inside an active `Modal` configures the
 modal dialog window as well as the host activity. Full-screen modal content can
 therefore declare its own background color, light/dark icon appearance,
 visibility and translucency without inheriting the dialog theme's defaults.
+The modal's navigation bar follows the app's light/dark appearance like React
+Native's Modal instead of the dialog theme's black bar: a
+`navigationBarTranslucent` (edge-to-edge) modal gets a transparent,
+system-scrimmed bar with icons for the app's theme, a fitted modal the app's
+window background, and `navigationBarHidden` hides it.
 
 `ModalPresentation::Dialog` preserves the intrinsic width and height authored
 on its single content card and centers that card over the native backdrop. Use

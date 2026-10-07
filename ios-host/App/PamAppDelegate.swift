@@ -254,6 +254,21 @@ final class PamHostViewController: UIViewController {
     private var lastSize = CGSize.zero
     private var lastInsets = UIEdgeInsets.zero
 
+    // PAM `StatusBar` nodes (RN StatusBar): barStyle, hidden and animated,
+    // resolved per screen and modal by PamStatusBarCoordinator, which calls
+    // setNeedsStatusBarAppearanceUpdate when they change.
+    override var preferredStatusBarStyle: UIStatusBarStyle {
+        PamStatusBarCoordinator.shared.config.style
+    }
+
+    override var prefersStatusBarHidden: Bool {
+        PamStatusBarCoordinator.shared.config.hidden
+    }
+
+    override var preferredStatusBarUpdateAnimation: UIStatusBarAnimation {
+        PamStatusBarCoordinator.shared.config.updateAnimation
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         reportGeometryIfNeeded()

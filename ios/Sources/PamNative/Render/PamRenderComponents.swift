@@ -1947,8 +1947,18 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
 
     func setVisible(_ value: Bool) {
         visibilityGeneration += 1
+        let changed = desiredVisible != value
         desiredVisible = value
         scheduleUpdate()
+        if changed {
+            PamStatusBarCoordinator.invalidate()
+        }
+    }
+
+    /// Open or opening: its content's StatusBar is on the stack (a closing
+    /// modal hands the bar back as its dismissal starts, like RN).
+    var showsContent: Bool {
+        desiredVisible
     }
 
     func setPresentation(_ value: Int) {
