@@ -756,6 +756,11 @@ internal data class PamTapEffect(
     val program: PamMotionProgram,
 ) {
     companion object {
+        private val parsed = PamParseCache<PamTapEffect>()
+
+        /** [parse] memoized by source (one tap effect shared by every list row). */
+        fun cached(source: String): PamTapEffect? = parsed.getOrParse(source, ::parse)
+
         fun parse(source: String): PamTapEffect? {
             val newline = source.indexOf('\n')
             if (newline < 0) return null

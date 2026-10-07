@@ -778,9 +778,14 @@ void apply_php_ini_defaults(HashTable* configuration) {
     // Bundles are extracted to a staging directory and activated by rename,
     // so fresh mtimes never mean a half-written file: cache on first launch.
     set_ini(configuration, "opcache.file_update_protection", "0");
-    // Release bundles are content-addressed; hot reload writes new files, so
-    // revalidate on every include (a stat) rather than serving stale code.
-    set_ini(configuration, "opcache.validate_timestamps", "1");
+    // Release bundles are content-addressed (releases/<digest>,
+    // ota-releases/<digest>): a path never changes contents, so the host
+    // marks them immutable and no include stats its source. Debug builds hot
+    // reload into the same paths and revalidate on every include instead of
+    // serving stale code.
+    const char* immutable_sources = std::getenv("PAM_NATIVE_IMMUTABLE_SOURCES");
+    const bool revalidate = immutable_sources == nullptr || std::strcmp(immutable_sources, "1") != 0;
+    set_ini(configuration, "opcache.validate_timestamps", revalidate ? "1" : "0");
     set_ini(configuration, "opcache.revalidate_freq", "0");
     set_ini(configuration, "opcache.enable_file_override", "1");
     if (has_state_dir) {

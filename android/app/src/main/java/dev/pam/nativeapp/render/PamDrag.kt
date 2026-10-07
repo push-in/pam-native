@@ -74,6 +74,14 @@ internal data class PamDragConfig(
     fun settleFor(index: Int): PamDragSettle = snapSettles[index] ?: settle
 
     companion object {
+        private val parsed = PamParseCache<PamDragConfig>()
+
+        /**
+         * [parse] memoized by source: every row of a list carries the same
+         * drag program, and binding a row must not split and parse it again.
+         */
+        fun cached(source: String): PamDragConfig? = parsed.getOrParse(source, ::parse)
+
         fun parse(source: String): PamDragConfig? {
             val values = linkedMapOf<String, String>()
             val drivers = mutableListOf<PamDragDriver>()

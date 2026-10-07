@@ -56,6 +56,10 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.19.0 | Native crypto for `Pam\Native\Crypto` | ✅ (uncompiled) | `PamCrypto.swift` installs the `pam_native_crypto()` provider (CryptoKit `AES.GCM`, `Curve25519.Signing` after libsodium's S/small-order/canonical checks) from `PamRuntime`; `PamCryptoTests` replays `packages/native/tests/Fixtures/crypto-vectors.json`. |
 | 1.19.1 | Inline `data:image/*` images and `<Image tintColor>` | ✅ (uncompiled) | Data URIs decode synchronously into their own `NSCache` (`PamInlineImages`) instead of staying empty; `tintColor` renders the bitmap as an `.alwaysTemplate` image in that color (Android `imageTintList`). `PamInlineImageTests`. |
 | 1.20.0 | Per-surface safe areas | ✅ (uncompiled) | The iOS bridge sets the engine surface policy `0` (in-window): a `SafeAreaView` inside a full-screen/dialog `Modal` gets every window inset, inside a `BottomSheet` or a page/form-sheet route (`modal`, `formSheet`) no top inset. `PamSurfaceSafeAreaTests` pins each rule to UIKit's own `safeAreaInsets` for the same surface. |
+| 1.29.0 | `appearance.firstFrame: "window"` | ✅ | The host skips the launch cover held until PHP's first frame (`PamFirstFrameWaitsForPHP` = NO in Info.plist); the window shows `PamAppearance.backgroundColor` at once. |
+| 1.29.0 | Drag config parsing per list row | ✅ | `PamDragConfig.cached` memoizes `parse` by source (bounded `PamParseCache`). |
+| 1.29.0 | Prepend/append prefetch ramp, spinner style, opcache stats, queued module calls | n/a | Android-only causes (RecyclerView extra layout space, ProgressBar theme AVD, the Android opcache file cache, module registry built on the UI thread). |
+| 1.29.0 | Boot from the bundle's component pack listing | ✅ | PHP SDK change, shared by both hosts. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac

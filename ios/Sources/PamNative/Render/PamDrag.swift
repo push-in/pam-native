@@ -69,6 +69,13 @@ struct PamDragConfig: Equatable {
 
     func settle(for index: Int) -> PamDragSettle { snapSettles[index] ?? settle }
 
+    private static let parsed = PamParseCache<PamDragConfig>()
+
+    /// `parse` memoized by source (every list row carries the same program).
+    static func cached(_ source: String) -> PamDragConfig? {
+        parsed.value(for: source, parse: parse)
+    }
+
     static func parse(_ source: String) -> PamDragConfig? {
         var values: [String: String] = [:]
         var drivers: [PamDragDriver] = []

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated from pam-native.json "appearance.firstFrame" by the PAM Native CLI. -->
+<resources>
+    <bool name="pam_first_frame_waits_for_php">true</bool>
+</resources>

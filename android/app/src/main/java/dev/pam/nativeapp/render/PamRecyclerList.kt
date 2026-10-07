@@ -234,10 +234,15 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             pixelExtents != richExtents &&
             restingAtEnd() &&
             (initialIndex > 0 || canScrollTowardStart())
-        if (isAppend(richIds, ids)) {
-            // A page appended under the prefetched space would otherwise be
-            // laid out and bound all at once (a dozen rows in one frame).
-            (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp()
+        // A page appended under (or history prepended above) the prefetched
+        // space would otherwise be laid out and bound all at once (a dozen
+        // rows in one frame). Only that side restarts: the rows already laid
+        // out on the other side stay bound instead of being recycled and
+        // bound again a few frames later.
+        val appended = rowsAddedAfter(richIds, ids)
+        val prepended = rowsAddedBefore(richIds, ids)
+        if (appended || prepended) {
+            (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp(start = prepended, end = appended)
         }
         richIds = ids
         richExtents = pixelExtents
@@ -980,8 +985,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         var extraLayoutSpace: Int
         /** Most the laid-out off-screen space grows in one layout or scroll pass (one row). */
         var extraLayoutStep: Int
-        /** Lays out only the viewport again and grows back toward [extraLayoutSpace] row by row. */
-        fun restartExtraLayoutRamp()
+        /**
+         * Lays out only the viewport again on the given sides (the start is
+         * where position 0 lies) and grows back toward [extraLayoutSpace] row
+         * by row. The other side keeps its laid-out rows.
+         */
+        fun restartExtraLayoutRamp(start: Boolean = true, end: Boolean = true)
     }
 
     private class PamLinearLayoutManager(
@@ -1027,10 +1036,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
         override var extraLayoutSpace = 0
         override var extraLayoutStep = 0
-        private var rampedExtraLayoutSpace = 0
+        private var rampedStartSpace = 0
+        private var rampedEndSpace = 0
 
-        override fun restartExtraLayoutRamp() {
-            rampedExtraLayoutSpace = 0
+        override fun restartExtraLayoutRamp(start: Boolean, end: Boolean) {
+            if (start) rampedStartSpace = 0
+            if (end) rampedEndSpace = 0
         }
 
         override fun calculateExtraLayoutSpace(
@@ -1038,13 +1049,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            rampedExtraLayoutSpace = rampExtraLayoutSpace(
-                rampedExtraLayoutSpace,
-                this.extraLayoutSpace,
-                extraLayoutStep,
-            )
-            extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedExtraLayoutSpace)
-            extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedExtraLayoutSpace)
+            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, this.extraLayoutSpace, extraLayoutStep)
+            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, this.extraLayoutSpace, extraLayoutStep)
+            extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
+            extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
     }
 
@@ -1097,10 +1105,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             }
         override var extraLayoutSpace = 0
         override var extraLayoutStep = 0
-        private var rampedExtraLayoutSpace = 0
+        private var rampedStartSpace = 0
+        private var rampedEndSpace = 0
 
-        override fun restartExtraLayoutRamp() {
-            rampedExtraLayoutSpace = 0
+        override fun restartExtraLayoutRamp(start: Boolean, end: Boolean) {
+            if (start) rampedStartSpace = 0
+            if (end) rampedEndSpace = 0
         }
 
         override fun calculateExtraLayoutSpace(
@@ -1108,13 +1118,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            rampedExtraLayoutSpace = rampExtraLayoutSpace(
-                rampedExtraLayoutSpace,
-                this.extraLayoutSpace,
-                extraLayoutStep,
-            )
-            extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedExtraLayoutSpace)
-            extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedExtraLayoutSpace)
+            rampedStartSpace = rampExtraLayoutSpace(rampedStartSpace, this.extraLayoutSpace, extraLayoutStep)
+            rampedEndSpace = rampExtraLayoutSpace(rampedEndSpace, this.extraLayoutSpace, extraLayoutStep)
+            extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedStartSpace)
+            extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedEndSpace)
         }
     }
 
@@ -1135,6 +1142,28 @@ internal fun rampExtraLayoutSpace(current: Int, target: Int, step: Int): Int =
 /** True when [next] keeps every id of a non-empty [previous] in order and adds rows after them. */
 internal fun isAppend(previous: List<Long>, next: List<Long>): Boolean =
     previous.isNotEmpty() && next.size > previous.size && next.subList(0, previous.size) == previous
+
+/**
+ * True when [next] adds new rows before the first row of [previous] it keeps
+ * (older history prepended, even while a bounded window drops rows at its
+ * other end).
+ */
+internal fun rowsAddedBefore(previous: List<Long>, next: List<Long>): Boolean {
+    if (previous.isEmpty() || next.isEmpty()) return false
+    val index = next.indexOf(previous.first())
+    if (index <= 0) return false
+    val kept = previous.toHashSet()
+    return next.subList(0, index).none(kept::contains)
+}
+
+/** True when [next] adds new rows after the last row of [previous] it keeps. */
+internal fun rowsAddedAfter(previous: List<Long>, next: List<Long>): Boolean {
+    if (previous.isEmpty() || next.isEmpty()) return false
+    val index = next.lastIndexOf(previous.last())
+    if (index < 0 || index == next.lastIndex) return false
+    val kept = previous.toHashSet()
+    return next.subList(index + 1, next.size).none(kept::contains)
+}
 
 internal data class VirtualScrollPosition(val index: Int, val offset: Int)
 

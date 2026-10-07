@@ -229,7 +229,7 @@ final class PamMotionCoordinator {
 
     func configureDrag(nodeId: Int64, host: UIView, source: String?) -> PamDragController? {
         let motion = state(nodeId)
-        guard let source, let config = PamDragConfig.parse(source) else {
+        guard let source, let config = PamDragConfig.cached(source) else {
             motion.drag?.configure(nil, onSettle: nil)
             return nil
         }

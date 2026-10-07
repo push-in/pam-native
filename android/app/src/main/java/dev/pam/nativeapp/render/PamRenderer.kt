@@ -124,6 +124,18 @@ private fun TextView.useHighQualityLineBreaks() {
 
 private const val LOCAL_MODAL_SELECTION_BEHAVIOR = 24L
 private const val MAX_POOLED_CELL_VIEWS_PER_SHAPE = 24
+private val PROP_KEY_WORDS = (PropKey.entries.size + 63) / 64
+
+/** Kind plus property-key bit set of a pooled cell view. */
+private class CellViewShape(private val kind: Int, private val keys: LongArray) {
+    private val hash = 31 * kind + keys.contentHashCode()
+
+    override fun equals(other: Any?): Boolean =
+        other is CellViewShape && other.kind == kind && other.keys.contentEquals(keys)
+
+    override fun hashCode(): Int = hash
+}
+
 private val POOLED_CELL_KINDS = setOf(
     NodeKind.VIEW, NodeKind.COLUMN, NodeKind.ROW, NodeKind.TEXT, NodeKind.PRESSABLE, NodeKind.IMAGE,
 )
@@ -678,14 +690,22 @@ class PamRenderer(
      * kind and the same set of authored properties. With an identical key set
      * every property is re-applied on reuse, so no stale value can survive.
      */
-    private val cellViewPool = HashMap<String, ArrayDeque<View>>()
-    private val cellViewShapes = java.util.WeakHashMap<View, String>()
+    private val cellViewPool = HashMap<CellViewShape, ArrayDeque<View>>()
+    private val cellViewShapes = java.util.WeakHashMap<View, CellViewShape>()
     private var recyclingCell = false
 
-    private fun cellViewShape(state: NodeState): String? {
+    /**
+     * The pool key of a cell view: its kind and the set of properties it
+     * carries, as a bit set (no sorting or string building per bind).
+     */
+    private fun cellViewShape(state: NodeState): CellViewShape? {
         if (state.kind !in POOLED_CELL_KINDS) return null
-        val keys = state.properties.keys.map(PropKey::value).sorted()
-        return state.kind.value.toString() + ":" + keys.joinToString(",")
+        val words = LongArray(PROP_KEY_WORDS)
+        for (key in state.properties.keys) {
+            val ordinal = key.ordinal
+            words[ordinal ushr 6] = words[ordinal ushr 6] or (1L shl (ordinal and 63))
+        }
+        return CellViewShape(state.kind.value, words)
     }
 
     private fun takePooledCellView(state: NodeState): View? {
@@ -5620,11 +5640,11 @@ class PamRenderer(
             delayMs = state.integer(PropKey.PRESS_DOUBLE_TAP_DELAY_MS, 250L),
             effect = (state.properties[PropKey.PRESS_TAP_EFFECT] as? PropValue.Text)
                 ?.value
-                ?.let(PamTapEffect::parse),
+                ?.let(PamTapEffect::cached),
         )
         val dragConfig = (state.properties[PropKey.GESTURE_DRAG] as? PropValue.Text)
             ?.value
-            ?.let(PamDragConfig::parse)
+            ?.let(PamDragConfig::cached)
         pressable.configureDrag(dragConfig) { index, position ->
             if (nodes[state.id] === state && state.properties[PropKey.ON_GESTURE_SETTLE] != null) {
                 dispatchBytes(

@@ -2,6 +2,7 @@ package dev.pam.nativeapp.render
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -14,10 +15,28 @@ import android.view.animation.LinearInterpolator
 import android.widget.ProgressBar
 import kotlin.math.cos
 
-internal class PamVuetifySpinner(context: Context) : ProgressBar(context) {
+/**
+ * No default style: the theme's ProgressBar style inflates an
+ * AnimatedVectorDrawable this view replaces at once (15-25 ms on the UI
+ * thread for every new spinner, e.g. a list's "loading older rows" cell).
+ * Only that style's tint is kept.
+ */
+internal class PamVuetifySpinner(context: Context) : ProgressBar(context, null, 0, 0) {
     init {
         isIndeterminate = true
         indeterminateDrawable = PamVuetifySpinnerDrawable(context)
+        themeProgressTint(context)?.let { indeterminateTintList = it }
+    }
+}
+
+private val PROGRESS_TINT_ATTRS = intArrayOf(android.R.attr.colorControlActivated)
+
+private fun themeProgressTint(context: Context): ColorStateList? {
+    val values = context.obtainStyledAttributes(PROGRESS_TINT_ATTRS)
+    return try {
+        values.getColorStateList(0)
+    } finally {
+        values.recycle()
     }
 }
 

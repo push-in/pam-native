@@ -108,6 +108,11 @@ class PamActivity : FragmentActivity() {
      * from the splash straight to the app, never through an empty window.
      */
     private var splashHold: ViewTreeObserver.OnPreDrawListener? = null
+
+    /** pam-native.json `appearance.firstFrame` ("php", the default, or "window"). */
+    private val firstFrameWaitsForPhp: Boolean by lazy(LazyThreadSafetyMode.NONE) {
+        resources.getBoolean(R.bool.pam_first_frame_waits_for_php)
+    }
     private var splashHoldRoot: View? = null
     private val releaseSplashAfterTimeout = Runnable {
         if (BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "benchmark") {
@@ -200,9 +205,15 @@ class PamActivity : FragmentActivity() {
             // traversal. Older releases learn insets from that traversal and
             // launch from the held pre-draw (see holdSplash).
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) launchRuntime()
-            // Built while PHP boots (~13 ms on a Galaxy S10); a module call
-            // that arrives first waits for it.
-            runtime.installModules()
+            // Built while PHP boots (~13-19 ms on a Galaxy S10); a module
+            // call that arrives first is queued until they exist. With
+            // appearance.firstFrame "window" they are built right after the
+            // window's first draw instead, off the path to that frame.
+            if (firstFrameWaitsForPhp) {
+                runtime.installModules()
+            } else {
+                window.decorView.post { if (!isDestroyed) runtime.installModules() }
+            }
         }
         // Keep one deterministic edge-to-edge contract on every supported
         // Android version. Insets are consumed by PAM views, never implicitly
@@ -338,7 +349,10 @@ class PamActivity : FragmentActivity() {
             // Below API 30 the insets exist once this first traversal laid
             // the window out; PHP boots before anything is drawn.
             if (!launchRequested && !retainedRuntime) launchRuntime()
-            splashHold == null
+            // appearance.firstFrame "window": the themed window draws now and
+            // PHP's first frame replaces it (an app whose first PHP frame is
+            // its background anyway shows the same pixels sooner).
+            splashHold == null || !firstFrameWaitsForPhp
         }
         splashHold = hold
         splashHoldRoot = root

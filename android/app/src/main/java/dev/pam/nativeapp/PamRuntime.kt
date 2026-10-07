@@ -54,7 +54,8 @@ class PamRuntime(
     /**
      * Native modules of the bound surface. A cold start boots PHP first and
      * builds them on the UI thread meanwhile ([installModules]); a module call
-     * from the PHP thread that arrives earlier waits for them.
+     * from the PHP thread that arrives earlier is queued (calls complete
+     * asynchronously), so PHP keeps rendering instead of blocking on them.
      */
     private var modules: NativeModuleRegistry
         get() = installedModules ?: run {
@@ -105,11 +106,28 @@ class PamRuntime(
         if (installModules) installModules()
     }
 
+    /** Module calls made before [installModules], replayed in order once it ran. */
+    private val callsAwaitingModules = ArrayList<() -> Unit>()
+
+    private fun deferUntilModulesInstalled(call: () -> Unit): Boolean {
+        if (installedModules != null) return false
+        synchronized(callsAwaitingModules) {
+            if (installedModules != null) return false
+            callsAwaitingModules += call
+        }
+        return true
+    }
+
     /** Builds the surface's native modules; idempotent, UI thread. */
     fun installModules() {
         if (installedModules != null) return
-        installedModules = NativeModuleRegistry(context)
+        val registry = NativeModuleRegistry(context)
+        val waiting = synchronized(callsAwaitingModules) {
+            installedModules = registry
+            callsAwaitingModules.toList().also { callsAwaitingModules.clear() }
+        }
         modulesInstalled.countDown()
+        waiting.forEach { it() }
     }
 
     private fun bindRenderer(target: PamRenderer) {
@@ -230,6 +248,15 @@ class PamRuntime(
             renderer.engineManagedSafeArea = true
             check(handle == 0L) { "Pam Runtime is already running" }
             PamStartup.loadNativeLibrary()
+            // Release bundles live in content-addressed directories: opcache
+            // never stats their includes (debug builds hot reload in place).
+            runCatching {
+                android.system.Os.setenv(
+                    "PAM_NATIVE_IMMUTABLE_SOURCES",
+                    if (BuildConfig.DEBUG) "0" else "1",
+                    true,
+                )
+            }
             val stateDirectory = File(context.filesDir, "pam/state").apply {
                 check(mkdirs() || isDirectory) { "Cannot create Pam Native state directory" }
             }
@@ -550,6 +577,7 @@ class PamRuntime(
         method: String,
         payload: ByteArray,
     ) {
+        if (deferUntilModulesInstalled { onNativeCall(requestId, module, method, payload) }) return
         val started = System.nanoTime()
         modules.invoke(
             module = module,
@@ -627,6 +655,7 @@ class PamRuntime(
         operation: Int,
         payload: ByteArray,
     ) {
+        if (deferUntilModulesInstalled { onNativeCallTyped(requestId, operation, payload) }) return
         val started = System.nanoTime()
         modules.invoke(
             operationValue = operation,

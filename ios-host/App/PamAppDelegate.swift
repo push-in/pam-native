@@ -30,7 +30,11 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         window.rootViewController = controller
         window.makeKeyAndVisible()
         self.window = window
-        installSplash(on: controller)
+        // appearance.firstFrame "window": the themed window shows at once and
+        // PHP's first frame replaces it (no cover held until that frame).
+        if Bundle.main.object(forInfoDictionaryKey: "PamFirstFrameWaitsForPHP") as? Bool != false {
+            installSplash(on: controller)
+        }
 
 #if DEBUG
         let devTools = PamDevToolsOverlay()

@@ -73,6 +73,11 @@ final class PamPhpCompiler
             );
         }
 
+        $bundled = self::bundledComponents($sourceRoot, $cachePath);
+        if ($bundled !== null) {
+            return $bundled;
+        }
+
         $iterator = new RecursiveIteratorIterator(
             new RecursiveDirectoryIterator(
                 $sourceRoot,
@@ -124,6 +129,74 @@ final class PamPhpCompiler
             self::$directoryPass = false;
         }
     }
+
+    /**
+     * A staged application bundle (manifest.sha256 at its root) ships the
+     * prebuilt pack compiled from these very sources on the build host, with
+     * the list of every component source. Boot from that listing: no walk of
+     * the source tree and no read or fingerprint of each component (about
+     * 30 ms of file I/O before a phone's first frame). A component the pack
+     * does not hold (a stylesheet outside the bundle) compiles from source.
+     * Development trees and hot reload bundles carry no such pack.
+     *
+     * @return list<PamPhpComponent>|null
+     */
+    private static function bundledComponents(string $sourceRoot, string $cachePath): ?array
+    {
+        $root = self::projectRoot($sourceRoot.DIRECTORY_SEPARATOR.'.');
+        if ($root === null || !is_file($root.DIRECTORY_SEPARATOR.self::BUNDLE_MANIFEST)) {
+            return null;
+        }
+        $directory = $root.DIRECTORY_SEPARATOR.self::PREBUILT_DIRECTORY;
+        if (!(self::$prebuiltDirectories[$directory] ??= is_dir($directory))) {
+            return null;
+        }
+        $pack = self::$prebuiltPacks[$directory] ??= self::readPrebuiltPack($directory);
+        if ($pack === false || !is_array($pack['sources'] ?? null)) {
+            return null;
+        }
+        $prefix = self::relativeTo($root, $sourceRoot);
+        if ($prefix === null) {
+            return null;
+        }
+        $prefix = str_replace(DIRECTORY_SEPARATOR, '/', $prefix).'/';
+        $sources = [];
+        foreach ($pack['sources'] as $relative) {
+            if (
+                !is_string($relative)
+                || str_contains($relative, "\0")
+                || str_contains('/'.$relative.'/', '/../')
+                || !self::isComponentFile(basename($relative))
+            ) {
+                return null;
+            }
+            if (str_starts_with($relative, $prefix)) {
+                $sources[] = $root.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, $relative);
+            }
+        }
+        if ($sources === [] || count($sources) > self::MAX_COMPONENTS) {
+            return null;
+        }
+        sort($sources, SORT_STRING);
+
+        self::$dependencyFingerprints = [];
+        self::$appStylePaths = [];
+        self::$directoryPass = true;
+        try {
+            return array_map(
+                static fn (string $source): PamPhpComponent =>
+                    self::prebuiltComponent($source, null) ?? self::compileFile($source, $cachePath),
+                $sources,
+            );
+        } finally {
+            self::$dependencyFingerprints = [];
+            self::$appStylePaths = [];
+            self::$directoryPass = false;
+        }
+    }
+
+    /** Written by the CLI at the root of every staged application bundle. */
+    private const BUNDLE_MANIFEST = 'manifest.sha256';
 
     private static function isComponentFile(string $filename): bool
     {
@@ -425,9 +498,14 @@ final class PamPhpCompiler
      * A bundle-precompiled component whose source and stylesheets still have
      * the fingerprints recorded at build time, or null.
      */
+    /**
+     * @param string|null $sourceFingerprint null: a bundle listed by its own
+     *        pack (see bundledComponents()), whose sources and stylesheets
+     *        were compiled together and are not fingerprinted again.
+     */
     private static function prebuiltComponent(
         string $source,
-        string $sourceFingerprint,
+        ?string $sourceFingerprint,
     ): ?PamPhpComponent
     {
         $root = self::projectRoot($source);
@@ -448,6 +526,8 @@ final class PamPhpCompiler
         if ($pack !== false) {
             $entry = $pack['components'][$key] ?? null;
             $metadata = is_array($entry) ? ($entry['metadata'] ?? null) : null;
+        } elseif ($sourceFingerprint === null) {
+            return null;
         } else {
             // Bundles prebuilt by 1.14: one metadata file per component.
             $entry = null;
@@ -457,7 +537,7 @@ final class PamPhpCompiler
             !is_array($metadata)
             || ($metadata['version'] ?? null) !== self::CACHE_VERSION
             || ($metadata['relocatable'] ?? null) !== true
-            || ($metadata['sourceFingerprint'] ?? null) !== $sourceFingerprint
+            || ($sourceFingerprint !== null && ($metadata['sourceFingerprint'] ?? null) !== $sourceFingerprint)
             || ($metadata['strict'] ?? null) !== BuildConfiguration::strict()
             || !is_string($metadata['class'] ?? null)
             || !is_string($metadata['tag'] ?? null)
@@ -467,22 +547,26 @@ final class PamPhpCompiler
         ) {
             return null;
         }
-        $appStyle = self::appStylePath($source);
-        $relativeAppStyle = $appStyle === null ? null : self::relativeTo($root, $appStyle);
-        if ($relativeAppStyle !== null) {
-            $relativeAppStyle = str_replace(DIRECTORY_SEPARATOR, '/', $relativeAppStyle);
-        }
-        if ($metadata['appStyle'] !== $relativeAppStyle) {
-            return null;
+        if ($sourceFingerprint !== null) {
+            $appStyle = self::appStylePath($source);
+            $relativeAppStyle = $appStyle === null ? null : self::relativeTo($root, $appStyle);
+            if ($relativeAppStyle !== null) {
+                $relativeAppStyle = str_replace(DIRECTORY_SEPARATOR, '/', $relativeAppStyle);
+            }
+            if ($metadata['appStyle'] !== $relativeAppStyle) {
+                return null;
+            }
         }
         $language = LanguageVersion::tryFrom($metadata['language']);
         if ($language === null || ($metadata['uiIr'] ?? null) !== UiIr::manifest($language)) {
             return null;
         }
-        foreach ($metadata['dependencies'] as $dependency => $fingerprint) {
-            $path = $root.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, (string) $dependency);
-            if (self::dependencyFingerprint($path) !== $fingerprint) {
-                return null;
+        if ($sourceFingerprint !== null) {
+            foreach ($metadata['dependencies'] as $dependency => $fingerprint) {
+                $path = $root.DIRECTORY_SEPARATOR.str_replace('/', DIRECTORY_SEPARATOR, (string) $dependency);
+                if (self::dependencyFingerprint($path) !== $fingerprint) {
+                    return null;
+                }
             }
         }
         if ($pack !== false) {
@@ -537,7 +621,7 @@ final class PamPhpCompiler
 
     private const PREBUILT_PACK_MAX_INDEX_BYTES = 64 * 1024 * 1024;
 
-    /** @var array<string, array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>}|false> */
+    /** @var array<string, array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>, sources: array<array-key, mixed>|null}|false> */
     private static array $prebuiltPacks = [];
 
     /** @var array<string, array{0: string, 1: int, 2: int}> file => [pack, offset, length] */
@@ -591,7 +675,7 @@ final class PamPhpCompiler
         unset(self::$pendingPrebuiltFiles[$file]);
     }
 
-    /** @return array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>}|false */
+    /** @return array{path: string, files: string, data: int, size: int, components: array<array-key, mixed>, sources: array<array-key, mixed>|null}|false */
     private static function readPrebuiltPack(string $directory): array|false
     {
         $file = $directory.DIRECTORY_SEPARATOR.self::PREBUILT_PACK;
@@ -633,6 +717,7 @@ final class PamPhpCompiler
             'data' => 8 + $length,
             'size' => max(0, $size - 8 - $length),
             'components' => $index['components'],
+            'sources' => is_array($index['sources'] ?? null) ? $index['sources'] : null,
         ];
     }
 
@@ -739,12 +824,16 @@ final class PamPhpCompiler
                 throw new RuntimeException("Cannot create PAM prebuild directory {$output}.");
             }
             $entries = [];
+            $sources = [];
             foreach ($components as $component) {
                 $relative = self::relativeTo($root, $component->source);
                 if ($relative === null) {
                     continue;
                 }
                 $relative = str_replace(DIRECTORY_SEPARATOR, '/', $relative);
+                // Every component source of the bundle, packed or not: the
+                // device boots from this listing (see bundledComponents()).
+                $sources[] = $relative;
                 $compiledBase = substr($component->classFile, 0, -strlen('.class.php'));
                 $metadata = json_decode(
                     (string) file_get_contents($compiledBase.'.json'),
@@ -799,7 +888,7 @@ final class PamPhpCompiler
                 $data .= $class.$template;
             }
             $encoded = json_encode(
-                ['version' => 1, 'components' => (object) $index],
+                ['version' => 1, 'components' => (object) $index, 'sources' => $sources],
                 JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES,
             );
             self::writeAtomic(

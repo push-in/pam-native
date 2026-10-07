@@ -46,24 +46,11 @@ internal data class NativeImageRequest(
     val mediaCacheChecksum: String? = null,
     val repeat: Boolean = false,
 ) {
-    fun signature(): String = listOf(
-        source,
-        defaultSource.orEmpty(),
-        loadingIndicatorSource.orEmpty(),
-        sourceSet.orEmpty(),
-        requestHeaders.orEmpty(),
-        fadeDurationMs,
-        resizeMethod,
-        resizeMultiplier,
-        progressiveRenderingEnabled,
-        cachePolicy,
-        mediaCachePolicy,
-        mediaCacheKey.orEmpty(),
-        mediaCacheMaxAgeMs,
-        mediaCacheMaxBytes,
-        mediaCacheChecksum.orEmpty(),
-        repeat,
-    ).joinToString("\u0000")
+    /**
+     * Identity of a request. Every field is an immutable value, so the data
+     * class equality is the signature; no string is joined per bind.
+     */
+    fun signature(): NativeImageRequest = this
 }
 
 internal data class NativeImageResult(
@@ -1447,7 +1434,7 @@ internal class NativeImageLoader(
 
     private data class ActiveRequest(
         val token: Long,
-        val signature: String,
+        val signature: NativeImageRequest,
         val request: NativeImageRequest,
         var callbacks: NativeImageCallbacks,
         var decodedKey: String? = null,

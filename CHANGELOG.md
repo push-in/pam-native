@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.29.0 - 2026-10-07
+
+- `appearance.firstFrame` (`"php"` default, `"window"`): with `"window"`
+  the Android activity draws its themed window at once instead of holding
+  the launch screen until PHP's first frame, and builds the native modules
+  right after that first draw; iOS skips the launch cover. For apps whose
+  first PHP frame only paints the background it shows the same pixels
+  sooner (Galaxy S10 cold start, Zé Chat: TTID 316 -> 230-237 ms median).
+- Android: a module call made before the native modules exist is queued
+  and replayed in order once they are built, instead of blocking the PHP
+  thread (calls complete asynchronously anyway).
+- PHP SDK: the prebuilt component pack lists every component source; a
+  staged bundle (`manifest.sha256` beside the pack) boots from that listing
+  without walking `src/` or reading and fingerprinting each component
+  (S10: component discovery 33 -> 3 ms of the first frame). Development
+  trees and hot reload bundles carry no pack and keep validating.
+- Android: release bundles live in content-addressed directories, so PHP's
+  opcache no longer stats the source of every include
+  (`opcache.validate_timestamps=0` outside debug builds, which hot reload in
+  place).
+- Android `VirtualizedList`: history prepended above the rows (also when a
+  bounded window drops rows at its other end) restarts the prefetch ramp of
+  that side only, like appended pages; the rows laid out on the other side
+  stay bound instead of being recycled and bound again.
+- Android cell binds: the pool key of a cell view is a property bit set
+  (no sorting/joining strings), image request identity is the immutable
+  request itself (no joined signature), and drag and tap-effect programs
+  are parsed once per distinct source (`PamParseCache`; iOS: drag configs).
+- Android: `ActivityIndicator` no longer inflates the theme's
+  AnimatedVectorDrawable it immediately replaces (15-25 ms on the UI thread
+  for each new spinner, e.g. a list's "loading older rows" cell).
+
 ## 1.28.0 - 2026-10-07
 
 - `KeyboardAvoidingView` works inside `Modal` and `BottomSheet` surfaces.

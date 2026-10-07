@@ -50,6 +50,24 @@ pub enum LegacyStartingWindow {
     None,
 }
 
+/// `appearance.firstFrame`: what the window shows first. `Php` (default)
+/// holds the launch screen until PHP's first frame is committed; `Window`
+/// draws the themed window at once and lets PHP's first frame replace it,
+/// for apps whose first PHP frame paints only the background anyway.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FirstFrame {
+    #[default]
+    Php,
+    Window,
+}
+
+impl FirstFrame {
+    pub fn waits_for_php(self) -> bool {
+        self == Self::Php
+    }
+}
+
 /// Icon of the Android 12+ system splash screen when `appearance.splash.logo`
 /// is set: the logo itself, or the launcher icon (`android.icon`) like an app
 /// whose theme sets no `windowSplashScreenAnimatedIcon` (React Native,
@@ -160,6 +178,8 @@ pub struct AppearanceOptions {
     #[serde(default)]
     pub legacy_starting_window: LegacyStartingWindow,
     #[serde(default)]
+    pub first_frame: FirstFrame,
+    #[serde(default)]
     pub light: AppearancePalette,
     #[serde(default)]
     pub dark: AppearancePalette,
@@ -236,8 +256,20 @@ impl AppearanceOptions {
         for (name, contents) in splash_resources(&self.splash) {
             write(&res.join(name), contents.as_bytes())?;
         }
+        write(
+            &res.join("values/pam_launch.xml"),
+            launch_resources(self.first_frame).as_bytes(),
+        )?;
         Ok(())
     }
+}
+
+/// `res/values/pam_launch.xml` (bundled default: wait for PHP's first frame).
+fn launch_resources(first_frame: FirstFrame) -> String {
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<!-- Generated from pam-native.json \"appearance.firstFrame\" by the PAM Native CLI. -->\n<resources>\n    <bool name=\"pam_first_frame_waits_for_php\">{}</bool>\n</resources>\n",
+        first_frame.waits_for_php()
+    )
 }
 
 const GENERATED: &str =
@@ -404,6 +436,7 @@ mod tests {
             "values-v31/pam_splash.xml",
             "drawable/pam_window_background.xml",
             "drawable/pam_splash_icon.xml",
+            "values/pam_launch.xml",
         ] {
             assert_eq!(
                 files[&Path::new("res").join(name)],
@@ -411,6 +444,17 @@ mod tests {
                 "{name} must equal the CLI defaults"
             );
         }
+    }
+
+    #[test]
+    fn first_frame_window_draws_without_waiting_for_php() {
+        let options: AppearanceOptions =
+            serde_json::from_str(r##"{"firstFrame":"window"}"##).expect("appearance");
+        assert!(!options.first_frame.waits_for_php());
+        assert!(launch_resources(options.first_frame)
+            .contains("<bool name=\"pam_first_frame_waits_for_php\">false</bool>"));
+        assert!(AppearanceOptions::default().first_frame.waits_for_php());
+        assert!(serde_json::from_str::<AppearanceOptions>(r##"{"firstFrame":"never"}"##).is_err());
     }
 
     #[test]

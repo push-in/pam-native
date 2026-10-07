@@ -3495,6 +3495,10 @@ fn merge_ios_appearance(
         serde_json::Value::from(appearance.default_mode.value()),
     );
     object.insert(
+        "PamFirstFrameWaitsForPHP".to_owned(),
+        serde_json::Value::Bool(appearance.first_frame.waits_for_php()),
+    );
+    object.insert(
         "PamAppearanceLightBackground".to_owned(),
         serde_json::Value::String(crate::appearance::hex(
             appearance.light_palette()?.background,

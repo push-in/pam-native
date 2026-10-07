@@ -122,6 +122,37 @@ try {
     chmod($readOnlyCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY, 0o755);
     exec('rm -rf '.escapeshellarg($readOnlyCopy).' '.escapeshellarg($readOnlyCopy.'-cache').' '.escapeshellarg($readOnlyState));
 }
+// A staged application bundle (manifest.sha256 at its root, written by the
+// CLI with the pack) boots from the pack's own listing of its components:
+// no walk of the source tree, no read or fingerprint of each source.
+$packIndex = (static function (string $pack): array {
+    $bytes = (string) file_get_contents($pack);
+    $length = unpack('V', substr($bytes, 4, 4))[1];
+
+    return json_decode(substr($bytes, 8, $length), true, 32, JSON_THROW_ON_ERROR);
+})($prebuiltRoot.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/'.PamPhpCompiler::PREBUILT_PACK);
+$assert(
+    ($packIndex['sources'] ?? null) === ['src/Components/Badge.pam.php'],
+    'The prebuilt pack must list every component source of the bundle.',
+);
+$stagedCopy = $prebuiltRoot.'-staged';
+exec('rm -rf '.escapeshellarg($stagedCopy));
+exec('cp -R '.escapeshellarg($prebuiltRoot).' '.escapeshellarg($stagedCopy));
+file_put_contents($stagedCopy.'/manifest.sha256', "staged\n");
+chmod($stagedCopy.'/src/Components/Badge.pam.php', 0o000);
+try {
+    $stagedComponent = PamPhpCompiler::compileDirectory($stagedCopy.'/src', $stagedCopy.'/.cache')[0] ?? null;
+    $assert(
+        $stagedComponent !== null
+            && $stagedComponent->className === 'Pam\\Native\\Tests\\Prebuilt\\Badge'
+            && str_starts_with($stagedComponent->classFile, $stagedCopy.'/'.PamPhpCompiler::PREBUILT_DIRECTORY.'/.')
+            && (glob($stagedCopy.'/.cache/*') ?: []) === [],
+        'A staged bundle must boot from its pack listing without reading its component sources.',
+    );
+} finally {
+    chmod($stagedCopy.'/src/Components/Badge.pam.php', 0o644);
+    exec('rm -rf '.escapeshellarg($stagedCopy));
+}
 foreach ([$prebuiltRoot, $prebuiltCopy] as $prebuiltDirectory) {
     exec('rm -rf '.escapeshellarg($prebuiltDirectory));
 }
