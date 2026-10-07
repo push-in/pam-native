@@ -1,0 +1,12 @@
+{
+    "name": "pam/mount-scenarios",
+    "description": "Synthetic mount benchmark: profile grid, tab switch and video page swap.",
+    "type": "project",
+    "license": "Apache-2.0",
+    "require": {
+        "php": "^8.5",
+        "pushinbr/pam-native": "^1.26"
+    },
+    "autoload": {"psr-4": {"App\\": "src/"}},
+    "config": {"platform-check": true, "sort-packages": true}
+}

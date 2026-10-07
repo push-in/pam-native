@@ -3918,29 +3918,37 @@ public final class PamRenderer {
         targetSize: CGSize,
         multiplier: CGFloat
     ) -> UIImage? {
-        guard targetSize.width > 0, targetSize.height > 0,
-              let source = CGImageSourceCreateWithData(data as CFData, nil) else {
+        guard targetSize.width > 0, targetSize.height > 0 else {
             return UIImage(data: data)
         }
-        let pixels = max(targetSize.width, targetSize.height)
-            * UIScreen.main.scale
-            * min(max(multiplier, 0.1), 8)
-        let options: [CFString: Any] = [
-            kCGImageSourceCreateThumbnailFromImageAlways: true,
-            kCGImageSourceCreateThumbnailWithTransform: true,
-            kCGImageSourceThumbnailMaxPixelSize: max(pixels, 1),
-            kCGImageSourceShouldCacheImmediately: true,
-        ]
-        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
-        else {
-            return UIImage(data: data)
+        // Decode at the size that covers the view (both edges), not at the
+        // view's longest edge: a portrait photo in a square cell kept a
+        // shorter edge below the cell and was upscaled.
+        if let image = PamImageDownsampling.image(
+            data: data,
+            targetSize: targetSize,
+            multiplier: multiplier
+        ) {
+            return image
         }
-        return UIImage(cgImage: image)
+        // Small enough already: decode now (background queue) instead of in
+        // the first Core Animation commit that draws it.
+        guard let image = UIImage(data: data) else { return nil }
+        return image.preparingForDisplay() ?? image
     }
 
-    private func localImage(_ source: String) -> UIImage? {
+    private func localImage(_ source: String, targetSize: CGSize = .zero) -> UIImage? {
         if let image = PamInlineImages.image(source) {
             return image
+        }
+        // Bundled photos and sandbox files decode at the view size through
+        // ImageIO instead of keeping their full resolution.
+        func fileImage(_ url: URL) -> UIImage? {
+            if targetSize.width > 0, targetSize.height > 0,
+               let image = PamImageDownsampling.image(contentsOf: url, targetSize: targetSize) {
+                return image
+            }
+            return UIImage(contentsOfFile: url.path)
         }
         if source.lowercased().hasPrefix("asset://") {
             guard let path = try? normalizedPamAssetPath(source) else {
@@ -3954,21 +3962,21 @@ public final class PamRenderer {
                 withExtension: nil,
                 subdirectory: directory
             ) {
-                return UIImage(contentsOfFile: url.path)
+                return fileImage(url)
             }
             if let resourceRoot = Bundle.main.resourceURL {
                 let url = resourceRoot.appendingPathComponent(path, isDirectory: false)
                 if FileManager.default.fileExists(atPath: url.path) {
-                    return UIImage(contentsOfFile: url.path)
+                    return fileImage(url)
                 }
             }
             return UIImage(named: path)
         }
         if let url = sandboxFileURL(source) {
-            return UIImage(contentsOfFile: url.path)
+            return fileImage(url)
         }
         if source.hasPrefix("file://"), let url = URL(string: source) {
-            return UIImage(contentsOfFile: url.path)
+            return fileImage(url)
         }
         return UIImage(named: source)
     }
@@ -4050,7 +4058,7 @@ public final class PamRenderer {
         guard let url = URL(string: resolvedSource),
               let scheme = url.scheme?.lowercased(),
               scheme == "https" || scheme == "http" else {
-            imageView.image = localImage(resolvedSource)
+            imageView.image = localImage(resolvedSource, targetSize: imageView.bounds.size)
             return
         }
         let policy = Int(

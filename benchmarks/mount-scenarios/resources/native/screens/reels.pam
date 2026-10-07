@@ -1,0 +1,26 @@
+<Screen>
+    <Column class="flex-1" backgroundColor="#FF000000">
+        <Column :key="$reel['id']" class="flex-1">
+            <MediaPlayer :source="$reel['video']" :thumbnail="$reel['poster']" autoPlay :controls="false" position="absolute" top="0" left="0" right="0" bottom="0" />
+            <Column position="absolute" right="12" bottom="120" gap="18" alignItems="center">
+                <Column alignItems="center"><Text fontSize="26" textColor="#FFFFFFFF">♥</Text><Text fontSize="12" textColor="#FFFFFFFF">{{ $reel['likes'] }}</Text></Column>
+                <Column alignItems="center"><Text fontSize="26" textColor="#FFFFFFFF">✎</Text><Text fontSize="12" textColor="#FFFFFFFF">{{ $reel['comments'] }}</Text></Column>
+                <Column alignItems="center"><Text fontSize="26" textColor="#FFFFFFFF">➤</Text><Text fontSize="12" textColor="#FFFFFFFF">Enviar</Text></Column>
+                <Image :source="$reel['avatar']" width="30" height="30" borderRadius="6" />
+            </Column>
+            <Column position="absolute" left="12" right="72" bottom="24" gap="8">
+                <Row alignItems="center" gap="8">
+                    <Image :source="$reel['avatar']" width="32" height="32" borderRadius="16" />
+                    <Text fontSize="14" fontWeight="700" textColor="#FFFFFFFF">{{ $reel['author'] }}</Text>
+                    <Text fontSize="13" textColor="#FFFFFFFF" borderWidth="1" borderColor="#FFFFFFFF" borderRadius="6" paddingHorizontal="8">Seguir</Text>
+                </Row>
+                <Text fontSize="14" lineHeight="19" textColor="#FFFFFFFF" maxLines="2">{{ $reel['caption'] }}</Text>
+                <Text fontSize="12" textColor="#FFFFFFFF">♪ {{ $reel['music'] }}</Text>
+            </Column>
+        </Column>
+        <Row position="absolute" top="0" left="0" right="0" height="72" paddingTop="24" paddingHorizontal="12" gap="12">
+            <Pressable width="48" height="48" on:press="back" accessibilityLabel="back"><Text height="48" textAlign="center" fontSize="22" textColor="#FFFFFFFF">←</Text></Pressable>
+            <Pressable flexGrow="1" height="48" backgroundColor="#55FFFFFF" borderRadius="8" on:press="next" accessibilityLabel="next-reel"><Text height="48" textAlign="center" fontSize="16" textColor="#FFFFFFFF">Próximo</Text></Pressable>
+        </Row>
+    </Column>
+</Screen>

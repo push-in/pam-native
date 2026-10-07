@@ -11,7 +11,7 @@ enum PamInlineImages {
 
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.totalCostLimit = 4 * 1024 * 1024
+        cache.totalCostLimit = PamImageDownsampling.inlineCacheBytes()
         return cache
     }()
 

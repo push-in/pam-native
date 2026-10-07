@@ -451,6 +451,16 @@ internal data class ModalChildPlacement(
     val gravity: Int,
 )
 
+/** Runs [block] inside a systrace/Perfetto section named [name]. */
+internal inline fun <T> pamTraceSection(name: String, block: () -> T): T {
+    android.os.Trace.beginSection(name)
+    try {
+        return block()
+    } finally {
+        android.os.Trace.endSection()
+    }
+}
+
 /** View kinds prebuilt for a cold start's first frame, with per-surface targets. */
 internal enum class PrewarmPool(val kind: NodeKind, val target: Int) {
     // Costliest first instances first: the batch can arrive at any slice.
@@ -745,6 +755,9 @@ class PamRenderer(
         return false
     }
 
+    /** Ancestors already invalidated by [applyLayout] in the running commit. */
+    private var layoutInvalidatedAncestors: HashSet<View>? = null
+
     fun commit(batches: List<List<Mutation>>) {
         check(Looper.myLooper() == Looper.getMainLooper()) {
             "Native mutations must be mounted on the Android UI thread"
@@ -789,72 +802,74 @@ class PamRenderer(
             val parent = nodes[id]?.parent ?: return
             if (nodes[parent]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += parent
         }
-        batches.forEach { batch ->
-            batch.forEach { mutation ->
-                when (mutation) {
-                    is Mutation.Create -> {
-                        create(mutation.node)
-                        createdNodes += mutation.node.id
-                        needsModalSync = true
-                        needsVirtualListSync = true
-                        if (mutation.node.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.node.id
-                        markListOf(mutation.node.id)
-                    }
-                    is Mutation.Remove -> {
-                        markListOf(mutation.id)
-                        remove(mutation.id)
-                        needsModalSync = true
-                        needsVirtualListSync = true
-                    }
-                    is Mutation.Update -> {
-                        update(mutation.id, mutation.key, mutation.value)
-                        if (
-                            mutation.key == PropKey.VALUE ||
-                            mutation.key == PropKey.ACCESSIBILITY_LABEL
-                        ) {
+        pamTraceSection("PamCommit.mutations") {
+            batches.forEach { batch ->
+                batch.forEach { mutation ->
+                    when (mutation) {
+                        is Mutation.Create -> {
+                            create(mutation.node)
+                            createdNodes += mutation.node.id
                             needsModalSync = true
-                        }
-                        if (
-                            mutation.key == PropKey.LIST_HORIZONTAL ||
-                            mutation.key == PropKey.LIST_ROW_HEIGHT ||
-                            mutation.key == PropKey.LIST_FULL_SPAN ||
-                            mutation.key == PropKey.STICKY_HEADER
-                        ) {
                             needsVirtualListSync = true
-                            if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.id
-                            markListOf(mutation.id)
+                            if (mutation.node.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.node.id
+                            markListOf(mutation.node.id)
                         }
-                    }
-                    is Mutation.Move -> {
-                        markListOf(mutation.id)
-                        move(mutation.id, mutation.parent, mutation.index)
-                        markListOf(mutation.id)
-                        needsVirtualListSync = true
-                    }
-                    is Mutation.Layout -> {
-                        val previous = frames[mutation.id]
-                        frames.put(mutation.id, mutation.frame)
-                        dirtyLayouts += mutation.id
-                        if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) {
-                            dirtyLists += mutation.id
+                        is Mutation.Remove -> {
+                            markListOf(mutation.id)
+                            remove(mutation.id)
+                            needsModalSync = true
                             needsVirtualListSync = true
-                        } else if (
-                            previous == null ||
-                            previous.width != mutation.frame.width ||
-                            previous.height != mutation.frame.height
-                        ) {
-                            // Only a row's extent feeds its list; a pure
-                            // offset (rows shifted by a prepend) does not.
-                            val before = dirtyLists.size
-                            markListOf(mutation.id)
-                            if (dirtyLists.size != before) needsVirtualListSync = true
                         }
-                    }
-                    is Mutation.SetRoot -> {
-                        rootId = mutation.id
-                        needsModalSync = true
-                        needsVirtualListSync = true
-                        dirtyLists += virtualListIds
+                        is Mutation.Update -> {
+                            update(mutation.id, mutation.key, mutation.value)
+                            if (
+                                mutation.key == PropKey.VALUE ||
+                                mutation.key == PropKey.ACCESSIBILITY_LABEL
+                            ) {
+                                needsModalSync = true
+                            }
+                            if (
+                                mutation.key == PropKey.LIST_HORIZONTAL ||
+                                mutation.key == PropKey.LIST_ROW_HEIGHT ||
+                                mutation.key == PropKey.LIST_FULL_SPAN ||
+                                mutation.key == PropKey.STICKY_HEADER
+                            ) {
+                                needsVirtualListSync = true
+                                if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.id
+                                markListOf(mutation.id)
+                            }
+                        }
+                        is Mutation.Move -> {
+                            markListOf(mutation.id)
+                            move(mutation.id, mutation.parent, mutation.index)
+                            markListOf(mutation.id)
+                            needsVirtualListSync = true
+                        }
+                        is Mutation.Layout -> {
+                            val previous = frames[mutation.id]
+                            frames.put(mutation.id, mutation.frame)
+                            dirtyLayouts += mutation.id
+                            if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) {
+                                dirtyLists += mutation.id
+                                needsVirtualListSync = true
+                            } else if (
+                                previous == null ||
+                                previous.width != mutation.frame.width ||
+                                previous.height != mutation.frame.height
+                            ) {
+                                // Only a row's extent feeds its list; a pure
+                                // offset (rows shifted by a prepend) does not.
+                                val before = dirtyLists.size
+                                markListOf(mutation.id)
+                                if (dirtyLists.size != before) needsVirtualListSync = true
+                            }
+                        }
+                        is Mutation.SetRoot -> {
+                            rootId = mutation.id
+                            needsModalSync = true
+                            needsVirtualListSync = true
+                            dirtyLists += virtualListIds
+                        }
                     }
                 }
             }
@@ -872,7 +887,9 @@ class PamRenderer(
         // authored StatusBar color must win at the end of every commit.
         applyMergedStatusBar()
         val virtualListStarted = if (profileCommit) System.nanoTime() else 0L
-        if (needsVirtualListSync) syncVirtualLists(dirtyLists) else remountEmptyListRows()
+        pamTraceSection("PamCommit.lists") {
+            if (needsVirtualListSync) syncVirtualLists(dirtyLists) else remountEmptyListRows()
+        }
         val virtualListSyncNanos = if (profileCommit) System.nanoTime() - virtualListStarted else 0L
         // A stable row ID/extent does not trigger a RecyclerView rebind when
         // conditional descendants are inserted. Materialize only affected,
@@ -881,8 +898,15 @@ class PamRenderer(
             val holder = virtualCellHolder(cellRoot)
             if (holder != null) materializeCell(cellRoot, holder)
         }
-        dirtyLayouts.forEach(::applyLayout)
-        dirtyLayouts.forEach(::queueLayoutEvent)
+        pamTraceSection("PamCommit.layout") {
+            layoutInvalidatedAncestors = HashSet()
+            try {
+                dirtyLayouts.forEach(::applyLayout)
+                dirtyLayouts.forEach(::queueLayoutEvent)
+            } finally {
+                layoutInvalidatedAncestors = null
+            }
+        }
         retainedScrollOffsets.forEach { (id, offset) ->
             if (id !in explicitlyUpdatedScrollOffsets) {
                 (views[id] as? PamScrollContainer)?.restoreOffsetPixels(
@@ -892,6 +916,7 @@ class PamRenderer(
             }
         }
         ensureFocusedInputVisibleAfterCommit()
+        scheduleIdlePrewarm()
         if (profileCommit) {
             Log.d(
                 COMMIT_PERF_TAG,
@@ -1194,6 +1219,11 @@ class PamRenderer(
         onNativeChildVisibility = null
         prewarmActive = false
         main.removeCallbacks(prewarmSlice)
+        destroyed = true
+        if (idlePrewarmScheduled) {
+            Looper.myQueue().removeIdleHandler(idlePrewarm)
+            idlePrewarmScheduled = false
+        }
         prewarmedViews.clear()
         for (position in 0 until views.size()) {
             (views.valueAt(position) as? NativeChildVisibilityHost)?.onChildVisibilityChanged = null
@@ -1324,8 +1354,49 @@ class PamRenderer(
         }
     }
 
-    private fun createView(kind: NodeKind, state: NodeState? = null): View =
-        PrewarmPool.of(kind)?.let { prewarmedViews[it]?.removeFirstOrNull() } ?: newView(kind, state)
+    private fun createView(kind: NodeKind, state: NodeState? = null): View {
+        val pool = PrewarmPool.of(kind) ?: return newView(kind, state)
+        val pooled = prewarmedViews[pool]?.removeFirstOrNull() ?: return newView(kind, state)
+        drainedPrewarmPools = true
+        return pooled
+    }
+
+    private var destroyed = false
+
+    /** A commit took views from the prewarm pools since they were last full. */
+    private var drainedPrewarmPools = false
+    private var idlePrewarmScheduled = false
+
+    /**
+     * Refills the prewarm pools while the UI thread is idle after a commit
+     * that drained them, in [PREWARM_SLICE_NANOS] slices, so the next large
+     * subtree (a profile grid, a tab's rows, a reel page) takes ready views
+     * instead of constructing (and class-initializing) each one inside its
+     * mount. Idle handlers only run when no message or frame is due.
+     */
+    private val idlePrewarm = android.os.MessageQueue.IdleHandler {
+        if (destroyed) {
+            idlePrewarmScheduled = false
+            return@IdleHandler false
+        }
+        val deadline = System.nanoTime() + PREWARM_SLICE_NANOS
+        for (pool in PrewarmPool.entries) {
+            val queue = prewarmedViews.getOrPut(pool) { ArrayDeque(pool.target) }
+            while (queue.size < pool.target) {
+                queue.addLast(newView(pool.kind, null))
+                if (System.nanoTime() >= deadline) return@IdleHandler true
+            }
+        }
+        idlePrewarmScheduled = false
+        false
+    }
+
+    private fun scheduleIdlePrewarm() {
+        if (!drainedPrewarmPools || idlePrewarmScheduled || prewarmActive || destroyed) return
+        drainedPrewarmPools = false
+        idlePrewarmScheduled = true
+        Looper.myQueue().addIdleHandler(idlePrewarm)
+    }
 
     private fun newView(kind: NodeKind, state: NodeState?): View =
         when (kind) {
@@ -2351,8 +2422,13 @@ class PamRenderer(
         // bounds. A descendant frame can change without mutating the host's
         // own properties, so invalidate the hosted ancestor chain after
         // applying layout instead of leaving a stale custom canvas.
+        // Within a commit each ancestor is invalidated once: a mount of a
+        // few hundred views otherwise walked (and invalidated) the full
+        // ancestor chain of every view, O(views x depth).
+        val invalidated = layoutInvalidatedAncestors
         var ancestor = view.parent
         while (ancestor is View) {
+            if (invalidated != null && !invalidated.add(ancestor)) break
             ancestor.invalidate()
             ancestor = ancestor.parent
         }

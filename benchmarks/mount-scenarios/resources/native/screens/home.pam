@@ -1,0 +1,13 @@
+<Screen>
+    <Column class="flex-1" backgroundColor="#FFFFFFFF" paddingTop="40" gap="16" padding="16">
+        <Pressable height="120" backgroundColor="#FF3366FF" borderRadius="12" on:press="openProfile" accessibilityLabel="open-profile">
+            <Text height="120" textColor="#FFFFFFFF" textAlign="center" fontSize="20">Profile</Text>
+        </Pressable>
+        <Pressable height="120" backgroundColor="#FF33AA66" borderRadius="12" on:press="openTabs" accessibilityLabel="open-tabs">
+            <Text height="120" textColor="#FFFFFFFF" textAlign="center" fontSize="20">Tabs</Text>
+        </Pressable>
+        <Pressable height="120" backgroundColor="#FFAA3366" borderRadius="12" on:press="openReels" accessibilityLabel="open-reels">
+            <Text height="120" textColor="#FFFFFFFF" textAlign="center" fontSize="20">Reels</Text>
+        </Pressable>
+    </Column>
+</Screen>

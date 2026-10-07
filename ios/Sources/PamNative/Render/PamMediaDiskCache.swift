@@ -21,7 +21,8 @@ final class PamMediaDiskCache: @unchecked Sendable {
     private init() {
         root = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("pam-media-v1", isDirectory: true)
-        memory.totalCostLimit = 64 * 1024 * 1024
+        // Sized from physical memory (16-96 MB) instead of a fixed 64 MB.
+        memory.totalCostLimit = PamImageDownsampling.memoryCacheBytes()
         try? FileManager.default.createDirectory(
             at: root,
             withIntermediateDirectories: true

@@ -1,0 +1,10 @@
+{
+    "version": 1,
+    "applicationId": "dev.pam.mountbench",
+    "name": "Mount Bench",
+    "entry": "index.php",
+    "runtime": {"php": "8.5", "channel": "stable"},
+    "android": {"minSdk": 26, "targetSdk": 36},
+    "modules": [],
+    "views": []
+}

@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.26.0 - 2026-10-07
+
+- Android images decode at the display size: a source larger than its view
+  is subsampled and then scaled in the same `BitmapFactory` pass to the
+  smallest size that still covers the view (`resizeMethod` `auto`/`resize`),
+  instead of keeping up to twice the view's pixels per edge. A 1080x1350
+  photo in a 360 px grid cell now holds 360x450 pixels (was 540x675).
+  Tiled (`repeat`) images only subsample; `scale`/`none` are unchanged.
+- Android photos decode to `Bitmap.Config.HARDWARE` on API 28+ (GPU memory
+  only: no heap copy and no texture upload in the first frame that draws
+  them); opaque JPEGs use `RGB_565` on API 26-27. Inline `data:` glyphs and
+  images under 128x128 px stay `ARGB_8888`. Software canvases (shared-element
+  snapshots, non-accelerated windows) draw a heap copy instead of failing;
+  blur already copied. MediaStore thumbnails follow the same storage.
+- Android decoded-image memory cache is sized from
+  `ActivityManager.memoryClass` (1/8, 1/16 on low-RAM devices, 8-64 MiB)
+  instead of a fixed 32 MiB.
+- Android releases the bitmap of an `Image` hidden by an ancestor (a covered
+  route, an inactive tab or page) or detached from the window, so the memory
+  cache bound really bounds decoded images. Showing it again restores it in
+  the same frame from the memory cache, or decodes it again without repeating
+  load events. Animated, inline and non-memory-cacheable images are kept.
+- Android mount: a new image drawable no longer requests a layout pass of the
+  engine-sized `ImageView` (one ancestor re-measure per arriving photo), each
+  ancestor is invalidated once per commit instead of once per laid-out
+  descendant, and the view prewarm pools refill on idle after a commit drains
+  them, so the next large subtree takes ready views. Commits emit
+  `PamCommit.mutations`, `PamCommit.lists` and `PamCommit.layout` trace
+  sections.
+- iOS: network, media-cache, bundled `asset://`, `pam-file://` and `file://`
+  images decode through ImageIO at the size that covers the view (both
+  edges; a portrait photo in a square cell was decoded to the cell's longest
+  edge and upscaled), and small images are decoded off the main thread with
+  `preparingForDisplay()`. The encoded media memory cache (1/32 of RAM,
+  16-96 MB) and the inline glyph cache (2-8 MB) are sized from physical
+  memory.
+- No PHP API, protocol identifiers or dependency requirements changed.
+  Rebuild the Android and iOS hosts; see [migration notes](docs/migration-1.26.0.md).
+- Measured on an API 35 emulator (SwiftShader, release-optimized benchmark
+  build, 4 runs each) with a synthetic profile (header + 3-column grid of 30
+  photos), a 20-row tab switch and a full-screen video page swap:
+  - video page swap: worst frame p90 56.7 -> 34.1 ms (median 27.0 -> 16.2),
+    slow frames 21 -> 16, slow UI-thread frames 16 -> 3, worst UI-thread
+    frame 16.1 -> 5.7 ms;
+  - tab switch: mount 9.1 -> 4.1 ms (median), worst UI-thread frame 11.7 ->
+    4.5 ms, slow frames 12 -> 9;
+  - profile first open: mount 6.6 -> 4.4 ms, worst UI-thread frame 404.8 ->
+    262.3 ms (SwiftShader-bound first draw);
+  - after a navigation tour: native heap 60-82 -> 32 MB, PSS 97-122 -> 72 MB
+    (the emulator does not attribute GPU buffers to the app's PSS).
 ## 1.25.4 - 2026-10-07
 
 - Android lint (`lintDebug`, warnings as errors) passes with zero findings.

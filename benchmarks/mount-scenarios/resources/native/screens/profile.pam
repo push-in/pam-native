@@ -1,0 +1,48 @@
+<Screen>
+    <Column class="flex-1" backgroundColor="#FFFFFFFF">
+        <Row height="56" paddingHorizontal="12" alignItems="center" gap="12">
+            <Pressable width="44" height="44" on:press="back" accessibilityLabel="back">
+                <Text height="44" textAlign="center" fontSize="22">←</Text>
+            </Pressable>
+            <Text flexGrow="1" fontSize="18" fontWeight="700">david.balbino</Text>
+            <Text width="44" fontSize="22" textAlign="center">⋯</Text>
+        </Row>
+        <ScrollView class="flex-1">
+            <Column>
+                <Row padding="16" gap="20" alignItems="center">
+                    <Image source="asset://assets/photos/p31.jpg" width="86" height="86" borderRadius="43" />
+                    <Row flexGrow="1" justifyContent="space-around">
+                        <Column alignItems="center"><Text fontSize="17" fontWeight="700">128</Text><Text fontSize="13" textColor="#FF666666">posts</Text></Column>
+                        <Column alignItems="center"><Text fontSize="17" fontWeight="700">4.2 mil</Text><Text fontSize="13" textColor="#FF666666">seguidores</Text></Column>
+                        <Column alignItems="center"><Text fontSize="17" fontWeight="700">311</Text><Text fontSize="13" textColor="#FF666666">seguindo</Text></Column>
+                    </Row>
+                </Row>
+                <Column paddingHorizontal="16" gap="4">
+                    <Text fontSize="14" fontWeight="700">David Balbino</Text>
+                    <Text fontSize="14" lineHeight="19">Construindo apps nativos em PHP. Café, código e fotografia. Belo Horizonte · Brasil</Text>
+                    <Text fontSize="14" textColor="#FF1E5AA8">pushin.com.br</Text>
+                </Column>
+                <Row paddingHorizontal="16" paddingVertical="12" gap="8">
+                    <Pressable flexGrow="1" height="34" borderRadius="8" backgroundColor="#FFEFEFEF"><Text height="34" textAlign="center" fontSize="14" fontWeight="600">Editar perfil</Text></Pressable>
+                    <Pressable flexGrow="1" height="34" borderRadius="8" backgroundColor="#FFEFEFEF"><Text height="34" textAlign="center" fontSize="14" fontWeight="600">Compartilhar</Text></Pressable>
+                </Row>
+                <Row paddingHorizontal="16" gap="14" paddingBottom="12">
+                    <Column v-for="$h in $highlights" :key="$h['id']" alignItems="center" gap="4">
+                        <Image :source="$h['src']" width="62" height="62" borderRadius="31" />
+                        <Text fontSize="12">{{ $h['label'] }}</Text>
+                    </Column>
+                </Row>
+                <Row height="44" borderTopWidth="1" borderColor="#FFDDDDDD">
+                    <Text flexGrow="1" height="44" textAlign="center" fontSize="14" fontWeight="700">Posts</Text>
+                    <Text flexGrow="1" height="44" textAlign="center" fontSize="14" textColor="#FF888888">Reels</Text>
+                    <Text flexGrow="1" height="44" textAlign="center" fontSize="14" textColor="#FF888888">Marcados</Text>
+                </Row>
+                <Grid gutterX="2" gutterY="2">
+                    <Pressable v-for="$photo in $photos" :key="$photo['id']" span="4">
+                        <Image :source="$photo['src']" aspectRatio="1" />
+                    </Pressable>
+                </Grid>
+            </Column>
+        </ScrollView>
+    </Column>
+</Screen>

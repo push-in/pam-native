@@ -231,7 +231,7 @@ internal class NativeImageLoader(
     private val inlineExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "pam-image-inline").apply { isDaemon = true }
     }
-    private val cache = object : LruCache<String, DecodedBitmap>(MEMORY_CACHE_BYTES) {
+    private val cache = object : LruCache<String, DecodedBitmap>(memoryCacheBytes(context)) {
         override fun sizeOf(key: String, value: DecodedBitmap): Int =
             value.bitmap.allocationByteCount + (value.animatedBytes?.size ?: 0)
     }
@@ -260,6 +260,12 @@ internal class NativeImageLoader(
 
         val signature = request.signature()
         val current = active[view]
+        if (current?.released == true && current.signature == signature) {
+            // Offscreen and released: the same request re-binds silently;
+            // pixels come back when the view shows again.
+            current.callbacks = callbacks
+            return
+        }
         if (
             shouldReuseImageRequest(
                 sameSignature = current?.signature == signature,
@@ -283,6 +289,7 @@ internal class NativeImageLoader(
         view.onImageSizeChanged = { width, height ->
             begin(view, token, width, height)
         }
+        view.onShownChanged = { shown -> onShownChanged(view, shown) }
         callbacks.onStart()
         // Keep already rendered pixels on screen while a changed request is
         // resolved. Reconciliation must never flash a blank/placeholder frame.
@@ -310,6 +317,7 @@ internal class NativeImageLoader(
         check(Looper.myLooper() == Looper.getMainLooper())
         active.remove(view)
         view.onImageSizeChanged = null
+        view.onShownChanged = null
         view.setImageDrawable(null)
     }
 
@@ -407,6 +415,8 @@ internal class NativeImageLoader(
                     measuredHeight,
                     pending.request.resizeMethod,
                     pending.request.resizeMultiplier,
+                    repeat = pending.request.repeat,
+                    inline = true,
                 )
             }.getOrElse { error ->
                 finishError(view, pending, safeError(error))
@@ -478,6 +488,8 @@ internal class NativeImageLoader(
                                         measuredHeight,
                                         pending.request.resizeMethod,
                                         pending.request.resizeMultiplier,
+                                        repeat = pending.request.repeat,
+                                        inline = isInlineImageSource(source),
                                     )
                                 }.getOrNull()?.bitmap ?: return@partial
                                 main.post {
@@ -491,6 +503,8 @@ internal class NativeImageLoader(
                             measuredHeight,
                             pending.request.resizeMethod,
                             pending.request.resizeMultiplier,
+                            repeat = pending.request.repeat,
+                            inline = isInlineImageSource(source),
                         )
                         if (
                             !closed.get() &&
@@ -567,6 +581,8 @@ internal class NativeImageLoader(
                         PLACEHOLDER_EDGE,
                         IMAGE_RESIZE_AUTO,
                         1f,
+                        repeat = pending.request.repeat,
+                        inline = isInlineImageSource(source),
                     ).bitmap
                 }.getOrNull()
             },
@@ -579,6 +595,61 @@ internal class NativeImageLoader(
                     ?: return@post
                 display(view, bitmap, latest.request.repeat, 0)
             }
+        }
+    }
+
+    /**
+     * Releases the pixels of an image hidden by an ancestor (a covered route,
+     * an inactive tab or pager page) or detached (a recycled cell): the view
+     * no longer pins its bitmap, so the memory cache's LRU bound really
+     * bounds decoded images. Showing again restores it in the same frame from
+     * the memory cache, or decodes it again silently (no repeated load
+     * events) when it was evicted meanwhile. Animated, inline and
+     * non-memory-cacheable requests are kept.
+     */
+    private fun onShownChanged(view: PamImageView, shown: Boolean) {
+        if (closed.get()) return
+        val pending = active[view] ?: return
+        if (!shown) {
+            if (
+                pending.released ||
+                !pending.finished ||
+                pending.animated ||
+                !isReleasable(pending.request) ||
+                view.drawable == null
+            ) {
+                return
+            }
+            pending.released = true
+            view.setImageDrawable(null)
+            return
+        }
+        if (!pending.released) return
+        pending.released = false
+        val cached = pending.decodedKey?.let { key -> synchronized(cache) { cache.get(key) } }
+        if (cached != null) {
+            display(view, cached.bitmap, pending.request.repeat, 0)
+            return
+        }
+        pending.restoringCallbacks = pending.callbacks
+        pending.callbacks = NativeImageCallbacks()
+        pending.finished = false
+        pending.decodedKey = null
+        begin(view, pending.token, view.width, view.height)
+    }
+
+    private fun isReleasable(request: NativeImageRequest): Boolean =
+        !isInlineImageSource(request.source) &&
+            request.cachePolicy != IMAGE_CACHE_RELOAD &&
+            request.cachePolicy != IMAGE_CACHE_NONE &&
+            request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+            request.mediaCachePolicy != MEDIA_CACHE_DISK &&
+            request.mediaCachePolicy != MEDIA_CACHE_NETWORK_FIRST
+
+    private fun endRestore(pending: ActiveRequest) {
+        pending.restoringCallbacks?.let { original ->
+            pending.callbacks = original
+            pending.restoringCallbacks = null
         }
     }
 
@@ -596,6 +667,7 @@ internal class NativeImageLoader(
     ) {
         if (active[view] !== pending || pending.finished) return
         pending.finished = true
+        pending.animated = result.animatedBytes != null
         val animated = result.animatedBytes?.let { bytes ->
             displayAnimated(view, bytes)
         } ?: false
@@ -609,6 +681,7 @@ internal class NativeImageLoader(
         }
         pending.callbacks.onSuccess(result)
         pending.callbacks.onEnd()
+        endRestore(pending)
     }
 
     private fun finishError(
@@ -638,6 +711,7 @@ internal class NativeImageLoader(
         pending.finished = true
         pending.callbacks.onError(message)
         pending.callbacks.onEnd()
+        endRestore(pending)
     }
 
     private fun dispatchProgress(
@@ -736,8 +810,24 @@ internal class NativeImageLoader(
                 null
             }
         }.getOrNull() ?: return null
-        val fitted = coverScaledThumbnail(bitmap, targetWidth, targetHeight)
-        fitted.prepareToDraw()
+        val fitted = coverScaledThumbnail(bitmap, targetWidth, targetHeight).let { scaled ->
+            // Same storage as a regular decode: GPU-only on API 28+.
+            if (
+                nativeBitmapStorage(
+                    sdk = Build.VERSION.SDK_INT,
+                    inline = false,
+                    allowHardware = true,
+                    pixels = scaled.width.toLong() * scaled.height,
+                    mimeType = null,
+                ) == NativeBitmapStorage.HARDWARE
+            ) {
+                runCatching { scaled.copy(Bitmap.Config.HARDWARE, false) }.getOrNull()
+                    ?.also { scaled.recycle() }
+                    ?: scaled.also(Bitmap::prepareToDraw)
+            } else {
+                scaled.also(Bitmap::prepareToDraw)
+            }
+        }
         return DecodedBitmap(
             fitted,
             item.width.takeIf { it > 0 } ?: bitmap.width,
@@ -980,6 +1070,8 @@ internal class NativeImageLoader(
         targetHeight: Int,
         resizeMethod: Int,
         resizeMultiplier: Float,
+        repeat: Boolean = false,
+        inline: Boolean = false,
     ): DecodedBitmap {
         val bounds = BitmapFactory.Options().apply {
             inJustDecodeBounds = true
@@ -995,52 +1087,68 @@ internal class NativeImageLoader(
         ) {
             "Full-resolution image exceeds the safe decode limit."
         }
-
-        val multiplier = resizeMultiplier.coerceIn(0.1f, 8f)
-        val desiredWidth = max(
-            1,
-            (targetWidth.coerceAtMost(MAX_DECODE_EDGE) * multiplier).toInt(),
+        // Decode at the display size (subsample, then an exact scale to the
+        // size that covers the view) instead of keeping up to 2x the view's
+        // pixels per edge (4x the memory) of every oversize photo.
+        val plan = nativeImageDecodePlan(
+            sourceWidth = bounds.outWidth,
+            sourceHeight = bounds.outHeight,
+            targetWidth = targetWidth,
+            targetHeight = targetHeight,
+            resizeMethod = resizeMethod,
+            resizeMultiplier = resizeMultiplier,
+            exactScale = !repeat,
+            maxEdge = MAX_DECODE_EDGE,
+            maxPixels = MAX_DECODE_PIXELS,
         )
-        val desiredHeight = max(
-            1,
-            (targetHeight.coerceAtMost(MAX_DECODE_EDGE) * multiplier).toInt(),
+        val storage = nativeBitmapStorage(
+            sdk = Build.VERSION.SDK_INT,
+            inline = inline,
+            allowHardware = true,
+            pixels = plan.width.toLong() * plan.height,
+            mimeType = bounds.outMimeType,
         )
-        val shouldResize = when (resizeMethod) {
-            IMAGE_RESIZE_RESIZE -> true
-            IMAGE_RESIZE_SCALE, IMAGE_RESIZE_NONE -> false
-            else -> bounds.outWidth > desiredWidth * 2 ||
-                bounds.outHeight > desiredHeight * 2
-        }
-        var sample = 1
-        if (shouldResize) {
-            while (
-                bounds.outWidth / (sample * 2) >= desiredWidth &&
-                bounds.outHeight / (sample * 2) >= desiredHeight
-            ) {
-                sample *= 2
+        fun options(config: Bitmap.Config) = BitmapFactory.Options().apply {
+            inSampleSize = plan.sample
+            inPreferredConfig = config
+            if (plan.scaled) {
+                // BitmapFactory scales the subsampled decode by
+                // inTargetDensity / inDensity in the same native pass.
+                inScaled = true
+                inDensity = (bounds.outWidth + plan.sample - 1) / plan.sample
+                inTargetDensity = plan.width
+            } else {
+                inScaled = false
             }
         }
-        while (
-            bounds.outWidth.toLong() * bounds.outHeight /
-            sample /
-            sample > MAX_DECODE_PIXELS
-        ) {
-            sample *= 2
+        val config = when (storage) {
+            NativeBitmapStorage.HARDWARE -> Bitmap.Config.HARDWARE
+            NativeBitmapStorage.RGB_565 -> Bitmap.Config.RGB_565
+            NativeBitmapStorage.ARGB_8888 -> Bitmap.Config.ARGB_8888
         }
-
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
+        // A GPU allocation can fail (no gralloc buffer for the format):
+        // fall back to a regular heap bitmap.
         val bitmap = requireNotNull(
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options),
+            runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options(config)) }
+                .getOrNull()
+                ?: if (config != Bitmap.Config.ARGB_8888) {
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options(Bitmap.Config.ARGB_8888))
+                } else {
+                    null
+                },
         ) {
             "Unsupported image format."
         }
-        // Starts the GPU texture upload now, on the RenderThread, instead of
-        // inside the frame that first draws the image: a 1080x2042 feed photo
-        // spent 8.5 ms of a scroll frame in "Texture upload" on the S10.
-        bitmap.prepareToDraw()
+        // A scaled decode carries the target "density"; restore the display
+        // density so BitmapDrawable's intrinsic size stays the pixel size.
+        if (plan.scaled) bitmap.density = context.resources.displayMetrics.densityDpi
+        if (bitmap.config != Bitmap.Config.HARDWARE) {
+            // Starts the GPU texture upload now, on the RenderThread, instead
+            // of inside the frame that first draws the image: a 1080x2042
+            // feed photo spent 8.5 ms of a scroll frame in "Texture upload" on
+            // the S10. Hardware bitmaps are already GPU textures.
+            bitmap.prepareToDraw()
+        }
         return DecodedBitmap(
             bitmap,
             bounds.outWidth,
@@ -1250,6 +1358,7 @@ internal class NativeImageLoader(
             heightBucket,
             request.resizeMethod,
             request.resizeMultiplier,
+            request.repeat,
         ).joinToString("\u0000")
     }
 
@@ -1344,6 +1453,9 @@ internal class NativeImageLoader(
         var decodedKey: String? = null,
         var finished: Boolean = false,
         var retryAttempts: Int = 0,
+        var released: Boolean = false,
+        var animated: Boolean = false,
+        var restoringCallbacks: NativeImageCallbacks? = null,
     )
 
     private data class DecodedBitmap(
@@ -1356,7 +1468,6 @@ internal class NativeImageLoader(
     private companion object {
         /** Shared by every loader instance so prefetch and rendering never race on one file. */
         val DISK_LOCK = Any()
-        const val MEMORY_CACHE_BYTES = 32 * 1024 * 1024
         const val INLINE_MEMORY_CACHE_BYTES = 4 * 1024 * 1024
         const val DISK_CACHE_BYTES = 96L * 1024 * 1024
         const val MAX_DISK_CACHE_BYTES = 2L * 1024 * 1024 * 1024
@@ -1382,6 +1493,13 @@ internal class NativeImageLoader(
         val REDIRECT_STATUS = setOf(301, 302, 303, 307, 308)
         val JPEG_CONTENT_TYPES = setOf("image/jpeg", "image/jpg")
     }
+}
+
+/** Decoded-photo cache budget for this device; see [nativeImageMemoryCacheBytes]. */
+private fun memoryCacheBytes(context: Context): Int {
+    val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        ?: return nativeImageMemoryCacheBytes(256, lowRam = false)
+    return nativeImageMemoryCacheBytes(manager.memoryClass, manager.isLowRamDevice)
 }
 
 internal fun shouldReuseImageRequest(

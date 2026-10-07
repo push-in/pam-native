@@ -1,0 +1,6 @@
+/assets/
+/vendor/
+/.pam-native/
+/dist/
+/composer.lock
+/results/

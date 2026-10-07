@@ -6,12 +6,22 @@ import android.graphics.Canvas
 import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.TransitionDrawable
 import android.graphics.Path
 import android.graphics.RectF
 import android.widget.ImageView
 
 internal class PamImageView(context: Context) : ImageView(context) {
     var onImageSizeChanged: ((Int, Int) -> Unit)? = null
+
+    /**
+     * Aggregated visibility of this view inside a visible window: false when
+     * an ancestor hides it (a covered navigation route, an inactive tab) or
+     * it leaves the window; true when it shows again. Window visibility
+     * changes (app to background) are not reported. See NativeImageLoader.
+     */
+    var onShownChanged: ((Boolean) -> Unit)? = null
+    private var suppressLayoutRequest = false
     private val clipPath = Path()
     private val clipBounds = RectF()
     private var cornerRadii = FloatArray(8)
@@ -48,7 +58,49 @@ internal class PamImageView(context: Context) : ImageView(context) {
 
     override fun setImageDrawable(drawable: Drawable?) {
         if (drawable == null) sourceBitmap = null
-        super.setImageDrawable(drawable)
+        // PAM's layout engine sizes this view; a new drawable never changes
+        // its frame. ImageView would otherwise requestLayout() whenever the
+        // intrinsic size changes, so every photo arriving in a 30-image grid
+        // re-measured the whole ancestor chain in its own frame.
+        suppressLayoutRequest = layoutParams != null && !isLayoutRequested
+        try {
+            super.setImageDrawable(drawable)
+        } finally {
+            suppressLayoutRequest = false
+        }
+    }
+
+    override fun requestLayout() {
+        if (suppressLayoutRequest) return
+        super.requestLayout()
+    }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        if (windowVisibility == VISIBLE) onShownChanged?.invoke(isVisible)
+    }
+
+    override fun draw(canvas: Canvas) {
+        // Hardware bitmaps only draw on hardware canvases. A software canvas
+        // (a shared-element snapshot, a window without hardware acceleration)
+        // gets a heap copy once instead of an exception.
+        if (!canvas.isHardwareAccelerated) ensureSoftwareDrawable()
+        super.draw(canvas)
+    }
+
+    private fun ensureSoftwareDrawable() {
+        val current = drawable ?: return
+        val bitmapDrawable = when (current) {
+            is BitmapDrawable -> current
+            is TransitionDrawable -> current.getDrawable(current.numberOfLayers - 1) as? BitmapDrawable
+            else -> null
+        } ?: return
+        val bitmap = bitmapDrawable.bitmap ?: return
+        if (bitmap.config != Bitmap.Config.HARDWARE) return
+        val copy = runCatching { bitmap.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: return
+        copy.density = bitmap.density
+        val tiled = bitmapDrawable.tileModeX == Shader.TileMode.REPEAT
+        setImageDrawable(bitmapDrawable(copy, tiled))
     }
 
     init {

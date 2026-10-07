@@ -1,0 +1,29 @@
+<Screen>
+    <Column class="flex-1" backgroundColor="#FFFFFFFF">
+        <Row height="56" paddingHorizontal="12" alignItems="center">
+            <Pressable width="44" height="44" on:press="back" accessibilityLabel="back">
+                <Text height="44" textAlign="center" fontSize="22">←</Text>
+            </Pressable>
+            <Text flexGrow="1" fontSize="18" fontWeight="700">Detalhes do chat</Text>
+        </Row>
+        <Row height="48">
+            <Pressable flexGrow="1" height="48" on:press="first" accessibilityLabel="tab-1"><Text height="48" textAlign="center" fontSize="15">Mídia</Text></Pressable>
+            <Pressable flexGrow="1" height="48" on:press="second" accessibilityLabel="tab-2"><Text height="48" textAlign="center" fontSize="15">Links</Text></Pressable>
+            <Pressable flexGrow="1" height="48" on:press="third" accessibilityLabel="tab-3"><Text height="48" textAlign="center" fontSize="15">Docs</Text></Pressable>
+        </Row>
+        <ScrollView class="flex-1">
+            <Column>
+                <Pressable v-for="$row in $rows" :key="$row['key']">
+                    <Row height="68" paddingHorizontal="16" gap="12" alignItems="center">
+                        <Image :source="$row['src']" width="44" height="44" borderRadius="8" />
+                        <Column flexGrow="1" flexShrink="1" gap="2">
+                            <Text fontSize="15" fontWeight="600" maxLines="1">{{ $row['title'] }}</Text>
+                            <Text fontSize="13" textColor="#FF777777" maxLines="1">{{ $row['subtitle'] }}</Text>
+                        </Column>
+                        <Text fontSize="12" textColor="#FF999999">{{ $row['meta'] }}</Text>
+                    </Row>
+                </Pressable>
+            </Column>
+        </ScrollView>
+    </Column>
+</Screen>
