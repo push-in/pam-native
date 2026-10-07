@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.27.1 - 2026-10-07
+
+- Android: appending a page to a `VirtualizedList` (or raising the adaptive
+  prefetch distance during a fling) no longer lays out and binds the whole
+  prefetched area in one frame. The off-screen layout space shrinks at once
+  but grows back by at most one row per layout pass, restarting from the
+  viewport when rows are appended. On a Galaxy S10 a device-gallery grid
+  fling went from p99 41 ms and ~5 missed vsyncs per run to p99 29 ms and
+  none (jank 3.7% → 2.9%).
+- Android: `MediaLibrary::assets()` and `albums()` sort through the SQL sort
+  order (`date_added DESC, date_modified DESC, _id DESC`). MediaProvider on
+  Android 11/12 ignored the structured sort columns and returned the oldest
+  media first; pages are now newest first like the camera roll (iOS already
+  sorted by `creationDate` descending).
+
 ## 1.27.0 - 2026-10-07
 
 - Keyed `VirtualizedList` sections for tabs over one list: rows set

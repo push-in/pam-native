@@ -234,6 +234,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             pixelExtents != richExtents &&
             restingAtEnd() &&
             (initialIndex > 0 || canScrollTowardStart())
+        if (isAppend(richIds, ids)) {
+            // A page appended under the prefetched space would otherwise be
+            // laid out and bound all at once (a dozen rows in one frame).
+            (layoutManager as? PrefetchLayoutManager)?.restartExtraLayoutRamp()
+        }
         richIds = ids
         richExtents = pixelExtents
         val current = adapter as? RichRecyclerAdapter
@@ -842,6 +847,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         (layoutManager as? PrefetchLayoutManager)?.apply {
             prefetchCount = adaptivePrefetchItems
             extraLayoutSpace = extent * adaptivePrefetchItems
+            extraLayoutStep = extent
         }
         val requestedCache = adaptivePrefetchItems * max(1, columns)
         val cache = if (removeClippedSubviews) {
@@ -970,7 +976,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     private interface PrefetchLayoutManager {
         var prefetchCount: Int
+        /** Off-screen space kept laid out on each side (the prefetched rows). */
         var extraLayoutSpace: Int
+        /** Most the laid-out off-screen space grows in one layout or scroll pass (one row). */
+        var extraLayoutStep: Int
+        /** Lays out only the viewport again and grows back toward [extraLayoutSpace] row by row. */
+        fun restartExtraLayoutRamp()
     }
 
     private class PamLinearLayoutManager(
@@ -1015,14 +1026,25 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 isItemPrefetchEnabled = value > 0
             }
         override var extraLayoutSpace = 0
+        override var extraLayoutStep = 0
+        private var rampedExtraLayoutSpace = 0
+
+        override fun restartExtraLayoutRamp() {
+            rampedExtraLayoutSpace = 0
+        }
 
         override fun calculateExtraLayoutSpace(
             state: State,
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            extraLayoutSpace[0] = max(extraLayoutSpace[0], this.extraLayoutSpace)
-            extraLayoutSpace[1] = max(extraLayoutSpace[1], this.extraLayoutSpace)
+            rampedExtraLayoutSpace = rampExtraLayoutSpace(
+                rampedExtraLayoutSpace,
+                this.extraLayoutSpace,
+                extraLayoutStep,
+            )
+            extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedExtraLayoutSpace)
+            extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedExtraLayoutSpace)
         }
     }
 
@@ -1074,14 +1096,25 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 isItemPrefetchEnabled = value > 0
             }
         override var extraLayoutSpace = 0
+        override var extraLayoutStep = 0
+        private var rampedExtraLayoutSpace = 0
+
+        override fun restartExtraLayoutRamp() {
+            rampedExtraLayoutSpace = 0
+        }
 
         override fun calculateExtraLayoutSpace(
             state: State,
             extraLayoutSpace: IntArray,
         ) {
             super.calculateExtraLayoutSpace(state, extraLayoutSpace)
-            extraLayoutSpace[0] = max(extraLayoutSpace[0], this.extraLayoutSpace)
-            extraLayoutSpace[1] = max(extraLayoutSpace[1], this.extraLayoutSpace)
+            rampedExtraLayoutSpace = rampExtraLayoutSpace(
+                rampedExtraLayoutSpace,
+                this.extraLayoutSpace,
+                extraLayoutStep,
+            )
+            extraLayoutSpace[0] = max(extraLayoutSpace[0], rampedExtraLayoutSpace)
+            extraLayoutSpace[1] = max(extraLayoutSpace[1], rampedExtraLayoutSpace)
         }
     }
 
@@ -1089,6 +1122,19 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         const val MAX_PREFETCH_ITEMS = 32
     }
 }
+
+/**
+ * Off-screen layout space for the next pass: it shrinks at once but grows by
+ * at most [step] per pass, so raising the prefetch distance (fast flings) or
+ * appending a page binds about one more row per frame instead of many rows
+ * in one frame. A step of zero applies [target] directly.
+ */
+internal fun rampExtraLayoutSpace(current: Int, target: Int, step: Int): Int =
+    if (step <= 0 || target <= current) target else minOf(target, current + step)
+
+/** True when [next] keeps every id of a non-empty [previous] in order and adds rows after them. */
+internal fun isAppend(previous: List<Long>, next: List<Long>): Boolean =
+    previous.isNotEmpty() && next.size > previous.size && next.subList(0, previous.size) == previous
 
 internal data class VirtualScrollPosition(val index: Int, val offset: Int)
 

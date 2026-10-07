@@ -128,11 +128,10 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
         val query = Bundle().apply {
             putString(ContentResolverArgs.SQL_SELECTION, selection)
             putStringArray(ContentResolverArgs.SQL_SELECTION_ARGS, arguments)
-            putStringArray(
-                ContentResolverArgs.SORT_COLUMNS,
-                recentSortColumns(),
-            )
-            putInt(ContentResolverArgs.SORT_DIRECTION, ContentResolverArgs.SORT_DESCENDING)
+            // MediaProvider (Android 11/12) ignores the structured sort
+            // columns and returns rows in _id order (oldest first); the SQL
+            // sort order is honoured by every provider version.
+            putString(ContentResolverArgs.SQL_SORT_ORDER, recentSortOrder())
             putInt(ContentResolverArgs.LIMIT, limit + 1)
             putInt(ContentResolverArgs.OFFSET, offset)
         }
@@ -164,11 +163,10 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
         val query = Bundle().apply {
             putString(ContentResolverArgs.SQL_SELECTION, selection)
             putStringArray(ContentResolverArgs.SQL_SELECTION_ARGS, arguments)
-            putStringArray(
-                ContentResolverArgs.SORT_COLUMNS,
-                recentSortColumns(),
-            )
-            putInt(ContentResolverArgs.SORT_DIRECTION, ContentResolverArgs.SORT_DESCENDING)
+            // MediaProvider (Android 11/12) ignores the structured sort
+            // columns and returns rows in _id order (oldest first); the SQL
+            // sort order is honoured by every provider version.
+            putString(ContentResolverArgs.SQL_SORT_ORDER, recentSortOrder())
         }
         context.contentResolver.query(
             collection(),
@@ -340,6 +338,10 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
             MediaStore.MediaColumns.DATE_MODIFIED,
         )
 
+        /** Newest first (camera-roll order); `_id` breaks ties so pages never overlap. */
+        fun recentSortOrder(): String =
+            (recentSortColumns() + MediaStore.MediaColumns._ID).joinToString(", ") { "$it DESC" }
+
         const val BUCKET_ID = "bucket_id"
         const val BUCKET_NAME = "bucket_display_name"
         const val DEFAULT_PAGE_SIZE = 80
@@ -352,9 +354,7 @@ internal class MediaLibraryModule(private val context: Context) : NativeModule, 
     private object ContentResolverArgs {
         const val SQL_SELECTION = "android:query-arg-sql-selection"
         const val SQL_SELECTION_ARGS = "android:query-arg-sql-selection-args"
-        const val SORT_COLUMNS = "android:query-arg-sort-columns"
-        const val SORT_DIRECTION = "android:query-arg-sort-direction"
-        const val SORT_DESCENDING = 1
+        const val SQL_SORT_ORDER = "android:query-arg-sql-sort-order"
         const val LIMIT = "android:query-arg-limit"
         const val OFFSET = "android:query-arg-offset"
     }

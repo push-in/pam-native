@@ -2,6 +2,7 @@ package dev.pam.nativeapp.modules
 
 import android.provider.MediaStore
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class MediaLibraryModuleTest {
@@ -13,6 +14,14 @@ class MediaLibraryModuleTest {
                 MediaStore.MediaColumns.DATE_MODIFIED,
             ),
             MediaLibraryModule.recentSortColumns(),
+        )
+    }
+
+    @Test
+    fun recentAssetsSortNewestFirstThroughTheSqlSortOrder() {
+        assertEquals(
+            "date_added DESC, date_modified DESC, _id DESC",
+            MediaLibraryModule.recentSortOrder(),
         )
     }
 }
