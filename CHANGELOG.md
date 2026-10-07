@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.29.2 - 2026-10-07
+
+- Android `Modal`: the `StatusBar` declared by a modal's content (or the
+  screen's, for a modal without one) now reaches the modal's own window. A
+  Dialog created after the bars last changed never received them, and every
+  window configuration (`enableEdgeToEdge`) reset its icons to the app
+  theme's: a dark full-screen modal in the light theme showed dark status bar
+  icons on black. The config is kept and re-applied after each window
+  configuration; a `statusBarTranslucent` modal keeps its transparent bar.
+
 ## 1.29.1 - 2026-10-07
 
 - Android `VirtualizedList`: a node of a mounted cell whose index changes

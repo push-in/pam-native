@@ -1502,6 +1502,9 @@ class PamRenderer(
             NodeKind.MODAL -> PamModalHost(context) {
                 (context as? PamActivity)?.suppressNextPamBack()
             }.also { modal ->
+                // A modal mounted after the bars last changed (its own
+                // StatusBar included) still opens with them.
+                appliedStatusBar?.let { applyStatusBar(modal, it) }
                 val id = state?.id ?: return@also
                 modal.onSurfaceKeyboardInset = { inset, _ -> forwardSurfaceKeyboard(id, modal, inset) }
             }
@@ -8429,13 +8432,17 @@ class PamRenderer(
         appliedStatusBar = merged
         applyStatusBarConfig(merged)
         for (id in localModalIds) {
-            (views[id] as? PamModalHost)?.applyStatusBar(
-                color = merged.color,
-                useDarkIcons = merged.appearance == STATUS_BAR_DARK,
-                hidden = merged.hidden,
-                translucent = merged.translucent,
-            )
+            (views[id] as? PamModalHost)?.let { applyStatusBar(it, merged) }
         }
+    }
+
+    private fun applyStatusBar(modal: PamModalHost, config: StatusBarConfig) {
+        modal.applyStatusBar(
+            color = config.color,
+            useDarkIcons = config.appearance == STATUS_BAR_DARK,
+            hidden = config.hidden,
+            translucent = config.translucent,
+        )
     }
 
     private fun isInActiveNavigationRoute(view: View): Boolean {

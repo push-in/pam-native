@@ -360,20 +360,43 @@ internal class PamModalHost @JvmOverloads constructor(
         updateBottomSheetChrome()
     }
 
-    @Suppress("DEPRECATION")
+    /**
+     * The StatusBar a modal's content declares. It is kept, not only applied:
+     * the StatusBar node commits before the Dialog exists, and every window
+     * configuration (WindowCompat.enableEdgeToEdge) resets the bar icons to
+     * the app theme's, so it is re-applied after each one.
+     */
+    private var statusBarConfig: ModalStatusBar? = null
+
+    private data class ModalStatusBar(
+        val color: Int,
+        val useDarkIcons: Boolean,
+        val hidden: Boolean,
+        val translucent: Boolean,
+    )
+
     fun applyStatusBar(
         color: Int,
         useDarkIcons: Boolean,
         hidden: Boolean,
         translucent: Boolean,
     ) {
-        val window = dialog?.window ?: return
-        if (!translucent) {
-            window.statusBarColor = color
+        statusBarConfig = ModalStatusBar(color, useDarkIcons, hidden, translucent)
+        dialog?.let(::applyStoredStatusBar)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyStoredStatusBar(modal: Dialog) {
+        val config = statusBarConfig ?: return
+        val window = modal.window ?: return
+        // A statusBarTranslucent modal keeps its transparent bar (its
+        // content draws under it); only the icons follow the StatusBar.
+        if (!config.translucent && !statusBarTranslucent) {
+            window.statusBarColor = config.color
         }
         val controller = WindowCompat.getInsetsController(window, window.decorView)
-        controller.isAppearanceLightStatusBars = useDarkIcons
-        if (hidden) {
+        controller.isAppearanceLightStatusBars = config.useDarkIcons
+        if (config.hidden) {
             controller.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
         } else {
             controller.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
@@ -868,6 +891,7 @@ internal class PamModalHost @JvmOverloads constructor(
                 WindowCompat.setDecorFitsSystemWindows(this, true)
             }
         }
+        applyStoredStatusBar(modal)
         applyBackdrop()
     }
 
