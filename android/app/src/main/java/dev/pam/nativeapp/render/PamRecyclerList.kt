@@ -123,9 +123,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         android.os.Trace.beginSection("PamList.layout")
-        super.onLayout(changed, left, top, right, bottom)
-        updateAccessibilityVisibility()
-        android.os.Trace.endSection()
+        try {
+            super.onLayout(changed, left, top, right, bottom)
+            updateAccessibilityVisibility()
+        } finally {
+            android.os.Trace.endSection()
+        }
     }
 
     /**

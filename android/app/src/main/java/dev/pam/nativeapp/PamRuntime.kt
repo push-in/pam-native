@@ -15,6 +15,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.render.PamRenderer
 import java.io.File
+import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
 import java.util.ArrayDeque
 import java.util.concurrent.ConcurrentHashMap
@@ -31,7 +32,15 @@ class PamRuntime(
     // The PHP runtime is process scoped (embedded PHP cannot be restarted in
     // a live process), while the surface (Activity, renderer, modules bound
     // to that Activity) can be recreated. attach() rebinds every one of these.
-    private var context: Context = context
+    //
+    // The runtime outlives its Activity (PamRuntimeHost keeps it for the
+    // process), so it holds the process-wide application context strongly and
+    // the current surface context only weakly: a destroyed Activity is never
+    // retained through the runtime.
+    private val applicationContext: Context = context.applicationContext ?: context
+    private var surfaceContext = WeakReference(context)
+    private val context: Context
+        get() = surfaceContext.get() ?: applicationContext
     private var renderer: PamRenderer = renderer
     private var reportError: (String) -> Unit = reportError
     private var onFrameCommitted: (RuntimeFrameMetrics) -> Unit = onFrameCommitted
@@ -132,7 +141,7 @@ class PamRuntime(
         check(!closed.get()) { "Pam Runtime is closed" }
         val previousRenderer = this.renderer
         val previousModules = installedModules
-        this.context = context
+        surfaceContext = WeakReference(context)
         this.reportError = reportError
         this.onFrameCommitted = onFrameCommitted
         this.onDiagnostic = onDiagnostic
@@ -162,8 +171,9 @@ class PamRuntime(
      */
     fun detach(context: Context) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        if (this.context !== context || !attachedSurface) return
+        if (surfaceContext.get() !== context || !attachedSurface) return
         attachedSurface = false
+        surfaceContext.clear()
         awaitingRemount = true
         choreographer.removeFrameCallback(frameCallback)
         frameScheduled = false

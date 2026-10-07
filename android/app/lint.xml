@@ -4,4 +4,17 @@
          layer. Pulling fragment-ktx must not mechanically require KTX
          rewrites across unrelated modules. -->
     <issue id="UseKtx" severity="ignore" />
+    <!-- Verified false positive: these two drawables are the bundled
+         defaults of the splash resource set that the PAM Native CLI
+         regenerates from pam-native.json "appearance.splash"
+         (crates/pam-native-cli/src/appearance.rs). With a splash logo the
+         generated themes reference them (windowBackground and
+         windowSplashScreenAnimatedIcon); without one the CLI rewrites them
+         to these placeholders so a removed logo leaves no stale drawable.
+         The files must exist in every configuration, but the default themes
+         do not reference them. -->
+    <issue id="UnusedResources">
+        <ignore path="src/main/res/drawable/pam_splash_icon.xml" />
+        <ignore path="src/main/res/drawable/pam_window_background.xml" />
+    </issue>
 </lint>

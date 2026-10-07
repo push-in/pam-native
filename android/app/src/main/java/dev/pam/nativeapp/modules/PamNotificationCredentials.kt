@@ -34,14 +34,9 @@ public object PamNotificationCredentials {
     internal var sealer: Sealer = KeystoreSealer
 
     internal fun set(context: Context, account: String, token: String) {
-        val id = normalize(account)
-        require(id.isNotEmpty() && id.length <= MAX_ACCOUNT) { "Invalid credential account" }
-        require(token.isNotEmpty() && token.length <= MAX_TOKEN && '\r' !in token && '\n' !in token) {
-            "Invalid credential token"
-        }
-        val sealed = sealer.seal(token.toByteArray(Charsets.UTF_8))
+        val (key, value) = sealedEntry(account, token)
         synchronized(lock) {
-            preferences(context).edit().putString(slot(id), Base64.encodeToString(sealed, Base64.NO_WRAP)).commit()
+            preferences(context).edit().putString(key, value).commit()
         }
     }
 
@@ -53,10 +48,26 @@ public object PamNotificationCredentials {
 
     /** Replaces every stored credential with [tokens] (account id to token). */
     internal fun replace(context: Context, tokens: Map<String, String>) {
+        // Every token is validated and sealed before the store is touched,
+        // and the clear and the writes land in one commit: an invalid entry
+        // leaves the previous credentials intact instead of a half-written set.
+        val entries = tokens.map { (account, token) -> sealedEntry(account, token) }
         synchronized(lock) {
-            preferences(context).edit().clear().commit()
-            tokens.forEach { (account, token) -> set(context, account, token) }
+            preferences(context).edit().apply {
+                clear()
+                entries.forEach { (key, value) -> putString(key, value) }
+            }.commit()
         }
+    }
+
+    private fun sealedEntry(account: String, token: String): Pair<String, String> {
+        val id = normalize(account)
+        require(id.isNotEmpty() && id.length <= MAX_ACCOUNT) { "Invalid credential account" }
+        require(token.isNotEmpty() && token.length <= MAX_TOKEN && '\r' !in token && '\n' !in token) {
+            "Invalid credential token"
+        }
+        val sealed = sealer.seal(token.toByteArray(Charsets.UTF_8))
+        return slot(id) to Base64.encodeToString(sealed, Base64.NO_WRAP)
     }
 
     internal fun clear(context: Context) {

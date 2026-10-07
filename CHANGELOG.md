@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.25.4 - 2026-10-07
+
+- Android lint (`lintDebug`, warnings as errors) passes with zero findings.
+- Android: the process-scoped `PamRuntime` holds its Activity context only
+  weakly (falling back to the application context) and drops it on `detach`,
+  so a destroyed Activity is no longer retained through `PamRuntimeHost`
+  (StaticFieldLeak).
+- Android: `PamNotificationCredentials.replace` validates and seals every
+  token first and clears and writes the store in a single commit; an invalid
+  entry leaves the previous credentials intact instead of an emptied store.
+- Android: the `PamList.layout` trace section is always closed, also when
+  layout throws (UnclosedTrace).
+- Android: the bottom-anchored window-sized modal child uses a named physical
+  gravity constant (its left margin is the engine's physical x).
+- Lint suppressions limited to verified false positives, each justified in
+  place: `WrongConstant` on `TextView.breakStrategy` (Layout and LineBreaker
+  constants are equal; LineBreaker is API 29, minSdk 26) and
+  `UnusedResources` for the CLI-managed splash drawables.
+- Rust: `cargo clippy --all-targets -D warnings` is clean on the toolchain in
+  use (collapsible `if` in `appearance.rs`, `app_icon.rs` and `mobile.rs`;
+  `double_ended_iterator_last` in `layout.rs`). No behavior change.
+
 ## 1.25.3 - 2026-10-07
 
 - Android: a hidden route mounted outside a Choreographer frame (a direct

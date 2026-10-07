@@ -103,6 +103,25 @@ import kotlin.math.roundToInt
 @SuppressLint("RtlHardcoded")
 internal const val PAM_PHYSICAL_FRAME_GRAVITY: Int = Gravity.TOP or Gravity.LEFT
 
+/**
+ * Bottom-anchored variant of [PAM_PHYSICAL_FRAME_GRAVITY]: the child's left
+ * margin is the engine's physical x, so it must not be mirrored in RTL.
+ */
+@SuppressLint("RtlHardcoded")
+internal const val PAM_PHYSICAL_BOTTOM_FRAME_GRAVITY: Int = Gravity.BOTTOM or Gravity.LEFT
+
+/**
+ * React Native's TextView default. Lint false positive (WrongConstant):
+ * TextView.setBreakStrategy is annotated with the API 29 LineBreaker
+ * constants, which have the same values as the Layout constants it documents
+ * (BREAK_STRATEGY_HIGH_QUALITY == 1 in both); LineBreaker itself does not
+ * exist below API 29, and minSdk is 26.
+ */
+@SuppressLint("WrongConstant")
+private fun TextView.useHighQualityLineBreaks() {
+    breakStrategy = android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY
+}
+
 private const val LOCAL_MODAL_SELECTION_BEHAVIOR = 24L
 private const val MAX_POOLED_CELL_VIEWS_PER_SHAPE = 24
 private val POOLED_CELL_KINDS = setOf(
@@ -488,7 +507,7 @@ internal fun windowSizedModalChildPlacement(
     val childWidth = if (spansWidth) match else width
     val childLeft = if (spansWidth) 0 else left
     return if (top > 1 && top + height >= modalHeight - 1) {
-        ModalChildPlacement(childLeft, 0, childWidth, height, Gravity.BOTTOM or Gravity.LEFT)
+        ModalChildPlacement(childLeft, 0, childWidth, height, PAM_PHYSICAL_BOTTOM_FRAME_GRAVITY)
     } else {
         ModalChildPlacement(childLeft, top, childWidth, height, PAM_PHYSICAL_FRAME_GRAVITY)
     }
@@ -1321,7 +1340,7 @@ class PamRenderer(
                 // React Native Android defaults: includeFontPadding=true,
                 // high-quality breaking, no hyphenation, fallback spacing.
                 includeFontPadding = true
-                breakStrategy = android.text.Layout.BREAK_STRATEGY_HIGH_QUALITY
+                useHighQualityLineBreaks()
                 hyphenationFrequency = android.text.Layout.HYPHENATION_FREQUENCY_NONE
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) isFallbackLineSpacing = true
                 gravity = Gravity.CENTER_VERTICAL

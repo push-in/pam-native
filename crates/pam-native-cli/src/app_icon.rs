@@ -47,12 +47,13 @@ impl AndroidIcon {
                 self.foreground
             )
         })?;
-        if let Some(background) = &self.background {
-            if parse_color(background).is_none() && image_extension(background).is_none() {
-                return Err(format!(
-                    "android.icon.background must be #RGB/#RRGGBB or a project-relative .png/.webp path, got {background:?}"
-                ));
-            }
+        if let Some(background) = &self.background
+            && parse_color(background).is_none()
+            && image_extension(background).is_none()
+        {
+            return Err(format!(
+                "android.icon.background must be #RGB/#RRGGBB or a project-relative .png/.webp path, got {background:?}"
+            ));
         }
         if let Some(monochrome) = &self.monochrome {
             image_extension(monochrome).ok_or_else(|| {

@@ -118,12 +118,12 @@ impl SplashOptions {
                 })?;
             }
         }
-        if let (Some(light), Some(dark)) = (&self.logo, &self.dark_logo) {
-            if splash_extension(light) != splash_extension(dark) {
-                return Err(
-                    "appearance.splash.logo and darkLogo must use the same image format".into(),
-                );
-            }
+        if let (Some(light), Some(dark)) = (&self.logo, &self.dark_logo)
+            && splash_extension(light) != splash_extension(dark)
+        {
+            return Err(
+                "appearance.splash.logo and darkLogo must use the same image format".into(),
+            );
         }
         Ok(())
     }

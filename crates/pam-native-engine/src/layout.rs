@@ -3415,8 +3415,7 @@ fn reserve_keyboard_space(
     let Some(trailing) = node_children
         .iter()
         .copied()
-        .filter(|child| visible(child) && !out_of_flow(child))
-        .last()
+        .rfind(|child| visible(child) && !out_of_flow(child))
     else {
         return inner;
     };

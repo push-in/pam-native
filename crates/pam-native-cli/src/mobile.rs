@@ -1428,12 +1428,12 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
     if let Some(icon) = &manifest.android.icon {
         icon.validate()?;
     }
-    if let Some(icon) = &manifest.ios.icon {
-        if crate::appearance::splash_extension(icon) != Some("png") {
-            return Err(format!(
-                "ios.icon must be a project-relative .png path, got {icon:?}"
-            ));
-        }
+    if let Some(icon) = &manifest.ios.icon
+        && crate::appearance::splash_extension(icon) != Some("png")
+    {
+        return Err(format!(
+            "ios.icon must be a project-relative .png path, got {icon:?}"
+        ));
     }
     if manifest
         .android
