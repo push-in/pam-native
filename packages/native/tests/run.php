@@ -1827,6 +1827,32 @@ $assert(
     'Keyboard avoidance helpers must preserve behavior, offset and enabled state.',
 );
 
+foreach (
+    [
+        'height' => KeyboardAvoidingBehavior::Resize,
+        'position' => KeyboardAvoidingBehavior::Pan,
+        'padding' => KeyboardAvoidingBehavior::Padding,
+    ] as $reactNativeBehavior => $expectedBehavior
+) {
+    $templateKeyboard = TemplateRenderer::render(
+        TemplateCompiler::compile(
+            '<Modal visible="true" statusBarTranslucent="true">'
+            .'<KeyboardAvoidingView flexGrow="1" behavior="'.$reactNativeBehavior.'">'
+            .'<Text>Composer</Text></KeyboardAvoidingView></Modal>',
+        ),
+        new class {
+        },
+        [],
+    );
+    $templateKeyboardView = $templateKeyboard->children()[0];
+    $assert(
+        $templateKeyboardView instanceof KeyboardAvoidingView
+            && $templateKeyboardView->properties()[PropKey::KeyboardBehavior->value]
+                === $expectedBehavior->value,
+        "KeyboardAvoidingView behavior=\"{$reactNativeBehavior}\" must map like React Native inside a Modal.",
+    );
+}
+
 $interactiveKeyboardElement = KeyboardAvoidingView::make(
     Text::make('Interactive sheet'),
     KeyboardAvoidingBehavior::Interactive,
@@ -7045,8 +7071,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.27.1',
-    'The runtime SDK contract must match the 1.27.1 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.28.0',
+    'The runtime SDK contract must match the 1.28.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

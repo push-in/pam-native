@@ -24,6 +24,11 @@ public final class PamRenderer {
     private var deferredVirtualListSyncs = Set<Int64>()
 
     var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
+    /// Keyboard overlap (points from the PAM root view's bottom) over the
+    /// presented Modal of a node, with the keyboard's duration and curve. The
+    /// runtime lays that modal's resize/padding KeyboardAvoidingViews out
+    /// above it.
+    var onSurfaceKeyboardInset: ((Int64, CGFloat, TimeInterval, UInt) -> Void)?
     private let fontLoader = PamFontLoader()
     private let host: UIView
     private let dispatchEvent: (Int64, Int, Data) -> Void
@@ -1183,6 +1188,15 @@ public final class PamRenderer {
         return "com.pam.native.custom"
     }
 
+    /// A modal's keyboard overlap (from its own bottom edge) re-expressed
+    /// from the bottom of the host view the engine lays out against.
+    static func hostKeyboardInset(modalInset: CGFloat, modal: UIView, host: UIView) -> CGFloat {
+        guard modalInset > 0 else { return 0 }
+        guard modal.window != nil, modal.window === host.window else { return modalInset }
+        let modalBottom = modal.convert(CGPoint(x: 0, y: modal.bounds.maxY), to: host).y
+        return max(0, modalInset + host.bounds.maxY - modalBottom)
+    }
+
     private func createView(for spec: NodeSpec) -> UIView {
         if spec.kind == .customView {
             let nativeView = nativeViews.create(name: hostName(for: NodeState(
@@ -1253,7 +1267,18 @@ public final class PamRenderer {
         case .toggle:
             return PamVuetifySwitch()
         case .modal:
-            return PamModalHost()
+            let modal = PamModalHost()
+            let id = spec.id
+            modal.onSurfaceKeyboardInset = { [weak self, weak modal] inset, duration, curve in
+                guard let self, let modal else { return }
+                self.onSurfaceKeyboardInset?(
+                    id,
+                    Self.hostKeyboardInset(modalInset: inset, modal: modal, host: self.host),
+                    duration,
+                    curve
+                )
+            }
+            return modal
         case .drawerLayout:
             return PamDrawerLayout()
         case .statusBar:

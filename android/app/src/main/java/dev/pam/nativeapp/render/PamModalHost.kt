@@ -93,6 +93,23 @@ internal fun sheetKeyboardLift(contentBottom: Int, windowHeight: Int, imeInset: 
     return (contentBottom - (windowHeight - imeInset)).coerceAtLeast(0)
 }
 
+/**
+ * IME pixels (from the window bottom) a modal's own content must avoid:
+ * everything over full-screen and dialog modals, what an interactive sheet's
+ * lift leaves, nothing for pan/resize sheets (their window moves instead).
+ */
+internal fun modalSurfaceKeyboardInset(
+    imeInset: Int,
+    presentation: Int,
+    interactiveSheet: Boolean,
+    sheetLift: Int,
+): Int = when {
+    imeInset <= 0 -> 0
+    presentation != 3 -> imeInset
+    interactiveSheet -> (imeInset - sheetLift.coerceAtLeast(0)).coerceAtLeast(0)
+    else -> 0
+}
+
 internal fun blocksModalDismissal(dismissible: Boolean): Boolean = !dismissible
 
 /**
@@ -170,6 +187,17 @@ internal class PamModalHost @JvmOverloads constructor(
     private var bottomSheetKeyboardInset = 0
     private var sheetKeyboardTranslation = 0f
     private var sheetImeAnimating = false
+    private var surfaceKeyboardInset = 0
+    private val surfaceKeyboardListeners = LinkedHashSet<(Int, Boolean) -> Unit>()
+
+    /**
+     * The IME of this modal's window that its content still has to avoid,
+     * in pixels from the window bottom (0 when hidden), and whether it comes
+     * from a running IME animation frame. KeyboardAvoidingViews inside the
+     * modal read it instead of the covered activity window, which never sees
+     * this window's keyboard.
+     */
+    internal var onSurfaceKeyboardInset: ((Int, Boolean) -> Unit)? = null
     private var lastSheetHeight = 0
     private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
     private var backdropAnimator: android.animation.ValueAnimator? = null
@@ -562,7 +590,10 @@ internal class PamModalHost @JvmOverloads constructor(
         val decor = modal.window?.decorView ?: return
         ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
             if (insets.isVisible(WindowInsetsCompat.Type.ime())) finishAutoFocusKeyboard()
-            if (!sheetImeAnimating) updateSheetKeyboardInset(sheetKeyboardLiftFor(insets))
+            if (!sheetImeAnimating) {
+                updateSheetKeyboardInset(sheetKeyboardLiftFor(insets))
+                publishSurfaceKeyboard(surfaceKeyboardInsetFor(insets), animating = false)
+            }
             ViewCompat.onApplyWindowInsets(view, insets)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -581,9 +612,9 @@ internal class PamModalHost @JvmOverloads constructor(
                         running: MutableList<android.view.WindowInsetsAnimation>,
                     ): WindowInsets {
                         if (sheetImeAnimating && running.any { it.typeMask and WindowInsets.Type.ime() != 0 }) {
-                            followSheetKeyboard(
-                                sheetKeyboardLiftFor(WindowInsetsCompat.toWindowInsetsCompat(insets, decor)),
-                            )
+                            val frame = WindowInsetsCompat.toWindowInsetsCompat(insets, decor)
+                            followSheetKeyboard(sheetKeyboardLiftFor(frame))
+                            publishSurfaceKeyboard(surfaceKeyboardInsetFor(frame), animating = true)
                         }
                         return insets
                     }
@@ -594,10 +625,57 @@ internal class PamModalHost @JvmOverloads constructor(
                         val settled = ViewCompat.getRootWindowInsets(decor)
                         bottomSheetKeyboardInset = -1
                         updateSheetKeyboardInset(settled?.let(::sheetKeyboardLiftFor) ?: 0)
+                        publishSurfaceKeyboard(
+                            settled?.let(::surfaceKeyboardInsetFor) ?: 0,
+                            animating = false,
+                            force = true,
+                        )
                     }
                 },
             )
         }
+    }
+
+    /**
+     * The part of this window's IME the modal content must avoid itself:
+     * the whole IME over a full-screen or dialog modal; over an interactive
+     * sheet only what the sheet's own lift leaves (nothing for a sheet that
+     * rests on the window bottom); none for pan/resize sheets, whose window
+     * already moves or shrinks with the IME.
+     */
+    private fun surfaceKeyboardInsetFor(insets: WindowInsetsCompat): Int {
+        if (!desiredVisible || !insets.isVisible(WindowInsetsCompat.Type.ime())) return 0
+        val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.coerceAtLeast(0)
+        return modalSurfaceKeyboardInset(
+            imeInset = ime,
+            presentation = presentation,
+            interactiveSheet = usesInteractiveKeyboard(),
+            sheetLift = if (usesInteractiveKeyboard()) sheetKeyboardLiftFor(insets) else 0,
+        )
+    }
+
+    private fun publishSurfaceKeyboard(inset: Int, animating: Boolean, force: Boolean = false) {
+        if (!force && inset == surfaceKeyboardInset && !animating) return
+        surfaceKeyboardInset = inset
+        onSurfaceKeyboardInset?.invoke(inset, animating)
+        surfaceKeyboardListeners.toList().forEach { it(inset, animating) }
+    }
+
+    /** IME inset (px from the window bottom) last published for this modal's content. */
+    internal fun currentSurfaceKeyboardInset(): Int = surfaceKeyboardInset
+
+    /** Screen y of the bottom of this modal's window (its IME insets are measured from it). */
+    internal fun windowBottomOnScreen(): Int? {
+        val decor = dialog?.window?.decorView?.takeIf { it.isAttachedToWindow } ?: return null
+        val location = IntArray(2)
+        decor.getLocationOnScreen(location)
+        return location[1] + decor.height
+    }
+
+    internal fun addSurfaceKeyboardListener(listener: (Int, Boolean) -> Unit): AutoCloseable {
+        surfaceKeyboardListeners += listener
+        listener(surfaceKeyboardInset, false)
+        return AutoCloseable { surfaceKeyboardListeners -= listener }
     }
 
     private fun sheetKeyboardLiftFor(insets: WindowInsetsCompat): Int {
@@ -1248,6 +1326,7 @@ internal class PamModalHost @JvmOverloads constructor(
         }
         modal.hide()
         lastOrientation = null
+        publishSurfaceKeyboard(0, animating = false)
         if (!focusKeyboard) restoreFocus()
         if (notify && wasShowing) {
             onDismiss?.invoke()
@@ -1266,6 +1345,7 @@ internal class PamModalHost @JvmOverloads constructor(
         modal.dismiss()
         dialog = null
         lastOrientation = null
+        publishSurfaceKeyboard(0, animating = false)
         if (notify && wasShowing) {
             onDismiss?.invoke()
         }

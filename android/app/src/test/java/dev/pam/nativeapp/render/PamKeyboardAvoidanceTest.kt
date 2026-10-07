@@ -216,4 +216,31 @@ class PamKeyboardAvoidanceTest {
             ),
         )
     }
+
+    @Test
+    fun fullScreenAndDialogModalsAvoidTheirWholeWindowIme() {
+        assertEquals(828, modalSurfaceKeyboardInset(828, presentation = 1, interactiveSheet = false, sheetLift = 0))
+        assertEquals(828, modalSurfaceKeyboardInset(828, presentation = 2, interactiveSheet = false, sheetLift = 0))
+        assertEquals(0, modalSurfaceKeyboardInset(0, presentation = 1, interactiveSheet = false, sheetLift = 0))
+    }
+
+    @Test
+    fun sheetsOnlyAvoidWhatTheirOwnLiftLeaves() {
+        // A sheet resting on the window bottom rides on the IME entirely.
+        assertEquals(0, modalSurfaceKeyboardInset(828, presentation = 3, interactiveSheet = true, sheetLift = 828))
+        // A fitted sheet ends above the navigation bar: the lift is shorter.
+        assertEquals(132, modalSurfaceKeyboardInset(828, presentation = 3, interactiveSheet = true, sheetLift = 696))
+        // Pan/resize sheets: the window itself moves or shrinks.
+        assertEquals(0, modalSurfaceKeyboardInset(828, presentation = 3, interactiveSheet = false, sheetLift = 0))
+    }
+
+    @Test
+    fun modalImeIsReexpressedFromTheHostBottom() {
+        // Dialog window and host end on the same screen row.
+        assertEquals(828, surfaceKeyboardInsetForHost(imeInset = 828, windowBottom = 2_340, hostBottom = 2_340))
+        // Host ends above the navigation bar (non edge-to-edge activity).
+        assertEquals(696, surfaceKeyboardInsetForHost(imeInset = 828, windowBottom = 2_340, hostBottom = 2_208))
+        assertEquals(0, surfaceKeyboardInsetForHost(imeInset = 0, windowBottom = 2_340, hostBottom = 2_208))
+        assertEquals(0, surfaceKeyboardInsetForHost(imeInset = 50, windowBottom = 2_340, hostBottom = 2_208))
+    }
 }

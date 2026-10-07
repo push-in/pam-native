@@ -233,6 +233,16 @@ internal fun interactiveKeyboardTranslation(
     (originalTop - minimumTop).coerceAtLeast(0),
 )
 
+/**
+ * A modal window's IME inset (from that window's bottom) re-expressed from
+ * the bottom of the PAM host view the engine lays out against.
+ */
+internal fun surfaceKeyboardInsetForHost(imeInset: Int, windowBottom: Int, hostBottom: Int): Int {
+    if (imeInset <= 0) return 0
+    val keyboardTop = windowBottom - imeInset
+    return (hostBottom - keyboardTop).coerceAtLeast(0)
+}
+
 internal fun keyboardAvoidingViewportHeight(
     baseHeight: Int,
     keyboardOverlap: Int,
@@ -585,6 +595,14 @@ class PamRenderer(
     private val dispatchEvent: (Long, Int, ByteArray) -> Unit,
 ) : AutoCloseable {
     var onNativeChildVisibility: ((Long, Long, Boolean) -> Unit)? = null
+
+    /**
+     * IME inset (dp from the root window bottom, 0 when hidden) over the
+     * Modal/BottomSheet window of a node; the runtime lays that modal's
+     * resize/padding KeyboardAvoidingViews out above it (engine surface
+     * keyboard inset).
+     */
+    var onSurfaceKeyboardInset: ((Long, Float) -> Unit)? = null
 
     /**
      * True once the runtime feeds window insets to the engine: SafeAreaView
@@ -1229,6 +1247,7 @@ class PamRenderer(
     override fun close() {
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null
+        onSurfaceKeyboardInset = null
         prewarmActive = false
         main.removeCallbacks(prewarmSlice)
         destroyed = true
@@ -1462,6 +1481,9 @@ class PamRenderer(
             NodeKind.SWITCH -> PamSwitch(context)
             NodeKind.MODAL -> PamModalHost(context) {
                 (context as? PamActivity)?.suppressNextPamBack()
+            }.also { modal ->
+                val id = state?.id ?: return@also
+                modal.onSurfaceKeyboardInset = { inset, _ -> forwardSurfaceKeyboard(id, modal, inset) }
             }
             NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {
                 installKeyboardInsets(it, requireNotNull(state))
@@ -1547,9 +1569,18 @@ class PamRenderer(
                     ?.let { it as? PamScrollContainer }
                     ?.setKeyboardAvoidanceInset(0)
             }
-            host.setOnApplyWindowInsetsListener(null)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                host.setWindowInsetsAnimationCallback(null)
+            val modalSubscription = state.modalKeyboardSubscription
+            if (modalSubscription != null) {
+                // A modal's KAV never owned the activity window's listeners:
+                // clearing them would stop the screen's own composer KAV.
+                modalSubscription.close()
+                state.modalKeyboardSubscription = null
+                state.keyboardModalHost = null
+            } else {
+                host.setOnApplyWindowInsetsListener(null)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    host.setWindowInsetsAnimationCallback(null)
+                }
             }
             state.keyboardLayoutListener?.let(host::removeOnLayoutChangeListener)
             state.keyboardSelfLayoutListener?.let { view?.removeOnLayoutChangeListener(it) }
@@ -7538,6 +7569,7 @@ class PamRenderer(
 
     private fun configureLegacyKeyboardInsets(view: View, state: NodeState) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return
+        if (state.keyboardModalHost != null) return
         if (!state.flag(PropKey.KEYBOARD_AVOIDING_ENABLED, true)) {
             state.legacyKeyboardSubscription?.close()
             state.legacyKeyboardSubscription = null
@@ -7550,7 +7582,84 @@ class PamRenderer(
         }
     }
 
+    /**
+     * A KeyboardAvoidingView inside a Modal/BottomSheet lives in that
+     * modal's Dialog window. The activity window never sees that window's
+     * IME (and its inset listeners belong to the screen's own KAV), so the
+     * view follows the modal's IME feed, frame by frame while the IME
+     * animates. Resize and padding are laid out by the engine from the same
+     * feed (PamModalHost.onSurfaceKeyboardInset); pan and interactive
+     * translate natively.
+     */
+    private fun installModalKeyboardInsets(view: View, state: NodeState, modal: PamModalHost) {
+        state.keyboardModalHost = modal
+        state.modalKeyboardSubscription = modal.addSurfaceKeyboardListener { inset, animating ->
+            if (nodes[state.id] !== state) return@addSurfaceKeyboardListener
+            state.keyboardInset = inset
+            state.keyboardAnimating = animating
+            applyKeyboardAvoidance(view, state)
+        }
+        val selfLayoutListener = View.OnLayoutChangeListener {
+                _,
+                _,
+                top,
+                _,
+                bottom,
+                _,
+                oldTop,
+                _,
+                oldBottom,
+            ->
+            if (
+                (top != oldTop || bottom != oldBottom) &&
+                !state.keyboardAnimating &&
+                (state.keyboardInset > 0 || view.translationY != 0f)
+            ) {
+                applyKeyboardAvoidance(view, state)
+            }
+        }
+        state.keyboardSelfLayoutListener = selfLayoutListener
+        view.addOnLayoutChangeListener(selfLayoutListener)
+    }
+
+    /** Engine-laid-out avoidance: resize/padding inside a modal window. */
+    private fun engineAvoidsKeyboard(state: NodeState): Boolean =
+        state.keyboardModalHost != null && (
+            state.keyboardBehavior == KEYBOARD_RESIZE ||
+                state.keyboardBehavior == KEYBOARD_PADDING
+            )
+
+    /**
+     * Forwards a modal window's IME to the engine in root-window
+     * coordinates: the inset is measured from the dialog window's bottom,
+     * the engine's viewport from the PAM host's.
+     */
+    private fun forwardSurfaceKeyboard(id: Long, modal: PamModalHost, inset: Int) {
+        val callback = onSurfaceKeyboardInset ?: return
+        val engineInset = if (inset <= 0) {
+            0
+        } else {
+            val windowBottom = modal.windowBottomOnScreen()
+            if (windowBottom == null || !host.isAttachedToWindow) {
+                inset
+            } else {
+                val location = IntArray(2)
+                host.getLocationOnScreen(location)
+                surfaceKeyboardInsetForHost(
+                    imeInset = inset,
+                    windowBottom = windowBottom,
+                    hostBottom = location[1] + host.height,
+                )
+            }
+        }
+        callback(id, engineInset / resourcesDensity())
+    }
+
     private fun installKeyboardInsets(view: View, state: NodeState) {
+        modalAncestor(state.id)?.let { modal ->
+            installModalKeyboardInsets(view, state, modal)
+            return
+        }
         configureLegacyKeyboardInsets(view, state)
         val layoutListener = View.OnLayoutChangeListener {
                 _,
@@ -7704,10 +7813,11 @@ class PamRenderer(
             state.number(PropKey.KEYBOARD_VERTICAL_OFFSET, 0.0).toFloat(),
         )
         val keyboard = if (enabled) {
-            keyboardOverlap(view, state.keyboardInset, offset)
+            keyboardOverlap(view, state.keyboardInset, offset, state.keyboardModalHost)
         } else {
             0
         }
+        val engineManaged = engineAvoidsKeyboard(state)
         if (keyboard > 0) {
             ((host.findFocus() as? EditText) ?: lastFocusedInput)
                 ?.let { state.keyboardFocusedInput = it }
@@ -7719,8 +7829,10 @@ class PamRenderer(
         // bottom controls reflow above the keyboard. Scroll descendants additionally receive
         // their native avoidance inset below.
         val viewportInset = if (
-            state.keyboardBehavior == KEYBOARD_RESIZE ||
-            state.keyboardBehavior == KEYBOARD_PADDING
+            !engineManaged && (
+                state.keyboardBehavior == KEYBOARD_RESIZE ||
+                    state.keyboardBehavior == KEYBOARD_PADDING
+                )
         ) keyboard else 0
         if (state.keyboardAvoidingViewportInset != viewportInset) {
             state.keyboardAvoidingViewportInset = viewportInset
@@ -7752,7 +7864,11 @@ class PamRenderer(
                 )
             }
             KEYBOARD_INTERACTIVE -> {
-                val root = (activity() as? PamActivity)?.rootHost ?: host
+                val root = if (state.keyboardModalHost != null) {
+                    view.rootView
+                } else {
+                    (activity() as? PamActivity)?.rootHost ?: host
+                }
                 val rootLocation = IntArray(2)
                 val viewLocation = IntArray(2)
                 root.getLocationOnScreen(rootLocation)
@@ -7801,11 +7917,11 @@ class PamRenderer(
         }
         scroll?.second?.let { container ->
             container.setKeyboardAvoidanceInset(
-                if (state.keyboardBehavior == KEYBOARD_RESIZE) 0 else keyboard,
+                if (state.keyboardBehavior == KEYBOARD_RESIZE || engineManaged) 0 else keyboard,
             )
-            if (keyboard > 0) {
+            if (keyboard > 0 && !state.keyboardAnimating) {
                 state.keyboardFocusedInput?.let { input ->
-                    if (state.keyboardBehavior == KEYBOARD_RESIZE) {
+                    if (state.keyboardBehavior == KEYBOARD_RESIZE || engineManaged) {
                         container.ensureViewportTargetVisible(input)
                     } else {
                         container.ensureKeyboardTargetVisible(input)
@@ -7813,7 +7929,7 @@ class PamRenderer(
                 }
             }
         }
-        if (keyboard > 0) {
+        if (keyboard > 0 && !state.keyboardAnimating) {
             view.post { restoreKeyboardAvoidingInput(state) }
         }
     }
@@ -7839,8 +7955,25 @@ class PamRenderer(
         if (view.z != target) view.z = target
     }
 
-    private fun keyboardOverlap(view: View, keyboardInset: Int, offset: Int): Int {
+    private fun keyboardOverlap(
+        view: View,
+        keyboardInset: Int,
+        offset: Int,
+        modal: PamModalHost? = null,
+    ): Int {
         if (keyboardInset <= 0) return 0
+        if (modal != null) {
+            // The modal's IME is measured from its own Dialog window bottom.
+            val windowBottom = modal.windowBottomOnScreen() ?: return 0
+            val viewLocation = IntArray(2)
+            view.getLocationOnScreen(viewLocation)
+            return keyboardOverlapForBounds(
+                originalBottom = viewLocation[1] - view.translationY + view.height,
+                windowBottom = windowBottom,
+                keyboardInset = keyboardInset,
+                offset = offset,
+            )
+        }
         val root = (activity() as? PamActivity)?.rootHost ?: host
         val rootLocation = IntArray(2)
         val viewLocation = IntArray(2)
@@ -9251,6 +9384,9 @@ class PamRenderer(
         var keyboardBaseHeight: Int = 0,
         var keyboardLayoutListener: View.OnLayoutChangeListener? = null,
         var legacyKeyboardSubscription: AutoCloseable? = null,
+        /** Set while the KAV lives in a Modal/BottomSheet window: that window's IME feed. */
+        var modalKeyboardSubscription: AutoCloseable? = null,
+        var keyboardModalHost: PamModalHost? = null,
         var keyboardSelfLayoutListener: View.OnLayoutChangeListener? = null,
         val inputInFlight: ArrayDeque<Pair<String, Long>> = ArrayDeque(),
         var keyboardViewportReconcileGeneration: Int = 0,

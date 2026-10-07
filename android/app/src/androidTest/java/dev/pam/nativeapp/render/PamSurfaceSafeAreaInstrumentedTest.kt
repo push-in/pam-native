@@ -38,6 +38,18 @@ object PamEngineLayoutProbe {
         insets: FloatArray,
         surfacePolicy: Int,
     ): ByteArray?
+
+    /** Same, with the IME inset (dp from the window bottom) of the Modal node [surface]. */
+    @JvmStatic
+    external fun nativeLayoutWithSurfaceKeyboard(
+        tree: ByteArray,
+        width: Float,
+        height: Float,
+        insets: FloatArray,
+        surfacePolicy: Int,
+        surface: Long,
+        keyboard: Float,
+    ): ByteArray?
 }
 
 /**

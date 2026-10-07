@@ -133,6 +133,17 @@ PamStatus pam_native_engine_set_keyboard_inset(
     float bottom,
     uint8_t *changed
 );
+/* Visible IME height in points from the window bottom (0 when hidden) over
+ * the Modal/BottomSheet whose node id is `surface`. A KeyboardAvoidingView
+ * with the resize or padding behavior inside it is then laid out above that
+ * keyboard. Writes 1 to `changed` when such a view must move; relayout
+ * afterwards. */
+PamStatus pam_native_engine_set_surface_keyboard_inset(
+    PamNativeEngineHandle *handle,
+    uint64_t surface,
+    float bottom,
+    uint8_t *changed
+);
 PamStatus pam_native_engine_set_refresh_rate(
     PamNativeEngineHandle *handle,
     double refresh_rate_hz

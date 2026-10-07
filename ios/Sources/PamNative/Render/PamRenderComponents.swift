@@ -1749,6 +1749,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     /// How far the sheet sits above its resting position so its bottom edge
     /// rests on the keyboard (@gorhom/bottom-sheet `interactive`).
     private var sheetKeyboardLift: CGFloat = 0
+    /// Keyboard overlap (points from the modal's bottom edge) its content
+    /// avoids itself (KeyboardAvoidingView resize/padding, laid out by the
+    /// engine), with the keyboard's animation duration and curve.
+    var onSurfaceKeyboardInset: ((CGFloat, TimeInterval, UInt) -> Void)?
+    private var surfaceKeyboardInset: CGFloat = 0
 
     private var showScheduled = false
     private var desiredVisible = true
@@ -1883,6 +1888,14 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         let end = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
         let keyboard = window.convert(end, from: window.screen.coordinateSpace)
         let frame = convert(bounds, to: window)
+        publishSurfaceKeyboard(
+            Self.surfaceKeyboardInset(
+                keyboardInModal: convert(end, from: window.screen.coordinateSpace),
+                modalBounds: bounds,
+                hiding: hiding || !currentlyVisible || presentation == Presentation.sheet
+            ),
+            info: info
+        )
         let lift = hiding || !currentlyVisible || presentation != Presentation.sheet
             ? 0
             : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
@@ -1903,6 +1916,23 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private func resetSheetKeyboardLift() {
         sheetKeyboardLift = 0
         contentBottomConstraint.constant = 0
+        publishSurfaceKeyboard(0, info: nil)
+    }
+
+    /// The keyboard overlap of a full-screen or dialog modal in its own
+    /// coordinate space: points between the keyboard's top edge and the
+    /// modal's bottom edge. Sheets ride on the keyboard instead (0).
+    static func surfaceKeyboardInset(keyboardInModal: CGRect, modalBounds: CGRect, hiding: Bool) -> CGFloat {
+        guard !hiding, !keyboardInModal.isEmpty, keyboardInModal.minY < modalBounds.maxY else { return 0 }
+        return max(0, modalBounds.maxY - max(keyboardInModal.minY, modalBounds.minY))
+    }
+
+    private func publishSurfaceKeyboard(_ inset: CGFloat, info: [AnyHashable: Any]?) {
+        guard abs(inset - surfaceKeyboardInset) > 0.5 else { return }
+        surfaceKeyboardInset = inset
+        let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0
+        let curve = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
+        onSurfaceKeyboardInset?(inset, duration, curve)
     }
 
     func insert(_ view: UIView, index _: Int) {

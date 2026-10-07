@@ -8,8 +8,8 @@
 //! engine keeps its portable glyph-advance estimator.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::c_void;
 use std::hash::{Hash, Hasher};
 
@@ -111,6 +111,9 @@ thread_local! {
     static KEYBOARD_INSET: Cell<f32> = const { Cell::new(0.0) };
     static SURFACE_POLICY: Cell<crate::surface::SurfacePolicy> =
         const { Cell::new(crate::surface::SurfacePolicy::InWindow) };
+    static SURFACE_KEYBOARD_INSETS: RefCell<BTreeMap<u64, f32>> =
+        const { RefCell::new(BTreeMap::new()) };
+    static SURFACE_KEYBOARD_TOP: Cell<Option<f32>> = const { Cell::new(None) };
 }
 
 /// Installs host layout inputs (text measurer, window safe area) for layout
@@ -120,6 +123,7 @@ pub(crate) struct ActiveScope {
     previous_safe_area: Option<[f32; 4]>,
     previous_keyboard_inset: f32,
     previous_surface_policy: crate::surface::SurfacePolicy,
+    previous_surface_keyboard_insets: Option<BTreeMap<u64, f32>>,
 }
 
 impl ActiveScope {
@@ -139,12 +143,23 @@ impl ActiveScope {
             previous_safe_area: SAFE_AREA.with(|area| area.replace(safe_area)),
             previous_keyboard_inset: KEYBOARD_INSET.with(|inset| inset.replace(keyboard_inset)),
             previous_surface_policy: SURFACE_POLICY.with(Cell::get),
+            previous_surface_keyboard_insets: None,
         }
     }
 
     /// Lays out presentation surfaces with `policy` while this scope lives.
     pub(crate) fn with_surface_policy(self, policy: crate::surface::SurfacePolicy) -> Self {
         SURFACE_POLICY.with(|current| current.set(policy));
+        self
+    }
+
+    /// IME insets of the modal surfaces (by modal node id) while this scope
+    /// lives.
+    pub(crate) fn with_surface_keyboard_insets(mut self, insets: &BTreeMap<u64, f32>) -> Self {
+        let previous = SURFACE_KEYBOARD_INSETS.with(|current| current.replace(insets.clone()));
+        if self.previous_surface_keyboard_insets.is_none() {
+            self.previous_surface_keyboard_insets = Some(previous);
+        }
         self
     }
 }
@@ -155,7 +170,41 @@ impl Drop for ActiveScope {
         SAFE_AREA.with(|area| area.set(self.previous_safe_area));
         KEYBOARD_INSET.with(|inset| inset.set(self.previous_keyboard_inset));
         SURFACE_POLICY.with(|policy| policy.set(self.previous_surface_policy));
+        if let Some(previous) = self.previous_surface_keyboard_insets.take() {
+            SURFACE_KEYBOARD_INSETS.with(|insets| *insets.borrow_mut() = previous);
+        }
     }
+}
+
+/// While a modal surface is laid out: the IME top edge in root coordinates
+/// (`None` when its keyboard is hidden). Restored on drop.
+pub(crate) struct SurfaceKeyboardScope {
+    previous: Option<f32>,
+}
+
+impl SurfaceKeyboardScope {
+    /// Enters the surface of the `Modal` `surface` whose window ends at
+    /// `window_bottom` (root coordinates).
+    pub(crate) fn enter(surface: u64, window_bottom: f32) -> Self {
+        let top = SURFACE_KEYBOARD_INSETS
+            .with(|insets| insets.borrow().get(&surface).copied())
+            .filter(|inset| *inset > 0.0)
+            .map(|inset| window_bottom - inset);
+        Self {
+            previous: SURFACE_KEYBOARD_TOP.with(|current| current.replace(top)),
+        }
+    }
+}
+
+impl Drop for SurfaceKeyboardScope {
+    fn drop(&mut self) {
+        SURFACE_KEYBOARD_TOP.with(|current| current.set(self.previous));
+    }
+}
+
+/// IME top edge (root coordinates) over the modal surface being laid out.
+pub(crate) fn surface_keyboard_top() -> Option<f32> {
+    SURFACE_KEYBOARD_TOP.with(Cell::get)
 }
 
 /// Replaces the safe area seen by `SafeAreaView`s while a presentation

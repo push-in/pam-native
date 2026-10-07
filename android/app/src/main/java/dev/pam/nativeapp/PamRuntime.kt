@@ -120,6 +120,7 @@ class PamRuntime(
                 }
             }
         }
+        target.onSurfaceKeyboardInset = ::updateSurfaceKeyboardInset
     }
 
     val isRunning: Boolean
@@ -147,6 +148,7 @@ class PamRuntime(
         this.onDiagnostic = onDiagnostic
         if (previousRenderer !== renderer) {
             previousRenderer.onNativeChildVisibility = null
+            previousRenderer.onSurfaceKeyboardInset = null
             if (attachedSurface) runCatching { previousRenderer.close() }
             renderer.engineManagedSafeArea = previousRenderer.engineManagedSafeArea
             this.renderer = renderer
@@ -295,6 +297,29 @@ class PamRuntime(
             val (width, height, textScale) = layoutViewport.let { Triple(it[0], it[1], it[2]) }
             if (active != 0L && width > 0f && height > 0f) {
                 nativeSetKeyboardInset(active, bottomDp.coerceAtLeast(0f), width, height, textScale)
+            }
+        }
+    }
+
+    /**
+     * Visible IME height in dp over the Modal/BottomSheet window of node
+     * [surface] (0 when hidden). The engine lays that modal's resize/padding
+     * KeyboardAvoidingViews out above it and relayouts synchronously, so
+     * every IME animation frame moves the content with the keyboard.
+     */
+    fun updateSurfaceKeyboardInset(surface: Long, bottomDp: Float) {
+        synchronized(handleLock) {
+            val active = handle
+            val (width, height, textScale) = layoutViewport.let { Triple(it[0], it[1], it[2]) }
+            if (active != 0L && surface > 0L && width > 0f && height > 0f) {
+                nativeSetSurfaceKeyboardInset(
+                    active,
+                    surface,
+                    bottomDp.coerceAtLeast(0f),
+                    width,
+                    height,
+                    textScale,
+                )
             }
         }
     }
@@ -721,6 +746,15 @@ class PamRuntime(
     ): Long
     private external fun nativeSetKeyboardInset(
         handle: Long,
+        bottom: Float,
+        width: Float,
+        height: Float,
+        textScale: Float,
+    )
+
+    private external fun nativeSetSurfaceKeyboardInset(
+        handle: Long,
+        surface: Long,
         bottom: Float,
         width: Float,
         height: Float,

@@ -4477,8 +4477,11 @@ final class TemplateRenderer
                 'slideFade' => ModalAnimationType::SlideFade->value,
             ]),
             PropKey::StatusBarStyle => self::named($value, ['dark' => 1, 'light' => 2]),
+            // React Native names: `height` resizes the view, `position`
+            // moves it up (pan), `padding` insets its content.
             PropKey::KeyboardBehavior => self::named($value, [
-                'resize' => 1, 'pan' => 2, 'padding' => 3,
+                'resize' => 1, 'height' => 1, 'pan' => 2, 'position' => 2,
+                'padding' => 3, 'interactive' => 4,
             ]),
             PropKey::Overflow => self::named($value, ['visible' => 1, 'hidden' => 2]),
             PropKey::FlexDirection => self::named($value, [
@@ -7441,7 +7444,7 @@ final class TemplateRenderer
     private static function keyboardBehavior(mixed $value): KeyboardAvoidingBehavior
     {
         return match ($value) {
-            2, 'pan' => KeyboardAvoidingBehavior::Pan,
+            2, 'pan', 'position' => KeyboardAvoidingBehavior::Pan,
             3, 'padding' => KeyboardAvoidingBehavior::Padding,
             4, 'interactive' => KeyboardAvoidingBehavior::Interactive,
             default => KeyboardAvoidingBehavior::Resize,

@@ -57,6 +57,16 @@ private func pam_native_runtime_relayout(
     _ dark_appearance: Bool,
 )
 
+@_silgen_name("pam_native_runtime_set_surface_keyboard_inset")
+private func pam_native_runtime_set_surface_keyboard_inset(
+    _ handle: UInt64,
+    _ surface: UInt64,
+    _ bottom: Float,
+    _ widthDp: Float,
+    _ heightDp: Float,
+    _ textScale: Float
+)
+
 @_silgen_name("pam_native_runtime_set_keyboard_inset")
 private func pam_native_runtime_set_keyboard_inset(
     _ handle: UInt64,
@@ -405,6 +415,14 @@ public final class PamRuntime {
             guard activeHandle != 0 else { return }
             pam_native_runtime_set_child_visibility(activeHandle, UInt64(owner), UInt64(child), visible)
         }
+        renderer.onSurfaceKeyboardInset = { [weak self] surface, inset, duration, curve in
+            self?.updateSurfaceKeyboardInset(
+                surface: surface,
+                bottom: Float(inset),
+                duration: duration,
+                curve: curve
+            )
+        }
         return renderer
     }
 
@@ -622,6 +640,37 @@ public final class PamRuntime {
         guard currentHandle != 0, viewport.width > 0, viewport.height > 0 else { return }
         pam_native_runtime_set_keyboard_inset(
             currentHandle,
+            max(0, bottom),
+            viewport.width,
+            viewport.height,
+            viewport.textScale
+        )
+    }
+
+    /// The keyboard animation the next committed frames follow: frames laid
+    /// out for a modal's keyboard animate with the keyboard's own duration
+    /// and curve (React Native's KeyboardAvoidingView LayoutAnimation).
+    private var keyboardLayoutAnimation: (duration: TimeInterval, curve: UInt, expires: CFTimeInterval)?
+
+    /// Keyboard overlap in points from the bottom of the PAM root view over
+    /// the presented Modal of node `surface` (0 when hidden). The engine lays
+    /// its resize/padding KeyboardAvoidingViews out above the keyboard.
+    public func updateSurfaceKeyboardInset(surface: Int64, bottom: Float, duration: TimeInterval, curve: UInt) {
+        let currentHandle = currentHandle()
+        let viewport = layoutViewport
+        guard currentHandle != 0, surface > 0, viewport.width > 0, viewport.height > 0 else { return }
+        if duration > 0, !PamMotionPolicy.isReduced {
+            keyboardLayoutAnimation = (
+                duration: duration,
+                curve: curve,
+                expires: CACurrentMediaTime() + max(0.1, duration / 2)
+            )
+        } else {
+            keyboardLayoutAnimation = nil
+        }
+        pam_native_runtime_set_surface_keyboard_inset(
+            currentHandle,
+            UInt64(surface),
             max(0, bottom),
             viewport.width,
             viewport.height,
@@ -1369,7 +1418,24 @@ public final class PamRuntime {
         let started = DispatchTime.now().uptimeNanoseconds
         let mutations = toProcess.map { $0.mutations }
 
-        renderer.commit(mutations)
+        if let animation = keyboardLayoutAnimation, CACurrentMediaTime() <= animation.expires {
+            keyboardLayoutAnimation = nil
+            UIView.animate(
+                withDuration: animation.duration,
+                delay: 0,
+                options: [
+                    UIView.AnimationOptions(rawValue: animation.curve << 16),
+                    .beginFromCurrentState,
+                    .allowUserInteraction,
+                ]
+            ) {
+                self.renderer.commit(mutations)
+                self.renderer.hostView?.layoutIfNeeded()
+            }
+        } else {
+            keyboardLayoutAnimation = nil
+            renderer.commit(mutations)
+        }
         surfaceAwaitingFirstFrame = false
         let mountNanos = Int64(DispatchTime.now().uptimeNanoseconds - started)
         let metrics = RuntimeFrameMetrics(

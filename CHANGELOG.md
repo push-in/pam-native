@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.28.0 - 2026-10-07
+
+- `KeyboardAvoidingView` works inside `Modal` and `BottomSheet` surfaces.
+  On Android a modal is its own `Dialog` window: the activity window never
+  receives that window's IME, so a modal's KAV read a zero inset (and
+  mounting one replaced the screen KAV's window-inset listeners, which its
+  unmount then cleared). A KAV inside a modal now follows the IME of the
+  modal's own window, frame by frame through `WindowInsetsAnimation`, and no
+  longer touches the activity window's listeners.
+- Engine: per-surface keyboard insets
+  (`Engine::set_surface_keyboard_inset`,
+  `pam_native_engine_set_surface_keyboard_inset`). The `resize` (RN
+  `height`) and `padding` behaviors of a KAV inside a modal are laid out by
+  the engine above that modal's keyboard (RN `relativeKeyboardHeight`,
+  including `keyboardVerticalOffset`): the content box shrinks, so flexible
+  and absolutely positioned descendants (a bottom palette) move above the
+  keyboard. The root keyboard inset still never reaches a modal, and a
+  modal's keyboard never moves the screen below it.
+- Android: `pan` KAVs inside a modal translate natively against the dialog
+  window's IME; an interactive `BottomSheet` keeps lifting itself and its
+  KAVs only avoid what that lift leaves.
+- iOS: modals publish the keyboard overlap measured in their own coordinate
+  space; the engine lays out `resize`/`padding`/`position` KAVs inside a
+  full-screen or dialog modal and the frames animate with the keyboard's
+  duration and curve.
+- Templates accept React Native's KAV behavior names: `height` (= `resize`)
+  and `position` (= `pan`).
+
 ## 1.27.1 - 2026-10-07
 
 - Android: appending a page to a `VirtualizedList` (or raising the adaptive

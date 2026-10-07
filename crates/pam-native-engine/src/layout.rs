@@ -210,6 +210,8 @@ fn layout_modal_surfaces(
     }) {
         let surface = crate::surface::modal_surface(modal, window, window_insets, policy);
         let _insets = crate::text_measure::SurfaceInsetsScope::enter(surface.insets);
+        let _keyboard =
+            crate::text_measure::SurfaceKeyboardScope::enter(modal.id, window.y + window.height);
         context.viewport.set(surface.viewport);
         let laid_out = layout_node(context, modal.id, surface.viewport, false, 0, output);
         context.viewport.set(window);
@@ -294,6 +296,18 @@ fn layout_node(
     // degenerate computation (for example an over-constrained box) must
     // never ship one. Negative origins are valid and kept.
     .sanitized();
+    let keyboard = surface_keyboard_avoidance(node, frame);
+    let frame = match keyboard {
+        Some(SurfaceKeyboardAvoidance::Resize(overlap)) => Layout {
+            height: frame.height - overlap,
+            ..frame
+        },
+        Some(SurfaceKeyboardAvoidance::Position(overlap)) => Layout {
+            y: frame.y - overlap,
+            ..frame
+        },
+        _ => frame,
+    };
     if context
         .previous
         .is_some_and(|previous| previous.get(&id) == Some(&frame))
@@ -339,7 +353,12 @@ fn layout_node(
     let padding_left = padding_left + safe_left;
     let padding_top = padding_top + safe_top;
     let padding_right = padding_right + safe_right;
-    let padding_bottom = padding_bottom + safe_bottom;
+    let padding_bottom = padding_bottom
+        + safe_bottom
+        + match keyboard {
+            Some(SurfaceKeyboardAvoidance::Padding(overlap)) => overlap,
+            _ => 0.0,
+        };
     let gap = finite_non_negative(number(node, PropKey::Gap).unwrap_or(0.0))?;
     let inner = Layout {
         x: frame.x + padding_left,
@@ -661,7 +680,8 @@ fn layout_node(
             let mut pending: Vec<&Node> = Vec::new();
             for child in visible_children.iter().copied() {
                 if pending.first().is_some_and(|first| {
-                    section_key(first, PropKey::ListSection) != section_key(child, PropKey::ListSection)
+                    section_key(first, PropKey::ListSection)
+                        != section_key(child, PropKey::ListSection)
                 }) {
                     rows.push(std::mem::take(&mut pending));
                 }
@@ -3554,7 +3574,8 @@ fn boolean(node: &Node, key: PropKey) -> bool {
 /// a chat timeline shrink and the composer is laid out right above the
 /// keyboard. Native views and engine frames therefore agree; hosts only
 /// translate whatever overlap layout could not absorb. Modal content is
-/// excluded because modal windows resize with the IME themselves.
+/// excluded: a modal has its own keyboard inset (see
+/// [`surface_keyboard_avoidance`]) and hosts pan modal views natively.
 fn reserve_keyboard_space(
     context: &LayoutContext<'_>,
     node: &Node,
@@ -3592,6 +3613,85 @@ fn reserve_keyboard_space(
         height: inner.height - reserve,
         ..inner
     }
+}
+
+/// How a `KeyboardAvoidingView` inside a modal surface avoids that
+/// surface's keyboard (React Native `behavior="height"` / `"padding"`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SurfaceKeyboardAvoidance {
+    /// The view itself loses the overlapping height.
+    Resize(f32),
+    /// The view keeps its frame; its content box loses the overlap.
+    Padding(f32),
+    /// The whole view moves up by the overlap (React Native `position`).
+    /// Only where modals are views of the host window (iOS): Android
+    /// translates a panning view of a modal's Dialog window natively.
+    Position(f32),
+}
+
+const KEYBOARD_RESIZE: i64 = 1;
+const KEYBOARD_PAN: i64 = 2;
+const KEYBOARD_PADDING: i64 = 3;
+
+fn avoids_surface_keyboard(node: &Node, policy: crate::surface::SurfacePolicy) -> bool {
+    let behavior = integer(node, PropKey::KeyboardBehavior).unwrap_or(KEYBOARD_RESIZE);
+    node.kind == NodeKind::KeyboardAvoidingView
+        && (matches!(behavior, KEYBOARD_RESIZE | KEYBOARD_PADDING)
+            || (behavior == KEYBOARD_PAN && policy == crate::surface::SurfacePolicy::InWindow))
+        && !matches!(
+            node.properties.get(&PropKey::KeyboardAvoidingEnabled),
+            Some(pam_native_protocol::PropValue::Boolean(false))
+        )
+}
+
+/// The part of the modal surface's keyboard that overlaps `frame` (root
+/// coordinates), like React Native's `relativeKeyboardHeight`: the view's
+/// bottom plus `keyboardVerticalOffset` below the keyboard's top edge.
+fn surface_keyboard_avoidance(node: &Node, frame: Layout) -> Option<SurfaceKeyboardAvoidance> {
+    if !avoids_surface_keyboard(node, crate::text_measure::surface_policy()) {
+        return None;
+    }
+    let keyboard_top = crate::text_measure::surface_keyboard_top()?;
+    let offset = number(node, PropKey::KeyboardVerticalOffset)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0);
+    let overlap = (frame.y + frame.height + offset - keyboard_top).clamp(0.0, frame.height);
+    if overlap <= 0.0 {
+        return None;
+    }
+    Some(match integer(node, PropKey::KeyboardBehavior) {
+        Some(KEYBOARD_PADDING) => SurfaceKeyboardAvoidance::Padding(overlap),
+        Some(KEYBOARD_PAN) => SurfaceKeyboardAvoidance::Position(overlap),
+        _ => SurfaceKeyboardAvoidance::Resize(overlap),
+    })
+}
+
+/// Whether the `Modal` `surface` holds a `KeyboardAvoidingView` that lays
+/// its content out above that surface's keyboard.
+pub(crate) fn surface_avoids_keyboard(
+    tree: &Tree,
+    surface: u64,
+    policy: crate::surface::SurfacePolicy,
+) -> bool {
+    tree.nodes.values().any(|node| {
+        avoids_surface_keyboard(node, policy) && enclosing_modal(tree, node) == Some(surface)
+    })
+}
+
+fn enclosing_modal(tree: &Tree, node: &Node) -> Option<u64> {
+    let mut current = tree.nodes.get(&node.parent);
+    let mut steps = 0;
+    while let Some(candidate) = current {
+        if candidate.kind == NodeKind::Modal {
+            return Some(candidate.id);
+        }
+        if candidate.id == tree.root || steps > MAX_LAYOUT_DEPTH {
+            return None;
+        }
+        steps += 1;
+        current = tree.nodes.get(&candidate.parent);
+    }
+    None
 }
 
 fn inside_modal(tree: &Tree, node: &Node) -> bool {
@@ -6955,7 +7055,10 @@ mod tests {
                 ],
             ),
         );
-        for (index, (id, key)) in [(2_u64, "a"), (3, "a"), (4, "b"), (5, "b")].into_iter().enumerate() {
+        for (index, (id, key)) in [(2_u64, "a"), (3, "a"), (4, "b"), (5, "b")]
+            .into_iter()
+            .enumerate()
+        {
             let mut cell = fixed_box(id, 1, 50.0);
             cell.index = index as u32;
             cell.properties.extend([section(key)]);
@@ -7253,6 +7356,177 @@ mod css_flex_tests {
         )
         .unwrap();
         assert_eq!(layouts[&5].y + layouts[&5].height, 800.0);
+    }
+
+    /// Zé Create text composer: a full-screen modal whose padding
+    /// `KeyboardAvoidingView` holds a flexible stage and an absolute overlay
+    /// with the colour palette at its bottom.
+    fn modal_composer(behavior: i64, offset: Option<f32>) -> Tree {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let mut kav = vec![
+            (PropKey::KeyboardBehavior, PropValue::Integer(behavior)),
+            (PropKey::FlexGrow, f(1.0)),
+        ];
+        if let Some(offset) = offset {
+            kav.push((PropKey::KeyboardVerticalOffset, f(offset)));
+        }
+        Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, vec![])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        vec![
+                            (PropKey::ModalPresentation, PropValue::Integer(1)),
+                            (PropKey::ModalStatusBarTranslucent, PropValue::Boolean(true)),
+                        ],
+                    ),
+                ),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::View, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                (4, node(4, 3, 0, NodeKind::KeyboardAvoidingView, kav)),
+                (
+                    5,
+                    node(5, 4, 0, NodeKind::View, vec![(PropKey::FlexGrow, f(1.0))]),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        5,
+                        0,
+                        NodeKind::View,
+                        vec![
+                            (PropKey::PositionType, PropValue::Integer(2)),
+                            (PropKey::Top, f(0.0)),
+                            (PropKey::Bottom, f(0.0)),
+                            (PropKey::Left, f(0.0)),
+                            (PropKey::Right, f(0.0)),
+                            (PropKey::JustifyContent, PropValue::Integer(4)),
+                        ],
+                    ),
+                ),
+                (
+                    7,
+                    node(7, 6, 0, NodeKind::View, vec![(PropKey::Height, f(56.0))]),
+                ),
+                (
+                    8,
+                    node(8, 6, 1, NodeKind::View, vec![(PropKey::Height, f(100.0))]),
+                ),
+                // The screen below: a root-window input must not move.
+                (
+                    9,
+                    node(
+                        9,
+                        1,
+                        1,
+                        NodeKind::KeyboardAvoidingView,
+                        vec![
+                            (PropKey::KeyboardBehavior, PropValue::Integer(3)),
+                            (PropKey::Height, f(60.0)),
+                        ],
+                    ),
+                ),
+            ]),
+        }
+    }
+
+    fn surface_keyboard_layout(tree: &Tree, insets: &[(u64, f32)]) -> BTreeMap<u64, Layout> {
+        let insets = insets.iter().copied().collect::<BTreeMap<_, _>>();
+        let _scope = crate::text_measure::ActiveScope::enter_with(None, None, 0.0)
+            .with_surface_policy(crate::surface::SurfacePolicy::EdgeToEdgeWindows)
+            .with_surface_keyboard_insets(&insets);
+        calculate(
+            tree,
+            Size {
+                width: 400.0,
+                height: 800.0,
+            },
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn padding_keyboard_avoiding_view_in_a_modal_lays_its_content_above_the_surface_keyboard() {
+        let tree = modal_composer(3, None);
+        let closed = surface_keyboard_layout(&tree, &[]);
+        assert_eq!(closed[&8].y + closed[&8].height, 800.0);
+
+        let open = surface_keyboard_layout(&tree, &[(2, 300.0)]);
+        assert_eq!(open[&4], closed[&4], "padding keeps the view's own frame");
+        assert_eq!(open[&5].height, 500.0);
+        assert_eq!(
+            open[&8].y + open[&8].height,
+            500.0,
+            "palette above the keyboard"
+        );
+        assert_eq!(open[&7].y, closed[&7].y, "the top bar stays");
+        assert_eq!(
+            open[&9], closed[&9],
+            "the root window ignores a modal keyboard"
+        );
+
+        // Another surface's keyboard does not reach this modal.
+        let other = surface_keyboard_layout(&tree, &[(42, 300.0)]);
+        assert_eq!(other, closed);
+    }
+
+    #[test]
+    fn resize_keyboard_avoiding_view_in_a_modal_loses_the_overlap_and_honours_the_offset() {
+        let tree = modal_composer(1, Some(20.0));
+        let open = surface_keyboard_layout(&tree, &[(2, 300.0)]);
+        assert_eq!(open[&4].height, 800.0 - 320.0);
+        assert_eq!(open[&8].y + open[&8].height, 480.0);
+
+        let pan = surface_keyboard_layout(&modal_composer(2, None), &[(2, 300.0)]);
+        assert_eq!(
+            pan[&8].y + pan[&8].height,
+            800.0,
+            "Android translates a panning view of a modal window natively"
+        );
+        let insets = BTreeMap::from([(2, 300.0)]);
+        let _scope = crate::text_measure::ActiveScope::enter_with(None, None, 0.0)
+            .with_surface_policy(crate::surface::SurfacePolicy::InWindow)
+            .with_surface_keyboard_insets(&insets);
+        let position = calculate(
+            &modal_composer(2, None),
+            Size {
+                width: 400.0,
+                height: 800.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(position[&4].y, -300.0, "iOS: position moves the view up");
+        assert_eq!(position[&8].y + position[&8].height, 500.0);
+    }
+
+    #[test]
+    fn surface_keyboard_changes_only_relayout_surfaces_that_avoid_it() {
+        let tree = modal_composer(3, None);
+        let android = crate::surface::SurfacePolicy::EdgeToEdgeWindows;
+        let ios = crate::surface::SurfacePolicy::InWindow;
+        assert!(super::surface_avoids_keyboard(&tree, 2, android));
+        assert!(!super::surface_avoids_keyboard(&tree, 1, android));
+        let pan = modal_composer(2, None);
+        assert!(
+            !super::surface_avoids_keyboard(&pan, 2, android),
+            "Android pans natively"
+        );
+        assert!(super::surface_avoids_keyboard(&pan, 2, ios));
     }
 
     #[test]

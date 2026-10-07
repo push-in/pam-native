@@ -28,8 +28,9 @@ pub use ffi::{
     pam_native_engine_remount, pam_native_engine_set_asset_root,
     pam_native_engine_set_keyboard_inset, pam_native_engine_set_native_child_visibility,
     pam_native_engine_set_refresh_rate, pam_native_engine_set_safe_area_insets,
-    pam_native_engine_set_surface_policy, pam_native_engine_set_text_measurer,
-    pam_native_engine_set_text_scale, pam_native_engine_set_viewport, pam_native_engine_stats,
+    pam_native_engine_set_surface_keyboard_inset, pam_native_engine_set_surface_policy,
+    pam_native_engine_set_text_measurer, pam_native_engine_set_text_scale,
+    pam_native_engine_set_viewport, pam_native_engine_stats,
 };
 pub use surface::SurfacePolicy;
 pub use text_measure::{PamTextMeasureCallback, PamTextMeasureRequest, PamTextMeasureResult};
@@ -43,6 +44,7 @@ pub struct Engine {
     text_measurer: Option<text_measure::HostTextMeasurer>,
     safe_area: Option<[f32; 4]>,
     keyboard_inset: f32,
+    surface_keyboard_insets: BTreeMap<u64, f32>,
     surface_policy: surface::SurfacePolicy,
     layouts: BTreeMap<u64, Layout>,
     commits: u64,
@@ -70,6 +72,7 @@ impl Default for Engine {
             text_measurer: None,
             safe_area: None,
             keyboard_inset: 0.0,
+            surface_keyboard_insets: BTreeMap::new(),
             surface_policy: surface::SurfacePolicy::InWindow,
             layouts: BTreeMap::new(),
             commits: 0,
@@ -170,6 +173,44 @@ impl Engine {
         Ok(changed)
     }
 
+    /// Visible IME height in points from the bottom of the window of the
+    /// `Modal`/`BottomSheet` `surface` (its node id), 0 when hidden. Android
+    /// presents every modal in its own `Dialog` window and iOS overlays it
+    /// on the host view, so the root keyboard inset
+    /// ([`Self::set_keyboard_inset`]) never applies inside a modal: a
+    /// `KeyboardAvoidingView` with the `resize` (RN `height`) or `padding`
+    /// behavior inside that surface reserves the part of this keyboard that
+    /// overlaps it, so its content is laid out above the keyboard.
+    ///
+    /// Returns whether a relayout would move anything: the value changed and
+    /// the surface holds such a `KeyboardAvoidingView`. The value is kept
+    /// either way, so a view mounted while the keyboard is open avoids it.
+    pub fn set_surface_keyboard_inset(
+        &mut self,
+        surface: u64,
+        bottom: f32,
+    ) -> Result<bool, EngineError> {
+        if !bottom.is_finite() || bottom < 0.0 {
+            return Err(EngineError::InvalidViewport);
+        }
+        let previous = self
+            .surface_keyboard_insets
+            .get(&surface)
+            .copied()
+            .unwrap_or(0.0);
+        if bottom > 0.0 {
+            self.surface_keyboard_insets.insert(surface, bottom);
+        } else {
+            self.surface_keyboard_insets.remove(&surface);
+        }
+        if (previous - bottom).abs() <= f32::EPSILON {
+            return Ok(false);
+        }
+        Ok(self.current.as_ref().is_some_and(|tree| {
+            layout::surface_avoids_keyboard(tree, surface, self.surface_policy)
+        }))
+    }
+
     /// How the host presents `Modal`/`BottomSheet` surfaces (see
     /// [`SurfacePolicy`]). A `SafeAreaView` inside a modal uses the insets of
     /// that surface: zero for edges its window does not extend under, the
@@ -226,7 +267,8 @@ impl Engine {
             self.safe_area,
             self.keyboard_inset,
         )
-        .with_surface_policy(self.surface_policy);
+        .with_surface_policy(self.surface_policy)
+        .with_surface_keyboard_insets(&self.surface_keyboard_insets);
         let text_metrics = self.font_metrics.measure_tree(current);
         let next_layouts = layout::calculate_with_text_metrics(
             current,
@@ -356,7 +398,8 @@ impl Engine {
             self.safe_area,
             self.keyboard_inset,
         )
-        .with_surface_policy(self.surface_policy);
+        .with_surface_policy(self.surface_policy)
+        .with_surface_keyboard_insets(&self.surface_keyboard_insets);
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -473,7 +516,8 @@ impl Engine {
                 self.safe_area,
                 self.keyboard_inset,
             )
-            .with_surface_policy(self.surface_policy);
+            .with_surface_policy(self.surface_policy)
+            .with_surface_keyboard_insets(&self.surface_keyboard_insets);
             let text_metrics = self.font_metrics.measure_nodes(current, &dirty_nodes);
             let calculated = layout::calculate_incremental_with_text_metrics(
                 current,
@@ -595,7 +639,8 @@ impl Engine {
             self.safe_area,
             self.keyboard_inset,
         )
-        .with_surface_policy(self.surface_policy);
+        .with_surface_policy(self.surface_policy)
+        .with_surface_keyboard_insets(&self.surface_keyboard_insets);
         let text_metrics = self.font_metrics.measure_tree(&next);
         let next_layouts = layout::calculate_with_text_metrics(
             &next,
@@ -1107,6 +1152,82 @@ mod tests {
             );
         }
         Tree { root: 1, nodes }.encode().expect("frame")
+    }
+
+    #[test]
+    fn surface_keyboard_inset_relayouts_only_the_modal_that_avoids_it() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, vec![])),
+                (
+                    2,
+                    node(
+                        2,
+                        1,
+                        0,
+                        NodeKind::Modal,
+                        vec![(PropKey::ModalPresentation, PropValue::Integer(1))],
+                    ),
+                ),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::KeyboardAvoidingView,
+                        vec![
+                            (PropKey::KeyboardBehavior, PropValue::Integer(3)),
+                            (PropKey::FlexGrow, PropValue::Float(1.0)),
+                        ],
+                    ),
+                ),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::View,
+                        vec![(PropKey::FlexGrow, PropValue::Float(1.0))],
+                    ),
+                ),
+            ]),
+        };
+        let mut engine = Engine::default();
+        engine.set_viewport(400.0, 800.0).expect("viewport");
+        assert!(
+            !engine.set_surface_keyboard_inset(2, 300.0).expect("inset"),
+            "no tree yet: kept for the first commit"
+        );
+        engine
+            .commit(&tree.encode().expect("tree"))
+            .expect("commit");
+        assert_eq!(
+            engine.layouts[&4].height, 500.0,
+            "mounted above the open keyboard"
+        );
+        assert!(!engine.set_surface_keyboard_inset(2, 300.0).expect("same"));
+        assert!(
+            !engine
+                .set_surface_keyboard_inset(9, 300.0)
+                .expect("other surface")
+        );
+        assert!(engine.set_surface_keyboard_inset(2, 0.0).expect("hidden"));
+        let batch = decode_batch(&engine.relayout(400.0, 800.0).expect("relayout")).expect("batch");
+        assert!(batch.iter().any(|mutation| matches!(
+            mutation,
+            Mutation::Layout { id: 4, frame } if frame.height == 800.0
+        )));
+        assert!(engine.set_surface_keyboard_inset(2, f32::NAN).is_err());
     }
 
     #[test]

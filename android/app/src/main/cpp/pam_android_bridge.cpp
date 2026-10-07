@@ -1324,6 +1324,52 @@ Java_dev_pam_nativeapp_PamRuntime_nativeSetKeyboardInset(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_dev_pam_nativeapp_PamRuntime_nativeSetSurfaceKeyboardInset(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jlong surface,
+    jfloat bottom,
+    jfloat width,
+    jfloat height,
+    jfloat text_scale
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || surface <= 0 || width <= 0 || height <= 0 || text_scale <= 0) {
+        return;
+    }
+    PamNativeBuffer batch{nullptr, 0, 0};
+    PamStatus status;
+    {
+        std::lock_guard<std::mutex> lock(state->engine_mutex);
+        std::uint8_t changed = 0;
+        status = pam_native_engine_set_surface_keyboard_inset(
+            state->engine,
+            static_cast<std::uint64_t>(surface),
+            bottom,
+            &changed
+        );
+        if (status != PAM_STATUS_SUCCESS || changed == 0) {
+            return;
+        }
+        // Each IME animation frame of a modal window lays its keyboard
+        // avoiding content out again, in the same UI frame as the inset.
+        status = pam_native_engine_relayout_with_metrics(
+            state->engine,
+            width,
+            height,
+            text_scale,
+            &batch
+        );
+    }
+    if (status != PAM_STATUS_SUCCESS) {
+        pam_native_buffer_free(batch);
+        return;
+    }
+    publish_batch(state, batch);
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_dev_pam_nativeapp_PamRuntime_nativeSetChildVisibility(
     JNIEnv*, jobject, jlong handle, jlong owner, jlong child, jboolean visible
 ) {
@@ -1556,6 +1602,17 @@ Java_dev_pam_nativeapp_PamRuntime_nativeStop(JNIEnv*, jobject, jlong handle) {
 }
 
 #ifdef PAM_ENGINE_LAYOUT_PROBE
+static jbyteArray probe_layout(
+    JNIEnv* env,
+    jbyteArray tree,
+    jfloat width,
+    jfloat height,
+    jfloatArray insets,
+    jint surface_policy,
+    jlong surface,
+    jfloat keyboard
+);
+
 // Debug builds only: lays out an encoded tree with the Android surface
 // policy and returns the engine batch, so instrumented tests drive the real
 // renderer and Dialog windows with real engine frames (no PHP involved).
@@ -1568,6 +1625,35 @@ Java_dev_pam_nativeapp_render_PamEngineLayoutProbe_nativeLayout(
     jfloat height,
     jfloatArray insets,
     jint surface_policy
+) {
+    return probe_layout(env, tree, width, height, insets, surface_policy, 0, 0);
+}
+
+// Same, with the IME inset (dp from the window bottom) of one modal surface.
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_dev_pam_nativeapp_render_PamEngineLayoutProbe_nativeLayoutWithSurfaceKeyboard(
+    JNIEnv* env,
+    jclass,
+    jbyteArray tree,
+    jfloat width,
+    jfloat height,
+    jfloatArray insets,
+    jint surface_policy,
+    jlong surface,
+    jfloat keyboard
+) {
+    return probe_layout(env, tree, width, height, insets, surface_policy, surface, keyboard);
+}
+
+static jbyteArray probe_layout(
+    JNIEnv* env,
+    jbyteArray tree,
+    jfloat width,
+    jfloat height,
+    jfloatArray insets,
+    jint surface_policy,
+    jlong surface,
+    jfloat keyboard
 ) {
     if (tree == nullptr || insets == nullptr || env->GetArrayLength(insets) != 4) {
         return nullptr;
@@ -1591,6 +1677,12 @@ Java_dev_pam_nativeapp_render_PamEngineLayoutProbe_nativeLayout(
             static_cast<std::uint32_t>(surface_policy),
             nullptr
         ) == PAM_STATUS_SUCCESS
+        && (surface <= 0 || pam_native_engine_set_surface_keyboard_inset(
+            engine,
+            static_cast<std::uint64_t>(surface),
+            keyboard,
+            nullptr
+        ) == PAM_STATUS_SUCCESS)
         && pam_native_engine_commit(
             engine,
             reinterpret_cast<const std::uint8_t*>(frame.data()),

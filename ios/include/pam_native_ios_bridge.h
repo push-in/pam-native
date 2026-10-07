@@ -140,6 +140,17 @@ void pam_native_runtime_set_keyboard_inset(
     float height_dp,
     float text_scale
 );
+/* Visible keyboard height (points from the bottom of the PAM root view, 0
+ * when hidden) over the presented Modal whose node id is `surface`. Its
+ * resize/padding KeyboardAvoidingViews relayout immediately when it changed. */
+void pam_native_runtime_set_surface_keyboard_inset(
+    uint64_t handle,
+    uint64_t surface,
+    float bottom,
+    float width_dp,
+    float height_dp,
+    float text_scale
+);
 
 void pam_native_runtime_relayout(
     uint64_t handle,
