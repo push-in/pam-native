@@ -294,6 +294,100 @@ class NativeCapabilitiesInstrumentedTest {
     }
 
     @Test
+    fun notificationCredentialsAreKeystoreSealedPerAccount() {
+        PamNotificationCredentials.clear(context)
+        PamNotificationCredentials.set(context, " User-A ", "token-a")
+        PamNotificationCredentials.set(context, "user-b", "token-b")
+        val raw = context.getSharedPreferences("pam-native-notification-credentials", Context.MODE_PRIVATE).all
+        assertEquals(2, raw.size)
+        raw.forEach { (slot, value) ->
+            assertFalse(slot.contains("user"))
+            assertFalse((value as String).contains("token-"))
+        }
+        assertEquals("token-a", PamNotificationCredentials.token(context, "USER-A"))
+        assertEquals("token-b", PamNotificationCredentials.token(context, "user-b"))
+        PamNotificationCredentials.remove(context, "user-a")
+        assertNull(PamNotificationCredentials.token(context, "user-a"))
+        PamNotificationCredentials.replace(context, mapOf("user-c" to "token-c"))
+        assertNull(PamNotificationCredentials.token(context, "user-b"))
+        assertEquals("token-c", PamNotificationCredentials.token(context, "user-c"))
+        PamNotificationCredentials.clear(context)
+        assertNull(PamNotificationCredentials.token(context, "user-c"))
+    }
+
+    @Test
+    fun inlineReplyIsSentWithThePushAccountCredential() {
+        val key = "chat-${UUID.randomUUID()}"
+        PamNotificationCredentials.replace(context, mapOf("user-a" to "token-a", "user-b" to "token-b"))
+        try {
+            LocalServer(response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n").use { server ->
+                PamConversationNotifications.show(context, accountConversation(key, "http://127.0.0.1:${server.port}", "USER-B"))
+                PamNotificationActions.handle(context, NotificationActionType.REPLY, key, "Já vou")
+                val request = server.request()
+                assertTrue(request.head.startsWith("POST /chats/42/messages HTTP/1.1"))
+                assertTrue(request.head.contains("Authorization: Bearer token-b"))
+                assertFalse(request.head.contains("token-a"))
+                assertFalse(String(request.body, Charsets.UTF_8).contains("token-"))
+                val event = drainAction(key)
+                assertEquals(WireValue.Integer(201), event["statusCode"])
+                assertEquals(WireValue.Flag(true), event["handledNatively"])
+                assertEquals(WireValue.Flag(false), event["credentialMissing"])
+                assertNotNull(PamConversationNotifications.load(context, key))
+            }
+        } finally {
+            PamConversationNotifications.cancel(context, key)
+            PamNotificationCredentials.clear(context)
+        }
+    }
+
+    @Test
+    fun actionOfAnAccountWithoutCredentialIsDismissedWithoutRequest() {
+        val key = "chat-${UUID.randomUUID()}"
+        PamNotificationCredentials.replace(context, mapOf("user-a" to "token-a"))
+        try {
+            LocalServer(response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n").use { server ->
+                PamConversationNotifications.show(context, accountConversation(key, "http://127.0.0.1:${server.port}", "user-b"))
+                PamNotificationActions.handle(context, NotificationActionType.REPLY, key, "Não deve sair")
+                val event = drainAction(key)
+                assertEquals(WireValue.Flag(false), event["handledNatively"])
+                assertEquals(WireValue.Flag(true), event["credentialMissing"])
+                assertNull(PamConversationNotifications.load(context, key))
+                assertNull(server.requestOrNull(500))
+            }
+        } finally {
+            PamConversationNotifications.cancel(context, key)
+            PamNotificationCredentials.clear(context)
+        }
+    }
+
+    private fun accountConversation(key: String, base: String, account: String) = ConversationSpec(
+        key = key,
+        messages = listOf(ConversationMessage("m1", "Oi", 1_000, ConversationPerson("Ana"))),
+        replyLabel = "Responder",
+        markReadLabel = "Marcar como lida",
+        replyEndpoint = JSONObject()
+            .put("method", "POST")
+            .put("url", "$base/chats/{chat_id}/messages")
+            .put("headers", JSONObject().put("Authorization", "Bearer {credential:user_id|recipient_user_id}"))
+            .put("body", JSONObject().put("body", "{reply}")),
+        dataJson = """{"chat_id":"42","user_id":"$account"}""",
+    )
+
+    private fun drainAction(key: String): Map<String, WireValue> {
+        val event = AtomicReference<Map<String, WireValue>>()
+        while (event.get() == null) {
+            val next = CountDownLatch(1)
+            PamNotificationActions.next { _, payload ->
+                val values = WireMap.decode(payload)
+                if ((values["conversation"] as? WireValue.Text)?.value == key) event.set(values)
+                next.countDown()
+            }
+            assertTrue(next.await(5, TimeUnit.SECONDS))
+        }
+        return event.get()
+    }
+
+    @Test
     fun pushRenderingRulesRenderSuppressAndDismissConversations() {
         val rule = JSONObject()
             .put("type", "chat.message")
@@ -439,6 +533,11 @@ class NativeCapabilitiesInstrumentedTest {
         fun request(): Request {
             assertTrue("server did not finish", done.await(20, TimeUnit.SECONDS))
             failure.get()?.let { throw it }
+            return received.get()
+        }
+
+        fun requestOrNull(timeoutMillis: Long): Request? {
+            done.await(timeoutMillis, TimeUnit.MILLISECONDS)
             return received.get()
         }
 

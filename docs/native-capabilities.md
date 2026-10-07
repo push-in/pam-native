@@ -501,6 +501,40 @@ Communication Notifications capability) with a text-input reply action and a
 mark-as-read action; `PamPushNotifications.didReceive(response:completionHandler:)`
 runs the endpoint natively (inside a background task) and queues the action.
 
+### Per-account action credentials
+
+Apps with several signed-in accounts must answer a push as the account that
+received it, also while the app is killed. Authenticate the endpoint with
+`bearerFromCredential()` instead of one stored token and keep the native
+credential store equal to the signed-in accounts:
+
+```php
+use Pam\Native\Notifications\NotificationCredentials;
+
+$reply = ActionEndpoint::post('https://api.example.com/chats/{chat_id}/messages')
+    ->bearerFromCredential('user_id', 'recipient_user_id') // push data fields, in order
+    ->json(['body' => '{reply}', 'client_id' => '{uuid}']);
+
+NotificationCredentials::sync(['user-a' => $tokenA, 'user-b' => $tokenB]); // boot / account changes
+NotificationCredentials::set('user-c', $tokenC);                            // sign-in, token refresh
+NotificationCredentials::remove('user-a');                                  // logout of one account
+NotificationCredentials::clear();                                           // logout of every account
+```
+
+The header resolves natively at tap time to the token saved for the account id
+in the first non-empty listed push data field (ids are trimmed and lower-cased).
+When the push names no account or that account has no token on the device,
+nothing is sent, the conversation notification is dismissed and the queued
+`NotificationAction` reports `credentialMissing` (`handledNatively` false), so
+PHP never retries it with another account's session. Credentials resolve only in
+headers: URLs and bodies containing `{credential:...}` are rejected.
+
+Android seals each token with a non-exportable Android Keystore AES-256-GCM key
+in a dedicated preferences file, keyed by a SHA-256 of the account id. iOS stores
+it in the Keychain (`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, never
+synced), read by `PamPushNotifications.didReceive(response:completionHandler:)`
+when the system launches the app in the background for the action.
+
 ### Declarative push rendering
 
 Rules render data-only Firebase pushes natively while PHP is suspended or the

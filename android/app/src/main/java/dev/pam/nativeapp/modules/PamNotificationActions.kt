@@ -34,20 +34,27 @@ public object PamNotificationActions {
     internal fun handle(context: Context, type: Int, key: String, text: String) {
         attach(context)
         val spec = PamConversationNotifications.load(context, key)
-        if (type == NotificationActionType.REPLY) {
-            PamConversationNotifications.appendOwnReply(context, key, text)
-        } else {
-            PamConversationNotifications.cancel(context, key)
-        }
         val endpoint = if (type == NotificationActionType.REPLY) spec?.replyEndpoint else spec?.markReadEndpoint
         val variables = NotificationTemplate.variables(spec?.dataJson ?: "{}") + mapOf(
             "reply" to text,
             "conversation" to key,
         )
-        val status = endpoint?.let {
-            runCatching { NotificationEndpoint.send(context, it, variables) }.getOrDefault(0)
-        } ?: -1
-        report(type, key, text, spec?.dataJson ?: "{}", spec?.deepLink.orEmpty(), status)
+        // An endpoint authenticated per account ({credential:user_id}) is never
+        // sent when the push's account has no token here: the notification is
+        // dismissed and nothing goes out with another account's session.
+        val missingCredential = endpoint != null && NotificationEndpoint.missingCredential(endpoint, variables) {
+            PamNotificationCredentials.token(context, it)
+        }
+        if (type == NotificationActionType.REPLY && !missingCredential) {
+            PamConversationNotifications.appendOwnReply(context, key, text)
+        } else {
+            PamConversationNotifications.cancel(context, key)
+        }
+        val status = when {
+            endpoint == null || missingCredential -> -1
+            else -> runCatching { NotificationEndpoint.send(context, endpoint, variables) }.getOrDefault(0)
+        }
+        report(type, key, text, spec?.dataJson ?: "{}", spec?.deepLink.orEmpty(), status, missingCredential)
     }
 
     @JvmStatic
@@ -90,7 +97,15 @@ public object PamNotificationActions {
         synchronized(lock) { waiter = null }
     }
 
-    private fun report(type: Int, key: String, text: String, dataJson: String, deepLink: String, status: Int) {
+    private fun report(
+        type: Int,
+        key: String,
+        text: String,
+        dataJson: String,
+        deepLink: String,
+        status: Int,
+        missingCredential: Boolean,
+    ) {
         val payload = WireMap.encode(
             mapOf(
                 "type" to WireValue.Integer(type.toLong()),
@@ -100,6 +115,7 @@ public object PamNotificationActions {
                 "deepLink" to WireValue.Text(deepLink),
                 "handledNatively" to WireValue.Flag(status >= 0),
                 "statusCode" to WireValue.Integer(status.coerceAtLeast(0).toLong()),
+                "credentialMissing" to WireValue.Flag(missingCredential),
                 "timestamp" to WireValue.Integer(System.currentTimeMillis()),
             ),
         )
@@ -129,9 +145,15 @@ public object PamNotificationActions {
     private const val PREFERENCES_NAME = "pam-native-notification-actions"
 }
 
-/** `{name}` placeholders resolved from push data and action context. */
+/**
+ * `{name}` placeholders resolved from push data and action context.
+ * `{credential:user_id|recipient_user_id}` is the token stored with
+ * PamNotificationCredentials for the account named by the first non-empty
+ * listed push data field.
+ */
 internal object NotificationTemplate {
-    private val PLACEHOLDER = Regex("\\{([A-Za-z0-9_.:-]{1,128})\\}")
+    private val PLACEHOLDER = Regex("\\{([A-Za-z0-9_.:|-]{1,128})\\}")
+    private const val CREDENTIAL = "credential:"
 
     fun variables(dataJson: String): Map<String, String> {
         val data = runCatching { JSONObject(dataJson) }.getOrDefault(JSONObject())
@@ -150,18 +172,59 @@ internal object NotificationTemplate {
         variables: Map<String, String>,
         context: Context? = null,
         encode: (String) -> String = { it },
+    ): String = render(template, variables, context, credentialsOf(context), encode)
+
+    fun render(
+        template: String,
+        variables: Map<String, String>,
+        context: Context?,
+        credentials: (String) -> String?,
+        encode: (String) -> String = { it },
     ): String = PLACEHOLDER.replace(template) { match ->
-        encode(resolve(match.groupValues[1], variables, context))
+        encode(resolve(match.groupValues[1], variables, context, credentials))
     }
+
+    /** Account id a `credential:` placeholder points at, or "" when the push names none. */
+    fun credentialAccount(name: String, variables: Map<String, String>): String {
+        if (!name.startsWith(CREDENTIAL)) return ""
+        return name.removePrefix(CREDENTIAL)
+            .split('|')
+            .asSequence()
+            .map { variables[it].orEmpty().trim() }
+            .firstOrNull(String::isNotEmpty)
+            .orEmpty()
+    }
+
+    /** True when a `credential:` placeholder in the template has no stored token. */
+    fun missingCredential(template: String, variables: Map<String, String>, credentials: (String) -> String?): Boolean =
+        PLACEHOLDER.findAll(template).any { match ->
+            val name = match.groupValues[1]
+            name.startsWith(CREDENTIAL) && credentialAccount(name, variables).let { account ->
+                account.isEmpty() || credentials(account).isNullOrEmpty()
+            }
+        }
+
+    private fun credentialsOf(context: Context?): (String) -> String? =
+        { account -> context?.let { PamNotificationCredentials.token(it, account) } }
 
     /** True when every placeholder in the template has a value. */
     fun complete(template: String, variables: Map<String, String>): Boolean =
         PLACEHOLDER.findAll(template).all { match ->
             val name = match.groupValues[1]
-            name in variables || name == "uuid" || name == "now" || name.startsWith("storage:")
+            name in variables || name == "uuid" || name == "now" ||
+                name.startsWith("storage:") || name.startsWith(CREDENTIAL)
         }
 
-    private fun resolve(name: String, variables: Map<String, String>, context: Context?): String = when {
+    private fun resolve(
+        name: String,
+        variables: Map<String, String>,
+        context: Context?,
+        credentials: (String) -> String?,
+    ): String = when {
+        name.startsWith(CREDENTIAL) -> credentialAccount(name, variables)
+            .takeIf(String::isNotEmpty)
+            ?.let(credentials)
+            .orEmpty()
         name in variables -> variables.getValue(name)
         name == "uuid" -> UUID.randomUUID().toString()
         name == "now" -> System.currentTimeMillis().toString()
@@ -178,10 +241,21 @@ internal object NotificationTemplate {
 
 /** Executes the declarative HTTP request attached to a notification action. */
 internal object NotificationEndpoint {
+    /** Credentials are only ever resolved in headers, never in a URL or a body. */
+    private val NO_CREDENTIALS: (String) -> String? = { null }
+
+    /** True when a header needs a credential the push's account has no token for. */
+    fun missingCredential(endpoint: JSONObject, variables: Map<String, String>, credentials: (String) -> String?): Boolean {
+        val headers = endpoint.optJSONObject("headers") ?: return false
+        return headers.keys().asSequence().any { name ->
+            NotificationTemplate.missingCredential(headers.optString(name), variables, credentials)
+        }
+    }
+
     fun send(context: Context, endpoint: JSONObject, variables: Map<String, String>): Int {
         val method = endpoint.optString("method", "POST").uppercase()
         require(method in setOf("POST", "PUT", "PATCH", "DELETE")) { "Unsupported endpoint method" }
-        val url = NotificationTemplate.render(endpoint.getString("url"), variables, context) {
+        val url = NotificationTemplate.render(endpoint.getString("url"), variables, context, NO_CREDENTIALS) {
             URLEncoder.encode(it, "UTF-8").replace("+", "%20")
         }
         val uri = URI(url)
@@ -226,7 +300,7 @@ internal object NotificationEndpoint {
         is JSONArray -> JSONArray().apply {
             for (index in 0 until value.length()) put(renderJson(value.get(index), variables, context))
         }
-        is String -> NotificationTemplate.render(value, variables, context)
+        is String -> NotificationTemplate.render(value, variables, context, NO_CREDENTIALS)
         else -> value
     }
 

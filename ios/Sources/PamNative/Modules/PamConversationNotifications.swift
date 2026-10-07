@@ -10,9 +10,15 @@ import UserNotifications
 // and declarative push rendering for data-only (content-available) pushes.
 
 /// `{name}` placeholders resolved from push data and action context.
+/// `{credential:user_id|recipient_user_id}` is the PamNotificationCredentials
+/// token of the account named by the first non-empty listed push data field.
 enum PamNotificationTemplate {
-    private static let placeholder = try! NSRegularExpression(pattern: "\\{([A-Za-z0-9_.:-]{1,128})\\}")
+    private static let placeholder = try! NSRegularExpression(pattern: "\\{([A-Za-z0-9_.:|-]{1,128})\\}")
     private static let storageKey = "^[A-Za-z0-9_.-]{1,128}$"
+    static let credentialPrefix = "credential:"
+    typealias Credentials = (String) -> String?
+    /// Credentials are only ever resolved in headers, never in a URL or body.
+    static let noCredentials: Credentials = { _ in nil }
 
     static func variables(_ dataJson: String) -> [String: String] {
         guard let object = try? JSONSerialization.jsonObject(with: Data(dataJson.utf8)) as? [String: Any] else {
@@ -31,13 +37,18 @@ enum PamNotificationTemplate {
         return result
     }
 
-    static func render(_ template: String, _ variables: [String: String], encode: (String) -> String = { $0 }) -> String {
+    static func render(
+        _ template: String,
+        _ variables: [String: String],
+        encode: (String) -> String = { $0 },
+        credentials: Credentials = noCredentials
+    ) -> String {
         let source = template as NSString
         var output = ""
         var cursor = 0
         for match in placeholder.matches(in: template, range: NSRange(location: 0, length: source.length)) {
             output += source.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
-            output += encode(resolve(source.substring(with: match.range(at: 1)), variables))
+            output += encode(resolve(source.substring(with: match.range(at: 1)), variables, credentials))
             cursor = match.range.location + match.range.length
         }
         output += source.substring(from: cursor)
@@ -46,15 +57,44 @@ enum PamNotificationTemplate {
 
     /// True when every placeholder in the template has a value.
     static func complete(_ template: String, _ variables: [String: String]) -> Bool {
-        let source = template as NSString
-        return placeholder.matches(in: template, range: NSRange(location: 0, length: source.length)).allSatisfy { match in
-            let name = source.substring(with: match.range(at: 1))
-            return variables[name] != nil || name == "uuid" || name == "now" || name.hasPrefix("storage:")
+        names(template).allSatisfy { name in
+            variables[name] != nil || name == "uuid" || name == "now"
+                || name.hasPrefix("storage:") || name.hasPrefix(credentialPrefix)
         }
     }
 
-    private static func resolve(_ name: String, _ variables: [String: String]) -> String {
+    /// Account id a `credential:` placeholder points at, or "" when the push names none.
+    static func credentialAccount(_ name: String, _ variables: [String: String]) -> String {
+        guard name.hasPrefix(credentialPrefix) else { return "" }
+        for field in name.dropFirst(credentialPrefix.count).split(separator: "|") {
+            let value = (variables[String(field)] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
+        }
+        return ""
+    }
+
+    /// True when a `credential:` placeholder in the template has no stored token.
+    static func missingCredential(_ template: String, _ variables: [String: String], _ credentials: Credentials) -> Bool {
+        names(template).contains { name in
+            guard name.hasPrefix(credentialPrefix) else { return false }
+            let account = credentialAccount(name, variables)
+            return account.isEmpty || (credentials(account) ?? "").isEmpty
+        }
+    }
+
+    private static func names(_ template: String) -> [String] {
+        let source = template as NSString
+        return placeholder.matches(in: template, range: NSRange(location: 0, length: source.length)).map {
+            source.substring(with: $0.range(at: 1))
+        }
+    }
+
+    private static func resolve(_ name: String, _ variables: [String: String], _ credentials: Credentials) -> String {
         if let value = variables[name] { return value }
+        if name.hasPrefix(credentialPrefix) {
+            let account = credentialAccount(name, variables)
+            return account.isEmpty ? "" : (credentials(account) ?? "")
+        }
         if name == "uuid" { return UUID().uuidString.lowercased() }
         if name == "now" { return String(Int64(Date().timeIntervalSince1970 * 1_000)) }
         if name.hasPrefix("storage:") {
@@ -76,6 +116,18 @@ enum PamNativeStorage {
 /// Executes the declarative HTTP request attached to a notification action.
 enum PamNotificationEndpoint {
     private static let header = "^[A-Za-z0-9-]{1,64}$"
+
+    /// True when a header needs a credential the push's account has no token for.
+    static func missingCredential(
+        _ endpoint: [String: Any],
+        variables: [String: String],
+        credentials: PamNotificationTemplate.Credentials = PamNotificationCredentials.token
+    ) -> Bool {
+        ((endpoint["headers"] as? [String: Any]) ?? [:]).values.contains { value in
+            guard let raw = value as? String else { return false }
+            return PamNotificationTemplate.missingCredential(raw, variables, credentials)
+        }
+    }
 
     static func send(_ endpoint: [String: Any], variables: [String: String], completion: @escaping (Int) -> Void) {
         let method = ((endpoint["method"] as? String) ?? "POST").uppercased()
@@ -100,7 +152,7 @@ enum PamNotificationEndpoint {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         for (name, value) in (endpoint["headers"] as? [String: Any]) ?? [:] {
             guard name.range(of: header, options: .regularExpression) != nil, let raw = value as? String else { continue }
-            let headerValue = PamNotificationTemplate.render(raw, variables)
+            let headerValue = PamNotificationTemplate.render(raw, variables, credentials: PamNotificationCredentials.token)
             guard !headerValue.contains("\r"), !headerValue.contains("\n"), headerValue.utf8.count <= 8_192 else { continue }
             request.setValue(headerValue, forHTTPHeaderField: name)
         }
@@ -501,20 +553,32 @@ public enum PamNotificationActions {
     /// Optional native HTTP delivery, conversation bookkeeping, then queue.
     static func handle(type: Int, key: String, text: String, completion: @escaping () -> Void) {
         let spec = PamConversationNotifications.load(key: key)
-        if type == PamNotificationActionType.reply {
-            PamConversationNotifications.appendOwnReply(key: key, text: text)
-        } else {
-            PamConversationNotifications.cancel(key: key)
-        }
         let endpoint = type == PamNotificationActionType.reply ? spec?.replyEndpoint : spec?.markReadEndpoint
         var variables = PamNotificationTemplate.variables(spec?.dataJson ?? "{}")
         variables["reply"] = text
         variables["conversation"] = key
+        // An endpoint authenticated per account ({credential:user_id}) is never
+        // sent when the push's account has no token here: the notification is
+        // dismissed and nothing goes out with another account's session.
+        let missingCredential = endpoint.map { PamNotificationEndpoint.missingCredential($0, variables: variables) } ?? false
+        if type == PamNotificationActionType.reply && !missingCredential {
+            PamConversationNotifications.appendOwnReply(key: key, text: text)
+        } else {
+            PamConversationNotifications.cancel(key: key)
+        }
         let finish = { (status: Int) in
-            report(type: type, key: key, text: text, dataJson: spec?.dataJson ?? "{}", deepLink: spec?.deepLink ?? "", status: status)
+            report(
+                type: type,
+                key: key,
+                text: text,
+                dataJson: spec?.dataJson ?? "{}",
+                deepLink: spec?.deepLink ?? "",
+                status: status,
+                missingCredential: missingCredential
+            )
             completion()
         }
-        guard let endpoint else {
+        guard let endpoint, !missingCredential else {
             finish(-1)
             return
         }
@@ -548,7 +612,15 @@ public enum PamNotificationActions {
         pending?(.failure, Data(message.utf8))
     }
 
-    static func report(type: Int, key: String, text: String, dataJson: String, deepLink: String, status: Int) {
+    static func report(
+        type: Int,
+        key: String,
+        text: String,
+        dataJson: String,
+        deepLink: String,
+        status: Int,
+        missingCredential: Bool = false
+    ) {
         let payload = (try? WireMap.encode([
             "type": .integer(Int64(type)),
             "conversation": .text(key),
@@ -557,6 +629,7 @@ public enum PamNotificationActions {
             "deepLink": .text(deepLink),
             "handledNatively": .flag(status >= 0),
             "statusCode": .integer(Int64(max(status, 0))),
+            "credentialMissing": .flag(missingCredential),
             "timestamp": .integer(Int64(Date().timeIntervalSince1970 * 1_000)),
         ])) ?? Data()
         lock.lock()

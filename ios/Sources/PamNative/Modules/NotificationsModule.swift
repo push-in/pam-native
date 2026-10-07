@@ -222,6 +222,26 @@ final class NotificationsModule: NativeModule, ClosableNativeModule {
                     PamPushRendering.forget(field: field, type: type)
                 }
                 completion(.success, Data())
+            case "setCredential":
+                let values = try WireMap.decode(payload)
+                guard case let .text(account)? = values["account"], case let .text(token)? = values["token"] else {
+                    throw NotificationsError("Missing credential account/token")
+                }
+                try PamNotificationCredentials.set(account: account, token: token)
+                completion(.success, Data())
+            case "removeCredential":
+                let values = try WireMap.decode(payload)
+                guard case let .text(account)? = values["account"] else { throw NotificationsError("Missing credential account") }
+                PamNotificationCredentials.remove(account: account)
+                completion(.success, Data())
+            case "replaceCredentials":
+                let values = try WireMap.decode(payload)
+                guard case let .text(json)? = values["tokens"],
+                      let tokens = try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: String] else {
+                    throw NotificationsError("Invalid credential map")
+                }
+                try PamNotificationCredentials.replace(tokens)
+                completion(.success, Data())
             case "setActiveRoute":
                 let values = try WireMap.decode(payload)
                 guard case let .text(name)? = values["name"] else { throw NotificationsError("Missing route name") }
@@ -390,7 +410,7 @@ private final class PushTokenRegistry {
     }
 }
 
-private struct NotificationsError: LocalizedError {
+struct NotificationsError: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }

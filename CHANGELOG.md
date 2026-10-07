@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.23.0 - 2026-10-06
+
+- Notification action endpoints authenticate per account while the app is
+  killed: `ActionEndpoint::bearerFromCredential('user_id', 'recipient_user_id')`
+  resolves natively the token of the account named by the push data, from the
+  new `Pam\Native\Notifications\NotificationCredentials` store
+  (`set`, `remove`, `sync`, `clear`).
+- Android seals credentials with an Android Keystore AES-256-GCM key; iOS keeps
+  them in the Keychain (this device only, after first unlock). Slots are keyed
+  by a SHA-256 of the account id.
+- A push whose account has no credential sends nothing and is dismissed;
+  `NotificationAction::$credentialMissing` reports it. Credentials resolve only
+  in headers.
+- Android JVM and emulator (API 35) tests cover resolution, Keystore sealing,
+  the per-account request and the dismissed no-credential case; the iOS
+  XCTests need Mac validation. Rebuild the native hosts; see
+  [migration notes](docs/migration-1.23.0.md).
+
 ## 1.22.7 - 2026-10-06
 
 - Android scroll views consume an authored content offset once that axis reaches

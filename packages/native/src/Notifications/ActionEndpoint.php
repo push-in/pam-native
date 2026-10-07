@@ -13,8 +13,14 @@ use InvalidArgumentException;
  * Strings may use placeholders: push data fields such as {chat_id}, {reply},
  * {conversation}, {uuid}, {now} and {storage:key} (a value saved with Storage).
  *
+ * Multi-account apps authenticate with the token of the account that received
+ * the push: bearerFromCredential('user_id') resolves natively, from the
+ * Keystore / Keychain backed NotificationCredentials store, the token saved
+ * for the account id in the push data field `user_id`. When that account has
+ * no token on the device nothing is sent and the notification is dismissed.
+ *
  *     ActionEndpoint::post('https://api.example.com/chats/{chat_id}/messages')
- *         ->bearerFromStorage('auth.token')
+ *         ->bearerFromCredential('user_id', 'recipient_user_id')
  *         ->json(['body' => '{reply}', 'client_id' => '{uuid}']);
  */
 final class ActionEndpoint
@@ -27,6 +33,9 @@ final class ActionEndpoint
 
     private function __construct(private readonly string $method, private readonly string $url)
     {
+        if (str_contains($url, '{credential:')) {
+            throw new InvalidArgumentException('Credentials may only be used in headers, never in the URL.');
+        }
         $scheme = strtolower((string) parse_url(preg_replace('/\{[^}]*\}/', 'x', $url) ?? '', PHP_URL_SCHEME));
         if (strlen($url) > 8_192 || !in_array($scheme, ['https', 'http'], true)) {
             throw new InvalidArgumentException('Action endpoints require an absolute HTTPS URL.');
@@ -81,9 +90,32 @@ final class ActionEndpoint
         return $this->bearer('{storage:'.$key.'}');
     }
 
+    /**
+     * Authorization: Bearer with the NotificationCredentials token of the
+     * account named by the first non-empty push data field in $fields.
+     */
+    public function bearerFromCredential(string $field, string ...$fallbacks): self
+    {
+        $fields = [$field, ...$fallbacks];
+        foreach ($fields as $name) {
+            if (preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $name) !== 1) {
+                throw new InvalidArgumentException('Credential fields must match [A-Za-z0-9_.-]{1,64}.');
+            }
+        }
+        $placeholder = 'credential:'.implode('|', $fields);
+        if (strlen($placeholder) > 128) {
+            throw new InvalidArgumentException('Credential placeholders are limited to 128 bytes.');
+        }
+
+        return $this->bearer('{'.$placeholder.'}');
+    }
+
     /** @param array<array-key, mixed> $body JSON body; string leaves may contain placeholders. */
     public function json(array $body): self
     {
+        if (str_contains(json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES), '{credential:')) {
+            throw new InvalidArgumentException('Credentials may only be used in headers, never in the body.');
+        }
         $this->body = $body;
 
         return $this;

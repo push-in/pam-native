@@ -139,6 +139,38 @@ class NativeCapabilitiesTest {
     }
 
     @Test
+    fun credentialPlaceholdersResolveThePushAccountToken() {
+        val tokens = mapOf("user-a" to "token-a", "user-b" to "token-b")
+        val lookup: (String) -> String? = { tokens[PamNotificationCredentials.normalize(it)] }
+        val pushA = mapOf("user_id" to " USER-A ", "recipient_user_id" to "user-b")
+        assertEquals("user-a", PamNotificationCredentials.normalize(NotificationTemplate.credentialAccount("credential:user_id|recipient_user_id", pushA)))
+        assertEquals(
+            "Bearer token-a",
+            NotificationTemplate.render("Bearer {credential:user_id|recipient_user_id}", pushA, null, lookup),
+        )
+        val legacy = mapOf("recipient_user_id" to "user-b")
+        assertEquals(
+            "Bearer token-b",
+            NotificationTemplate.render("Bearer {credential:user_id|recipient_user_id}", legacy, null, lookup),
+        )
+        assertFalse(NotificationTemplate.missingCredential("Bearer {credential:user_id}", pushA, lookup))
+        assertTrue(NotificationTemplate.missingCredential("Bearer {credential:user_id}", mapOf("user_id" to "user-c"), lookup))
+        assertTrue(NotificationTemplate.missingCredential("Bearer {credential:user_id}", emptyMap(), lookup))
+        assertFalse(NotificationTemplate.missingCredential("Bearer {storage:auth.token}", emptyMap(), lookup))
+        assertEquals("Bearer ", NotificationTemplate.render("Bearer {credential:user_id}", mapOf("user_id" to "user-c"), null, lookup))
+        assertTrue(NotificationTemplate.complete("Bearer {credential:user_id|recipient_user_id}", emptyMap()))
+    }
+
+    @Test
+    fun credentialSlotsHashTheNormalizedAccount() {
+        val slot = PamNotificationCredentials.slot(PamNotificationCredentials.normalize(" User-A "))
+        assertEquals(64, slot.length)
+        assertEquals(slot, PamNotificationCredentials.slot("user-a"))
+        assertFalse(slot.contains("user"))
+        assertFalse(slot == PamNotificationCredentials.slot("user-b"))
+    }
+
+    @Test
     fun pushTimestampsAcceptSecondsMillisecondsAndIso8601() {
         assertEquals(1_700_000_000_000, PamPushRendering.timestamp("1700000000"))
         assertEquals(1_700_000_000_000, PamPushRendering.timestamp("1700000000000"))

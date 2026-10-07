@@ -75,6 +75,23 @@ internal class NotificationsModule(private val activity: PamActivity) : NativeMo
                     }
                     completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
                 }
+                "setCredential" -> background(completion) {
+                    val values = WireMap.decode(payload)
+                    PamNotificationCredentials.set(activity.applicationContext, values.text("account"), values.text("token"))
+                    ByteArray(0)
+                }
+                "removeCredential" -> background(completion) {
+                    PamNotificationCredentials.remove(activity.applicationContext, WireMap.decode(payload).text("account"))
+                    ByteArray(0)
+                }
+                "replaceCredentials" -> background(completion) {
+                    val tokens = JSONObject(WireMap.decode(payload).text("tokens"))
+                    PamNotificationCredentials.replace(
+                        activity.applicationContext,
+                        tokens.keys().asSequence().associateWith { tokens.getString(it) },
+                    )
+                    ByteArray(0)
+                }
                 "setActiveRoute" -> {
                     val values = WireMap.decode(payload)
                     PamActiveRoute.update(

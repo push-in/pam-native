@@ -17,6 +17,8 @@ final readonly class NotificationAction
         public bool $handledNatively,
         public int $statusCode,
         public int $timestamp,
+        /** True when a bearerFromCredential() endpoint found no token for the push's account: nothing was sent. */
+        public bool $credentialMissing = false,
     ) {
     }
 

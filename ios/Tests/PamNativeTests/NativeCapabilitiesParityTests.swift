@@ -57,6 +57,67 @@ final class NativeCapabilitiesParityTests: XCTestCase {
         )
     }
 
+    func testCredentialPlaceholdersResolveThePushAccountToken() {
+        let tokens = ["user-a": "token-a", "user-b": "token-b"]
+        let lookup: PamNotificationTemplate.Credentials = { tokens[PamNotificationCredentials.normalize($0)] }
+        let pushA = ["user_id": " USER-A ", "recipient_user_id": "user-b"]
+        XCTAssertEqual(
+            PamNotificationTemplate.render("Bearer {credential:user_id|recipient_user_id}", pushA, credentials: lookup),
+            "Bearer token-a"
+        )
+        XCTAssertEqual(
+            PamNotificationTemplate.render("Bearer {credential:user_id|recipient_user_id}", ["recipient_user_id": "user-b"], credentials: lookup),
+            "Bearer token-b"
+        )
+        // URLs and bodies never resolve credentials.
+        XCTAssertEqual(PamNotificationTemplate.render("{credential:user_id}", pushA), "")
+        XCTAssertFalse(PamNotificationTemplate.missingCredential("Bearer {credential:user_id}", pushA, lookup))
+        XCTAssertTrue(PamNotificationTemplate.missingCredential("Bearer {credential:user_id}", ["user_id": "user-c"], lookup))
+        XCTAssertTrue(PamNotificationTemplate.missingCredential("Bearer {credential:user_id}", [:], lookup))
+        XCTAssertFalse(PamNotificationTemplate.missingCredential("Bearer {storage:auth.token}", [:], lookup))
+        XCTAssertTrue(PamNotificationTemplate.complete("Bearer {credential:user_id}", [:]))
+        let endpoint: [String: Any] = [
+            "method": "POST",
+            "url": "https://api.test/chats/{chat_id}/messages",
+            "headers": ["Authorization": "Bearer {credential:user_id}"],
+        ]
+        XCTAssertFalse(PamNotificationEndpoint.missingCredential(endpoint, variables: pushA, credentials: lookup))
+        XCTAssertTrue(PamNotificationEndpoint.missingCredential(endpoint, variables: ["user_id": "user-c"], credentials: lookup))
+    }
+
+    func testNotificationCredentialsArePerAccount() throws {
+        let previous = PamNotificationCredentials.store
+        let memory = MemoryCredentialStore()
+        PamNotificationCredentials.store = memory
+        defer { PamNotificationCredentials.store = previous }
+        try PamNotificationCredentials.set(account: " User-A ", token: "token-a")
+        try PamNotificationCredentials.set(account: "user-b", token: "token-b")
+        XCTAssertEqual(memory.values.count, 2)
+        XCTAssertTrue(memory.values.keys.allSatisfy { $0.count == 64 && !$0.contains("user") })
+        XCTAssertEqual(PamNotificationCredentials.token("USER-A"), "token-a")
+        PamNotificationCredentials.remove(account: "user-a")
+        XCTAssertNil(PamNotificationCredentials.token("user-a"))
+        try PamNotificationCredentials.replace(["user-c": "token-c"])
+        XCTAssertNil(PamNotificationCredentials.token("user-b"))
+        XCTAssertEqual(PamNotificationCredentials.token("user-c"), "token-c")
+        XCTAssertThrowsError(try PamNotificationCredentials.set(account: "", token: "x"))
+        XCTAssertThrowsError(try PamNotificationCredentials.set(account: "a", token: "x\ny"))
+    }
+
+    func testNotificationCredentialsKeychainRoundTrip() throws {
+        let store = PamNotificationCredentials.KeychainStore()
+        let slot = PamNotificationCredentials.slot("xctest-\(UUID().uuidString)")
+        do {
+            try store.write(slot, "token-k")
+        } catch {
+            throw XCTSkip("Keychain unavailable in this test host: \(error)")
+        }
+        defer { store.delete(slot) }
+        XCTAssertEqual(store.read(slot), "token-k")
+        store.delete(slot)
+        XCTAssertNil(store.read(slot))
+    }
+
     func testActiveRouteSuppressesOnlyMatchingForegroundRoute() {
         PamActiveRoute.update(name: "chat", paramsJson: #"{"id":"c-1"}"#, path: "/chats/c-1?tab=media")
         let variables = ["chat": "c-1"]
@@ -163,4 +224,12 @@ final class NativeCapabilitiesParityTests: XCTestCase {
         wait(for: [done], timeout: 2)
         PamScreenSecurity.shared.setEnabled(false)
     }
+}
+
+private final class MemoryCredentialStore: PamNotificationCredentials.Store {
+    var values: [String: String] = [:]
+    func read(_ slot: String) -> String? { values[slot] }
+    func write(_ slot: String, _ token: String) throws { values[slot] = token }
+    func delete(_ slot: String) { values[slot] = nil }
+    func deleteAll() { values.removeAll() }
 }

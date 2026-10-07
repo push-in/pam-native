@@ -20,6 +20,7 @@ use Pam\Native\NetworkType;
 use Pam\Native\Notifications\ActionEndpoint;
 use Pam\Native\Notifications\NotificationAction;
 use Pam\Native\Notifications\NotificationActionType;
+use Pam\Native\Notifications\NotificationCredentials;
 use Pam\Native\Notifications\Person;
 use Pam\Native\Notifications\PushRendering;
 use Pam\Native\NotificationImportance;
@@ -341,6 +342,49 @@ $assert(
         && $actions[0]->text === 'Já vou' && $actions[0]->data === ['chat_id' => '42'] && $actions[0]->delivered()
         && $lastCall()['method'] === 'nextAction',
     'Inline replies must reach PHP typed and re-arm the listener.',
+);
+
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map([
+    'type' => 1, 'conversation' => 'chat:43', 'text' => 'Oi', 'data' => '{"chat_id":"43","user_id":"u-b"}', 'deepLink' => '',
+    'handledNatively' => false, 'statusCode' => 0, 'timestamp' => 6, 'credentialMissing' => true,
+]));
+$assert(
+    count($actions) === 2 && $actions[1]->credentialMissing && !$actions[1]->delivered() && !$actions[0]->credentialMissing,
+    'Actions must report when the push account had no native credential.',
+);
+
+// 9b. Per-account notification credentials.
+$credentialEndpoint = ActionEndpoint::post('https://api.example.test/chats/{chat_id}/messages')
+    ->bearerFromCredential('user_id', 'recipient_user_id')
+    ->json(['body' => '{reply}'])
+    ->toArray();
+$assert(
+    $credentialEndpoint['headers']->Authorization === 'Bearer {credential:user_id|recipient_user_id}',
+    'bearerFromCredential must resolve the token of the push account natively.',
+);
+$assert(
+    $rejects(static fn () => ActionEndpoint::post('https://x.test/{credential:user_id}'))
+        && $rejects(static fn () => ActionEndpoint::post('https://x.test')->json(['token' => '{credential:user_id}']))
+        && $rejects(static fn () => ActionEndpoint::post('https://x.test')->bearerFromCredential('bad field'))
+        && $rejects(static fn () => ActionEndpoint::post('https://x.test')->bearerFromCredential('a|b')),
+    'Credentials must stay in headers and name plain push data fields.',
+);
+NotificationCredentials::set(' User-A ', 'token-a');
+$assert($lastCall()['method'] === 'setCredential' && $lastCall()['values'] == ['account' => 'user-a', 'token' => 'token-a'], 'set must normalize the account id.');
+NotificationCredentials::remove('USER-A');
+$assert($lastCall()['method'] === 'removeCredential' && $lastCall()['values'] == ['account' => 'user-a'], 'remove must normalize the account id.');
+NotificationCredentials::sync(['User-B' => 'token-b']);
+$assert(
+    $lastCall()['method'] === 'replaceCredentials' && $lastCall()['values'] == ['tokens' => '{"user-b":"token-b"}'],
+    'sync must replace the native credential map.',
+);
+NotificationCredentials::clear();
+$assert($lastCall()['method'] === 'replaceCredentials' && $lastCall()['values'] == ['tokens' => '{}'], 'clear must empty the native credential map.');
+$assert(
+    $rejects(static fn () => NotificationCredentials::set('', 't'))
+        && $rejects(static fn () => NotificationCredentials::set('a', "t\nx"))
+        && $rejects(static fn () => NotificationCredentials::set('a', '')),
+    'Credentials must validate accounts and tokens.',
 );
 
 PushRendering::forType('chat.message')

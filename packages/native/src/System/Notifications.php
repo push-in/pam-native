@@ -101,6 +101,7 @@ final class Notifications
                     handledNatively: (bool) ($values['handledNatively'] ?? false),
                     statusCode: (int) ($values['statusCode'] ?? 0),
                     timestamp: (int) ($values['timestamp'] ?? 0),
+                    credentialMissing: (bool) ($values['credentialMissing'] ?? false),
                 ));
             }
             self::armActions($subscription);
