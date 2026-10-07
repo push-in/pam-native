@@ -1686,6 +1686,9 @@ class PamRenderer(
         }
         val wasVirtualized = virtualListAncestor(state.parent) != null
         val view = views[id]
+        if (wasVirtualized && view != null && state.parent == parent && moveWithinMountedCell(state, view, index)) {
+            return
+        }
         if (view?.parent != null && !wasVirtualized && moveKeepsHostedPosition(state, parent, index)) {
             // Only the logical index changed (a sibling before it was removed
             // or inserted): the view keeps its place among its host's views.
@@ -1729,6 +1732,31 @@ class PamRenderer(
         } else {
             reattachHostedDescendants(id)
         }
+    }
+
+    /**
+     * A node of a mounted list cell changing its index under the same parent
+     * (a conditional sibling inserted or removed before it, e.g. a video page
+     * swapping its poster for its player) keeps its views: they are only
+     * re-ordered among the host's children when their place changed. Moving
+     * them by dematerializing the subtree rebuilt every following sibling of
+     * the cell (a Loops page rebuilt ~55 views on every swipe).
+     */
+    private fun moveWithinMountedCell(state: NodeState, view: View, index: Int): Boolean {
+        val host = effectiveParent(state.parent)
+        val hostView = views[host] as? ViewGroup ?: return false
+        if (view.parent !== hostView || nodes[host]?.kind == NodeKind.VIRTUAL_LIST) return false
+        removeChild(state.parent, state.id)
+        state.index = index
+        addChild(state.parent, state.id)
+        val target = hostedInsertionIndex(state, host)
+        if (hostView.indexOfChild(view) != target) {
+            clearHitSlop(view)
+            hostView.removeView(view)
+            attach(view, host, target)
+            applyHitSlop(view, state)
+        }
+        return true
     }
 
     /**

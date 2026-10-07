@@ -60,6 +60,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.29.0 | Drag config parsing per list row | ✅ | `PamDragConfig.cached` memoizes `parse` by source (bounded `PamParseCache`). |
 | 1.29.0 | Prepend/append prefetch ramp, spinner style, opcache stats, queued module calls | n/a | Android-only causes (RecyclerView extra layout space, ProgressBar theme AVD, the Android opcache file cache, module registry built on the UI thread). |
 | 1.29.0 | Boot from the bundle's component pack listing | ✅ | PHP SDK change, shared by both hosts. |
+| 1.29.1 | In-cell moves keep their views | ✅ | iOS `move` already re-attaches the existing views of a list cell. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac

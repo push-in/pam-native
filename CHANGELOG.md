@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.29.1 - 2026-10-07
+
+- Android `VirtualizedList`: a node of a mounted cell whose index changes
+  under the same parent (a conditional sibling inserted or removed before
+  it) keeps its views and is only re-ordered when its place changed. It used
+  to be dematerialized and rebuilt with every following sibling: a Loops
+  page swapping its poster for its player rebuilt ~55 views on every swipe
+  (S10 settle frame 55-84 ms -> 20-27 ms, Loops p99 46-61 -> 27-29 ms). iOS
+  already re-attaches the existing views.
+
 ## 1.29.0 - 2026-10-07
 
 - `appearance.firstFrame` (`"php"` default, `"window"`): with `"window"`
