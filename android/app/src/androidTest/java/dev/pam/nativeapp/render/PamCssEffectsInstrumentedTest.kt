@@ -230,6 +230,44 @@ class PamCssEffectsInstrumentedTest {
     }
 
     @Test
+    fun backdropFilterRedrawsOnlyWhenTheWindowChanges() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+        render(
+            listOf(
+                child(2, Frame(0f, 0f, 240f, 200f), mapOf(PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFF0000))),
+                child(3, Frame(60f, 40f, 120f, 120f), mapOf(PropKey.BACKDROP_BLUR_RADIUS to PropValue.Decimal(12.0))),
+            ),
+        ) { _, _ -> }
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val window = requireNotNull(activity).window.decorView
+        awaitFrames(instrumentation, 3)
+        var traversals = 0
+        var glassDraws = 0
+        val preDraw = android.view.ViewTreeObserver.OnPreDrawListener {
+            traversals++
+            true
+        }
+        val glass = viewsById.getValue(3)
+        val draw = android.view.ViewTreeObserver.OnDrawListener { if (glass.isDirty) glassDraws++ }
+        onMain(instrumentation) {
+            window.viewTreeObserver.addOnPreDrawListener(preDraw)
+            window.viewTreeObserver.addOnDrawListener(draw)
+        }
+        awaitFrames(instrumentation, 10)
+        // An idle screen with a backdrop schedules no frames of its own.
+        onMain(instrumentation) { assertEquals("idle traversals", 0, traversals) }
+        // A change behind the glass redraws it in that frame.
+        onMain(instrumentation) { viewsById.getValue(2).setBackgroundColor(Color.BLUE) }
+        awaitFrames(instrumentation, 3)
+        onMain(instrumentation) {
+            window.viewTreeObserver.removeOnPreDrawListener(preDraw)
+            window.viewTreeObserver.removeOnDrawListener(draw)
+            assertTrue("traversals after a change: $traversals", traversals in 1..2)
+            assertTrue("the glass re-records what is behind it", glassDraws >= 1)
+        }
+    }
+
+    @Test
     fun imageBlurRadiusBlursTheBitmapWithOpaqueEdgesOnEveryApi() {
         val source = Bitmap.createBitmap(200, 100, Bitmap.Config.ARGB_8888)
         Canvas(source).apply {
@@ -269,8 +307,10 @@ class PamCssEffectsInstrumentedTest {
                 ),
             ),
         ) { _, _ -> }
-        Thread.sleep(500)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
+        // The sweep starts from the left edge: 30 frames (>= 500 ms) bring
+        // the highlight onto the box.
+        awaitFrames(instrumentation, 30)
         var brightest = 0
         instrumentation.runOnMainSync {
             val bitmap = software(viewsById.getValue(2))
@@ -306,7 +346,8 @@ class PamCssEffectsInstrumentedTest {
                 ),
             )
         }
-        instrumentation.waitForIdleSync()
+        // A shimmer or backdrop keeps drawing: wait for frames, not idle.
+        awaitFrames(instrumentation, 2)
         onMain(instrumentation) {
             val parent = launched.host.getChildAt(0) as ViewGroup
             viewsById.clear()
@@ -326,8 +367,9 @@ class PamCssEffectsInstrumentedTest {
     private fun lastActivityPixel(viewId: Long = 2, point: (View) -> Pair<Int, Int>): Int {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val current = activity ?: error("No activity")
-        Thread.sleep(400)
-        instrumentation.waitForIdleSync()
+        // Effects render on the RenderThread after the frame that records
+        // them; a few frames later they are composited into the window.
+        awaitFrames(instrumentation, 4)
         var rect = Rect()
         onMain(instrumentation) {
             val view = viewsById.getValue(viewId)

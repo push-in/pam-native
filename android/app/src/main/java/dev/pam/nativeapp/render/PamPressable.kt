@@ -239,6 +239,7 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         gestureRecognizer.configure(config) { payload ->
             val delivered = applyNativeTransform(applyDrag(payload))
             callback?.invoke(delivered)
+            drag.flushReleaseSettle()
         }
         updateClickable()
     }

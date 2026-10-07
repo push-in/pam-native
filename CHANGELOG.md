@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.25.3 - 2026-10-07
+
+- Android: a hidden route mounted outside a Choreographer frame (a direct
+  commit, not an engine batch) is laid out on the frame after the one that
+  lays out its mount, as 1.25.0 intended. Before, its release callback ran in
+  the very frame that mounted it (frame callbacks precede the traversal), so
+  mount and first layout shared a frame.
+- Android: an attached `PamNavigationHost` mounts a route straight through its
+  route controller and restores its position with
+  `detachViewFromParent`/`attachViewToParent`. A new screen enters the window
+  once instead of being attached, detached for its fragment and moved back
+  (three attaches and two detaches of the whole subtree).
+- Android and iOS: a drag whose settle completes within the release (reduced
+  motion, or system animations off) reports `onGestureSettle` after
+  `onGestureEnd`, never before it.
+- Android: a text input with a mask or currency format turns IME
+  suggestions off (`TYPE_TEXT_FLAG_NO_SUGGESTIONS`); the IME composed over
+  text the formatter rewrites on every keystroke. iOS: formatted fields turn
+  autocorrection and spell checking off.
+- Android 12+: a `backdrop-filter` container no longer redraws on every
+  frame of an idle screen. It re-records what is behind it only in frames
+  where something in the window changed; before, its own invalidation
+  scheduled the next frame forever (continuous rendering, and a main thread
+  that never went idle, which hung `waitForIdleSync` in tests).
+- Android: a visible DevTools overlay moved to another window resumes its
+  frame-rate loop there. iOS: the overlay's `CADisplayLink` (which retains
+  its target) runs only while the overlay is in a window, so a removed overlay
+  is released instead of ticking forever; showing it twice no longer adds a
+  second display link.
+- iOS parity written on Linux, not compiled: XCTest
+  `testReducedMotionDragSettleIsReportedAfterTheRelease` and
+  `testVisibleDevToolsOverlayIsReleasedAfterLeavingItsWindow`; validate on a
+  Mac. New Android instrumented tests
+  `reducedMotionDragReportsItsSettleAfterTheEnd` and
+  `backdropFilterRedrawsOnlyWhenTheWindowChanges`.
+- The Android instrumented suite is green and deterministic on API 26, 31,
+  35 and 36 with system animations on or off: frame-ordered assertions wait
+  for rendered frames (`awaitFrames`) instead of `waitForIdleSync`/sleeps,
+  tests that observe motion in flight enable animations through
+  `PamAnimationsEnabledRule`, window captures wait for a stable composited
+  frame, the layout-origin test expects edge-snapped sizes (1 px at density
+  2.75), the status-bar and transition-layer tests follow the 1.25.0
+  transition timing, the double-tap test dispatches both taps in one main
+  thread message, the controlled-input echo test types into the field, the
+  rapid formatted input test waits until the IME serves the focused field
+  before its key burst, and the DevTools test no longer waits for an idle
+  main thread (its snapshot checks use JUnit instead of Kotlin `assert`, a
+  no-op on Android). The reload and crypto bridge tests no longer read the
+  PHP report list while the runtime thread appends to it (a
+  `ConcurrentModificationException`).
+- No PHP API or protocol identifiers changed. See
+  [migration notes](docs/migration-1.25.3.md).
+
 ## 1.25.2 - 2026-10-07
 
 - Android device-gallery images (`content://media/...` photos and videos,

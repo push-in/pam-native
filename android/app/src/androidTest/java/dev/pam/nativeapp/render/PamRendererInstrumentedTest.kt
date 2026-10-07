@@ -707,10 +707,13 @@ class PamRendererInstrumentedTest {
                 currency = requireNotNull(
                     activity.host.findByTransitionName("rapid-currency-input"),
                 ) as EditText
+                // The IME must not compose over text the formatter rewrites.
+                assertTrue(currency.inputType and android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
                 currency.setText("128450")
                 currency.setSelection(currency.text.length)
                 currency.requestFocus()
             }
+            awaitInputConnection(instrumentation, currency)
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("73125")
             instrumentation.waitForIdleSync()
@@ -721,10 +724,12 @@ class PamRendererInstrumentedTest {
                 mask = requireNotNull(
                     activity.host.findByTransitionName("rapid-mask-input"),
                 ) as EditText
+                assertTrue(mask.inputType and android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS != 0)
                 mask.setText("11987654321")
                 mask.setSelection(mask.text.length)
                 mask.requestFocus()
             }
+            awaitInputConnection(instrumentation, mask)
             repeat(24) { instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_DEL) }
             instrumentation.sendStringSync("21912345678")
             instrumentation.waitForIdleSync()
@@ -1749,10 +1754,14 @@ class PamRendererInstrumentedTest {
             // Showcase samples start outside the vertical viewport. Reveal the
             // row without ever touching its horizontal scroll or drawing it in
             // software first.
-            // Outlive the platform's initial fade delay: a persistent indicator
-            // must remain available when users reach a later showcase sample.
-            SystemClock.sleep(1800)
-            requireNotNull(instrumentation.uiAutomation.takeScreenshot()).recycle()
+            // A persistent indicator must remain available when users reach a
+            // later showcase sample: it never starts the platform fade.
+            onMain(instrumentation) {
+                assertFalse(
+                    "Persistent indicator must not fade",
+                    scroll.getChildAt(0).isScrollbarFadingEnabled,
+                )
+            }
             onMain(instrumentation) {
                 val parent = activity.host.findByTransitionName("indicator-parent-scroll") as PamScrollContainer
                 parent.setContentOffsetY(500f)
@@ -1763,18 +1772,18 @@ class PamRendererInstrumentedTest {
             // never for the indicator itself, without drawing/toggling the view.
             // Keep the final frame on timeout so the existing content assertion
             // still fails with captured evidence if rendering never happens.
-            val initialFrameDeadline = SystemClock.uptimeMillis() + 2000L
+            val initialFrameDeadline = SystemClock.uptimeMillis() + 10_000L
             val initialLocation = IntArray(2)
             do {
                 onMain(instrumentation) { scroll.getLocationOnScreen(initialLocation) }
                 initialWindow?.recycle()
-                val frame = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+                val frame = windowCapture(instrumentation)
                 initialWindow = frame
                 val x = initialLocation[0] + 10
                 val y = initialLocation[1] + 10
                 if (x in 0 until frame.width && y in 0 until frame.height
                     && frame.getPixel(x, y) == Color.LTGRAY) break
-                SystemClock.sleep(50)
+                awaitFrames(instrumentation)
             } while (SystemClock.uptimeMillis() < initialFrameDeadline)
             onMain(instrumentation) {
                 assertTrue("Renderer fixture must overflow", scroll.getChildAt(0).canScrollHorizontally(1))
@@ -1809,23 +1818,24 @@ class PamRendererInstrumentedTest {
                 height = scroll.height
                 trackTop = dp(scroll, 48f)
             }
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(100)
-            val screenShown = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            val screenShown = stableWindowCapture(instrumentation)
             onMain(instrumentation) { scroll.setShowsScrollIndicator(false) }
-            instrumentation.waitForIdleSync()
-            SystemClock.sleep(100)
-            val screenHidden = requireNotNull(instrumentation.uiAutomation.takeScreenshot())
+            val screenHidden = stableWindowCapture(instrumentation)
             try {
                 // Gradle collects this directory before uninstalling test APKs.
                 // Keep all three frames even on success so collection itself
                 // can be verified without intentionally breaking the renderer.
-                val directory = InstrumentationRegistry.getArguments()
-                    .getString("additionalTestOutputDir")
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { java.io.File(it) }
-                    ?: requireNotNull(instrumentation.context.getExternalFilesDir("renderer-evidence"))
-                check(directory.isDirectory || directory.mkdirs())
+                // External storage can be unavailable or not creatable (fresh
+                // emulator, no media mount). The test runs in the target app's
+                // process, so its private cache is always writable.
+                val directory = listOfNotNull(
+                    InstrumentationRegistry.getArguments()
+                        .getString("additionalTestOutputDir")
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { java.io.File(it) },
+                    instrumentation.targetContext.getExternalFilesDir("renderer-evidence"),
+                    java.io.File(instrumentation.targetContext.cacheDir, "renderer-evidence"),
+                ).first { it.isDirectory || it.mkdirs() }
                 mapOf(
                     "indicator-initial.png" to requireNotNull(initialWindow),
                     "indicator-shown.png" to screenShown,
@@ -1888,8 +1898,9 @@ class PamRendererInstrumentedTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
         try {
+            lateinit var renderer: PamRenderer
             onMain(instrumentation) {
-                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
                 renderer.commit(
                     listOf(
                         listOf(
@@ -1950,7 +1961,11 @@ class PamRendererInstrumentedTest {
                         ),
                     ),
                 )
-                activity.host.viewTreeObserver.dispatchOnPreDraw()
+            }
+            // The push was committed before the host joined the window; its
+            // transition (duration 0) runs on the next frame.
+            awaitFrames(instrumentation)
+            onMain(instrumentation) {
                 assertEquals(
                     Color.BLUE,
                     if (Build.VERSION.SDK_INT >= 35) {
@@ -1978,7 +1993,9 @@ class PamRendererInstrumentedTest {
                         ),
                     ),
                 )
-                activity.host.viewTreeObserver.dispatchOnPreDraw()
+            }
+            awaitFrames(instrumentation)
+            onMain(instrumentation) {
                 assertEquals(
                     Color.RED,
                     if (Build.VERSION.SDK_INT >= 35) {
@@ -2328,7 +2345,8 @@ class PamRendererInstrumentedTest {
                 assertEquals(0, (holder.itemView as FrameLayout).childCount)
                 list.onVisibilityAggregated(true)
             }
-            instrumentation.waitForIdleSync()
+            // The repair rebinds the empty holder in the next layout pass.
+            awaitFrames(instrumentation, 2)
             onMain(instrumentation) {
                 val holder = requireNotNull(list.findViewHolderForAdapterPosition(0))
                 assertEquals(1, (holder.itemView as FrameLayout).childCount)
@@ -2776,6 +2794,25 @@ class PamRendererInstrumentedTest {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             },
         ) as PamTestActivity
+
+    /**
+     * Waits until the IME serves [input]. Keys injected while focus moves
+     * reach the field partly through the IME (asynchronously) and partly
+     * directly, which reorders or drops the first keys of a burst.
+     */
+    private fun awaitInputConnection(instrumentation: Instrumentation, input: EditText) {
+        val manager = input.context.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+        val deadline = SystemClock.uptimeMillis() + 10_000L
+        while (true) {
+            var served = false
+            onMain(instrumentation) { served = input.hasFocus() && input.hasWindowFocus() && manager.isActive(input) }
+            if (served) break
+            check(SystemClock.uptimeMillis() < deadline) { "The IME never served the focused input" }
+            awaitFrames(instrumentation)
+        }
+        // One more round trip lets the IME finish starting its session.
+        awaitFrames(instrumentation, 2)
+    }
 
     private fun assertInputTextArrives(
         instrumentation: Instrumentation,

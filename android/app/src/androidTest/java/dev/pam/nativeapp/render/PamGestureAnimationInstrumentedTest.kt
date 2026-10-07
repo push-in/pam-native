@@ -22,6 +22,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.util.Collections
@@ -33,6 +34,10 @@ import java.util.Collections
  */
 @RunWith(AndroidJUnit4::class)
 class PamGestureAnimationInstrumentedTest {
+    /** These tests observe motion in flight; CI emulators disable animations. */
+    @get:Rule
+    val animations = PamAnimationsEnabledRule()
+
     private data class Dispatched(val id: Long, val kind: Int, val payload: Map<String, WireValue>, val atMs: Long)
 
     @Test
@@ -107,6 +112,65 @@ class PamGestureAnimationInstrumentedTest {
             }
         } finally {
             onMain(instrumentation) {
+                renderer.close()
+                activity.finish()
+            }
+        }
+    }
+
+    @Test
+    fun reducedMotionDragReportsItsSettleAfterTheEnd() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val events = Collections.synchronizedList(mutableListOf<Dispatched>())
+        lateinit var renderer: PamRenderer
+        lateinit var page: View
+        try {
+            onMain(instrumentation) {
+                // Reduced motion settles within the release itself.
+                PamMotionPolicy.reduceMotionOverride = true
+                renderer = recordingRenderer(activity, events)
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.PRESSABLE, mapOf(
+                        PropKey.GESTURE_TYPE to PropValue.Integer(2),
+                        PropKey.GESTURE_DIRECTION to PropValue.Integer(7),
+                        PropKey.GESTURE_MIN_DISTANCE to PropValue.Decimal(8.0),
+                        PropKey.GESTURE_DRAG to PropValue.Text(
+                            "axis=y\nmin=0\nsnaps=0,100%\nsettle=spring:230:22:0.72\nthreshold=120\nvelocity=900",
+                        ),
+                        PropKey.ON_GESTURE_BEGIN to PropValue.Flag(true),
+                        PropKey.ON_GESTURE_END to PropValue.Flag(true),
+                        PropKey.ON_GESTURE_SETTLE to PropValue.Flag(true),
+                    ))),
+                    Mutation.Create(node(3, 2, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF203040),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 640f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 360f, 640f)),
+                    Mutation.Layout(3, Frame(0f, 0f, 360f, 640f)),
+                    Mutation.SetRoot(1),
+                )))
+                page = views(renderer)[3]
+            }
+            instrumentation.waitForIdleSync()
+            val start = locationOf(instrumentation, activity.host)
+            val x = start.first + 180f.dp(page)
+            val y = start.second + 120f.dp(page)
+            drag(instrumentation, x, y, x, y + 300f.dp(page), steps = 10)
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(
+                    "settle must follow end",
+                    listOf(EventKind.GESTURE_BEGIN.value, EventKind.GESTURE_END.value, EventKind.GESTURE_SETTLE.value),
+                    events.map { it.kind },
+                )
+                assertEquals(1L, (events[2].payload["snapIndex"] as WireValue.Integer).value)
+                assertEquals(page.height.toFloat(), page.translationY, 1.5f)
+            }
+        } finally {
+            onMain(instrumentation) {
+                PamMotionPolicy.reduceMotionOverride = null
                 renderer.close()
                 activity.finish()
             }
@@ -236,12 +300,17 @@ class PamGestureAnimationInstrumentedTest {
             val origin = locationOf(instrumentation, activity.host)
             val x = origin.first + 200f.dp(surface)
             val y = origin.second + 300f.dp(surface)
-            tap(instrumentation, x, y)
-            SystemClock.sleep(90)
-            tap(instrumentation, x + 4f, y + 4f)
-            SystemClock.sleep(500)
-            instrumentation.waitForIdleSync()
             onMain(instrumentation) {
+                // Both taps (90 ms apart in event time) reach the window in one
+                // main-thread message: the pending single press can never run
+                // between them, however late the host schedules the injection.
+                val window = IntArray(2).also(activity.host::getLocationInWindow)
+                val screen = IntArray(2).also(activity.host::getLocationOnScreen)
+                val dx = (window[0] - screen[0]).toFloat()
+                val dy = (window[1] - screen[1]).toFloat()
+                val first = SystemClock.uptimeMillis()
+                windowTap(activity, first, x + dx, y + dy)
+                windowTap(activity, first + 90L, x + 4f + dx, y + 4f + dy)
                 val kinds = events.map { it.kind }
                 assertEquals("double tap replaces the single press: $kinds", listOf(EventKind.DOUBLE_TAP.value), kinds)
                 val payload = events[0].payload
@@ -254,7 +323,6 @@ class PamGestureAnimationInstrumentedTest {
             events.clear()
             tap(instrumentation, x, y)
             waitUntil(1_500) { events.isNotEmpty() }
-            SystemClock.sleep(50)
             onMain(instrumentation) {
                 assertEquals(listOf(EventKind.PRESS.value), events.map { it.kind })
                 val pressX = (events[0].payload["x"] as WireValue.Decimal).value
@@ -302,7 +370,15 @@ class PamGestureAnimationInstrumentedTest {
                 bubble = views(renderer)[3]
             }
             instrumentation.waitForIdleSync()
+            var springInFlight = false
+            var opacityInFlight = false
+            val sample = android.view.ViewTreeObserver.OnPreDrawListener {
+                if (bubble.translationX > 0f && bubble.translationX < 80f.dp(bubble) * 1.3f) springInFlight = true
+                if (bubble.alpha < 1f && bubble.alpha > 0.2f) opacityInFlight = true
+                true
+            }
             onMain(instrumentation) {
+                activity.host.viewTreeObserver.addOnPreDrawListener(sample)
                 frames.attach(activity.window)
                 renderer.commit(listOf(listOf(
                     Mutation.Update(2, PropKey.ANIMATION_PROGRAM, PropValue.Text(
@@ -315,14 +391,15 @@ class PamGestureAnimationInstrumentedTest {
                     Mutation.Update(3, PropKey.OPACITY, PropValue.Decimal(0.2)),
                 )))
             }
-            SystemClock.sleep(150)
-            onMain(instrumentation) {
-                assertTrue("spring transition is in flight", bubble.translationX > 0f && bubble.translationX < 80f.dp(bubble) * 1.3f)
-                assertTrue("timed opacity transition is in flight", bubble.alpha < 1f && bubble.alpha > 0.2f)
-            }
             waitUntil(5_000) { events.any { it.kind == EventKind.ANIMATION_COMPLETE.value } }
-            SystemClock.sleep(600)
+            // The bubble's spring may still be settling after the program ends.
+            waitUntil(5_000) {
+                kotlin.math.abs(bubble.translationX - 80f.dp(bubble)) <= 0.5f && kotlin.math.abs(bubble.alpha - 0.2f) <= 0.001f
+            }
             onMain(instrumentation) {
+                activity.host.viewTreeObserver.removeOnPreDrawListener(sample)
+                assertTrue("spring transition is in flight", springInFlight)
+                assertTrue("timed opacity transition is in flight", opacityInFlight)
                 frames.detach(activity.window)
                 assertEquals(listOf(EventKind.ANIMATION_COMPLETE.value), events.map { it.kind })
                 assertEquals(1f, badge.scaleX, 0.001f)
@@ -482,21 +559,19 @@ class PamGestureAnimationInstrumentedTest {
                 renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.VISIBLE, PropValue.Flag(true)))))
             }
             var sawIndependentMotion = false
-            val deadline = SystemClock.uptimeMillis() + 1_500
-            while (SystemClock.uptimeMillis() < deadline) {
-                onMain(instrumentation) {
-                    val content = sheet.parent as View
-                    val backdropAlpha = (content.background as? android.graphics.drawable.ColorDrawable)?.alpha ?: 255
-                    // Mid-flight: the scrim is partially visible while the sheet is still below its frame,
-                    // and the scrim container itself never translates.
-                    if (backdropAlpha in 1 until DEFAULT_BACKDROP_ALPHA && sheet.translationY > 0f && content.translationY == 0f) {
-                        sawIndependentMotion = true
-                    }
+            // Sampled on every frame of the modal window until it settles.
+            waitUntil(5_000) {
+                val content = sheet.parent as View
+                val backdropAlpha = (content.background as? android.graphics.drawable.ColorDrawable)?.alpha ?: 255
+                // Mid-flight: the scrim is partially visible while the sheet is still below its frame,
+                // and the scrim container itself never translates.
+                if (backdropAlpha in 1 until DEFAULT_BACKDROP_ALPHA && sheet.translationY > 0f && content.translationY == 0f) {
+                    sawIndependentMotion = true
                 }
-                if (sawIndependentMotion) break
-                SystemClock.sleep(8)
+                // Before the dialog presents, the sheet also rests at 0 with the
+                // default scrim: only a settle after the motion ends the wait.
+                sawIndependentMotion && sheet.translationY == 0f && backdropAlpha == DEFAULT_BACKDROP_ALPHA
             }
-            SystemClock.sleep(500)
             onMain(instrumentation) {
                 val content = sheet.parent as View
                 assertTrue("backdrop and sheet must animate independently", sawIndependentMotion)
@@ -627,6 +702,19 @@ class PamGestureAnimationInstrumentedTest {
         instrumentation.sendPointerSync(MotionEvent.obtain(down, down + 40L, MotionEvent.ACTION_UP, x, y, 0))
     }
 
+    /** Dispatches a 40 ms tap at window coordinates on the main thread. */
+    private fun windowTap(activity: PamTestActivity, down: Long, x: Float, y: Float) {
+        val root = activity.window.decorView
+        listOf(
+            MotionEvent.obtain(down, down, MotionEvent.ACTION_DOWN, x, y, 0),
+            MotionEvent.obtain(down, down + 40L, MotionEvent.ACTION_UP, x, y, 0),
+        ).forEach { event ->
+            event.source = android.view.InputDevice.SOURCE_TOUCHSCREEN
+            root.dispatchTouchEvent(event)
+            event.recycle()
+        }
+    }
+
     private fun waitUntil(timeoutMs: Long, condition: () -> Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val deadline = SystemClock.uptimeMillis() + timeoutMs
@@ -634,7 +722,7 @@ class PamGestureAnimationInstrumentedTest {
             var met = false
             onMain(instrumentation) { met = condition() }
             if (met) return
-            SystemClock.sleep(16)
+            awaitFrames(instrumentation)
         }
     }
 
@@ -663,7 +751,7 @@ class PamGestureAnimationInstrumentedTest {
         while (!focused && SystemClock.uptimeMillis() < deadline) {
             instrumentation.waitForIdleSync()
             onMain(instrumentation) { focused = activity.hasWindowFocus() }
-            if (!focused) SystemClock.sleep(50)
+            if (!focused) awaitFrames(instrumentation)
         }
         assertTrue("Test activity never gained window focus", focused)
         return activity

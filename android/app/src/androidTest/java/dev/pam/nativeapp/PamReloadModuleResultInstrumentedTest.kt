@@ -67,9 +67,9 @@ class PamReloadModuleResultInstrumentedTest {
             runtime.start(oldEntry, widthDp = 360f, heightDp = 640f, textScale = 1f, darkAppearance = false)
         }
         try {
-            assertTrue("Initial PHP request never became ready: $reports", ready.await(30, TimeUnit.SECONDS))
+            assertTrue("Initial PHP request never became ready: ${synchronized(reports) { reports.toList() }}", ready.await(30, TimeUnit.SECONDS))
             instrumentation.runOnMainSync { runtime.reload(newEntry.absolutePath) }
-            assertTrue("New PHP request never became ready: $reports", reloaded.await(30, TimeUnit.SECONDS))
+            assertTrue("New PHP request never became ready: ${synchronized(reports) { reports.toList() }}", reloaded.await(30, TimeUnit.SECONDS))
             assertTrue("Old and new requests must reach the native module", held.keys.containsAll(listOf("beforeReload", "duringShutdown", "current")))
             instrumentation.runOnMainSync {
                 // Both complete after the new PHP entry reused request ID 3.
@@ -83,7 +83,7 @@ class PamReloadModuleResultInstrumentedTest {
                 )
                 PamDeepLinks.reportOpened("test://reload-proof")
             }
-            assertTrue("Linking results never arrived: $reports", received.await(30, TimeUnit.SECONDS))
+            assertTrue("Linking results never arrived: ${synchronized(reports) { reports.toList() }}", received.await(30, TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             val snapshot = synchronized(results) { results.toList() }
             android.util.Log.i("PamReloadResult", snapshot.toString())

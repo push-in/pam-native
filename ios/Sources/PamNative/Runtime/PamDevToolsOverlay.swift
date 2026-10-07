@@ -157,14 +157,37 @@ public final class PamDevToolsOverlay: UIView {
         if visible {
             frameWindowStarted = 0
             frameCount = 0
-            let link = CADisplayLink(target: self, selector: #selector(frameDidRender(_:)))
-            link.add(to: .main, forMode: .common)
-            displayLink = link
+            startDisplayLink()
             renderMetrics()
         } else {
-            displayLink?.invalidate()
-            displayLink = nil
+            stopDisplayLink()
         }
+    }
+
+    // The display link retains its target: it runs only while the overlay is
+    // in a window, so a removed overlay is released and stops ticking.
+    override public func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window == nil {
+            stopDisplayLink()
+        } else if !isHidden {
+            frameWindowStarted = 0
+            frameCount = 0
+            startDisplayLink()
+        }
+    }
+
+    private func startDisplayLink() {
+        stopDisplayLink()
+        guard window != nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(frameDidRender(_:)))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    private func stopDisplayLink() {
+        displayLink?.invalidate()
+        displayLink = nil
     }
 
     private func configure() {

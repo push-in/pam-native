@@ -52,7 +52,7 @@ class NativeCryptoBridgeInstrumentedTest {
             runtime.start(entry, widthDp = 360f, heightDp = 640f, textScale = 1f, darkAppearance = false)
         }
         try {
-            assertTrue("PHP never reported: $reports", reported.await(60, TimeUnit.SECONDS))
+            assertTrue("PHP never reported: ${synchronized(reports) { reports.toList() }}", reported.await(60, TimeUnit.SECONDS))
             val report = JSONObject(synchronized(reports) { reports.first { it.startsWith("PAMCRYPTO1 ") } }.removePrefix("PAMCRYPTO1 "))
             assertEquals(report.toString(), 0, report.getJSONArray("failures").length())
             assertTrue(report.toString(), report.getInt("checked") >= 120)

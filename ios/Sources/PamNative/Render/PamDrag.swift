@@ -221,6 +221,8 @@ final class PamDragController {
     private var thresholdReached = false
     private var runner: PamMotionRunner?
     private let haptics = UIImpactFeedbackGenerator(style: .light)
+    private var releasing = false
+    private var releaseSettle: (() -> Void)?
 
     var currentIndex: Int { restingIndex }
 
@@ -281,11 +283,36 @@ final class PamDragController {
         }
     }
 
+    /// Ends the drag. A settle that completes within the release (reduced
+    /// motion, or already at its snap) is reported by `flushReleaseSettle()`,
+    /// after the gesture end has been delivered: settle never precedes end.
     func end(velocity: CGPoint, cancelled: Bool) -> PamDragRelease? {
+        releasing = true
+        defer { releasing = false }
+        return release(velocity: velocity, cancelled: cancelled)
+    }
+
+    /// Reports a settle deferred by `end`; call after delivering the end.
+    func flushReleaseSettle() {
+        guard let settle = releaseSettle else { return }
+        releaseSettle = nil
+        settle()
+    }
+
+    private func settled(_ index: Int, _ position: Double) {
+        guard let callback = onSettle else { return }
+        if releasing {
+            releaseSettle = { callback(index, position) }
+        } else {
+            callback(index, position)
+        }
+    }
+
+    private func release(velocity: CGPoint, cancelled: Bool) -> PamDragRelease? {
         guard let current = config, let target = target() else { return nil }
         let position = read(target, current)
         if !current.snapOnRelease {
-            onSettle?(-1, position)
+            settled(-1, position)
             return PamDragRelease(snapIndex: -1, thresholdReached: false)
         }
         let axisVelocity = Double(current.horizontal ? velocity.x : velocity.y)
@@ -339,7 +366,7 @@ final class PamDragController {
                 guard let self else { return }
                 self.runner = nil
                 self.restingIndex = index
-                self.onSettle?(index, destination)
+                self.settled(index, destination)
             }
         )
         runner = next

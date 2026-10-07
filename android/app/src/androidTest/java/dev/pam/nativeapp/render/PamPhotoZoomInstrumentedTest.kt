@@ -21,6 +21,7 @@ import dev.pam.nativeapp.protocol.WireValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
@@ -28,6 +29,10 @@ import java.io.File
 /** Same stable pan -> translation -> pinch -> scale -> image topology as the photo viewer. */
 @RunWith(AndroidJUnit4::class)
 class PamPhotoZoomInstrumentedTest {
+    /** Zoom transitions are observed in flight; CI emulators disable animations. */
+    @get:Rule
+    val animations = PamAnimationsEnabledRule()
+
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
 
     @Test
@@ -72,7 +77,7 @@ class PamPhotoZoomInstrumentedTest {
                 photo.touch(start, MotionEvent.ACTION_MOVE, 2, distance)
                 heldScale = photo.scale.scaleX
             }
-            SystemClock.sleep(240)
+            awaitFrames(instrumentation, 15)
             onMain {
                 assertEquals("A stationary pinch owns scale; the previous zoom must stop writing", heldScale, photo.scale.scaleX, 0.015f)
                 photo.touch(start, MotionEvent.ACTION_POINTER_UP or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2, distance)
@@ -89,7 +94,7 @@ class PamPhotoZoomInstrumentedTest {
                 assertEquals("Committing the result must not jump to the old authored target", heldScale, photo.scale.scaleX, 0.015f)
                 assertSame(photo.drawable, photo.image.drawable)
             }
-            SystemClock.sleep(100)
+            awaitFrames(instrumentation, 6)
             onMain { assertEquals("Committed scale stays unchanged", heldScale, photo.scale.scaleX, 0.015f) }
         }
         onMain {
@@ -119,7 +124,7 @@ class PamPhotoZoomInstrumentedTest {
             heldX = translation.translationX
             heldY = translation.translationY
         }
-        SystemClock.sleep(160)
+        awaitFrames(instrumentation, 10)
         onMain {
             assertEquals(heldX, translation.translationX, 0.1f)
             assertEquals(heldY, translation.translationY, 0.1f)
@@ -208,7 +213,7 @@ class PamPhotoZoomInstrumentedTest {
                 x = surface.translationX
                 y = surface.translationY
             }
-            SystemClock.sleep(180)
+            awaitFrames(instrumentation, 11)
             onMain {
                 assertEquals("Pinch and pan must stop all in-flight transforms", x, surface.translationX, 0.01f)
                 assertEquals(y, surface.translationY, 0.01f)
@@ -223,7 +228,7 @@ class PamPhotoZoomInstrumentedTest {
                 assertEquals(x.toDouble(), (ended["nativeTranslationX"] as WireValue.Decimal).value * density, 0.01)
                 assertEquals(y.toDouble(), (ended["nativeTranslationY"] as WireValue.Decimal).value * density, 0.01)
             }
-            SystemClock.sleep(850)
+            awaitFrames(instrumentation, 52)
             onMain {
                 assertEquals("Release adopts the actual scale, including after a pan", scale, surface.scaleX, 0.015f)
                 // Existing authored lengths use integer px; verify that contract exactly.
@@ -360,7 +365,7 @@ class PamPhotoZoomInstrumentedTest {
             var ready = false
             onMain { ready = predicate() }
             if (ready) return
-            SystemClock.sleep(16)
+            awaitFrames(instrumentation)
         } while (SystemClock.uptimeMillis() < until)
         error("Photo zoom condition did not settle")
     }

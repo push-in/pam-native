@@ -62,7 +62,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
     private val choreographer = Choreographer.getInstance()
     private val frameCallback = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
-            if (!visible) return
+            if (!visible || !isAttachedToWindow) return
             if (frameWindowStarted == 0L) frameWindowStarted = frameTimeNanos
             frameCount++
             val elapsed = frameTimeNanos - frameWindowStarted
@@ -95,6 +95,18 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         )
     }
 
+    // The frame loop runs only while the overlay is in a window; a visible
+    // overlay moved to another window resumes measuring there.
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        if (visible) {
+            frameWindowStarted = 0L
+            frameCount = 0
+            choreographer.removeFrameCallback(frameCallback)
+            choreographer.postFrameCallback(frameCallback)
+        }
+    }
+
     fun toggle(): Boolean {
         visible = !visible
         visibility = if (visible) View.VISIBLE else View.GONE
@@ -106,7 +118,8 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
         if (visible) {
             frameWindowStarted = 0L
             frameCount = 0
-            choreographer.postFrameCallback(frameCallback)
+            choreographer.removeFrameCallback(frameCallback)
+            if (isAttachedToWindow) choreographer.postFrameCallback(frameCallback)
             renderMetrics()
         } else {
             choreographer.removeFrameCallback(frameCallback)

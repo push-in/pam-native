@@ -62,6 +62,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private var movingRoute: View? = null
     private var layeredRoute: View? = null
     private val awaitingFirstLayout: MutableSet<View> = java.util.Collections.newSetFromMap(IdentityHashMap())
+    private var layoutGeneration = 0L
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingObserver: ViewTreeObserver? = null
@@ -139,20 +140,47 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         // mount and its first layout never add up in a single frame.
         if (!isVisibleRoute && !moved && isAttachedToWindow) {
             awaitingFirstLayout.add(view)
-            Choreographer.getInstance().postFrameCallback { releaseFirstLayout(view) }
+            releaseFirstLayoutOnNextFrame(view)
         }
         view.importantForAccessibility = if (isVisibleRoute) {
             View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         } else {
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
-        addView(
-            view,
-            index.coerceIn(0, childCount),
-            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT),
-        )
-        if (isAttachedToWindow) ensureRouteController(view)
+        val params = LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        val position = index.coerceIn(0, childCount)
+        // Attached hosts mount the route straight through its controller: the
+        // view enters the window once instead of being added, removed for the
+        // fragment and moved back (three attaches and two detaches of the
+        // whole screen subtree).
+        if (!isAttachedToWindow || !addRouteController(view, params, position)) {
+            addView(view, position, params)
+            if (isAttachedToWindow) ensureRouteController(view)
+        }
         if (isInitialRoute) setActiveRoute(view)
+    }
+
+    /**
+     * Releases a hidden route's first layout on the frame after the one that
+     * lays out its mount. A mount from a frame callback (engine batches) is
+     * laid out by that frame's traversal, so the next frame callback releases
+     * it; a mount outside a frame has not been laid out yet when the next
+     * callback runs (callbacks precede the traversal), so it waits one more.
+     */
+    private fun releaseFirstLayoutOnNextFrame(view: View) {
+        val mountLayout = layoutGeneration
+        Choreographer.getInstance().postFrameCallback(object : Choreographer.FrameCallback {
+            private var deferred = false
+
+            override fun doFrame(frameTimeNanos: Long) {
+                if (!deferred && layoutGeneration == mountLayout && view in awaitingFirstLayout) {
+                    deferred = true
+                    Choreographer.getInstance().postFrameCallback(this)
+                    return
+                }
+                releaseFirstLayout(view)
+            }
+        })
     }
 
     override fun onAttachedToWindow() {
@@ -164,6 +192,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        layoutGeneration++
         if (awaitingFirstLayout.isEmpty()) {
             super.onLayout(changed, left, top, right, bottom)
         } else {
@@ -876,12 +905,34 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         if (routeControllers.containsKey(view)) return
         val manager = fragmentManager() ?: return
         if (manager.isStateSaved) return
-        val fragment = PamRouteFragment().also { it.bind(view) }
-        routeControllers[view] = fragment
         val position = indexOfChild(view)
+        val params = view.layoutParams
         suppressControllerRemoval = true
         if (view.parent === this) removeView(view)
         suppressControllerRemoval = false
+        commitRouteController(manager, view)
+        // The FragmentManager re-adds the view right after the previously
+        // added route fragment's view, not where the engine placed it.
+        if (position < 0) return
+        if (view.parent !== this) addView(view, position.coerceIn(0, childCount), params)
+        restoreRoutePosition(view, position)
+    }
+
+    /** Adds [view] (not yet a child) through a new route controller. */
+    private fun addRouteController(view: View, params: LayoutParams, position: Int): Boolean {
+        if (view.parent != null || routeControllers.containsKey(view)) return false
+        val manager = fragmentManager() ?: return false
+        if (manager.isStateSaved) return false
+        view.layoutParams = params
+        commitRouteController(manager, view)
+        if (view.parent !== this) addView(view, position.coerceIn(0, childCount), params)
+        restoreRoutePosition(view, position)
+        return true
+    }
+
+    private fun commitRouteController(manager: FragmentManager, view: View) {
+        val fragment = PamRouteFragment().also { it.bind(view) }
+        routeControllers[view] = fragment
         manager.beginTransaction()
             .setReorderingAllowed(true)
             .add(id, fragment, "pam-route-${id}-${nextControllerId++}")
@@ -890,22 +941,18 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 if (view === activeRoute) Lifecycle.State.RESUMED else Lifecycle.State.STARTED,
             )
             .commitNow()
-        // The FragmentManager re-adds the view right after the previously
-        // added route fragment's view, not where the engine placed it.
-        if (position >= 0) restoreRoutePosition(view, position)
     }
 
+    /** Moves [view] to [position] without taking it out of the window. */
     private fun restoreRoutePosition(view: View, position: Int) {
         if (view.parent !== this) return
         val target = position.coerceIn(0, childCount - 1)
         if (indexOfChild(view) == target) return
-        suppressControllerRemoval = true
-        try {
-            removeView(view)
-            addView(view, target)
-        } finally {
-            suppressControllerRemoval = false
-        }
+        val params = view.layoutParams
+        detachViewFromParent(view)
+        attachViewToParent(view, target, params)
+        requestLayout()
+        invalidate()
     }
 
     private fun updateControllerLifecycles() {

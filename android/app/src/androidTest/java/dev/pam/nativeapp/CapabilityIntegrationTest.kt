@@ -6,6 +6,9 @@ import android.view.ViewGroup
 import android.widget.TextView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.pam.nativeapp.render.awaitFrames
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.After
 import org.junit.Test
@@ -69,7 +72,9 @@ class CapabilityIntegrationTest {
             overlay.toggle()
         }
 
-        instrumentation.waitForIdleSync()
+        // The visible overlay measures frame rate on every frame; wait for
+        // rendered frames, not for an idle main thread.
+        awaitFrames(instrumentation, 2)
         instrumentation.runOnMainSync {
             assertTrue(overlay.isShown)
             val text = descendantText(overlay).joinToString("\n")
@@ -113,19 +118,20 @@ class CapabilityIntegrationTest {
             snapshot = JSONObject(overlay.snapshotJson(capturedAtUnixMs = 1234))
         }
 
-        assert(snapshot.getInt("schemaVersion") == 1)
-        assert(snapshot.getInt("surfaceCode") == 2)
-        assert(snapshot.getInt("platformCode") == 1)
-        assert(snapshot.getLong("capturedAtUnixMs") == 1234L)
-        assert(snapshot.getJSONArray("timeline").length() == 8)
-        assert(!snapshot.toString().contains("secret-"))
-        assert(!snapshot.toString().contains("secret.example"))
+        // Kotlin assert() is a no-op on Android (no -ea): use JUnit.
+        assertEquals(1, snapshot.getInt("schemaVersion"))
+        assertEquals(2, snapshot.getInt("surfaceCode"))
+        assertEquals(1, snapshot.getInt("platformCode"))
+        assertEquals(1234L, snapshot.getLong("capturedAtUnixMs"))
+        assertEquals(8, snapshot.getJSONArray("timeline").length())
+        assertFalse(snapshot.toString().contains("secret-"))
+        assertFalse(snapshot.toString().contains("secret.example"))
         val network = snapshot.getJSONArray("timeline").getJSONObject(7)
-        assert(network.getInt("kindCode") == RuntimeDiagnosticKind.NETWORK.value)
-        assert(network.getInt("methodCode") == RuntimeHttpMethod.PATCH.value)
-        assert(network.getInt("statusCode") == 202)
-        assert(network.getInt("requestBytes") == 17)
-        assert(network.getInt("responseBytes") == 8)
+        assertEquals(RuntimeDiagnosticKind.NETWORK.value, network.getInt("kindCode"))
+        assertEquals(RuntimeHttpMethod.PATCH.value, network.getInt("methodCode"))
+        assertEquals(202, network.getInt("statusCode"))
+        assertEquals(17, network.getInt("requestBytes"))
+        assertEquals(8, network.getInt("responseBytes"))
     }
 
     private fun descendantText(view: View?): List<String> {

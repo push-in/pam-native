@@ -8507,7 +8507,14 @@ class PamRenderer(
             type = type or InputType.TYPE_TEXT_FLAG_MULTI_LINE
         }
         if ((type and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT) {
-            if (!state.flag(PropKey.INPUT_AUTO_CORRECT, true)) {
+            // A mask or currency format rewrites the whole text on every
+            // keystroke. An IME composing over it (suggestions on) commits
+            // its next keys against the replaced composition and can drop or
+            // repeat one of a fast burst; formatted text never takes
+            // suggestions anyway.
+            val formatted = state.integer(PropKey.INPUT_FORMAT, INPUT_FORMAT_NONE.toLong()).toInt() !=
+                INPUT_FORMAT_NONE
+            if (!state.flag(PropKey.INPUT_AUTO_CORRECT, true) || formatted) {
                 type = type or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             }
             type = type or when (

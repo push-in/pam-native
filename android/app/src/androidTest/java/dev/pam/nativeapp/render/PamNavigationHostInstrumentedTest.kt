@@ -614,11 +614,19 @@ class PamNavigationHostInstrumentedTest {
     fun transitionsReuseHardwareAcceleratedDisplayListsWithoutBitmapLayers() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
+        val ended = CountDownLatch(1)
         try {
+            lateinit var navigation: PamNavigationHost
             lateinit var first: View
             lateinit var second: View
+            val layerTypes = mutableSetOf<Int>()
+            val sample = android.view.ViewTreeObserver.OnPreDrawListener {
+                layerTypes += first.layerType
+                layerTypes += second.layerType
+                true
+            }
             onMain(instrumentation) {
-                val navigation = PamNavigationHost(activity).apply {
+                navigation = PamNavigationHost(activity).apply {
                     layoutParams = FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -626,17 +634,33 @@ class PamNavigationHostInstrumentedTest {
                     operation = OPERATION_PUSH
                     transition = TRANSITION_SLIDE_FROM_RIGHT
                     durationMs = 120
+                    setGestureNavigation(
+                        enabled = false,
+                        edgeWidth = 24f,
+                        threshold = 0.35f,
+                        onPop = null,
+                        onTransitionEnd = { ended.countDown() },
+                        onGestureStart = null,
+                        onGestureEnd = null,
+                        onGestureCancel = null,
+                    )
                 }
                 activity.host.addView(navigation)
                 first = View(activity)
                 second = View(activity)
                 navigation.insert(first, 0)
                 navigation.insert(second, 1)
+                navigation.viewTreeObserver.addOnPreDrawListener(sample)
                 navigation.navigate(1)
             }
 
-            instrumentation.waitForIdleSync()
+            assertTrue("push transition must end", ended.await(5, TimeUnit.SECONDS))
+            awaitFrames(instrumentation)
             onMain(instrumentation) {
+                navigation.viewTreeObserver.removeOnPreDrawListener(sample)
+                // The outgoing screen may be composited from a hardware layer
+                // while it moves; it is never drawn into a software bitmap.
+                assertTrue(layerTypes.toString(), View.LAYER_TYPE_SOFTWARE !in layerTypes)
                 assertEquals(View.LAYER_TYPE_NONE, first.layerType)
                 assertEquals(View.LAYER_TYPE_NONE, second.layerType)
             }
@@ -786,7 +810,9 @@ class PamNavigationHostInstrumentedTest {
                 navigation.insert(current, 0)
                 navigation.insert(prewarmed, 0)
             }
-            instrumentation.waitForIdleSync()
+            // Mounted outside a frame: the next frame lays out the mount, the
+            // one after it the hidden route.
+            awaitFrames(instrumentation, 2)
             onMain(instrumentation) {
                 // Mounted hidden: laid out at full size on the frame after its mount.
                 assertEquals(View.INVISIBLE, prewarmed.visibility)
@@ -796,7 +822,7 @@ class PamNavigationHostInstrumentedTest {
                 assertSame(prewarmed, navigation.getChildAt(1))
                 assertTrue(prewarmed.isAttachedToWindow)
             }
-            instrumentation.waitForIdleSync()
+            awaitFrames(instrumentation)
             onMain(instrumentation) {
                 assertEquals(0, detaches)
                 assertEquals(800, prewarmed.height)
@@ -819,7 +845,7 @@ class PamNavigationHostInstrumentedTest {
                 activity.host.addView(navigation, FrameLayout.LayoutParams(390, 800))
                 navigation.insert(View(activity), 0)
             }
-            instrumentation.waitForIdleSync()
+            awaitFrames(instrumentation)
             onMain(instrumentation) {
                 hidden = View(activity)
                 navigation.insert(hidden, 0)
@@ -831,7 +857,7 @@ class PamNavigationHostInstrumentedTest {
                     }
                 })
             }
-            instrumentation.waitForIdleSync()
+            awaitFrames(instrumentation, 2)
             onMain(instrumentation) {
                 assertEquals(0, sizeInMountFrame)
                 assertEquals(800, hidden.height)

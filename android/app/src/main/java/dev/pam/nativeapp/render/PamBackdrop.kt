@@ -67,8 +67,12 @@ internal class PamBackdrop(private val host: PamContainer) : ViewTreeObserver.On
 
     override fun onPreDraw(): Boolean {
         // Content behind may change without invalidating the host (a list
-        // scrolling under a blurred header): redraw within this frame.
-        if (host.isShown) host.invalidate()
+        // scrolling under a blurred header): redraw within this frame. Only
+        // when something in the window changed since the last frame (any
+        // invalidation or property change marks the root dirty); otherwise
+        // the host's own invalidation would schedule another traversal and
+        // an idle screen would redraw on every frame, forever.
+        if (host.isShown && host.rootView.isDirty) host.invalidate()
         return true
     }
 

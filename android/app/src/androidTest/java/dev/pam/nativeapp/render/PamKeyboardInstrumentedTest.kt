@@ -231,8 +231,10 @@ class PamKeyboardInstrumentedTest {
                 ) as EditText
                 input.requestFocus()
             }
-            instrumentation.sendStringSync("qa teste")
-            instrumentation.waitForIdleSync()
+            // Typed into the field itself, one key at a time: injected keys go
+            // through whichever IME and window hold focus at that moment
+            // (autocorrect, a late focus change), which made this test flaky.
+            onMain(instrumentation) { typeInto(input, "qa teste") }
             waitUntil(instrumentation, "IME text dispatched") { changes.lastOrNull() == "qa teste" }
             assertTrue(changes.contains("qa test"))
 
@@ -248,8 +250,7 @@ class PamKeyboardInstrumentedTest {
                 )))
                 assertEquals("qa teste", input.text.toString())
             }
-            instrumentation.sendStringSync(" 1")
-            instrumentation.waitForIdleSync()
+            onMain(instrumentation) { typeInto(input, " 1") }
             waitUntil(instrumentation, "suffix dispatched") { changes.lastOrNull() == "qa teste 1" }
             onMain(instrumentation) {
                 assertEquals("qa teste 1", input.text.toString())
@@ -484,7 +485,7 @@ class PamKeyboardInstrumentedTest {
             var satisfied = false
             instrumentation.runOnMainSync { satisfied = condition() }
             if (satisfied) return
-            Thread.sleep(50)
+            awaitFrames(instrumentation)
         }
         throw AssertionError("Timed out waiting for $description ($lastGeometry)")
     }
@@ -502,6 +503,11 @@ class PamKeyboardInstrumentedTest {
         kind = kind,
         properties = properties,
     )
+
+    private fun typeInto(input: EditText, text: String) {
+        val keys = android.view.KeyCharacterMap.load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
+        requireNotNull(keys.getEvents(text.toCharArray())).forEach(input::dispatchKeyEvent)
+    }
 
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity =
         instrumentation.startActivitySync(

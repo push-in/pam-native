@@ -209,6 +209,8 @@ internal class PamDragController(private val host: ViewGroup) {
     private var thresholdReached = false
     private var runner: PamMotionRunner? = null
     private var lastPosition = 0.0
+    private var releasing = false
+    private var releaseSettle: (() -> Unit)? = null
 
     val currentIndex: Int get() = restingIndex
 
@@ -265,13 +267,43 @@ internal class PamDragController(private val host: ViewGroup) {
         }
     }
 
+    /**
+     * Ends the drag. A settle that completes within the release (reduced
+     * motion, or already at its snap) is reported by [flushReleaseSettle],
+     * after the gesture end has been delivered: settle never precedes end.
+     */
     fun end(velocityX: Float, velocityY: Float, cancelled: Boolean): PamDragRelease? {
+        releasing = true
+        try {
+            return release(velocityX, velocityY, cancelled)
+        } finally {
+            releasing = false
+        }
+    }
+
+    /** Reports a settle deferred by [end]; call after delivering the end. */
+    fun flushReleaseSettle() {
+        val settle = releaseSettle ?: return
+        releaseSettle = null
+        settle()
+    }
+
+    private fun settled(index: Int, position: Double) {
+        val callback = onSettle ?: return
+        if (releasing) {
+            releaseSettle = { callback(index, position) }
+        } else {
+            callback(index, position)
+        }
+    }
+
+    private fun release(velocityX: Float, velocityY: Float, cancelled: Boolean): PamDragRelease? {
         val current = config ?: return null
         val target = target() ?: return null
         val density = density()
         val position = read(target, current)
         if (!current.snapOnRelease) {
-            onSettle?.invoke(-1, position / density())
+            settled(-1, position / density())
             return PamDragRelease(-1, false)
         }
         val velocity = (if (current.horizontal) velocityX else velocityY).toDouble()
@@ -322,7 +354,7 @@ internal class PamDragController(private val host: ViewGroup) {
             runner = null
             restingIndex = index
             lastPosition = destination
-            onSettle?.invoke(index, destination / density())
+            settled(index, destination / density())
             Unit
         }
         val next = PamMotionRunner(

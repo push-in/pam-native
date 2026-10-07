@@ -220,4 +220,29 @@ final class PamMotionTests: XCTestCase {
         XCTAssertEqual(clamped.lines, all.lines)
         XCTAssertTrue(clamped.lineWidthsJSON.hasPrefix("["))
     }
+
+    /// Mirrors PamGestureAnimationInstrumentedTest.storyDragToDismissStaysOnTheUiThreadUntilItSettles
+    /// under reduced motion: a settle completed within the release follows the end.
+    func testReducedMotionDragSettleIsReportedAfterTheRelease() throws {
+        PamMotionPolicy.reduceMotionOverride = true
+        defer { PamMotionPolicy.reduceMotionOverride = nil }
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
+        let page = UIView(frame: host.bounds)
+        host.addSubview(page)
+        let drag = PamDragController(host: host, firstChild: { page })
+        var settles: [Int] = []
+        drag.configure(
+            try XCTUnwrap(PamDragConfig.parse("axis=y\nmin=0\nsnaps=0,100%\nthreshold=120\nvelocity=900")),
+            onSettle: { index, _ in settles.append(index) }
+        )
+        drag.begin()
+        drag.update(translation: CGPoint(x: 0, y: 300))
+        let release = try XCTUnwrap(drag.end(velocity: .zero, cancelled: false))
+        XCTAssertEqual(release.snapIndex, 1)
+        XCTAssertEqual(settles, [], "settle must wait for the end to be delivered")
+        drag.flushReleaseSettle()
+        XCTAssertEqual(settles, [1])
+        drag.flushReleaseSettle()
+        XCTAssertEqual(settles, [1])
+    }
 }

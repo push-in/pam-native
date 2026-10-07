@@ -55,10 +55,15 @@ class PamLayoutOriginInstrumentedTest {
                 val root = activity.host.getChildAt(0) as ViewGroup
                 val child = root.getChildAt(0)
                 val density = child.resources.displayMetrics.density
-                assertEquals((-34f * density).roundToInt(), child.left)
-                assertEquals((-200f * density).roundToInt(), child.top)
-                assertEquals((390f * density).roundToInt(), child.width)
-                assertEquals((200f * density).roundToInt(), child.height)
+                // Both edges snap to the pixel grid independently (Yoga), so
+                // the size is the distance between the snapped edges: at
+                // density 2.75 a 390 dp box from -34 dp spans 1072 px, not
+                // round(1072.5).
+                fun edge(dp: Float) = (dp * density).roundToInt()
+                assertEquals(edge(-34f), child.left)
+                assertEquals(edge(-200f), child.top)
+                assertEquals(edge(-34f + 390f) - edge(-34f), child.width)
+                assertEquals(edge(-200f + 200f) - edge(-200f), child.height)
                 renderer.close()
             }
         } finally {

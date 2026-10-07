@@ -1905,7 +1905,14 @@ public final class PamRenderer {
     private func applyInputTextTraits(view: UIView, nodeId: Int64) {
         guard let field = view as? UITextField, let state = nodes[nodeId] else { return }
         let autoCorrect = state.properties[PamConstants.inputAutoCorrect]?.boolOrNil()
-        let correction: UITextAutocorrectionType = autoCorrect.map { $0 ? .yes : .no } ?? .default
+        // A mask or currency format rewrites the text on every keystroke;
+        // autocorrection over it can replace a formatted value (Android
+        // disables IME suggestions for the same inputs).
+        let formatted = (state.properties[PamConstants.inputFormat]?.integerOrNil() ?? 1) != 1
+        let correction: UITextAutocorrectionType = formatted
+            ? .no
+            : autoCorrect.map { $0 ? .yes : .no } ?? .default
+        field.spellCheckingType = formatted ? .no : .default
         let mode = (state.properties[PamConstants.inputAutoCapitalize]?.integerOrNil())
             .flatMap(PamInputCapitalization.init(rawValue:)) ?? .sentences
         let capitalization: UITextAutocapitalizationType
@@ -2036,6 +2043,7 @@ public final class PamRenderer {
              PamConstants.inputFormatSuffix,
              PamConstants.inputFormatDecimalDigits,
              PamConstants.inputFormatLocale:
+            applyInputTextTraits(view: view, nodeId: nodeId)
             if let field = view as? PamInputField, let state = nodes[nodeId] {
                 field.configureInputFormat(
                     format: Int(state.properties[PamConstants.inputFormat]?.integerOrNil() ?? 1),
@@ -5185,6 +5193,8 @@ public final class PamRenderer {
             defer {
                 if sender.state == .ended || sender.state == .cancelled || sender.state == .failed {
                     dragRelease = nil
+                    // A settle completed within the release follows the end.
+                    if dragging { drag?.flushReleaseSettle() }
                 }
             }
 

@@ -578,6 +578,21 @@ final class CapabilityIntegrationTests: XCTestCase {
         XCTAssertTrue(overlay.accessibilityValue?.contains("permissions.request") == true)
     }
 
+    /// The frame-rate display link retains its target: removing a visible
+    /// overlay from its window must stop it so the overlay is released.
+    func testVisibleDevToolsOverlayIsReleasedAfterLeavingItsWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 640))
+        weak var released: PamDevToolsOverlay?
+        autoreleasepool {
+            let overlay = PamDevToolsOverlay(frame: window.bounds)
+            window.addSubview(overlay)
+            overlay.setVisible(true)
+            released = overlay
+            overlay.removeFromSuperview()
+        }
+        XCTAssertNil(released)
+    }
+
     func testDevToolsExportsBoundedRedactedCrossHostSnapshot() throws {
         let overlay = PamDevToolsOverlay(frame: .zero)
         for index in 0..<7 {
