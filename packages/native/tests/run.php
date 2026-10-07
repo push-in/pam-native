@@ -6666,6 +6666,85 @@ $assert(
     $boundedPreloadFactories === 20,
     'Speculative routes must use a 16-entry LRU bound and be releasable under memory pressure.',
 );
+$prewarmBuilds = 0;
+$prewarmFlags = [];
+$prewarmScreen = new class extends Component implements NavigationLifecycleAware {
+    use InteractsWithNavigationLifecycle;
+
+    public int $focused = 0;
+    public int $removed = 0;
+    public bool $mountedWhilePrewarming = false;
+
+    public function mount(): void
+    {
+        $this->mountedWhilePrewarming = Navigator::isPrewarming();
+    }
+
+    public function navigationFocused(RouteContext $route): void
+    {
+        $this->focused++;
+    }
+
+    public function navigationRemoved(RouteContext $route): void
+    {
+        $this->removed++;
+    }
+
+    public function render(): \Pam\Native\Renderable
+    {
+        return Screen::make(Text::make('Prewarmed'));
+    }
+};
+$prewarmNavigator = Router::stack('home')
+    ->route('home', static fn () => Screen::make(Text::make('Home')))
+    ->route('detail', static function () use (&$prewarmBuilds, &$prewarmFlags, $prewarmScreen) {
+        $prewarmBuilds++;
+        $prewarmFlags[] = Navigator::isPrewarming();
+        return $prewarmScreen;
+    })
+    ->route('other', static fn () => Screen::make(Text::make('Other')))
+    ->build();
+$prewarmKeys = static fn (Navigator $navigator): array => array_map(
+    static fn ($screen): ?string => $screen->toElement()->elementKey(),
+    $navigator->render()->toElement()->children(),
+);
+$assert(
+    !$prewarmNavigator->prewarm('home') && $prewarmNavigator->prewarm('detail', ['id' => 7])
+        && $prewarmNavigator->isPrewarmed('detail', ['id' => 7])
+        && !$prewarmNavigator->isPrewarmed('detail', ['id' => 8]),
+    'prewarm() must mount a route other than the current one and match only its exact params.',
+);
+$warmKeys = $prewarmKeys($prewarmNavigator);
+$assert(
+    count($warmKeys) === 2 && $prewarmNavigator->currentRoute() === 'home'
+        && $prewarmBuilds === 1 && $prewarmScreen->mountedWhilePrewarming
+        && $prewarmScreen->focused === 0 && !Navigator::isPrewarming(),
+    'A prewarmed screen must render hidden under the current one, mounted while isPrewarming(), without focus.',
+);
+$prewarmNavigator->push('detail', ['id' => 7]);
+$pushedKeys = $prewarmKeys($prewarmNavigator);
+$assert(
+    $prewarmBuilds === 1 && end($pushedKeys) === $warmKeys[0] && $prewarmScreen->focused === 1
+        && !$prewarmNavigator->isPrewarmed('detail', ['id' => 7]),
+    'push() must reuse the prewarmed screen (same element key, no new build) and focus it then.',
+);
+$prewarmNavigator->pop();
+$prewarmNavigator->render();
+$prewarmNavigator->prewarm('detail', ['id' => 9]);
+$prewarmNavigator->render();
+$prewarmNavigator->push('other');
+$prewarmNavigator->render();
+$assert(
+    !$prewarmNavigator->isPrewarmed('detail', ['id' => 9]) && $prewarmScreen->removed >= 1,
+    'Any other navigation must release an unused prewarmed screen.',
+);
+$prewarmNavigator->pop();
+$prewarmNavigator->prewarm('detail', ['id' => 10]);
+$prewarmNavigator->cancelPrewarm();
+$assert(
+    !$prewarmNavigator->isPrewarmed('detail', ['id' => 10]),
+    'cancelPrewarm() must unmount the prewarmed screen.',
+);
 $lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
     use InteractsWithNavigationLifecycle;
 
@@ -6966,8 +7045,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.24.0',
-    'The runtime SDK contract must match the 1.24.0 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.25.0',
+    'The runtime SDK contract must match the 1.25.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

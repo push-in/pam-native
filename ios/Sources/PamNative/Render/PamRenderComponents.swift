@@ -379,6 +379,17 @@ final class PamAnchoredScrollView: UIScrollView {
 
 final class PamVirtualListView: UIScrollView {
     var onViewportChange: (() -> Void)?
+
+    /// In a window and not hidden by any ancestor (a prewarmed route is).
+    var pamIsShown: Bool {
+        guard window != nil else { return false }
+        var view: UIView? = self
+        while let current = view {
+            if current.isHidden || current.alpha < 0.01 { return false }
+            view = current.superview
+        }
+        return true
+    }
     /// RN `pagingEnabled` for lists: one item per page.
     var pamPagingEnabled = false {
         didSet { decelerationRate = pamPagingEnabled ? .fast : .normal }

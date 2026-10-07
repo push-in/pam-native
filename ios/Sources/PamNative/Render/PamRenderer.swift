@@ -20,6 +20,9 @@ private enum PamReturnKey: Int64 {
 }
 
 public final class PamRenderer {
+    static let hiddenCellMountBudget: CFTimeInterval = 0.005
+    private var deferredVirtualListSyncs = Set<Int64>()
+
     var onNativeChildVisibility: ((Int64, Int64, Bool) -> Void)?
     private let fontLoader = PamFontLoader()
     private let host: UIView
@@ -488,11 +491,19 @@ public final class PamRenderer {
             state.parent == parent &&
             virtualListAncestor(of: parent) == nil
         let previousPosition = keepsPlace ? children[parent]?.firstIndex(of: id) : nil
+        let previousParent = state.parent
         removeChild(from: state.parent, child: id)
         state.parent = parent
         state.index = index
         addChild(to: parent, child: id)
         if let previousPosition, children[parent]?.firstIndex(of: id) == previousPosition {
+            return
+        }
+        if let view = views[id], previousParent == parent,
+           let navigation = views[parent] as? PamNavigationHost {
+            // A route changing places in its stack (prewarmed or kept alive)
+            // is reordered without leaving the window.
+            navigation.reorderRoute(view, index: children[parent]?.firstIndex(of: id) ?? index)
             return
         }
         views[id]?.removeFromSuperview()
@@ -686,11 +697,28 @@ public final class PamRenderer {
                 visible.insert(pinned.0)
             }
         }
+        // A list nobody sees yet (a screen mounted ahead, hidden under the
+        // visible one) creates its cells a few per frame within a budget.
+        let deferMounts = !list.pamIsShown
+        let budgetStart = CACurrentMediaTime()
+        var deferred = false
         for cellId in cellIds {
             if visible.contains(cellId) {
+                if deferMounts, views[cellId] == nil,
+                   CACurrentMediaTime() - budgetStart > PamRenderer.hiddenCellMountBudget {
+                    deferred = true
+                    continue
+                }
                 materializeSubtree(cellId)
             } else if views[cellId] != nil {
                 dematerializeSubtree(cellId)
+            }
+        }
+        if deferred, deferredVirtualListSyncs.insert(id).inserted {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0 / 60.0) { [weak self] in
+                guard let self else { return }
+                self.deferredVirtualListSyncs.remove(id)
+                self.syncVirtualList(id)
             }
         }
     }

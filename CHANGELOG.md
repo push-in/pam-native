@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.25.0 - 2026-10-07
+
+- `Navigator::prewarm($route, $params)` mounts a screen ahead of navigation,
+  hidden under the current one; a following `push()`/`navigate()` with the
+  same route and params reuses it (same element, views and first layout), so
+  the transition starts on the next frame. One prewarmed screen is kept; it is
+  released after 4 s unused or by any other navigation. `isPrewarmed()`,
+  `cancelPrewarm()` and the static `Navigator::isPrewarming()` (true while a
+  prewarmed screen renders, so `mount()` can defer focus-only work to
+  `navigationFocused()`) complete the API. Call it from a row's `on:pressIn`.
+- Android: a route mounted hidden is measured and laid out on the frame after
+  its mount (the push transition waits that frame), so mount and first layout
+  never add up in one frame; a route moving inside its navigation host is
+  reordered with `detachViewFromParent`/`attachViewToParent` instead of
+  leaving the window, so a press in progress on the Inbox is no longer
+  cancelled and kept-alive routes keep their views and list layout.
+- Android: a hidden virtual list (`!isShown`) creates its cells within 5 ms
+  per frame and finishes them on the following frames (10 ms once shown);
+  cell extents are laid out at once. The first layout after a commit starts
+  at `initialScrollIndex` instead of binding position 0 and scrolling a frame
+  later. A list resting at its start whose rows all fit is no longer treated
+  as "at its end" when its viewport shrinks (an Inbox banner no longer jumps
+  the list to its last rows).
+- Android: the outgoing screen of a navigation transition is drawn into a
+  hardware layer for the duration of the animation instead of re-rendering
+  its translucent subtree every frame.
+- iOS parity (written on Linux, not compiled): `PamNavigationHost.reorderRoute`
+  and `PamRenderer.move` reorder routes without `removeFromSuperview`, hidden
+  `PamVirtualListView`s materialize visible cells within 5 ms per frame, and
+  the outgoing route is rasterized during the transition. XCTest
+  `testReorderingAPrewarmedRouteKeepsItInTheWindow`; validate on a Mac.
+- Measured in Zé Chat on a Galaxy S10 (R8 build, cold process, phone lock
+  held, five taps of ~95 ms on an Inbox row): the slide starts 15-32 ms after
+  the finger lifts instead of ~100 ms, the commit frame drops from up to
+  44-49 ms to 21-26 ms on the UI thread and every other frame of the open stays
+  under 16.7 ms. New PHP SDK cases and Android instrumented tests
+  (`reorderingAPrewarmedRouteKeepsItAttachedAndItsLayout`,
+  `hiddenRouteIsNotLaidOutInTheFrameThatMountsIt`); see
+  [migration notes](docs/migration-1.25.0.md).
+
 ## 1.24.0 - 2026-10-07
 
 - Faster render pipeline, same frames: on the Zé Chat host benchmark suite

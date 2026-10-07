@@ -38,6 +38,23 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertEqual(second.transform, .identity)
     }
 
+    func testReorderingAPrewarmedRouteKeepsItInTheWindow() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let host = PamNavigationHost(frame: window.bounds)
+        window.addSubview(host)
+        let prewarmed = MovedToWindowCounter()
+        let current = UIView()
+        host.insert(current, index: 0)
+        host.insert(prewarmed, index: 0)
+        let attachments = prewarmed.windowChanges
+
+        host.reorderRoute(prewarmed, index: 1)
+
+        XCTAssertTrue(host.subviews.last === prewarmed)
+        XCTAssertNotNil(prewarmed.window)
+        XCTAssertEqual(prewarmed.windowChanges, attachments)
+    }
+
     func testNativeTabHostRetainsScenesAndSelectsWithoutRemounting() {
         let host = PamTabHost(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let first = UIView()
@@ -286,5 +303,14 @@ final class PamNavigationHostTests: XCTestCase {
         XCTAssertEqual(host.activeSharedElementCount, 0)
         XCTAssertTrue(first.subviews.allSatisfy { !$0.isHidden })
         XCTAssertTrue(second.subviews.allSatisfy { !$0.isHidden })
+    }
+}
+
+private final class MovedToWindowCounter: UIView {
+    var windowChanges = 0
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        windowChanges += 1
     }
 }

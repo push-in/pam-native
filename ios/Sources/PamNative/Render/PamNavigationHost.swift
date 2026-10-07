@@ -128,6 +128,21 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         showOnlyTop()
     }
 
+    /// Moves a route without removing it from the window, so touches in
+    /// progress on other routes are not cancelled and its views stay as they
+    /// are (a screen mounted ahead by Navigator::prewarm() becoming the top).
+    func reorderRoute(_ view: UIView, index: Int) {
+        guard let current = routeViews.firstIndex(where: { $0 === view }) else {
+            insert(view, index: index)
+            return
+        }
+        routeViews.remove(at: current)
+        routeViews.insert(view, at: min(max(index, 0), routeViews.count))
+        if navigationController == nil, view.superview === self {
+            insertSubview(view, at: min(max(index, 0), max(subviews.count - 1, 0)))
+        }
+    }
+
     func removeRoute(_ view: UIView) {
         routeViews.removeAll { $0 === view }
         routeControllers.removeValue(forKey: ObjectIdentifier(view))
@@ -208,6 +223,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             return
         }
         applyProgress(0, incoming: incoming, outgoing: outgoing, kind: kind)
+        // The outgoing screen only fades/slides: rasterize it once instead
+        // of compositing its translucent subtree offscreen every frame.
+        let outgoingRasterized = outgoing?.layer.shouldRasterize ?? true
+        if let outgoing, !outgoingRasterized {
+            outgoing.layer.rasterizationScale = window?.screen.scale ?? UIScreen.main.scale
+            outgoing.layer.shouldRasterize = true
+        }
         let sharedDuration = sharedElements.map { Double($0.config.durationMs) / 1000 }.max() ?? 0
         UIView.animate(
             withDuration: min(max(max(duration, sharedDuration), 0), 2),
@@ -216,6 +238,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         ) {
             self.applyProgress(1, incoming: incoming, outgoing: outgoing, kind: kind)
         } completion: { _ in
+            if !outgoingRasterized { outgoing?.layer.shouldRasterize = false }
             self.finish(incoming: incoming, outgoing: outgoing)
         }
     }

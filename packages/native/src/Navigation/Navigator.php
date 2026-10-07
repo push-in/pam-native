@@ -86,6 +86,18 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     private const MAX_PARKED_PER_ROUTE = 3;
 
     /**
+     * A screen mounted ahead of navigation (see prewarm()): rendered hidden
+     * under the current screen until a push/navigate with the same route and
+     * params turns it into the top of the stack without building it again.
+     *
+     * @var array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>}|null
+     */
+    private ?array $warm = null;
+    private int $warmGeneration = 0;
+    private const WARM_TTL_MS = 4_000;
+    private static int $prewarmDepth = 0;
+
+    /**
      * @param array<array-key, mixed> $routes
      * @param array<array-key, string|true|Closure> $keepAliveRoutes route names, or name => true|Closure(RouteContext): bool
      */
@@ -257,7 +269,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         $previous = $this->currentEntry();
         $this->setActionTransition($transition, $durationMs);
         $this->outgoing = null;
-        $this->stack[] = $this->unpark($route, $validatedParams) ?? [
+        $this->stack[] = $this->takeWarm($route, $validatedParams) ?? $this->unpark($route, $validatedParams) ?? [
             'name' => $route,
             'id' => $this->nextId++,
             'routeId' => $this->resolveRouteId($route, $validatedParams),
@@ -420,10 +432,17 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         if ($this->keepAliveRoutes !== []) {
             $entries = [...$this->keptAliveBelow($entries, $outgoingKey), ...$entries];
         }
+        $warm = $this->warm;
+        if ($warm !== null) {
+            // Below every visible screen, so the native host keeps it hidden.
+            $entries = [$warm, ...$entries];
+        }
 
         $top = $this->stack[count($this->stack) - 1];
         $screens = array_map(
-            fn (array $entry): Renderable => $this->screenElement($entry, $entry['id'] === $top['id']),
+            fn (array $entry): Renderable => $warm !== null && $entry['id'] === $warm['id']
+                ? $this->warmScreenElement($entry)
+                : $this->screenElement($entry, $entry['id'] === $top['id']),
             $entries,
         );
         $live = [];
@@ -670,6 +689,79 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
     public function trimMemory(): void
     {
         $this->preloaded = [];
+        $this->cancelPrewarm();
+    }
+
+    /**
+     * Mounts a route ahead of navigation, hidden under the current screen, so
+     * a following push()/navigate() with the same route and params starts
+     * its transition at once: the screen, its native views and its first
+     * layout already exist. Call it when a navigation is likely, e.g. on the
+     * press-in of a list row. The screen renders with isPrewarming() true and
+     * receives navigationFocused() only once it is pushed; one warm screen is
+     * kept at a time and it is released when unused for a few seconds or on
+     * any other navigation.
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function prewarm(string|BackedEnum $route, array $params = []): bool
+    {
+        $route = RouteName::value($route);
+        if (!isset($this->routes[$route])) return false;
+        $validatedParams = self::validatedParams($params);
+        if (!$this->routeAvailable($route, $validatedParams)) return false;
+        $key = $this->parkKey($route, $validatedParams);
+        $current = $this->currentEntry();
+        if ($this->parkKey($current['name'], $current['params']) === $key) return false;
+        if (isset($this->parked[$key])) return true;
+        $generation = ++$this->warmGeneration;
+        if ($this->warm === null || $this->parkKey($this->warm['name'], $this->warm['params']) !== $key) {
+            $this->warm = [
+                'name' => $route,
+                'id' => $this->nextId++,
+                'routeId' => $this->resolveRouteId($route, $validatedParams),
+                'params' => $validatedParams,
+            ];
+            $this->pruneRouteInstances();
+        }
+        \Pam\Native\System\Timers::after(self::WARM_TTL_MS, function () use ($generation): void {
+            if ($generation === $this->warmGeneration) $this->cancelPrewarm();
+        });
+
+        return true;
+    }
+
+    /**
+     * Whether a push()/navigate() to this route and params would reuse the
+     * screen mounted by prewarm().
+     *
+     * @param array<string, string|int|float|bool|null> $params
+     */
+    public function isPrewarmed(string|BackedEnum $route, array $params = []): bool
+    {
+        return $this->warm !== null
+            && $this->parkKey($this->warm['name'], $this->warm['params'])
+                === $this->parkKey(RouteName::value($route), self::validatedParams($params));
+    }
+
+    /** Unmounts the screen mounted by prewarm(), if it was not used. */
+    public function cancelPrewarm(): void
+    {
+        if ($this->warm === null) return;
+        $this->warm = null;
+        $this->warmGeneration++;
+        $this->pruneRouteInstances();
+    }
+
+    /**
+     * True while a screen mounted by prewarm() renders: its mount() runs
+     * before the user navigated to it, so work that must wait for the screen
+     * to be shown (read receipts, analytics, focus-only side effects) waits
+     * for navigationFocused().
+     */
+    public static function isPrewarming(): bool
+    {
+        return self::$prewarmDepth > 0;
     }
 
     public function popTo(string|BackedEnum $route): bool
@@ -894,6 +986,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         }
         $this->stack = $restored;
         $this->parked = [];
+        $this->warm = null;
         $this->outgoing = null;
         $this->focusedEntryKey = null;
         $this->operation = NavigationOperation::Reset;
@@ -998,6 +1091,42 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         ];
 
         return $element;
+    }
+
+    /** @param array{name: string, id: int, routeId?: string|null, params: array<string, string|int|float|bool|null>} $entry */
+    private function warmScreenElement(array $entry): \Pam\Native\Element
+    {
+        self::$prewarmDepth++;
+        try {
+            [$element] = \Pam\Native\Internal\ComponentLifecycle::capture(
+                fn (): \Pam\Native\Element => new NavigationScreen(
+                    $this->renderRoute($entry),
+                    $this->resolvedOptions($entry),
+                    $this->theme,
+                    true,
+                    fn (): bool => $this->pop(),
+                )->toElement()->key('navigation.'.$entry['id']),
+            );
+        } finally {
+            self::$prewarmDepth--;
+        }
+
+        return $element;
+    }
+
+    /**
+     * @param array<string, string|int|float|bool|null> $params
+     * @return array{name: string, id: int, routeId: string|null, params: array<string, string|int|float|bool|null>}|null
+     */
+    private function takeWarm(string $route, array $params): ?array
+    {
+        $entry = $this->warm;
+        if ($entry === null) return null;
+        $this->warm = null;
+        $this->warmGeneration++;
+        if ($this->parkKey($entry['name'], $entry['params']) !== $this->parkKey($route, $params)) return null;
+
+        return $entry;
     }
 
     private function decorateRoute(array $entry): Renderable
@@ -1107,6 +1236,11 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
 
     private function didNavigate(array $previous, NavigationAction $action): void
     {
+        if ($this->warm !== null) {
+            // Any other navigation releases the screen mounted ahead of time.
+            $this->warm = null;
+            $this->warmGeneration++;
+        }
         $current = $this->currentEntry();
         if ($this->entryKey($previous) !== $this->entryKey($current)) {
             $previousInstance = $this->routeInstances[$this->entryKey($previous)] ?? null;
@@ -1211,6 +1345,7 @@ final class Navigator extends Component implements Restorable, NavigationStatePr
         foreach ($this->stack as $entry) $retained[$this->entryKey($entry)] = true;
         if ($this->outgoing !== null) $retained[$this->entryKey($this->outgoing)] = true;
         foreach ($this->parked as $entry) $retained[$this->entryKey($entry)] = true;
+        if ($this->warm !== null) $retained[$this->entryKey($this->warm)] = true;
         foreach (array_keys($this->routeContexts + $this->routeInstances) as $key) {
             if (!isset($retained[$key])) {
                 $instance = $this->routeInstances[$key] ?? null;

@@ -1504,9 +1504,21 @@ class PamRenderer(
             // back as a new window without the focused input).
             return
         }
-        view?.let(::clearHitSlop)
         val sourceNavigation = view?.parent as? PamNavigationHost
         val destinationNavigation = views[effectiveParent(parent)] as? PamNavigationHost
+        if (view != null && sourceNavigation != null && sourceNavigation === destinationNavigation && state.parent == parent) {
+            // A route changing places in its stack (a screen mounted ahead
+            // under the top one, a kept-alive screen coming back) is reordered
+            // without leaving the window: touches in progress on the other
+            // routes are not cancelled and its own views, images and list
+            // layout stay as they are.
+            removeChild(state.parent, id)
+            state.index = index
+            addChild(parent, id)
+            sourceNavigation.reorderRoute(view, hostedInsertionIndex(state, effectiveParent(parent)))
+            return
+        }
+        view?.let(::clearHitSlop)
         if (sourceNavigation != null && sourceNavigation === destinationNavigation) {
             sourceNavigation.detachRouteForMove(requireNotNull(view))
         } else {

@@ -36,6 +36,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     private var initialIndex = 0
     private var initialPositionApplied = false
     private var initialPositionGeneration = 0
+    private var pendingInitialGeneration = -1
     private var scrollEnabled = true
     private var showsScrollIndicator = true
     private var removeClippedSubviews = true
@@ -121,8 +122,10 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        android.os.Trace.beginSection("PamList.layout")
         super.onLayout(changed, left, top, right, bottom)
         updateAccessibilityVisibility()
+        android.os.Trace.endSection()
     }
 
     /**
@@ -133,8 +136,11 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         val oldExtent = if (horizontal) oldWidth else oldHeight
         val newExtent = if (horizontal) width else height
+        // A list resting at its start (an inbox whose first rows all fit)
+        // is not "at its end": only one opened at its end or scrolled away
+        // from its start follows the end.
         val wasAtEnd = initialPositionApplied && oldExtent > 0 && newExtent != oldExtent &&
-            restingAtEnd()
+            restingAtEnd() && (initialIndex > 0 || canScrollTowardStart())
         super.onSizeChanged(width, height, oldWidth, oldHeight)
         if (wasAtEnd && !inverted) {
             post {
@@ -215,7 +221,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
             ids.isNotEmpty() &&
             ids == richIds &&
             pixelExtents != richExtents &&
-            restingAtEnd()
+            restingAtEnd() &&
+            (initialIndex > 0 || canScrollTowardStart())
         richIds = ids
         richExtents = pixelExtents
         val current = adapter as? RichRecyclerAdapter
@@ -231,6 +238,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 pixelExtents,
                 mount,
                 unmount,
+                deferMounts = { !isShown },
             )
         } else {
             current.submit(ids, pixelExtents)
@@ -763,6 +771,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 orientation,
                 inverted,
                 stickyPins,
+                ::takePendingInitialPosition,
             )
         } else {
             PamLinearLayoutManager(
@@ -770,6 +779,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 orientation,
                 inverted,
                 stickyPins,
+                ::takePendingInitialPosition,
             )
         }
         (layoutManager as LinearLayoutManager).stackFromEnd = inverted
@@ -848,6 +858,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
     }
 
+    private fun canScrollTowardStart(): Boolean =
+        if (horizontal) canScrollHorizontally(-1) else canScrollVertically(-1)
+
     private fun restingAtEnd(): Boolean {
         val count = adapter?.itemCount ?: 0
         val layout = layoutManager as? LinearLayoutManager ?: return false
@@ -859,6 +872,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         val count = adapter?.itemCount ?: 0
         if (count == 0) return
         val generation = ++initialPositionGeneration
+        pendingInitialGeneration = generation
         post {
             // An explicit scroll request issued in the same commit (or a newer
             // initial index) supersedes this pending initial position.
@@ -869,6 +883,21 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
                 ?.scrollToPositionWithOffset(initialIndex.coerceAtMost(itemCount - 1), 0)
             initialPositionApplied = true
         }
+    }
+
+    /**
+     * The first layout after a commit starts at the initial index instead of
+     * binding the rows at position 0 and replacing them a frame later (a chat
+     * opening at its last message bound two screens of cells). Runs inside
+     * the layout pass, after every operation of the commit was applied, so an
+     * explicit scroll request of the same commit still wins.
+     */
+    private fun takePendingInitialPosition(manager: LinearLayoutManager) {
+        if (initialPositionApplied || pendingInitialGeneration != initialPositionGeneration) return
+        val itemCount = adapter?.itemCount ?: 0
+        if (itemCount == 0) return
+        manager.scrollToPositionWithOffset(initialIndex.coerceAtMost(itemCount - 1), 0)
+        initialPositionApplied = true
     }
 
     private fun dispatchViewport() {
@@ -904,6 +933,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         orientation: Int,
         reverseLayout: Boolean,
         private val pins: StickyPins,
+        private val beforeLayout: (LinearLayoutManager) -> Unit,
     ) : LinearLayoutManager(context, orientation, reverseLayout), PrefetchLayoutManager {
         override fun getChildCount(): Int {
             val raw = super.getChildCount()
@@ -920,6 +950,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
 
         override fun onLayoutChildren(recycler: Recycler, state: State) {
+            // RecyclerView defers requestLayout() during its own layout, so
+            // this only seeds the anchor the fill below starts from.
+            if (!state.isPreLayout) beforeLayout(this)
             super.onLayoutChildren(recycler, state)
             pins.place(this, recycler, state)
         }
@@ -954,6 +987,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         orientation: Int,
         reverseLayout: Boolean,
         private val pins: StickyPins,
+        private val beforeLayout: (LinearLayoutManager) -> Unit,
     ) : GridLayoutManager(
         context,
         spanCount,
@@ -975,6 +1009,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
 
         override fun onLayoutChildren(recycler: Recycler, state: State) {
+            // RecyclerView defers requestLayout() during its own layout, so
+            // this only seeds the anchor the fill below starts from.
+            if (!state.isPreLayout) beforeLayout(this)
             super.onLayoutChildren(recycler, state)
             pins.place(this, recycler, state)
         }
@@ -1051,7 +1088,67 @@ private class RichRecyclerAdapter(
     extents: Map<Long, Int>,
     private val mount: (Long, FrameLayout) -> Unit,
     private val unmount: (Long, FrameLayout) -> Unit,
+    private val deferMounts: () -> Boolean = { false },
 ) : RecyclerView.Adapter<RichRecyclerAdapter.RichHolder>() {
+    /**
+     * Rows of a list nobody sees yet (a screen mounted ahead, under the
+     * visible one) are laid out with their final extents at once, but their
+     * views are created a few per frame within [MOUNT_BUDGET_NANOS], so the
+     * first layout of a hidden chat never takes a whole screen of cells in
+     * one frame. Showing the list mounts what is left on the next frame.
+     */
+    private val pendingMounts = LinkedHashMap<RichHolder, Long>()
+    private var mountWindowStart = 0L
+    private var mountWindowUsed = 0L
+    private var drainScheduled = false
+
+    private fun mountWithinBudget(holder: RichHolder, id: Long): Boolean {
+        if (!deferMounts()) return mountNow(holder, id)
+        // One budget per frame: the animation clock is the frame's vsync time.
+        val frame = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
+        if (frame != mountWindowStart) {
+            mountWindowStart = frame
+            mountWindowUsed = 0L
+        }
+        if (mountWindowUsed >= MOUNT_BUDGET_NANOS) {
+            pendingMounts[holder] = id
+            scheduleDrain()
+            return false
+        }
+        val started = System.nanoTime()
+        mountNow(holder, id)
+        mountWindowUsed += System.nanoTime() - started
+        return true
+    }
+
+    private fun mountNow(holder: RichHolder, id: Long): Boolean {
+        pendingMounts.remove(holder)
+        mount(id, holder.container)
+        return true
+    }
+
+    private fun scheduleDrain() {
+        if (drainScheduled) return
+        drainScheduled = true
+        android.view.Choreographer.getInstance().postFrameCallback {
+            drainScheduled = false
+            mountWindowStart = android.view.animation.AnimationUtils.currentAnimationTimeMillis()
+            mountWindowUsed = 0L
+            val budget = if (deferMounts()) MOUNT_BUDGET_NANOS else SHOWN_MOUNT_BUDGET_NANOS
+            val iterator = pendingMounts.entries.iterator()
+            while (iterator.hasNext() && mountWindowUsed < budget) {
+                val (holder, id) = iterator.next()
+                iterator.remove()
+                if (holder.boundId != id || holder.container.childCount > 0) continue
+                val started = System.nanoTime()
+                mount(id, holder.container)
+                mountWindowUsed += System.nanoTime() - started
+            }
+            if (pendingMounts.isNotEmpty()) scheduleDrain()
+        }
+    }
+
+    private fun isPending(holder: RichHolder): Boolean = pendingMounts.containsKey(holder)
     private var ids = ids.toList()
     private var extents = extents.toMap()
     private var extent = dp(48f)
@@ -1119,6 +1216,7 @@ private class RichRecyclerAdapter(
         boundHolders
             .mapNotNull { holder ->
                 val id = holder.boundId
+                if (isPending(holder)) return@mapNotNull null
                 if (holder.container.childCount == 0 && id in mounted) return@mapNotNull null
                 val position = ids.indexOf(id)
                 position.takeIf {
@@ -1176,6 +1274,7 @@ private class RichRecyclerAdapter(
     }
 
     override fun onViewRecycled(holder: RichHolder) {
+        pendingMounts.remove(holder)
         boundHolders.remove(holder)
         emptyRemountAttempts.remove(holder)
         holder.boundId.takeIf { it != RecyclerView.NO_ID && ownsCell(holder, it) }?.let {
@@ -1188,14 +1287,15 @@ private class RichRecyclerAdapter(
 
     private fun bind(holder: RichHolder, id: Long) {
         val previous = holder.boundId
+        pendingMounts.remove(holder)
         if (previous != RecyclerView.NO_ID && previous != id) {
             emptyRemountAttempts.remove(holder)
             if (ownsCell(holder, previous)) unmount(previous, holder.container)
             holder.container.removeAllViews()
         }
         applyLayout(holder.container, id)
-        mount(id, holder.container)
         holder.boundId = id
+        mountWithinBudget(holder, id)
         boundHolders += holder
         if (holder.container.childCount > 0) {
             emptyRemountAttempts.remove(holder)
@@ -1224,7 +1324,7 @@ private class RichRecyclerAdapter(
     fun boundContainer(id: Long): FrameLayout? =
         boundHolders.firstOrNull { it.boundId == id && it.container.childCount > 0 }?.container
             ?: pinned?.takeIf { it.boundId == id }?.container
-            ?: boundHolders.firstOrNull { it.boundId == id }?.container
+            ?: boundHolders.firstOrNull { it.boundId == id && !isPending(it) }?.container
 
     /** Holder pinned as the sticky header, if any. */
     private var pinned: RichHolder? = null
@@ -1291,6 +1391,8 @@ private class RichRecyclerAdapter(
 
     private companion object {
         val PAYLOAD_LAYOUT = Any()
+        const val MOUNT_BUDGET_NANOS = 5_000_000L
+        const val SHOWN_MOUNT_BUDGET_NANOS = 10_000_000L
     }
 }
 

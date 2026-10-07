@@ -762,6 +762,85 @@ class PamNavigationHostInstrumentedTest {
         }
     }
 
+    @Test
+    fun reorderingAPrewarmedRouteKeepsItAttachedAndItsLayout() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var current: View
+            lateinit var prewarmed: View
+            var detaches = 0
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity)
+                activity.host.addView(navigation, FrameLayout.LayoutParams(390, 800))
+                current = View(activity)
+                prewarmed = View(activity).apply {
+                    addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                        override fun onViewAttachedToWindow(view: View) = Unit
+                        override fun onViewDetachedFromWindow(view: View) {
+                            detaches++
+                        }
+                    })
+                }
+                navigation.insert(current, 0)
+                navigation.insert(prewarmed, 0)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                // Mounted hidden: laid out at full size on the frame after its mount.
+                assertEquals(View.INVISIBLE, prewarmed.visibility)
+                assertEquals(390, prewarmed.width)
+                assertEquals(800, prewarmed.height)
+                navigation.reorderRoute(prewarmed, 1)
+                assertSame(prewarmed, navigation.getChildAt(1))
+                assertTrue(prewarmed.isAttachedToWindow)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(0, detaches)
+                assertEquals(800, prewarmed.height)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun hiddenRouteIsNotLaidOutInTheFrameThatMountsIt() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            lateinit var navigation: PamNavigationHost
+            lateinit var hidden: View
+            var sizeInMountFrame = -1
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity)
+                activity.host.addView(navigation, FrameLayout.LayoutParams(390, 800))
+                navigation.insert(View(activity), 0)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                hidden = View(activity)
+                navigation.insert(hidden, 0)
+                navigation.viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                    override fun onPreDraw(): Boolean {
+                        navigation.viewTreeObserver.removeOnPreDrawListener(this)
+                        sizeInMountFrame = hidden.height
+                        return true
+                    }
+                })
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(0, sizeInMountFrame)
+                assertEquals(800, hidden.height)
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity =
         instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).apply {

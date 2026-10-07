@@ -11,6 +11,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Rect
 import android.graphics.Outline
+import android.view.Choreographer
 import android.view.View
 import android.view.ViewOutlineProvider
 import android.view.Gravity
@@ -58,6 +59,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     var onActiveRouteChanged: (() -> Unit)? = null
     private var revision: Long = 0L
     private var activeRoute: View? = null
+    private var movingRoute: View? = null
+    private var layeredRoute: View? = null
+    private val awaitingFirstLayout: MutableSet<View> = java.util.Collections.newSetFromMap(IdentityHashMap())
     private var running: ValueAnimator? = null
     private var pendingPreDraw: ViewTreeObserver.OnPreDrawListener? = null
     private var pendingObserver: ViewTreeObserver? = null
@@ -127,7 +131,16 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     fun insert(view: View, index: Int) {
         val isInitialRoute = childCount == 0
         val isVisibleRoute = isInitialRoute || view === activeRoute
+        val moved = movingRoute === view
+        if (moved) movingRoute = null
         view.visibility = if (isVisibleRoute) View.VISIBLE else View.INVISIBLE
+        // A screen mounted hidden (prewarmed, kept alive, or pushed and not
+        // yet animating) is measured and laid out on the next frame, so its
+        // mount and its first layout never add up in a single frame.
+        if (!isVisibleRoute && !moved && isAttachedToWindow) {
+            awaitingFirstLayout.add(view)
+            Choreographer.getInstance().postFrameCallback { releaseFirstLayout(view) }
+        }
         view.importantForAccessibility = if (isVisibleRoute) {
             View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         } else {
@@ -151,12 +164,29 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        super.onLayout(changed, left, top, right, bottom)
+        if (awaitingFirstLayout.isEmpty()) {
+            super.onLayout(changed, left, top, right, bottom)
+        } else {
+            // Routes are full-size frames; skip the ones awaiting their own
+            // frame (their engine-positioned descendants would lay out and
+            // bind their lists now otherwise).
+            for (index in 0 until childCount) {
+                val child = getChildAt(index)
+                if (child.visibility == View.GONE || child in awaitingFirstLayout) continue
+                child.layout(
+                    paddingLeft,
+                    paddingTop,
+                    paddingLeft + child.measuredWidth,
+                    paddingTop + child.measuredHeight,
+                )
+            }
+        }
         nativeToolbar.layout(0, 0, width, dp(56f).toInt())
     }
 
     override fun onViewRemoved(child: View) {
         super.onViewRemoved(child)
+        if (!suppressControllerRemoval) awaitingFirstLayout.remove(child)
         if (suppressControllerRemoval) return
         if (child === activeRoute) {
             activeRoute = null
@@ -190,8 +220,64 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Moves a route to [index] without detaching it from the window (no
+     * cancelled touches, no re-attach of its views). A route still waiting
+     * for its deferred first layout is laid out now.
+     */
+    fun reorderRoute(view: View, index: Int) {
+        if (view.parent !== this) return
+        if (indexOfChild(view) != index) {
+            val params = view.layoutParams
+            detachViewFromParent(view)
+            attachViewToParent(view, index.coerceIn(0, childCount), params)
+            requestLayout()
+            invalidate()
+        }
+        releaseFirstLayout(view)
+    }
+
+    private fun releaseFirstLayout(view: View) {
+        if (!awaitingFirstLayout.remove(view)) return
+        view.requestLayout()
+        requestLayout()
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        // FrameLayout re-measures MATCH_PARENT children at full size when its
+        // own spec is not exact; keep routes awaiting their frame empty.
+        for (child in awaitingFirstLayout) {
+            if (child.parent === this && child.measuredHeight != 0) {
+                child.measure(
+                    MeasureSpec.makeMeasureSpec(0, MeasureSpec.EXACTLY),
+                    MeasureSpec.makeMeasureSpec(0, MeasureSpec.EXACTLY),
+                )
+            }
+        }
+    }
+
+    override fun measureChildWithMargins(
+        child: View,
+        parentWidthMeasureSpec: Int,
+        widthUsed: Int,
+        parentHeightMeasureSpec: Int,
+        heightUsed: Int,
+    ) {
+        if (child in awaitingFirstLayout) {
+            // Laid out (empty) at zero size until its own frame.
+            child.measure(
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(0, MeasureSpec.EXACTLY),
+            )
+            return
+        }
+        super.measureChildWithMargins(child, parentWidthMeasureSpec, widthUsed, parentHeightMeasureSpec, heightUsed)
+    }
+
     fun detachRouteForMove(view: View) {
         if (view.parent !== this) return
+        movingRoute = view
         suppressControllerRemoval = true
         try {
             removeView(view)
@@ -438,6 +524,14 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     private fun runTransition() {
         running?.cancel()
         if (childCount == 0) return
+        val top = getChildAt(childCount - 1)
+        if (operation != OPERATION_POP && top in awaitingFirstLayout) {
+            // Mounted in this frame: lay it out on the next one, then show it
+            // (mount and first layout never share a frame).
+            releaseFirstLayout(top)
+            scheduleTransition()
+            return
+        }
 
         val outgoing: View?
         val incoming: View
@@ -456,6 +550,11 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                 showOnlyTop()
                 return
             }
+        }
+        if (incoming in awaitingFirstLayout) {
+            releaseFirstLayout(incoming)
+            scheduleTransition()
+            return
         }
         setActiveRoute(incoming)
         applyRoutePresentation(incoming)
@@ -494,6 +593,13 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             return
         }
 
+        // The outgoing screen only fades/slides: draw it once into a layer and
+        // composite it, instead of re-rendering it offscreen for its alpha
+        // on every frame of the transition.
+        outgoing?.takeIf { it.layerType == View.LAYER_TYPE_NONE }?.let {
+            it.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+            layeredRoute = it
+        }
         running = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = actualDuration
             interpolator = DecelerateInterpolator(1.75f)
@@ -726,6 +832,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
     }
 
     private fun finish(incoming: View, outgoing: View?) {
+        layeredRoute?.setLayerType(View.LAYER_TYPE_NONE, null)
+        layeredRoute = null
         clearSharedElements()
         running = null
         setActiveRoute(incoming)
