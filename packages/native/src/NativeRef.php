@@ -7,6 +7,8 @@ namespace Pam\Native;
 use Closure;
 use LogicException;
 
+use function is_array;
+
 final class NativeRef
 {
     /** @var array<string, Closure>|null */

@@ -9,6 +9,12 @@ use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\LanguageVersion;
 use RuntimeException;
 
+use function array_key_exists;
+use function count;
+use function is_array;
+use function is_string;
+use function strlen;
+
 /**
  * Deterministic formatter for single-file .pam.php components.
  *

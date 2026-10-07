@@ -13,6 +13,8 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 
+use function is_string;
+
 final class NativeList extends Element
 {
     /** @param array<array-key, mixed> $items */

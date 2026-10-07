@@ -18,6 +18,8 @@ use Pam\Native\InputSubmitBehavior;
 use Pam\Native\InputTextAlignVertical;
 use Pam\Native\PropKey;
 
+use function strlen;
+
 /** @phpstan-require-extends Element */
 trait HasInputBehavior
 {

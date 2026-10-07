@@ -6,6 +6,15 @@ namespace Pam\Native\Internal;
 
 use InvalidArgumentException;
 
+use function array_key_exists;
+use function count;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_string;
+use function ord;
+use function strlen;
+
 final class Wire
 {
     public const MAX_VALUE_BYTES = 1_048_576;

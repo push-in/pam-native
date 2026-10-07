@@ -9,6 +9,11 @@ use JsonException;
 use Pam\Native\PropKey;
 use RuntimeException;
 
+use function chr;
+use function is_array;
+use function is_int;
+use function is_string;
+
 /**
  * Font icons with react-native-vector-icons semantics: one glyph of a bundled
  * icon font rendered as text, so it stays crisp at any size, takes any color

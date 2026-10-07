@@ -7,6 +7,8 @@ namespace Pam\Native\Navigation;
 use InvalidArgumentException;
 use ReflectionClass;
 
+use function is_string;
+
 /** Sparse option layer: omitted keys inherit; explicit false and null override. */
 final readonly class ScreenOptionsPatch
 {

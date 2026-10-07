@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use function is_array;
+use function is_bool;
+use function is_int;
+use function is_string;
+
 final class CompiledTemplateNode
 {
     /** @var list<self> */
@@ -24,6 +29,38 @@ final class CompiledTemplateNode
      * @var array<string, array<string, mixed>>
      */
     public array $pamTagPlans = [];
+
+    /** @var array<string, array{0: int, 1: int, 2: ?string, 3: string, 4: mixed, 5: array<string, mixed>, 6: string}> last style entry per tag variant */
+    public array $pamLastEntries = [];
+
+    /** @var array<string, array<string, array{0: int, 1: int, 2: ?string, 3: string, 4: mixed, 5: array<string, mixed>, 6: string}>> recent style entries per tag variant, by class and inherited styles */
+    public array $pamRecentEntries = [];
+
+    /** Native element rendered through fastTag() last time (see TemplateRenderer::fastNode()). */
+    public bool $pamFast = false;
+
+    /** Whether this template mentions `props` anywhere (null: not scanned yet). */
+    public ?bool $pamUsesProps = null;
+
+    /** @internal True when any attribute, directive or text of the tree mentions "props". */
+    public function mentionsProps(): bool
+    {
+        if (str_contains($this->name, 'props') || str_contains($this->value, 'props')) {
+            return true;
+        }
+        foreach ($this->attributes as $name => $value) {
+            if (str_contains((string) $name, 'props') || (is_string($value) && str_contains($value, 'props'))) {
+                return true;
+            }
+        }
+        foreach ($this->children as $child) {
+            if ($child->mentionsProps()) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /** @param array<string, string|bool> $attributes */
     public function __construct(

@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.24.0 - 2026-10-07
+
+- Faster render pipeline, same frames: on the Zé Chat host benchmark suite
+  (16 screens, nine interleaved processes per screen against 1.22.7/1.23.1,
+  whose render path is identical) the summed per-screen medians fall 34%
+  (570.8 to 375.5 ms) and the p90 across processes 38% (625.2 to 387.1 ms);
+  per operation, the median falls 30% (1.80 to 1.26 ms). Every encoded frame
+  of every benchmark is byte-identical to 1.22.7, and render counts and
+  lifecycle hook counts are unchanged.
+- Encoder: a subtree the previous frame already emitted is diffed in O(1)
+  (only its root placement can change), so patches cost what changed instead
+  of the tree size; constant element properties are encoded once per
+  template element; long strings (inline images) are validated and copied
+  once within a byte budget; node ids come from the binary digest.
+- Renderer: compiled component call sites whose evaluated inputs did not
+  change skip prop diffing, configuration, contract validation and
+  decoration; native elements dispatch straight to the fast path from cached
+  style entries (also with dynamic classes, alternating classes and
+  environment-dependent styles, now cached per window/container/style
+  environment); text-only children interpolate without child render data;
+  method event handlers are built once per scope; render data is handed to
+  children without copies.
+- Runtime: component bookkeeping is updated in place (no quadratic copies
+  for long lists); reused subtrees are retained from a cached state list;
+  commit visits only components that need attach, resume or effects;
+  discarded components and trees are freed without the cycle collector
+  (released render references, weak state callbacks, no recursive closures).
+  PHP's cycle collector runs between frames once 40,000 roots are buffered
+  (`PAM_NATIVE_FRAME_GC=0` keeps PHP's own scheduling, a number sets the
+  budget) and at shutdown. The first runtime checkpoint is written after the
+  runtime stays up for five seconds instead of in the first frame.
+- Hot paths compile to dedicated opcodes (`use function` imports) and
+  generated expressions read the missing-value sentinel directly (component
+  cache format 6: caches are rebuilt once).
+- `Element` exposes its encoding fields as read-only public properties
+  (`kind`, `properties`, `events`, `children`, `elementKey`, `domIdentity`,
+  `identitySlot`, `reusable`); `TreeEncoder::frameNodes()` returns the last
+  frame's nodes. No protocol identifiers, wire format, Android or iOS code
+  changed. See [migration notes](docs/migration-1.24.0.md).
+
 ## 1.23.1 - 2026-10-06
 
 - iOS: `PamHeldPanGestureRecognizer` imports `UIKit.UIGestureRecognizerSubclass`,

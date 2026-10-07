@@ -6,6 +6,8 @@ namespace Pam\Native\Notifications;
 
 use InvalidArgumentException;
 
+use function strlen;
+
 /**
  * Message sender shown by conversation notifications.
  *

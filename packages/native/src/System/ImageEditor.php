@@ -13,6 +13,11 @@ use Pam\Native\ImageFilterType;
 use Pam\Native\ImageTextLayerStyle;
 use Pam\Native\Modules\NativeModules;
 
+use function count;
+use function is_array;
+use function is_string;
+use function strlen;
+
 final class ImageEditor
 {
     private function __construct()

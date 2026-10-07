@@ -7,6 +7,12 @@ namespace Pam\Native\Bridge;
 use InvalidArgumentException;
 use JsonException;
 
+use function count;
+use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class IdlCompiler
 {
     private const MAX_SCHEMA_BYTES = 1_048_576;

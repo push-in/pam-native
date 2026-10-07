@@ -6,6 +6,9 @@ namespace Pam\Native;
 
 use InvalidArgumentException;
 
+use function count;
+use function in_array;
+
 final readonly class ProtocolHandshake
 {
     /** @param list<string> $capabilities */

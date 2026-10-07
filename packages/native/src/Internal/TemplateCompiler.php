@@ -7,6 +7,14 @@ namespace Pam\Native\Internal;
 use Pam\Native\LanguageVersion;
 use RuntimeException;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class TemplateCompiler
 {
     private const MAX_TEMPLATE_BYTES = 2_097_152;

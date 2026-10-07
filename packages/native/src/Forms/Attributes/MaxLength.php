@@ -9,6 +9,11 @@ use InvalidArgumentException;
 use Pam\Native\Forms\NativeForm;
 use Pam\Native\Forms\ValidationRule;
 
+use function count;
+use function is_array;
+use function is_string;
+use function strlen;
+
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final readonly class MaxLength implements ValidationRule
 {

@@ -7,6 +7,11 @@ namespace Pam\Native\Store;
 use Pam\Native\State;
 use RuntimeException;
 
+use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final readonly class EncryptedStatePersistence implements StorePersistence
 {
     private string $key;

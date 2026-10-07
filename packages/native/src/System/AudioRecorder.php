@@ -12,6 +12,9 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 use RuntimeException;
 
+use function is_array;
+use function is_int;
+
 final class AudioRecorder
 {
     private static int $nextSubscription = 1;

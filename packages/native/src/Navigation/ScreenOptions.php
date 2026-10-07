@@ -8,6 +8,11 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\Renderable;
 
+use function count;
+use function is_float;
+use function is_int;
+use function strlen;
+
 final readonly class ScreenOptions
 {
     /** @param list<float>|null $sheetAllowedDetents */

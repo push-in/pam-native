@@ -11,6 +11,9 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 use RuntimeException;
 
+use function count;
+use function strlen;
+
 final class Sms
 {
     private function __construct()

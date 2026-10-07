@@ -7,6 +7,11 @@ namespace Pam\Native\Routing;
 use InvalidArgumentException;
 use JsonException;
 
+use function in_array;
+use function is_array;
+use function is_int;
+use function is_string;
+
 final class RouteCodeGenerator
 {
     /** @return array<string, string> filename => PHP source */

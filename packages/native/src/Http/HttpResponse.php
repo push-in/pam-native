@@ -6,6 +6,10 @@ namespace Pam\Native\Http;
 
 use DateTimeImmutable;
 
+use function is_array;
+use function is_scalar;
+use function is_string;
+
 final readonly class HttpResponse
 {
     /** @var array<string, string> Lower-case header names. */

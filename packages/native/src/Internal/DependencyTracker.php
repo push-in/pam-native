@@ -99,6 +99,12 @@ final class DependencyTracker
         return !isset((self::$dirty ??= new WeakMap())[$component]);
     }
 
+    /** True when the component is already marked dirty (with its ancestors). */
+    public static function isDirty(Component $component): bool
+    {
+        return self::$dirty !== null && isset(self::$dirty[$component]);
+    }
+
     /** Monotonic counter bumped by every global invalidation. */
     public static function epoch(): int
     {

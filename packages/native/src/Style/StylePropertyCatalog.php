@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Style;
 
+use function in_array;
+
 /**
  * Stable, generated-documentation source of truth for CSS-to-native support.
  * IDs are public ABI and must remain sequential and append-only.

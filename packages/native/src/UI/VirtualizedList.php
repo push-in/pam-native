@@ -16,6 +16,10 @@ use Pam\Native\PropKey;
 use Pam\Native\ScrollTargetAlignment;
 use Pam\Native\Renderable;
 
+use function count;
+use function is_array;
+use function is_string;
+
 final class VirtualizedList extends Element
 {
     use HasScrollPhaseEvents;

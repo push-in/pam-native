@@ -7,6 +7,11 @@ namespace Pam\Native\Diagnostics;
 use Pam\Native\TemplateException;
 use Throwable;
 
+use function count;
+use function is_array;
+use function is_string;
+use function strlen;
+
 /**
  * Structured, path-shortened description of an uncaught runtime error. It is
  * what the native error overlay renders and what App::onError() listeners

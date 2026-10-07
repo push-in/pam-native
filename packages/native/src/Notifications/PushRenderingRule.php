@@ -13,6 +13,9 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NotificationImportance;
 use RuntimeException;
 
+use function is_bool;
+use function strlen;
+
 /**
  * Declarative native rendering for one data-push type. Placeholders such as
  * {chat_id} are filled from the push data; {_title}, {_body} and {_id} expose

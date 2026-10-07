@@ -7,6 +7,12 @@ namespace Pam\Native\Internal;
 use RuntimeException;
 use Throwable;
 
+use function in_array;
+use function is_array;
+use function is_string;
+use function strlen;
+use function strval;
+
 /**
  * Collects the expression sources a compiled template can evaluate and
  * writes them as one PHP file of generated closures, so components load

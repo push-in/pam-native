@@ -16,11 +16,19 @@ use Pam\Native\BuildConfiguration;
 use Pam\Native\LanguageVersion;
 use Pam\Native\UI\Ir\UiIr;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class PamPhpCompiler
 {
     private const MAX_COMPONENTS = 10_000;
     private const MAX_SOURCE_BYTES = 2_097_152;
-    private const CACHE_VERSION = 5;
+    private const CACHE_VERSION = 6;
 
     /**
      * Content fingerprints of stylesheets read during one compileDirectory()

@@ -6,6 +6,8 @@ namespace Pam\Native;
 
 use InvalidArgumentException;
 
+use function strlen;
+
 final readonly class NativeMenuItem
 {
     public function __construct(

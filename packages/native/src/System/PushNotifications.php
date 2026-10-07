@@ -16,6 +16,8 @@ use Pam\Native\Navigation\Navigator;
 use RuntimeException;
 use LogicException;
 
+use function is_array;
+
 final class PushNotifications
 {
     private static int $nextSubscription = 1;

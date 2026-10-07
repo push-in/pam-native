@@ -6,6 +6,10 @@ namespace Pam\Native\LocalFirst;
 
 use Pam\Native\Crypto;
 
+use function is_array;
+use function is_string;
+use function strlen;
+
 /**
  * AES-256-GCM sealed local-first journal: 'PNL1' . nonce(12) . tag(16) .
  * ciphertext, additional data 'PAM-NATIVE-LF1'. Uses ext-openssl when loaded

@@ -16,6 +16,10 @@ use Pam\Native\Modules\NativeModules;
 use InvalidArgumentException;
 use RuntimeException;
 
+use function count;
+use function is_array;
+use function strlen;
+
 final class MediaLibrary
 {
     private function __construct()

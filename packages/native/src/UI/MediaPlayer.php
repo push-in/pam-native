@@ -16,6 +16,9 @@ use Pam\Native\UI\Concerns\HasMediaCacheBehavior;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 
+use function is_string;
+use function strlen;
+
 final class MediaPlayer extends Element
 {
     use HasMediaCacheBehavior;

@@ -6,6 +6,9 @@ namespace Pam\Native\Animation;
 
 use InvalidArgumentException;
 
+use function in_array;
+use function is_string;
+
 /** @internal Shared number/value formatting for the native motion contracts. */
 final class Motion
 {

@@ -8,6 +8,11 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\UI\Contract\TagContract;
 
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_string;
+
 final class TemplateRegistry
 {
     /** @var array<string, Closure(array<string, mixed>, list<Element>, ?object): Renderable> */

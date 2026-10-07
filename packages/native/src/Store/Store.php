@@ -12,6 +12,12 @@ use Pam\Native\Store\Attributes\Computed;
 use Pam\Native\Internal\DependencyTracker;
 use ReflectionMethod;
 
+use function array_key_exists;
+use function is_array;
+use function is_null;
+use function is_scalar;
+use function is_string;
+
 abstract class Store
 {
     /** @var array<string, mixed> */

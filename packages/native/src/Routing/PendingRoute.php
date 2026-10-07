@@ -11,6 +11,8 @@ use Pam\Native\Navigation\NavigationTransition;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
 
+use function in_array;
+
 final class PendingRoute
 {
     /** @internal */

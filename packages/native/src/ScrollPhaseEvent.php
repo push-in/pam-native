@@ -6,6 +6,9 @@ namespace Pam\Native;
 
 use Pam\Native\Internal\Wire;
 
+use function is_float;
+use function is_int;
+
 /**
  * `on:scrollBeginDrag`, `on:scrollEndDrag` and `on:momentumScrollEnd`
  * payload: content offset in dp, release velocity in dp/s (end drag only)

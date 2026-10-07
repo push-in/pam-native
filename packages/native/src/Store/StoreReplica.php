@@ -6,6 +6,8 @@ namespace Pam\Native\Store;
 
 use Closure;
 
+use function array_key_exists;
+
 final class StoreReplica
 {
     private ?int $subscription = null;

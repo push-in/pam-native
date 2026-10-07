@@ -6,6 +6,8 @@ namespace Pam\Native;
 
 use Pam\Native\Internal\Wire;
 
+use function is_string;
+
 final readonly class ImageErrorEvent
 {
     public function __construct(public string $message)

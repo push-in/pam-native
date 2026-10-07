@@ -10,6 +10,10 @@ use Pam\Native\Internal\Runtime;
 use Throwable;
 use Pam\Native\Diagnostics\Profiler;
 
+use function array_key_exists;
+use function count;
+use function is_array;
+
 final class StoreManager
 {
     private const HISTORY_LIMIT = 200;

@@ -8,6 +8,14 @@ use InvalidArgumentException;
 use JsonException;
 use OverflowException;
 
+use function array_slice;
+use function count;
+use function in_array;
+use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class OfflineMutationQueue
 {
     private const MAX_MUTATIONS = 10_000;

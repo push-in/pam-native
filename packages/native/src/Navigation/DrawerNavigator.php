@@ -24,6 +24,11 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 use Pam\Native\WindowMetrics;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_string;
+
 final class DrawerNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var list<NavigationDrawerItem> */

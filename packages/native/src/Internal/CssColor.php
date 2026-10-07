@@ -6,6 +6,10 @@ namespace Pam\Native\Internal;
 
 use InvalidArgumentException;
 
+use function count;
+use function in_array;
+use function strlen;
+
 /**
  * Parses CSS Color values into the ARGB integer used by the native protocol.
  */

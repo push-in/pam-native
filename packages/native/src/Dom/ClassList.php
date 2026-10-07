@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Dom;
 
+use function in_array;
+
 final class ClassList
 {
     public function __construct(private readonly Element $element)

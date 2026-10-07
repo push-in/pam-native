@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Diagnostics;
 
+use function count;
+
 final class ReplayTimeline
 {
     /** @var list<array{sequence: int, kind: int, payload: array<string, mixed>}> */

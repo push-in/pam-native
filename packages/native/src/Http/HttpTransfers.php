@@ -9,6 +9,9 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 
+use function is_array;
+use function is_int;
+
 /** @internal Drives native transfer observation channels. */
 final class HttpTransfers
 {

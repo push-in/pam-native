@@ -7,6 +7,8 @@ namespace Pam\Native\Routing;
 use BackedEnum;
 use InvalidArgumentException;
 
+use function is_string;
+
 /** @internal */
 final class RouteName
 {

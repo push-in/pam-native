@@ -7,6 +7,11 @@ namespace Pam\Native\Internal;
 use Pam\Native\Style\StyleQueryKind;
 use RuntimeException;
 
+use function count;
+use function in_array;
+use function is_string;
+use function strlen;
+
 /** Extracts Language 2 constructs into a deterministic, runtime-free style IR. */
 final class Language2StyleCompiler
 {

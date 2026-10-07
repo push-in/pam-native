@@ -9,6 +9,14 @@ use Pam\Native\Style\StyleQueryOperator;
 use Pam\Native\Style\StyleQueryValueKind;
 use RuntimeException;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_float;
+use function is_int;
+use function is_string;
+use function strlen;
+
 /** Compiles native media/container conditions into a typed, string-free IR. */
 final class StyleQueryCompiler
 {

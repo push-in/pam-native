@@ -9,6 +9,9 @@ use Pam\Native\Component;
 use Pam\Native\Renderable;
 use Pam\Native\System\Linking;
 
+use function is_array;
+use function is_string;
+
 /**
  * Root authority for navigation state, actions, lifecycle and app integration.
  *

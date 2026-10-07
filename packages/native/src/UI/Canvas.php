@@ -10,6 +10,10 @@ use Pam\Native\Element;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 
+use function count;
+use function is_float;
+use function strlen;
+
 final class Canvas extends Element
 {
     private const MAX_COMMANDS = 10_000;

@@ -16,6 +16,9 @@ use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 use Pam\Native\System\Keyboard;
 
+use function in_array;
+use function is_array;
+
 final class Element
 {
     public function __construct(

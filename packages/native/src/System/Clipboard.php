@@ -10,6 +10,9 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\NativeOperation;
 
+use function is_string;
+use function strlen;
+
 final class Clipboard
 {
     private const MAX_TEXT_BYTES = 1_048_576;

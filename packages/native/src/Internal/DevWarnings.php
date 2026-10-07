@@ -7,6 +7,8 @@ namespace Pam\Native\Internal;
 use Pam\Native\BuildConfiguration;
 use Pam\Native\BuildMode;
 
+use function count;
+
 /**
  * Development-only diagnostics, reported once per source location.
  *

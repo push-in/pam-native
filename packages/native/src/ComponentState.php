@@ -8,6 +8,12 @@ use InvalidArgumentException;
 use LogicException;
 use Pam\Native\Internal\DependencyTracker;
 
+use function array_key_exists;
+use function is_array;
+use function is_null;
+use function is_scalar;
+use function is_string;
+
 final class ComponentState
 {
     /** @param array<string, mixed> $values */

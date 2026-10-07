@@ -37,6 +37,12 @@ use Pam\Native\BuildConfiguration;
 use Pam\Native\BuildMode;
 use Throwable;
 
+use function is_array;
+use function is_float;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class Runtime
 {
     private static Renderable|Closure|null $root = null;
@@ -50,6 +56,12 @@ final class Runtime
     private static int $nextRequestId = 1;
     private static ?NativeModuleTransport $moduleTransport = null;
     private static ?string $lastFrame = null;
+
+    /** Roots buffered before a frame-aligned cycle collection (PHP: 10,001). */
+    private const CYCLE_ROOT_BUDGET = 40_000;
+
+    private static bool $cycleCollection = false;
+    private static int $cycleRootBudget = self::CYCLE_ROOT_BUDGET;
     private static ?Closure $backHandler = null;
     private static ?Closure $appStateHandler = null;
     private static ?Closure $dimensionsHandler = null;
@@ -83,6 +95,7 @@ final class Runtime
         self::$root = $root;
         self::$encoder = new TreeEncoder();
         Profiler::enabled(BuildConfiguration::mode() !== BuildMode::Production);
+        self::manageCycleCollection();
         try {
             self::render();
         } catch (Throwable $error) {
@@ -282,6 +295,7 @@ final class Runtime
                 }
                 }
                 } finally {
+                    TemplateRenderer::releaseFrame();
                     ComponentLifecycle::finishRender();
                     PamPhpRegistry::finishRender();
                 }
@@ -293,7 +307,35 @@ final class Runtime
             throw $error;
         } finally {
             self::$rendering = false;
+            self::collectCycles();
         }
+    }
+
+    private static function collectCycles(): void
+    {
+        if (self::$cycleCollection && gc_status()['roots'] >= self::$cycleRootBudget) {
+            gc_collect_cycles();
+        }
+    }
+
+    /**
+     * Runs PHP's cycle collector between frames instead of in the middle of
+     * one. Each collection traverses the live component and element graphs,
+     * so collecting once per larger root budget, after a frame was committed,
+     * removes most of its cost from rendering. PAM_NATIVE_FRAME_GC=0 keeps
+     * PHP's own scheduling.
+     */
+    private static function manageCycleCollection(): void
+    {
+        $setting = getenv('PAM_NATIVE_FRAME_GC');
+        if (self::$cycleCollection || !gc_enabled() || $setting === '0') {
+            return;
+        }
+        self::$cycleRootBudget = is_string($setting) && ctype_digit($setting)
+            ? max(10_001, (int) $setting)
+            : self::CYCLE_ROOT_BUDGET;
+        gc_disable();
+        self::$cycleCollection = true;
     }
 
     /**
@@ -378,6 +420,7 @@ final class Runtime
     {
         if (self::$deferred) {
             self::$pending = true;
+            self::collectCycles();
 
             return;
         }
@@ -697,6 +740,14 @@ final class Runtime
         IncomingShares::resetRuntime();
         PushNotifications::resetRuntime();
         State::resetCache();
+        TemplateRenderer::releaseFrame();
+        if (self::$cycleCollection) {
+            // Collect what the frames left behind now, during teardown, so
+            // re-enabling PHP's collector does not run it in the next frame.
+            self::$cycleCollection = false;
+            gc_collect_cycles();
+            gc_enable();
+        }
     }
 
     public static function lastFrame(): ?string

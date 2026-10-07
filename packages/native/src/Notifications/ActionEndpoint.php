@@ -6,6 +6,10 @@ namespace Pam\Native\Notifications;
 
 use InvalidArgumentException;
 
+use function count;
+use function in_array;
+use function strlen;
+
 /**
  * HTTP request executed natively when a notification action is tapped, so a
  * reply reaches the server even while PHP is suspended.

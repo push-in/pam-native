@@ -35,21 +35,21 @@ final class GestureDetector extends Element
         };
         $minimumDuration = $type === GestureType::LongPress ? 500 : 0;
 
+        // One copy with every default, in the order the setters applied them.
         return (new self(NodeKind::Pressable))
             ->withChildren([$content])
-            ->withProperty(PropKey::GestureType, $type->value)
-            ->withProperty(PropKey::GestureEnabled, true)
-            ->withProperty(PropKey::GestureMinPointers, $minimumPointers)
-            ->withProperty(PropKey::GestureMaxPointers, $minimumPointers)
-            ->withProperty(PropKey::GestureDirection, GestureDirection::Any->value)
-            ->withProperty(PropKey::PressOpacity, 1.0)
-            ->withProperty(PropKey::PressScale, 1.0)
-            ->withProperty(
-                PropKey::GestureComposition,
-                GestureComposition::Exclusive->value,
-            )
-            ->withProperty(PropKey::GestureMinDistance, $minimumDistance)
-            ->withProperty(PropKey::GestureMinDurationMs, $minimumDuration);
+            ->__pamWithProperties([
+                PropKey::GestureType->value => $type->value,
+                PropKey::GestureEnabled->value => true,
+                PropKey::GestureMinPointers->value => $minimumPointers,
+                PropKey::GestureMaxPointers->value => $minimumPointers,
+                PropKey::GestureDirection->value => GestureDirection::Any->value,
+                PropKey::PressOpacity->value => 1.0,
+                PropKey::PressScale->value => 1.0,
+                PropKey::GestureComposition->value => GestureComposition::Exclusive->value,
+                PropKey::GestureMinDistance->value => $minimumDistance,
+                PropKey::GestureMinDurationMs->value => $minimumDuration,
+            ]);
     }
 
     public function pointers(int $minimum = 1, int $maximum = 1): self

@@ -7,6 +7,10 @@ namespace Pam\Native\Animation;
 use InvalidArgumentException;
 use Stringable;
 
+use function count;
+use function is_int;
+use function is_string;
+
 /**
  * Immutable, declarative UI-thread animation (Reanimated `withTiming`,
  * `withSpring`, `withSequence`, `withDelay`, `withRepeat`).

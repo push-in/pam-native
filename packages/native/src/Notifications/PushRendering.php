@@ -6,6 +6,8 @@ namespace Pam\Native\Notifications;
 
 use Pam\Native\Modules\NativeModules;
 
+use function is_scalar;
+
 /**
  * Native rendering of data-only pushes while PHP is suspended or not running.
  *

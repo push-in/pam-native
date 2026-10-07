@@ -11,6 +11,12 @@ use ReflectionClass;
 use ReflectionNamedType;
 use ReflectionParameter;
 
+use function array_key_exists;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_string;
+
 /** @internal */
 final class ScreenFactory
 {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\InternalHttp;
 
+use function strlen;
+
 final readonly class Request
 {
     /** @param array<string, string> $headers */

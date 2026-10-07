@@ -6,6 +6,9 @@ namespace Pam\Native\HotReload;
 
 use Pam\Native\State;
 
+use function is_array;
+use function is_string;
+
 final class HotReloadCoordinator
 {
     private const string STATE_KEY = 'runtime.hotReloadSnapshot';

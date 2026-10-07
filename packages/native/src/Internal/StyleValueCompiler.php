@@ -9,6 +9,14 @@ use Pam\Native\Style\StyleExpressionKind;
 use Pam\Native\Style\StyleValueUnit;
 use RuntimeException;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_float;
+use function is_int;
+use function is_string;
+use function strlen;
+
 /** Compile-time parser and allocation-free-at-call-site evaluator for CSS math. */
 final class StyleValueCompiler
 {

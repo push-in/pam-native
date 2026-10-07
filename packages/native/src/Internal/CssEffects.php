@@ -6,6 +6,11 @@ namespace Pam\Native\Internal;
 
 use RuntimeException;
 
+use function count;
+use function in_array;
+use function sprintf;
+use function strlen;
+
 /**
  * Compiles CSS visual effects (gradients, multiple/inset box shadows and
  * filter functions) into compact wire strings decoded once by the native

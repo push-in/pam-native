@@ -10,6 +10,9 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 use RuntimeException;
 
+use function count;
+use function strlen;
+
 /**
  * Per-account tokens used by notification action endpoints while PHP is not
  * running (ActionEndpoint::bearerFromCredential()).

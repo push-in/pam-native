@@ -15,6 +15,13 @@ use JsonException;
 use InvalidArgumentException;
 use RuntimeException;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class Files
 {
     private static int $nextDownload = 1;

@@ -13,6 +13,9 @@ use Pam\Native\NativeOperation;
 use InvalidArgumentException;
 use RuntimeException;
 
+use function count;
+use function is_string;
+
 final class Share
 {
     private function __construct()

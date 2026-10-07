@@ -13,6 +13,8 @@ use Pam\Native\PressEvent;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 
+use function is_string;
+
 final class Pressable extends Element
 {
     public static function make(Renderable|false|null ...$children): self

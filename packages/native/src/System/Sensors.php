@@ -14,6 +14,10 @@ use RuntimeException;
 use Pam\Native\SensorReading;
 use Pam\Native\SensorType;
 
+use function is_array;
+use function is_float;
+use function is_int;
+
 final class Sensors
 {
     private static int $nextSubscription = 1;

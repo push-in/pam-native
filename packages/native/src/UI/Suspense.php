@@ -11,6 +11,8 @@ use Pam\Native\AsyncValue;
 use Pam\Native\Element;
 use Pam\Native\Renderable;
 
+use function in_array;
+
 final readonly class Suspense implements Renderable
 {
     /**

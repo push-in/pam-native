@@ -6,6 +6,9 @@ namespace Pam\Native\Diagnostics;
 
 use Closure;
 
+use function array_slice;
+use function count;
+
 final class Profiler
 {
     private const LIMIT = 512;
@@ -38,6 +41,34 @@ final class Profiler
             if (count(self::$spans) >= 2 * self::LIMIT) {
                 self::$spans = array_slice(self::$spans, -self::LIMIT);
             }
+        }
+    }
+
+    /** @internal Start of a span recorded with record(); 0 when disabled. */
+    public static function start(): int
+    {
+        return self::$enabled ? hrtime(true) : 0;
+    }
+
+    /**
+     * @internal Records a span started with start() (what measure() records
+     * without a closure).
+     *
+     * @param array<string, string|int|float|bool> $metadata
+     */
+    public static function record(string $name, int $started, array $metadata = []): void
+    {
+        if (!self::$enabled || $started === 0) {
+            return;
+        }
+        self::$spans[] = new ProfileSpan(
+            $name,
+            (hrtime(true) - $started) / 1_000_000,
+            microtime(true),
+            $metadata,
+        );
+        if (count(self::$spans) >= 2 * self::LIMIT) {
+            self::$spans = array_slice(self::$spans, -self::LIMIT);
         }
     }
 

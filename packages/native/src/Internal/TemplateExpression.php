@@ -21,6 +21,9 @@ use function is_object;
 use function is_string;
 use function property_exists;
 
+use function defined;
+use function strlen;
+
 /**
  * Template expressions are compiled once per source string into a closure
  * tree and evaluated against the render scope/data afterwards. The grammar and
@@ -32,8 +35,13 @@ final class TemplateExpression
 {
     private const CACHE_LIMIT = 8192;
 
-    /** @var array<string, Closure(array<string, mixed>, ?object): mixed> */
-    private static array $compiled = [];
+    /**
+     * @internal Compiled expressions by source; the renderer's hot paths
+     * call them directly (TemplateExpression::closure() fills misses).
+     *
+     * @var array<string, Closure(array<string, mixed>, ?object): mixed>
+     */
+    public static array $compiled = [];
 
     /** @var array<string, string|list<string|array{0: string}>> */
     private static array $interpolations = [];
@@ -41,13 +49,17 @@ final class TemplateExpression
     /** @var array<string, ReflectionProperty> */
     private static array $properties = [];
 
-    /** @var array<string, array{public: bool, gestures: list<int>}> */
-    private static array $methods = [];
+    /** @var array<class-string, array<string, ReflectionProperty>> declared properties by class and name */
+    private static array $scopeProperties = [];
+
+    /** @var array<class-string, array<string, array{public: bool, gestures: list<int>}>> */
+    private static array $scopeMethods = [];
 
     /** @var array<string, string|false> */
     private static array $enumClasses = [];
 
-    private static ?object $missingSentinel = null;
+    /** @internal The "missing value" sentinel (generated code reads it directly). */
+    public static ?object $pamMissing = null;
 
     private static bool $generated = true;
 
@@ -75,6 +87,16 @@ final class TemplateExpression
         $compiled = self::$compiled[$expression] ?? self::compile($expression);
 
         return $compiled($data, $scope);
+    }
+
+    /**
+     * @internal The compiled closure of an expression (what evaluate() calls).
+     *
+     * @return Closure(array<string, mixed>, ?object): mixed
+     */
+    public static function closure(string $expression): Closure
+    {
+        return self::$compiled[$expression] ?? self::compile($expression);
     }
 
     /** @param array<string, mixed> $data */
@@ -268,7 +290,7 @@ final class TemplateExpression
     /** @internal */
     public static function __pamMissing(): object
     {
-        return self::$missingSentinel ??= new \stdClass();
+        return self::$pamMissing ??= new \stdClass();
     }
 
     /** @internal */
@@ -301,6 +323,17 @@ final class TemplateExpression
     /** @internal A variable missing from the render data: component property or missing. */
     public static function __pamVariable(?object $scope, string $name, bool $lenient): mixed
     {
+        if ($scope !== null) {
+            // Declared properties, resolved once per class and name.
+            $property = self::$scopeProperties[$scope::class][$name] ?? null;
+            if ($property !== null) {
+                if (!$property->isInitialized($scope)) {
+                    throw new RuntimeException("Template property \${$name} is not initialized.");
+                }
+
+                return $property->getValue($scope);
+            }
+        }
         if ($scope !== null && property_exists($scope, $name)) {
             $property = self::property($scope, $name);
             if (!$property->isInitialized($scope)) {
@@ -371,7 +404,7 @@ final class TemplateExpression
 
     private static function missing(): object
     {
-        return self::$missingSentinel ??= new \stdClass();
+        return self::$pamMissing ??= new \stdClass();
     }
 
     private static function constant(mixed $value): Closure
@@ -902,6 +935,7 @@ final class TemplateExpression
         $property = new ReflectionProperty($target, $name);
         if ($property->isDefault()) {
             self::$properties[$key] = $property;
+            self::$scopeProperties[$target::class][$name] = $property;
         }
 
         return $property;
@@ -1047,11 +1081,10 @@ final class TemplateExpression
         if (isset(self::STRING_HELPERS[$builtIn])) {
             return self::invokeStringHelper($builtIn, $arguments);
         }
-        if ($scope === null || !method_exists($scope, $name)) {
+        $method = $scope === null ? null : (self::$scopeMethods[$scope::class][$name] ?? null);
+        if ($method === null && ($scope === null || !method_exists($scope, $name))) {
             throw new RuntimeException("Template method {$name} does not exist.");
         }
-        $key = $scope::class.'::'.$name;
-        $method = self::$methods[$key] ?? null;
         if ($method === null) {
             $reflection = new ReflectionMethod($scope, $name);
             $gestures = [];
@@ -1061,10 +1094,11 @@ final class TemplateExpression
                     $gestures[$index] = $class;
                 }
             }
-            $method = self::$methods[$key] = [
+            $method = [
                 'public' => $reflection->isPublic(),
                 'gestures' => $gestures,
             ];
+            self::$scopeMethods[$scope::class][$name] = $method;
         }
         if (!$method['public']) {
             throw new RuntimeException("Template method {$name} must be public.");

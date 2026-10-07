@@ -7,6 +7,10 @@ namespace Pam\Native\Update;
 use InvalidArgumentException;
 use JsonException;
 
+use function count;
+use function is_array;
+use function is_string;
+
 final readonly class SignedUpdateManifest
 {
     /** @param list<string> $capabilities */

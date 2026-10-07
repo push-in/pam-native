@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use function chr;
+use function count;
+
 final class EncodedNode
 {
     /**
@@ -39,7 +42,7 @@ final class EncodedNode
         if ($this->propertyBytes === null) {
             $bytes = Wire::u16(count($this->properties));
             foreach ($this->properties as $key => $value) {
-                $bytes .= pack('v', $key).$value;
+                $bytes .= (self::$keys[$key] ??= pack('v', $key)).$value;
             }
             $this->propertyBytes = $bytes;
         }
@@ -48,4 +51,7 @@ final class EncodedNode
             .chr($this->kind)
             .$this->propertyBytes;
     }
+
+    /** @var array<int, string> little-endian u16 property keys */
+    private static array $keys = [];
 }

@@ -9,6 +9,13 @@ use Pam\Native\Animation\Transition;
 use Pam\Native\Style\StyleScope;
 use RuntimeException;
 
+use function array_key_exists;
+use function array_slice;
+use function count;
+use function in_array;
+use function is_string;
+use function strlen;
+
 /**
  * Compiles the intentionally small, native-safe CSS subset accepted by
  * `<style>` blocks in .pam.php components.

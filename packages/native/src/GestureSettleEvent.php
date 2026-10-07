@@ -6,6 +6,9 @@ namespace Pam\Native;
 
 use Pam\Native\Internal\Wire;
 
+use function is_float;
+use function is_int;
+
 /**
  * Emitted once a native drag finished settling onto a snap point
  * (`on:gestureSettle`). [position] is the resting translation in dp.

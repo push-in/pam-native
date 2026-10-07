@@ -6,6 +6,8 @@ namespace Pam\Native;
 
 use Pam\Native\Internal\Wire;
 
+use function is_int;
+
 final readonly class ImageProgressEvent
 {
     public function __construct(

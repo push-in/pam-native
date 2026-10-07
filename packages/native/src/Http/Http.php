@@ -11,6 +11,12 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\NativeOperation;
 use RuntimeException;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_string;
+use function strlen;
+
 final class Http
 {
     private const MAX_BODY_BYTES = 1_048_576;

@@ -8,6 +8,8 @@ use Attribute;
 use Pam\Native\Forms\NativeForm;
 use Pam\Native\Forms\ValidationRule;
 
+use function is_string;
+
 #[Attribute(Attribute::TARGET_PROPERTY)]
 final readonly class Email implements ValidationRule
 {

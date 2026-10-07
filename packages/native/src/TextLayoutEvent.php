@@ -6,6 +6,12 @@ namespace Pam\Native;
 
 use Pam\Native\Internal\Wire;
 
+use function count;
+use function is_array;
+use function is_float;
+use function is_int;
+use function is_string;
+
 /**
  * `on:textLayout` payload: wrapped line count at the rendered width (even
  * when `numberOfLines` truncates), visible line count, truncation flag and

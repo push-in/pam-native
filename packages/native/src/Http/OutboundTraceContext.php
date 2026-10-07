@@ -6,6 +6,9 @@ namespace Pam\Native\Http;
 
 use InvalidArgumentException;
 
+use function in_array;
+use function is_array;
+
 final readonly class OutboundTraceContext
 {
     public string $origin;

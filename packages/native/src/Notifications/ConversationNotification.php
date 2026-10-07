@@ -11,6 +11,9 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NotificationImportance;
 use RuntimeException;
 
+use function count;
+use function strlen;
+
 /**
  * Android MessagingStyle conversation notification with inline reply.
  *

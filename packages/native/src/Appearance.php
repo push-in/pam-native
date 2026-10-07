@@ -8,6 +8,9 @@ use Closure;
 use Pam\Native\Internal\Runtime;
 use Pam\Native\Modules\NativeModules;
 
+use function array_key_exists;
+use function is_string;
+
 /**
  * First-class light/dark appearance control.
  *

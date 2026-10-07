@@ -8,6 +8,8 @@ use BackedEnum;
 use InvalidArgumentException;
 use Pam\Native\Routing\RouteName;
 
+use function strlen;
+
 final readonly class NavigationAction
 {
     /** @param array<string, string|int|float|bool|null> $params */

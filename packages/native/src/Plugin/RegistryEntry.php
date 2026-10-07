@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Plugin;
 
+use function count;
+
 final readonly class RegistryEntry
 {
     /** @param list<string> $capabilities */

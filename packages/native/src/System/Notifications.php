@@ -15,6 +15,9 @@ use Pam\Native\Notifications\ConversationNotification;
 use Pam\Native\Notifications\NotificationAction;
 use Pam\Native\Notifications\NotificationActionType;
 
+use function is_array;
+use function strlen;
+
 final class Notifications
 {
     private static int $nextActionSubscription = 1;

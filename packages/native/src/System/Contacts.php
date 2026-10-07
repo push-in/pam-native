@@ -12,6 +12,10 @@ use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 use RuntimeException;
 
+use function count;
+use function is_array;
+use function is_string;
+
 final class Contacts
 {
     private const PAGE_SIZE = 250;

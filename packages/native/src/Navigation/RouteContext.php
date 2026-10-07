@@ -6,6 +6,12 @@ namespace Pam\Native\Navigation;
 
 use InvalidArgumentException;
 
+use function array_key_exists;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_string;
+
 final readonly class RouteContext
 {
     /** @param array<string, string|int|float|bool|null> $params */

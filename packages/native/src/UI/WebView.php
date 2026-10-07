@@ -12,6 +12,10 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 
+use function in_array;
+use function is_string;
+use function strlen;
+
 final class WebView extends Element
 {
     public static function make(string $source): self

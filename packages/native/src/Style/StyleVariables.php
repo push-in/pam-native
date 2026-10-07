@@ -7,6 +7,8 @@ namespace Pam\Native\Style;
 use Pam\Native\Internal\Runtime;
 use RuntimeException;
 
+use function array_key_exists;
+
 /** Application-level reactive CSS custom-property overrides. */
 final class StyleVariables
 {

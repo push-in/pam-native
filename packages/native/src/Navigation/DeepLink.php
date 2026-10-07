@@ -6,6 +6,10 @@ namespace Pam\Native\Navigation;
 
 use InvalidArgumentException;
 
+use function count;
+use function is_bool;
+use function strlen;
+
 final readonly class DeepLink
 {
     private string $expression;

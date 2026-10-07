@@ -15,6 +15,8 @@ use Pam\Native\PropKey;
 use Pam\Native\Element as NativeElement;
 use Traversable;
 
+use function in_array;
+
 /** @implements IteratorAggregate<int, Element> */
 final readonly class ElementCollection implements Countable, IteratorAggregate
 {

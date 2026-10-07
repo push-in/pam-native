@@ -15,6 +15,14 @@ use Pam\Native\TextDataDetectorType;
 use Pam\Native\TextEllipsizeMode;
 use Pam\Native\TextHyphenationFrequency;
 
+use function count;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_scalar;
+use function is_string;
+use function sprintf;
+
 final class Text extends Element
 {
     /** Style properties a nested Text/Span may override, in wire field order. */
@@ -55,46 +63,8 @@ final class Text extends Element
         $spans = [];
         /** @var list<\Closure> $handlers */
         $handlers = [];
-        $append = static function (string|self $part, array $inherited) use (&$append, &$text, &$length, &$spans, &$handlers): void {
-            if (is_string($part)) {
-                $text .= $part;
-                $length += (int) preg_match_all('/./su', $part);
-                return;
-            }
-            if ($part->kind() !== NodeKind::Text) {
-                throw new InvalidArgumentException('Rich text can only contain strings and Text/Span runs.');
-            }
-            $merged = $inherited;
-            foreach ($part->properties() as $key => $value) {
-                if (isset(self::SPAN_FIELDS[$key]) && !$value instanceof BinaryValue) {
-                    $merged[self::SPAN_FIELDS[$key]] = $value;
-                }
-            }
-            $press = $part->events()[EventKind::Press->value] ?? null;
-            if ($press !== null) {
-                $merged[10] = count($handlers);
-                $handlers[] = $press;
-            }
-            $start = $length;
-            $slot = count($spans);
-            $spans[] = null;
-            if ($part->richParts !== null) {
-                foreach ($part->richParts as $child) {
-                    $append($child, $merged);
-                }
-            } else {
-                $content = $part->properties()[PropKey::Text->value] ?? '';
-                $append(is_string($content) ? $content : '', $merged);
-            }
-            if ($merged !== [] && $length > $start) {
-                $spans[$slot] = [$start, $length, $merged];
-            }
-            if (count($spans) > self::MAX_SPANS) {
-                throw new InvalidArgumentException('Rich text supports at most 4096 runs.');
-            }
-        };
         foreach ($parts as $part) {
-            $append($part, []);
+            self::appendRun($part, [], $text, $length, $spans, $handlers);
         }
         $records = [];
         foreach ($spans as $span) {
@@ -123,6 +93,60 @@ final class Text extends Element
         }
 
         return $element;
+    }
+
+    /**
+     * Appends one rich text run (a named method instead of a recursive
+     * closure, which would be a reference cycle left to the cycle collector).
+     *
+     * @param array<int|string, mixed> $inherited
+     * @param array<int, array{int, int, array<int|string, mixed>}|null> $spans
+     * @param list<\Closure> $handlers
+     */
+    private static function appendRun(
+        string|self $part,
+        array $inherited,
+        string &$text,
+        int &$length,
+        array &$spans,
+        array &$handlers,
+    ): void {
+        if (is_string($part)) {
+            $text .= $part;
+            $length += (int) preg_match_all('/./su', $part);
+            return;
+        }
+        if ($part->kind() !== NodeKind::Text) {
+            throw new InvalidArgumentException('Rich text can only contain strings and Text/Span runs.');
+        }
+        $merged = $inherited;
+        foreach ($part->properties() as $key => $value) {
+            if (isset(self::SPAN_FIELDS[$key]) && !$value instanceof BinaryValue) {
+                $merged[self::SPAN_FIELDS[$key]] = $value;
+            }
+        }
+        $press = $part->events()[EventKind::Press->value] ?? null;
+        if ($press !== null) {
+            $merged[10] = count($handlers);
+            $handlers[] = $press;
+        }
+        $start = $length;
+        $slot = count($spans);
+        $spans[] = null;
+        if ($part->richParts !== null) {
+            foreach ($part->richParts as $child) {
+                self::appendRun($child, $merged, $text, $length, $spans, $handlers);
+            }
+        } else {
+            $content = $part->properties()[PropKey::Text->value] ?? '';
+            self::appendRun(is_string($content) ? $content : '', $merged, $text, $length, $spans, $handlers);
+        }
+        if ($merged !== [] && $length > $start) {
+            $spans[$slot] = [$start, $length, $merged];
+        }
+        if (count($spans) > self::MAX_SPANS) {
+            throw new InvalidArgumentException('Rich text supports at most 4096 runs.');
+        }
     }
 
     private static function spanField(mixed $value, int $index): string

@@ -8,6 +8,11 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\System\Files;
 
+use function count;
+use function in_array;
+use function is_bool;
+use function strlen;
+
 /**
  * Fluent multipart/form-data upload streamed natively from private files.
  *

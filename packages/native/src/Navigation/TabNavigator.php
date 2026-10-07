@@ -25,6 +25,11 @@ use Pam\Native\UI\View;
 use Pam\Native\WindowMetrics;
 use Closure;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_string;
+
 final class TabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var list<NavigationTab> */

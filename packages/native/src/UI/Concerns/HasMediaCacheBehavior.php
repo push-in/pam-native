@@ -12,6 +12,8 @@ use Pam\Native\MediaCacheEvent;
 use Pam\Native\MediaPriority;
 use Pam\Native\PropKey;
 
+use function count;
+
 trait HasMediaCacheBehavior
 {
     public function cacheKey(string $key): static

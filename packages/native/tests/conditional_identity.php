@@ -264,7 +264,7 @@ $GLOBALS['pamIdentityFrames'] = [];
 /** @return array<int, EncodedNode> */
 $encodedNodes = static function (TreeEncoder $encoder, Element $tree): array {
     $encoder->encode($tree);
-    $nodes = (new ReflectionProperty(TreeEncoder::class, 'nodes'))->getValue($encoder);
+    $nodes = $encoder->frameNodes();
 
     return $nodes;
 };

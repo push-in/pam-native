@@ -6,6 +6,10 @@ namespace Pam\Native;
 
 use InvalidArgumentException;
 
+use function count;
+use function is_float;
+use function strlen;
+
 final readonly class GridTemplate
 {
     /** @var list<GridBreakpoint> */

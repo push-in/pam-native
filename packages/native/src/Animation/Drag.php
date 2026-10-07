@@ -7,6 +7,10 @@ namespace Pam\Native\Animation;
 use InvalidArgumentException;
 use Stringable;
 
+use function count;
+use function is_int;
+use function is_string;
+
 /**
  * UI-thread drag contract for a pan `GestureDetector` (react-native-gesture-handler
  * `Gesture.Pan()` + Reanimated shared values). The target follows the finger

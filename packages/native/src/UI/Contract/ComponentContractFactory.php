@@ -15,6 +15,8 @@ use ReflectionParameter;
 use ReflectionUnionType;
 use RuntimeException;
 
+use function count;
+
 final class ComponentContractFactory
 {
     private function __construct()

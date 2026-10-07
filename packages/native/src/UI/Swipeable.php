@@ -18,6 +18,8 @@ use Pam\Native\PositionType;
 use Pam\Native\Renderable;
 use Pam\Native\Style;
 
+use function in_array;
+
 /**
  * react-native-gesture-handler `Swipeable`: horizontal drag reveals the
  * left and/or right action panels behind the row, settles open or closed

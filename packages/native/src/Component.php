@@ -18,6 +18,12 @@ use WeakMap;
 use Pam\Native\Diagnostics\Profiler;
 use Pam\Native\Routing\Navigation;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function is_array;
+use function is_object;
+
 abstract class Component implements Renderable
 {
     /** @var WeakMap<object, string>|null */
@@ -51,9 +57,30 @@ abstract class Component implements Renderable
     /** @var array<string, mixed>|null Own state captured after the last real render. */
     private ?array $pamSnapshot = null;
     private int $pamEpoch = -1;
+    /** @var array<string, Closure> event handlers bound to this scope, by expression */
+    private array $pamHandlers = [];
 
     /** @var array<class-string, bool> */
     private static array $pamAlwaysRender = [];
+
+    /** @var array<class-string, array{0: int, 1: list<string>}> */
+    private static array $pamObjectKeys = [];
+
+    /** @var array<class-string, bool> */
+    private static array $pamHasEffects = [];
+
+    /** @internal True when the component's class declares effects or watchers. */
+    final public static function __pamHasEffects(Component $component): bool
+    {
+        return self::$pamHasEffects[$component::class] ??= self::pamDeclaresEffects($component::class);
+    }
+
+    /** @param class-string $class */
+    private static function pamDeclaresEffects(string $class): bool
+    {
+        return (new ReflectionMethod($class, 'effects'))->getDeclaringClass()->getName() !== self::class
+            || (new ReflectionMethod($class, 'watchers'))->getDeclaringClass()->getName() !== self::class;
+    }
 
     /** Component bookkeeping that never affects rendered output. */
     /** @var array<string, true>|null mangled names of PAM_SNAPSHOT_EXCLUDED */
@@ -70,6 +97,7 @@ abstract class Component implements Renderable
         'pamLastElement',
         'pamSnapshot',
         'pamEpoch',
+        'pamHandlers',
     ];
 
     public function render(): Renderable
@@ -286,13 +314,24 @@ abstract class Component implements Renderable
 
     final public function toElement(): Element
     {
-        return ComponentLifecycle::render($this, function (): Element {
+        ComponentLifecycle::enter($this);
+        try {
+            $element = $this->pamElement();
+            $this->rendered();
+
+            return $element;
+        } finally {
+            ComponentLifecycle::leave();
+        }
+    }
+
+    private function pamElement(): Element
+    {
             if (
                 $this->pamLastElement !== null
                 && ($this->pamSkipRender || $this->pamCanReuse())
             ) {
                 $this->pamSkipRender = false;
-                PamPhpRegistry::retainScope($this);
                 ComponentLifecycle::retainSubtree($this);
 
                 return $this->pamLastElement;
@@ -310,11 +349,12 @@ abstract class Component implements Renderable
                 }
             }
             try {
-                $rendered = Profiler::measure(
-                    'component.render',
-                    fn (): Renderable => $this->render(),
-                    ['component' => $this::class],
-                );
+                $started = Profiler::start();
+                try {
+                    $rendered = $this->render();
+                } finally {
+                    Profiler::record('component.render', $started, ['component' => $this::class]);
+                }
 
                 if ($rendered instanceof View) {
                     $element = $rendered->withScope($this)->toElement();
@@ -359,7 +399,38 @@ abstract class Component implements Renderable
             } finally {
                 DependencyTracker::end($this);
             }
-        });
+        }
+
+    /**
+     * @internal Reconfigures an instance whose call site evaluated exactly
+     * the same inputs as last time: only the (fresh) listeners change. False
+     * when the slots, parent or inherited styles differ.
+     *
+     * @param array<string, list<Renderable>> $slots
+     * @param array<string, Closure> $listeners
+     * @param array<string, mixed> $inheritedStyles
+     */
+    final public function __pamReconfigure(
+        array $slots,
+        array $listeners,
+        ?Component $parent,
+        array $inheritedStyles,
+    ): bool {
+        if (
+            $slots !== $this->pamSlots
+            || $parent !== $this->pamParent
+            || $inheritedStyles !== $this->pamInheritedStyles
+        ) {
+            return false;
+        }
+        $this->pamEventListeners = $listeners;
+        $provided = $this->provide();
+        if ($provided !== $this->pamProvided) {
+            DependencyTracker::invalidate($this, '__pamProvided');
+        }
+        $this->pamProvided = $provided;
+
+        return true;
     }
 
     /**
@@ -463,8 +534,92 @@ abstract class Component implements Renderable
             ),
             true,
         ));
+        $plan = self::$pamObjectKeys[static::class] ??= self::pamObjectKeys(static::class);
+        if (count($values) > $plan[0]) {
+            // Dynamic properties: any value may hold an object.
+            return self::pamExpandObjects($values, 0);
+        }
+        // Only properties whose declared type admits an object can need
+        // expanding; scalar and array properties compare as they are.
+        foreach ($plan[1] as $key) {
+            $value = $values[$key] ?? null;
+            if (
+                is_object($value)
+                && !$value instanceof Component
+                && !$value instanceof Closure
+                && !$value instanceof \UnitEnum
+                && !$value instanceof Element
+                && !$value instanceof ComponentState
+            ) {
+                $values[$key] = [$value, self::pamExpandObjects((array) $value, 1)];
+            }
+        }
 
-        return self::pamExpandObjects($values, 0);
+        return $values;
+    }
+
+    /**
+     * Declared instance property count and the mangled array keys of the
+     * properties whose type admits an object.
+     *
+     * @param class-string $class
+     * @return array{0: int, 1: list<string>}
+     */
+    private static function pamObjectKeys(string $class): array
+    {
+        $declared = [];
+        $objects = [];
+        for ($reflection = new \ReflectionClass($class); $reflection !== false; $reflection = $reflection->getParentClass()) {
+            $name = $reflection->getName();
+            foreach ($reflection->getProperties() as $property) {
+                if ($property->isStatic() || $property->getDeclaringClass()->getName() !== $name) {
+                    continue;
+                }
+                $key = match (true) {
+                    $property->isPrivate() => "\0".$name."\0".$property->getName(),
+                    $property->isProtected() => "\0*\0".$property->getName(),
+                    default => $property->getName(),
+                };
+                if (isset($declared[$key])) {
+                    continue;
+                }
+                $declared[$key] = true;
+                if (self::pamTypeAdmitsObject($property->getType())) {
+                    $objects[] = $key;
+                }
+            }
+        }
+
+        $excluded = self::$pamSnapshotExcludedKeys ?? [];
+        // Framework references compared by identity: the parent component and
+        // the local state (whose every change bumps pamRevision).
+        $identity = ["\0".self::class."\0pamParent" => true, "\0".self::class."\0pamState" => true];
+        $objects = array_values(array_filter($objects, static fn (string $key): bool => !isset($identity[$key])));
+        $objects = array_values(array_filter($objects, static fn (string $key): bool => !isset($excluded[$key])));
+
+        return [count(array_diff_key($declared, $excluded)), $objects];
+    }
+
+    private static function pamTypeAdmitsObject(?\ReflectionType $type): bool
+    {
+        if ($type === null) {
+            return true;
+        }
+        if ($type instanceof \ReflectionNamedType) {
+            return !$type->isBuiltin()
+                || in_array($type->getName(), ['object', 'mixed', 'iterable', 'callable'], true);
+        }
+        if ($type instanceof \ReflectionUnionType || $type instanceof \ReflectionIntersectionType) {
+            foreach ($type->getTypes() as $member) {
+                if (self::pamTypeAdmitsObject($member)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -529,6 +684,11 @@ abstract class Component implements Renderable
 
     final public function __pamRunEffects(): void
     {
+        $class = static::class;
+        // Components that override neither effects() nor watchers() have none.
+        if (!(self::$pamHasEffects[$class] ??= self::pamDeclaresEffects($class)) && $this->pamEffects === []) {
+            return;
+        }
         foreach ([...$this->effects(), ...$this->watchers()] as $index => $effect) {
             if (!$effect instanceof Effect) {
                 throw new LogicException('Component effects must contain Effect instances.');
@@ -549,6 +709,38 @@ abstract class Component implements Renderable
             ];
             $this->pamEffects[$key] = $state;
         }
+    }
+
+    /**
+     * @internal Drops the render references of an instance the registry
+     * discarded (its last element tree, slots, listeners and parent), so the
+     * reference cycles through event closures are freed at once instead of
+     * waiting for the cycle collector.
+     */
+    /** @internal An event handler closure this scope already built. */
+    final public function __pamHandler(string $key): ?Closure
+    {
+        return $this->pamHandlers[$key] ?? null;
+    }
+
+    /** @internal */
+    final public function __pamRememberHandler(string $key, Closure $handler): Closure
+    {
+        if (count($this->pamHandlers) >= 256) {
+            $this->pamHandlers = [];
+        }
+
+        return $this->pamHandlers[$key] = $handler;
+    }
+
+    final public function __pamRelease(): void
+    {
+        $this->pamHandlers = [];
+        $this->pamLastElement = null;
+        $this->pamSnapshot = null;
+        $this->pamEventListeners = [];
+        $this->pamSlots = [];
+        $this->pamParent = null;
     }
 
     final public function __pamCleanup(): void
@@ -601,13 +793,21 @@ abstract class Component implements Renderable
 
     private function pamLocalState(): ComponentState
     {
+        // A weak reference keeps the state's callback from forming a cycle
+        // with its component, so a discarded component is freed at once.
+        $owner = \WeakReference::create($this);
+
         return $this->pamState ??= new ComponentState(
             $this->initialState(),
-            function (string $name, mixed $current, mixed $previous): void {
-                $this->pamRevision++;
-                $this->pamComputed = [];
-                $this->pamSkipRender = false;
-                $this->pamChanges['state.'.$name] = [
+            static function (string $name, mixed $current, mixed $previous) use ($owner): void {
+                $component = $owner->get();
+                if ($component === null) {
+                    return;
+                }
+                $component->pamRevision++;
+                $component->pamComputed = [];
+                $component->pamSkipRender = false;
+                $component->pamChanges['state.'.$name] = [
                     'previous' => $previous,
                     'current' => $current,
                 ];

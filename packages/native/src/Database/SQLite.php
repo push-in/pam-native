@@ -13,6 +13,11 @@ use Pam\Native\Modules\NativeModuleException;
 use Pam\Native\Modules\NativeModules;
 use Throwable;
 
+use function count;
+use function is_array;
+use function is_string;
+use function strlen;
+
 final class SQLite
 {
     private function __construct()

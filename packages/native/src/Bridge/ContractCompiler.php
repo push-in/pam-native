@@ -11,6 +11,9 @@ use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
 
+use function count;
+use function in_array;
+
 /**
  * @phpstan-type ParameterShape array{id: int, name: string, type: string, nullable: bool}
  * @phpstan-type MethodShape array{id: int, name: string, kind: int, timeoutMs: int, parameters: list<ParameterShape>, returns: string, permissions: list<string>}

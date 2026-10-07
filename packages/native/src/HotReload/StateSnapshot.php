@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\HotReload;
 
+use function strlen;
+
 final readonly class StateSnapshot
 {
     /**

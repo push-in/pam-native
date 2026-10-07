@@ -16,6 +16,9 @@ use Pam\Native\ImageProgressEvent;
 use Pam\Native\ImageResizeMethod;
 use Pam\Native\PropKey;
 
+use function count;
+use function strlen;
+
 trait HasImageBehavior
 {
     use HasMediaCacheBehavior;

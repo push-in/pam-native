@@ -14,6 +14,8 @@ use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 
+use function is_string;
+
 final class FlatList extends Element
 {
     use HasScrollPhaseEvents;

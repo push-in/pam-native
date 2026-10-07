@@ -18,6 +18,8 @@ use Pam\Native\Navigation\TopTabNavigator;
 use Pam\Native\Navigation\TopTabRouter;
 use Pam\Native\Renderable;
 
+use function is_string;
+
 final class Route
 {
     private static ?RouteRegistrar $registrar = null;

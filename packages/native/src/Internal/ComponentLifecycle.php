@@ -10,27 +10,27 @@ use Pam\Native\Component;
 use Pam\Native\Element;
 use WeakMap;
 
+use function count;
+
 final class ComponentLifecycle
 {
-    /**
-     * @var WeakMap<Component, array{
-     *     booted: bool,
-     *     setup: bool,
-     *     mounted: bool,
-     *     attached: bool,
-     *     resumed: bool,
-     *     seen: int
-     * }>|null
-     */
+    /** @var WeakMap<Component, ComponentLifecycleState>|null */
     private static ?WeakMap $states = null;
 
     private static int $pass = 0;
+
+    private static int $sequence = 0;
+
+    /** @var array<int, \WeakReference<Component>> components commit() visits, by creation order */
+    private static array $commitQueue = [];
+
+    private static bool $queueSorted = true;
     private static AppState $appState = AppState::Active;
 
     /** @var list<Component> Components currently inside render(). */
     private static array $renderStack = [];
 
-    /** @var WeakMap<Component, list<Component>>|null Child components rendered during each component's last real render. */
+    /** @var WeakMap<Component, ComponentLifecycleState>|null Components with child lists (their last real render). */
     private static ?WeakMap $children = null;
 
     /** @var list<array{depth: int, components: list<Component>}> */
@@ -47,37 +47,48 @@ final class ComponentLifecycle
 
     public static function retain(Component $component): void
     {
-        $states = self::$states;
-        $state = $states[$component] ?? null;
-        if ($state === null) {
-            return;
+        $state = self::$states[$component] ?? null;
+        if ($state !== null) {
+            $state->seen = self::$pass;
         }
-        $state['seen'] = self::$pass;
-        $states[$component] = $state;
     }
 
     /** @param Closure(): Element $render */
     public static function render(Component $component, Closure $render): Element
     {
-        $states = self::$states ??= new WeakMap();
-        $state = $states[$component] ?? [
-            'booted' => false,
-            'setup' => false,
-            'mounted' => false,
-            'attached' => false,
-            'resumed' => false,
-            'inactive' => false,
-            'seen' => 0,
-        ];
+        self::enter($component);
+        try {
+            $element = $render();
+            $component->rendered();
 
-        $state['seen'] = self::$pass;
-        $states[$component] = $state;
+            return $element;
+        } finally {
+            array_pop(self::$renderStack);
+        }
+    }
+
+    /**
+     * Starts rendering a component: records it for this pass and as a child
+     * of the component rendering it, then boots, sets up and mounts it on
+     * first use. The caller must call leave() once it rendered.
+     */
+    public static function enter(Component $component): void
+    {
+        $states = self::$states ??= new WeakMap();
+        $state = $states[$component] ?? null;
+        if ($state === null) {
+            $state = new ComponentLifecycleState();
+            $state->sequence = ++self::$sequence;
+            $states[$component] = $state;
+        }
+        if (!$state->queued && (!$state->attached || !$state->resumed)) {
+            self::queue($component, $state);
+        }
+
+        $state->seen = self::$pass;
         $parent = self::$renderStack === [] ? null : self::$renderStack[count(self::$renderStack) - 1];
         if ($parent !== null && $parent !== $component) {
-            $children = self::$children ??= new WeakMap();
-            $list = $children[$parent] ?? [];
-            $list[] = $component;
-            $children[$parent] = $list;
+            self::addChild($parent, $component);
         }
         if (self::$captures !== []) {
             $capture = count(self::$captures) - 1;
@@ -86,31 +97,33 @@ final class ComponentLifecycle
             }
         }
         self::$renderStack[] = $component;
+        if ($state->mounted && $state->setup && $state->booted) {
+            return;
+        }
         try {
-            if (!$state['booted']) {
+            if (!$state->booted) {
                 $component->boot();
-                $state['booted'] = true;
+                $state->booted = true;
             }
-            if (!$state['setup']) {
+            if (!$state->setup) {
                 $component->__pamSetup();
-                $state['setup'] = true;
+                $state->setup = true;
             }
-            if (!$state['mounted']) {
+            if (!$state->mounted) {
                 $component->mount();
-                $state['mounted'] = true;
+                $state->mounted = true;
             }
-            $states[$component] = $state;
-
-            $element = $render();
-            $component->rendered();
-
-            return $element;
         } catch (\Throwable $error) {
             $states[$component] = $state;
-            throw $error;
-        } finally {
             array_pop(self::$renderStack);
+
+            throw $error;
         }
+    }
+
+    public static function leave(): void
+    {
+        array_pop(self::$renderStack);
     }
 
     /**
@@ -150,10 +163,7 @@ final class ComponentLifecycle
             PamPhpRegistry::retainScope($component);
             self::retainSubtree($component);
             if ($parent !== null && $parent !== $component) {
-                $children = self::$children ??= new WeakMap();
-                $list = $children[$parent] ?? [];
-                $list[] = $component;
-                $children[$parent] = $list;
+                self::addChild($parent, $component);
             }
             if (self::$captures !== []) {
                 $capture = count(self::$captures) - 1;
@@ -168,7 +178,38 @@ final class ComponentLifecycle
     public static function beginComponentRender(Component $component): void
     {
         $children = self::$children ??= new WeakMap();
-        $children[$component] = [];
+        $holder = $children[$component] ?? null;
+        if ($holder === null) {
+            $children[$component] = $holder = new ComponentLifecycleState();
+        }
+        $holder->children = [];
+        $holder->walked = -1;
+        $holder->retained = null;
+        $state = self::$states[$component] ?? null;
+        if ($state !== null) {
+            $state->rendered = self::$pass;
+        }
+    }
+
+    /**
+     * True when the component is part of this pass without having rendered
+     * (it, or an ancestor, was reused): what it rendered last stays.
+     */
+    public static function retainedWithoutRender(Component $component): bool
+    {
+        $state = self::$states[$component] ?? null;
+
+        return $state !== null && $state->seen === self::$pass && $state->rendered !== self::$pass;
+    }
+
+    private static function addChild(Component $parent, Component $component): void
+    {
+        $children = self::$children ??= new WeakMap();
+        $holder = $children[$parent] ?? null;
+        if ($holder === null) {
+            $children[$parent] = $holder = new ComponentLifecycleState();
+        }
+        $holder->children[] = $component;
     }
 
     /**
@@ -177,15 +218,35 @@ final class ComponentLifecycle
      */
     public static function retainSubtree(Component $component, int $depth = 0): void
     {
-        $children = self::$children;
-        if ($children === null || $depth > 256 || !isset($children[$component])) {
+        $holder = self::$children[$component] ?? null;
+        if ($holder === null || $depth > 256 || $holder->walked === self::$pass) {
             return;
         }
-        foreach ($children[$component] as $child) {
-            self::retain($child);
-            PamPhpRegistry::retainScope($child);
-            self::retainSubtree($child, $depth + 1);
+        $holder->walked = self::$pass;
+        // Their compiled instances stay with them: the registry keeps the
+        // instances of owners retained without rendering.
+        $pass = self::$pass;
+        foreach ($holder->retained ??= self::descendantStates($holder, $depth) as $state) {
+            $state->seen = $pass;
         }
+    }
+
+    /** @return list<ComponentLifecycleState> */
+    private static function descendantStates(ComponentLifecycleState $holder, int $depth): array
+    {
+        $states = [];
+        foreach ($holder->children as $child) {
+            $state = self::$states[$child] ?? null;
+            if ($state !== null) {
+                $states[] = $state;
+            }
+            $childHolder = self::$children[$child] ?? null;
+            if ($childHolder !== null && $depth + 1 <= 256) {
+                array_push($states, ...self::descendantStates($childHolder, $depth + 1));
+            }
+        }
+
+        return $states;
     }
 
     /**
@@ -200,7 +261,8 @@ final class ComponentLifecycle
             return;
         }
         foreach ($states as $component => $state) {
-            if ($state['mounted'] && $component->__pamStateChanged()) {
+            // Marking an already dirty component is a no-op: skip its snapshot.
+            if ($state->mounted && !DependencyTracker::isDirty($component) && $component->__pamStateChanged()) {
                 DependencyTracker::markDirty($component);
             }
         }
@@ -215,20 +277,26 @@ final class ComponentLifecycle
         }
 
         foreach ($states as $component => $state) {
-            if (!$state['mounted'] || $state['seen'] === self::$pass) {
+            if (!$state->mounted || $state->seen === self::$pass) {
                 continue;
             }
-            if ($state['resumed']) {
+            if ($state->resumed) {
                 $component->paused();
             }
             $component->unmount();
-            $state['mounted'] = false;
-            $state['attached'] = false;
-            $state['resumed'] = false;
+            $state->mounted = false;
+            $state->attached = false;
+            $state->resumed = false;
             $states[$component] = $state;
         }
     }
 
+    /**
+     * Attaches, resumes and runs the effects of the components this pass
+     * rendered, in creation order. Only components that still need one of
+     * those (new, remounted or paused ones, and those with effects) are
+     * queued, so a frame does not visit every mounted component.
+     */
     public static function commit(): void
     {
         $states = self::$states;
@@ -237,21 +305,60 @@ final class ComponentLifecycle
             return;
         }
 
-        foreach ($states as $component => $state) {
-            if (!$state['mounted'] || $state['seen'] !== self::$pass) {
-                continue;
+        $visited = [];
+        do {
+            if (!self::$queueSorted) {
+                ksort(self::$commitQueue);
+                self::$queueSorted = true;
             }
-            if (!$state['attached']) {
-                $component->attached();
-                $state['attached'] = true;
+            $more = false;
+            foreach (self::$commitQueue as $sequence => $reference) {
+                if (isset($visited[$sequence])) {
+                    continue;
+                }
+                $visited[$sequence] = true;
+                $component = $reference->get();
+                $state = $component === null ? null : ($states[$component] ?? null);
+                if ($state === null || $state->sequence !== $sequence) {
+                    unset(self::$commitQueue[$sequence]);
+                    continue;
+                }
+                if (!$state->mounted || $state->seen !== self::$pass) {
+                    continue;
+                }
+                if (!$state->attached) {
+                    $component->attached();
+                    $state->attached = true;
+                }
+                if (self::$appState !== AppState::Background && !$state->resumed) {
+                    $component->resumed();
+                    $state->resumed = true;
+                }
+                $component->__pamRunEffects();
+                if ($state->resumed && !Component::__pamHasEffects($component)) {
+                    unset(self::$commitQueue[$sequence]);
+                    $state->queued = false;
+                }
             }
-            if (self::$appState !== AppState::Background && !$state['resumed']) {
-                $component->resumed();
-                $state['resumed'] = true;
+            // Components entered by the hooks above join this commit, as
+            // they would have been visited by a live iteration.
+            foreach (self::$commitQueue as $sequence => $_) {
+                if (!isset($visited[$sequence])) {
+                    $more = true;
+                    break;
+                }
             }
-            $component->__pamRunEffects();
-            $states[$component] = $state;
+        } while ($more);
+    }
+
+    private static function queue(Component $component, ComponentLifecycleState $state): void
+    {
+        $state->queued = true;
+        $last = array_key_last(self::$commitQueue);
+        if ($last !== null && $last > $state->sequence) {
+            self::$queueSorted = false;
         }
+        self::$commitQueue[$state->sequence] = \WeakReference::create($component);
     }
 
     /**
@@ -275,25 +382,25 @@ final class ComponentLifecycle
         }
 
         foreach ($states as $component => $state) {
-            if (!$state['mounted'] || !$state['attached']) {
+            if (!$state->mounted || !$state->attached) {
                 continue;
             }
             if ($appState === AppState::Background) {
-                if ($state['resumed']) {
+                if ($state->resumed) {
                     $component->paused();
-                    $state['resumed'] = false;
-                    $state['inactive'] = false;
+                    $state->resumed = false;
+                    $state->inactive = false;
                 }
-            } elseif (!$state['resumed']) {
+            } elseif (!$state->resumed) {
                 $component->resumed();
-                $state['resumed'] = true;
-                $state['inactive'] = false;
+                $state->resumed = true;
+                $state->inactive = false;
             } elseif ($appState === AppState::Inactive) {
                 $component->inactive();
-                $state['inactive'] = true;
-            } elseif ($state['inactive'] ?? false) {
+                $state->inactive = true;
+            } elseif ($state->inactive) {
                 $component->activated();
-                $state['inactive'] = false;
+                $state->inactive = false;
             }
             $states[$component] = $state;
         }
@@ -307,11 +414,11 @@ final class ComponentLifecycle
         if ($state === null) {
             return;
         }
-        if ($state['resumed']) {
+        if ($state->resumed) {
             $component->paused();
         }
         try {
-            if ($state['mounted']) {
+            if ($state->mounted) {
                 $component->unmount();
             }
         } finally {
@@ -327,22 +434,25 @@ final class ComponentLifecycle
 
         if ($states !== null) {
             foreach ($states as $component => $state) {
-                if ($state['resumed']) {
+                if ($state->resumed) {
                     $component->paused();
                 }
                 try {
-                    if ($state['mounted']) {
+                    if ($state->mounted) {
                         $component->unmount();
                     }
                 } finally {
                     $component->__pamCleanup();
                     DependencyTracker::forget($component);
+                    $component->__pamRelease();
                 }
             }
         }
 
         self::$states = null;
         self::$children = null;
+        self::$commitQueue = [];
+        self::$queueSorted = true;
         self::$renderStack = [];
         self::$captures = [];
         self::$pass = 0;

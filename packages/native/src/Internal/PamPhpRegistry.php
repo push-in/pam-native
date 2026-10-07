@@ -16,6 +16,13 @@ use ReflectionClass;
 use RuntimeException;
 use WeakMap;
 
+use function array_key_exists;
+use function count;
+use function is_array;
+use function is_float;
+use function is_int;
+use function is_string;
+
 final class PamPhpRegistry
 {
     /** @var array<class-string<Component>, PamPhpComponent> */
@@ -38,11 +45,19 @@ final class PamPhpRegistry
      */
     private static array $metadata = [];
 
-    /** @var WeakMap<object, array<string, Component>>|null */
+    /** @var WeakMap<object, ComponentInstances>|null */
     private static ?WeakMap $instances = null;
 
-    /** @var WeakMap<object, array<string, true>>|null */
-    private static ?WeakMap $seen = null;
+    /** Render pass whose used instances are tracked; null outside a pass. */
+    private static ?int $seen = null;
+
+    private static int $pass = 0;
+
+    /** @var array{0: ComponentInstances, 1: string, 2: Component, 3: array<string, mixed>}|null */
+    private static ?array $lastCall = null;
+
+    /** @var array<class-string, array<string, true>|null> */
+    private static array $propertyParameters = [];
 
     private static ?object $rootScope = null;
     private static bool $autoloadRegistered = false;
@@ -110,11 +125,12 @@ final class PamPhpRegistry
 
     public static function beginRender(): void
     {
-        self::$seen = new WeakMap();
+        self::$seen = ++self::$pass;
     }
 
     public static function finishRender(): void
     {
+        self::$lastCall = null;
         $instances = self::$instances;
         if ($instances === null) {
             self::$seen = null;
@@ -124,15 +140,30 @@ final class PamPhpRegistry
 
         $seen = self::$seen;
         foreach ($instances as $owner => $bucket) {
-            $active = $seen !== null ? ($seen[$owner] ?? []) : [];
-            foreach ($bucket as $cacheKey => $component) {
-                if (isset($active[$cacheKey])) {
-                    continue;
-                }
-                ComponentLifecycle::forget($component);
-                unset($bucket[$cacheKey]);
+            if (
+                $seen !== null
+                && $bucket->pass !== $seen
+                && $owner instanceof Component
+                && ComponentLifecycle::retainedWithoutRender($owner)
+            ) {
+                // The owner was reused: everything it rendered stays.
+                continue;
             }
-            $instances[$owner] = $bucket;
+            $active = $seen !== null && $bucket->pass === $seen ? $bucket->active : [];
+            if (count($active) === count($bucket->instances)) {
+                // Every instance was used (active only holds instance keys).
+                continue;
+            }
+            // Only the instances this pass did not use, in creation order.
+            foreach (array_diff_key($bucket->instances, $active) as $cacheKey => $component) {
+                ComponentLifecycle::forget($component);
+                unset($bucket->instances[$cacheKey]);
+                $path = $bucket->callPaths[$cacheKey] ?? null;
+                if ($path !== null) {
+                    unset($bucket->callPaths[$cacheKey], $bucket->calls[$path]);
+                }
+                $component->__pamRelease();
+            }
         }
         self::$seen = null;
     }
@@ -158,14 +189,20 @@ final class PamPhpRegistry
         if ($instances === null || $seen === null) {
             return;
         }
-        $bucket = $instances[$owner] ?? [];
-        $active = $seen[$owner] ?? [];
-        foreach ($bucket as $cacheKey => $component) {
-            $active[$cacheKey] = true;
+        $bucket = $instances[$owner] ?? null;
+        if ($bucket === null || $bucket->instances === [] || $bucket->retained === $seen) {
+            return;
+        }
+        $bucket->retained = $seen;
+        if ($bucket->pass !== $seen) {
+            $bucket->pass = $seen;
+            $bucket->active = [];
+        }
+        foreach ($bucket->instances as $cacheKey => $component) {
+            $bucket->active[$cacheKey] = true;
             ComponentLifecycle::retain($component);
             self::retainScope($component);
         }
-        $seen[$owner] = $active;
     }
 
     /** @param array<string, mixed> $props */
@@ -195,6 +232,7 @@ final class PamPhpRegistry
         self::$components = [];
         self::$classFiles = [];
         self::$metadata = [];
+        self::$propertyParameters = [];
     }
 
     public static function releaseInstances(): void
@@ -202,14 +240,18 @@ final class PamPhpRegistry
         $instances = self::$instances;
         if ($instances !== null) {
             foreach ($instances as $bucket) {
-                foreach ($bucket as $component) {
+                foreach ($bucket->instances as $component) {
                     ComponentLifecycle::forget($component);
+                    $component->__pamRelease();
                 }
+                $bucket->calls = [];
+                $bucket->callPaths = [];
             }
         }
         self::$instances = null;
         self::$seen = null;
         self::$rootScope = null;
+        self::$lastCall = null;
     }
 
     /**
@@ -267,33 +309,158 @@ final class PamPhpRegistry
 
         $owner = $scope ?? (self::$rootScope ??= new \stdClass());
         $instances = self::$instances ??= new WeakMap();
-        $bucket = $instances[$owner] ?? [];
+        $bucket = $instances[$owner] ??= new ComponentInstances();
         $cacheKey = $className.'@'.$identity;
-        $seen = self::$seen ??= new WeakMap();
-        $active = $seen[$owner] ?? [];
-        $active[$cacheKey] = true;
-        $seen[$owner] = $active;
-        $instance = $bucket[$cacheKey] ?? null;
+        $seen = self::$seen ??= ++self::$pass;
+        if ($bucket->pass !== $seen) {
+            $bucket->pass = $seen;
+            $bucket->active = [];
+        }
+        $bucket->active[$cacheKey] = true;
+        $instance = $bucket->instances[$cacheKey] ?? null;
 
-        if (!$instance instanceof $className) {
-            $instance = self::instantiate($className, $values);
-        } elseif (!self::updateProps($instance, $values)) {
-            ComponentLifecycle::forget($instance);
-            $instance = self::instantiate($className, $values);
+        try {
+            if (!$instance instanceof $className) {
+                $instance = self::instantiate($className, $values);
+            } elseif (!self::updateProps($instance, $values)) {
+                $replaced = $instance;
+                ComponentLifecycle::forget($replaced);
+                $instance = self::instantiate($className, $values);
+                $replaced->__pamRelease();
+            }
+
+            /** @var array<string, list<Renderable>> $safeSlots */
+            $safeSlots = $slots;
+            /** @var array<string, Closure> $safeListeners */
+            $safeListeners = $listeners;
+            $instance->__pamConfigure(
+                $safeSlots,
+                $safeListeners,
+                $scope instanceof Component ? $scope : null,
+                $inheritedStyles,
+            );
+        } catch (\Throwable $error) {
+            // Keep "active" a subset of the instances (see finishRender()).
+            if (!isset($bucket->instances[$cacheKey])) {
+                unset($bucket->active[$cacheKey]);
+            }
+
+            throw $error;
+        }
+        $bucket->instances[$cacheKey] = $instance;
+        self::$lastCall = [$bucket, $cacheKey, $instance, $values];
+
+        return $instance;
+    }
+
+    /**
+     * Remembers the inputs of the compiled component call that just ran.
+     *
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $inherited
+     */
+    public static function rememberCall(int $plan, string $path, array $values, array $inherited): ?ComponentCall
+    {
+        $last = self::$lastCall;
+        self::$lastCall = null;
+        if ($last === null) {
+            return null;
+        }
+        [$bucket, $cacheKey, $instance, $props] = $last;
+        $names = self::$propertyParameters[$instance::class] ??= self::propertyParameters($instance);
+        if ($names === null) {
+            // No constructor props: updateProps() replaces the instance
+            // whenever props are given.
+            if ($props !== []) {
+                return null;
+            }
+            $names = [];
+        }
+        $held = array_intersect_key($props, $names);
+        $call = new ComponentCall($plan, $values, $inherited, $cacheKey, $instance, $held);
+        if (count($bucket->calls) >= 4096) {
+            $bucket->calls = [];
+            $bucket->callPaths = [];
+        }
+        $bucket->calls[$path] = $call;
+        $bucket->callPaths[$cacheKey] = $path;
+
+        return $call;
+    }
+
+    /**
+     * Constructor props that are instance properties (what updateProps()
+     * compares), or null without constructor props.
+     *
+     * @return array<string, true>|null
+     */
+    private static function propertyParameters(Component $instance): ?array
+    {
+        $parameters = self::metadata($instance::class)['parameters'];
+        if ($parameters === []) {
+            return null;
+        }
+        $names = [];
+        foreach ($parameters as $parameter) {
+            if (property_exists($instance, $parameter['name'])) {
+                $names[$parameter['name']] = true;
+            }
         }
 
-        /** @var array<string, list<Renderable>> $safeSlots */
-        $safeSlots = $slots;
-        /** @var array<string, Closure> $safeListeners */
-        $safeListeners = $listeners;
-        $instance->__pamConfigure(
-            $safeSlots,
-            $safeListeners,
+        return $names;
+    }
+
+    public static function call(?object $scope, string $path): ?ComponentCall
+    {
+        $owner = $scope ?? self::$rootScope;
+        if ($owner === null || self::$instances === null) {
+            return null;
+        }
+
+        return (self::$instances[$owner] ?? null)?->calls[$path] ?? null;
+    }
+
+    /**
+     * Reuses the instance of a call site whose inputs did not change: same
+     * effect as component() with the same values (props already equal, so
+     * nothing updates) but without diffing and validating them again.
+     *
+     * @param array<string, Closure> $listeners
+     * @param array<string, mixed> $inheritedStyles
+     */
+    public static function reuseCall(
+        ComponentCall $call,
+        ?object $scope,
+        array $listeners,
+        array $inheritedStyles,
+    ): ?Component {
+        $owner = $scope ?? self::$rootScope;
+        $bucket = $owner === null || self::$instances === null ? null : (self::$instances[$owner] ?? null);
+        $instance = $bucket?->instances[$call->cacheKey] ?? null;
+        if ($bucket === null || $instance !== $call->instance) {
+            return null;
+        }
+        foreach ($call->props as $name => $value) {
+            if ($instance->{$name} !== $value) {
+                return null;
+            }
+        }
+        // As updateProps() does after finding every prop unchanged.
+        $instance->__pamFlushChanges();
+        if (!$instance->__pamReconfigure(
+            ['slot' => []],
+            $listeners,
             $scope instanceof Component ? $scope : null,
             $inheritedStyles,
-        );
-        $bucket[$cacheKey] = $instance;
-        $instances[$owner] = $bucket;
+        )) {
+            return null;
+        }
+        $seen = self::$seen ??= ++self::$pass;
+        if ($bucket->pass !== $seen) {
+            $bucket->pass = $seen;
+            $bucket->active = [];
+        }
+        $bucket->active[$call->cacheKey] = true;
 
         return $instance;
     }

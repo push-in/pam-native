@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Pam\Native\Internal;
 
+use function count;
+use function is_array;
+use function is_int;
+use function is_scalar;
+
 /**
  * Lazily accumulated declarative values of a template element's native
  * ancestors (`__parentVariants` for PHP component factories). Most elements

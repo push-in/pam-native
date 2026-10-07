@@ -10,6 +10,10 @@ use Pam\Native\CryptoUnavailableException;
 use Pam\Native\Protocol;
 use Throwable;
 
+use function is_array;
+use function is_string;
+use function strlen;
+
 final class UpdateVerifier
 {
     private const int MAX_MANIFEST_BYTES = 65_536;

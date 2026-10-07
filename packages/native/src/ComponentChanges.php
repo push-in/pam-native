@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
+use function array_key_exists;
+
 final readonly class ComponentChanges
 {
     /** @param array<string, array{previous: mixed, current: mixed}> $values */

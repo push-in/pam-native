@@ -6,6 +6,9 @@ namespace Pam\Native\Update;
 
 use RuntimeException;
 
+use function is_int;
+use function is_string;
+
 final class UpdateSlotManager
 {
     private const int MAX_BUNDLE_BYTES = 268_435_456;

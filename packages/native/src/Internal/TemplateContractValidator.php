@@ -11,6 +11,9 @@ use Pam\Native\TemplateRegistry;
 use ReflectionClass;
 use RuntimeException;
 
+use function in_array;
+use function is_string;
+
 final class TemplateContractValidator
 {
     private function __construct()

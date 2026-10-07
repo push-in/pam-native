@@ -10,6 +10,9 @@ use Pam\Native\State;
 use ReflectionClass;
 use ReflectionProperty;
 
+use function is_array;
+use function is_string;
+
 abstract class NativeForm
 {
     /** @var array<string, list<string>> */

@@ -6,6 +6,9 @@ namespace Pam\Native\Animation;
 
 use InvalidArgumentException;
 
+use function in_array;
+use function strlen;
+
 /**
  * CSS transitions compiled for the native runtime, with per-property
  * durations, delays and timing functions plus a `spring()` timing function

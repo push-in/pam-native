@@ -25,6 +25,13 @@ final class RuntimeSupervisor
         self::$failures = 0;
         self::$safeMode = false;
         $now = microtime(true);
+        if (self::$lastCheckpoint === 0.0) {
+            // The first checkpoint waits for the runtime to stay up for one
+            // interval: no synchronous state-file write in the first frame.
+            self::$lastCheckpoint = $now;
+
+            return;
+        }
         if ($now - self::$lastCheckpoint < 5.0) {
             return;
         }

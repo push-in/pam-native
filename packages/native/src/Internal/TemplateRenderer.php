@@ -128,6 +128,8 @@ use function is_scalar;
 use function is_string;
 use function strlen;
 
+use function is_object;
+
 final class TemplateRenderer
 {
     /** @var list<string> */
@@ -172,6 +174,15 @@ final class TemplateRenderer
     /** Last native element built by tag(); nodes() places it without copying. */
     private static ?Element $freshElement = null;
 
+    /** @var array<string, true> style keys whose entries depend on the environment */
+    private static array $dynamicKeys = [];
+
+    /** @var array<string, bool> component event attributes that name a method */
+    private static array $methodNames = [];
+
+    /** @var array<string, bool> event attributes that are call expressions */
+    private static array $callExpressions = [];
+
     /** Set when a style resolution read the window/container environment. */
     private static bool $dynamicStyles = false;
 
@@ -213,10 +224,13 @@ final class TemplateRenderer
 
     private static int $propertyMemoSize = 0;
 
+    /** Bytes of the long strings held by the property memo. */
+    private static int $propertyMemoBytes = 0;
+
     /** @var array<string, ReflectionMethod> validated public component event handlers */
     private static array $componentMethods = [];
 
-    /** @var \WeakMap<Element, array<string, Element>>|null decorated component elements */
+    /** @var \WeakMap<Element, array<string, Element|true>>|null decorated component elements (true: unchanged) */
     private static ?\WeakMap $decorations = null;
 
     /** @var array<string, ReflectionMethod> */
@@ -740,6 +754,15 @@ final class TemplateRenderer
     }
 
     /**
+     * @internal Drops the last element built in place, so it does not keep
+     * a finished frame's tree alive until the next render builds one.
+     */
+    public static function releaseFrame(): void
+    {
+        self::$freshElement = null;
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public static function render(
@@ -749,17 +772,17 @@ final class TemplateRenderer
     ): Element
     {
         $data['__pamStyles'] = self::styleSheet($tree);
-        $rendered = self::nodes($tree->children, $scope, $data);
-        $elements = array_values(array_filter($rendered, static fn (mixed $value): bool => $value instanceof Element));
+        $rendered = self::nodes($tree->children, $scope, self::handOver($data));
 
         if ($rendered === []) {
             return NativeView::make()->visible(false);
         }
-        if (count($rendered) !== 1 || count($elements) !== 1) {
+        $root = $rendered[0] ?? null;
+        if (count($rendered) !== 1 || !$root instanceof Element) {
             throw new RuntimeException('A Pam Native view must render exactly one root element.');
         }
 
-        return $elements[0];
+        return $root;
     }
 
     /**
@@ -783,10 +806,11 @@ final class TemplateRenderer
 
         foreach ($nodes as $index => $node) {
             $slot = $slotPrefix.$index;
-            $nodeData = $data;
-            $nodeData['__pamNodePath'] = $parentPath.'.'.$index;
+            // Written in place: only copied when the previous sibling kept a
+            // reference to the data (an event closure, a child data array).
+            $data['__pamNodePath'] = $parentPath.'.'.$index;
             if ($node->kind === 2) {
-                $output[] = self::interpolate($node->value, $scope, $nodeData);
+                $output[] = self::interpolate($node->value, $scope, $data);
                 $branchMatched = false;
                 continue;
             }
@@ -795,7 +819,7 @@ final class TemplateRenderer
 
             if ($plan['for'] !== null) {
                 [$variable, $source, $keyExpression, $staticKey, $indexName, $indexValid, $loopNode] = $plan['for'];
-                $items = TemplateExpression::evaluate($source, $scope, $nodeData);
+                $items = TemplateExpression::evaluate($source, $scope, $data);
                 if (is_int($items)) {
                     $items = $items > 0 ? range(1, $items) : [];
                 } elseif ($items instanceof Traversable) {
@@ -820,9 +844,9 @@ final class TemplateRenderer
                     );
                 }
                 $seenKeys = [];
-                $loopPath = $nodeData['__pamNodePath'].'.';
+                $loopPath = $data['__pamNodePath'].'.';
                 foreach ($items as $itemIndex => $item) {
-                    $iterationData = $nodeData;
+                    $iterationData = $data;
                     $iterationData[$variable] = $item;
                     $iterationData[$indexName] = $itemIndex;
                     $identity = $itemIndex;
@@ -840,7 +864,7 @@ final class TemplateRenderer
                         $seenKeys[$fingerprint] = true;
                     }
                     $iterationData['__pamNodePath'] = $loopPath.$identity;
-                    foreach (self::nodes([$loopNode], $scope, $iterationData, $slot.'.'.$identity.'.') as $rendered) {
+                    foreach (self::nodes([$loopNode], $scope, self::handOver($iterationData), $slot.'.'.$identity.'.') as $rendered) {
                         $output[] = $rendered;
                     }
                 }
@@ -850,7 +874,7 @@ final class TemplateRenderer
 
             switch ($plan['condition']) {
                 case 1:
-                    $branchMatched = (bool) self::dynamicValue($plan['expression'], $scope, $nodeData);
+                    $branchMatched = (bool) self::dynamicValue($plan['expression'], $scope, $data);
                     if (!$branchMatched) {
                         continue 2;
                     }
@@ -859,7 +883,7 @@ final class TemplateRenderer
                     if ($branchMatched) {
                         continue 2;
                     }
-                    $branchMatched = (bool) self::dynamicValue($plan['expression'], $scope, $nodeData);
+                    $branchMatched = (bool) self::dynamicValue($plan['expression'], $scope, $data);
                     if (!$branchMatched) {
                         continue 2;
                     }
@@ -881,20 +905,22 @@ final class TemplateRenderer
             $children = $node->children;
 
             if ($plan['control']) {
-                self::controlNode($output, $tag, $attributes, $children, $scope, $nodeData, $slot);
+                self::controlNode($output, $tag, $attributes, $children, $scope, $data, $slot);
                 continue;
             }
 
             try {
-                $element = self::tag(
-                    $tag,
-                    $attributes,
-                    $children,
-                    $scope,
-                    $nodeData,
-                    $node,
-                );
-                if ($element->identitySlot() === null && self::$freshElement === $element) {
+                $element = $node->pamFast
+                    ? self::fastNode($node, $tag, $children, $scope, $data)
+                    : self::tag(
+                        $tag,
+                        $attributes,
+                        $children,
+                        $scope,
+                        $data,
+                        $node,
+                    );
+                if ($element->identitySlot === null && self::$freshElement === $element) {
                     $output[] = $element->__pamPlaceAt($slot);
                 } else {
                     // A component's element: the same object while the
@@ -1207,33 +1233,86 @@ final class TemplateRenderer
         ?object $scope,
         array $data,
         ?CompiledTemplateNode $planNode = null,
+        string|false|null $knownClass = false,
     ): Element {
         $factory = TemplateRegistry::factory($tag);
         $plan = null;
         $variant = $factory === null ? 'n' : 'f';
         if ($planNode !== null) {
             $plan = $planNode->pamTagPlans[$variant]
-                ??= self::tagPlan($tag, $attributes, $factory !== null);
+                ??= self::tagPlan($tag, $attributes, $factory !== null, $childNodes);
             $attributes = $plan['attributes'];
         } elseif ($factory === null) {
             $attributes = self::nativeEventAliases($attributes);
         }
         $declaredAttributes = $attributes;
-        $resolvedClass = $plan !== null && !$plan['dynamicClass'] && !$plan['interpolatedClass']
-            ? $plan['staticClass']
-            : self::classValue($attributes, $scope, $data);
+        // $knownClass: already evaluated by fastNode() (never twice).
+        $resolvedClass = $knownClass !== false
+            ? $knownClass
+            : ($plan !== null && !$plan['dynamicClass'] && !$plan['interpolatedClass']
+                ? $plan['staticClass']
+                : self::classValue($attributes, $scope, $data));
         $inheritedStyles = $data['__pamInheritedStyles'] ?? [];
         if (!is_array($inheritedStyles)) {
             $inheritedStyles = [];
         }
         $sheet = $data['__pamStyles'] ?? null;
-        $prepared = is_array($sheet) ? self::preparedStyleSheet($sheet, $data) : null;
         $styleKey = null;
+        $entryKey = null;
         $entry = null;
-        if ($plan !== null && $plan['cacheable']) {
-            $styleKey = self::styleEntryKey($planNode, $variant, $plan, $sheet, $prepared, $resolvedClass, $inheritedStyles, $data);
-            if ($styleKey !== null) {
-                $entry = self::$styleEntries[$styleKey] ?? null;
+        $prepared = null;
+        // The element's last resolved style entry: valid while the sheet,
+        // style variables, class, inherited styles and ancestor chain match.
+        if ($planNode !== null && is_array($sheet)) {
+            $inheritedKey = $inheritedStyles === []
+                ? ''
+                : (is_string($data['__pamInheritedKey'] ?? null) ? $data['__pamInheritedKey'] : null);
+            $last = self::recentEntry($planNode, $variant, $sheet, $resolvedClass, $inheritedKey, $data);
+            if ($last !== null) {
+                $prepared = $last[5];
+                $styleKey = $last[6];
+                $entryKey = self::entryKey($styleKey, $data);
+                $entry = self::$styleEntries[$entryKey] ?? null;
+            }
+        }
+        if ($entry === null) {
+            $prepared = is_array($sheet) ? self::preparedStyleSheet($sheet, $data) : null;
+            $styleKey = null;
+            $entryKey = null;
+            if ($plan !== null && $plan['cacheable']) {
+                $styleKey = self::styleEntryKey($planNode, $variant, $plan, $sheet, $prepared, $resolvedClass, $inheritedStyles, $data);
+                if ($styleKey !== null) {
+                    $entryKey = self::entryKey($styleKey, $data);
+                    $entry = self::$styleEntries[$entryKey] ?? null;
+                    if (
+                        $planNode !== null
+                        && is_array($sheet)
+                        && ($sheet['queries'] ?? null) === []
+                        && is_int($sheet['__pamSheetId'] ?? null)
+                    ) {
+                        $inheritedKey = $inheritedStyles === []
+                            ? ''
+                            : (is_string($data['__pamInheritedKey'] ?? null) ? $data['__pamInheritedKey'] : null);
+                        if ($inheritedKey !== null) {
+                            $record = [
+                                $sheet['__pamSheetId'],
+                                StyleVariables::revision(),
+                                $resolvedClass,
+                                $inheritedKey,
+                                $data['__pamStyleChain'] ?? 0,
+                                $prepared,
+                                $styleKey,
+                            ];
+                            $planNode->pamLastEntries[$variant] = $record;
+                            $recent = $planNode->pamRecentEntries[$variant] ?? [];
+                            if (count($recent) >= 16) {
+                                $recent = [];
+                            }
+                            $recent[($resolvedClass ?? '')."\0".$inheritedKey] = $record;
+                            $planNode->pamRecentEntries[$variant] = $recent;
+                        }
+                    }
+                }
             }
         }
         if ($entry === null) {
@@ -1257,7 +1336,15 @@ final class TemplateRenderer
                 $attributes,
                 self::styleSheetFonts($data),
             );
-            if ($styleKey !== null && !self::$dynamicStyles) {
+            if ($styleKey !== null) {
+                if (self::$dynamicStyles) {
+                    // Styles resolved against the window, the container
+                    // size or the style environment: cached per environment.
+                    self::$dynamicKeys[$styleKey] = true;
+                    $entryKey = $styleKey."\0".self::styleEnvironmentKey($data);
+                } else {
+                    $entryKey = $styleKey;
+                }
                 $entry = self::styleEntry(
                     $tag,
                     $factory !== null,
@@ -1268,7 +1355,7 @@ final class TemplateRenderer
                 if (count(self::$styleEntries) >= 8192) {
                     self::$styleEntries = [];
                 }
-                self::$styleEntries[$styleKey] = $entry;
+                self::$styleEntries[$entryKey] = $entry;
             }
         } else {
             $styleDescriptor = $entry['descriptor'];
@@ -1290,6 +1377,10 @@ final class TemplateRenderer
             && !$plan['bindings']
             && TemplateRegistry::isCompiledComponent($tag)
         ) {
+            if (($planNode->pamLastEntries['f'][6] ?? null) === $styleKey) {
+                $planNode->pamFast = true;
+            }
+
             return self::componentTag(
                 $tag,
                 $factory,
@@ -1303,16 +1394,27 @@ final class TemplateRenderer
                 $data,
                 $prepared,
                 $sheet,
+                $entryKey,
             );
         }
         if ($entry !== null && $factory === null && $plan !== null) {
             if (!array_key_exists('fast', $entry)) {
                 $entry['fast'] = self::fastEntry($tag, $plan, $entry['values'], $resolvedClass, $data, $entry['inherited']);
-                if ($styleKey !== null && isset(self::$styleEntries[$styleKey])) {
-                    self::$styleEntries[$styleKey]['fast'] = $entry['fast'];
+                if ($entryKey !== null && isset(self::$styleEntries[$entryKey])) {
+                    self::$styleEntries[$entryKey]['fast'] = $entry['fast'];
                 }
             }
             if ($entry['fast'] !== null) {
+                if (
+                    $planNode !== null
+                    && $variant === 'n'
+                    && ($planNode->pamLastEntries['n'][6] ?? null) === $styleKey
+                ) {
+                    // Later renders of this element go straight to fastTag()
+                    // while its cached style entry stays valid (fastNode()).
+                    $planNode->pamFast = true;
+                }
+
                 return self::fastTag(
                     $tag,
                     $plan,
@@ -1324,6 +1426,7 @@ final class TemplateRenderer
                     $scope,
                     $data,
                     $prepared,
+                    $entryKey,
                 );
             }
         }
@@ -1862,7 +1965,7 @@ final class TemplateRenderer
                 if ($decorated !== null) {
                     self::$freshElement = null;
 
-                    return $decorated;
+                    return $decorated === true ? $element : $decorated;
                 }
             }
         }
@@ -1982,7 +2085,9 @@ final class TemplateRenderer
             if (count($memo) >= 8) {
                 $memo = [];
             }
-            $memo[$decorationKey] = $element;
+            // Never the key itself: a weak map value referencing its key
+            // would keep it alive until the cycle collector runs.
+            $memo[$decorationKey] = $element === $undecorated ? true : $element;
             self::$decorations[$undecorated] = $memo;
         }
 
@@ -2312,12 +2417,13 @@ final class TemplateRenderer
         ?object $scope,
         array $data,
         ?array $prepared,
+        ?string $styleKey = null,
     ): Element {
         $values = $fast['values'];
         $evaluated = [];
         foreach ($fast['ops'] as [$name, $valueName, $mode, $payload, $assign, $remember]) {
             $value = $mode === 1
-                ? TemplateExpression::evaluate($payload, $scope, $data)
+                ? (TemplateExpression::$compiled[$payload] ?? TemplateExpression::closure($payload))($data, $scope)
                 : self::value($payload, $scope, $data);
             if ($assign) {
                 $values[$valueName] = $value;
@@ -2393,35 +2499,20 @@ final class TemplateRenderer
         $children = [];
         $renderedChildren = [];
         $text = '';
-        if ($childNodes !== []) {
-            $childData = $data;
-            if ($prepared === null || $prepared['usesAncestors']) {
-                $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
-                $ancestors[] = $entry['descriptor'];
-                $childData['__pamStyleAncestors'] = $ancestors;
-                $childData['__pamStyleChain'] = self::styleChain(
-                    $data['__pamStyleChain'] ?? 0,
-                    $entry['descriptorId'],
-                );
-            } else {
-                $childData['__pamStyleAncestors'] = [];
+        if ($childNodes !== [] && ($plan['textOnly'] ?? false)) {
+            foreach ($childNodes as $textNode) {
+                $rendered = TemplateExpression::interpolate($textNode->value, $scope, $data);
+                $renderedChildren[] = $rendered;
+                $text .= $rendered;
             }
-            $childData['__pamContainerWidth'] = is_numeric($values['width'] ?? null)
-                ? (float) $values['width']
-                : ($data['__pamContainerWidth'] ?? null);
-            $childData['__pamContainerHeight'] = is_numeric($values['height'] ?? null)
-                ? (float) $values['height']
-                : ($data['__pamContainerHeight'] ?? null);
-            $childData['__pamInheritedStyles'] = $inheritedChildStyles;
-            $childData['__pamInheritedKey'] = $inheritedKey
-                ?? ($inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles));
-            $childData['__pamParentVariants'] = ParentVariants::extend(
-                $data['__pamParentVariants'] ?? null,
-                $values,
+        } elseif ($childNodes !== []) {
+            // The child data is handed over without another reference, so
+            // nodes() writes each child's path into it without copying it.
+            $renderedChildren = self::nodes(
+                $childNodes,
+                $scope,
+                self::fastChildData($data, $entry, $prepared, $values, $inheritedChildStyles, $inheritedKey),
             );
-            $eventContexts = $data['__pamEventContexts'] ?? [];
-            $childData['__pamEventContexts'] = is_array($eventContexts) ? $eventContexts : [];
-            $renderedChildren = self::nodes($childNodes, $scope, $childData);
             foreach ($renderedChildren as $rendered) {
                 if ($rendered instanceof Element) {
                     $children[] = $rendered;
@@ -2517,9 +2608,18 @@ final class TemplateRenderer
         }
         $dropped = null;
         foreach ($fast['dynamic'] as [$name, $key]) {
-            $value = array_key_exists($name, $values)
-                ? self::propertyValue($key, $values[$name])
-                : null;
+            if (array_key_exists($name, $values)) {
+                // propertyValue() with its memo read inline.
+                $raw = $values[$name];
+                $id = $key->value;
+                $value = is_string($raw) && isset(self::$propertyStrings[$id][$raw])
+                    ? self::$propertyStrings[$id][$raw]
+                    : (is_int($raw) && isset(self::$propertyInts[$id][$raw])
+                        ? self::$propertyInts[$id][$raw]
+                        : self::propertyValue($key, $raw));
+            } else {
+                $value = null;
+            }
             if ($value === null) {
                 $dropped[$key->value] = true;
                 continue;
@@ -2577,9 +2677,325 @@ final class TemplateRenderer
             throw new RuntimeException('The model attribute is only valid on Input.');
         }
 
+        if ($prebuilt === null && $pressEvents === null && $styleKey !== null) {
+            // Wire-encode the properties from the element's template: its
+            // constants were encoded once, only the variable ones encode now.
+            $template = $fast['encodedTemplate'] ?? null;
+            if ($template === null) {
+                $template = self::encodedTemplate($tag, $plan, $fast);
+                if (isset(self::$styleEntries[$styleKey]['fast'])) {
+                    self::$styleEntries[$styleKey]['fast']['encodedTemplate'] = $template;
+                }
+            }
+            if ($template !== false) {
+                $final = $element->properties;
+                $encoded = $template[0];
+                try {
+                    foreach ($template[1] as $key) {
+                        if (array_key_exists($key, $final)) {
+                            $value = $final[$key];
+                            $encoded[$key] = (is_string($value) ? (TreeEncoder::$encodedStrings[$value] ?? null) : null)
+                                ?? TreeEncoder::encodeProperty($value);
+                        } else {
+                            unset($encoded[$key]);
+                        }
+                    }
+                    if (count($encoded) === count($final)) {
+                        $element->__pamEncoded($encoded, $template[1] === [] ? $template[2] : null);
+                    }
+                } catch (\Throwable) {
+                    // Invalid values fail where they always did: when encoded.
+                }
+            }
+        }
+
         self::$freshElement = $element;
 
         return $element;
+    }
+
+    /**
+     * The element's style entry record for this class, inherited styles and
+     * sheet when one of its recent ones still applies (sheet, style variables
+     * and ancestor chain unchanged); it becomes the last one.
+     *
+     * @param array<string, mixed> $sheet
+     * @param array<string, mixed> $data
+     * @return array{0: int, 1: int, 2: ?string, 3: string, 4: mixed, 5: array<string, mixed>, 6: string}|null
+     */
+    private static function recentEntry(
+        CompiledTemplateNode $node,
+        string $variant,
+        array $sheet,
+        ?string $resolvedClass,
+        ?string $inheritedKey,
+        array $data,
+    ): ?array {
+        if ($inheritedKey === null) {
+            return null;
+        }
+        $last = $node->pamLastEntries[$variant] ?? null;
+        if ($last === null || $last[2] !== $resolvedClass || $last[3] !== $inheritedKey) {
+            $last = $node->pamRecentEntries[$variant][($resolvedClass ?? '')."\0".$inheritedKey] ?? null;
+            if ($last === null) {
+                return null;
+            }
+        }
+        if (
+            $last[0] !== ($sheet['__pamSheetId'] ?? null)
+            || $last[1] !== StyleVariables::revision()
+            || ($last[5]['usesAncestors'] && $last[4] !== ($data['__pamStyleChain'] ?? 0))
+        ) {
+            return null;
+        }
+        $node->pamLastEntries[$variant] = $last;
+
+        return $last;
+    }
+
+    /** Cache key of a style entry: dynamic ones also key the environment. */
+    private static function entryKey(string $styleKey, array $data): string
+    {
+        return isset(self::$dynamicKeys[$styleKey])
+            ? $styleKey."\0".self::styleEnvironmentKey($data)
+            : $styleKey;
+    }
+
+    /**
+     * Everything resolveDynamicStyles() reads besides the style attributes:
+     * window metrics, pixel ratio, container size and style environment.
+     *
+     * @param array<string, mixed> $data
+     */
+    private static function styleEnvironmentKey(array $data): string
+    {
+        $metrics = Runtime::windowMetrics();
+
+        return serialize([
+            $metrics->width,
+            $metrics->height,
+            $metrics->fontScale,
+            $metrics->safeAreaTop,
+            $metrics->safeAreaRight,
+            $metrics->safeAreaBottom,
+            $metrics->safeAreaLeft,
+            PixelRatio::get(),
+            PixelRatio::hairlineWidth(),
+            $data['__pamContainerWidth'] ?? null,
+            $data['__pamContainerHeight'] ?? null,
+            $data['__pamStyleEnvironment'] ?? null,
+        ]);
+    }
+
+    /**
+     * Moves an array into a call argument without leaving another reference,
+     * so the callee can write to it without copying it.
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private static function handOver(array &$data): array
+    {
+        $moved = $data;
+        $data = [];
+
+        return $moved;
+    }
+
+    /**
+     * Render data of a fast element's children (see fastTag()).
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $entry
+     * @param array<string, mixed>|null $prepared
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $inheritedChildStyles
+     * @return array<string, mixed>
+     */
+    private static function fastChildData(
+        array $data,
+        array $entry,
+        ?array $prepared,
+        array $values,
+        array $inheritedChildStyles,
+        ?string $inheritedKey,
+    ): array {
+        $childData = $data;
+        if ($prepared === null || $prepared['usesAncestors']) {
+            $ancestors = is_array($data['__pamStyleAncestors'] ?? null) ? $data['__pamStyleAncestors'] : [];
+            $ancestors[] = $entry['descriptor'];
+            $childData['__pamStyleAncestors'] = $ancestors;
+            $childData['__pamStyleChain'] = self::styleChain(
+                $data['__pamStyleChain'] ?? 0,
+                $entry['descriptorId'],
+            );
+        } else {
+            $childData['__pamStyleAncestors'] = [];
+        }
+        $childData['__pamContainerWidth'] = is_numeric($values['width'] ?? null)
+            ? (float) $values['width']
+            : ($data['__pamContainerWidth'] ?? null);
+        $childData['__pamContainerHeight'] = is_numeric($values['height'] ?? null)
+            ? (float) $values['height']
+            : ($data['__pamContainerHeight'] ?? null);
+        $childData['__pamInheritedStyles'] = $inheritedChildStyles;
+        $childData['__pamInheritedKey'] = $inheritedKey
+            ?? ($inheritedChildStyles === [] ? '' : serialize($inheritedChildStyles));
+        $childData['__pamParentVariants'] = ParentVariants::extend(
+            $data['__pamParentVariants'] ?? null,
+            $values,
+        );
+        $eventContexts = $data['__pamEventContexts'] ?? [];
+        $childData['__pamEventContexts'] = is_array($eventContexts) ? $eventContexts : [];
+
+        return $childData;
+    }
+
+    /**
+     * tag() for a native element whose last render took the fast path:
+     * the same entry checks without re-deriving the plan, null when they
+     * fail (tag() then runs).
+     *
+     * @param list<CompiledTemplateNode> $children
+     * @param array<string, mixed> $data
+     */
+    private static function fastNode(
+        CompiledTemplateNode $node,
+        string $tag,
+        array $children,
+        ?object $scope,
+        array $data,
+    ): Element {
+        $factory = TemplateRegistry::factory($tag);
+        $variant = $factory === null ? 'n' : 'f';
+        $last = $node->pamLastEntries[$variant] ?? null;
+        $plan = $node->pamTagPlans[$variant] ?? null;
+        $sheet = $data['__pamStyles'] ?? null;
+        if ($last === null || $plan === null || !is_array($sheet)) {
+            return self::tag($tag, $node->attributes, $children, $scope, $data, $node);
+        }
+        $resolvedClass = !$plan['dynamicClass'] && !$plan['interpolatedClass']
+            ? $plan['staticClass']
+            : self::classValue($plan['attributes'], $scope, $data);
+        $inheritedStyles = $data['__pamInheritedStyles'] ?? [];
+        $inheritedKey = $inheritedStyles === [] || !is_array($inheritedStyles)
+            ? ''
+            : (is_string($data['__pamInheritedKey'] ?? null) ? $data['__pamInheritedKey'] : null);
+        $entry = null;
+        $entryKey = null;
+        // recentEntry() and entryKey() inlined for the common case: the
+        // element's last entry still applies and does not vary with the
+        // environment.
+        if (
+            $last[2] === $resolvedClass
+            && $last[3] === $inheritedKey
+            && $last[0] === ($sheet['__pamSheetId'] ?? null)
+            && $last[1] === StyleVariables::revision()
+            && (!$last[5]['usesAncestors'] || $last[4] === ($data['__pamStyleChain'] ?? 0))
+        ) {
+            $entryKey = isset(self::$dynamicKeys[$last[6]]) ? self::entryKey($last[6], $data) : $last[6];
+            $entry = self::$styleEntries[$entryKey] ?? null;
+        } else {
+            $last = self::recentEntry($node, $variant, $sheet, $resolvedClass, $inheritedKey, $data);
+            if ($last !== null) {
+                $entryKey = self::entryKey($last[6], $data);
+                $entry = self::$styleEntries[$entryKey] ?? null;
+            }
+        }
+        if ($entry !== null && $factory !== null) {
+            if (
+                $plan['componentFast']
+                && !$plan['bindings']
+                && TemplateRegistry::isCompiledComponent($tag)
+            ) {
+                return self::componentTag(
+                    $tag,
+                    $factory,
+                    $node,
+                    $plan,
+                    $entry,
+                    $resolvedClass,
+                    $entry['attributes'],
+                    $children,
+                    $scope,
+                    $data,
+                    $last[5],
+                    $sheet,
+                    $entryKey,
+                );
+            }
+        } elseif ($entry !== null && ($entry['fast'] ?? null) !== null && !$plan['bindings']) {
+            return self::fastTag(
+                $tag,
+                $plan,
+                $entry,
+                $entry['fast'],
+                $resolvedClass,
+                $entry['attributes'],
+                $children,
+                $scope,
+                $data,
+                $last[5],
+                $entryKey,
+            );
+        }
+
+        return self::tag($tag, $node->attributes, $children, $scope, $data, $node, $resolvedClass);
+    }
+
+    /**
+     * Encoded constant properties of a fast element in key order, with
+     * placeholders for the keys whose value varies per render.
+     *
+     * @param array<string, mixed> $plan
+     * @param array<string, mixed> $fast
+     * @return array{0: array<int, string>, 1: list<int>}|false
+     */
+    private static function encodedTemplate(string $tag, array $plan, array $fast): array|false
+    {
+        $variable = [];
+        foreach ($fast['dynamic'] as [, $key]) {
+            $variable[$key->value] = true;
+        }
+        if ($tag === 'Text' || $tag === 'Span') {
+            $variable[PropKey::Text->value] = true;
+        } elseif ($tag === 'Image') {
+            $variable[PropKey::Source->value] = true;
+        } elseif ($tag === 'Grid') {
+            $variable[PropKey::GridColumns->value] = true;
+        }
+        if ($fast['specials']) {
+            $variable[PropKey::AccessibilityLabel->value] = true;
+            $variable[PropKey::TestId->value] = true;
+            $variable[PropKey::Enabled->value] = true;
+        }
+        foreach ($plan['events'] as $event) {
+            $variable[EventProperties::MAP[$event->value]] = true;
+        }
+        $map = [];
+        try {
+            foreach ($fast['constant'] as $key => $value) {
+                if ($value !== null && !isset($variable[$key])) {
+                    $map[$key] = TreeEncoder::encodeProperty($value);
+                }
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+        foreach ($variable as $key => $_) {
+            $map[$key] = '';
+        }
+        ksort($map, SORT_NUMERIC);
+        // Wire bytes of the properties when none varies.
+        $bytes = null;
+        if ($variable === []) {
+            $bytes = Wire::u16(count($map));
+            foreach ($map as $key => $value) {
+                $bytes .= pack('v', $key).$value;
+            }
+        }
+
+        return [$map, array_keys($variable), $bytes];
     }
 
     /**
@@ -2607,6 +3023,7 @@ final class TemplateRenderer
         array $data,
         ?array $prepared,
         mixed $sheet,
+        ?string $styleKey = null,
     ): Element {
         $values = [];
         $evaluated = [];
@@ -2614,7 +3031,7 @@ final class TemplateRenderer
             $value = $mode === 0
                 ? $payload
                 : ($mode === 1
-                    ? TemplateExpression::evaluate($payload, $scope, $data)
+                    ? (TemplateExpression::$compiled[$payload] ?? TemplateExpression::closure($payload))($data, $scope)
                     : self::value($payload, $scope, $data));
             $values[$valueName] = $value;
             if ($remember) {
@@ -2624,32 +3041,56 @@ final class TemplateRenderer
         if ($resolvedClass !== null) {
             $values['className'] = $resolvedClass;
         }
-        $values['__pamNodePath'] = $data['__pamNodePath'] ?? $tag;
-        $componentValues = array_intersect_key($values, $plan['declaredNames'] + self::COMPONENT_CONTEXT_VALUES);
+        $path = $data['__pamNodePath'] ?? $tag;
+        $values['__pamNodePath'] = $path;
 
+        // Component event attributes are static per element: validated once.
+        $eventAttributes = $plan['componentEvents'] ?? null;
+        if ($eventAttributes === null) {
+            $eventAttributes = [];
+            foreach ($attributes as $name => $raw) {
+                if (!str_starts_with($name, '@')) {
+                    continue;
+                }
+                if (!is_string($raw) && !is_bool($raw)) {
+                    throw new RuntimeException("Invalid component event expression {$name}.");
+                }
+                $event = substr($name, 1);
+                if (
+                    $event === ''
+                    || preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/D', $event)
+                        !== 1
+                ) {
+                    throw new RuntimeException(
+                        "Invalid component event {$name}.",
+                    );
+                }
+                $eventAttributes[$event] = $raw;
+            }
+            $planNode->pamTagPlans['f']['componentEvents'] = $eventAttributes;
+        }
         $componentEvents = [];
-        foreach ($attributes as $name => $raw) {
-            if (!str_starts_with($name, '@')) {
-                continue;
-            }
-            if (!is_string($raw) && !is_bool($raw)) {
-                throw new RuntimeException("Invalid component event expression {$name}.");
-            }
-            $event = substr($name, 1);
-            if (
-                $event === ''
-                || preg_match('/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/D', $event)
-                    !== 1
-            ) {
-                throw new RuntimeException(
-                    "Invalid component event {$name}.",
-                );
-            }
+        foreach ($eventAttributes as $event => $raw) {
             $componentEvents[$event] = self::componentHandler($raw, $scope, $data);
         }
 
+        // Inherited text attributes this element's values can carry.
+        $inheritedNames = $entry['inheritedNames'] ?? null;
+        if ($inheritedNames === null) {
+            $names = [];
+            foreach ($entry['values'] as [, $valueName]) {
+                $names[$valueName] = true;
+            }
+            $inheritedNames = array_values(array_filter(
+                self::INHERITED_STYLE_ATTRIBUTES,
+                static fn (string $attribute): bool => isset($names[$attribute]),
+            ));
+            if ($styleKey !== null && isset(self::$styleEntries[$styleKey])) {
+                self::$styleEntries[$styleKey]['inheritedNames'] = $inheritedNames;
+            }
+        }
         $inheritedChildStyles = [];
-        foreach (self::INHERITED_STYLE_ATTRIBUTES as $attribute) {
+        foreach ($inheritedNames as $attribute) {
             $value = $values[$attribute] ?? null;
             if (
                 is_string($value)
@@ -2686,6 +3127,30 @@ final class TemplateRenderer
             $planNode->pamTagPlans['f']['slots'] = $slotPlan;
         }
         [$defaultNodes, $slotNodes] = $slotPlan;
+        $memoizable = $defaultNodes === [] && $slotNodes === [] && is_string($path);
+        if ($memoizable) {
+            // Same evaluated inputs at this call site as last time: the
+            // instance keeps its props, so only its listeners are refreshed.
+            $call = PamPhpRegistry::call($scope, $path);
+            if (
+                $call !== null
+                && $call->plan === $plan['id']
+                && $call->values === $values
+                && $call->inherited === $inheritedChildStyles
+            ) {
+                $instance = PamPhpRegistry::reuseCall($call, $scope, $componentEvents, $inheritedChildStyles);
+                if ($instance !== null) {
+                    $element = $instance->toElement();
+                    self::$freshElement = null;
+                    if ($element === $call->element && $call->decorated !== null) {
+                        return $call->decorated;
+                    }
+
+                    return self::decorateComponent($call, $element, $resolvedClass, $values, $sheet, $data);
+                }
+            }
+        }
+        $componentValues = array_intersect_key($values, $plan['declaredNames'] + self::COMPONENT_CONTEXT_VALUES);
         $children = [];
         $slots = ['slot' => []];
         if ($defaultNodes !== [] || $slotNodes !== []) {
@@ -2756,13 +3221,57 @@ final class TemplateRenderer
         $componentValues['__pamComponentEvents'] = $componentEvents;
         $componentValues['__pamInheritedStyles'] = $inheritedChildStyles;
 
-        $element = $factory($componentValues, $children, $scope)->toElement();
+        $component = $factory($componentValues, $children, $scope);
+        $call = $memoizable
+            ? PamPhpRegistry::rememberCall($plan['id'], $path, $values, $inheritedChildStyles)
+            : null;
+        $element = $component->toElement();
         self::$freshElement = null;
 
+        return self::decorateComponent($call, $element, $resolvedClass, $values, $sheet, $data);
+    }
+
+    /**
+     * Applies the call site's class and attributes to a component's element
+     * (memoized per element when they do not depend on the render data).
+     *
+     * @param array<string, mixed> $values
+     * @param array<string, mixed> $data
+     */
+    private static function decorateComponent(
+        ?ComponentCall $call,
+        Element $element,
+        ?string $resolvedClass,
+        array $values,
+        mixed $sheet,
+        array $data,
+    ): Element {
+        if ($call !== null) {
+            $call->element = null;
+            $call->decorated = null;
+        }
+        if ($resolvedClass === null && self::attributePlanFor($element, $values)['names'] === []) {
+            // No class and no attribute applies to the element: decorating
+            // returns it unchanged (what the memoized path would return).
+            self::$freshElement = null;
+            if ($call !== null) {
+                $call->element = $element;
+                $call->decorated = $element;
+            }
+
+            return $element;
+        }
         $decorationKey = self::decorationKey($element, $resolvedClass, $values, $sheet);
         if ($decorationKey !== null) {
             $decorated = (self::$decorations[$element] ?? [])[$decorationKey] ?? null;
             if ($decorated !== null) {
+                // true: the decoration left the element unchanged.
+                $decorated = $decorated === true ? $element : $decorated;
+                if ($call !== null) {
+                    $call->element = $element;
+                    $call->decorated = $decorated;
+                }
+
                 return $decorated;
             }
         }
@@ -2781,8 +3290,14 @@ final class TemplateRenderer
             if (count($memo) >= 8) {
                 $memo = [];
             }
-            $memo[$decorationKey] = $element;
+            // Never the key itself: a weak map value referencing its key
+            // would keep it alive until the cycle collector runs.
+            $memo[$decorationKey] = $element === $undecorated ? true : $element;
             self::$decorations[$undecorated] = $memo;
+            if ($call !== null) {
+                $call->element = $undecorated;
+                $call->decorated = $element;
+            }
         }
         self::$freshElement = null;
 
@@ -2798,8 +3313,17 @@ final class TemplateRenderer
      * @param array<string, string|bool> $attributes
      * @return array<string, mixed>
      */
-    private static function tagPlan(string $tag, array $attributes, bool $factory): array
+    private static function tagPlan(string $tag, array $attributes, bool $factory, array $childNodes = []): array
     {
+        // Children that are only text interpolations need no child render
+        // data: they are interpolated against the element's own data.
+        $textOnly = $childNodes !== [];
+        foreach ($childNodes as $child) {
+            if ($child->kind !== 2 || str_contains($child->value, '__pam')) {
+                $textOnly = false;
+                break;
+            }
+        }
         if (!$factory) {
             $attributes = self::nativeEventAliases($attributes);
         }
@@ -2840,6 +3364,7 @@ final class TemplateRenderer
                 || isset($attributes['bind:checked']),
             'observed' => [],
             'slots' => null,
+            'textOnly' => $textOnly,
             'componentFast' => $factory && $events === [] && $tag !== 'Animated'
                 && !array_key_exists('p-ripple', $attributes) && !array_key_exists(':p-ripple', $attributes)
                 && !array_key_exists('model', $attributes) && !array_key_exists(':model', $attributes),
@@ -3083,6 +3608,7 @@ final class TemplateRenderer
         self::$descriptorIds = [];
         self::$styleChains = [];
         self::$styleEntries = [];
+        self::$dynamicKeys = [];
     }
 
     private static function withDomClasses(Element $element, string $classes): Element
@@ -3705,7 +4231,17 @@ final class TemplateRenderer
                 return self::$propertyStrings[$id][$value];
             }
             $converted = self::convertPropertyValue($key, $value);
-            if (strlen($value) <= 256) {
+            $length = strlen($value);
+            if ($length <= 256) {
+                self::rememberPropertyValue();
+                self::$propertyStrings[$id][$value] = $converted;
+            } elseif ($length <= 262_144) {
+                // Long values (inline images) recur every frame: memoized
+                // within a byte budget.
+                self::$propertyMemoBytes += $length;
+                if (self::$propertyMemoBytes > 16_777_216) {
+                    self::$propertyMemoSize = 16384;
+                }
                 self::rememberPropertyValue();
                 self::$propertyStrings[$id][$value] = $converted;
             }
@@ -3750,6 +4286,7 @@ final class TemplateRenderer
     {
         if (++self::$propertyMemoSize > 16384) {
             self::$propertyMemoSize = 1;
+            self::$propertyMemoBytes = 0;
             self::$propertyStrings = [];
             self::$propertyInts = [];
             self::$propertyFloats = [];
@@ -6194,7 +6731,12 @@ final class TemplateRenderer
                 'Component events require a method or expression on the parent component.',
             );
         }
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $raw) === 1) {
+        if (self::$methodNames[$raw] ??= preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/D', $raw) === 1) {
+            // A method handler only captures its scope: built once per scope.
+            $cached = $scope instanceof Component ? $scope->__pamHandler('@'.$raw) : null;
+            if ($cached !== null) {
+                return $cached;
+            }
             $method = self::$componentMethods[$scope::class.'::'.$raw] ?? null;
             if ($method === null) {
                 if (!method_exists($scope, $raw)) {
@@ -6214,7 +6756,7 @@ final class TemplateRenderer
                 self::$componentMethods[$scope::class.'::'.$raw] = $method;
             }
 
-            return static function (mixed $payload = null) use (
+            $handler = static function (mixed $payload = null) use (
                 $method,
                 $scope,
             ): void {
@@ -6227,6 +6769,8 @@ final class TemplateRenderer
                     $method->invoke($scope, $payload);
                 }
             };
+
+            return $scope instanceof Component ? $scope->__pamRememberHandler('@'.$raw, $handler) : $handler;
         }
 
         return static function (mixed $payload = null) use (
@@ -6256,7 +6800,7 @@ final class TemplateRenderer
     ): Closure {
         if (
             is_string($raw)
-            && preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*\(/D', $raw) === 1
+            && (self::$callExpressions[$raw] ??= preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*\(/D', $raw) === 1)
         ) {
             if ($scope === null) {
                 throw new RuntimeException(
@@ -6299,7 +6843,13 @@ final class TemplateRenderer
             throw new RuntimeException("Template event handler {$resolved} must be public.");
         }
 
-        return static function (mixed $payload = '') use ($kind, $method, $scope): void {
+        // A method handler only captures its kind, method and scope.
+        $handlerKey = $kind->value.':'.$resolved;
+        $cached = $scope instanceof Component ? $scope->__pamHandler($handlerKey) : null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        $handler = static function (mixed $payload = '') use ($kind, $method, $scope): void {
             if ($scope instanceof Component) {
                 DependencyTracker::markDirty($scope);
             }
@@ -6384,6 +6934,8 @@ final class TemplateRenderer
             }
             $method->invoke($scope, $value);
         };
+
+        return $scope instanceof Component ? $scope->__pamRememberHandler($handlerKey, $handler) : $handler;
     }
 
     private static function modelHandler(string $model, ?object $scope): Closure
@@ -6584,7 +7136,7 @@ final class TemplateRenderer
             return $raw;
         }
 
-        return TemplateExpression::evaluate($raw, $scope, $data);
+        return (TemplateExpression::$compiled[$raw] ?? TemplateExpression::closure($raw))($data, $scope);
     }
 
     /** @param array<string, mixed> $data */

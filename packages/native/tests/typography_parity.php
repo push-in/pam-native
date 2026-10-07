@@ -142,6 +142,31 @@ $assert(
         && abs((float) $lineView->properties()[PropKey::BorderWidth->value] - 1 / 2.625) < 1e-9,
     'hairline must be one physical pixel and Ndpx N physical pixels.',
 );
+// The same element re-resolves its environment-dependent styles (cached
+// per environment) after the display density changes.
+\Pam\Native\Internal\Runtime::dispatchEvent(0, EventKind::Dimensions->value, \Pam\Native\Internal\Wire::map([
+    'width' => 411.0, 'height' => 914.0, 'density' => 2.0, 'fontScale' => 1.0,
+]));
+$denser = $typographyRender(
+    '<View class="row"><View class="line" /></View>',
+    '.row { border-bottom: hairline solid #DDDDDD; } .line { height: 2dpx; border-width: hairline; }',
+);
+$assert(
+    abs((float) $denser->properties()[PropKey::BorderBottomWidth->value] - 0.5) < 1e-9
+        && abs((float) $denser->children()[0]->properties()[PropKey::Height->value] - 1.0) < 1e-9,
+    'Environment-dependent styles must follow a density change for the same element.',
+);
+\Pam\Native\Internal\Runtime::dispatchEvent(0, EventKind::Dimensions->value, \Pam\Native\Internal\Wire::map([
+    'width' => 411.0, 'height' => 914.0, 'density' => 2.625, 'fontScale' => 1.0,
+]));
+$restored = $typographyRender(
+    '<View class="row"><View class="line" /></View>',
+    '.row { border-bottom: hairline solid #DDDDDD; } .line { height: 2dpx; border-width: hairline; }',
+);
+$assert(
+    abs((float) $restored->properties()[PropKey::BorderBottomWidth->value] - 1 / 2.625) < 1e-9,
+    'Environment-dependent styles must come back with the previous density.',
+);
 $assert(
     \Pam\Native\PixelRatio::hairlineWidth(4.0) === 0.5
         && \Pam\Native\PixelRatio::hairlineWidth(1.0) === 1.0

@@ -6,6 +6,8 @@ namespace Pam\Native\Worklets;
 
 use InvalidArgumentException;
 
+use function count;
+
 /**
  * A bounded, data-only numeric program intended for native frame execution.
  * It cannot call PHP functions, allocate objects, access files, or perform I/O.

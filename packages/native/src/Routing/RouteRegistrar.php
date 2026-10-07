@@ -14,6 +14,8 @@ use Pam\Native\Navigation\ScreenOptionLayer;
 use Pam\Native\Navigation\ScreenOptions;
 use Pam\Native\Navigation\ScreenOptionsPatch;
 
+use function count;
+
 /** @internal */
 final class RouteRegistrar
 {

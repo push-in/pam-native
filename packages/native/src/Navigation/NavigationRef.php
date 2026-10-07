@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace Pam\Native\Navigation;
 
 use BackedEnum;
+
+use function count;
+
 /**
  * Stable imperative handle for notification handlers, deep-link adapters and
  * code which runs before the navigation tree mounts. Pre-mount actions are

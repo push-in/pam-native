@@ -7,6 +7,11 @@ namespace Pam\Native\Dom;
 use InvalidArgumentException;
 use Pam\Native\Element as NativeElement;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function strlen;
+
 final readonly class Selector
 {
     /** @param non-empty-list<array{compound: string, combinator: ?string}> $parts */

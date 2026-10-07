@@ -6,6 +6,20 @@ namespace Pam\Native\Polyfill;
 
 use ValueError;
 
+use function array_slice;
+use function chr;
+use function count;
+use function in_array;
+use function is_array;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_object;
+use function is_string;
+use function ord;
+use function sprintf;
+use function strlen;
+
 /**
  * ext-mbstring in plain PHP for the mobile runtimes.
  *

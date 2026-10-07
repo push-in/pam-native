@@ -19,10 +19,14 @@ final readonly class CompiledComponentView implements Renderable
     public function toElement(): Element
     {
         $slots = $this->component->__pamSlots();
-        $props = PamPhpRegistry::publicProps($this->component);
+        $template = $this->template;
+        // `$props` is only collected for templates that can read it.
+        $props = ($template->pamUsesProps ??= $template->mentionsProps())
+            ? PamPhpRegistry::publicProps($this->component)
+            : [];
 
         return TemplateRenderer::render(
-            $this->template,
+            $template,
             $this->component,
             [
                 ...$slots,

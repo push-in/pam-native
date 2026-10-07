@@ -27,6 +27,11 @@ use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
 use Pam\Native\PropKey;
 
+use function count;
+use function in_array;
+use function is_array;
+use function is_string;
+
 final class TopTabNavigator implements Renderable, Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var list<NavigationTab> */

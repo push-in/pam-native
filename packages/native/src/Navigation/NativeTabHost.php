@@ -13,6 +13,8 @@ use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 
+use function count;
+
 /** Retained platform tab controller shared by bottom, rail and top tabs. */
 final class NativeTabHost extends Element
 {

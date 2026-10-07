@@ -6,6 +6,13 @@ namespace Pam\Native\Internal;
 
 use RuntimeException;
 
+use function array_key_exists;
+use function in_array;
+use function is_array;
+use function is_float;
+use function is_int;
+use function is_string;
+
 /**
  * Compiles a template expression to the PHP source of one closure with the
  * exact semantics of TemplateExpression's closure tree (same grammar, eager
@@ -57,7 +64,7 @@ final class TemplateExpressionCompiler
             );
         }
         $body = $compiler->usesMissing
-            ? '$m = '.self::RUNTIME.'::__pamMissing();'."\n"
+            ? '$m = '.self::RUNTIME.'::$pamMissing ?? '.self::RUNTIME.'::__pamMissing();'."\n"
             : '';
         $body .= implode("\n", $compiler->statements);
 
@@ -117,7 +124,7 @@ final class TemplateExpressionCompiler
             return null;
         }
         $body = $compiler->usesMissing
-            ? '$m = '.self::RUNTIME.'::__pamMissing();'."\n"
+            ? '$m = '.self::RUNTIME.'::$pamMissing ?? '.self::RUNTIME.'::__pamMissing();'."\n"
             : '';
         $body .= implode("\n", $compiler->statements);
 

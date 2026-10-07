@@ -8,6 +8,9 @@ use InvalidArgumentException;
 use Pam\Native\Internal\BinaryValue;
 use Pam\Native\PropKey;
 
+use function in_array;
+use function is_float;
+
 final class StyleDeclaration
 {
     /** @var array<string, PropKey> */

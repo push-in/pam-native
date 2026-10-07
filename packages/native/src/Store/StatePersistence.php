@@ -7,6 +7,9 @@ namespace Pam\Native\Store;
 use Pam\Native\State;
 use RuntimeException;
 
+use function is_array;
+use function is_int;
+
 final class StatePersistence implements StorePersistence
 {
     public function load(string $key): ?array

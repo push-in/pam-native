@@ -16,6 +16,11 @@ use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\UI\Concerns\HasImageBehavior;
 
+use function count;
+use function in_array;
+use function is_string;
+use function strlen;
+
 final class Image extends Element
 {
     use HasImageBehavior;

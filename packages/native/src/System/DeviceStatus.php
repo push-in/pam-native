@@ -12,6 +12,9 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NetworkType;
 use RuntimeException;
 
+use function is_array;
+use function is_int;
+
 final class DeviceStatus
 {
     private static int $nextSubscription = 1;

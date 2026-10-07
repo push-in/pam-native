@@ -7,6 +7,13 @@ namespace Pam\Native;
 use InvalidArgumentException;
 use RuntimeException;
 
+use function is_array;
+use function is_bool;
+use function is_float;
+use function is_int;
+use function is_string;
+use function strlen;
+
 final class State
 {
     private const MAX_BYTES = 1_048_576;

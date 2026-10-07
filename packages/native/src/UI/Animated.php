@@ -20,6 +20,8 @@ use Pam\Native\Renderable;
 use Pam\Native\Worklets\Worklet;
 use Pam\Native\Worklets\WorkletTarget;
 
+use function count;
+
 final class Animated extends Element
 {
     public static function worklet(

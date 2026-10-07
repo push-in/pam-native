@@ -17,6 +17,10 @@ use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
 use Pam\Native\Renderable;
 
+use function count;
+use function is_float;
+use function is_int;
+
 final class BottomSheet extends Element
 {
     /**

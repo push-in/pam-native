@@ -8,6 +8,8 @@ use Closure;
 use InvalidArgumentException;
 use Pam\Native\Renderable;
 
+use function strlen;
+
 final readonly class NavigationTab
 {
     public function __construct(

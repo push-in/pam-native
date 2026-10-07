@@ -6,6 +6,10 @@ namespace Pam\Native\Internal;
 
 use RuntimeException;
 
+use function count;
+use function is_array;
+use function strlen;
+
 /** Compiles the native-safe selector grammar to a deterministic matcher IR. */
 final class StyleSelectorCompiler
 {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Pam\Native\Scheduling;
 
+use function count;
+
 final class AsyncStream
 {
     /** @var list<mixed> */

@@ -8,6 +8,10 @@ use JsonException;
 use Pam\Native\Protocol;
 use RuntimeException;
 
+use function count;
+use function is_int;
+use function is_string;
+
 final class PamPhpPreloader
 {
     private const VERSION = 1;

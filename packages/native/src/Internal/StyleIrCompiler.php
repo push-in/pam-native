@@ -9,6 +9,8 @@ use Pam\Native\Style\StyleInvalidationKind;
 use Pam\Native\Style\StylePropertyCatalog;
 use RuntimeException;
 
+use function strlen;
+
 /** Produces the stable PAM Style IR, bytecode envelope and source map. */
 final class StyleIrCompiler
 {

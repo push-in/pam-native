@@ -6,6 +6,9 @@ namespace Pam\Native;
 
 use Pam\Native\Internal\Wire;
 
+use function is_float;
+use function is_int;
+
 final readonly class InputContentSizeEvent
 {
     public function __construct(

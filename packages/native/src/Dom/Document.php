@@ -12,6 +12,9 @@ use Pam\Native\Internal\Runtime;
 use Pam\Native\Renderable;
 use Throwable;
 
+use function count;
+use function is_int;
+
 final class Document implements Renderable
 {
     private NativeElement $root;

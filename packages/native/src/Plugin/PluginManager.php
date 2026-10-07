@@ -8,6 +8,10 @@ use JsonException;
 use Pam\Native\Protocol;
 use ReflectionClass;
 
+use function count;
+use function is_array;
+use function is_string;
+
 final class PluginManager
 {
     private const int MAX_INSTALLED_BYTES = 8_388_608;

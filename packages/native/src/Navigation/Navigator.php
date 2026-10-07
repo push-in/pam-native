@@ -13,6 +13,16 @@ use Pam\Native\Restorable;
 use Pam\Native\Routing\RouteName;
 use ReflectionFunction;
 
+use function array_key_exists;
+use function array_slice;
+use function count;
+use function in_array;
+use function is_array;
+use function is_int;
+use function is_scalar;
+use function is_string;
+use function strlen;
+
 final class Navigator extends Component implements Restorable, NavigationStateProvider, NavigationBackHandler, NavigationObservable, NavigationActionHandler, NavigationLinkHandler
 {
     /** @var array<string, Closure(): Renderable> */

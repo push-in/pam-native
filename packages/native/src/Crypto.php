@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Pam\Native;
 
+use function in_array;
+use function is_string;
+use function sprintf;
+use function strlen;
+
 /**
  * Ed25519 signature verification and AES-256-GCM on every PAM runtime.
  *

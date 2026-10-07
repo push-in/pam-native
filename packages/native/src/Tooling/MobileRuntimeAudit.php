@@ -11,6 +11,12 @@ use RecursiveIteratorIterator;
 use ReflectionClass;
 use ReflectionFunction;
 
+use function count;
+use function in_array;
+use function is_string;
+use function sprintf;
+use function strlen;
+
 /**
  * Build-time check for PHP the mobile runtimes cannot run.
  *

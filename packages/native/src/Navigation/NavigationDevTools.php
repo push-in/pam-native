@@ -6,6 +6,9 @@ namespace Pam\Native\Navigation;
 
 use JsonException;
 
+use function count;
+use function is_array;
+
 final class NavigationDevTools
 {
     /** @var list<array{id: int, kind: int, timestampNs: int, target: string, data: array<string, mixed>, state: array<string, mixed>}> */

@@ -245,7 +245,7 @@ $movingIndexes = static function () use ($movingNavigator, $movingEncoder, $asse
     \Pam\Native\Internal\ComponentLifecycle::finishRender();
     \Pam\Native\Internal\PamPhpRegistry::finishRender();
     $movingEncoder->encode($element);
-    $nodes = (new ReflectionProperty($movingEncoder, 'nodes'))->getValue($movingEncoder);
+    $nodes = $movingEncoder->frameNodes();
     $seen = [];
     foreach ($nodes as $node) {
         $slot = $node->parent.':'.$node->index;

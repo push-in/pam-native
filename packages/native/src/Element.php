@@ -9,20 +9,31 @@ use InvalidArgumentException;
 use Pam\Native\Internal\BinaryValue;
 use Pam\Native\Navigation\SharedTransitionStyle;
 
+use function array_key_exists;
+use function count;
+use function in_array;
+use function is_string;
+use function strlen;
+
 abstract class Element implements Renderable
 {
     /** @var array<int, string|int|float|bool|BinaryValue> */
-    private array $properties = [];
+    /** @internal public read for the tree encoder */
+    public private(set) array $properties = [];
 
     /** @var list<Element> */
-    private array $children = [];
+    /** @internal public read for the tree encoder */
+    public private(set) array $children = [];
 
     /** @var array<int, Closure> */
-    private array $events = [];
+    /** @internal public read for the tree encoder */
+    public private(set) array $events = [];
 
-    private ?string $elementKey = null;
+    /** @internal public read for the tree encoder */
+    public private(set) ?string $elementKey = null;
 
-    private ?string $domIdentity = null;
+    /** @internal public read for the tree encoder */
+    public private(set) ?string $domIdentity = null;
 
     private ?string $domId = null;
 
@@ -38,15 +49,27 @@ abstract class Element implements Renderable
      * that render nothing leave a hole, so unkeyed siblings keep their native
      * identity when a sibling before them appears or disappears.
      */
-    private ?string $identitySlot = null;
+    /** @internal public read for the tree encoder */
+    public private(set) ?string $identitySlot = null;
 
     /** Likely to be the same object in the next frame (memoized component). */
-    private bool $reusable = false;
+    /** @internal public read for the tree encoder */
+    public private(set) bool $reusable = false;
+
+    /**
+     * @internal Wire-encoded properties computed by the template renderer:
+     * [the properties array they encode, encoded values by key in key order,
+     * their wire bytes when precomputed]. Valid only while the element still
+     * holds that same array.
+     *
+     * @var array{0: array<int, mixed>, 1: array<int, string>, 2: ?string}|null
+     */
+    public private(set) ?array $encodedProperties = null;
 
     /** @var \WeakMap<Element, array<string, Element>>|null */
     private static ?\WeakMap $slottedCopies = null;
 
-    final protected function __construct(private readonly NodeKind $kind)
+    final protected function __construct(public readonly NodeKind $kind)
     {
     }
 
@@ -450,6 +473,15 @@ abstract class Element implements Renderable
             $this->identitySlot,
             $this->reusable,
         ];
+    }
+
+    /**
+     * @internal
+     * @param array<int, string> $encoded
+     */
+    final public function __pamEncoded(array $encoded, ?string $bytes = null): void
+    {
+        $this->encodedProperties = [$this->properties, $encoded, $bytes];
     }
 
     /** @internal Marks an element the renderer expects to reuse across frames. */
