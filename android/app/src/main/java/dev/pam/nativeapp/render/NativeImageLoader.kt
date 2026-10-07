@@ -104,6 +104,77 @@ internal fun resolvePamImageFile(root: File, source: String): File {
     return candidate
 }
 
+/** Largest cell edge (px) served from the MediaStore thumbnail cache; bigger views decode the file. */
+internal const val MEDIA_STORE_THUMBNAIL_MAX_EDGE = 640
+
+internal fun isMediaStoreThumbnailCandidate(
+    source: String,
+    resizeMethod: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+): Boolean {
+    if (resizeMethod == IMAGE_RESIZE_NONE || resizeMethod == IMAGE_RESIZE_SCALE) return false
+    if (targetWidth <= 0 || targetHeight <= 0) return false
+    if (max(targetWidth, targetHeight) > MEDIA_STORE_THUMBNAIL_MAX_EDGE) return false
+    val uri = runCatching { URI(source) }.getOrNull() ?: return false
+    return uri.scheme.equals("content", ignoreCase = true) &&
+        uri.authority.equals("media", ignoreCase = true) &&
+        mediaStoreKind(source) != MEDIA_STORE_OTHER
+}
+
+internal const val MEDIA_STORE_OTHER = 0
+internal const val MEDIA_STORE_IMAGE = 1
+internal const val MEDIA_STORE_VIDEO = 2
+internal const val MEDIA_STORE_FILE = 3
+
+/** Which MediaStore collection a `content://media/<volume>/...` URI names. */
+internal fun mediaStoreKind(source: String): Int {
+    val path = runCatching { URI(source).path }.getOrNull().orEmpty()
+    return when {
+        path.contains("/images/media/") -> MEDIA_STORE_IMAGE
+        path.contains("/video/media/") -> MEDIA_STORE_VIDEO
+        path.contains("/file/") -> MEDIA_STORE_FILE
+        else -> MEDIA_STORE_OTHER
+    }
+}
+
+/**
+ * The platform thumbnail fits inside the requested box; a cell crops its image
+ * (cover). A square box whose edge is the cell's longer side times the item's
+ * aspect ratio yields a thumbnail whose shorter side still covers the cell,
+ * whatever the stored rotation of the item. Unknown sizes request the cell.
+ */
+internal fun thumbnailRequestSize(
+    itemWidth: Int,
+    itemHeight: Int,
+    targetWidth: Int,
+    targetHeight: Int,
+): android.util.Size {
+    if (itemWidth <= 0 || itemHeight <= 0) return android.util.Size(targetWidth, targetHeight)
+    val ratio = max(itemWidth, itemHeight).toFloat() / kotlin.math.min(itemWidth, itemHeight)
+    val edge = kotlin.math.ceil(max(targetWidth, targetHeight) * ratio).toInt()
+        .coerceAtMost(MEDIA_STORE_THUMBNAIL_MAX_EDGE * 2)
+    return android.util.Size(edge, edge)
+}
+
+/**
+ * Downscales a platform thumbnail to cover the cell exactly (the image view
+ * crops it); keeps it when it is already at most the cell size.
+ */
+internal fun coverScaledThumbnail(bitmap: Bitmap, targetWidth: Int, targetHeight: Int): Bitmap {
+    val scale = max(
+        targetWidth.toFloat() / bitmap.width.coerceAtLeast(1),
+        targetHeight.toFloat() / bitmap.height.coerceAtLeast(1),
+    )
+    if (scale >= 1f) return bitmap
+    val width = (bitmap.width * scale).toInt().coerceAtLeast(targetWidth)
+    val height = (bitmap.height * scale).toInt().coerceAtLeast(targetHeight)
+    if (width >= bitmap.width && height >= bitmap.height) return bitmap
+    val scaled = Bitmap.createScaledBitmap(bitmap, width, height, true)
+    if (scaled !== bitmap) bitmap.recycle()
+    return scaled
+}
+
 internal fun isInlineImageSource(source: String): Boolean =
     source.regionMatches(0, "data:image/", 0, "data:image/".length, ignoreCase = true)
 
@@ -366,7 +437,28 @@ internal class NativeImageLoader(
         val future = runCatching {
             inFlight.share(key) {
                 CompletableFuture.supplyAsync(
-                    {
+                    supply@{
+                        mediaStoreThumbnail(
+                            source,
+                            pending.request,
+                            measuredWidth,
+                            measuredHeight,
+                        )?.let { thumbnail ->
+                            if (
+                                !closed.get() &&
+                                pending.request.cachePolicy != IMAGE_CACHE_NONE &&
+                                pending.request.mediaCachePolicy != MEDIA_CACHE_NONE &&
+                                pending.request.mediaCachePolicy != MEDIA_CACHE_DISK
+                            ) {
+                                synchronized(memory) { memory.put(key, thumbnail) }
+                            }
+                            return@supply NativeImageResult(
+                                source,
+                                thumbnail.bitmap,
+                                thumbnail.width,
+                                thumbnail.height,
+                            )
+                        }
                         val bytes = loadBytes(
                             source = source,
                             request = pending.request,
@@ -604,6 +696,100 @@ internal class NativeImageLoader(
         drawable.start()
         return true
     }
+
+    /**
+     * Device gallery cells (MediaStore `content://media/...` photos and
+     * videos, including the Files collection the media library pages) come
+     * from the platform thumbnail cache at the cell size instead of reading
+     * and decoding the whole file: a 4-column grid otherwise reads megabytes
+     * per photo (and up to 16 MiB of every video, which then fails to decode)
+     * into the heap while scrolling. Videos get a frame. Returns null for any
+     * other source, a full-size or unresized request, or when the platform has
+     * no thumbnail, so the regular byte decode runs.
+     */
+    private fun mediaStoreThumbnail(
+        source: String,
+        request: NativeImageRequest,
+        targetWidth: Int,
+        targetHeight: Int,
+    ): DecodedBitmap? {
+        if (!isMediaStoreThumbnailCandidate(source, request.resizeMethod, targetWidth, targetHeight)) {
+            return null
+        }
+        val item = mediaStoreItem(android.net.Uri.parse(source)) ?: return null
+        val bitmap = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                context.contentResolver.loadThumbnail(
+                    item.uri,
+                    thumbnailRequestSize(item.width, item.height, targetWidth, targetHeight),
+                    null,
+                )
+            } else if (item.video) {
+                val retriever = android.media.MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(context, item.uri)
+                    retriever.getFrameAtTime(0)
+                } finally {
+                    retriever.release()
+                }
+            } else {
+                null
+            }
+        }.getOrNull() ?: return null
+        val fitted = coverScaledThumbnail(bitmap, targetWidth, targetHeight)
+        fitted.prepareToDraw()
+        return DecodedBitmap(
+            fitted,
+            item.width.takeIf { it > 0 } ?: bitmap.width,
+            item.height.takeIf { it > 0 } ?: bitmap.height,
+        )
+    }
+
+    private class MediaStoreItem(
+        val uri: android.net.Uri,
+        val video: Boolean,
+        val width: Int,
+        val height: Int,
+    )
+
+    /**
+     * The typed images/video URI of a MediaStore row (the thumbnail provider
+     * only serves typed rows) and its natural pixel size, the raw size the
+     * regular decode reports. Null for rows that are neither.
+     */
+    private fun mediaStoreItem(uri: android.net.Uri): MediaStoreItem? = runCatching {
+        val kind = mediaStoreKind(uri.toString())
+        val files = kind == MEDIA_STORE_FILE
+        val projection = buildList {
+            add(android.provider.MediaStore.MediaColumns.WIDTH)
+            add(android.provider.MediaStore.MediaColumns.HEIGHT)
+            if (files) add(android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE)
+        }.toTypedArray()
+        context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+            if (!cursor.moveToFirst()) return@use null
+            val mediaType = if (files) cursor.getInt(2) else 0
+            val video = kind == MEDIA_STORE_VIDEO ||
+                mediaType == android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+            val image = kind == MEDIA_STORE_IMAGE ||
+                mediaType == android.provider.MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE
+            if (!video && !image) return@use null
+            val typed = if (files) {
+                val volume = uri.pathSegments.firstOrNull() ?: "external"
+                val id = android.content.ContentUris.parseId(uri)
+                android.content.ContentUris.withAppendedId(
+                    if (video) {
+                        android.provider.MediaStore.Video.Media.getContentUri(volume)
+                    } else {
+                        android.provider.MediaStore.Images.Media.getContentUri(volume)
+                    },
+                    id,
+                )
+            } else {
+                uri
+            }
+            MediaStoreItem(typed, video, cursor.getInt(0), cursor.getInt(1))
+        }
+    }.getOrNull()
 
     private fun loadBytes(
         source: String,

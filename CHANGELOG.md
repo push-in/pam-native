@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.25.2 - 2026-10-07
+
+- Android device-gallery images (`content://media/...` photos and videos,
+  including the Files collection `MediaLibrary::assets()` pages) up to 640 px
+  load from the platform thumbnail cache (`ContentResolver.loadThumbnail`)
+  and are downscaled to cover the cell, instead of reading the whole file
+  into the heap and decoding it. Videos show a frame instead of failing to
+  decode after reading up to 16 MiB. Natural size events still report the
+  MediaStore width and height. Larger views and other sources keep the
+  regular decode.
+- iOS: `ph://` photo-library sources of video assets draw their poster frame
+  (previously an image error), matching Android.
+- No PHP API, protocol identifiers or dependency requirements changed.
+  Rebuild the Android and iOS hosts; see [migration notes](docs/migration-1.25.2.md).
+- Measured on a Galaxy S10 (Android 12) Create gallery, 4 columns, 14 flings:
+  janky frames 7.9% → 4.0% (p99 61–81 → 44 ms); app-process GC time during a
+  14 s trace 1.12 s → 0.14 s.
+
 ## 1.25.1 - 2026-10-07
 
 - VirtualizedList/VirtualGrid cells include their root's margins, like React

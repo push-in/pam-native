@@ -4123,11 +4123,13 @@ public final class PamRenderer {
         state.imageGeneration += 1
         state.imageLoading = true
         let generation = state.imageGeneration
-        guard let asset = PamPhotoAssetURI.asset(source), asset.mediaType == .image else {
+        // Video assets draw their poster frame, like Android's MediaStore thumbnail.
+        guard let asset = PamPhotoAssetURI.asset(source),
+              asset.mediaType == .image || asset.mediaType == .video else {
             state.imageLoading = false
             if state.properties[PamConstants.onImageError] != nil {
                 let payload = (try? WireMap.encode([
-                    "error": .text("Photo asset is unavailable or is not an image"),
+                    "error": .text("Photo asset is unavailable or is not an image or video"),
                 ])) ?? Data()
                 dispatchEvent(nodeId, EventKind.imageError.rawValue, payload)
             }
