@@ -301,6 +301,11 @@ fn layout_node(
             .dirty_path
             .is_some_and(|dirty_path| !dirty_path.contains(&id))
     {
+        // A clean subtree under a dirty node was dropped from the output
+        // before the pass; it keeps its previous frames.
+        if !output.contains_key(&id) {
+            restore_previous_subtree(context, id, output);
+        }
         return Ok(());
     }
     output.insert(id, frame);
@@ -593,9 +598,25 @@ fn layout_node(
             .filter(|child| visible(child))
             .collect::<Vec<_>>();
 
+        // Keyed sections (`listSection`/`activeSection`): every section of a
+        // contiguous block starts at the block's origin, so a row's frame
+        // never depends on which section is active and switching sections
+        // moves nothing but the rows after the block.
+        let active_section = section_key(node, PropKey::ListActiveSection).unwrap_or("");
+        // Rows may keep their measured extents only while the list keeps its
+        // own frame (a content-sized cell can depend on the list height).
+        let list_unchanged = context
+            .previous
+            .is_some_and(|previous| previous.get(&id) == Some(&frame));
+        let mut sections = SectionFlow::default();
         if horizontal {
             let mut cursor = inner.x;
             for child in visible_children {
+                let section = section_key(child, PropKey::ListSection);
+                let start = sections.start(section, cursor, active_section);
+                if section.is_none() {
+                    cursor = start;
+                }
                 // Like a React Native cell, the slot includes the root's
                 // margins and the root is inset by them. An authored width
                 // stays the root's own width; rowHeight stays the slot.
@@ -619,21 +640,31 @@ fn layout_node(
                 }
                 .max(1.0);
                 let item_frame = Layout {
-                    x: cursor + margins.left,
+                    x: start + margins.left,
                     y: inner.y + margins.top,
                     width: (item_width - margins.left - margins.right).max(0.0),
                     height: (inner.height - margins.top - margins.bottom).max(0.0),
                 };
                 layout_node(context, child.id, item_frame, false, depth + 1, output)?;
-                cursor += item_width;
+                if let Some(section) = section {
+                    sections.advance(section, start + item_width);
+                } else {
+                    cursor = start + item_width;
+                }
             }
         } else {
             let mut cursor = inner.y;
             // ListHeaderComponent/ListFooterComponent-style full-span items
-            // occupy a whole row; the others fill `columns` per row.
+            // occupy a whole row; the others fill `columns` per row. A row
+            // never mixes sections.
             let mut rows: Vec<Vec<&Node>> = Vec::new();
             let mut pending: Vec<&Node> = Vec::new();
             for child in visible_children.iter().copied() {
+                if pending.first().is_some_and(|first| {
+                    section_key(first, PropKey::ListSection) != section_key(child, PropKey::ListSection)
+                }) {
+                    rows.push(std::mem::take(&mut pending));
+                }
                 if boolean(child, PropKey::ListFullSpan) {
                     if !pending.is_empty() {
                         rows.push(std::mem::take(&mut pending));
@@ -650,8 +681,18 @@ fn layout_node(
                 rows.push(pending);
             }
             for row in &rows {
+                let section = section_key(row[0], PropKey::ListSection);
+                let start = sections.start(section, cursor, active_section);
+                if section.is_none() {
+                    cursor = start;
+                }
                 let full_span = row.len() == 1 && boolean(row[0], PropKey::ListFullSpan);
                 let cell_width = if full_span { inner.width } else { cell_width };
+                let retained = if list_unchanged {
+                    retained_row_extent(context, row, inner.x, cell_width)
+                } else {
+                    None
+                };
                 // The slot of a cell includes its root's margins (React
                 // Native/Yoga measure the cell around the item's margin box);
                 // an authored height stays the root's own height.
@@ -664,13 +705,17 @@ fn layout_node(
                         })
                     })
                     .reduce(f32::max);
-                let item_height = match authored {
-                    Some(height) => height,
+                let item_height = match (authored, retained) {
+                    (Some(height), _) => height,
+                    // A clean row keeps its measured extent: re-laying out a
+                    // list (a section switch, one changed row) measures only
+                    // the rows that changed.
+                    (None, Some(height)) => height,
                     // Cells without an authored height are content-sized, like
                     // React Native FlatList cells (the tallest cell of a
                     // multi-column row). The estimate only remains for cells
                     // without a definite intrinsic extent or not populated yet.
-                    None => {
+                    (None, None) => {
                         let mut tallest = 0.0_f32;
                         for child in row.iter().copied() {
                             let populated = context.children.get(&child.id).is_some_and(|cell| {
@@ -702,13 +747,17 @@ fn layout_node(
                     let margins = cell_margins(child);
                     let item_frame = Layout {
                         x: inner.x + column as f32 * cell_width + margins.left,
-                        y: cursor + margins.top,
+                        y: start + margins.top,
                         width: (cell_width - margins.left - margins.right).max(0.0),
                         height: (item_height - margins.top - margins.bottom).max(0.0),
                     };
                     layout_node(context, child.id, item_frame, false, depth + 1, output)?;
                 }
-                cursor += item_height;
+                if let Some(section) = section {
+                    sections.advance(section, start + item_height);
+                } else {
+                    cursor = start + item_height;
+                }
             }
         }
         return Ok(());
@@ -3385,6 +3434,110 @@ fn integer(node: &Node, key: PropKey) -> Option<i64> {
         Some(pam_native_protocol::PropValue::Integer(value)) => Some(*value),
         _ => None,
     }
+}
+
+fn restore_previous_subtree(
+    context: &LayoutContext<'_>,
+    id: u64,
+    output: &mut BTreeMap<u64, Layout>,
+) {
+    let Some(previous) = context.previous else {
+        return;
+    };
+    let mut pending = vec![id];
+    while let Some(current) = pending.pop() {
+        let Some(frame) = previous.get(&current) else {
+            continue;
+        };
+        output.insert(current, *frame);
+        if let Some(children) = context.children.get(&current) {
+            pending.extend(children.iter().map(|child| child.id));
+        }
+    }
+}
+
+fn section_key(node: &Node, key: PropKey) -> Option<&str> {
+    match node.properties.get(&key) {
+        Some(pam_native_protocol::PropValue::String(value)) if !value.is_empty() => {
+            Some(value.as_str())
+        }
+        _ => None,
+    }
+}
+
+/// Main-axis flow of a list with keyed sections. Consecutive sectioned rows
+/// form a block; each section of the block flows from the block's origin.
+/// The first row after the block continues after the active section (or at
+/// the origin when the active section has no rows in the block).
+#[derive(Default)]
+struct SectionFlow<'a> {
+    origin: Option<f32>,
+    ends: Vec<(&'a str, f32)>,
+}
+
+impl<'a> SectionFlow<'a> {
+    /// Main-axis start of the next row of `section` (`None`: an unsectioned
+    /// row) given the flow `cursor` of unsectioned rows.
+    fn start(&mut self, section: Option<&'a str>, cursor: f32, active: &str) -> f32 {
+        match (section, self.origin) {
+            (Some(section), Some(origin)) => self
+                .ends
+                .iter()
+                .find(|(key, _)| *key == section)
+                .map_or(origin, |(_, end)| *end),
+            (Some(_), None) => {
+                self.origin = Some(cursor);
+                cursor
+            }
+            (None, Some(origin)) => {
+                let end = self
+                    .ends
+                    .iter()
+                    .find(|(key, _)| *key == active)
+                    .map_or(origin, |(_, end)| *end);
+                self.origin = None;
+                self.ends.clear();
+                end
+            }
+            (None, None) => cursor,
+        }
+    }
+
+    fn advance(&mut self, section: &'a str, end: f32) {
+        if let Some(entry) = self.ends.iter_mut().find(|(key, _)| *key == section) {
+            entry.1 = end;
+        } else {
+            self.ends.push((section, end));
+        }
+    }
+}
+
+/// Slot extent of a vertical list row whose cells are all clean (off the
+/// dirty path) and keep their previous cross-axis placement: the previous
+/// measurement still holds, so the row is not measured again.
+fn retained_row_extent(
+    context: &LayoutContext<'_>,
+    row: &[&Node],
+    origin_x: f32,
+    cell_width: f32,
+) -> Option<f32> {
+    let previous = context.previous?;
+    let dirty_path = context.dirty_path?;
+    let mut extent = 0.0_f32;
+    for (column, child) in row.iter().enumerate() {
+        if dirty_path.contains(&child.id) {
+            return None;
+        }
+        let frame = previous.get(&child.id)?;
+        let margins = cell_margins(child);
+        let x = origin_x + column as f32 * cell_width + margins.left;
+        let width = (cell_width - margins.left - margins.right).max(0.0);
+        if (frame.x - x).abs() > f32::EPSILON || (frame.width - width).abs() > f32::EPSILON {
+            return None;
+        }
+        extent = extent.max(frame.height + margins.top + margins.bottom);
+    }
+    Some(extent.max(1.0))
 }
 
 fn boolean(node: &Node, key: PropKey) -> bool {
@@ -6689,6 +6842,137 @@ mod tests {
         assert!(!incremental.contains_key(&2));
         assert!(!incremental.contains_key(&3));
         assert!(incremental.contains_key(&4));
+    }
+
+    fn sectioned_list(active: &str) -> Tree {
+        let section = |value: &str| (PropKey::ListSection, PropValue::String(value.into()));
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [(PropKey::ListActiveSection, PropValue::String(active.into()))],
+            ),
+        );
+        // Header (40), rail (20), media rows (2 x 100), file rows (3 x 30), footer (10).
+        nodes.insert(2, fixed_box(2, 1, 40.0));
+        nodes.insert(3, fixed_box(3, 1, 20.0));
+        for (index, id) in [4_u64, 5].into_iter().enumerate() {
+            let mut row = fixed_box(id, 1, 100.0);
+            row.index = 2 + index as u32;
+            row.properties.extend([section("media")]);
+            nodes.insert(id, row);
+        }
+        for (index, id) in [6_u64, 7, 8].into_iter().enumerate() {
+            let mut row = fixed_box(id, 1, 30.0);
+            row.index = 4 + index as u32;
+            row.properties.extend([section("files")]);
+            nodes.insert(id, row);
+        }
+        let mut footer = fixed_box(9, 1, 10.0);
+        footer.index = 7;
+        nodes.insert(9, footer);
+        nodes.get_mut(&3).expect("rail").index = 1;
+        Tree { root: 1, nodes }
+    }
+
+    #[test]
+    fn list_sections_share_their_block_origin() {
+        let viewport = Size {
+            width: 360.0,
+            height: 640.0,
+        };
+        let media = calculate(&sectioned_list("media"), viewport).expect("media layout");
+        let files = calculate(&sectioned_list("files"), viewport).expect("files layout");
+
+        assert_eq!(media[&4].y, 60.0);
+        assert_eq!(media[&5].y, 160.0);
+        assert_eq!(media[&6].y, 60.0);
+        assert_eq!(media[&8].y, 120.0);
+        assert_eq!(media[&9].y, 260.0);
+        assert_eq!(files[&9].y, 150.0);
+        // Section rows never move when the active section changes.
+        for id in 2..=8 {
+            assert_eq!(media[&id], files[&id], "row {id}");
+        }
+        // Without an active section the block is skipped by the flow.
+        let none = calculate(&sectioned_list(""), viewport).expect("no active section");
+        assert_eq!(none[&9].y, 60.0);
+    }
+
+    #[test]
+    fn switching_list_sections_is_incremental_and_keeps_row_extents() {
+        let viewport = Size {
+            width: 360.0,
+            height: 640.0,
+        };
+        let metrics = TextMetrics::new();
+        let mut tree = sectioned_list("media");
+        let previous =
+            calculate_with_text_metrics(&tree, viewport, 1.0, &metrics).expect("initial layout");
+        tree.nodes.get_mut(&1).expect("list").properties.insert(
+            PropKey::ListActiveSection,
+            PropValue::String("files".into()),
+        );
+        let (incremental, _) = calculate_incremental_with_text_metrics(
+            &tree,
+            viewport,
+            1.0,
+            &metrics,
+            &previous,
+            &BTreeSet::from([1]),
+        )
+        .expect("incremental layout");
+        let full =
+            calculate_with_text_metrics(&tree, viewport, 1.0, &metrics).expect("full layout");
+
+        assert_eq!(incremental, full);
+        let moved = incremental
+            .iter()
+            .filter(|(id, frame)| previous.get(id) != Some(frame))
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        assert_eq!(moved, vec![9]);
+    }
+
+    #[test]
+    fn multi_column_rows_never_mix_list_sections() {
+        let section = |value: &str| (PropKey::ListSection, PropValue::String(value.into()));
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListNumColumns, PropValue::Integer(3)),
+                    (PropKey::ListActiveSection, PropValue::String("a".into())),
+                ],
+            ),
+        );
+        for (index, (id, key)) in [(2_u64, "a"), (3, "a"), (4, "b"), (5, "b")].into_iter().enumerate() {
+            let mut cell = fixed_box(id, 1, 50.0);
+            cell.index = index as u32;
+            cell.properties.extend([section(key)]);
+            nodes.insert(id, cell);
+        }
+        let layout = calculate(
+            &Tree { root: 1, nodes },
+            Size {
+                width: 300.0,
+                height: 600.0,
+            },
+        )
+        .expect("multi-column sections");
+
+        assert_eq!((layout[&2].x, layout[&3].x), (0.0, 100.0));
+        assert_eq!((layout[&4].x, layout[&4].y), (0.0, 0.0));
+        assert_eq!(layout[&5].x, 100.0);
     }
 }
 

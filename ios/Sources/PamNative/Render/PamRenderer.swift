@@ -43,6 +43,13 @@ public final class PamRenderer {
     private var children: [Int64: [Int64]] = [:]
     /// Mounted list / section-list / virtual-list nodes (no per-commit scan).
     private var virtualListIds = Set<Int64>()
+    /// Cells of inactive keyed sections (`listSection`) kept materialized
+    /// out of the list: switching back reattaches the same views.
+    private var parkedCells = Set<Int64>()
+    /// Active keyed section each list last showed.
+    private var appliedListSections: [Int64: String] = [:]
+    /// Scroll offset of each switched-away section, per list.
+    private var listSectionOffsets: [Int64: [String: CGFloat]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
     private var interactionBridges: [Int64: PamInteractionBridge] = [:]
     private var animationDelegates: [Int64: PamAnimationDelegate] = [:]
@@ -186,6 +193,7 @@ public final class PamRenderer {
                 case let .update(id, key, value):
                     update(id: id, key: key, value: value)
                     if virtualListIds.contains(id) { dirtyLists.insert(id) }
+                    if key == PamConstants.listSection { markList(of: id) }
                     if key == PamConstants.value { needsModalSync = true }
                 case let .move(id, parent, index):
                     markList(of: id)
@@ -223,6 +231,10 @@ public final class PamRenderer {
         viewPool.removeAll()
         viewPoolCount = 0
         guard critical else { return }
+        for cellId in parkedCells {
+            dematerializeSubtree(cellId)
+        }
+        parkedCells.removeAll()
         for node in nodes.values {
             cancelImageLoad(for: node)
         }
@@ -413,6 +425,9 @@ public final class PamRenderer {
         views[id] = nil
         nodes[id] = nil
         virtualListIds.remove(id)
+        parkedCells.remove(id)
+        appliedListSections[id] = nil
+        listSectionOffsets[id] = nil
         frames[id] = nil
         children[id] = nil
         imageLoadContexts = imageLoadContexts.filter { _, context in
@@ -656,7 +671,24 @@ public final class PamRenderer {
         let horizontal = nodes[id]?
             .properties[PamConstants.scrollHorizontal]?.boolOrNil() ?? false
         list.horizontal = horizontal
-        let cellIds = children[id] ?? []
+        let allCellIds = children[id] ?? []
+        // Keyed sections: only shared rows and the active section's rows are
+        // listed; the others keep their views parked out of the list.
+        let activeSection = nodes[id]?.properties[PamConstants.listActiveSection]?.textOrNil() ?? ""
+        let sectionOf: (Int64) -> String? = { [nodes = self.nodes] cellId in
+            nodes[cellId]?.properties[PamConstants.listSection]?.textOrNil().flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let cellIds = PamListSections.visibleCells(allCellIds, active: activeSection, sectionOf: sectionOf)
+        if cellIds.count != allCellIds.count {
+            let shown = Set(cellIds)
+            for cellId in allCellIds where !shown.contains(cellId) {
+                guard let view = views[cellId], view.superview != nil else { continue }
+                view.removeFromSuperview()
+                parkedCells.insert(cellId)
+            }
+        }
+        let previousSection = appliedListSections[id]
+        appliedListSections[id] = activeSection
         // Cell slots are the roots' margin boxes (React Native cells): the
         // engine insets each root frame by its margins, and the content size,
         // item starts and visible window follow the slots.
@@ -686,6 +718,17 @@ public final class PamRenderer {
             list.maintainEndAnchor()
         }
         list.pamItemStarts = localFrames.map { horizontal ? $0.1.minX : $0.1.minY }.sorted()
+        if let previousSection, previousSection != activeSection {
+            switchListSection(
+                list,
+                listId: id,
+                from: previousSection,
+                to: activeSection,
+                rail: PamListSections.railId(allCellIds, sectionOf: sectionOf).flatMap { railId in
+                    localFrames.first { $0.0 == railId }?.1
+                }
+            )
+        }
         var visible = PamVirtualWindow.visibleIds(
             frames: localFrames,
             viewport: CGRect(origin: list.contentOffset, size: list.bounds.size),
@@ -714,8 +757,12 @@ public final class PamRenderer {
                     deferred = true
                     continue
                 }
+                if parkedCells.remove(cellId) != nil, let view = views[cellId] {
+                    attach(view, parentId: id, index: nodes[cellId]?.index ?? 0)
+                }
                 materializeSubtree(cellId)
             } else if views[cellId] != nil {
+                parkedCells.remove(cellId)
                 dematerializeSubtree(cellId)
             }
         }
@@ -726,6 +773,37 @@ public final class PamRenderer {
                 self.syncVirtualList(id)
             }
         }
+    }
+
+    /// Saves the switched-away section's offset and restores the switched-in
+    /// one's while the tab rail is pinned (React Native tabs over one list).
+    private func switchListSection(
+        _ list: PamVirtualListView,
+        listId: Int64,
+        from: String,
+        to: String,
+        rail: CGRect?
+    ) {
+        let horizontal = list.horizontal
+        let inset = horizontal ? list.adjustedContentInset.left : list.adjustedContentInset.top
+        let current = horizontal ? list.contentOffset.x : list.contentOffset.y
+        var offsets = listSectionOffsets[listId] ?? [:]
+        let change = PamListSections.switchOffsets(
+            current: current,
+            rail: rail.map { (horizontal ? $0.minX : $0.minY) - inset },
+            saved: offsets[to],
+            minimum: -inset,
+            maximum: list.primaryMaximumOffset
+        )
+        offsets[from] = change.saved
+        listSectionOffsets[listId] = offsets
+        guard let target = change.target, abs(target - current) > 0.5 else { return }
+        list.setContentOffset(
+            horizontal
+                ? CGPoint(x: target, y: list.contentOffset.y)
+                : CGPoint(x: list.contentOffset.x, y: target),
+            animated: false
+        )
     }
 
     private func applyLayout(_ id: Int64) {
@@ -2237,8 +2315,10 @@ public final class PamRenderer {
              PamConstants.textShadowRadius,
              PamConstants.textShadowColor:
             applyTextContent(view: view, nodeId: nodeId)
-        case PamConstants.includeFontPadding, PamConstants.listFullSpan:
-            // Android-only metric / laid out by the engine.
+        case PamConstants.includeFontPadding, PamConstants.listFullSpan,
+             PamConstants.listSection, PamConstants.listActiveSection:
+            // Android-only metric / laid out by the engine / list sections
+            // (applied by syncVirtualList).
             break
         case PamConstants.stickyHeader:
             applyLayout(nodeId)

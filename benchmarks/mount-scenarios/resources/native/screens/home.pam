@@ -9,5 +9,11 @@
         <Pressable height="120" backgroundColor="#FFAA3366" borderRadius="12" on:press="openReels" accessibilityLabel="open-reels">
             <Text height="120" textColor="#FFFFFFFF" textAlign="center" fontSize="20">Reels</Text>
         </Pressable>
+        <Pressable height="120" backgroundColor="#FF666666" borderRadius="12" on:press="openDetails" accessibilityLabel="open-details">
+            <Text height="120" textColor="#FFFFFFFF" textAlign="center" fontSize="20">Details (rebuild)</Text>
+        </Pressable>
+        <Pressable height="120" backgroundColor="#FF336699" borderRadius="12" on:press="openDetailsKeep" accessibilityLabel="open-details-keep">
+            <Text height="120" textColor="#FFFFFFFF" textAlign="center" fontSize="20">Details (sections)</Text>
+        </Pressable>
     </Column>
 </Screen>

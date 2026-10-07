@@ -32,6 +32,45 @@ struct PamTransformSpec: Equatable {
     }
 }
 
+/// Keyed list sections (`listSection` on rows, `activeSection` on the list):
+/// tabs over one VirtualizedList. Unsectioned rows (header, tab rail, footer)
+/// are always listed; sectioned rows only for the active section.
+enum PamListSections {
+    static func visibleCells(
+        _ ids: [Int64],
+        active: String,
+        sectionOf: (Int64) -> String?
+    ) -> [Int64] {
+        ids.filter { id in
+            guard let section = sectionOf(id) else { return true }
+            return section == active
+        }
+    }
+
+    /// Last unsectioned row before the first sectioned one (the tab rail).
+    static func railId(_ ids: [Int64], sectionOf: (Int64) -> String?) -> Int64? {
+        guard let first = ids.firstIndex(where: { sectionOf($0) != nil }), first > 0 else { return nil }
+        return ids[first - 1]
+    }
+
+    /// Offsets along the primary axis (content-offset space). While the rail
+    /// is at or above the viewport start, the outgoing section keeps its
+    /// offset (`saved`) and the incoming one returns to its own, or starts
+    /// with the rail at the top (its first row right below it). With the
+    /// header still visible nothing moves and nothing is saved.
+    static func switchOffsets(
+        current: CGFloat,
+        rail: CGFloat?,
+        saved: CGFloat?,
+        minimum: CGFloat,
+        maximum: CGFloat
+    ) -> (saved: CGFloat?, target: CGFloat?) {
+        guard let rail, current >= rail - 0.5 else { return (nil, nil) }
+        let target = min(max(saved ?? rail, minimum), max(minimum, maximum))
+        return (current, target)
+    }
+}
+
 /// React Native sticky headers (`stickyHeaderIndices`): a sticky child stays
 /// pinned to the top of the viewport after it scrolls past it until the next
 /// sticky child pushes it away.

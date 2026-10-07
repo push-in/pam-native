@@ -951,6 +951,8 @@ fn affects_layout(key: PropKey) -> bool {
             | PropKey::TextAdjustsFontSizeToFit
             | PropKey::TextMinimumFontScale
             | PropKey::Visible
+            | PropKey::ListSection
+            | PropKey::ListActiveSection
             | PropKey::MarginLeftAuto
             | PropKey::ScrollHorizontal
             | PropKey::ScrollFillViewport

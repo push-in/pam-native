@@ -21,6 +21,13 @@ internal class PamImageView(context: Context) : ImageView(context) {
      * changes (app to background) are not reported. See NativeImageLoader.
      */
     var onShownChanged: ((Boolean) -> Unit)? = null
+
+    /**
+     * Keeps the decoded pixels while hidden or detached: set on the images of
+     * a parked list cell (an inactive keyed section) so switching back draws
+     * them in the same frame without a cache lookup or decode.
+     */
+    var retainPixels = false
     private var suppressLayoutRequest = false
     private val clipPath = Path()
     private val clipBounds = RectF()
@@ -77,7 +84,7 @@ internal class PamImageView(context: Context) : ImageView(context) {
 
     override fun onVisibilityAggregated(isVisible: Boolean) {
         super.onVisibilityAggregated(isVisible)
-        if (windowVisibility == VISIBLE) onShownChanged?.invoke(isVisible)
+        if (windowVisibility == VISIBLE && (isVisible || !retainPixels)) onShownChanged?.invoke(isVisible)
     }
 
     override fun draw(canvas: Canvas) {

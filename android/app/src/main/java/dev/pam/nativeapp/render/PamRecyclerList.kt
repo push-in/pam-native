@@ -205,6 +205,12 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
     fun boundContainer(id: Long): FrameLayout? =
         (adapter as? RichRecyclerAdapter)?.boundContainer(id)
 
+    /** True while a holder is bound to cell [id] (mounted or mounting). */
+    fun isBound(id: Long): Boolean = (adapter as? RichRecyclerAdapter)?.isBound(id) == true
+
+    /** Scroll anchor of each keyed section, saved when it was switched away. */
+    private val sectionAnchors = HashMap<String, VirtualScrollAnchor>()
+
     /** Rebinds visible rows whose content was emptied, without a diff. */
     fun remountEmptyRows() {
         (adapter as? RichRecyclerAdapter)?.remountEmptyHolders()
@@ -215,7 +221,9 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         extents: Map<Long, Float>,
         mount: (Long, FrameLayout) -> Unit,
         unmount: (Long, FrameLayout) -> Unit,
+        sectionSwitch: ListSectionSwitch? = null,
     ) {
+        val sectionRestore = sectionSwitch?.let(::leaveSection)
         val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(1f)) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
@@ -249,6 +257,40 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         configureAdapter()
         updateHeaderSpans()
         applyInitialPosition()
+        if (sectionSwitch != null && sectionRestore != null) enterSection(sectionSwitch, sectionRestore)
+    }
+
+    /**
+     * Saves the outgoing section's scroll anchor. Returns whether the rail
+     * (the last row shared by every section above them) was at or above the
+     * top of the viewport: only then does each section keep its own offset,
+     * like React Native tabs over one list; with the header still visible
+     * every section starts right below it at the current offset.
+     */
+    private fun leaveSection(change: ListSectionSwitch): Boolean? {
+        if (inverted || !initialPositionApplied) return null
+        val manager = layoutManager as? LinearLayoutManager ?: return null
+        val first = manager.findFirstVisibleItemPosition()
+        if (first == NO_POSITION || first >= richIds.size) return null
+        val firstView = manager.findViewByPosition(first) ?: return null
+        val railIndex = change.railId?.let(richIds::indexOf) ?: -1
+        val pinned = railIndex >= 0 && first >= railIndex
+        if (pinned) {
+            val offset = if (horizontal) firstView.left - paddingLeft else firstView.top - paddingTop
+            sectionAnchors[change.from] = VirtualScrollAnchor(richIds[first], offset)
+        } else {
+            sectionAnchors.remove(change.from)
+        }
+        return pinned
+    }
+
+    private fun enterSection(change: ListSectionSwitch, pinned: Boolean) {
+        if (!pinned) return
+        val manager = layoutManager as? LinearLayoutManager ?: return
+        val target = sectionScrollTarget(richIds, sectionAnchors[change.to], change.railId) ?: return
+        stopScroll()
+        manager.scrollToPositionWithOffset(target.index, target.offset)
+        dispatchViewport()
     }
 
     /**
@@ -1050,6 +1092,46 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
 
 internal data class VirtualScrollPosition(val index: Int, val offset: Int)
 
+/** First visible row of a keyed section and its offset from the list start edge. */
+internal data class VirtualScrollAnchor(val id: Long, val offset: Int)
+
+/** A keyed-section change of a list; [railId] is the last row shared above the sections. */
+internal data class ListSectionSwitch(val from: String, val to: String, val railId: Long?)
+
+/**
+ * Rows a list shows for [activeSection]: unsectioned rows always, sectioned
+ * rows only for the active section.
+ */
+internal fun visibleSectionItems(
+    ids: List<Long>,
+    activeSection: String,
+    sectionOf: (Long) -> String?,
+): List<Long> = ids.filter { id -> sectionOf(id).let { it == null || it == activeSection } }
+
+/** Last unsectioned row before the first sectioned one (the tab rail), if any. */
+internal fun sectionRailId(ids: List<Long>, sectionOf: (Long) -> String?): Long? {
+    val first = ids.indexOfFirst { sectionOf(it) != null }
+    return if (first > 0) ids[first - 1] else null
+}
+
+/**
+ * Where a section switched in while the rail was pinned scrolls to: its
+ * saved anchor when that row is still listed, otherwise the rail at the top
+ * (the section's first row right below it).
+ */
+internal fun sectionScrollTarget(
+    ids: List<Long>,
+    saved: VirtualScrollAnchor?,
+    railId: Long?,
+): VirtualScrollPosition? {
+    saved?.let { anchor ->
+        val index = ids.indexOf(anchor.id)
+        if (index >= 0) return VirtualScrollPosition(index, anchor.offset)
+    }
+    val rail = railId?.let(ids::indexOf) ?: return null
+    return if (rail >= 0) VirtualScrollPosition(rail, 0) else null
+}
+
 internal fun virtualScrollPosition(extents: List<Int>, target: Int): VirtualScrollPosition {
     if (extents.isEmpty()) return VirtualScrollPosition(0, 0)
     var remaining = target.coerceAtLeast(0)
@@ -1322,6 +1404,8 @@ private class RichRecyclerAdapter(
 
     private fun dp(value: Float): Int =
         (value * context.resources.displayMetrics.density + 0.5f).toInt()
+
+    fun isBound(id: Long): Boolean = boundHolders.any { it.boundId == id }
 
     /** Container currently bound to cell [id], if that cell is on screen. */
     fun boundContainer(id: Long): FrameLayout? =

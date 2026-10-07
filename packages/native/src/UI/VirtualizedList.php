@@ -68,6 +68,18 @@ final class VirtualizedList extends Element
         return $this->rowHeight($height);
     }
 
+    /**
+     * Shows only the rows of keyed section `$section` among the rows that
+     * set {@see Element::listSection()}; the other sections stay mounted
+     * (layouts, views and images) and hidden, each with its own scroll
+     * position. Changing it is a property update: no row is rebuilt or
+     * remounted.
+     */
+    public function activeSection(string|int $section): self
+    {
+        return $this->withProperty(PropKey::ListActiveSection, (string) $section);
+    }
+
     public function prefetch(int $items): self
     {
         return $this->withProperty(PropKey::ListPrefetch, min(32, max(1, $items)));

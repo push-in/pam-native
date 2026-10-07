@@ -28,4 +28,14 @@ final class Home extends Component
     {
         $this->pushRoute('reels');
     }
+
+    public function openDetails(): void
+    {
+        $this->pushRoute('details');
+    }
+
+    public function openDetailsKeep(): void
+    {
+        $this->pushRoute('details-keep');
+    }
 }

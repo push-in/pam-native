@@ -624,6 +624,14 @@ class PamRenderer(
     private val scrollContainers = LongSparseArray<PamScrollContainer>()
     private val scrollKeyboardInsets = HashMap<PamScrollContainer, PamScrollKeyboardInset>()
     private val virtualListIds = LinkedHashSet<Long>()
+
+    /**
+     * Cells of inactive keyed sections (`listSection`) whose views stay
+     * materialized off screen: their holder was recycled when their section
+     * was switched away, and binding them again reattaches the same views
+     * (images, text layouts, players) instead of rebuilding them.
+     */
+    private val parkedCells = HashSet<Long>()
     private val localModalIds = LinkedHashSet<Long>()
     private val pressableIds = LinkedHashSet<Long>()
     private val inputIds = LinkedHashSet<Long>()
@@ -691,6 +699,7 @@ class PamRenderer(
             is PamImageView -> {
                 view.setImageDrawable(null)
                 view.onImageSizeChanged = null
+                view.retainPixels = false
             }
             // Modal trigger actions are re-installed by the commit pass.
             is PamPressable -> view.setLocalOnPress(null)
@@ -832,7 +841,9 @@ class PamRenderer(
                                 mutation.key == PropKey.LIST_HORIZONTAL ||
                                 mutation.key == PropKey.LIST_ROW_HEIGHT ||
                                 mutation.key == PropKey.LIST_FULL_SPAN ||
-                                mutation.key == PropKey.STICKY_HEADER
+                                mutation.key == PropKey.STICKY_HEADER ||
+                                mutation.key == PropKey.LIST_SECTION ||
+                                mutation.key == PropKey.LIST_ACTIVE_SECTION
                             ) {
                                 needsVirtualListSync = true
                                 if (nodes[mutation.id]?.kind == NodeKind.VIRTUAL_LIST) dirtyLists += mutation.id
@@ -1150,6 +1161,7 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper())
         imageLoader.trimMemory(critical)
         if (critical) {
+            releaseParkedCells { true }
             val recyclerLists = snapshotValues<PamRecyclerList>(views.size(), views::valueAt)
             for (recyclerList in recyclerLists) {
                 recyclerList.trimMemory(true)
@@ -1547,6 +1559,7 @@ class PamRenderer(
         children.remove(id)
         removeView(id)
         virtualListIds.remove(id)
+        parkedCells.remove(id)
         localModalIds.remove(id)
         statusBarIds.remove(id)
         nodes.remove(id)
@@ -1741,7 +1754,15 @@ class PamRenderer(
                 list.remountEmptyRows()
                 continue
             }
-            val itemIds = children[id]?.toList().orEmpty()
+            val activeSection = state.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty()
+            val allItemIds = children[id]?.toList().orEmpty()
+            val itemIds = visibleSectionItems(allItemIds, activeSection, ::listSectionOf)
+            val sectionSwitch = state.appliedListSection
+                ?.takeIf { previous -> previous != activeSection }
+                ?.let { previous ->
+                    ListSectionSwitch(previous, activeSection, sectionRailId(allItemIds, ::listSectionOf))
+                }
+            state.appliedListSection = activeSection
             if (state.virtualListItemIds != itemIds) {
                 state.virtualListItemIds = itemIds
                 state.endReachedSent = false
@@ -1763,9 +1784,36 @@ class PamRenderer(
             list.setRichItems(
                 ids = itemIds,
                 extents = itemExtents,
-                mount = { id, holder -> materializeCell(id, holder) },
-                unmount = { id, _ -> recycleCell(id) },
+                mount = { cell, holder -> materializeCell(cell, holder) },
+                unmount = { cell, _ ->
+                    val section = listSectionOf(cell)
+                    val listState = nodes[nodes[cell]?.parent ?: 0L]
+                    if (
+                        section != null &&
+                        listState != null &&
+                        section != listState.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty()
+                    ) {
+                        parkCell(cell)
+                    } else {
+                        recycleCell(cell)
+                    }
+                },
+                sectionSwitch = sectionSwitch,
             )
+            if (sectionSwitch != null) {
+                // Cells of the active section that the switch did not bind
+                // (scrolled away meanwhile) return to the ordinary recycling.
+                list.postOnAnimation {
+                    // After this frame's layout bound the switched-in rows.
+                    list.post {
+                        releaseParkedCells { cell ->
+                            nodes[cell]?.parent == id &&
+                                listSectionOf(cell) == nodes[id]?.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty() &&
+                                !list.isBound(cell)
+                        }
+                    }
+                }
+            }
             list.setFullSpanIds(
                 itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.LIST_FULL_SPAN, false) == true },
             )
@@ -1884,8 +1932,53 @@ class PamRenderer(
 
     private fun materializeCell(id: Long, holder: FrameLayout) {
         val slotFrame = cellSlotFrame(id) ?: return
+        if (parkedCells.remove(id)) unparkCell(id, holder)
         materializeCellNode(id, id, slotFrame, holder)
     }
+
+    /** Keeps the views of a cell whose section was switched away. */
+    private fun parkCell(id: Long) {
+        parkedCells += id
+        forEachCellView(id) { view -> pamImageView(view)?.retainPixels = true }
+    }
+
+    /**
+     * Moves a parked cell's top-level views into [holder] in node order;
+     * nodes created while it was parked are materialized by the caller.
+     */
+    private fun unparkCell(id: Long, holder: FrameLayout) {
+        fun attachTop(nodeId: Long) {
+            val view = views[nodeId]
+            if (view != null) {
+                (view.parent as? ViewGroup)?.removeView(view)
+                holder.addView(view)
+                return
+            }
+            children[nodeId]?.forEach(::attachTop)
+        }
+        attachTop(id)
+        forEachCellView(id) { view -> pamImageView(view)?.retainPixels = false }
+    }
+
+    private fun forEachCellView(id: Long, action: (View) -> Unit) {
+        views[id]?.let(action)
+        children[id]?.forEach { child -> forEachCellView(child, action) }
+    }
+
+    /** Dematerializes parked cells matching [predicate] (memory pressure, stale). */
+    private fun releaseParkedCells(predicate: (Long) -> Boolean) {
+        if (parkedCells.isEmpty()) return
+        val released = parkedCells.filter(predicate)
+        released.forEach { id ->
+            parkedCells.remove(id)
+            forEachCellView(id) { view -> pamImageView(view)?.retainPixels = false }
+            recycleCell(id)
+        }
+    }
+
+    /** Section key of a list row, or null for rows shown in every section. */
+    private fun listSectionOf(id: Long): String? =
+        nodes[id]?.textOrNull(PropKey.LIST_SECTION)?.takeIf { it.isNotEmpty() }
 
     /** The cell holder's frame: the root frame outset by the root's margins. */
     private fun cellSlotFrame(rootId: Long): Frame? {
@@ -3432,6 +3525,8 @@ class PamRenderer(
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
             PropKey.LIST_FULL_SPAN,
+            PropKey.LIST_SECTION,
+            PropKey.LIST_ACTIVE_SECTION,
             -> Unit
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
             PropKey.ANIMATION_DURATION_MS -> {
@@ -4103,6 +4198,8 @@ class PamRenderer(
             PropKey.MIN_WIDTH_PERCENT,
             PropKey.MIN_HEIGHT_PERCENT,
             PropKey.LIST_FULL_SPAN,
+            PropKey.LIST_SECTION,
+            PropKey.LIST_ACTIVE_SECTION,
             -> Unit
             PropKey.TEXT_SPANS,
             PropKey.ON_SPAN_PRESS,
@@ -9141,6 +9238,8 @@ class PamRenderer(
         var pendingScrollOffset: Float = 0f,
         var endReachedSent: Boolean = false,
         var virtualListItemIds: List<Long> = emptyList(),
+        /** Active keyed section the list last showed (null before the first sync). */
+        var appliedListSection: String? = null,
         var keyboardBehavior: Int = KEYBOARD_RESIZE,
         var safeBottomInset: Int = 0,
         var safeAreaLeftInset: Int = 0,

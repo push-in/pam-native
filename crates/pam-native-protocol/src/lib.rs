@@ -701,6 +701,8 @@ pub enum PropKey {
     OnMomentumScrollEnd = 521,
     OnTextLayout = 522,
     ListFullSpan = 523,
+    ListSection = 524,
+    ListActiveSection = 525,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1231,6 +1233,8 @@ impl TryFrom<u16> for PropKey {
             521 => Ok(Self::OnMomentumScrollEnd),
             522 => Ok(Self::OnTextLayout),
             523 => Ok(Self::ListFullSpan),
+            524 => Ok(Self::ListSection),
+            525 => Ok(Self::ListActiveSection),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2168,10 +2172,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=523 {
+        for value in 1..=525 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(524).is_err());
+        assert!(PropKey::try_from(526).is_err());
     }
 
     #[test]

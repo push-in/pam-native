@@ -569,6 +569,8 @@ final class TemplateRenderer
         'stickyHeader' => PropKey::StickyHeader,
         'keyboardInset' => PropKey::ScrollKeyboardInset,
         'fullSpan' => PropKey::ListFullSpan,
+        'listSection' => PropKey::ListSection,
+        'activeSection' => PropKey::ListActiveSection,
         'textTransform' => PropKey::TextTransform,
         'fontStyle' => PropKey::FontStyle,
         'widthPercent' => PropKey::WidthPercent,
@@ -4775,6 +4777,9 @@ final class TemplateRenderer
                 ? $value->encode()
                 : (is_string($value) && $value !== '' ? $value : null),
             PropKey::NativeRef => Drag::ref(self::stringValue($value, 'nativeRef')),
+            PropKey::ListSection,
+            PropKey::ListActiveSection,
+            => $value === null || $value === false ? null : self::stringValue($value, "Template {$key->name}"),
             PropKey::PressDoubleTapDelayMs => max(80, min(1_000, self::intValue($value, 'doubleTapDelay'))),
             PropKey::GestureDragSnapIndex => Drag::snapRequestValue($value),
             PropKey::AnimationRestartKey => max(0, self::intValue($value, "Template {$key->name}")),

@@ -57,9 +57,10 @@ def frames(path):
     draws = [(r.ts, r.dur / 1e6) for r in tp.query(mt.replace('NAME','DrawFrames*'))]
     uploads = [(r.ts, r.dur / 1e6) for r in tp.query(mt.replace('NAME','*prepareToDraw*'))] + [(r.ts, r.dur / 1e6) for r in tp.query(mt.replace('NAME','*Upload*'))]
     decodes = [(r.ts, r.dur / 1e6) for r in tp.query(mt.replace('NAME','decodeBitmap'))]
+    inputs = [(r.ts, r.dur / 1e6) for r in tp.query(mt.replace('NAME','deliverInputEvent*'))]
     t0 = next(iter(tp.query('select start_ts from trace_bounds'))).start_ts
     tp.close()
-    return fr, mounts, doframes, t0, draws, uploads, decodes
+    return fr, mounts, doframes, t0, draws, uploads, decodes, inputs
 
 def window(items, start, end):
     return [d for (ts, d) in items if start <= ts < end]
@@ -78,8 +79,24 @@ def collect(path, marks, span_ms):
         pass
     return fr, mounts, doframes, t0
 
+def tap_latency(path):
+    """Per tap: input delivery -> end of its first commit, and -> end of the
+    first app frame presented after that commit (what the user sees)."""
+    fr, mounts, _, _, _, _, _, inputs = frames(path)
+    out, used = [], set()
+    for ts, d in mounts:
+        before = [i for i, (its, _) in enumerate(inputs) if its <= ts and ts - its < 1e9]
+        if not before or before[-1] in used: continue
+        used.add(before[-1])
+        start = inputs[before[-1]][0]
+        end = ts + int(d * 1e6)
+        frame_end = next((fts + int(fd * 1e6) for fts, fd in fr if fts + fd * 1e6 >= end), None)
+        out.append({'commit_ms': round((end - start) / 1e6, 1), 'mount_ms': round(d, 1),
+                    'frame_ms': round((frame_end - start) / 1e6, 1) if frame_end else None})
+    return out
+
 def per_mount(path, span_ms=1200, min_mount_ms=0.0):
-    fr, mounts, doframes, t0, draws, uploads, decodes = frames(path)
+    fr, mounts, doframes, t0, draws, uploads, decodes, _ = frames(path)
     out = []
     for ts, d in mounts:
         if d < min_mount_ms: continue
@@ -113,6 +130,32 @@ def scenario_reels(i):
         return []
     p, _ = trace(f'reels-{i}', 11500, act)
     return per_mount(p, 700)
+
+DETAIL_TAPS = (540, 900, 180, 540, 900, 180, 540, 900, 180)
+
+def scenario_details(button_y, label):
+    def run(i):
+        launch(); tap(540, button_y); time.sleep(4)
+        def act():
+            for x in DETAIL_TAPS:
+                tap(x, 630); time.sleep(1.2)
+            return []
+        p, _ = trace(f'{label}-{i}', 13500, act)
+        return {'mounts': per_mount(p, 700), 'taps': tap_latency(p)}
+    return run
+
+def agg_taps(runs):
+    taps = [t for r in runs for t in r['taps']]
+    # The first two switches visit new tabs; the rest return to visited ones.
+    returns = [t for r in runs for t in r['taps'][2:]]
+    def summary(items, key):
+        values = sorted(t[key] for t in items if t[key] is not None)
+        if not values: return {}
+        return {'n': len(values), 'median': round(statistics.median(values), 1),
+                'p90': values[min(len(values) - 1, int(len(values) * 0.9))], 'max': values[-1]}
+    return {'all_commit': summary(taps, 'commit_ms'), 'all_frame': summary(taps, 'frame_ms'),
+            'return_commit': summary(returns, 'commit_ms'), 'return_frame': summary(returns, 'frame_ms'),
+            'return_mount': summary(returns, 'mount_ms')}
 
 def meminfo():
     launch()
@@ -160,6 +203,11 @@ for name, fn in (('profile', scenario_profile), ('tabs', scenario_tabs), ('reels
     runs = [fn(i) for i in range(RUNS)]
     (OUT / f'{name}.json').write_text(json.dumps(runs, indent=1))
     result[name] = agg(runs)
+for name, y in (('details', 1335), ('details-keep', 1692)):
+    if name not in which: continue
+    runs = [scenario_details(y, name)(i) for i in range(RUNS)]
+    (OUT / f'{name}.json').write_text(json.dumps(runs, indent=1))
+    result[name] = {**agg([r['mounts'] for r in runs]), 'taps': agg_taps(runs)}
 if 'mem' in which:
     mems = []
     for i in range(2):

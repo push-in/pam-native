@@ -1,0 +1,37 @@
+<Screen>
+    <Column class="flex-1" backgroundColor="#FFFFFFFF">
+        <Row height="56" paddingHorizontal="12" alignItems="center">
+            <Pressable width="44" height="44" on:press="back" accessibilityLabel="back">
+                <Text height="44" textAlign="center" fontSize="22">←</Text>
+            </Pressable>
+            <Text flexGrow="1" fontSize="18" fontWeight="700">{{ $keep ? 'Detalhes (seções)' : 'Detalhes (rebuild)' }}</Text>
+        </Row>
+        <VirtualizedList flexGrow="1" flexShrink="1" estimatedRowHeight="68" :activeSection="$active">
+            <Column height="160" alignItems="center" justifyContent="center" gap="8">
+                <Image source="asset://assets/photos/p31.jpg" width="88" height="88" borderRadius="44" />
+                <Text fontSize="17" fontWeight="700">Grupo de teste</Text>
+            </Column>
+            <Row height="48" stickyHeader="true" backgroundColor="#FFFFFFFF">
+                <Pressable flexGrow="1" height="48" on:press="first" accessibilityLabel="tab-0">
+                    <Text height="48" textAlign="center" fontSize="15" :fontWeight="$tab === 0 ? '700' : '400'" :textColor="$tab === 0 ? '#FF111111' : '#FF888888'">Mídias</Text>
+                </Pressable>
+                <Pressable flexGrow="1" height="48" on:press="second" accessibilityLabel="tab-1">
+                    <Text height="48" textAlign="center" fontSize="15" :fontWeight="$tab === 1 ? '700' : '400'" :textColor="$tab === 1 ? '#FF111111' : '#FF888888'">Links</Text>
+                </Pressable>
+                <Pressable flexGrow="1" height="48" on:press="third" accessibilityLabel="tab-2">
+                    <Text height="48" textAlign="center" fontSize="15" :fontWeight="$tab === 2 ? '700' : '400'" :textColor="$tab === 2 ? '#FF111111' : '#FF888888'">Arquivos</Text>
+                </Pressable>
+            </Row>
+            <Pressable v-for="$row in $rows" :key="$row['key']" :listSection="$row['section']">
+                <Row height="68" paddingHorizontal="16" gap="12" alignItems="center">
+                    <Image :source="$row['src']" width="44" height="44" borderRadius="8" />
+                    <Column flexGrow="1" flexShrink="1" gap="2">
+                        <Text fontSize="15" fontWeight="600" maxLines="1">{{ $row['title'] }}</Text>
+                        <Text fontSize="13" textColor="#FF777777" maxLines="1">{{ $row['subtitle'] }}</Text>
+                    </Column>
+                    <Text fontSize="12" textColor="#FF999999">{{ $row['meta'] }}</Text>
+                </Row>
+            </Pressable>
+        </VirtualizedList>
+    </Column>
+</Screen>

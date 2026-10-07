@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.27.0 - 2026-10-07
+
+- Keyed `VirtualizedList` sections for tabs over one list: rows set
+  `listSection` (`Element::listSection()`) and the list `activeSection`
+  (`VirtualizedList::activeSection()`). Unsectioned rows (header, sticky tab
+  rail, footer) are always shown; rows of inactive sections stay mounted and
+  hidden, so switching tabs is a property update: no PHP rebuild of the rows
+  and no remount.
+- Engine: every section of a contiguous block is laid out from the block
+  origin, so row frames never depend on the active section, and a vertical
+  list reuses the previous extent of rows off the dirty path (a section
+  switch or one changed row no longer re-measures every row). Clean subtrees
+  under a dirty node keep their previous frames in incremental layouts
+  (they were dropped and re-sent).
+- Android: the adapter lists only shared and active rows; holders of an
+  inactive section are recycled into the shared pool while their views stay
+  materialized (parked) with their decoded bitmaps, and binding them again
+  reattaches the same views. Each section keeps its own scroll anchor while
+  the rail is pinned; a first visit starts with the rail at the top. Parked
+  rows not bound after a switch, and all of them under critical memory
+  pressure, return to ordinary recycling.
+- iOS: same contract: inactive sections are detached from the list and
+  reattached on return, content size and windowing follow the active
+  section, and each section keeps its own content offset while the rail is
+  pinned.
+- Protocol: `ListSection` (524) and `ListActiveSection` (525) property
+  identifiers (append-only).
+- Benchmarks: `mount-scenarios` adds chat-details tabs over one
+  `VirtualizedList` (header, sticky rail, 40 rows with a photo per tab,
+  switched back and forth 9 times) built by rebuilding the active tab
+  (`details`) or with keyed sections (`details-keep`), with tap-to-commit and
+  tap-to-frame latency. API 35 emulator (SwiftShader, benchmark build,
+  4 runs, 28 returns to a visited tab):
+  - native commit of a switch back: 1.9 -> 0.5 ms (median), p90 2.2 -> 0.5;
+  - image decode / texture upload after a switch: 16.9 / 3.3 -> 0 / 0 ms;
+  - tap to first presented frame: median 32.9 -> 28.4 ms, p90 40.7 -> 35.5;
+  - the remaining latency is the PHP render of the screen (about 24 ms in
+    both modes here, where the rows are inline template elements);
+    memoized row components keep it to the rail.
+- See [migration notes](docs/migration-1.27.0.md).
+
 ## 1.26.0 - 2026-10-07
 
 - Android images decode at the display size: a source larger than its view

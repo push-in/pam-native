@@ -259,6 +259,27 @@ $assert(
     ($listHeader[PropKey::ListFullSpan->value] ?? null) === true && ($listHeader[PropKey::StickyHeader->value] ?? null) === true,
     'List header attributes must compile to native booleans.',
 );
+// Keyed list sections: rows carry their section, the list the active one.
+$sectionTemplate = $typographyRender(
+    '<VirtualizedList activeSection="1"><Column stickyHeader="true"><Text>Tabs</Text></Column><Column listSection="0"><Text>A</Text></Column><Column :listSection="1"><Text>B</Text></Column></VirtualizedList>',
+    '',
+);
+$sectionRows = $sectionTemplate->children();
+$assert(
+    ($sectionTemplate->properties()[PropKey::ListActiveSection->value] ?? null) === '1'
+        && !isset($sectionRows[0]->properties()[PropKey::ListSection->value])
+        && ($sectionRows[1]->properties()[PropKey::ListSection->value] ?? null) === '0'
+        && ($sectionRows[2]->properties()[PropKey::ListSection->value] ?? null) === '1',
+    'List sections must compile to native section keys.',
+);
+$sectionBuilder = \Pam\Native\UI\VirtualizedList::make(
+    \Pam\Native\UI\Column::make()->listSection(7),
+)->activeSection('media');
+$assert(
+    ($sectionBuilder->properties()[PropKey::ListActiveSection->value] ?? null) === 'media'
+        && ($sectionBuilder->children()[0]->properties()[PropKey::ListSection->value] ?? null) === '7',
+    'The list section builders must send string keys.',
+);
 $keyboardScroll = $typographyRender('<ScrollView keyboardInset="true"><Column /></ScrollView>', '');
 $assert(($keyboardScroll->properties()[PropKey::ScrollKeyboardInset->value] ?? null) === true, 'keyboardInset must reach the scroll view.');
 $offsetScroll = $typographyRender('<ScrollView keyboardInset="true" keyboardVerticalOffset="156"><Column /></ScrollView>', '');

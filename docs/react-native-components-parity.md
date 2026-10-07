@@ -48,6 +48,47 @@ their state (a horizontal tab rail offset, a focused input) is kept.
   — use it for `ListHeaderComponent`/`ListFooterComponent` equivalents placed
   first/last; they scroll with the list.
 
+### Keyed sections (tabs over one list)
+
+Screens such as chat details render a header, a sticky tab rail and the
+active tab's rows in one list. Instead of rebuilding the rows on every tab
+switch, give each tab's rows a section and the list the active one:
+
+```html
+<VirtualizedList :activeSection="$activeTab">
+    <Column><Text>Grupo</Text></Column>
+    <Row stickyHeader="true"><!-- tab rail --></Row>
+    <Row p-for="$row in $mediaRows" p-key="$row['key']" listSection="media">…</Row>
+    <Row p-for="$row in $fileRows" p-key="$row['key']" listSection="files">…</Row>
+</VirtualizedList>
+```
+
+Like `stickyHeader`, `listSection` is a property of the cell's root element:
+a row component sets it on its own root (for example from a `section`
+prop).
+`Element::listSection()` / `VirtualizedList::activeSection()` are the
+builder equivalents. Rows without a section (hero, rail, footer) are always
+shown. Rows of the other sections stay in the tree, hidden:
+
+- their layouts are kept (every section of a block starts at the same
+  origin, so a switch moves nothing but the rows after the block) and the
+  engine reuses the measured extent of clean rows instead of measuring them
+  again;
+- the views of their bound rows stay materialized off screen (Android
+  parks them when their holder is recycled, iOS detaches them), images keep
+  their decoded pixels, so switching back reattaches the same views: no PHP
+  rebuild, no remount, no decode;
+- while the rail is pinned each section keeps its own scroll position (a
+  first visit starts with the rail at the top); with the header still
+  visible the switch keeps the current offset, like React Native.
+
+Changing `activeSection` is a property-only update. Render only the
+sections the user visited (lazy, like React Native tab content) and keep
+their row arrays and child components identical between renders so PHP
+re-renders nothing but the rail. Rows that scroll out of a section's
+window recycle as usual; under critical memory pressure parked rows are
+released and rebuilt on demand.
+
 ## Pressed styles
 
 `:active` and `:pressed` rules apply on touch-down to `Pressable` and

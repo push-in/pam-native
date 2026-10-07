@@ -384,6 +384,19 @@ abstract class Element implements Renderable
     }
 
     /**
+     * Keyed section of a VirtualizedList row. Rows of a section other than
+     * the list's {@see \Pam\Native\UI\VirtualizedList::activeSection()}
+     * stay mounted but hidden: their layouts, native views and decoded
+     * images are kept, so switching back is a native visibility swap with
+     * no rebuild. Rows without a section (header, tab rail, footer) are
+     * always shown. Each section keeps its own scroll position.
+     */
+    final public function listSection(string|int $section): static
+    {
+        return $this->withProperty(PropKey::ListSection, (string) $section);
+    }
+
+    /**
      * React Native `onLayout`: receives a {@see LayoutEvent} with the frame
      * relative to the parent on mount and after every frame change.
      *
