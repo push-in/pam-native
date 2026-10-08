@@ -680,7 +680,8 @@ enum class PropKey(val value: Int) {
     ON_TEXT_LAYOUT(522),
     LIST_FULL_SPAN(523),
     LIST_SECTION(524),
-    LIST_ACTIVE_SECTION(525);
+    LIST_ACTIVE_SECTION(525),
+    GESTURE_NATIVE_FOCAL_ZOOM(526);
 
     companion object {
         private val byValue: Array<PropKey?> = lookupTable(entries) { it.value }

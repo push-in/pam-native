@@ -116,6 +116,24 @@ public function commitZoom(GestureEvent $event): void
 }
 ```
 
+### Focal zoom
+
+`gestureNativeFocalZoom="true"` on a native-transform pinch keeps the content
+point under the fingers' centroid where it is, like a photo cropper: the zoom
+happens around the fingers and moving them carries the content. An adjacent
+native pan on the same surface yields the translation while the pinch is
+active and continues from wherever the pinch left the content. Commit the
+applied values on end as usual (clamping is the screen's decision).
+
+```pam
+<GestureDetector gestureType="pan" gestureComposition="simultaneous" gestureNativeTransform="true" on:gestureEnd="commit">
+    <GestureDetector gestureType="pinch" gestureComposition="simultaneous" gestureNativeTransform="true"
+        gestureNativeMinScale="1" gestureNativeMaxScale="5" gestureNativeFocalZoom="true" on:gestureEnd="commit">
+        <View :scaleX="$zoom" :scaleY="$zoom" :translationX="$x" :translationY="$y"><Image :source="$uri" /></View>
+    </GestureDetector>
+</GestureDetector>
+```
+
 Gesture types, states, directions and composition modes are integer-backed,
 sequential enums. Pointer counts are bounded to `1...10`, distances are in
 logical points/dp and durations are milliseconds.

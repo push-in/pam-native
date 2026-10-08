@@ -39,6 +39,9 @@ internal data class PamGesturePayload(
     val nativeScale: Float? = null,
     val nativeTranslationX: Float? = null,
     val nativeTranslationY: Float? = null,
+    /** Centroid of the first two pointers (the pinch focus), in this view's coordinates. */
+    val focalX: Float = x,
+    val focalY: Float = y,
 )
 
 internal class PamGestureRecognizer(private val view: View) {
@@ -303,6 +306,8 @@ internal class PamGestureRecognizer(private val view: View) {
             rotation = rotation,
             pointerCount = pointerCount,
             timestamp = event?.eventTime ?: SystemClock.uptimeMillis(),
+            focalX = if (event != null && event.pointerCount >= 2) (event.getX(0) + event.getX(1)) / 2f else x,
+            focalY = if (event != null && event.pointerCount >= 2) (event.getY(0) + event.getY(1)) / 2f else y,
         )
     }
 

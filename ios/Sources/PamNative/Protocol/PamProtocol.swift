@@ -532,6 +532,7 @@ public enum PamConstants {
     public static let listFullSpan = 523
     public static let listSection = 524
     public static let listActiveSection = 525
+    public static let gestureNativeFocalZoom = 526
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let opacity = 38

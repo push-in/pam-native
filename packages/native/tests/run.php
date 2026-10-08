@@ -944,6 +944,7 @@ $gesture = GestureDetector::make(
     ->nativeTransform(
         translationLimitX: 96.0,
         resetOnEnd: true,
+        focalZoom: true,
     )
     ->onBegin(static function (): void {
     })
@@ -965,6 +966,8 @@ $assert(
         && $gesture->properties()[PropKey::GestureNativeTranslationLimitX->value]
             === 96.0
         && $gesture->properties()[PropKey::GestureNativeResetOnEnd->value]
+            === true
+        && $gesture->properties()[PropKey::GestureNativeFocalZoom->value]
             === true
         && count($gesture->events()) === 4,
     'GestureDetector must compile to an additive native Pressable contract.',
@@ -3616,9 +3619,35 @@ $assert(
         && $pickManyCall['requestId'] === $pickManyRequest
         && $pickManyCall['module'] === 'files'
         && $pickManyCall['method'] === 'pickMany'
-        && $pickManyPayload === ['limit' => 6, 'type' => MediaPickerType::Media->value],
+        && $pickManyPayload === ['limit' => 6, 'maximumBytes' => 67_108_864, 'type' => MediaPickerType::Media->value],
     'Files pickMany must emit a bounded typed native module call.',
 );
+$pickManyFailure = '';
+$failingPick = Files::pickMany(
+    MediaPickerType::Video,
+    static function (array $files): void {
+    },
+    3,
+    static function (string $message) use (&$pickManyFailure): void {
+        $pickManyFailure = $message;
+    },
+    314_572_800,
+);
+$failingPayload = Wire::decodeMap(TestDiagnostics::$moduleCall['payload'] ?? '');
+Runtime::dispatchModuleResult($failingPick, ModuleResultStatus::Failure->value, 'Selected file is too large');
+$assert(
+    ($failingPayload['maximumBytes'] ?? null) === 314_572_800
+        && $pickManyFailure === 'Selected file is too large',
+    'Files pickMany must forward the per-file limit and report import failures.',
+);
+$pickManyLimitRejected = false;
+try {
+    Files::pickMany(MediaPickerType::Media, static function (array $files): void {
+    }, maximumBytes: 0);
+} catch (InvalidArgumentException) {
+    $pickManyLimitRejected = true;
+}
+$assert($pickManyLimitRejected, 'Files pickMany must reject an invalid per-file limit.');
 Runtime::dispatchModuleResult(
     $pickManyRequest,
     ModuleResultStatus::Success->value,
@@ -7071,8 +7100,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.31.0',
-    'The runtime SDK contract must match the 1.31.0 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.32.0',
+    'The runtime SDK contract must match the 1.32.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

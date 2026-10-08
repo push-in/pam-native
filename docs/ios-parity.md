@@ -71,6 +71,8 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.31.0 | App text scale | ✅ (uncompiled) | `PamTextScale` (UserDefaults) multiplies the Dynamic Type scale given to the engine in `PamNativeViewController.start/updateViewport`; `accessibility` module `textScale`/`setTextScale`. Values apply on the next launch, like Android. |
 | 1.31.0 | Biometrics and secure storage | ✅ (uncompiled) | `BiometricsModule` (LocalAuthentication, `deviceOwnerAuthenticationWithBiometrics`; apps declare `NSFaceIDUsageDescription`) and `SecureStorageModule` (Keychain, `WhenUnlockedThisDeviceOnly`, SHA-256 account names) in `Modules/SecurityModules.swift`. |
 | 1.31.0 | Named secure-screen claims | n/a | PHP only (`Screen::claim/release`); the native `window.secure` call is unchanged. |
+| 1.32.0 | Focal pinch zoom (`gestureNativeFocalZoom`) | ✅ (uncompiled) | `PamNativeGestureTransform.apply(focal:pivot:)`: the pinch keeps the content point under `location(in:)` fixed around the child's untranslated `center`; an adjacent pan rebases while the surface is in `focalZoomTargets`. XCTest `testFocalPinchKeepsTheContentPointUnderTheFingersAndPanResumesFromIt`. |
+| 1.32.0 | System photo picker for images/videos | ✅ (uncompiled) | `FilesModule` presents `PHPickerViewController` (filter images/videos/both, selection limit) and copies each `loadFileRepresentation` file before importing it; other types keep `UIDocumentPickerViewController`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -132,6 +134,13 @@ Visual checks that tests cannot fully cover:
   Touch ID must prompt from `Biometrics::authenticate()` (cancel answers
   `Cancelled`), and a `SecureStorage` value must survive a relaunch and be
   absent from UserDefaults.
+- Focal pinch zoom (1.32.0): `swift test --filter PamNativeGestureTransformTests`;
+  then in Ze Chat, Editar perfil → foto: pinching on a corner of the photo
+  must zoom around the fingers (not the center), moving two fingers must
+  carry the photo, and releasing out of bounds must glide back inside.
+- Photo picker (1.32.0): Criar → post opens PHPicker with photos and videos
+  (multi-select up to 20), loop opens it with videos only, cancelling returns
+  an empty selection, and the picked files import with their real names.
 - Heavy commits after the frame (1.30.1): `swift build` and the runtime tests
   must pass; then in Ze Chat, scrolling a chat until older pages load and
   swiping Reels must show each new page on the frame after it is ready (no

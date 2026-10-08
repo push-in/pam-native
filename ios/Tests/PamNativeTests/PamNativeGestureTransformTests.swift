@@ -64,6 +64,32 @@ final class PamNativeGestureTransformTests: XCTestCase {
         XCTAssertEqual(wire["nativeTranslationY"], .decimal(5))
     }
 
+    func testFocalPinchKeepsTheContentPointUnderTheFingersAndPanResumesFromIt() throws {
+        let view = UIView()
+        PamMotionTarget.write(view, .translateX, 20)
+        PamMotionTarget.write(view, .translateY, -10)
+        PamMotionTarget.write(view, .scale, 1.5)
+        var pinch = PamNativeGestureTransform()
+        var pan = PamNativeGestureTransform()
+        let pivot = CGPoint(x: 160, y: 240)
+        let focal = CGPoint(x: 240, y: 280)
+        pinch.begin(on: view, focal: focal)
+        pan.begin(on: view)
+        PamNativeGestureTransform.focalZoomTargets.insert(ObjectIdentifier(view))
+        let zoomed = pinch.apply(on: view, type: 3, translation: .zero, scale: 2, rotation: 0,
+                                 minimumScale: 1, maximumScale: 5, translationLimitX: 0, focal: focal, pivot: pivot)
+        // Content point under the focus before and after: (focal - pivot - t) / s.
+        XCTAssertEqual((focal.x - pivot.x - 20) / 1.5, (focal.x - pivot.x - zoomed.translateX) / 3, accuracy: 0.0001)
+        XCTAssertEqual((focal.y - pivot.y + 10) / 1.5, (focal.y - pivot.y - zoomed.translateY) / 3, accuracy: 0.0001)
+        let held = pan.apply(on: view, type: 2, translation: CGPoint(x: 30, y: 0), scale: 1, rotation: 0,
+                             minimumScale: 1, maximumScale: 5, translationLimitX: 0)
+        XCTAssertEqual(held.translateX, zoomed.translateX, accuracy: 0.0001)
+        PamNativeGestureTransform.focalZoomTargets.remove(ObjectIdentifier(view))
+        let resumed = pan.apply(on: view, type: 2, translation: CGPoint(x: 40, y: 0), scale: 1, rotation: 0,
+                                minimumScale: 1, maximumScale: 5, translationLimitX: 0)
+        XCTAssertEqual(resumed.translateX, zoomed.translateX + 10, accuracy: 0.0001)
+    }
+
     func testTakingOverTransformStopsItsRunnersAndKeepsOpacityRunning() throws {
         let view = UIView()
         let coordinator = PamMotionCoordinator(dispatch: { _, _, _ in }, isMounted: { _ in true },

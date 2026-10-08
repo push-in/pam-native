@@ -371,17 +371,28 @@ final class Files
     /**
      * @param Closure(list<FileReference>): void $callback
      *
-     * A user-cancelled platform picker resolves with an empty list.
+     * A user-cancelled platform picker resolves with an empty list. Each file
+     * may use up to `$maximumBytes` (1 byte to 8 GiB); the selection may use
+     * at least 256 MiB. A failed import reaches `$failure` when given.
+     *
+     * @param null|Closure(string): void $failure
      */
     public static function pickMany(
         MediaPickerType $type,
         Closure $callback,
         int $limit = 10,
+        ?Closure $failure = null,
+        int $maximumBytes = 67_108_864,
     ): int {
-        return self::invoke(
+        if ($maximumBytes < 1 || $maximumBytes > 8_589_934_592) {
+            throw new InvalidArgumentException('Picker import limit must be between 1 byte and 8 GiB.');
+        }
+
+        return self::invokeOptionalFailure(
             'pickMany',
             [
                 'limit' => max(1, min(50, $limit)),
+                'maximumBytes' => $maximumBytes,
                 'type' => $type->value,
             ],
             static function (array $values) use ($callback): mixed {
@@ -410,6 +421,7 @@ final class Files
 
                 return null;
             },
+            $failure,
         );
     }
 

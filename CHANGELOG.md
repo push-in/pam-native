@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.32.0 - 2026-10-08
+
+- Gestures: `gestureNativeFocalZoom="true"` (`GestureDetector::nativeTransform(focalZoom: true)`,
+  property 526) makes a native-transform pinch keep the content point under
+  the fingers' centroid in place and carry the content when the fingers move
+  (the React Native/Instagram cropper behaviour). It runs entirely on the UI
+  thread; an adjacent native pan on the same surface yields the translation
+  while the pinch is active and resumes from wherever the pinch left it.
+  `nativeScale`/`nativeTranslationX/Y` report the applied values as before.
+- Files: `Files::pick()`/`Files::pickMany()` for images, videos or both open
+  the system Photo Picker on Android when it is available (Android 13+, or the
+  Google Play backport on Android 11/12) and PHPicker on iOS, like
+  `react-native-image-picker`. Other types, an explicit MIME type and devices
+  without the Photo Picker keep the documents UI. Results, limits and
+  cancellation are unchanged.
+- `Files::pickMany()` accepts `failure` and `maximumBytes` (per file, 1 byte to
+  8 GiB, default 64 MiB) like `Files::pick()`: a large video no longer fails
+  the whole pick with an uncaught error, and the selection may import at
+  least 256 MiB (up to 8 GiB).
+
 ## 1.31.0 - 2026-10-08
 
 - App text scale: `Accessibility::setTextScale(float $multiplier, float

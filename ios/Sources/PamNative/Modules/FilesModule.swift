@@ -1,12 +1,13 @@
 import Foundation
 import QuickLook
 import Photos
+import PhotosUI
 import UniformTypeIdentifiers
 import UIKit
 
 final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     UIDocumentPickerDelegate, UINavigationControllerDelegate, UIImagePickerControllerDelegate,
-    QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+    PHPickerViewControllerDelegate, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
     private let queue = DispatchQueue(label: "dev.pam.native.files")
     private let root: URL
     private var pending: ModuleCompletion?
@@ -85,8 +86,12 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 let values = try WireMap.decode(payload)
                 let type = values["type"]?.integerValue ?? 4
                 let limit = min(50, max(1, Int(values["limit"]?.integerValue ?? 10)))
+                let maximumBytes = Int(values["maximumBytes"]?.integerValue ?? 64 * 1_024 * 1_024)
+                guard (1...8 * 1_024 * 1_024 * 1_024).contains(maximumBytes) else {
+                    throw FileModuleError("Picker import limit must be between 1 byte and 8 GiB")
+                }
                 presentPicker(type: Int(type), multiple: true, limit: limit,
-                              requestedType: nil, maximumBytes: 64 * 1_024 * 1_024,
+                              requestedType: nil, maximumBytes: maximumBytes,
                               completion: completion)
             case "importUri":
                 importPhotoAsset(payload, completion: completion)
@@ -538,6 +543,18 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
             self.pendingMultiple = multiple
             self.pendingLimit = limit
             self.pendingMaximumBytes = maximumBytes
+            // Photos and videos come from the system photo picker (PHPicker),
+            // like the Android Photo Picker; other types keep the documents UI.
+            if requestedType == nil, let filter = Self.photoPickerFilter(type) {
+                var configuration = PHPickerConfiguration()
+                configuration.filter = filter
+                configuration.selectionLimit = multiple ? max(1, limit) : 1
+                configuration.preferredAssetRepresentationMode = .current
+                let photoPicker = PHPickerViewController(configuration: configuration)
+                photoPicker.delegate = self
+                presenter.present(photoPicker, animated: true)
+                return
+            }
             let picker = UIDocumentPickerViewController(forOpeningContentTypes: types)
             picker.delegate = self
             picker.allowsMultipleSelection = multiple
@@ -573,14 +590,73 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         let selected = Array(urls.prefix(pendingLimit))
         queue.async {
             if multiple {
-                self.importFiles(selected, completion: self.takePending())
+                self.importFiles(selected, maximumBytes: maximumBytes, completion: self.takePending())
             } else if let source = selected.first {
                 self.importFile(source, maximumBytes: maximumBytes, completion: self.takePending())
             }
         }
     }
 
-    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    private static func photoPickerFilter(_ type: Int) -> PHPickerFilter? {
+        switch type {
+        case 1: .images
+        case 2: .videos
+        case 5: .any(of: [.images, .videos])
+        default: nil
+        }
+    }
+
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        guard !results.isEmpty else {
+            return documentPickerCancelled()
+        }
+        let multiple = pendingMultiple
+        let maximumBytes = pendingMaximumBytes
+        let selected = Array(results.prefix(multiple ? min(results.count, max(1, pendingLimit)) : 1))
+        let completion = takePending()
+        let staging = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pam-photo-picker-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        var staged = [URL?](repeating: nil, count: selected.count)
+        let stagedLock = NSLock()
+        let group = DispatchGroup()
+        for (index, result) in selected.enumerated() {
+            let provider = result.itemProvider
+            let identifier = provider.hasItemConformingToTypeIdentifier(UTType.movie.identifier)
+                ? UTType.movie.identifier : UTType.image.identifier
+            group.enter()
+            // The provided file only lives inside this callback: copy it first.
+            provider.loadFileRepresentation(forTypeIdentifier: identifier) { url, _ in
+                defer { group.leave() }
+                guard let url else { return }
+                let name = provider.suggestedName.map { "\($0).\(url.pathExtension)" } ?? url.lastPathComponent
+                let destination = staging.appendingPathComponent("\(index)-\(name)")
+                if (try? FileManager.default.copyItem(at: url, to: destination)) != nil {
+                    stagedLock.lock()
+                    staged[index] = destination
+                    stagedLock.unlock()
+                }
+            }
+        }
+        group.notify(queue: queue) {
+            stagedLock.lock()
+            let urls = staged.compactMap { $0 }
+            stagedLock.unlock()
+            defer { try? FileManager.default.removeItem(at: staging) }
+            guard !urls.isEmpty else {
+                completion?(.failure, Data("The selected media could not be read".utf8))
+                return
+            }
+            if multiple {
+                self.importFiles(urls, maximumBytes: maximumBytes, completion: completion)
+            } else if let source = urls.first {
+                self.importFile(source, maximumBytes: maximumBytes, completion: completion)
+            }
+        }
+    }
+
+    private func documentPickerCancelled() {
         let multiple = pendingMultiple
         let completion = takePending()
         if multiple {
@@ -589,6 +665,10 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         } else {
             completion?(.success, Data())
         }
+    }
+
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+        documentPickerCancelled()
     }
 
     func imagePickerController(
@@ -687,19 +767,25 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
         }
     }
 
-    private func importFiles(_ sources: [URL], completion: ModuleCompletion?) {
+    private func importFiles(
+        _ sources: [URL],
+        maximumBytes: Int = 64 * 1_024 * 1_024,
+        completion: ModuleCompletion?
+    ) {
         guard let completion else { return }
         var imported: [URL] = []
         var totalBytes = 0
+        // Each file may use the per-file limit; the selection at least 256 MiB, at most 8 GiB.
+        let selectionLimit = min(8 * 1_024 * 1_024 * 1_024, max(256 * 1_024 * 1_024, maximumBytes))
         do {
             let items = try sources.map { source -> [String: Any] in
-                let remaining = 256 * 1_024 * 1_024 - totalBytes
+                let remaining = selectionLimit - totalBytes
                 guard remaining > 0 else {
-                    throw FileModuleError("Selected files exceed 256 MiB")
+                    throw FileModuleError("Selected files exceed \(selectionLimit / (1_024 * 1_024)) MiB")
                 }
                 let item = try importFileReference(
                     source,
-                    maximumBytes: min(64 * 1_024 * 1_024, remaining)
+                    maximumBytes: min(maximumBytes, remaining)
                 )
                 imported.append(item.url)
                 totalBytes += item.size

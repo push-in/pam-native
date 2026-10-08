@@ -50,4 +50,12 @@ class FilesImportTest {
 
         override fun write(buffer: ByteArray, offset: Int, length: Int) { count += length }
     }
+
+    @Test
+    fun multiImportLimitHonoursTheRequestedPerFileLimit() {
+        val mib = 1024L * 1024L
+        org.junit.Assert.assertEquals(256L * mib, multiImportLimit(64L * mib))
+        org.junit.Assert.assertEquals(300L * mib, multiImportLimit(300L * mib))
+        org.junit.Assert.assertEquals(8L * 1024L * mib, multiImportLimit(16L * 1024L * mib))
+    }
 }

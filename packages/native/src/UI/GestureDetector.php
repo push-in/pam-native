@@ -106,6 +106,7 @@ final class GestureDetector extends Element
         int $resetKey = 0,
         float $translationLimitX = 0.0,
         bool $resetOnEnd = false,
+        bool $focalZoom = false,
     ): self {
         return $this
             ->withProperty(PropKey::GestureNativeTransform, $enabled)
@@ -122,7 +123,8 @@ final class GestureDetector extends Element
                 PropKey::GestureNativeTranslationLimitX,
                 max(0.0, min(10_000.0, $translationLimitX)),
             )
-            ->withProperty(PropKey::GestureNativeResetOnEnd, $resetOnEnd);
+            ->withProperty(PropKey::GestureNativeResetOnEnd, $resetOnEnd)
+            ->withProperty(PropKey::GestureNativeFocalZoom, $focalZoom);
     }
 
     /** @param Closure(GestureEvent): void $handler */

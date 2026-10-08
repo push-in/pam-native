@@ -7,6 +7,8 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import dev.pam.nativeapp.PamActivity
 import dev.pam.nativeapp.protocol.WireMap
@@ -449,13 +451,14 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             3L -> "audio/*"
             else -> "*/*"
         } }
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            this.type = mime
-            if (requestedMime.isEmpty() && type == 5L) {
-                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+        val intent = (if (requestedMime.isEmpty()) visualMediaIntent(type, 1) else null)
+            ?: Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                this.type = mime
+                if (requestedMime.isEmpty() && type == 5L) {
+                    putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                }
             }
-        }
         activity.launchForResult(intent) { result, data ->
             if (result != Activity.RESULT_OK || data?.data == null) {
                 completion.complete(ModuleResultStatus.SUCCESS, ByteArray(0))
@@ -465,19 +468,52 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }
     }
 
+    /**
+     * Photos/videos open the system Photo Picker (Android 13+, or older devices
+     * with the Google Play backport), like PHPicker on iOS. Without it, the
+     * caller keeps the document picker.
+     */
+    private fun visualMediaIntent(type: Long, limit: Int): Intent? {
+        val mediaType = when (type) {
+            1L -> ActivityResultContracts.PickVisualMedia.ImageOnly
+            2L -> ActivityResultContracts.PickVisualMedia.VideoOnly
+            5L -> ActivityResultContracts.PickVisualMedia.ImageAndVideo
+            else -> return null
+        }
+        if (!ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(activity)) return null
+        val request = PickVisualMediaRequest.Builder().setMediaType(mediaType).build()
+        val maximum = photoPickerSelectionLimit(limit)
+        return if (maximum > 1) {
+            ActivityResultContracts.PickMultipleVisualMedia(maximum).createIntent(activity, request)
+        } else {
+            ActivityResultContracts.PickVisualMedia().createIntent(activity, request)
+        }
+    }
+
+    private fun photoPickerSelectionLimit(limit: Int): Int {
+        val platformMaximum = if (android.os.Build.VERSION.SDK_INT >= 33) {
+            MediaStore.getPickImagesMaxLimit()
+        } else {
+            limit
+        }
+        return limit.coerceIn(1, platformMaximum.coerceAtLeast(1))
+    }
+
     private fun pickMany(payload: ByteArray, completion: ModuleCompletion) {
         val values = WireMap.decode(payload)
         val type = values.integer("type", 4)
         val limit = values.integer("limit", DEFAULT_PICK_LIMIT.toLong())
             .coerceIn(1, MAX_PICK_LIMIT.toLong())
             .toInt()
+        val maximumBytes = values.integer("maximumBytes", MAX_IMPORT_BYTES)
+        require(maximumBytes in 1..MAX_PICK_IMPORT_BYTES) { "Picker import limit must be between 1 byte and 8 GiB" }
         val mime = when (type) {
             1L -> "image/*"
             2L -> "video/*"
             3L -> "audio/*"
             else -> "*/*"
         }
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        val intent = visualMediaIntent(type, limit) ?: Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             this.type = mime
             if (type == 5L) {
@@ -510,7 +546,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 )
                 return@launchForResult
             }
-            executor.execute { importUris(uris, completion) }
+            executor.execute { importUris(uris, completion, maximumBytes) }
         }
     }
 
@@ -571,14 +607,17 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }.onFailure { completion.failure(it) }
     }
 
-    private fun importUris(uris: List<Uri>, completion: ModuleCompletion) {
+    private fun importUris(uris: List<Uri>, completion: ModuleCompletion, maximumBytes: Long = MAX_IMPORT_BYTES) {
         val imported = mutableListOf<ImportedFile>()
+        // Each file may use the per-file limit; the selection may use at least
+        // 256 MiB and never more than the 8 GiB picker ceiling.
+        val selectionLimit = multiImportLimit(maximumBytes)
         runCatching {
             var total = 0L
             uris.forEach { uri ->
-                val remaining = MAX_MULTI_IMPORT_BYTES - total
-                require(remaining > 0) { "Selected files exceed 256 MiB" }
-                val item = importUri(uri, minOf(MAX_IMPORT_BYTES, remaining))
+                val remaining = selectionLimit - total
+                require(remaining > 0) { "Selected files exceed ${selectionLimit / (1024L * 1024L)} MiB" }
+                val item = importUri(uri, minOf(maximumBytes, remaining))
                 imported += item
                 total += item.file.length()
             }
@@ -813,3 +852,7 @@ internal fun shareFilesIntent(uris: List<Uri>, mime: String): Intent {
     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     return intent
 }
+
+/** Total bytes a multi-file pick may import for a per-file [maximumBytes]. */
+internal fun multiImportLimit(maximumBytes: Long): Long =
+    maxOf(256L * 1024L * 1024L, maximumBytes).coerceAtMost(8L * 1024L * 1024L * 1024L)

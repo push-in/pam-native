@@ -65,6 +65,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var nativeMaxScale = 4f
     private var nativeTranslationLimitX = 0f
     private var nativeResetOnEnd = false
+    private var nativeFocalZoom = false
+    private var nativeFocalStartX = 0f
+    private var nativeFocalStartY = 0f
     private var nativeResetKey = 0L
     private var nativeBaseTranslationX = 0f
     private var nativeBaseTranslationY = 0f
@@ -226,12 +229,14 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         nativeResetKey: Long = 0L,
         nativeTranslationLimitX: Float = 0f,
         nativeResetOnEnd: Boolean = false,
+        nativeFocalZoom: Boolean = false,
     ) {
         this.nativeTransformEnabled = nativeTransform
         this.nativeMinScale = nativeMinScale.coerceAtLeast(0.01f)
         this.nativeMaxScale = nativeMaxScale.coerceAtLeast(this.nativeMinScale)
         this.nativeTranslationLimitX = nativeTranslationLimitX.coerceAtLeast(0f)
         this.nativeResetOnEnd = nativeResetOnEnd
+        this.nativeFocalZoom = nativeFocalZoom
         if (this.nativeResetKey != nativeResetKey) {
             this.nativeResetKey = nativeResetKey
             resetNativeTransform()
@@ -280,9 +285,20 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             nativeBaseScaleX = child.scaleX
             nativeBaseScaleY = child.scaleY
             nativeBaseRotation = child.rotation
+            if (payload.type == 3 && nativeFocalZoom) {
+                nativeFocalStartX = payload.focalX
+                nativeFocalStartY = payload.focalY
+                focalZoomTargets[child] = true
+            }
         }
         when (payload.type) {
-            2, 5 -> {
+            2, 5 -> if (focalZoomTargets[translationTarget] == true) {
+                // A focal pinch owns the translation of this surface: follow it
+                // and resume panning from wherever the pinch leaves the content.
+                nativeBaseTranslationX = translationTarget.translationX - payload.translationX
+                nativeBaseTranslationY = translationTarget.translationY - payload.translationY
+                nativeGestureTransformActive = false
+            } else {
                 val translatedX = nativeBaseTranslationX + payload.translationX
                 translationTarget.translationX = if (nativeTranslationLimitX > 0f) {
                     translatedX.coerceIn(-nativeTranslationLimitX, nativeTranslationLimitX)
@@ -301,6 +317,19 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             3 -> {
                 val scale = (nativeBaseScaleX * payload.scale)
                     .coerceIn(nativeMinScale, nativeMaxScale)
+                if (nativeFocalZoom) {
+                    // Keep the content point that was under the fingers' centroid
+                    // under it: zoom around the focus and follow its movement.
+                    val (pivotX, pivotY) = pivotIn(child)
+                    val ratio = scale / nativeBaseScaleX.coerceAtLeast(0.0001f)
+                    child.translationX = focalZoomTranslation(
+                        payload.focalX, nativeFocalStartX, pivotX, nativeBaseTranslationX, ratio,
+                    )
+                    child.translationY = focalZoomTranslation(
+                        payload.focalY, nativeFocalStartY, pivotY, nativeBaseTranslationY, ratio,
+                    )
+                    if (payload.state in 3..5) focalZoomTargets.remove(child)
+                }
                 child.scaleX = scale
                 child.scaleY = scale
             }
@@ -322,6 +351,21 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             nativeTranslationX = translationTarget.translationX,
             nativeTranslationY = translationTarget.translationY,
         )
+    }
+
+    /** The child's untranslated pivot in this view's coordinates. */
+    private fun pivotIn(child: View): Pair<Float, Float> {
+        var x = child.pivotX
+        var y = child.pivotY
+        x += child.left
+        y += child.top
+        var ancestor = child.parent as? View
+        while (ancestor != null && ancestor !== this) {
+            x += ancestor.left + ancestor.translationX
+            y += ancestor.top + ancestor.translationY
+            ancestor = ancestor.parent as? View
+        }
+        return x to y
     }
 
     private fun resetNativeTransform() {
@@ -735,6 +779,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         )
 
     private companion object {
+        /** Surfaces whose translation a focal pinch currently owns (shared by adjacent detectors). */
+        val focalZoomTargets = java.util.WeakHashMap<View, Boolean>()
         const val GESTURE_LOG_TAG = "PamGesture"
         const val DEFAULT_PRESS_OPACITY = 0.72f
         const val DEFAULT_RETENTION_HORIZONTAL = 20f
@@ -788,3 +834,16 @@ internal fun gestureRecognitionCancelsPress(
     recognized: Boolean,
     pressActive: Boolean,
 ): Boolean = recognized && pressActive
+
+/**
+ * Translation that keeps the content point under the pinch focus in place:
+ * the point under [focalStart] (relative to the untranslated [pivot]) is
+ * scaled by [ratio] and lands under the current [focal].
+ */
+internal fun focalZoomTranslation(
+    focal: Float,
+    focalStart: Float,
+    pivot: Float,
+    baseTranslation: Float,
+    ratio: Float,
+): Float = (focal - pivot) - (focalStart - pivot - baseTranslation) * ratio
