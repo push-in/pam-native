@@ -163,6 +163,24 @@ final class AccessibilityModule: NativeModule {
                     "touchExploration": .flag(running),
                 ])) ?? Data())
             }
+        case "textScale":
+            DispatchQueue.main.async {
+                completion(.success, PamTextScale.snapshot(system: Float(UIFontMetrics.default.scaledValue(for: 1))))
+            }
+        case "setTextScale":
+            guard let values = try? WireMap.decode(payload), case let .decimal(multiplier)? = values["multiplier"] else {
+                completion(.failure, Data("Text scale multiplier is required".utf8))
+                return
+            }
+            var cap: Double = 0
+            if case let .decimal(value)? = values["maxSystemScale"] { cap = value }
+            guard PamTextScale.persist(multiplier: Float(multiplier), maxSystemScale: Float(cap)) else {
+                completion(.failure, Data("Text scale is out of range".utf8))
+                return
+            }
+            DispatchQueue.main.async {
+                completion(.success, PamTextScale.snapshot(system: Float(UIFontMetrics.default.scaledValue(for: 1))))
+            }
         default:
             completion(.failure, Data("Unknown accessibility method \(method)".utf8))
         }

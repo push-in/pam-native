@@ -18,6 +18,9 @@ use Pam\Native\Modules\NativeModules;
  *     Route::screen('wallet', WalletScreen::class)->secure();
  *
  * Screen::secure() adds an explicit, app-wide claim on top of route claims.
+ * Independent features (an app lock, a screen showing a secret) use named
+ * claims: Screen::claim('app-lock') / Screen::release('app-lock'); secure
+ * mode stays on while any claim is held.
  * iOS has no public equivalent; the callback then receives false.
  */
 final class Screen
@@ -26,6 +29,9 @@ final class Screen
 
     /** @var array<string, true> */
     private static array $routes = [];
+
+    /** @var array<string, true> */
+    private static array $claims = [];
 
     private static ?bool $applied = null;
 
@@ -42,7 +48,33 @@ final class Screen
 
     public static function isSecure(): bool
     {
-        return self::$manual || self::$routes !== [];
+        return self::$manual || self::$routes !== [] || self::$claims !== [];
+    }
+
+    /**
+     * Holds secure mode on behalf of $owner until release($owner).
+     *
+     * @param null|Closure(bool): void $callback Receives whether the platform enforces secure mode.
+     */
+    public static function claim(string $owner, ?Closure $callback = null): void
+    {
+        if ($owner === '') {
+            throw new \InvalidArgumentException('A secure-screen claim needs an owner.');
+        }
+        self::$claims[$owner] = true;
+        self::sync($callback, force: $callback !== null);
+    }
+
+    /** @param null|Closure(bool): void $callback */
+    public static function release(string $owner, ?Closure $callback = null): void
+    {
+        unset(self::$claims[$owner]);
+        self::sync($callback, force: $callback !== null);
+    }
+
+    public static function claimed(string $owner): bool
+    {
+        return isset(self::$claims[$owner]);
     }
 
     /** @internal Navigators report whether their active route requires secure mode. */
@@ -61,6 +93,7 @@ final class Screen
     {
         self::$manual = false;
         self::$routes = [];
+        self::$claims = [];
         self::$applied = null;
     }
 

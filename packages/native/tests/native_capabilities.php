@@ -445,6 +445,42 @@ $assert($lastCall()['module'] === 'accessibility' && $lastCall()['values'] == ['
 Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['delivered' => true]));
 $assert($announced === true && $rejects(static fn () => Accessibility::announce('  ')), 'Accessibility::announce must report delivery and reject empty text.');
 
+// 10b. Named secure claims, app text scale, biometrics and secure storage.
+TestDiagnostics::$moduleCall = null;
+SecureScreen::claim('app-lock');
+$assert($lastCall()['values'] == ['enabled' => true] && SecureScreen::claimed('app-lock'), 'Screen::claim must enable secure mode.');
+SecureScreen::claim('two-factor');
+SecureScreen::release('app-lock');
+$assert(SecureScreen::isSecure(), 'Releasing one claim must keep another owner secure.');
+SecureScreen::release('two-factor');
+$assert($lastCall()['values'] == ['enabled' => false] && !SecureScreen::isSecure(), 'Releasing the last claim must clear secure mode.');
+
+$scale = null;
+Accessibility::setTextScale(1.15, 1.6, static function (?\Pam\Native\System\TextScale $value) use (&$scale): void { $scale = $value; });
+$assert($lastCall()['module'] === 'accessibility' && $lastCall()['method'] === 'setTextScale'
+    && $lastCall()['values'] == ['multiplier' => 1.15, 'maxSystemScale' => 1.6], 'Accessibility::setTextScale must bridge multiplier and cap.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map([
+    'multiplier' => 1.15, 'maxSystemScale' => 1.6, 'appliedMultiplier' => 1.0, 'appliedMaxSystemScale' => 0.0, 'systemScale' => 1.0, 'effectiveScale' => 1.0,
+]));
+$assert($scale instanceof \Pam\Native\System\TextScale && $scale->pendingRestart() && $scale->multiplier === 1.15, 'TextScale must expose the stored and applied values.');
+$assert($rejects(static fn () => Accessibility::setTextScale(4.0)) && $rejects(static fn () => Accessibility::setTextScale(1.0, 0.5)), 'Text scale ranges must be validated.');
+
+$biometric = null;
+\Pam\Native\System\Biometrics::authenticate('Desbloquear', 'Usar PIN', static function (bool $passed, \Pam\Native\BiometricError $error) use (&$biometric): void { $biometric = [$passed, $error]; });
+$assert($lastCall()['module'] === 'biometrics' && $lastCall()['values']['cancelLabel'] === 'Usar PIN', 'Biometrics::authenticate must bridge the prompt copy.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['authenticated' => false, 'error' => 4]));
+$assert($biometric === [false, \Pam\Native\BiometricError::Lockout], 'Biometrics::authenticate must report the outcome.');
+$kind = null;
+\Pam\Native\System\Biometrics::status(static function (\Pam\Native\BiometricKind $value) use (&$kind): void { $kind = $value; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['available' => true, 'kind' => 3]));
+$assert($kind === \Pam\Native\BiometricKind::Face, 'Biometrics::status must decode the hardware kind.');
+
+$secret = 'unset';
+\Pam\Native\Storage\SecureStorage::get('app-lock:user', static function (?string $value) use (&$secret): void { $secret = $value; });
+$assert($lastCall()['module'] === 'secure-storage' && $lastCall()['values'] == ['key' => 'app-lock:user'], 'SecureStorage::get must bridge the key.');
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['found' => false, 'value' => '']));
+$assert($secret === null && $rejects(static fn () => \Pam\Native\Storage\SecureStorage::set('', 'x')), 'SecureStorage must answer null for missing keys and reject empty keys.');
+
 // HTTP response headers.
 $headerResponse = null;
 Http::get('https://api.example.test/clock', static function (HttpResponse $value) use (&$headerResponse): void { $headerResponse = $value; });

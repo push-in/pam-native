@@ -4,10 +4,11 @@ import android.content.Context
 import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityManager
+import dev.pam.nativeapp.PamTextScale
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 
-/** Screen-reader announcements and accessibility service state. */
+/** Screen-reader announcements, accessibility service state and the app text scale. */
 internal class AccessibilityModule(private val context: Context) : NativeModule {
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
         runCatching {
@@ -33,6 +34,15 @@ internal class AccessibilityModule(private val context: Context) : NativeModule 
                         ),
                     )
                 }
+                "textScale" -> completion.complete(ModuleResultStatus.SUCCESS, textScaleSnapshot())
+                "setTextScale" -> {
+                    val values = WireMap.decode(payload)
+                    val multiplier = (values["multiplier"] as? WireValue.Decimal)?.value?.toFloat()
+                        ?: error("Text scale multiplier is required")
+                    val cap = (values["maxSystemScale"] as? WireValue.Decimal)?.value?.toFloat() ?: 0f
+                    require(PamTextScale.persist(context, multiplier, cap)) { "Text scale could not be persisted" }
+                    completion.complete(ModuleResultStatus.SUCCESS, textScaleSnapshot())
+                }
                 else -> error("Unknown accessibility method $method")
             }
         }.onFailure {
@@ -41,6 +51,21 @@ internal class AccessibilityModule(private val context: Context) : NativeModule 
                 (it.message ?: "Accessibility operation failed").toByteArray(),
             )
         }
+    }
+
+    private fun textScaleSnapshot(): ByteArray {
+        val (multiplier, cap) = PamTextScale.stored(context)
+        val (appliedMultiplier, appliedCap) = PamTextScale.applied(context)
+        return WireMap.encode(
+            mapOf(
+                "multiplier" to WireValue.Decimal(multiplier.toDouble()),
+                "maxSystemScale" to WireValue.Decimal(cap.toDouble()),
+                "appliedMultiplier" to WireValue.Decimal(appliedMultiplier.toDouble()),
+                "appliedMaxSystemScale" to WireValue.Decimal(appliedCap.toDouble()),
+                "systemScale" to WireValue.Decimal(context.resources.configuration.fontScale.toDouble()),
+                "effectiveScale" to WireValue.Decimal(PamTextScale.effective(context).toDouble()),
+            ),
+        )
     }
 
     internal companion object {

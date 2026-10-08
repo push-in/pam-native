@@ -294,6 +294,70 @@ class NativeCapabilitiesInstrumentedTest {
     }
 
     @Test
+    fun secureStorageSealsValuesWithTheKeystore() {
+        PamSecureStore.delete(context, "app-lock:user-a")
+        assertTrue(PamSecureStore.set(context, "app-lock:user-a", "{\"pinHash\":\"secret\"}"))
+        val raw = context.getSharedPreferences("pam-native-secure-storage", Context.MODE_PRIVATE).all
+        raw.forEach { (slot, value) ->
+            assertFalse(slot.contains("app-lock"))
+            assertFalse((value as String).contains("secret"))
+        }
+        assertEquals("{\"pinHash\":\"secret\"}", PamSecureStore.get(context, "app-lock:user-a"))
+        val module = SecureStorageModule(context)
+        val read = AtomicReference<ByteArray>()
+        module.invoke("get", WireMap.encode(mapOf("key" to WireValue.Text("app-lock:user-a")))) { status, payload ->
+            assertEquals(ModuleResultStatus.SUCCESS, status)
+            read.set(payload)
+        }
+        assertEquals(WireValue.Flag(true), WireMap.decode(read.get())["found"])
+        PamSecureStore.delete(context, "app-lock:user-a")
+        assertNull(PamSecureStore.get(context, "app-lock:user-a"))
+    }
+
+    @Test
+    fun textScaleIsPersistedForTheNextLaunch() {
+        val previous = dev.pam.nativeapp.PamTextScale.stored(context)
+        try {
+            val module = AccessibilityModule(context)
+            val answer = AtomicReference<ByteArray>()
+            module.invoke(
+                "setTextScale",
+                WireMap.encode(mapOf("multiplier" to WireValue.Decimal(1.3), "maxSystemScale" to WireValue.Decimal(1.6))),
+            ) { status, payload ->
+                assertEquals(ModuleResultStatus.SUCCESS, status)
+                answer.set(payload)
+            }
+            val values = WireMap.decode(answer.get())
+            assertEquals(1.3, (values["multiplier"] as WireValue.Decimal).value, 1e-6)
+            assertEquals(1.6, (values["maxSystemScale"] as WireValue.Decimal).value, 1e-6)
+            assertEquals(1.3f to 1.6f, dev.pam.nativeapp.PamTextScale.stored(context))
+            val rejected = AtomicReference<ModuleResultStatus>()
+            module.invoke("setTextScale", WireMap.encode(mapOf("multiplier" to WireValue.Decimal(9.0)))) { status, _ ->
+                rejected.set(status)
+            }
+            assertEquals(ModuleResultStatus.FAILURE, rejected.get())
+        } finally {
+            dev.pam.nativeapp.PamTextScale.persist(context, previous.first, previous.second)
+        }
+    }
+
+    @Test
+    fun biometricsStatusMatchesAvailability() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = instrumentation.startActivitySync(
+            Intent(context, CapabilityTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        ) as CapabilityTestActivity
+        try {
+            val values = call(BiometricsModule(activity), "status", emptyMap())
+            val kind = (values["kind"] as WireValue.Integer).value
+            assertTrue(kind in BiometricsModule.KIND_NONE.toLong()..BiometricsModule.KIND_OTHER.toLong())
+            assertEquals(kind != BiometricsModule.KIND_NONE.toLong(), (values["available"] as WireValue.Flag).value)
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
     fun notificationCredentialsAreKeystoreSealedPerAccount() {
         PamNotificationCredentials.clear(context)
         PamNotificationCredentials.set(context, " User-A ", "token-a")

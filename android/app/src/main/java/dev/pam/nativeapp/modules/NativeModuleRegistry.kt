@@ -35,6 +35,8 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val appearance = AppearanceModule(context)
     private val window = (context as? android.app.Activity)?.let(::WindowModule)
     private val accessibility = AccessibilityModule(context)
+    private val biometrics = (context as? android.app.Activity)?.let(::BiometricsModule)
+    private val secureStorage = SecureStorageModule(context)
     private val image = ImagePrefetchModule(context)
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
@@ -59,6 +61,8 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         put("appearance", appearance)
         window?.let { put("window", it) }
         put("accessibility", accessibility)
+        biometrics?.let { put("biometrics", it) }
+        put("secure-storage", secureStorage)
         put("image", image)
         putAll(GeneratedPamModules.create(context))
     }

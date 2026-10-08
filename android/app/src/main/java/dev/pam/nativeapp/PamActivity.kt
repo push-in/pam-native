@@ -293,7 +293,7 @@ class PamActivity : FragmentActivity() {
         val safeArea = currentSafeAreaInsets()
         dispatchedSafeArea = safeArea
         exportBootMetrics(widthDp, heightDp, safeArea)
-        val textScale = resources.configuration.fontScale
+        val textScale = PamTextScale.effective(this)
         val dark = isDarkAppearance()
         val safeAreaDp = floatArrayOf(
             safeArea.left / density,
@@ -860,7 +860,7 @@ class PamActivity : FragmentActivity() {
         runtime.updateViewport(
             widthDp,
             heightDp,
-            resources.configuration.fontScale,
+            PamTextScale.effective(this),
             isDarkAppearance(),
         )
         runtime.dispatchLifecycle(
@@ -875,7 +875,7 @@ class PamActivity : FragmentActivity() {
                     "systemAppearance" to WireValue.Integer(
                         PamAppearance.systemAppearance(this, appearanceMode).toLong(),
                     ),
-                    "fontScale" to WireValue.Decimal(configuration.fontScale.toDouble()),
+                    "fontScale" to WireValue.Decimal(PamTextScale.effective(this, configuration.fontScale).toDouble()),
                     "safeAreaTop" to WireValue.Decimal((insets.top / density).toDouble()),
                     "safeAreaRight" to WireValue.Decimal((insets.right / density).toDouble()),
                     "safeAreaBottom" to WireValue.Decimal((insets.bottom / density).toDouble()),
@@ -1011,7 +1011,7 @@ class PamActivity : FragmentActivity() {
             .put("width", widthDp.toDouble())
             .put("height", heightDp.toDouble())
             .put("density", density.toDouble())
-            .put("fontScale", resources.configuration.fontScale.toDouble())
+            .put("fontScale", PamTextScale.effective(this).toDouble())
             .put("safeAreaTop", (insets.top / density).toDouble())
             .put("safeAreaRight", (insets.right / density).toDouble())
             .put("safeAreaBottom", (insets.bottom / density).toDouble())

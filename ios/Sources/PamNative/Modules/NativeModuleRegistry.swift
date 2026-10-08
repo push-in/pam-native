@@ -24,6 +24,8 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let appearance = AppearanceModule()
     private let window = WindowModule()
     private let accessibility = AccessibilityModule()
+    private let biometrics = BiometricsModule()
+    private let secureStorage = SecureStorageModule()
     private let image = ImagePrefetchModule()
     private let modules: [String: NativeModule]
 
@@ -51,6 +53,8 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "appearance": appearance,
             "window": window,
             "accessibility": accessibility,
+            "biometrics": biometrics,
+            "secure-storage": secureStorage,
             "image": image,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }

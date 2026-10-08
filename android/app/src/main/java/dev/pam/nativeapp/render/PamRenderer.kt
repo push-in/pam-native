@@ -67,6 +67,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.PopupMenu
 import android.widget.Space
+import dev.pam.nativeapp.PamTextScale
 import dev.pam.nativeapp.BuildConfig
 import android.widget.Switch
 import android.widget.TextView
@@ -6850,7 +6851,7 @@ class PamRenderer(
         val baseSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat().coerceAtLeast(1f)
         val metrics = view.resources.displayMetrics
         val allowScaling = state.flag(PropKey.TEXT_ALLOW_FONT_SCALING, true)
-        val deviceScale = view.resources.configuration.fontScale
+        val deviceScale = PamTextScale.effective(view.context)
         val maximumMultiplier = state
             .number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0)
             .toFloat()
@@ -7137,7 +7138,7 @@ class PamRenderer(
             fontSize = state.number(PropKey.FONT_SIZE, 14.0).toFloat().coerceAtLeast(1f),
             fontScale = resolvedFontScale(
                 state.flag(PropKey.TEXT_ALLOW_FONT_SCALING, true),
-                context.resources.configuration.fontScale,
+                PamTextScale.effective(context),
                 state.number(PropKey.TEXT_MAX_FONT_SIZE_MULTIPLIER, 0.0).toFloat(),
             ),
             fontWeight = state.integer(PropKey.FONT_WEIGHT, 400L).coerceIn(1L, 1000L).toInt(),

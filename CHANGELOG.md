@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.31.0 - 2026-10-08
+
+- App text scale: `Accessibility::setTextScale(float $multiplier, float
+  $maxSystemScale = 0)` persists an in-app "text size" natively and every text
+  then renders at `multiplier * min(system font scale, maxSystemScale)` from
+  the next launch, read before the first frame so measurement and drawing
+  agree (Android `PamTextScale`, iOS Dynamic Type multiplier).
+  `Accessibility::textScale()` reports the stored and applied values
+  (`TextScale::pendingRestart()`).
+- `System\Biometrics`: `status()` (`BiometricKind`) and `authenticate()`
+  (`BiometricError`) over Android `BiometricPrompt` (Android 10+, weak or
+  strong biometrics, `USE_BIOMETRIC` in the host manifest) and iOS
+  LocalAuthentication.
+- `Storage\SecureStorage`: get/set/delete of small secrets (64 KiB) in
+  Keystore-sealed preferences (AES-256-GCM, non-exportable key) on Android and
+  the Keychain (`WhenUnlockedThisDeviceOnly`) on iOS.
+- `Screen::claim(string $owner)` / `release()` / `claimed()`: named secure-mode
+  claims, so independent features (an app lock, a screen showing a secret)
+  never drop each other's `FLAG_SECURE`.
+
 ## 1.30.1 - 2026-10-07
 
 - Commits between frames: a batch that builds something (32 mutations or

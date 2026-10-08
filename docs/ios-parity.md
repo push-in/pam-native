@@ -68,6 +68,9 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.30.1 | Heavy batches committed after the frame | ✅ (uncompiled) | `PamRuntime.deferHeavyCommitPastFrame`: a batch of 32+ mutations runs in a one-shot `beforeWaiting` run loop observer ordered after Core Animation's commit (2_000_001) instead of inside the display link tick. Android also defers any batch while a list scrolls and lays the dirtied lists out between frames (RecyclerView passes). |
 | 1.30.1 | Runtime statistics read lazily | ✅ (uncompiled) | `RuntimeFrameMetrics.stats` is read from the engine on first access (`PamLazyRuntimeStats`); the public memberwise-style initializer is kept. |
 | 1.30.1 | Spinner without ProgressBar, pooled TextView size reset | n/a | Android-only causes (the ProgressBar constructor's AnimatedVectorDrawable, a pooled TextView's stale width laying text out twice). |
+| 1.31.0 | App text scale | ✅ (uncompiled) | `PamTextScale` (UserDefaults) multiplies the Dynamic Type scale given to the engine in `PamNativeViewController.start/updateViewport`; `accessibility` module `textScale`/`setTextScale`. Values apply on the next launch, like Android. |
+| 1.31.0 | Biometrics and secure storage | ✅ (uncompiled) | `BiometricsModule` (LocalAuthentication, `deviceOwnerAuthenticationWithBiometrics`; apps declare `NSFaceIDUsageDescription`) and `SecureStorageModule` (Keychain, `WhenUnlockedThisDeviceOnly`, SHA-256 account names) in `Modules/SecurityModules.swift`. |
+| 1.31.0 | Named secure-screen claims | n/a | PHP only (`Screen::claim/release`); the native `window.secure` call is unchanged. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -123,6 +126,12 @@ Visual checks that tests cannot fully cover:
   back swipe), and a route presented as a full-screen modal keeps the bar it
   declares. With the key set to NO the same screens must drive the bar
   through the application API (no console warning about the key).
+- App text scale, biometrics and secure storage (1.31.0): `swift build` and
+  the module tests must pass; then `Accessibility::setTextScale(1.3, 1.6)` and a
+  relaunch must enlarge every text (and its measured layout) by 1.3, Face ID /
+  Touch ID must prompt from `Biometrics::authenticate()` (cancel answers
+  `Cancelled`), and a `SecureStorage` value must survive a relaunch and be
+  absent from UserDefaults.
 - Heavy commits after the frame (1.30.1): `swift build` and the runtime tests
   must pass; then in Ze Chat, scrolling a chat until older pages load and
   swiping Reels must show each new page on the frame after it is ready (no

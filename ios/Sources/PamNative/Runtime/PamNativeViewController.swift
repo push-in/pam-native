@@ -128,7 +128,7 @@ public final class PamNativeViewController: UIViewController {
             entry: entryURL.path,
             widthDp: Float(max(view.bounds.width, 1)),
             heightDp: Float(max(view.bounds.height, 1)),
-            textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+            textScale: PamTextScale.effective(system: Float(UIFontMetrics.default.scaledValue(for: 1))),
             darkAppearance: traitCollection.userInterfaceStyle == .dark
         )
     }
@@ -137,7 +137,7 @@ public final class PamNativeViewController: UIViewController {
         runtime?.updateViewport(
             widthDp: Float(max(view.bounds.width, 1)),
             heightDp: Float(max(view.bounds.height, 1)),
-            textScale: Float(UIFontMetrics.default.scaledValue(for: 1)),
+            textScale: PamTextScale.effective(system: Float(UIFontMetrics.default.scaledValue(for: 1))),
             darkAppearance: traitCollection.userInterfaceStyle == .dark
         )
     }

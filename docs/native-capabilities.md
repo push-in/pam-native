@@ -324,6 +324,36 @@ The callback receives `true`; the native result also reports
 `Accessibility::announce()` sends a polite TalkBack/VoiceOver announcement and
 is a no-op when no screen reader runs; `screenReaderEnabled()` reports state.
 
+Independent features hold named claims so one never drops another's
+protection: `Screen::claim('app-lock')` ... `Screen::release('app-lock')`.
+
+### App text scale
+
+```php
+Accessibility::setTextScale(1.15, maxSystemScale: 1.6); // "Grande", next launch
+Accessibility::textScale(fn (TextScale $scale) => $scale->pendingRestart());
+```
+
+Every text renders at `multiplier * min(system font scale, maxSystemScale)`
+(`maxSystemScale` 0 leaves the system scale uncapped). The value is persisted
+natively and read before the first frame, so layout measurement and drawing
+always agree; a new value applies on the next launch.
+
+### Biometrics and secure storage
+
+```php
+Biometrics::status(fn (BiometricKind $kind) => ...);          // None when not enrolled
+Biometrics::authenticate('Desbloquear', 'Usar PIN', fn (bool $ok, BiometricError $error) => ...);
+SecureStorage::set('app-lock:'.$userId, $json);
+SecureStorage::get('app-lock:'.$userId, fn (?string $value) => ...);
+```
+
+Android uses the platform `BiometricPrompt` (Android 10+, weak or strong
+biometrics; older versions report `BiometricKind::None`) and Keystore-sealed
+(AES-256-GCM, non-exportable key) preferences for `SecureStorage`. iOS uses
+LocalAuthentication (declare `NSFaceIDUsageDescription`) and the Keychain
+(`WhenUnlockedThisDeviceOnly`). Values are limited to 64 KiB.
+
 ## Images, timers and lifecycle
 
 `Image::prefetch($urls, MediaPriority::Visible, $headers)` downloads remote
