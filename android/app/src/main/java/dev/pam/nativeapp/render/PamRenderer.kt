@@ -1019,6 +1019,10 @@ class PamRenderer(
             if (state.kind != NodeKind.VIRTUAL_LIST) continue
             val list = views[state.id] as? PamRecyclerList ?: continue
             val itemIds = children[state.id]?.toList().orEmpty()
+            if (state.virtualListItemIds != itemIds) {
+                state.virtualListItemIds = itemIds
+                state.endReachedSent = false
+            }
             val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
             val fallbackExtent = state.number(PropKey.LIST_ROW_HEIGHT, 48.0).toFloat()
             val itemExtents = itemIds.associateWith { id ->
@@ -7115,6 +7119,7 @@ class PamRenderer(
         var scrollScheduled: Boolean = false,
         var pendingScrollOffset: Float = 0f,
         var endReachedSent: Boolean = false,
+        var virtualListItemIds: List<Long> = emptyList(),
         var keyboardBehavior: Int = KEYBOARD_RESIZE,
         var safeBottomInset: Int = 0,
         var safeAreaLeftInset: Int = 0,

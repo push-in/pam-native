@@ -2374,9 +2374,15 @@ pub fn repair_android(project_path: &Path) -> Result<(), String> {
     let runtime = resolve_runtime(&project, &pam_home)?;
     if default_abis()
         .into_iter()
-        .any(|abi| !runtime_ready_at(&runtime.root, abi) || !engine_ready_at(&native_home, abi))
+        .any(|abi| !runtime_ready_at(&runtime.root, abi))
     {
-        install_android_runtime_bundle(&project, &pam_home, &native_home)?;
+        install_android_runtime_bundle(&project, &pam_home)?;
+    }
+    if default_abis()
+        .into_iter()
+        .any(|abi| !engine_ready_at(&native_home, abi))
+    {
+        install_android_renderer_bundle(&native_home)?;
     }
 
     write_runtime_lock(&project, &runtime)?;
@@ -2394,11 +2400,7 @@ fn install_android_runtime(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-fn install_android_runtime_bundle(
-    project: &Project,
-    pam_home: &Path,
-    native_home: &Path,
-) -> Result<(), String> {
+fn install_android_runtime_bundle(project: &Project, pam_home: &Path) -> Result<(), String> {
     let asset = "pam-android-runtime.tar.gz";
     let configured_base = std::env::var("PAM_RELEASE_BASE_URL").ok();
     let base = android_runtime_release_base(configured_base.as_deref());
@@ -2469,21 +2471,10 @@ fn install_android_runtime_bundle(
                     abi.android()
                 ));
             }
-            if !engine_ready_at(&extracted.join("native"), abi) {
-                return Err(format!(
-                    "Android runtime archive is missing the PAM Native engine for {}",
-                    abi.android()
-                ));
-            }
         }
         copy_tree(
             &extracted.join("runtime/android"),
             &pam_home.join("runtime/android"),
-            &[],
-        )?;
-        copy_tree(
-            &extracted.join("native/target"),
-            &native_home.join("target"),
             &[],
         )?;
         Ok(())
@@ -2496,6 +2487,122 @@ fn install_android_runtime_bundle(
         )),
         (Ok(()), Ok(())) => Ok(()),
     }
+}
+
+fn install_android_renderer_bundle(native_home: &Path) -> Result<(), String> {
+    let version = env!("CARGO_PKG_VERSION");
+    let asset = format!("pam-native-android-renderer-{version}.tar.gz");
+    let base = format!("https://github.com/push-in/pam-native/releases/download/v{version}");
+    let temporary = std::env::temp_dir().join(format!(
+        "pam-native-renderer-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    fs::create_dir(&temporary)
+        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
+    let result = (|| {
+        let archive = temporary.join(&asset);
+        let checksum = temporary.join(format!("{asset}.sha256"));
+        download_release_asset(
+            &format!("{base}/{asset}"),
+            &archive,
+            MAX_ANDROID_RUNTIME_ARCHIVE_BYTES,
+        )?;
+        download_release_asset(
+            &format!("{base}/{asset}.sha256"),
+            &checksum,
+            MAX_CHECKSUM_BYTES,
+        )?;
+        verify_release_checksum(&archive, &checksum, &asset)?;
+
+        let root = format!("pam-native-android-renderer-{version}");
+        let paths = default_abis()
+            .into_iter()
+            .map(|abi| {
+                format!(
+                    "{root}/target/{}/release/libpam_native_engine.a",
+                    abi.rust_target()
+                )
+            })
+            .collect::<Vec<_>>();
+        let listing = Command::new("tar")
+            .args(["-tzf"])
+            .arg(&archive)
+            .output()
+            .map_err(|error| format!("cannot inspect Native renderer archive: {error}"))?;
+        if !listing.status.success() {
+            return Err(format!(
+                "Native renderer archive inspection failed: {}",
+                listing.status
+            ));
+        }
+        for line in String::from_utf8_lossy(&listing.stdout).lines() {
+            if !safe_android_renderer_archive_path(Path::new(line), &root) {
+                return Err(format!("unsafe Native renderer archive path: {line}"));
+            }
+        }
+        let extracted = temporary.join("extracted");
+        fs::create_dir(&extracted)
+            .map_err(|error| format!("cannot create {}: {error}", extracted.display()))?;
+        let status = Command::new("tar")
+            .args(["-xzf"])
+            .arg(&archive)
+            .arg("-C")
+            .arg(&extracted)
+            .args(&paths)
+            .status()
+            .map_err(|error| format!("cannot extract Native renderer engines: {error}"))?;
+        if !status.success() {
+            return Err(format!(
+                "Native renderer engine extraction failed: {status}"
+            ));
+        }
+        for abi in default_abis() {
+            let relative = PathBuf::from(format!(
+                "target/{}/release/libpam_native_engine.a",
+                abi.rust_target()
+            ));
+            let source = extracted.join(&root).join(&relative);
+            let metadata = fs::symlink_metadata(&source)
+                .map_err(|error| format!("cannot inspect {}: {error}", source.display()))?;
+            if !metadata.file_type().is_file() || metadata.len() == 0 {
+                return Err(format!(
+                    "Native renderer engine is not a regular file: {}",
+                    source.display()
+                ));
+            }
+            let destination = native_home.join(&relative);
+            fs::create_dir_all(destination.parent().expect("engine has a parent"))
+                .map_err(|error| format!("cannot create engine directory: {error}"))?;
+            let staged = destination.with_extension(format!("a.tmp-{}", std::process::id()));
+            fs::copy(&source, &staged)
+                .map_err(|error| format!("cannot stage {}: {error}", destination.display()))?;
+            fs::rename(&staged, &destination)
+                .map_err(|error| format!("cannot activate {}: {error}", destination.display()))?;
+        }
+        write_atomic(
+            &native_home.join("target/pam-native-engine-version"),
+            format!("{version}\n").as_bytes(),
+        )
+    })();
+    let cleanup = fs::remove_dir_all(&temporary);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(format!(
+            "Native renderer installed, but temporary files remain: {error}"
+        )),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+fn safe_android_renderer_archive_path(path: &Path, root: &str) -> bool {
+    path.starts_with(root)
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
 }
 
 fn android_runtime_release_base(configured: Option<&str>) -> String {
@@ -6929,7 +7036,12 @@ fn native_engine_path(native_home: &Path, abi: AndroidAbi) -> PathBuf {
 }
 
 fn engine_ready_at(native_home: &Path, abi: AndroidAbi) -> bool {
-    native_engine_path(native_home, abi).is_file()
+    if !native_engine_path(native_home, abi).is_file() {
+        return false;
+    }
+    native_home.join(".git").is_dir()
+        || fs::read_to_string(native_home.join("target/pam-native-engine-version"))
+            .is_ok_and(|version| version.trim() == env!("CARGO_PKG_VERSION"))
 }
 
 fn installed_rust_targets() -> Result<HashSet<String>, String> {
@@ -8500,6 +8612,50 @@ mod tests {
             "https://mirror.example/pam/v2.0.10"
         );
         assert!(!android_runtime_release_base(None).contains(env!("CARGO_PKG_VERSION")));
+    }
+
+    #[test]
+    fn native_renderer_archive_is_confined_to_its_exact_release_root() {
+        let root = format!("pam-native-android-renderer-{}", env!("CARGO_PKG_VERSION"));
+        assert!(safe_android_renderer_archive_path(
+            Path::new(&format!(
+                "{root}/target/aarch64-linux-android/release/libpam_native_engine.a"
+            )),
+            &root,
+        ));
+        assert!(!safe_android_renderer_archive_path(
+            Path::new(&format!("{root}/../outside")),
+            &root,
+        ));
+        assert!(!safe_android_renderer_archive_path(
+            Path::new("pam-native-android-renderer-old/target/libpam_native_engine.a"),
+            &root,
+        ));
+    }
+
+    #[test]
+    fn packaged_native_engine_requires_matching_version_marker() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-native-engine-version-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let engine = native_engine_path(&root, AndroidAbi::Arm64);
+        fs::create_dir_all(engine.parent().expect("engine parent")).expect("directory");
+        fs::write(&engine, b"engine").expect("engine");
+        assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
+        fs::write(root.join("target/pam-native-engine-version"), b"0.0.0\n").expect("wrong marker");
+        assert!(!engine_ready_at(&root, AndroidAbi::Arm64));
+        fs::write(
+            root.join("target/pam-native-engine-version"),
+            format!("{}\n", env!("CARGO_PKG_VERSION")),
+        )
+        .expect("matching marker");
+        assert!(engine_ready_at(&root, AndroidAbi::Arm64));
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]

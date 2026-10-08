@@ -4,7 +4,7 @@
 
 No release may be published merely because source tests and package builds are
 green. The release graph must create a project in a new temporary directory
-through `pam init --template mobile`, allow the generated Composer project and
+through `pam init community-app --template native`, allow the generated Composer project and
 native toolchain to install their own declared dependencies, execute `pam dev`,
 launch on an Android emulator, inspect process logs for runtime/plugin failures,
 and capture a valid PNG. The same contract covers `native-ui`; PAM owns the

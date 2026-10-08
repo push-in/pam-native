@@ -51,6 +51,72 @@ import java.util.concurrent.TimeUnit
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
     @Test
+    fun richVirtualListRearmsEndReachedWhenItsItemsChange() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        var endReached = 0
+        lateinit var renderer: PamRenderer
+        lateinit var list: PamRecyclerList
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, kind, _ ->
+                    if (kind == EventKind.END_REACHED.value) endReached++
+                }
+                val mutations = mutableListOf<Mutation>(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST, mapOf(
+                        PropKey.ON_END_REACHED to PropValue.Flag(true),
+                        PropKey.END_REACHED_THRESHOLD to PropValue.Decimal(0.1),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 300f, 144f)),
+                )
+                repeat(8) { index ->
+                    val id = index.toLong() + 3
+                    mutations += Mutation.Create(node(id, 2, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("Record $index"),
+                    )))
+                    mutations += Mutation.Layout(id, Frame(0f, index * 48f, 300f, 48f))
+                }
+                mutations += Mutation.SetRoot(1)
+                renderer.commit(listOf(mutations))
+                val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
+                @Suppress("UNCHECKED_CAST")
+                val views = field.get(renderer) as android.util.LongSparseArray<View>
+                list = views[2] as PamRecyclerList
+                list.measure(
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 300f), View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(dp(list, 144f), View.MeasureSpec.EXACTLY),
+                )
+                list.layout(0, 0, dp(list, 300f), dp(list, 144f))
+                list.scrollToLogicalOffset(10_000f)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) {
+                assertEquals(1, endReached)
+                val additions = mutableListOf<Mutation>()
+                repeat(8) { offset ->
+                    val index = offset + 8
+                    val id = index.toLong() + 3
+                    additions += Mutation.Create(node(id, 2, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("Record $index"),
+                    )))
+                    additions += Mutation.Layout(id, Frame(0f, index * 48f, 300f, 48f))
+                }
+                renderer.commit(listOf(additions))
+                list.scrollToLogicalOffset(10_000f)
+            }
+            instrumentation.waitForIdleSync()
+            onMain(instrumentation) { assertEquals(2, endReached) }
+        } finally {
+            onMain(instrumentation) {
+                renderer.close()
+                activity.finish()
+            }
+        }
+    }
+
+    @Test
     fun decimalKeyboardAcceptsSignedValuesButDigitKeyboardDoesNot() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
