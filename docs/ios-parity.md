@@ -77,6 +77,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.33.0 | `Share::files()` text | ✅ (uncompiled) | `FilesModule.shareFiles` appends the text to the `UIActivityViewController` items. |
 | 1.33.0 | `BottomSheetKeyboardBehavior::Contain` | ✅ (uncompiled) | `PamModalHost.setBottomSheetKeyboardBehavior(4)`: no sheet lift, the keyboard overlap is published as the surface keyboard inset. |
 | 1.33.0 | `Location.watch` / `clearWatch` | ✅ (uncompiled) | `LocationModule` creates one `CLLocationManager` per subscription (`LocationWatch`, `distanceFilter`, `desiredAccuracy`), buffers fixes in `WatchChannel` and stops on `stop`/module close. Android registers a `LocationListener` per watch with `minTime`/`minDistance`. |
+| 1.33.1 | Header-less `Files::download*` | ✅ (PHP only) | PHP sends `{}` for no headers; `FilesModule.downloadHeaders` decodes `[String: String]` and rejected `[]`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -151,6 +152,7 @@ Visual checks that tests cannot fully cover:
   `keyboardBehavior="contain"` and a bottom composer inside a
   `KeyboardAvoidingView` must keep the sheet's top edge in place while the
   composer rises right above the keyboard.
+- Header-less downloads (1.33.1): in Zé Chat, Perfil → Compartilhar must offer the profile card image (downloaded from `/api/share-cards/users/...` without headers) with the link text; no "Download request headers are invalid or unsafe" failure.
 - Location watch (1.33.0): `swift build`; in Zé Chat share a live
   location for 15 min, walk ~30 m with the app open and confirm the bubble
   moves (PATCH within 3 s), backgrounding stops the updates and `stop`

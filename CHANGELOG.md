@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.33.1 - 2026-10-09
+
+- `Files::download()` / `Files::downloadWithProgress()` without request
+  headers now send `{}` instead of `[]`. Android (`JSONObject`) and iOS
+  (`[String: String]`) rejected the empty JSON array, so every header-less
+  download failed with "Value [] of type org.json.JSONArray cannot be
+  converted to JSONObject" (Android) or "Download request headers are invalid
+  or unsafe" (iOS). Downloads with headers are unchanged.
+
 ## 1.33.0 - 2026-10-09
 
 - `Location::watch()` / `Location::clearWatch()`: continuous position updates

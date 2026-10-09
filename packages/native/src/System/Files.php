@@ -110,7 +110,7 @@ final class Files
                 'url' => $url,
                 'path' => $destination,
                 'maximumBytes' => $maximumBytes,
-                'headers' => json_encode($headers, JSON_THROW_ON_ERROR),
+                'headers' => json_encode($headers, JSON_THROW_ON_ERROR | JSON_FORCE_OBJECT),
             ],
             static fn (array $values): mixed => $callback(self::reference($values)),
             $failure,
@@ -147,7 +147,7 @@ final class Files
             'url' => $url,
             'path' => $destination,
             'maximumBytes' => $maximumBytes,
-            'headers' => json_encode($headers, JSON_THROW_ON_ERROR),
+            'headers' => json_encode($headers, JSON_THROW_ON_ERROR | JSON_FORCE_OBJECT),
         ], static function ($result) use ($download): void {
             if ($result->status === ModuleResultStatus::Failure) {
                 self::finishDownloadFailure($download, $result->payload);
