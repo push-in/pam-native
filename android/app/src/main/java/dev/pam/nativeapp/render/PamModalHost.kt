@@ -126,7 +126,8 @@ internal fun blocksModalDismissal(dismissible: Boolean): Boolean = !dismissible
  * the system bars, so its base is the window minus the top and bottom bar
  * insets and the sheet rests on the navigation bar; the top inset is never
  * subtracted twice. Once the window is laid out, [laidOutContainerHeight]
- * (the real container) replaces the pre-layout window estimate.
+ * (the real container) replaces the pre-layout window estimate. Since 1.34
+ * every BottomSheet window is edge to edge ([modalWindowEdgeToEdge]).
  */
 internal fun sheetAvailableHeight(
     laidOutContainerHeight: Int?,
@@ -139,6 +140,19 @@ internal fun sheetAvailableHeight(
         ?: if (edgeToEdge) windowHeight else windowHeight - topInset - bottomInset
     return (container - if (edgeToEdge) topInset else 0).coerceAtLeast(1)
 }
+
+/**
+ * Whether a modal window draws under the system bars. A BottomSheet window
+ * (presentation 3) always does: React Native's @gorhom sheet lives in the
+ * edge-to-edge root, so its backdrop covers the status and navigation bars
+ * and the sheet reaches the screen bottom (its content receives the bottom
+ * inset). Other presentations fit the bars unless declared translucent.
+ */
+internal fun modalWindowEdgeToEdge(
+    presentation: Int,
+    statusBarTranslucent: Boolean,
+    navigationBarTranslucent: Boolean,
+): Boolean = presentation == 3 || statusBarTranslucent || navigationBarTranslucent
 
 /** The navigation bar a modal window draws, see [modalNavigationBarStyle]. */
 internal data class ModalNavigationBarStyle(
@@ -316,6 +330,9 @@ internal class PamModalHost @JvmOverloads constructor(
         updateBottomSheetChrome()
     }
 
+    private fun edgeToEdgeWindow(): Boolean =
+        modalWindowEdgeToEdge(presentation, statusBarTranslucent, navigationBarTranslucent)
+
     internal fun usesWindowSizedContent(): Boolean = presentation != 2 && presentation != 3
 
     fun setPresentation(value: Int) {
@@ -451,9 +468,9 @@ internal class PamModalHost @JvmOverloads constructor(
         val dark = PamAppearance.isDark(context)
         val style = modalNavigationBarStyle(
             sdkInt = Build.VERSION.SDK_INT,
-            // An edge-to-edge window (either bar translucent) draws its
-            // content under the navigation bar too.
-            translucent = statusBarTranslucent || navigationBarTranslucent,
+            // An edge-to-edge window (either bar translucent, or a bottom
+            // sheet) draws its content under the navigation bar too.
+            translucent = edgeToEdgeWindow(),
             lightAppearance = PamAppearance.bool(context, R.bool.pam_light_navigation_bar, dark),
             windowBackground = PamAppearance.color(context, R.color.pam_window_background, dark),
         )
@@ -476,9 +493,10 @@ internal class PamModalHost @JvmOverloads constructor(
     private fun applyStoredStatusBar(modal: Dialog) {
         val config = statusBarConfig ?: return
         val window = modal.window ?: return
-        // A statusBarTranslucent modal keeps its transparent bar (its
-        // content draws under it); only the icons follow the StatusBar.
-        if (!config.translucent && !statusBarTranslucent) {
+        // A statusBarTranslucent modal or a bottom sheet keeps its
+        // transparent bar (its backdrop/content draws under it); only the
+        // icons follow the StatusBar.
+        if (!config.translucent && !edgeToEdgeWindow()) {
             window.statusBarColor = config.color
         }
         val controller = WindowCompat.getInsetsController(window, window.decorView)
@@ -956,7 +974,7 @@ internal class PamModalHost @JvmOverloads constructor(
             } else {
                 clearFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED)
             }
-            val edgeToEdge = statusBarTranslucent || navigationBarTranslucent
+            val edgeToEdge = edgeToEdgeWindow()
             if (edgeToEdge) {
                 WindowCompat.enableEdgeToEdge(this)
                 WindowCompat.setDecorFitsSystemWindows(this, false)
@@ -998,7 +1016,7 @@ internal class PamModalHost @JvmOverloads constructor(
                     ?: resources.displayMetrics.heightPixels,
                 topInset = insets.top,
                 bottomInset = insets.bottom,
-                edgeToEdge = statusBarTranslucent || navigationBarTranslucent,
+                edgeToEdge = edgeToEdgeWindow(),
             )
         } else {
             resources.displayMetrics.heightPixels

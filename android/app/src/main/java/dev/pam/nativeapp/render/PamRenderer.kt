@@ -3075,6 +3075,8 @@ class PamRenderer(
             -> configureTabHost(view, state)
             PropKey.CANVAS_COMMANDS ->
                 (view as? PamVectorCanvas)?.setCommands(value.text(PropKey.CANVAS_COMMANDS))
+            PropKey.NEEDS_OFFSCREEN_ALPHA_COMPOSITING ->
+                (view as? PamContainer)?.needsOffscreenAlphaCompositing = value.flag()
             PropKey.NAVIGATION_GESTURE_ENABLED,
             PropKey.NAVIGATION_GESTURE_EDGE_WIDTH,
             PropKey.NAVIGATION_GESTURE_THRESHOLD,
@@ -4124,19 +4126,25 @@ class PamRenderer(
                 (view as? PamRecyclerList)?.setInitialIndex(0)
             PropKey.LIST_REMOVE_CLIPPED_SUBVIEWS ->
                 (view as? PamRecyclerList)?.setRemoveClippedSubviews(true)
+            // A removed value (a class toggled off) changes the property back
+            // to its default: a declared transition / `animate` runs to it
+            // like any other change instead of snapping. Re-adding the value
+            // before a frame then continues from where the view still is.
             PropKey.OPACITY -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
                     applyAnimationKind(view, state, 2)
                 } else {
-                    view.alpha = 1f
+                    animateOrSet(view, state, key, 1f)
                 }
                 configurePressable(view, state)
             }
-            PropKey.TRANSLATION_X -> view.translationX = 0f
-            PropKey.TRANSLATION_Y -> view.translationY = 0f
-            PropKey.SCALE_X -> view.scaleX = 1f
-            PropKey.SCALE_Y -> view.scaleY = 1f
-            PropKey.ROTATION -> view.rotation = 0f
+            PropKey.NEEDS_OFFSCREEN_ALPHA_COMPOSITING ->
+                (view as? PamContainer)?.needsOffscreenAlphaCompositing = false
+            PropKey.TRANSLATION_X -> animateOrSet(view, state, key, 0f)
+            PropKey.TRANSLATION_Y -> animateOrSet(view, state, key, 0f)
+            PropKey.SCALE_X -> animateOrSet(view, state, key, 1f)
+            PropKey.SCALE_Y -> animateOrSet(view, state, key, 1f)
+            PropKey.ROTATION -> animateOrSet(view, state, key, 0f)
             PropKey.OVERFLOW -> applyOverflowClip(view, state)
             PropKey.VISIBLE -> {
                 when (view) {
@@ -4721,6 +4729,8 @@ class PamRenderer(
         } else null
 
     private fun configureMediaCache(view: PamMediaView, state: NodeState) {
+        // `preloadSeconds`: the forward buffer (ExoPlayer above 0 seconds).
+        view.setForwardBufferSeconds(state.integer(PropKey.MEDIA_CACHE_PRELOAD_SECONDS, 0).toInt())
         view.setCacheRequest(
             MediaCacheRequest(
                 source = state.textOrNull(PropKey.MEDIA_SOURCE).orEmpty(),
@@ -9710,6 +9720,7 @@ class PamRenderer(
             PropKey.BORDER_RIGHT_WIDTH,
             PropKey.BORDER_BOTTOM_WIDTH,
             PropKey.OPACITY,
+            PropKey.NEEDS_OFFSCREEN_ALPHA_COMPOSITING,
             PropKey.VISIBLE,
             PropKey.TRANSLATION_X_PERCENT,
             PropKey.TRANSLATION_Y_PERCENT,

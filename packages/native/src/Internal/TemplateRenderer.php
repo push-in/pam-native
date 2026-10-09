@@ -438,6 +438,7 @@ final class TemplateRenderer
         'pressedOpacity' => PropKey::PressOpacity,
         'pressedScale' => PropKey::PressScale,
         'collapsable' => PropKey::Collapsable,
+        'needsOffscreenAlphaCompositing' => PropKey::NeedsOffscreenAlphaCompositing,
         'accessibilityRole' => PropKey::AccessibilityRole,
         'accessibilityHint' => PropKey::AccessibilityHint,
         'accessibilityActions' => PropKey::AccessibilityActions,

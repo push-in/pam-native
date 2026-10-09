@@ -179,6 +179,9 @@ final class PamMediaView: UIView {
     private var cachePinned = false
     private var streamingCache = false
     private var downloadWhilePlaying = false
+    /// `preloadSeconds`: `AVPlayerItem.preferredForwardBufferDuration`
+    /// (0 = the system chooses), the same forward buffer as Android.
+    private var forwardBufferSeconds: Double = 0
     /// Natural width/height (pixels) and duration (seconds) — `MediaReadyEvent`.
     var onReady: ((Int, Int, Double) -> Void)?
     var onLoadStart: (() -> Void)?
@@ -318,8 +321,17 @@ final class PamMediaView: UIView {
         installPlayer(AVPlayerItem(url: url))
     }
 
+    /// Applies to the current item at once; later items get it on install.
+    func setForwardBufferSeconds(_ seconds: Double) {
+        let value = min(max(seconds, 0), 300)
+        guard value != forwardBufferSeconds else { return }
+        forwardBufferSeconds = value
+        player?.currentItem?.preferredForwardBufferDuration = value
+    }
+
     private func installPlayer(_ item: AVPlayerItem) {
         releasePlayer()
+        item.preferredForwardBufferDuration = forwardBufferSeconds
         let next = AVPlayer(playerItem: item)
         player = next
         controller.player = next

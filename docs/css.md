@@ -57,7 +57,7 @@ by line numbers or areas → —.
 | `aspect-ratio` | `<number>`, `<w> / <h>`, `auto` | L |
 | `padding`, `margin` (+ `-top/-right/-bottom/-left`, `-inline`, `-block`, `-inline-start/end`, `-block-start/end`) | 1–4 values, `auto` (margin) | L |
 | `box-sizing` | `border-box` (always; `content-box` → —) | L |
-| `position` | `static`/`relative` (offsets shift the box), `absolute`, `fixed` (relative to the viewport; `sticky` → —) | L |
+| `position` | `static`/`relative` (offsets shift the box), `absolute` (insets and their percentages from the parent's padding box — inside its border, ignoring its padding — like Yoga/React Native), `fixed` (relative to the viewport; `sticky` → —) | L |
 | `top`, `right`, `bottom`, `left`, `inset`, `inset-inline/block` | `<length>`, `<percentage>`, `auto` | L |
 | `z-index` | `<integer>`, `auto` | A i |
 | `overflow`, `overflow-x/y` | `visible`, `hidden`, `clip` (`auto`/`scroll` → use `<ScrollView>`) | A i |

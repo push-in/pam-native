@@ -92,6 +92,36 @@ class PamTextParityInstrumentedTest {
         }
     }
 
+    /**
+     * RN 0.85 `TextLayoutManager.measureText` (AT_MOST): the layout is built
+     * at min(desired, available) and the measured width is `layout.width`, so
+     * wrapping text takes the whole available width instead of shrinking to
+     * its widest line (a 16 dp avatar beside "Seguido(a) por ..." stays put).
+     */
+    @Test
+    fun wrappingTextMeasuresTheAvailableWidthLikeReactNative() {
+        val output = FloatArray(4)
+        val available = 213.5f
+        val availablePx = kotlin.math.floor(available * density + 0.001f)
+        val wrapped = "Seguido(a) por fulano_de_tal, beltrano e mais 12 pessoas"
+        PamTextLayout.measure(wrapped, null, style(size = 13f), available, density, typefaces, output)
+        assertTrue("must wrap", output[3] >= 2f)
+        assertEquals(availablePx / density, output[0], 0.001f)
+        val newline = "Curta\nOutra"
+        PamTextLayout.measure(newline, null, style(size = 13f), available, density, typefaces, output)
+        val paint = TextPaint(TextPaint.ANTI_ALIAS_FLAG)
+        PamTextLayout.configurePaint(paint, style(size = 13f), density, typefaces)
+        val desired = kotlin.math.ceil(
+            android.text.Layout.getDesiredWidth(
+                PamTextLayout.content(newline, null, style(size = 13f), density, typefaces),
+                paint,
+            ).toDouble(),
+        ).toFloat()
+        // Hard breaks that fit keep the desired (widest paragraph) width.
+        assertEquals(2f, output[3])
+        assertEquals(desired / density, output[0], 0.001f)
+    }
+
     @Test
     fun lineHeightScalesWithTheAccessibilityFontScaleLikeReactNative() {
         val text = "Linha um do corpo da mensagem que precisa quebrar em várias linhas para medir o espaçamento"

@@ -87,6 +87,23 @@ internal open class PamContainer(context: Context) :
         effect.configure(enabled, color, durationMs)
     }
 
+    /**
+     * React Native `needsOffscreenAlphaCompositing`. Off by default, like
+     * RN's `ReactViewGroup`: an `opacity` < 1 is applied to every draw of the
+     * subtree (the background, then each child over it) instead of fading
+     * one offscreen layer, so a white label inside a faded button blends
+     * with the faded fill exactly as in React Native Android. True restores
+     * the single flattened layer (no overlap between translucent children).
+     */
+    var needsOffscreenAlphaCompositing = false
+        set(value) {
+            if (field == value) return
+            field = value
+            invalidate()
+        }
+
+    override fun hasOverlappingRendering(): Boolean = needsOffscreenAlphaCompositing
+
     override fun draw(canvas: Canvas) {
         backdrop?.draw(canvas, overflowClipRadii)
         super.draw(canvas)

@@ -2764,6 +2764,28 @@ public final class PamRenderer {
 
     private func resetProperty(view: UIView, nodeId: Int64, key: Int, state: NodeState) {
         switch key {
+        // A removed value (a class toggled off) goes back to its default
+        // through the declared transition, like any other change; re-adding
+        // it before a frame continues from where the view still is.
+        case PamConstants.opacity:
+            if !motion.animateTransition(nodeId: nodeId, view: view, property: .opacity, target: 1) {
+                view.alpha = 1
+            }
+        case PamConstants.translationX
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .translateX, target: 0):
+            break
+        case PamConstants.translationY
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .translateY, target: 0):
+            break
+        case PamConstants.scaleX
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .scaleX, target: 1):
+            break
+        case PamConstants.scaleY
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .scaleY, target: 1):
+            break
+        case PamConstants.rotation
+            where motion.animateTransition(nodeId: nodeId, view: view, property: .rotate, target: 0):
+            break
         case PamConstants.translationX,
              PamConstants.translationY,
              PamConstants.translationXPercent,
@@ -4076,6 +4098,10 @@ public final class PamRenderer {
     }
 
     private func configureMediaCache(_ view: PamMediaView, state: NodeState) {
+        // `preloadSeconds`: the forward buffer (Android plays through ExoPlayer).
+        view.setForwardBufferSeconds(
+            Double(state.properties[PamConstants.mediaCachePreloadSeconds]?.integerOrNil() ?? 0)
+        )
         view.setCache(
             policy: Int(
                 state.properties[PamConstants.mediaCachePolicy]?.integerOrNil() ?? 1

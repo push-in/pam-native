@@ -91,7 +91,7 @@ dependencies = [
 
 [[package]]
 name = "pam-native-cli"
-version = "1.33.1"
+version = "1.34.0"
 dependencies = [
  "miniz_oxide",
  "serde",
@@ -101,7 +101,7 @@ dependencies = [
 
 [[package]]
 name = "pam-native-engine"
-version = "1.33.1"
+version = "1.34.0"
 dependencies = [
  "pam-native-protocol",
  "ttf-parser",
@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "pam-native-protocol"
-version = "1.33.1"
+version = "1.34.0"
 
 [[package]]
 name = "proc-macro2"

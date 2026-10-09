@@ -1,7 +1,8 @@
 # Bottom Sheet
 
 `BottomSheet` is a native modal surface with deterministic snap points on
-Android and iOS. Snap points are fractions of the available screen height and
+Android and iOS. Snap points are fractions of the available screen height (the
+window minus its top inset, like @gorhom/bottom-sheet) and
 are encoded in the binary protocol without strings or platform-specific units.
 
 ```php
@@ -56,3 +57,9 @@ publishes the keyboard inset to its content, so a `KeyboardAvoidingView` or a
 keyboard-inset `ScrollView` inside the sheet lifts a bottom composer above the
 IME while the list above it shrinks (React Native @gorhom sheet with
 `adjustResize` and a self-lifting composer). iOS applies the same contract.
+
+On Android the sheet window is always edge to edge (1.34), like the @gorhom
+sheet inside React Native's edge-to-edge root: the backdrop covers the status
+and navigation bars and the sheet reaches the bottom of the screen. Wrap
+bottom content in a `SafeAreaView` (or pad it with the bottom inset) so it
+stays above the navigation bar, as on Android 15+ and iOS.

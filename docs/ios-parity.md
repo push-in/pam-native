@@ -78,6 +78,14 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.33.0 | `BottomSheetKeyboardBehavior::Contain` | ✅ (uncompiled) | `PamModalHost.setBottomSheetKeyboardBehavior(4)`: no sheet lift, the keyboard overlap is published as the surface keyboard inset. |
 | 1.33.0 | `Location.watch` / `clearWatch` | ✅ (uncompiled) | `LocationModule` creates one `CLLocationManager` per subscription (`LocationWatch`, `distanceFilter`, `desiredAccuracy`), buffers fixes in `WatchChannel` and stops on `stop`/module close. Android registers a `LocationListener` per watch with `minTime`/`minDistance`. |
 | 1.33.1 | Header-less `Files::download*` | ✅ (PHP only) | PHP sends `{}` for no headers; `FilesModule.downloadHeaders` decodes `[String: String]` and rejected `[]`. |
+| 1.34.0 | Absolute insets from the padding box | ✅ | Rust layout engine, shared by both hosts. |
+| 1.34.0 | Wrapping text measures the available width | n/a | Android-only (RN 0.85 `TextLayoutManager`); iOS keeps RN iOS `usedRect` (widest line). |
+| 1.34.0 | `opacity` without offscreen compositing, `needsOffscreenAlphaCompositing` (527) | n/a | Android-only (RN `ReactViewGroup.hasOverlappingRendering`); iOS keeps group opacity like RN iOS. `PamConstants.needsOffscreenAlphaCompositing` exists for protocol parity. |
+| 1.34.0 | AppCompat `Switch` geometry | n/a | Android-only; iOS uses `UISwitch` like RN iOS. |
+| 1.34.0 | Edge-to-edge `BottomSheet` window | ✅ | iOS sheets already lie in the host window (`InWindow`), with the detent over `bounds.height - safeAreaInsets.top`. |
+| 1.34.0 | Removed transform/opacity runs the transition | ✅ (uncompiled) | `resetProperty` calls `motion.animateTransition` to the default (translate 0, scale 1, rotate 0, opacity 1) before `applyTransform`; a removed `opacity` now resets `alpha` to 1. |
+| 1.34.0 | `preloadSeconds` forward buffer | ✅ (uncompiled) | `PamMediaView.setForwardBufferSeconds` sets `preferredForwardBufferDuration` on the current and every new `AVPlayerItem`. Android uses Media3 ExoPlayer only for those players. |
+| 1.34.0 | PHP lifetimes serialized, `PamRuntime` init order, `Trace.isEnabled` | n/a | Android-only causes (JNI bridge worker threads, Kotlin initialisation order, API 29 call). |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -152,6 +160,16 @@ Visual checks that tests cannot fully cover:
   `keyboardBehavior="contain"` and a bottom composer inside a
   `KeyboardAvoidingView` must keep the sheet's top edge in place while the
   composer rises right above the keyboard.
+- Renderer parity (1.34.0): `swift build` and `swift test` must pass
+  (`PamRenderer.resetProperty` gained `where motion.animateTransition` cases);
+  then in Zé Chat: a view with `transition: transform` whose transform class
+  is removed must slide back (not jump), and toggling the class twice within
+  a frame must not move it; removing `opacity` must restore full opacity; a
+  feed/reel video with `preloadSeconds="12"` must play and keep buffering
+  ahead (Network Link Conditioner "3G": fewer stalls than without it); badges
+  with `position: absolute; top: 0; right: 0` inside padded avatars must sit
+  on the avatar's edge like the React Native build; OptionDialog/BottomSheet
+  detents and backdrops must match the RN screenshots.
 - Header-less downloads (1.33.1): in Zé Chat, Perfil → Compartilhar must offer the profile card image (downloaded from `/api/share-cards/users/...` without headers) with the link text; no "Download request headers are invalid or unsafe" failure.
 - Location watch (1.33.0): `swift build`; in Zé Chat share a live
   location for 15 min, walk ~30 m with the app open and confirm the bubble

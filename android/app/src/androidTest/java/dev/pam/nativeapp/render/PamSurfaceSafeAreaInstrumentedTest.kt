@@ -120,19 +120,19 @@ class PamSurfaceSafeAreaInstrumentedTest {
         assertEdgeToEdgeModal(result)
     }
 
+    /**
+     * A BottomSheet window is always edge to edge (1.34), like the @gorhom
+     * sheet in React Native's edge-to-edge root: its backdrop covers the
+     * navigation bar, the sheet reaches the screen bottom and a SafeAreaView
+     * inside it pads the navigation bar once, whatever the surface policy.
+     */
     @Test
-    fun nonTranslucentBottomSheetPadsTheNavigationBarOnlyWhenItsWindowReachesIt() {
+    fun nonTranslucentBottomSheetReachesTheScreenBottomAndPadsTheNavigationBar() {
         val result = present(translucentStatus = false, translucentNavigation = false, sheet = true)
         assertEquals(0f, result.safeAreaPaddingTop, 0.01f)
         assertNear("sheet header", result.sheetTop, result.headerTop)
-        if (result.policy == SURFACE_POLICY_SYSTEM_WINDOWS) {
-            // The sheet window rests on the navigation bar.
-            assertNear("fitted sheet window bottom", result.window.navigationTop, result.contentBottom)
-            assertEquals(0f, result.safeAreaPaddingBottom, 0.01f)
-        } else {
-            assertNear("edge-to-edge sheet window bottom", result.window.bottom, result.contentBottom)
-            assertEquals(result.window.navigationHeightDp, result.safeAreaPaddingBottom, 0.6f)
-        }
+        assertNear("edge-to-edge sheet window bottom", result.window.bottom, result.contentBottom)
+        assertEquals(result.window.navigationHeightDp, result.safeAreaPaddingBottom, 0.6f)
     }
 
     @Test

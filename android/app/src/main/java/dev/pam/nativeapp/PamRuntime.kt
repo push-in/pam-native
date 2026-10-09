@@ -2,6 +2,7 @@ package dev.pam.nativeapp
 
 import android.content.Context
 import android.hardware.display.DisplayManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.Trace
@@ -133,13 +134,17 @@ class PamRuntime(
     @Volatile
     private var handle = 0L
 
+    /**
+     * Module calls made before [installModules], replayed in order once it ran.
+     * Declared before `init`: property initialisers run in declaration order,
+     * and `init` may install the modules (which locks this list).
+     */
+    private val callsAwaitingModules = ArrayList<() -> Unit>()
+
     init {
         bindRenderer(renderer)
         if (installModules) installModules()
     }
-
-    /** Module calls made before [installModules], replayed in order once it ran. */
-    private val callsAwaitingModules = ArrayList<() -> Unit>()
 
     private fun deferUntilModulesInstalled(call: () -> Unit): Boolean {
         if (installedModules != null) return false
@@ -940,12 +945,18 @@ class PamRuntime(
         // A remount replays the whole retained tree: whatever is mounted
         // (nothing on a fresh surface, a diverged tree after a failure) goes.
         val remount = current.any(PendingBatch::remount)
-        Trace.beginSection("PamNative.mount")
-        if (Trace.isEnabled()) {
-            Trace.beginSection("mutations=" + current.sumOf { it.mutations.size })
-            Trace.endSection()
+        // Trace.isEnabled() is API 29; on API 26-28 it threw NoSuchMethodError.
+        val mutationsLabel = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && Trace.isEnabled()) {
+            "mutations=" + current.sumOf { it.mutations.size }
+        } else {
+            null
         }
+        Trace.beginSection("PamNative.mount")
         try {
+            if (mutationsLabel != null) {
+                Trace.beginSection(mutationsLabel)
+                Trace.endSection()
+            }
             runCatching {
                 if (remount) renderer.resetTree()
                 renderer.commit(current.map(PendingBatch::mutations))

@@ -491,6 +491,8 @@ Supported CSS covers PAM's common native layout and paint contracts:
   `border: none`;
 - background colors (including `background: none`), text color, percentage or
   numeric opacity, `box-shadow`, elevation, overflow and visibility;
+  on Android an opacity is applied to each draw of the subtree like React
+  Native (`needsOffscreenAlphaCompositing="true"` flattens it into one layer);
 - font family stacks, size/weight/style, letter/line spacing, text alignment,
   decoration and case;
 - `object-fit`, `box-sizing: border-box`, and `aspect-ratio: 16 / 9`.

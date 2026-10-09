@@ -344,6 +344,15 @@ fn layout_node(
         finite_non_negative(number(node, PropKey::PaddingBottom).unwrap_or(padding_vertical))?;
     // Yoga: the border is part of the padding box and insets content.
     let (border_left, border_top, border_right, border_bottom) = border_edges(node);
+    // Yoga's containing block for absolute children: the padding box
+    // (inside the border). Their insets ignore padding, safe-area and
+    // keyboard insets.
+    let padding_box = Layout {
+        x: frame.x + border_left,
+        y: frame.y + border_top,
+        width: (frame.width - border_left - border_right).max(0.0),
+        height: (frame.height - border_top - border_bottom).max(0.0),
+    };
     let padding_left = padding_left + border_left;
     let padding_top = padding_top + border_top;
     let padding_right = padding_right + border_right;
@@ -783,7 +792,16 @@ fn layout_node(
         return Ok(());
     }
     if is_grid(node) {
-        layout_grid(context, node, node_children, inner, gap, depth, output)?;
+        layout_grid(
+            context,
+            node,
+            node_children,
+            inner,
+            padding_box,
+            gap,
+            depth,
+            output,
+        )?;
         return Ok(());
     }
     let default_direction = if node.kind == NodeKind::Row { 2 } else { 1 };
@@ -1000,28 +1018,50 @@ fn layout_node(
     }
 
     for child in absolute_children {
-        let inner = if integer(child, PropKey::PositionType) == Some(3) {
+        let fixed = integer(child, PropKey::PositionType) == Some(3);
+        let containing = if fixed {
             context.viewport.get()
         } else {
-            inner
+            padding_box
         };
-        let left = dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width);
-        let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height);
-        let right = dimension(child, PropKey::Right, PropKey::RightPercent, inner.width);
-        let bottom = dimension(child, PropKey::Bottom, PropKey::BottomPercent, inner.height);
-        let explicit_width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width);
-        let explicit_height =
-            dimension(child, PropKey::Height, PropKey::HeightPercent, inner.height);
+        // Static position (no inset on an axis) stays in the content box.
+        let content = if fixed { containing } else { inner };
+        let left = dimension(child, PropKey::Left, PropKey::LeftPercent, containing.width);
+        let top = dimension(child, PropKey::Top, PropKey::TopPercent, containing.height);
+        let right = dimension(
+            child,
+            PropKey::Right,
+            PropKey::RightPercent,
+            containing.width,
+        );
+        let bottom = dimension(
+            child,
+            PropKey::Bottom,
+            PropKey::BottomPercent,
+            containing.height,
+        );
+        let explicit_width = dimension(
+            child,
+            PropKey::Width,
+            PropKey::WidthPercent,
+            containing.width,
+        );
+        let explicit_height = dimension(
+            child,
+            PropKey::Height,
+            PropKey::HeightPercent,
+            containing.height,
+        );
         let mut width = explicit_width.unwrap_or_else(|| {
             if let (Some(left), Some(right)) = (left, right) {
-                (inner.width - left - right).max(0.0)
+                (containing.width - left - right).max(0.0)
             } else {
                 intrinsic_extent(
                     context.children,
                     child,
                     Axis::Horizontal,
-                    inner.width,
-                    inner.height,
+                    containing.width,
+                    containing.height,
                     context.text_scale,
                     context.text_metrics,
                     depth + 1,
@@ -1031,14 +1071,14 @@ fn layout_node(
         });
         let mut height = explicit_height.unwrap_or_else(|| {
             if let (Some(top), Some(bottom)) = (top, bottom) {
-                (inner.height - top - bottom).max(0.0)
+                (containing.height - top - bottom).max(0.0)
             } else {
                 intrinsic_extent(
                     context.children,
                     child,
                     Axis::Vertical,
                     width,
-                    inner.height,
+                    containing.height,
                     context.text_scale,
                     context.text_metrics,
                     depth + 1,
@@ -1064,13 +1104,13 @@ fn layout_node(
                 child,
                 PropKey::MinWidth,
                 PropKey::MinWidthPercent,
-                inner.width,
+                containing.width,
             ),
             dimension(
                 child,
                 PropKey::MaxWidth,
                 PropKey::MaxWidthPercent,
-                inner.width,
+                containing.width,
             ),
         )?;
         height = constrained(
@@ -1079,27 +1119,30 @@ fn layout_node(
                 child,
                 PropKey::MinHeight,
                 PropKey::MinHeightPercent,
-                inner.height,
+                containing.height,
             ),
             dimension(
                 child,
                 PropKey::MaxHeight,
                 PropKey::MaxHeightPercent,
-                inner.height,
+                containing.height,
             ),
         )?;
         let static_x =
-            absolute_static_offset(child, node, axis, Axis::Horizontal, inner.width, width);
+            absolute_static_offset(child, node, axis, Axis::Horizontal, content.width, width);
         let static_y =
-            absolute_static_offset(child, node, axis, Axis::Vertical, inner.height, height);
+            absolute_static_offset(child, node, axis, Axis::Vertical, content.height, height);
         let child_frame = Layout {
-            x: inner.x
-                + left
-                    .unwrap_or_else(|| right.map_or(static_x, |right| inner.width - right - width)),
-            y: inner.y
-                + top.unwrap_or_else(|| {
-                    bottom.map_or(static_y, |bottom| inner.height - bottom - height)
-                }),
+            x: match (left, right) {
+                (Some(left), _) => containing.x + left,
+                (None, Some(right)) => containing.x + containing.width - right - width,
+                (None, None) => content.x + static_x,
+            },
+            y: match (top, bottom) {
+                (Some(top), _) => containing.y + top,
+                (None, Some(bottom)) => containing.y + containing.height - bottom - height,
+                (None, None) => content.y + static_y,
+            },
             width,
             height,
         };
@@ -1396,11 +1439,13 @@ fn resolved_grid_plan(
     Ok((fitting.clamp(1, maximum), gap, row_gap, level))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn layout_grid(
     context: &LayoutContext<'_>,
     node: &Node,
     node_children: &[&Node],
     inner: Layout,
+    padding_box: Layout,
     fallback_gap: f32,
     depth: usize,
     output: &mut BTreeMap<u64, Layout>,
@@ -1521,22 +1566,33 @@ fn layout_grid(
         };
         layout_node(context, placement.child.id, frame, false, depth + 1, output)?;
     }
-    // Absolute children remain relative to the grid's inner box.
+    // Absolute children are placed in the grid's padding box (Yoga/CSS).
     for child in node_children
         .iter()
         .copied()
         .filter(|child| visible(child) && child.kind != NodeKind::Modal && out_of_flow(child))
     {
-        let left =
-            dimension(child, PropKey::Left, PropKey::LeftPercent, inner.width).unwrap_or(0.0);
-        let top = dimension(child, PropKey::Top, PropKey::TopPercent, inner.height).unwrap_or(0.0);
-        let width = dimension(child, PropKey::Width, PropKey::WidthPercent, inner.width)
-            .unwrap_or(inner.width);
+        let left = dimension(
+            child,
+            PropKey::Left,
+            PropKey::LeftPercent,
+            padding_box.width,
+        )
+        .unwrap_or(0.0);
+        let top =
+            dimension(child, PropKey::Top, PropKey::TopPercent, padding_box.height).unwrap_or(0.0);
+        let width = dimension(
+            child,
+            PropKey::Width,
+            PropKey::WidthPercent,
+            padding_box.width,
+        )
+        .unwrap_or(padding_box.width);
         let height = child_main(
             context.children,
             child,
             Axis::Vertical,
-            inner.height,
+            padding_box.height,
             width,
             context.text_scale,
             context.text_metrics,
@@ -1546,8 +1602,8 @@ fn layout_grid(
             context,
             child.id,
             Layout {
-                x: inner.x + left,
-                y: inner.y + top,
+                x: padding_box.x + left,
+                y: padding_box.y + top,
                 width,
                 height,
             },
@@ -3935,10 +3991,12 @@ mod tests {
         .expect("layout");
         let child = layouts[&2];
 
-        assert_eq!(child.width, 156.0);
-        assert_eq!(child.height, 156.0);
-        assert_eq!(child.x, 114.0);
-        assert_eq!(child.y, 200.0);
+        // Yoga 3 (RN 0.74+): percentages and insets of an absolute child
+        // resolve against the padding box, not the content box.
+        assert_eq!(child.width, 180.0);
+        assert_eq!(child.height, 180.0);
+        assert_eq!(child.x, 120.0);
+        assert_eq!(child.y, 216.0);
     }
 
     /// Lays out one child under a root of `viewport` and returns its frame.
@@ -4382,7 +4440,7 @@ mod tests {
     }
 
     #[test]
-    fn resolves_percentage_position_offsets_against_the_inner_containing_block() {
+    fn resolves_percentage_position_offsets_against_the_padding_box() {
         let tree = Tree {
             root: 1,
             nodes: BTreeMap::from([
@@ -4425,8 +4483,9 @@ mod tests {
         .expect("percentage offsets");
         let child = layouts[&2];
 
-        assert_eq!(child.x, 38.0);
-        assert_eq!(child.y, 86.0);
+        // Padding does not move the containing block of an absolute child.
+        assert_eq!(child.x, 30.0);
+        assert_eq!(child.y, 80.0);
     }
 
     #[test]
@@ -7467,6 +7526,54 @@ mod css_flex_tests {
             );
         }
         calculate(&Tree { root: 1, nodes }, Size { width, height }).expect("layout")
+    }
+
+    /// Yoga resolves `top/right/bottom/left` of an absolute child from the
+    /// parent's padding box (inside the border, ignoring padding); padding
+    /// only moves the static position of an absolute child without insets.
+    #[test]
+    fn absolute_insets_ignore_parent_padding_like_yoga() {
+        let layouts = layout(
+            vec![(PropKey::Padding, f(16.0)), (PropKey::BorderWidth, f(2.0))],
+            vec![
+                vec![
+                    (PropKey::PositionType, i(2)),
+                    (PropKey::Top, f(4.0)),
+                    (PropKey::Right, f(6.0)),
+                    (PropKey::Width, f(10.0)),
+                    (PropKey::Height, f(10.0)),
+                ],
+                vec![
+                    (PropKey::PositionType, i(2)),
+                    (PropKey::Left, f(0.0)),
+                    (PropKey::Bottom, f(0.0)),
+                    (PropKey::Width, f(10.0)),
+                    (PropKey::Height, f(10.0)),
+                ],
+                vec![
+                    (PropKey::PositionType, i(2)),
+                    (PropKey::Left, f(0.0)),
+                    (PropKey::Right, f(0.0)),
+                    (PropKey::TopPercent, f(50.0)),
+                    (PropKey::Height, f(10.0)),
+                ],
+                vec![
+                    (PropKey::PositionType, i(2)),
+                    (PropKey::Width, f(10.0)),
+                    (PropKey::Height, f(10.0)),
+                ],
+            ],
+            100.0,
+            80.0,
+        );
+        // top/right from the border edge: x = 100 - 2 - 6 - 10, y = 2 + 4.
+        assert_eq!((layouts[&2].x, layouts[&2].y), (82.0, 6.0));
+        assert_eq!((layouts[&3].x, layouts[&3].y), (2.0, 68.0));
+        // Both insets size against the padding box (100 - 2 * 2), percentages too.
+        assert_eq!((layouts[&4].x, layouts[&4].width), (2.0, 96.0));
+        assert_eq!(layouts[&4].y, 2.0 + 38.0);
+        // Without insets the static position still honors padding + border.
+        assert_eq!((layouts[&5].x, layouts[&5].y), (18.0, 18.0));
     }
 
     #[test]

@@ -95,6 +95,14 @@ internal class PamMediaView(
     private var mediaController: MediaController? = null
     private var creatingPlayer = false
     @Volatile private var playerGeneration = 0L
+
+    /**
+     * `preloadSeconds` (forward buffer). Above 0 the media plays through a
+     * Media3 ExoPlayer ([exo]) whose load control keeps that much media
+     * ahead of the playhead; at 0 it keeps the platform MediaPlayer.
+     */
+    private var forwardBufferSeconds = 0
+    private var exo: PamExoPlayback? = null
     var onReady: (() -> Unit)? = null
 
     /** Ready with natural video size (px) and duration (s). */
@@ -121,6 +129,14 @@ internal class PamMediaView(
      */
     private val progress = object : Runnable {
         override fun run() {
+            val exoPlayer = exo
+            if (exoPlayer != null) {
+                if (prepared && onProgress != null && exoPlayer.isPlaying) {
+                    onProgress?.invoke(exoPlayer.positionMs / 1_000.0, exoPlayer.durationMs / 1_000.0)
+                }
+                main.postDelayed(this, 250)
+                return
+            }
             val player = preparedPlayer
             if (prepared && player != null && onProgress != null) {
                 val generation = playerGeneration
@@ -227,6 +243,17 @@ internal class PamMediaView(
         imageLoader.load(request, poster, NativeImageCallbacks())
     }
 
+    fun setForwardBufferSeconds(seconds: Int) {
+        val value = seconds.coerceIn(0, 300)
+        if (forwardBufferSeconds == value) return
+        forwardBufferSeconds = value
+        if (source.isNotEmpty()) {
+            val current = source
+            source = ""
+            setSource(current)
+        }
+    }
+
     fun setCacheRequest(request: MediaCacheRequest) {
         if (cacheRequest == request) return
         cacheRequest = request
@@ -258,18 +285,21 @@ internal class PamMediaView(
 
     fun setLoop(value: Boolean) {
         looping = value
+        exo?.setLooping(value)
         command { it.isLooping = value }
     }
 
     fun setMuted(value: Boolean) {
         muted = value
         val actual = audioLevel()
+        exo?.setVolume(actual)
         command { it.setVolume(actual, actual) }
     }
 
     fun setVolume(value: Float) {
         volume = value.coerceIn(0f, 1f)
         val actual = audioLevel()
+        exo?.setVolume(actual)
         command { it.setVolume(actual, actual) }
     }
     fun seek(seconds: Double) {
@@ -315,7 +345,13 @@ internal class PamMediaView(
     }
 
     private fun syncPlayback() {
-        if (prepared) command(::applyPlayback)
+        if (!prepared) return
+        val exoPlayer = exo
+        if (exoPlayer != null) {
+            if (playback.mayPlay) exoPlayer.play(rate) else exoPlayer.pause()
+            return
+        }
+        command(::applyPlayback)
     }
 
     /** The only start path, evaluated on the worker immediately before playback. */
@@ -341,6 +377,10 @@ internal class PamMediaView(
      */
     private fun prepareMedia(uri: Uri) {
         releasePlayer()
+        pamForwardBuffer(forwardBufferSeconds)?.let { buffer ->
+            prepareExo(uri, buffer)
+            return
+        }
         val generation = playerGeneration
         val surface = videoSurface
         val appContext = context.applicationContext
@@ -373,6 +413,66 @@ internal class PamMediaView(
                 preparedPlayer = player
                 if (videoSurface !== surface) runCatching { player.setSurface(videoSurface) }
             }
+        }
+    }
+
+    private fun prepareExo(uri: Uri, buffer: PamForwardBuffer) {
+        onLoadStart?.invoke()
+        val generation = playerGeneration
+        val player = runCatching {
+            PamExoPlayback(context, uri, buffer, exoListener(generation))
+        }.getOrElse {
+            onError?.invoke(it.message ?: "Media source could not be prepared.")
+            poster.visibility = VISIBLE
+            return
+        }
+        exo = player
+        player.setSurface(videoSurface)
+    }
+
+    private fun exoListener(generation: Long) = object : PamExoPlayback.Listener {
+        private fun current(): PamExoPlayback? = exo.takeIf { generation == playerGeneration }
+
+        override fun onPrepared(width: Int, height: Int, durationMs: Long) {
+            val player = current() ?: return
+            prepared = true
+            videoWidthPx = width
+            videoHeightPx = height
+            player.setLooping(looping)
+            player.setVolume(audioLevel())
+            if (currentTime > 0) player.seekTo((currentTime * 1_000).toLong())
+            syncPlayback()
+            mediaController?.isEnabled = true
+            applyVideoTransform()
+            onReady?.invoke()
+            onReadyDetails?.invoke(width, height, durationMs / 1_000.0)
+        }
+
+        override fun onVideoSize(width: Int, height: Int) {
+            current() ?: return
+            videoWidthPx = width
+            videoHeightPx = height
+            applyVideoTransform()
+        }
+
+        override fun onBuffering(buffering: Boolean) {
+            current() ?: return
+            onBuffering?.invoke(buffering)
+        }
+
+        override fun onCompletion() {
+            current() ?: return
+            playback.completed(looping)
+            onEnd?.invoke()
+            syncPlayback()
+        }
+
+        override fun onError(message: String) {
+            current() ?: return
+            prepared = false
+            showPoster()
+            mediaController?.isEnabled = false
+            onError?.invoke(message)
         }
     }
 
@@ -449,6 +549,8 @@ internal class PamMediaView(
         mediaController?.isEnabled = false
         preparedPlayer?.let(::discard)
         preparedPlayer = null
+        exo?.release()
+        exo = null
     }
 
     /** Stops and frees a player off the UI thread (release() waits for mediaserver). */
@@ -485,6 +587,7 @@ internal class PamMediaView(
         videoSurface?.release()
         val surface = Surface(texture)
         videoSurface = surface
+        exo?.setSurface(surface)
         command { it.setSurface(surface) }
     }
 
@@ -504,6 +607,11 @@ internal class PamMediaView(
     override fun onSurfaceTextureDestroyed(texture: SurfaceTexture): Boolean {
         val surface = videoSurface
         videoSurface = null
+        exo?.let {
+            it.setSurface(null)
+            surface?.release()
+            return true
+        }
         val player = preparedPlayer ?: run {
             surface?.release()
             return true
@@ -551,23 +659,34 @@ internal class PamMediaView(
         syncPlayback()
     }
 
-    override fun getDuration(): Int =
-        if (prepared) preparedPlayer?.duration?.coerceAtLeast(0) ?: 0 else 0
+    override fun getDuration(): Int = when {
+        !prepared -> 0
+        exo != null -> exo?.durationMs?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: 0
+        else -> preparedPlayer?.duration?.coerceAtLeast(0) ?: 0
+    }
 
-    override fun getCurrentPosition(): Int =
-        if (prepared) preparedPlayer?.currentPosition?.coerceAtLeast(0) ?: 0 else 0
+    override fun getCurrentPosition(): Int = when {
+        !prepared -> 0
+        exo != null -> exo?.positionMs?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt() ?: 0
+        else -> preparedPlayer?.currentPosition?.coerceAtLeast(0) ?: 0
+    }
 
     override fun seekTo(position: Int) {
         currentTime = position.coerceAtLeast(0) / 1_000.0
         if (prepared) {
             val target = position.coerceAtLeast(0)
+            exo?.let {
+                it.seekTo(target.toLong())
+                return
+            }
             command { it.seekTo(target) }
         }
     }
 
-    override fun isPlaying(): Boolean = prepared && preparedPlayer?.isPlaying == true
+    override fun isPlaying(): Boolean =
+        prepared && (exo?.isPlaying ?: (preparedPlayer?.isPlaying == true))
 
-    override fun getBufferPercentage(): Int = bufferedPercentage
+    override fun getBufferPercentage(): Int = exo?.bufferedPercentage ?: bufferedPercentage
 
     override fun canPause(): Boolean = true
 
@@ -575,7 +694,7 @@ internal class PamMediaView(
 
     override fun canSeekForward(): Boolean = true
 
-    override fun getAudioSessionId(): Int = preparedPlayer?.audioSessionId ?: 0
+    override fun getAudioSessionId(): Int = exo?.audioSessionId ?: preparedPlayer?.audioSessionId ?: 0
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
@@ -584,7 +703,7 @@ internal class PamMediaView(
         syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
-        if (source.isNotEmpty() && preparedPlayer == null && !creatingPlayer) {
+        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer) {
             val current = source
             source = ""
             setSource(current)

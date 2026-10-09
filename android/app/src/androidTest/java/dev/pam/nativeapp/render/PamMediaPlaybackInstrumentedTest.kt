@@ -132,7 +132,66 @@ class PamMediaPlaybackInstrumentedTest {
         assertStopped(media)
     }
 
-    private fun withMedia(initiallyPaused: Boolean = false, routeState: Lifecycle.State? = null, block: (PamMediaView, FrameLayout, String) -> Unit) {
+    /**
+     * `preloadSeconds` (forward buffer) plays through Media3 ExoPlayer with
+     * the same lifecycle contract as MediaPlayer: background, manual pause,
+     * hidden parent and detach.
+     */
+    @Test fun forwardBufferedMediaUsesExoPlayerWithTheSameLifecycle() = withMedia(forwardBufferSeconds = 8) { media, parent, source ->
+        val ready = CountDownLatch(1)
+        var details: Triple<Int, Int, Double>? = null
+        main {
+            media.onReady = { ready.countDown() }
+            media.onReadyDetails = { width, height, duration -> details = Triple(width, height, duration) }
+            media.setAutoPlay(true)
+            media.onHostPause()
+            media.setSource(source)
+        }
+        assertTrue("Forward-buffered media prepares", ready.await(10, TimeUnit.SECONDS))
+        main {
+            assertTrue("ExoPlayer engine", field(media, "exo") is PamExoPlayback)
+            assertEquals("No MediaPlayer is created", null, field(media, "preparedPlayer"))
+        }
+        assertEquals(5.0, details!!.third, 0.25)
+        SystemClock.sleep(150)
+        assertStopped(media)
+        main { media.onHostResume() }
+        awaitPlaying(media, true)
+        main { media.pause() }
+        awaitPlaying(media, false)
+        main { media.start(); parent.visibility = View.GONE }
+        awaitPlaying(media, false)
+        main { parent.visibility = View.VISIBLE }
+        awaitPlaying(media, true)
+        main { parent.removeView(media) }
+        main { assertEquals("Detach releases ExoPlayer", null, field(media, "exo")) }
+        assertStopped(media)
+    }
+
+    @Test fun clearingTheForwardBufferReturnsToMediaPlayer() = withMedia(forwardBufferSeconds = 4) { media, _, source ->
+        val ready = CountDownLatch(2)
+        main {
+            media.onReady = { ready.countDown() }
+            media.setSource(source)
+        }
+        SystemClock.sleep(500)
+        main { media.setForwardBufferSeconds(0) }
+        assertTrue(ready.await(10, TimeUnit.SECONDS))
+        main {
+            assertEquals(null, field(media, "exo"))
+            assertTrue(field(media, "preparedPlayer") is MediaPlayer)
+        }
+    }
+
+    private fun field(media: PamMediaView, name: String): Any? =
+        PamMediaView::class.java.getDeclaredField(name).apply { isAccessible = true }.get(media)
+
+    private fun withMedia(
+        initiallyPaused: Boolean = false,
+        routeState: Lifecycle.State? = null,
+        forwardBufferSeconds: Int = 0,
+        block: (PamMediaView, FrameLayout, String) -> Unit,
+    ) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
@@ -159,6 +218,7 @@ class PamMediaPlaybackInstrumentedTest {
                 }
                 media = PamMediaView(activity, cache, loader)
                 media.setMuted(true)
+                media.setForwardBufferSeconds(forwardBufferSeconds)
                 parent.addView(media, FrameLayout.LayoutParams(200, 120))
                 activity.host.addView(parent, FrameLayout.LayoutParams(200, 120))
             }

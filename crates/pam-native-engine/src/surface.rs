@@ -25,7 +25,8 @@ pub enum SurfacePolicy {
     /// Every `Modal`/`BottomSheet` is its own window (Android `Dialog`) that
     /// fits the system bars unless it is `statusBarTranslucent` or
     /// `navigationBarTranslucent`; then it is edge-to-edge and every edge
-    /// extends under the system bars (Android 14 and older).
+    /// extends under the system bars (Android 14 and older). A
+    /// `BottomSheet` window is always edge-to-edge.
     SystemWindows = 1,
     /// Every `Modal`/`BottomSheet` is its own edge-to-edge window that
     /// extends under every system bar whatever its translucency (Android 15+
@@ -84,8 +85,12 @@ pub(crate) fn modal_surface(
     let sheet = integer(modal, PropKey::ModalPresentation) == Some(PRESENTATION_SHEET);
     let extends_under_system_bars = match policy {
         SurfacePolicy::InWindow | SurfacePolicy::EdgeToEdgeWindows => true,
+        // A bottom sheet window is always edge to edge (React Native's
+        // @gorhom sheet lives in the edge-to-edge root): its backdrop covers
+        // the navigation bar and the sheet reaches the screen bottom.
         SurfacePolicy::SystemWindows => {
-            flag(modal, PropKey::ModalStatusBarTranslucent)
+            sheet
+                || flag(modal, PropKey::ModalStatusBarTranslucent)
                 || flag(modal, PropKey::ModalNavigationBarTranslucent)
         }
     };
@@ -233,12 +238,15 @@ mod tests {
         assert_eq!(SurfacePolicy::from_raw(3), None);
     }
 
+    /// A BottomSheet window is always edge to edge on Android (like the
+    /// @gorhom sheet inside React Native's edge-to-edge root): it reaches the
+    /// screen bottom behind the navigation bar, whose inset its content gets.
     #[test]
     fn system_window_sheet_bottom_follows_the_window() {
         let fitted = modal(&[(PropKey::ModalPresentation, PropValue::Integer(3))]);
         let surface = modal_surface(&fitted, WINDOW, Some(INSETS), SurfacePolicy::SystemWindows);
-        assert_eq!(surface.insets, Some([0.0; 4]));
-        assert!((surface.viewport.height - 728.0).abs() < f32::EPSILON);
+        assert_eq!(surface.viewport, WINDOW);
+        assert_eq!(surface.insets, Some([0.0, 0.0, 0.0, 48.0]));
         let edge_to_edge = modal(&[
             (PropKey::ModalPresentation, PropValue::Integer(3)),
             (

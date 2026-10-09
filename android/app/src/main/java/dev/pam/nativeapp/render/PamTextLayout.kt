@@ -308,9 +308,12 @@ internal object PamTextLayout {
     }
 
     /**
-     * Measures like React Native's `TextLayoutManager.measureText` followed by
-     * Yoga's text rounding: widths are ceiled to whole pixels and heights are
-     * the bottom of the last laid-out line. Returns points.
+     * Measures like React Native's `TextLayoutManager.measureText` (0.85)
+     * followed by Yoga's text rounding: the layout is built at
+     * min(desired, available) whole pixels and its width is the measured
+     * width, so text that wraps takes the whole available width (not its
+     * widest line); heights are the bottom of the last laid-out line.
+     * Returns points.
      */
     fun measure(
         raw: String,
@@ -330,15 +333,8 @@ internal object PamTextLayout {
         val desired = ceil(Layout.getDesiredWidth(text, paint).toDouble()).toInt()
         val layoutWidth = max(0, min(desired, availablePx))
         val layout = build(text, paint, layoutWidth, style)
-        var widthPx = 0f
-        for (line in 0 until layout.lineCount) {
-            val end = layout.getLineEnd(line)
-            val endsWithNewLine = end > 0 && end <= text.length && text[end - 1] == '\n'
-            widthPx = max(widthPx, if (endsWithNewLine) layout.getLineMax(line) else layout.getLineWidth(line))
-        }
-        widthPx = min(ceil(widthPx.toDouble()).toFloat(), availablePx.toFloat())
         val lines = max(1, layout.lineCount)
-        output[0] = widthPx / density
+        output[0] = layout.width / density
         output[1] = layout.getLineBottom(lines - 1) / density
         output[2] = layout.getLineBaseline(0) / density
         output[3] = lines.toFloat()

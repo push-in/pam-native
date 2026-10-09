@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.34.0 - 2026-10-09
+
+Renderer parity with React Native found while porting Zé Chat to PAM.
+
+- Layout (Android and iOS, Rust engine): `top`/`right`/`bottom`/`left` of a
+  `position: absolute` child are measured from the parent's padding box
+  (inside its border, ignoring its padding) like Yoga 3 / React Native 0.74+,
+  and so are their percentages and the size given by two opposite insets.
+  They were measured from the content box, so a badge with `top: 0; right: 0`
+  inside a padded avatar or button sat `padding` dp too low and to the left.
+  An absolute child without insets on an axis keeps its static position in
+  the content box. Grid absolute children follow the same rule.
+- Android text measurement: wrapping text measures the whole available width,
+  like React Native 0.85 `TextLayoutManager` (the layout is built at
+  min(desired, available) and its width is the result). It used the widest
+  wrapped line, so a row with a 16 dp avatar beside "Seguido(a) por …" was
+  laid out ~13 px off. Single-line and hard-break text keep their desired
+  width. iOS keeps React Native iOS semantics (TextKit `usedRect`).
+- Android `opacity`: a View/Pressable fades its subtree like React Native
+  Android — `hasOverlappingRendering()` is false, so the fill and then each
+  child are drawn with the opacity and a white label inside a faded button
+  blends with the faded fill instead of staying white over the screen. The new
+  `needsOffscreenAlphaCompositing` attribute / `Element::needsOffscreenAlphaCompositing()`
+  (property 527, RN prop of the same name) restores one flattened layer.
+  iOS already fades a subtree as a group, like React Native iOS.
+- Android `Switch`: AppCompat geometry of React Native's `SwitchCompat` — a
+  14 dp track inset 4 dp under a 20 dp thumb with 3.5 dp of padding. The
+  platform `Switch` stretched the old track drawable to the full 20 dp height.
+- Android `BottomSheet`: the sheet window is always edge to edge, like the
+  @gorhom sheet in React Native's edge-to-edge root. The backdrop covers the
+  status and navigation bars, a percentage detent resolves against the window
+  minus the top inset (the sheet top no longer lands 36–80 px higher on
+  Android 14 and older), and the sheet reaches the screen bottom; a
+  `SafeAreaView` inside it pads the navigation bar (the engine's surface
+  policy treats sheets as edge to edge). Android 15+ already behaved so.
+- Transitions (Android and iOS): removing a value (a class toggled off) runs a
+  declared `transition` / `animate` back to the default instead of snapping;
+  re-adding it before a frame continues from where the view is, so a
+  `transition: transform` survives a class removed and re-added within one
+  frame. iOS now also resets a removed `opacity`.
+- `MediaPlayer::preloadSeconds()` / `preloadSeconds="12"` is the forward
+  buffer: iOS sets `AVPlayerItem.preferredForwardBufferDuration`; Android
+  plays those players through Media3 ExoPlayer with a `DefaultLoadControl`
+  that keeps that many seconds loaded ahead (Android `MediaPlayer` has no
+  buffer control). Players without it keep `MediaPlayer`. Adds
+  `androidx.media3:media3-exoplayer:1.10.1` (and Guava) to the Android host.
+- Android runtime: `PamRuntime(...)` with the default `installModules = true`
+  no longer throws a NullPointerException (the queue of module calls was
+  initialised after the `init` block that locks it; since 1.29.0). A runtime
+  started right after another one closed no longer crashes the process: each
+  PHP lifetime (`php_embed_init` … `php_embed_shutdown`) holds a process-wide
+  lock on its worker thread, so the next one waits for the previous shutdown
+  (they used to overlap — the crash seen when the crypto bridge and reload
+  tests ran back to back). The mount trace no longer calls the API 29
+  `Trace.isEnabled()` on API 26–28.
+
 ## 1.33.1 - 2026-10-09
 
 - `Files::download()` / `Files::downloadWithProgress()` without request

@@ -37,6 +37,12 @@ eviction run away from the UI thread; native views are mutated only on their UI 
 />
 ```
 
+`preload-seconds` (`preloadSeconds()`) is the player's forward buffer: iOS sets
+`AVPlayerItem.preferredForwardBufferDuration`, and Android plays that player
+through Media3 ExoPlayer with a load control that keeps that many seconds
+loaded ahead of the playhead. `0` (default) leaves the platform player alone
+(Android `MediaPlayer`, which has no buffer control).
+
 Durations accept `ms`, `s`, `m`, `h`, and `d`. Byte sizes accept `b`, `kb`, `mb`,
 and `gb`. Cache keys and tags are restricted to stable, filesystem-safe identifiers;
 the native cache hashes them before creating files.

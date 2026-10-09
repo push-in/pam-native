@@ -266,6 +266,8 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    // Forward-buffered video (MediaPlayer preloadSeconds > 0); MediaPlayer stays the default engine.
+    implementation("androidx.media3:media3-exoplayer:1.10.1")
     if (pamFirebaseMessagingEnabled) {
         implementation("com.google.firebase:firebase-messaging:25.1.1")
     }

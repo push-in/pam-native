@@ -1010,6 +1010,20 @@ $templateGestureScope = new class {
         $this->event = $event;
     }
 };
+$offscreenTemplate = TemplateRenderer::render(
+    TemplateCompiler::compile(
+        '<View opacity="0.5" needsOffscreenAlphaCompositing="true"><Text>Faded</Text></View>',
+    ),
+    null,
+    [],
+);
+$offscreenElement = \Pam\Native\UI\View::make()->needsOffscreenAlphaCompositing();
+$assert(
+    PropKey::NeedsOffscreenAlphaCompositing->value === 527
+        && ($offscreenTemplate->properties()[PropKey::NeedsOffscreenAlphaCompositing->value] ?? null) === true
+        && $offscreenElement->properties()[PropKey::NeedsOffscreenAlphaCompositing->value] === true,
+    'needsOffscreenAlphaCompositing must compile to the additive RN-compatible property 527.',
+);
 $templateGesture = TemplateRenderer::render(
     TemplateCompiler::compile(
         '<GestureDetector gestureType="pan" on:gestureUpdate="changed">'
@@ -7156,8 +7170,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.33.1',
-    'The runtime SDK contract must match the 1.33.1 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.34.0',
+    'The runtime SDK contract must match the 1.34.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

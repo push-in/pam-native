@@ -967,7 +967,19 @@ bool run_php_request(RuntimeState* state) {
     return reload;
 }
 
+// Embedded PHP (NTS) has process-wide state: only one PHP lifetime
+// (php_embed_init .. php_embed_shutdown) may run at a time. close() stops a
+// runtime on a background thread, so a runtime started right after it would
+// initialize PHP while the previous one still shuts down (SIGSEGV). Each
+// worker holds this lock for its whole PHP lifetime; the next one waits on
+// its own worker thread, never on the UI thread.
+std::mutex& php_lifetime_mutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
 void runtime_loop(RuntimeState* state) {
+    std::unique_lock<std::mutex> php_lifetime(php_lifetime_mutex());
     active_runtime = state;
     // Attach the worker once so every batch/call/error callback reuses the
     // JNIEnv instead of attaching and detaching per call.
@@ -1009,6 +1021,7 @@ void runtime_loop(RuntimeState* state) {
         php_embed_shutdown();
     }
     active_runtime = nullptr;
+    php_lifetime.unlock();
 
     {
         AttachedEnvironment attached(state->vm);

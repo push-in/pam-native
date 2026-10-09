@@ -334,6 +334,16 @@ abstract class Element implements Renderable
         return $this->withProperty(PropKey::Collapsable, $collapsable);
     }
 
+    /**
+     * React Native `needsOffscreenAlphaCompositing` (Android): fade this
+     * view's subtree as one flattened layer instead of drawing each child
+     * with the opacity. Off by default, like React Native.
+     */
+    final public function needsOffscreenAlphaCompositing(bool $enabled = true): static
+    {
+        return $this->withProperty(PropKey::NeedsOffscreenAlphaCompositing, $enabled);
+    }
+
     final public function animate(
         int $durationMs = 180,
         AnimationEasing $easing = AnimationEasing::EaseInOut,

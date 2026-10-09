@@ -532,4 +532,5 @@ enum PropKey: int
     case ListSection = 524;
     case ListActiveSection = 525;
     case GestureNativeFocalZoom = 526;
+    case NeedsOffscreenAlphaCompositing = 527;
 }
