@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.32.1 - 2026-10-08
+
+- Android Modal: a tap on the modal's content no longer counts as a backdrop
+  tap when its layout-only wrapper was flattened into several sibling views
+  (for example a full-height `Column` holding a dismiss `Pressable` and an
+  option panel). The backdrop check now tests every top-level child; before,
+  only the first one was tested, so a press on an option row also fired
+  `requestClose`, the modal unmounted first and the row's own press was lost.
+
 ## 1.32.0 - 2026-10-08
 
 - Gestures: `gestureNativeFocalZoom="true"` (`GestureDetector::nativeTransform(focalZoom: true)`,

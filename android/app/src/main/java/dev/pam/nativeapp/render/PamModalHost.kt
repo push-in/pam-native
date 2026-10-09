@@ -187,6 +187,10 @@ internal fun isPointOutsideModalChild(
     bottom: Int,
 ): Boolean = x < left || x >= right || y < top || y >= bottom
 
+/** True when ([x], [y]) hits none of the modal's top-level children ([left, top, right, bottom]). */
+internal fun isPointOutsideModalChildren(x: Float, y: Float, children: List<IntArray>): Boolean =
+    children.all { isPointOutsideModalChild(x, y, it[0], it[1], it[2], it[3]) }
+
 internal class PamModalHost @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -1044,14 +1048,16 @@ internal class PamModalHost @JvmOverloads constructor(
 
     private fun onModalMotion(event: MotionEvent) {
         if (presentation != PRESENTATION_SHEET) {
-            val modalChild = sheetChild() ?: return
-            val outside = isPointOutsideModalChild(
+            // Layout-only wrappers are flattened, so the modal's content can
+            // arrive as several siblings (a backdrop Pressable and the panel
+            // below it): a touch is outside only when it hits none of them.
+            val modalChildren = sheetChildren()
+            if (modalChildren.isEmpty()) return
+            val outside = isPointOutsideModalChildren(
                 event.x,
                 event.y,
-                modalChild.left,
-                modalChild.top,
-                modalChild.right,
-                modalChild.bottom,
+                modalChildren.filter { it.visibility == View.VISIBLE }
+                    .map { intArrayOf(it.left, it.top, it.right, it.bottom) },
             )
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> modalBackdropPressed = outside
