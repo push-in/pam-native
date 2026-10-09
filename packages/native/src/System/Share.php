@@ -42,6 +42,9 @@ final class Share
      * Android grants temporary read access through the PAM FileProvider and uses
      * ACTION_SEND for one file or ACTION_SEND_MULTIPLE for several files.
      *
+     * `$text` (optional) travels beside the files — Android EXTRA_TEXT, iOS an
+     * extra activity item — so a picture can be shared with its caption/link.
+     *
      * @param list<string> $paths Relative private file paths.
      * @param null|Closure(): void $opened
      * @param null|Closure(string): void $failure
@@ -52,6 +55,7 @@ final class Share
         ?string $title = null,
         ?Closure $opened = null,
         ?Closure $failure = null,
+        ?string $text = null,
     ): int {
         if ($paths === [] || count($paths) > 50 || !array_is_list($paths)) {
             throw new InvalidArgumentException('Share between 1 and 50 private files.');
@@ -74,6 +78,7 @@ final class Share
                 'paths' => json_encode($normalized, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
                 'mimeType' => $mimeType,
                 'title' => $title ?? '',
+                'text' => $text ?? '',
             ],
             static function ($result) use ($opened, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {

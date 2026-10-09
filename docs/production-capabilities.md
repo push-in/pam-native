@@ -90,6 +90,31 @@ Location::current(
 The failure callback is optional for backwards compatibility. Without one,
 native failures retain the legacy exception behavior.
 
+## Watching the position
+
+`Location::watch()` is React Native's `watchPosition`: the platform location
+service (Android `LocationManager.requestLocationUpdates`, iOS
+`CLLocationManager.startUpdatingLocation`) wakes the app only after the device
+moved `distanceFilterMeters` (`0` = every update), at most every `intervalMs`
+on Android. Keep it to the foreground (the app declares no background
+location) and clear it when the feature ends:
+
+```php
+$watch = Location::watch(
+    callback: function (LocationPosition $position): void {
+        // Throttle and send the fix.
+    },
+    highAccuracy: true,
+    distanceFilterMeters: 20.0,
+    intervalMs: 5_000,
+    failure: function (string $message): void {
+        // Permission missing or no enabled provider.
+    },
+);
+// ... on background, logout or when sharing ends:
+Location::clearWatch($watch);
+```
+
 ## Push delivery, opening and deep links
 
 ```php

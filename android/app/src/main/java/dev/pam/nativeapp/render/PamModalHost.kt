@@ -104,9 +104,12 @@ internal fun modalSurfaceKeyboardInset(
     presentation: Int,
     interactiveSheet: Boolean,
     sheetLift: Int,
+    containedSheet: Boolean = false,
 ): Int = when {
     imeInset <= 0 -> 0
     presentation != 3 -> imeInset
+    // A contained sheet never moves: its content avoids the whole IME.
+    containedSheet -> imeInset
     interactiveSheet -> (imeInset - sheetLift.coerceAtLeast(0)).coerceAtLeast(0)
     else -> 0
 }
@@ -488,7 +491,7 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     fun setBottomSheetKeyboardBehavior(value: Int) {
-        bottomSheetKeyboardBehavior = value.coerceIn(KEYBOARD_INTERACTIVE, KEYBOARD_FILL_PARENT)
+        bottomSheetKeyboardBehavior = value.coerceIn(KEYBOARD_INTERACTIVE, KEYBOARD_CONTAIN)
         dialog?.let(::applyWindowConfiguration)
     }
 
@@ -758,6 +761,8 @@ internal class PamModalHost @JvmOverloads constructor(
             presentation = presentation,
             interactiveSheet = usesInteractiveKeyboard(),
             sheetLift = if (usesInteractiveKeyboard()) sheetKeyboardLiftFor(insets) else 0,
+            containedSheet = presentation == PRESENTATION_SHEET &&
+                bottomSheetKeyboardBehavior == KEYBOARD_CONTAIN,
         )
     }
 
@@ -1516,6 +1521,7 @@ internal class PamModalHost @JvmOverloads constructor(
         const val KEYBOARD_INTERACTIVE = 1
         const val KEYBOARD_EXTEND = 2
         const val KEYBOARD_FILL_PARENT = 3
+        const val KEYBOARD_CONTAIN = 4
         const val MODAL_ENTER_DURATION_MS = 225L
         const val MODAL_EXIT_DURATION_MS = 125L
         const val SHEET_ENTER_DURATION_MS = 250L

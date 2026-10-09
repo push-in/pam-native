@@ -74,6 +74,9 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.31.0 | Named secure-screen claims | n/a | PHP only (`Screen::claim/release`); the native `window.secure` call is unchanged. |
 | 1.32.0 | Focal pinch zoom (`gestureNativeFocalZoom`) | ✅ (uncompiled) | `PamNativeGestureTransform.apply(focal:pivot:)`: the pinch keeps the content point under `location(in:)` fixed around the child's untranslated `center`; an adjacent pan rebases while the surface is in `focalZoomTargets`. XCTest `testFocalPinchKeepsTheContentPointUnderTheFingersAndPanResumesFromIt`. |
 | 1.32.0 | System photo picker for images/videos | ✅ (uncompiled) | `FilesModule` presents `PHPickerViewController` (filter images/videos/both, selection limit) and copies each `loadFileRepresentation` file before importing it; other types keep `UIDocumentPickerViewController`. |
+| 1.33.0 | `Share::files()` text | ✅ (uncompiled) | `FilesModule.shareFiles` appends the text to the `UIActivityViewController` items. |
+| 1.33.0 | `BottomSheetKeyboardBehavior::Contain` | ✅ (uncompiled) | `PamModalHost.setBottomSheetKeyboardBehavior(4)`: no sheet lift, the keyboard overlap is published as the surface keyboard inset. |
+| 1.33.0 | `Location.watch` / `clearWatch` | ✅ (uncompiled) | `LocationModule` creates one `CLLocationManager` per subscription (`LocationWatch`, `distanceFilter`, `desiredAccuracy`), buffers fixes in `WatchChannel` and stops on `stop`/module close. Android registers a `LocationListener` per watch with `minTime`/`minDistance`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -142,6 +145,16 @@ Visual checks that tests cannot fully cover:
 - Photo picker (1.32.0): Criar → post opens PHPicker with photos and videos
   (multi-select up to 20), loop opens it with videos only, cancelling returns
   an empty selection, and the picked files import with their real names.
+- Share with text and contained sheets (1.33.0): `swift build` and tests must
+  pass; `Share::files(['card.jpg'], 'image/jpeg', text: 'link')` must offer the
+  image with the text (Messages/WhatsApp keep both); a `BottomSheet` with
+  `keyboardBehavior="contain"` and a bottom composer inside a
+  `KeyboardAvoidingView` must keep the sheet's top edge in place while the
+  composer rises right above the keyboard.
+- Location watch (1.33.0): `swift build`; in Zé Chat share a live
+  location for 15 min, walk ~30 m with the app open and confirm the bubble
+  moves (PATCH within 3 s), backgrounding stops the updates and `stop`
+  releases the location indicator.
 - Heavy commits after the frame (1.30.1): `swift build` and the runtime tests
   must pass; then in Ze Chat, scrolling a chat until older pages load and
   swiping Reels must show each new page on the frame after it is ready (no

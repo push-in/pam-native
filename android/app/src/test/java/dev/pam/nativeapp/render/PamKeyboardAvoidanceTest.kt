@@ -235,6 +235,23 @@ class PamKeyboardAvoidanceTest {
     }
 
     @Test
+    fun containedSheetsStayAndLetTheirContentAvoidTheWholeIme() {
+        assertEquals(
+            828,
+            modalSurfaceKeyboardInset(828, presentation = 3, interactiveSheet = false, sheetLift = 0, containedSheet = true),
+        )
+        assertEquals(
+            0,
+            modalSurfaceKeyboardInset(0, presentation = 3, interactiveSheet = false, sheetLift = 0, containedSheet = true),
+        )
+        @Suppress("DEPRECATION")
+        assertEquals(
+            android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING,
+            modalSoftInputAdjustMode(focusKeyboard = false, presentation = 3, bottomSheetKeyboardBehavior = 4),
+        )
+    }
+
+    @Test
     fun modalImeIsReexpressedFromTheHostBottom() {
         // Dialog window and host end on the same screen row.
         assertEquals(828, surfaceKeyboardInsetForHost(imeInset = 828, windowBottom = 2_340, hostBottom = 2_340))

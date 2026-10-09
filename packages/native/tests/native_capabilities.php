@@ -158,9 +158,12 @@ $share = $lastCall();
 $assert(
     $share['module'] === 'files' && $share['method'] === 'share'
         && json_decode((string) $share['values']['paths'], true) === ['exports/a.jpg', 'exports/b.mp4']
-        && $share['values']['mimeType'] === '' && $share['values']['title'] === 'Enviar',
+        && $share['values']['mimeType'] === '' && $share['values']['title'] === 'Enviar'
+        && $share['values']['text'] === '',
     'Share::files must bridge private paths to the native share sheet.',
 );
+Share::files(['exports/card.jpg'], 'image/jpeg', text: 'Veja https://example.com');
+$assert($lastCall()['values']['text'] === 'Veja https://example.com', 'Share::files must bridge the optional caption beside the files.');
 Runtime::dispatchModuleResult($share['requestId'], ModuleResultStatus::Success->value, '');
 $assert($shared, 'Share::files must confirm the opened share sheet.');
 $assert(

@@ -136,6 +136,9 @@ class NativeCapabilitiesInstrumentedTest {
         assertEquals(2, intent.clipData?.itemCount)
         assertTrue(intent.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
         assertEquals(Intent.ACTION_SEND, shareFilesIntent(uris.take(1), "image/png").action)
+        val captioned = shareFilesIntent(uris.take(1), "image/jpeg", "Veja https://example.com")
+        assertEquals("Veja https://example.com", captioned.getStringExtra(Intent.EXTRA_TEXT))
+        assertEquals(null, shareFilesIntent(uris.take(1), "image/jpeg", " ").getStringExtra(Intent.EXTRA_TEXT))
     }
 
     @Test

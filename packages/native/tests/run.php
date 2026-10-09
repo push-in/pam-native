@@ -3447,6 +3447,62 @@ $assert(
     'Location failures must reach the optional failure callback.',
 );
 
+$watched = [];
+$watchId = Location::watch(
+    static function (LocationPosition $position) use (&$watched): void {
+        $watched[] = $position->latitude;
+    },
+    highAccuracy: true,
+    distanceFilterMeters: 20.0,
+    intervalMs: 5_000,
+);
+$watchCall = TestDiagnostics::$moduleCall;
+$assert(
+    $watchCall !== null
+        && $watchCall['module'] === 'location'
+        && $watchCall['method'] === 'watch'
+        && Wire::decodeMap($watchCall['payload']) === [
+            'distanceFilterMeters' => 20.0,
+            'highAccuracy' => true,
+            'intervalMs' => 5_000,
+        ],
+    'Location::watch must emit its typed native watch call.',
+);
+Runtime::dispatchModuleResult($watchCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['subscription' => 7]));
+$nextCall = TestDiagnostics::$moduleCall;
+$assert(
+    $nextCall['method'] === 'next' && Wire::decodeMap($nextCall['payload']) === ['subscription' => 7],
+    'Location::watch must read the native subscription channel.',
+);
+Runtime::dispatchModuleResult($nextCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['latitude' => -23.5, 'longitude' => -46.6]));
+$secondNext = TestDiagnostics::$moduleCall;
+$assert($watched === [-23.5] && $secondNext['method'] === 'next' && $secondNext['requestId'] !== $nextCall['requestId'], 'Each watched position must reach the callback and re-arm the next read.');
+Location::clearWatch($watchId);
+$stopCall = TestDiagnostics::$moduleCall;
+$assert(
+    $stopCall['method'] === 'stop' && Wire::decodeMap($stopCall['payload']) === ['subscription' => 7] && !Location::watching($watchId),
+    'Location::clearWatch must stop the native subscription.',
+);
+Runtime::dispatchModuleResult($secondNext['requestId'], ModuleResultStatus::Success->value, Wire::map(['latitude' => 1.0, 'longitude' => 1.0]));
+$assert($watched === [-23.5], 'A cleared watch must ignore late positions.');
+$watchFailure = null;
+Location::watch(
+    static function (LocationPosition $_): void {
+        throw new RuntimeException('A failed watch must not deliver positions.');
+    },
+    failure: static function (string $message) use (&$watchFailure): void {
+        $watchFailure = $message;
+    },
+);
+Runtime::dispatchModuleResult(TestDiagnostics::$moduleCall['requestId'], ModuleResultStatus::Failure->value, 'Location permission is required');
+$assert($watchFailure === 'Location permission is required', 'Location::watch start failures must reach the failure callback.');
+$lateId = Location::watch(static function (LocationPosition $_): void {});
+$lateCall = TestDiagnostics::$moduleCall;
+Location::clearWatch($lateId);
+Runtime::dispatchModuleResult($lateCall['requestId'], ModuleResultStatus::Success->value, Wire::map(['subscription' => 9]));
+$lateStop = TestDiagnostics::$moduleCall;
+$assert($lateStop['method'] === 'stop' && Wire::decodeMap($lateStop['payload']) === ['subscription' => 9], 'A watch cleared before the native answer must stop the late subscription.');
+
 foreach ([true, false] as $notificationGranted) {
     $notificationDecision = null;
     $permissionRequest = \Pam\Native\System\Notifications::requestPermission(
@@ -7100,8 +7156,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.32.1',
-    'The runtime SDK contract must match the 1.32.1 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.33.0',
+    'The runtime SDK contract must match the 1.33.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,
@@ -7323,6 +7379,18 @@ $assert(
             PropKey::BottomSheetKeyboardBehavior->value
         ] === BottomSheetKeyboardBehavior::Extend->value,
     'BottomSheet must be available from declarative templates.',
+);
+$containedSheet = TemplateRenderer::render(
+    TemplateCompiler::compile('<BottomSheet keyboardBehavior="contain"><Text>Composer</Text></BottomSheet>'),
+    new class {
+    },
+    [],
+);
+$assert(
+    $containedSheet->properties()[PropKey::BottomSheetKeyboardBehavior->value]
+        === BottomSheetKeyboardBehavior::Contain->value
+        && BottomSheetKeyboardBehavior::Contain->value === 4,
+    'BottomSheet keyboardBehavior="contain" must keep the sheet in place (4).',
 );
 
 $animated = Animated::make(

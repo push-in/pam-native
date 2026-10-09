@@ -7347,6 +7347,7 @@ final class TemplateRenderer
         return match ($value) {
             2, 'extend' => BottomSheetKeyboardBehavior::Extend,
             3, 'fillParent' => BottomSheetKeyboardBehavior::FillParent,
+            4, 'contain' => BottomSheetKeyboardBehavior::Contain,
             default => BottomSheetKeyboardBehavior::Interactive,
         };
     }

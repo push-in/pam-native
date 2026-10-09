@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.33.0 - 2026-10-09
+
+- `Location::watch()` / `Location::clearWatch()`: continuous position updates
+  like React Native's `watchPosition`, with a distance filter and (Android) a
+  minimum interval, delivered through the same subscription channel as
+  `Sensors::watch()`. Android registers one `LocationListener` per watch on the
+  enabled GPS/network providers; iOS uses one `CLLocationManager` per watch
+  with `distanceFilter`. A watch cleared before the platform answers stops the
+  late subscription; closing the module stops every watch. Covered by the PHP
+  suite and an instrumented mock-provider test on API 26/36; the iOS side
+  needs the Mac checklist.
+- `Share::files()` takes an optional `text` shared beside the files (Android
+  `EXTRA_TEXT`, iOS an extra activity item), so a picture goes out with its
+  caption or link in one share sheet (React Native `Share`/`shareLocalFileWithText`).
+- `BottomSheetKeyboardBehavior::Contain` (4, template `keyboardBehavior="contain"`):
+  the sheet keeps its detent and position — its top edge never moves — and the
+  keyboard inset is published to its content, so a `KeyboardAvoidingView` or a
+  keyboard-inset `ScrollView` inside it lifts a bottom composer above the IME
+  while the list above shrinks (a @gorhom sheet with `adjustResize` and a
+  self-lifting composer). Android keeps `adjustNothing` for that window; iOS
+  stops lifting the sheet and publishes the overlap instead.
+
 ## 1.32.1 - 2026-10-08
 
 - Android Modal: a tap on the modal's content no longer counts as a backdrop

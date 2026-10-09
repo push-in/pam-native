@@ -5,6 +5,8 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
     private let manager = CLLocationManager()
     private var completion: ModuleCompletion?
     private var generation = 0
+    private var nextWatch = 1
+    private var watches: [Int: LocationWatch] = [:]
 
     override init() {
         super.init()
@@ -12,6 +14,28 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
     }
 
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
+        switch method {
+        case "watch":
+            DispatchQueue.main.async { self.watch(payload, completion) }
+            return
+        case "next":
+            DispatchQueue.main.async {
+                guard let id = Self.subscription(payload), let watch = self.watches[id] else {
+                    completion(.failure, Data("Unknown location subscription".utf8))
+                    return
+                }
+                watch.channel.next(completion)
+            }
+            return
+        case "stop":
+            DispatchQueue.main.async {
+                if let id = Self.subscription(payload) { self.stop(id) }
+                completion(.success, Data())
+            }
+            return
+        default:
+            break
+        }
         guard method == "current" else {
             completion(.failure, Data("Unknown location method \(method)".utf8))
             return
@@ -93,25 +117,101 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
         generation += 1
         completion = nil
         manager.stopUpdatingLocation()
+        DispatchQueue.main.async {
+            self.watches.keys.forEach(self.stop)
+        }
+    }
+
+    /// React Native watchPosition: one CLLocationManager per subscription,
+    /// woken after `distanceFilterMeters`; fixes are buffered in a WatchChannel.
+    private func watch(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let values = try WireMap.decode(payload)
+            guard manager.authorizationStatus == .authorizedWhenInUse ||
+                    manager.authorizationStatus == .authorizedAlways else {
+                completion(.failure, Data("Location permission is required".utf8))
+                return
+            }
+            let distance: Double
+            switch values["distanceFilterMeters"] {
+            case let .decimal(value)?: distance = value
+            case let .integer(value)?: distance = Double(value)
+            default: distance = 0
+            }
+            let watch = LocationWatch(
+                highAccuracy: values.flag("highAccuracy", fallback: true),
+                distanceFilter: min(max(distance, 0), 100_000)
+            )
+            let id = nextWatch
+            nextWatch += 1
+            watches[id] = watch
+            watch.start()
+            completion(.success, try WireMap.encode(["subscription": .integer(Int64(id))]))
+        } catch {
+            completion(.failure, Data(error.localizedDescription.utf8))
+        }
+    }
+
+    private func stop(_ id: Int) {
+        watches.removeValue(forKey: id)?.stop()
+    }
+
+    private static func subscription(_ payload: Data) -> Int? {
+        guard let values = try? WireMap.decode(payload),
+              case let .integer(value)? = values["subscription"] else { return nil }
+        return Int(value)
+    }
+
+    fileprivate static func encode(_ location: CLLocation) throws -> Data {
+        try WireMap.encode([
+            "latitude": .decimal(location.coordinate.latitude),
+            "longitude": .decimal(location.coordinate.longitude),
+            "accuracy": .decimal(max(0, location.horizontalAccuracy)),
+            "altitude": .decimal(location.altitude),
+            "speed": .decimal(max(0, location.speed)),
+            "bearing": .decimal(max(0, location.course)),
+            "timestamp": .integer(Int64(location.timestamp.timeIntervalSince1970 * 1_000)),
+        ])
     }
 
     private func finish(_ location: CLLocation, _ completion: @escaping ModuleCompletion) {
         do {
-            completion(
-                .success,
-                try WireMap.encode([
-                    "latitude": .decimal(location.coordinate.latitude),
-                    "longitude": .decimal(location.coordinate.longitude),
-                    "accuracy": .decimal(max(0, location.horizontalAccuracy)),
-                    "altitude": .decimal(location.altitude),
-                    "speed": .decimal(max(0, location.speed)),
-                    "bearing": .decimal(max(0, location.course)),
-                    "timestamp": .integer(Int64(location.timestamp.timeIntervalSince1970 * 1_000)),
-                ])
-            )
+            completion(.success, try Self.encode(location))
         } catch {
             completion(.failure, Data(error.localizedDescription.utf8))
         }
+    }
+}
+
+private final class LocationWatch: NSObject, CLLocationManagerDelegate {
+    let channel = WatchChannel()
+    private let manager = CLLocationManager()
+
+    init(highAccuracy: Bool, distanceFilter: Double) {
+        super.init()
+        manager.delegate = self
+        manager.desiredAccuracy = highAccuracy ? kCLLocationAccuracyBest : kCLLocationAccuracyHundredMeters
+        manager.distanceFilter = distanceFilter > 0 ? distanceFilter : kCLDistanceFilterNone
+    }
+
+    func start() {
+        manager.startUpdatingLocation()
+    }
+
+    func stop() {
+        manager.stopUpdatingLocation()
+        manager.delegate = nil
+        channel.close()
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last,
+              let data = try? LocationModule.encode(location) else { return }
+        channel.offer(data)
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        // Transient (kCLErrorLocationUnknown): Core Location keeps trying.
     }
 }
 

@@ -148,7 +148,8 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         val mime = requestedMime.ifEmpty { sharedMimeType(files.map(::mimeFor)) }
         val authority = "${activity.packageName}.pam.files"
         val uris = files.map { FileProvider.getUriForFile(activity, authority, it) }
-        val intent = shareFilesIntent(uris, mime)
+        val text = (values["text"] as? WireValue.Text)?.value?.takeIf(String::isNotBlank)
+        val intent = shareFilesIntent(uris, mime, text)
         val title = (values["title"] as? WireValue.Text)?.value?.takeIf(String::isNotBlank)
         val chooser = Intent.createChooser(intent, title).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -837,7 +838,7 @@ internal fun sharedMimeType(types: List<String>): String {
     return if (families.size == 1) "${families.first()}/*" else "*/*"
 }
 
-internal fun shareFilesIntent(uris: List<Uri>, mime: String): Intent {
+internal fun shareFilesIntent(uris: List<Uri>, mime: String, text: String? = null): Intent {
     require(uris.isNotEmpty()) { "At least one file is required" }
     val intent = if (uris.size == 1) {
         Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
@@ -846,6 +847,8 @@ internal fun shareFilesIntent(uris: List<Uri>, mime: String): Intent {
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
     }
     intent.type = mime
+    // Optional caption shared beside the files (EXTRA_TEXT, e.g. a link).
+    if (!text.isNullOrBlank()) intent.putExtra(Intent.EXTRA_TEXT, text)
     intent.clipData = android.content.ClipData.newRawUri(null, uris.first()).apply {
         uris.drop(1).forEach { addItem(android.content.ClipData.Item(it)) }
     }

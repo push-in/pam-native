@@ -1754,6 +1754,9 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     /// engine), with the keyboard's animation duration and curve.
     var onSurfaceKeyboardInset: ((CGFloat, TimeInterval, UInt) -> Void)?
     private var surfaceKeyboardInset: CGFloat = 0
+    /// BottomSheetKeyboardBehavior.Contain (4): the sheet never moves; its
+    /// content avoids the keyboard through the published surface inset.
+    private var bottomSheetContainsKeyboard = false
 
     private var showScheduled = false
     private var desiredVisible = true
@@ -1888,15 +1891,16 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         let end = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
         let keyboard = window.convert(end, from: window.screen.coordinateSpace)
         let frame = convert(bounds, to: window)
+        let containedSheet = presentation == Presentation.sheet && bottomSheetContainsKeyboard
         publishSurfaceKeyboard(
             Self.surfaceKeyboardInset(
                 keyboardInModal: convert(end, from: window.screen.coordinateSpace),
                 modalBounds: bounds,
-                hiding: hiding || !currentlyVisible || presentation == Presentation.sheet
+                hiding: hiding || !currentlyVisible || (presentation == Presentation.sheet && !containedSheet)
             ),
             info: info
         )
-        let lift = hiding || !currentlyVisible || presentation != Presentation.sheet
+        let lift = hiding || !currentlyVisible || presentation != Presentation.sheet || containedSheet
             ? 0
             : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
         guard abs(lift - sheetKeyboardLift) > 0.5 else { return }
@@ -1999,8 +2003,11 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     func setBottomSheetDismissible(_ value: Bool) { bottomSheetDismissible = value }
     func setBottomSheetBackdropDismiss(_ value: Bool) { bottomSheetBackdropDismiss = value }
     func setBottomSheetDragEnabled(_ value: Bool) { bottomSheetDragEnabled = value }
-    /// Every keyboard behavior keeps the sheet above the keyboard on iOS.
-    func setBottomSheetKeyboardBehavior(_: Int) {}
+    /// Interactive, Extend and FillParent keep the sheet above the keyboard on
+    /// iOS; Contain (4) keeps it in place and lets its content avoid the IME.
+    func setBottomSheetKeyboardBehavior(_ value: Int) {
+        bottomSheetContainsKeyboard = value == 4
+    }
 
     /// Whether the keyboard belongs to an input inside a presented modal or
     /// sheet: the screen below must not avoid that keyboard.

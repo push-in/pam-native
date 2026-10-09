@@ -244,7 +244,12 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                     completion(.failure, Data("No window is available for sharing".utf8))
                     return
                 }
-                let activity = UIActivityViewController(activityItems: files, applicationActivities: nil)
+                // Optional caption shared beside the files (e.g. a link).
+                var items: [Any] = files
+                if let text = values["text"]?.textValue, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    items.append(text)
+                }
+                let activity = UIActivityViewController(activityItems: items, applicationActivities: nil)
                 if let popover = activity.popoverPresentationController {
                     popover.sourceView = presenter.view
                     popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 0, height: 0)
