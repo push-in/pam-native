@@ -222,8 +222,12 @@ class PamReactNativeRenderParityInstrumentedTest {
                 bitmap.eraseColor(Color.TRANSPARENT)
                 switch.setTrackOffColor(Color.TRANSPARENT)
                 switch.draw(Canvas(bitmap))
-                val left = switch.width - (40f * density).roundToInt() + (10f * density).roundToInt()
-                thumb = (0 until bitmap.height).sumOf { Color.alpha(bitmap.getPixel(left, it)) } / 255f
+                // The disc's widest column; its baked drop shadow is black, not red.
+                thumb = (0 until bitmap.width).maxOf { x ->
+                    (0 until bitmap.height).sumOf { y ->
+                        bitmap.getPixel(x, y).let { if (Color.red(it) >= 200) Color.alpha(it) else 0 }
+                    }
+                } / 255f
             }
             assertEquals("track thickness (px) $debug", 14f * density, thickness, 1.5f)
             assertEquals("thumb diameter (px)", 20f * density, thumb, 1.5f)

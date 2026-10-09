@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.PorterDuff
 import android.view.View
 import android.widget.Switch
 import kotlin.math.min
@@ -23,21 +24,19 @@ internal class PamSwitch(context: Context) : Switch(context) {
         switchMinWidth = dp(36)
         minimumWidth = dp(40)
         minimumHeight = dp(40)
-        // React Native's Switch is an AppCompat SwitchCompat: a 20 dp thumb
-        // inside a 27 dp drawable (3.5 dp shadow padding) over a 14 dp tall
-        // track inset 4 dp from the 40 dp switch area. The platform Switch
-        // stretches the track drawable over the whole switch height, so a
-        // plain filled track was 20 dp thick.
-        trackDrawable = PamSwitchTrackDrawable(
-            intrinsicWidthPx = dp(23.5f),
-            intrinsicHeightPx = dp(16),
-            barHeightPx = dp(14),
-            horizontalInsetPx = dp(4),
-        )
-        thumbDrawable = PamSwitchThumbDrawable(diameterPx = dp(20), paddingPx = dp(3.5f))
+        // React Native's Switch is an AppCompat SwitchCompat. PAM draws it
+        // with AppCompat's own 9-patches (res/drawable-*/pam_switch_*): a 14 dp
+        // track pill and a 20 dp thumb disc with its baked drop shadow, whose
+        // 3.5 dp optical insets move the switch area in from the right edge
+        // and shrink the track exactly like SwitchCompat (Switch applies them
+        // the same way). RN colors both with MULTIPLY filters, which keep the
+        // shadow black; SRC_IN tinting would paint it in the thumb color.
+        trackDrawable = context.getDrawable(dev.pam.nativeapp.R.drawable.pam_switch_track)
+        thumbDrawable = context.getDrawable(dev.pam.nativeapp.R.drawable.pam_switch_thumb)
+        trackTintMode = PorterDuff.Mode.MULTIPLY
+        thumbTintMode = PorterDuff.Mode.MULTIPLY
         trackTintList = defaultTrackTint
         thumbTintList = defaultThumbTint
-        elevation = dp(2).toFloat()
     }
 
     fun setTrackOffColor(color: Int?) {
@@ -141,132 +140,4 @@ internal fun resolvePamSwitchMeasuredExtent(
     View.MeasureSpec.EXACTLY -> available
     View.MeasureSpec.AT_MOST -> min(available, preferred)
     else -> preferred
-}
-
-/**
- * AppCompat's `abc_switch_track_mtrl_alpha` 9-patch: a 14 dp pill, 4 dp in
- * from each horizontal edge, that stays 14 dp tall and vertically centred
- * however tall the switch draws it, with no padding (the thumb travels over
- * the whole switch width).
- */
-internal class PamSwitchTrackDrawable(
-    private val intrinsicWidthPx: Int,
-    private val intrinsicHeightPx: Int,
-    private val barHeightPx: Int,
-    private val horizontalInsetPx: Int,
-) : android.graphics.drawable.Drawable() {
-    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-    private val bar = android.graphics.RectF()
-    private var tint: ColorStateList? = null
-    private var alphaMultiplier = 255
-
-    override fun draw(canvas: android.graphics.Canvas) {
-        val bounds = bounds
-        val height = min(barHeightPx, bounds.height()).toFloat()
-        val top = bounds.exactCenterY() - height / 2f
-        bar.set(
-            (bounds.left + horizontalInsetPx).toFloat(),
-            top,
-            (bounds.right - horizontalInsetPx).toFloat(),
-            top + height,
-        )
-        if (bar.width() <= 0f) return
-        val color = tint?.getColorForState(state, tint?.defaultColor ?: Color.WHITE) ?: Color.WHITE
-        paint.color = color
-        paint.alpha = Color.alpha(color) * alphaMultiplier / 255
-        canvas.drawRoundRect(bar, height / 2f, height / 2f, paint)
-    }
-
-    override fun getIntrinsicWidth(): Int = intrinsicWidthPx
-
-    override fun getIntrinsicHeight(): Int = intrinsicHeightPx
-
-    override fun getPadding(padding: android.graphics.Rect): Boolean {
-        padding.set(0, 0, 0, 0)
-        return false
-    }
-
-    override fun setTintList(tint: ColorStateList?) {
-        this.tint = tint
-        invalidateSelf()
-    }
-
-    override fun isStateful(): Boolean = tint?.isStateful == true
-
-    override fun onStateChange(state: IntArray): Boolean {
-        invalidateSelf()
-        return tint?.isStateful == true
-    }
-
-    override fun setAlpha(alpha: Int) {
-        alphaMultiplier = alpha
-        invalidateSelf()
-    }
-
-    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
-        paint.colorFilter = colorFilter
-        invalidateSelf()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
-}
-
-/**
- * AppCompat's switch thumb: a 20 dp circle inside a 27 dp drawable whose
- * 3.5 dp padding (the shadow area of the 9-patch) lets it overhang the track
- * ends. Unlike an InsetDrawable it reports no optical insets, which would
- * shrink the track and widen the switch.
- */
-internal class PamSwitchThumbDrawable(
-    private val diameterPx: Int,
-    private val paddingPx: Int,
-) : android.graphics.drawable.Drawable() {
-    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
-    private var tint: ColorStateList? = null
-    private var alphaMultiplier = 255
-
-    override fun draw(canvas: android.graphics.Canvas) {
-        val bounds = bounds
-        val radius = min(diameterPx.toFloat(), min(bounds.width(), bounds.height()).toFloat()) / 2f
-        if (radius <= 0f) return
-        val color = tint?.getColorForState(state, tint?.defaultColor ?: Color.WHITE) ?: Color.WHITE
-        paint.color = color
-        paint.alpha = Color.alpha(color) * alphaMultiplier / 255
-        canvas.drawCircle(bounds.exactCenterX(), bounds.exactCenterY(), radius, paint)
-    }
-
-    override fun getIntrinsicWidth(): Int = diameterPx + 2 * paddingPx
-
-    override fun getIntrinsicHeight(): Int = diameterPx + 2 * paddingPx
-
-    override fun getPadding(padding: android.graphics.Rect): Boolean {
-        padding.set(paddingPx, paddingPx, paddingPx, paddingPx)
-        return true
-    }
-
-    override fun setTintList(tint: ColorStateList?) {
-        this.tint = tint
-        invalidateSelf()
-    }
-
-    override fun isStateful(): Boolean = tint?.isStateful == true
-
-    override fun onStateChange(state: IntArray): Boolean {
-        invalidateSelf()
-        return tint?.isStateful == true
-    }
-
-    override fun setAlpha(alpha: Int) {
-        alphaMultiplier = alpha
-        invalidateSelf()
-    }
-
-    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) {
-        paint.colorFilter = colorFilter
-        invalidateSelf()
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
 }

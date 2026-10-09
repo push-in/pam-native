@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.34.1 - 2026-10-09
+
+- Android `BottomSheet`: the edge-to-edge sheet window no longer enforces
+  navigation bar contrast. On Android 10–14 with three-button navigation the
+  system drew its scrim over the bottom of every sheet (near white over a light
+  sheet, near black over a dark one) while React Native's @gorhom sheet, inside
+  the edge-to-edge root, shows its own surface behind the transparent bar.
+  `navigationBarTranslucent` full-screen modals keep the scrim like RN `Modal`.
+- Android `MediaPlayer` with `preloadSeconds` > 0: HLS (`.m3u8`) sources play.
+  Those players run on Media3 ExoPlayer, which was shipped without its HLS
+  module, so preparing an `.m3u8` failed (`ClassNotFoundException:
+  androidx.media3.exoplayer.hls.HlsMediaSource$Factory`) where the platform
+  MediaPlayer (no `preloadSeconds`) plays the same stream. The renderer now depends on
+  `androidx.media3:media3-exoplayer-hls:1.10.1` (same Media3 version), so HLS
+  keeps the forward buffer instead of falling back to MediaPlayer.
+- Android `Switch`: drawn with React Native's (AppCompat `SwitchCompat`)
+  track and thumb 9-patches, tinted with MULTIPLY like `ReactSwitch`. The thumb
+  now has RN's baked drop shadow (black, also under `thumbColor`), and its
+  3.5 dp optical insets place the switch area like SwitchCompat: PAM's flat
+  disc sat flush with the view's right edge, so the off thumb was 15 px
+  (density 2.625) right of RN's. A `SwitchCompat` reference test now matches
+  PAM pixel for pixel in both positions. The view no longer sets a 2 dp
+  elevation (RN's switch has none).
+
 ## 1.34.0 - 2026-10-09
 
 Renderer parity with React Native found while porting Zé Chat to PAM.

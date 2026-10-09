@@ -169,12 +169,18 @@ internal data class ModalNavigationBarStyle(
  * appearance. A fitted modal paints the app's window background behind the
  * bar instead of the Dialog theme's black. Light icons need API 26; below
  * it a light bar would hide them, so the dark colour is kept.
+ *
+ * A BottomSheet ([sheet]) is the @gorhom sheet inside React Native's edge-to-
+ * edge root, whose window does not enforce navigation bar contrast: the sheet
+ * surface shows through the transparent bar with no system scrim (Android
+ * 10–14 drew a near-white / near-black scrim over the sheet bottom).
  */
 internal fun modalNavigationBarStyle(
     sdkInt: Int,
     translucent: Boolean,
     lightAppearance: Boolean,
     windowBackground: Int,
+    sheet: Boolean = false,
 ): ModalNavigationBarStyle {
     val light = lightAppearance && sdkInt >= Build.VERSION_CODES.O
     val color = when {
@@ -186,7 +192,7 @@ internal fun modalNavigationBarStyle(
     }
     return ModalNavigationBarStyle(
         color = color,
-        contrastEnforced = translucent,
+        contrastEnforced = translucent && !sheet,
         lightAppearance = light,
     )
 }
@@ -473,6 +479,7 @@ internal class PamModalHost @JvmOverloads constructor(
             translucent = edgeToEdgeWindow(),
             lightAppearance = PamAppearance.bool(context, R.bool.pam_light_navigation_bar, dark),
             windowBackground = PamAppearance.color(context, R.color.pam_window_background, dark),
+            sheet = presentation == PRESENTATION_SHEET,
         )
         window.navigationBarColor = style.color
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

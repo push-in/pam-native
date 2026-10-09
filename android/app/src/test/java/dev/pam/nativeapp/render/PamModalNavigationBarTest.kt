@@ -17,6 +17,18 @@ class PamModalNavigationBarTest {
     }
 
     @Test
+    fun bottom_sheet_bar_is_transparent_without_a_system_scrim_like_the_gorhom_root() {
+        assertEquals(
+            ModalNavigationBarStyle(Color.TRANSPARENT, contrastEnforced = false, lightAppearance = true),
+            modalNavigationBarStyle(31, translucent = true, lightAppearance = true, windowBackground = white, sheet = true),
+        )
+        assertEquals(
+            ModalNavigationBarStyle(Color.TRANSPARENT, contrastEnforced = false, lightAppearance = false),
+            modalNavigationBarStyle(34, translucent = true, lightAppearance = false, windowBackground = black, sheet = true),
+        )
+    }
+
+    @Test
     fun translucent_modal_keeps_light_icons_in_the_dark_theme() {
         assertEquals(
             ModalNavigationBarStyle(Color.TRANSPARENT, contrastEnforced = true, lightAppearance = false),

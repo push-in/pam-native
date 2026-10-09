@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  React Native's Android Switch thumb: AppCompat's abc_switch_thumb_material
+  (Apache-2.0, The Android Open Source Project). The 9-patches are AppCompat's
+  abc_btn_switch_to_on_mtrl_00001/00012: a 20 dp disc with its drop shadow and
+  3.5 dp optical insets.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_checked="true" android:drawable="@drawable/pam_switch_thumb_on" />
+    <item android:drawable="@drawable/pam_switch_thumb_off" />
+</selector>

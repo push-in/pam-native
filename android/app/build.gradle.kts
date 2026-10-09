@@ -268,6 +268,8 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     // Forward-buffered video (MediaPlayer preloadSeconds > 0); MediaPlayer stays the default engine.
     implementation("androidx.media3:media3-exoplayer:1.10.1")
+    // HLS (.m3u8) for those players: MediaPlayer plays HLS, so ExoPlayer must too.
+    implementation("androidx.media3:media3-exoplayer-hls:1.10.1")
     if (pamFirebaseMessagingEnabled) {
         implementation("com.google.firebase:firebase-messaging:25.1.1")
     }
@@ -276,6 +278,8 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
+    // Reference widget for the Switch pixel-parity test (React Native's ReactSwitch is a SwitchCompat).
+    androidTestImplementation("androidx.appcompat:appcompat:1.7.1")
     val pluginCount = pamPluginProperties.getProperty("plugin.count", "0").toInt()
     repeat(pluginCount) { index ->
         val module = pamPluginProperties.getProperty("plugin.$index.module")

@@ -183,6 +183,43 @@ class PamMediaPlaybackInstrumentedTest {
         }
     }
 
+    /**
+     * An HLS playlist (`.m3u8`) with `preloadSeconds` plays through ExoPlayer
+     * like it does through MediaPlayer without it: ExoPlayer needs the Media3
+     * HLS module, without which preparing the playlist fails with
+     * `ClassNotFoundException: androidx.media3.exoplayer.hls.HlsMediaSource$Factory`.
+     */
+    @Test fun forwardBufferedHlsPlaylistPlays() = withMedia(forwardBufferSeconds = 8) { media, _, _ ->
+        val directory = File(media.context.cacheDir, "pam-hls").apply { deleteRecursively(); mkdirs() }
+        val assets = InstrumentationRegistry.getInstrumentation().context.assets
+        try {
+            for (name in listOf("index.m3u8", "segment0.ts", "segment1.ts")) {
+                assets.open("pam-hls/$name").use { input -> File(directory, name).outputStream().use(input::copyTo) }
+            }
+            val ready = CountDownLatch(1)
+            var details: Triple<Int, Int, Double>? = null
+            var error: String? = null
+            main {
+                media.onReadyDetails = { width, height, duration ->
+                    details = Triple(width, height, duration)
+                    ready.countDown()
+                }
+                media.onError = { error = it; ready.countDown() }
+                media.setAutoPlay(true)
+                media.setSource(File(directory, "index.m3u8").toURI().toString())
+            }
+            assertTrue("HLS playlist prepares", ready.await(10, TimeUnit.SECONDS))
+            assertEquals("HLS error", null, error)
+            main { assertTrue("ExoPlayer engine", field(media, "exo") is PamExoPlayback) }
+            assertEquals(64, details!!.first)
+            assertEquals(48, details!!.second)
+            assertEquals(2.0, details!!.third, 0.25)
+            awaitPlaying(media, true)
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
     private fun field(media: PamMediaView, name: String): Any? =
         PamMediaView::class.java.getDeclaredField(name).apply { isAccessible = true }.get(media)
 

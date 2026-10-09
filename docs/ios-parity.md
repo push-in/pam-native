@@ -170,6 +170,12 @@ Visual checks that tests cannot fully cover:
   with `position: absolute; top: 0; right: 0` inside padded avatars must sit
   on the avatar's edge like the React Native build; OptionDialog/BottomSheet
   detents and backdrops must match the RN screenshots.
+- HLS with forward buffer and Switch thumb (1.34.1): no Swift change (AVPlayer
+  plays HLS natively and `PamVuetifySwitch` already draws a thumb shadow);
+  `swift build` and `swift test` must pass, then in Zé Chat a feed/reel video
+  whose source is an `.m3u8` with `preloadSeconds="12"` must play (and keep
+  buffering ahead), and a `Switch` must show its thumb shadow in both
+  positions and themes.
 - Header-less downloads (1.33.1): in Zé Chat, Perfil → Compartilhar must offer the profile card image (downloaded from `/api/share-cards/users/...` without headers) with the link text; no "Download request headers are invalid or unsafe" failure.
 - Location watch (1.33.0): `swift build`; in Zé Chat share a live
   location for 15 min, walk ~30 m with the app open and confirm the bubble

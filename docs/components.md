@@ -1117,3 +1117,7 @@ pixels. Explicit `width` or `height` still wins, and a parent `max-width` or
 `max-height` constraint is respected.
 Track and thumb colors remain configurable through `trackColorFalse`,
 `trackColorTrue`, and `thumbColor`.
+On Android the track and thumb are React Native's AppCompat 9-patches (the
+thumb is a 20 dp disc with a baked drop shadow and 3.5 dp optical insets),
+tinted with MULTIPLY like `ReactSwitch`, so both positions and the shadow match
+RN pixel for pixel.
