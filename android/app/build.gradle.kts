@@ -270,6 +270,9 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     // HLS (.m3u8) for those players: MediaPlayer plays HLS, so ExoPlayer must too.
     implementation("androidx.media3:media3-exoplayer-hls:1.10.1")
+    // Location: the fused provider and the "turn on location" dialog (React Native's
+    // playServices provider); LocationManager remains the fallback without Play Services.
+    implementation("com.google.android.gms:play-services-location:21.4.0")
     if (pamFirebaseMessagingEnabled) {
         implementation("com.google.firebase:firebase-messaging:25.1.1")
     }

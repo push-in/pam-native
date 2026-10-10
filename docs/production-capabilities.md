@@ -81,8 +81,13 @@ Location::current(
     highAccuracy: true,
     timeoutMs: 15_000,
     maximumAgeMs: 10_000,
-    failure: function (string $message): void {
-        Toast::show($message !== '' ? $message : 'Location is unavailable.');
+    failure: function (string $failure): void {
+        Toast::show(match (LocationError::fromFailure($failure)) {
+            LocationError::Permission => 'Allow location access.',
+            LocationError::Disabled => 'Turn on location.',
+            LocationError::Timeout => 'Location took too long. Try again outdoors.',
+            LocationError::Unavailable => 'Location is unavailable right now.',
+        });
     },
 );
 ```
@@ -90,14 +95,88 @@ Location::current(
 The failure callback is optional for backwards compatibility. Without one,
 native failures retain the legacy exception behavior.
 
+On Android, `current()`, `watch()` and `lastKnown()` use the Google Play
+Services fused provider (`FusedLocationProviderClient`, `PRIORITY_HIGH_ACCURACY`
+or `PRIORITY_BALANCED_POWER_ACCURACY` from `highAccuracy`) whenever Google Play
+Services is available, like React Native's `locationProvider: 'playServices'`,
+and the platform `LocationManager` otherwise. A fix at most `maximumAgeMs` old
+(the fused `lastLocation`, or a provider's last known location) answers without
+a new request. iOS uses Core Location.
+
+### Failure contract
+
+Every location failure is a string `"<code>: <detail>"`, for example
+`"disabled: No enabled location provider"`. The code is stable and identical
+on Android and iOS; the detail is English diagnostics, never user copy:
+
+| `LocationError` | Code | When |
+| --- | --- | --- |
+| `Permission` (1) | `permission` | No location permission (Core Location `.denied`). |
+| `Disabled` (2) | `disabled` | The system location switch is off (no enabled provider). |
+| `Unavailable` (3) | `unavailable` | No fix, no last known position, or a platform error. |
+| `Timeout` (4) | `timeout` | No fix within `timeoutMs`. |
+
+`LocationError::fromFailure(string $failure): LocationError` reads the code
+(bare messages from runtimes before 1.35.0 are recognized too) and
+`LocationError::detail(string $failure): string` strips it. Show your own
+localized message per case.
+
+### Last known position
+
+```php
+Location::lastKnown(
+    callback: fn (LocationPosition $position) => $this->showApproximate($position),
+    failure: fn (string $failure) => null, // LocationError::Unavailable when there is none
+);
+```
+
+`lastKnown()` never turns on GPS: it returns the fused `lastLocation`, then
+the newest position any `LocationManager` provider still holds (iOS:
+`CLLocationManager.location`).
+
+### Location services (the system switch)
+
+The permission and the system location switch are separate. When a request
+fails with `LocationError::Disabled`, ask to turn location on:
+
+```php
+Location::servicesEnabled(function (bool $enabled): void {
+    if ($enabled) {
+        return;
+    }
+    Location::requestServices(function (LocationServicesResult $result): void {
+        match ($result) {
+            LocationServicesResult::Enabled => $this->locate(),
+            LocationServicesResult::Denied => null, // the user said no: do not ask again now
+            LocationServicesResult::Unavailable => Location::openSettings(),
+        };
+    });
+});
+```
+
+- `Location::servicesEnabled(Closure(bool): void $callback)`: Android
+  `LocationManagerCompat.isLocationEnabled`, iOS
+  `CLLocationManager.locationServicesEnabled()`.
+- `Location::requestServices(Closure(LocationServicesResult): void $callback)`:
+  Android shows Google Play Services' "turn on location" dialog
+  (`SettingsClient.checkLocationSettings` + the resolution activity) and
+  resolves `Enabled` (1) or `Denied` (2). Without Google Play Services or an
+  activity no dialog is possible: `Enabled` when the switch is already on,
+  otherwise `Unavailable` (3). iOS has no such dialog: `Enabled` or
+  `Unavailable`.
+- `Location::openSettings(?Closure(bool): void $completed = null)`: Android
+  `Settings.ACTION_LOCATION_SOURCE_SETTINGS`; iOS the app's Settings page
+  (`UIApplication.openSettingsURLString`, the only one apps may open).
+  `$completed` receives whether the screen opened.
+
 ## Watching the position
 
 `Location::watch()` is React Native's `watchPosition`: the platform location
-service (Android `LocationManager.requestLocationUpdates`, iOS
-`CLLocationManager.startUpdatingLocation`) wakes the app only after the device
-moved `distanceFilterMeters` (`0` = every update), at most every `intervalMs`
-on Android. Keep it to the foreground (the app declares no background
-location) and clear it when the feature ends:
+service (Android fused `requestLocationUpdates`, or `LocationManager` without
+Google Play Services; iOS `CLLocationManager.startUpdatingLocation`) wakes the
+app only after the device moved `distanceFilterMeters` (`0` = every update), at
+most every `intervalMs` on Android. Keep it to the foreground (the app declares
+no background location) and clear it when the feature ends:
 
 ```php
 $watch = Location::watch(
@@ -107,8 +186,8 @@ $watch = Location::watch(
     highAccuracy: true,
     distanceFilterMeters: 20.0,
     intervalMs: 5_000,
-    failure: function (string $message): void {
-        // Permission missing or no enabled provider.
+    failure: function (string $failure): void {
+        // LocationError::Permission or LocationError::Disabled.
     },
 );
 // ... on background, logout or when sharing ends:

@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.35.0 - 2026-10-09
+
+- Android `Location`: `current()`, `watch()` and the new `lastKnown()` use the
+  Google Play Services fused provider (`FusedLocationProviderClient`,
+  `com.google.android.gms:play-services-location:21.4.0`) whenever Google Play
+  Services is available, like React Native's `locationProvider:
+  'playServices'`; `highAccuracy` picks `PRIORITY_HIGH_ACCURACY` or
+  `PRIORITY_BALANCED_POWER_ACCURACY` and a fused `lastLocation` at most
+  `maximumAgeMs` old answers without a new request. Without Play Services the
+  platform `LocationManager` path is unchanged.
+- `Location::lastKnown(Closure $callback, ?Closure $failure = null)`: the last
+  position the platform holds (fused `lastLocation`, then the newest
+  `LocationManager` provider fix; iOS `CLLocationManager.location`) without
+  starting GPS; fails with `LocationError::Unavailable` when there is none.
+- Location services switch (not the permission):
+  `Location::servicesEnabled(Closure(bool): void)`,
+  `Location::requestServices(Closure(LocationServicesResult): void)` (Android:
+  Play Services' "turn on location" dialog through `SettingsClient`, resolved
+  from the activity result; `LocationServicesResult` Enabled = 1, Denied = 2,
+  Unavailable = 3, where Unavailable means no dialog is possible and the app
+  should offer the settings screen) and
+  `Location::openSettings(?Closure(bool): void $completed = null)` (Android
+  `ACTION_LOCATION_SOURCE_SETTINGS`, iOS the app's Settings page).
+- Location failures are coded: Android and iOS send `"<code>: <detail>"`
+  with code `permission`, `disabled`, `unavailable` or `timeout`; the
+  `$failure` callbacks still receive the string and
+  `LocationError::fromFailure(string): LocationError` (Permission = 1,
+  Disabled = 2, Unavailable = 3, Timeout = 4) gives the typed reason, also for
+  the bare messages of older runtimes. `LocationError::detail()` strips the
+  code. A location switched off is now `disabled` on both platforms (Android
+  checked only for an enabled provider; iOS reported a `.denied` permission).
+
 ## 1.34.1 - 2026-10-09
 
 - Android `BottomSheet`: the edge-to-edge sheet window no longer enforces

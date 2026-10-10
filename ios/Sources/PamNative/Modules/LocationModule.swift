@@ -1,5 +1,34 @@
 import CoreLocation
 import Foundation
+import UIKit
+
+/// Why a location call failed, sent to PHP as "<code>: <detail>" (1.35.0).
+/// Same codes and order as Android's `LocationFailure` and PHP's `LocationError` (1...4).
+enum LocationFailure: String, CaseIterable {
+    case permission
+    case disabled
+    case unavailable
+    case timeout
+
+    func payload(_ detail: String) -> Data {
+        Data("\(rawValue): \(detail)".utf8)
+    }
+
+    /// Core Location errors: denied → permission, everything else unavailable.
+    static func from(_ error: Error) -> LocationFailure {
+        if let clError = error as? CLError, clError.code == .denied {
+            return .permission
+        }
+        return .unavailable
+    }
+}
+
+/// `Location::requestServices()` result (`Pam\Native\LocationServicesResult`).
+enum LocationServicesResult: Int64 {
+    case enabled = 1
+    case denied = 2
+    case unavailable = 3
+}
 
 final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLocationManagerDelegate {
     private let manager = CLLocationManager()
@@ -16,12 +45,12 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
     func invoke(method: String, payload: Data, completion: @escaping ModuleCompletion) {
         switch method {
         case "watch":
-            DispatchQueue.main.async { self.watch(payload, completion) }
+            Self.withServicesState { enabled in self.watch(payload, servicesEnabled: enabled, completion) }
             return
         case "next":
             DispatchQueue.main.async {
                 guard let id = Self.subscription(payload), let watch = self.watches[id] else {
-                    completion(.failure, Data("Unknown location subscription".utf8))
+                    completion(.failure, LocationFailure.unavailable.payload("Unknown location subscription"))
                     return
                 }
                 watch.channel.next(completion)
@@ -33,11 +62,41 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
                 completion(.success, Data())
             }
             return
+        case "lastKnown":
+            DispatchQueue.main.async { self.lastKnown(completion) }
+            return
+        case "servicesEnabled":
+            // locationServicesEnabled() may block: never on the main thread.
+            DispatchQueue.global(qos: .userInitiated).async {
+                Self.complete(completion, ["enabled": .flag(CLLocationManager.locationServicesEnabled())])
+            }
+            return
+        case "requestServices":
+            // iOS has no "turn on location" dialog for apps: the user must use Settings.
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result: LocationServicesResult = CLLocationManager.locationServicesEnabled()
+                    ? .enabled
+                    : .unavailable
+                Self.complete(completion, ["result": .integer(result.rawValue)])
+            }
+            return
+        case "openSettings":
+            DispatchQueue.main.async {
+                // Apps may only open their own Settings page (Location Services is under Privacy).
+                guard let url = URL(string: UIApplication.openSettingsURLString) else {
+                    Self.complete(completion, ["opened": .flag(false)])
+                    return
+                }
+                UIApplication.shared.open(url) { opened in
+                    Self.complete(completion, ["opened": .flag(opened)])
+                }
+            }
+            return
         default:
             break
         }
         guard method == "current" else {
-            completion(.failure, Data("Unknown location method \(method)".utf8))
+            completion(.failure, LocationFailure.unavailable.payload("Unknown location method \(method)"))
             return
         }
         do {
@@ -47,16 +106,60 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
                 .clamped(to: 1_000...60_000)
             let maximumAge = values.integer("maximumAgeMs", fallback: 30_000)
                 .clamped(to: 0...300_000)
-            DispatchQueue.main.async {
+            Self.withServicesState { enabled in
                 self.current(
                     highAccuracy: highAccuracy,
                     timeoutMs: timeout,
                     maximumAgeMs: maximumAge,
+                    servicesEnabled: enabled,
                     completion: completion
                 )
             }
         } catch {
-            completion(.failure, Data(error.localizedDescription.utf8))
+            completion(.failure, LocationFailure.unavailable.payload(error.localizedDescription))
+        }
+    }
+
+    private var authorized: Bool {
+        manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways
+    }
+
+    /// The switch first: with Location Services off iOS reports every app as `.denied`.
+    private func readinessFailure(servicesEnabled: Bool) -> Data? {
+        if !servicesEnabled {
+            return LocationFailure.disabled.payload("No enabled location provider")
+        }
+        if !authorized {
+            return LocationFailure.permission.payload("Location permission is required")
+        }
+        return nil
+    }
+
+    /// Reads `locationServicesEnabled()` off the main thread (it may block), then continues on main.
+    private static func withServicesState(_ body: @escaping (Bool) -> Void) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let enabled = CLLocationManager.locationServicesEnabled()
+            DispatchQueue.main.async { body(enabled) }
+        }
+    }
+
+    private func lastKnown(_ completion: @escaping ModuleCompletion) {
+        guard authorized else {
+            completion(.failure, LocationFailure.permission.payload("Location permission is required"))
+            return
+        }
+        guard let location = manager.location else {
+            completion(.failure, LocationFailure.unavailable.payload("No last known location"))
+            return
+        }
+        finish(location, completion)
+    }
+
+    private static func complete(_ completion: ModuleCompletion, _ values: [String: WireValue]) {
+        do {
+            completion(.success, try WireMap.encode(values))
+        } catch {
+            completion(.failure, LocationFailure.unavailable.payload(error.localizedDescription))
         }
     }
 
@@ -64,15 +167,15 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
         highAccuracy: Bool,
         timeoutMs: Int64,
         maximumAgeMs: Int64,
+        servicesEnabled: Bool,
         completion: @escaping ModuleCompletion
     ) {
         guard self.completion == nil else {
-            completion(.failure, Data("A location request is already active".utf8))
+            completion(.failure, LocationFailure.unavailable.payload("A location request is already active"))
             return
         }
-        guard manager.authorizationStatus == .authorizedWhenInUse ||
-                manager.authorizationStatus == .authorizedAlways else {
-            completion(.failure, Data("Location permission is required".utf8))
+        if let failure = readinessFailure(servicesEnabled: servicesEnabled) {
+            completion(.failure, failure)
             return
         }
 
@@ -94,7 +197,7 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
                   let pending = self.completion else { return }
             self.completion = nil
             self.generation += 1
-            pending(.failure, Data("Timed out while obtaining location".utf8))
+            pending(.failure, LocationFailure.timeout.payload("Timed out while obtaining location"))
         }
     }
 
@@ -110,7 +213,7 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
         guard let completion else { return }
         self.completion = nil
         generation += 1
-        completion(.failure, Data(error.localizedDescription.utf8))
+        completion(.failure, LocationFailure.from(error).payload(error.localizedDescription))
     }
 
     func close() {
@@ -124,12 +227,11 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
 
     /// React Native watchPosition: one CLLocationManager per subscription,
     /// woken after `distanceFilterMeters`; fixes are buffered in a WatchChannel.
-    private func watch(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+    private func watch(_ payload: Data, servicesEnabled: Bool, _ completion: @escaping ModuleCompletion) {
         do {
             let values = try WireMap.decode(payload)
-            guard manager.authorizationStatus == .authorizedWhenInUse ||
-                    manager.authorizationStatus == .authorizedAlways else {
-                completion(.failure, Data("Location permission is required".utf8))
+            if let failure = readinessFailure(servicesEnabled: servicesEnabled) {
+                completion(.failure, failure)
                 return
             }
             let distance: Double
@@ -148,7 +250,7 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
             watch.start()
             completion(.success, try WireMap.encode(["subscription": .integer(Int64(id))]))
         } catch {
-            completion(.failure, Data(error.localizedDescription.utf8))
+            completion(.failure, LocationFailure.unavailable.payload(error.localizedDescription))
         }
     }
 
@@ -178,7 +280,7 @@ final class LocationModule: NSObject, NativeModule, ClosableNativeModule, CLLoca
         do {
             completion(.success, try Self.encode(location))
         } catch {
-            completion(.failure, Data(error.localizedDescription.utf8))
+            completion(.failure, LocationFailure.unavailable.payload(error.localizedDescription))
         }
     }
 }

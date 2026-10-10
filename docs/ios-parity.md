@@ -86,6 +86,7 @@ contract (iOS gestures, animations and native modules shipped in 1.8.0).
 | 1.34.0 | Removed transform/opacity runs the transition | ✅ (uncompiled) | `resetProperty` calls `motion.animateTransition` to the default (translate 0, scale 1, rotate 0, opacity 1) before `applyTransform`; a removed `opacity` now resets `alpha` to 1. |
 | 1.34.0 | `preloadSeconds` forward buffer | ✅ (uncompiled) | `PamMediaView.setForwardBufferSeconds` sets `preferredForwardBufferDuration` on the current and every new `AVPlayerItem`. Android uses Media3 ExoPlayer only for those players. |
 | 1.34.0 | PHP lifetimes serialized, `PamRuntime` init order, `Trace.isEnabled` | n/a | Android-only causes (JNI bridge worker threads, Kotlin initialisation order, API 29 call). |
+| 1.35.0 | `Location.lastKnown`, `servicesEnabled`, `requestServices`, `openSettings`, coded failures | ✅ (uncompiled) | `LocationModule`: `lastKnown` = `CLLocationManager.location`; `servicesEnabled` = `CLLocationManager.locationServicesEnabled()` (read off the main thread); `requestServices` resolves 1 (on) or 3 (off: no system dialog exists for apps); `openSettings` opens `UIApplication.openSettingsURLString`. Failures are `"<code>: <detail>"` (`LocationFailure`: permission, disabled, unavailable, timeout); with Location Services off iOS reports `.denied`, so the switch is checked before the permission. Android uses the Play Services fused provider and its settings dialog. XCTest `LocationModuleTests`. |
 | — | `ScrollView` content size | ✅ (fix) | iOS never set `contentSize` for `<ScrollView>`; it now follows its children. |
 
 ## Validation on a Mac
@@ -160,6 +161,16 @@ Visual checks that tests cannot fully cover:
   `keyboardBehavior="contain"` and a bottom composer inside a
   `KeyboardAvoidingView` must keep the sheet's top edge in place while the
   composer rises right above the keyboard.
+- Location services and coded failures (1.35.0): `swift build` and `swift test`
+  (`LocationModuleTests`) must pass. Then in Zé Chat: with Location Services
+  off (Settings → Privacy → Location Services), "send my location" must report
+  `LocationError::Disabled` (the app's "turn on location" copy, not the
+  permission one) and `requestServices` must resolve `Unavailable`, so the app
+  offers `openSettings`, which must open the app's Settings page; with the
+  permission denied it must report `Permission`; after turning location back
+  on, `servicesEnabled` must be true, `lastKnown` must return the last fix
+  without starting GPS, and `current`/`watch` must keep working (no
+  main-thread `locationServicesEnabled` warning in the Xcode console).
 - Renderer parity (1.34.0): `swift build` and `swift test` must pass
   (`PamRenderer.resetProperty` gained `where motion.animateTransition` cases);
   then in Zé Chat: a view with `transition: transform` whose transform class

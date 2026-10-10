@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentSender
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Color
@@ -515,6 +516,19 @@ class PamActivity : FragmentActivity() {
         val request = nextActivityRequest++
         activityResultCallbacks[request] = callback
         startActivityForResult(intent, request)
+    }
+
+    /** Like launchForResult for a PendingIntent's sender (Play Services resolution dialogs). */
+    @Suppress("DEPRECATION")
+    internal fun launchIntentSenderForResult(sender: IntentSender, callback: (Int, Intent?) -> Unit) {
+        val request = nextActivityRequest++
+        activityResultCallbacks[request] = callback
+        try {
+            startIntentSenderForResult(sender, request, null, 0, 0, 0)
+        } catch (error: IntentSender.SendIntentException) {
+            activityResultCallbacks.remove(request)
+            throw error
+        }
     }
 
     @Deprecated("Deprecated in Android")

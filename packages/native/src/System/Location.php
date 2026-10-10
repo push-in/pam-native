@@ -6,11 +6,21 @@ namespace Pam\Native\System;
 
 use Closure;
 use Pam\Native\Internal\Wire;
+use Pam\Native\LocationError;
 use Pam\Native\LocationPosition;
+use Pam\Native\LocationServicesResult;
 use Pam\Native\ModuleResultStatus;
 use Pam\Native\Modules\NativeModules;
 use RuntimeException;
 
+/**
+ * Device position (React Native geolocation). Android uses the Play Services
+ * fused provider when Google Play Services is available and the platform
+ * LocationManager otherwise; iOS uses Core Location.
+ *
+ * Failures reach `$failure` as "<code>: <detail>" strings; LocationError::fromFailure()
+ * gives the typed reason (Permission, Disabled, Unavailable, Timeout).
+ */
 final class Location
 {
     private static int $nextSubscription = 1;
@@ -23,8 +33,11 @@ final class Location
     }
 
     /**
+     * One fix. A cached position at most `$maximumAgeMs` old is returned
+     * without waiting for a new one.
+     *
      * @param Closure(LocationPosition): void $callback
-     * @param Closure(string): void|null $failure
+     * @param Closure(string): void|null $failure "<code>: <detail>", see LocationError::fromFailure()
      */
     public static function current(
         Closure $callback,
@@ -61,10 +74,10 @@ final class Location
      * `$distanceFilterMeters` (0 = every update), at most every `$intervalMs`
      * on Android. Updates stop with clearWatch(); the app decides when to
      * watch (for example only in the foreground). `$failure` receives a
-     * start error (permission missing, no enabled provider).
+     * start error (LocationError::Permission, LocationError::Disabled).
      *
      * @param Closure(LocationPosition): void $callback
-     * @param Closure(string): void|null $failure
+     * @param Closure(string): void|null $failure "<code>: <detail>", see LocationError::fromFailure()
      */
     public static function watch(
         Closure $callback,
@@ -115,6 +128,112 @@ final class Location
         );
 
         return $subscription;
+    }
+
+    /**
+     * The last position the platform knows (fused `lastLocation`, then every
+     * LocationManager provider on Android; `CLLocationManager.location` on
+     * iOS) without turning on GPS. Fails with LocationError::Unavailable when
+     * there is none, LocationError::Permission without permission.
+     *
+     * @param Closure(LocationPosition): void $callback
+     * @param Closure(string): void|null $failure "<code>: <detail>", see LocationError::fromFailure()
+     */
+    public static function lastKnown(Closure $callback, ?Closure $failure = null): int
+    {
+        return NativeModules::call(
+            'location',
+            'lastKnown',
+            [],
+            static function ($result) use ($callback, $failure): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) {
+                        $failure($result->payload);
+
+                        return;
+                    }
+                    throw new RuntimeException($result->payload);
+                }
+                $callback(self::position(Wire::decodeMap($result->payload)));
+            },
+        );
+    }
+
+    /**
+     * Whether the system location switch is on (not the app permission).
+     * Android: LocationManagerCompat.isLocationEnabled; iOS:
+     * CLLocationManager.locationServicesEnabled().
+     *
+     * @param Closure(bool): void $callback
+     */
+    public static function servicesEnabled(Closure $callback): int
+    {
+        return NativeModules::call(
+            'location',
+            'servicesEnabled',
+            [],
+            static function ($result) use ($callback): void {
+                $callback(
+                    $result->status === ModuleResultStatus::Success
+                        && (Wire::decodeMap($result->payload)['enabled'] ?? false) === true,
+                );
+            },
+        );
+    }
+
+    /**
+     * Asks to turn the system location on. Android shows Google Play
+     * Services' "turn on location" dialog (SettingsClient); without Play
+     * Services or an activity, and on iOS while the switch is off, it
+     * resolves Unavailable: offer openSettings() then.
+     *
+     * @param Closure(LocationServicesResult): void $callback
+     */
+    public static function requestServices(Closure $callback): int
+    {
+        return NativeModules::call(
+            'location',
+            'requestServices',
+            [],
+            static function ($result) use ($callback): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    $callback(LocationServicesResult::Unavailable);
+
+                    return;
+                }
+                $value = Wire::decodeMap($result->payload)['result'] ?? null;
+                $callback(
+                    is_int($value)
+                        ? LocationServicesResult::tryFrom($value) ?? LocationServicesResult::Unavailable
+                        : LocationServicesResult::Unavailable,
+                );
+            },
+        );
+    }
+
+    /**
+     * Opens the system location settings (Android
+     * ACTION_LOCATION_SOURCE_SETTINGS; iOS the app's Settings page, the
+     * only one apps may open). `$completed` receives whether it opened.
+     *
+     * @param Closure(bool): void|null $completed
+     */
+    public static function openSettings(?Closure $completed = null): int
+    {
+        return NativeModules::call(
+            'location',
+            'openSettings',
+            [],
+            static function ($result) use ($completed): void {
+                if ($completed === null) {
+                    return;
+                }
+                $completed(
+                    $result->status === ModuleResultStatus::Success
+                        && (Wire::decodeMap($result->payload)['opened'] ?? false) === true,
+                );
+            },
+        );
     }
 
     public static function clearWatch(int $subscription): void
