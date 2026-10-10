@@ -1683,8 +1683,46 @@ fn child_index(tree: &Tree) -> BTreeMap<u64, Vec<&Node>> {
     children
 }
 
+/// Natural extent of scroll content along the scrolling axis, honoring each
+/// node's min/max on that axis like layout does: a row with `minHeight: 52`
+/// whose content is 44 is 52 tall, so the scroll content measured 8 per row
+/// short and its trailing padding fell outside the scrollable extent.
 #[allow(clippy::too_many_arguments)]
 fn natural_scroll_extent(
+    children: &BTreeMap<u64, Vec<&Node>>,
+    node: &Node,
+    axis: Axis,
+    available_main: f32,
+    available_cross: f32,
+    text_scale: f32,
+    text_metrics: &TextMetrics,
+    depth: usize,
+) -> Result<f32, LayoutError> {
+    let extent = unconstrained_natural_scroll_extent(
+        children,
+        node,
+        axis,
+        available_main,
+        available_cross,
+        text_scale,
+        text_metrics,
+        depth,
+    )?;
+    let (minimum, maximum) = match axis {
+        Axis::Vertical => (
+            number(node, PropKey::MinHeight),
+            number(node, PropKey::MaxHeight),
+        ),
+        Axis::Horizontal => (
+            number(node, PropKey::MinWidth),
+            number(node, PropKey::MaxWidth),
+        ),
+    };
+    constrained(extent, minimum, maximum)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn unconstrained_natural_scroll_extent(
     children: &BTreeMap<u64, Vec<&Node>>,
     node: &Node,
     axis: Axis,
@@ -5368,6 +5406,286 @@ mod tests {
     }
 
     #[test]
+    fn edit_profile_scroll_content_wrapper_measures_its_padded_column() {
+        // Zé Chat Editar perfil, dumped from the S10 (ids, parents, kinds and
+        // every property): ScrollView > content Column > Column(paddingBottom 68).
+        let mut nodes = BTreeMap::from([
+            (1, node(1, 0, 0, NodeKind::Screen, [])),
+            (
+                2,
+                node(
+                    2,
+                    1,
+                    0,
+                    NodeKind::Scroll,
+                    [(PropKey::Height, PropValue::Float(725.9))],
+                ),
+            ),
+        ]);
+        let mut wrapper = 0;
+        for line in include_str!("fixtures/edit_profile_scroll.txt").lines() {
+            let fields: Vec<&str> = line.split('|').collect();
+            if fields.len() < 7 {
+                continue;
+            }
+            let id: u64 = fields[0].parse().unwrap();
+            let mut parent: u64 = fields[1].parse().unwrap();
+            if wrapper == 0 {
+                wrapper = id;
+                parent = 2;
+            }
+            let kind = NodeKind::try_from(fields[3].parse::<u8>().unwrap()).unwrap();
+            let mut properties = Vec::new();
+            for entry in fields[6].split(';').filter(|entry| !entry.is_empty()) {
+                let (key, value) = entry.split_once('=').unwrap();
+                let Ok(key) = PropKey::try_from(key.parse::<u16>().unwrap()) else {
+                    continue;
+                };
+                let (kind, raw) = value.split_once(':').unwrap();
+                let value = match kind {
+                    "s" => PropValue::String(raw.to_string()),
+                    "i" => PropValue::Integer(raw.parse().unwrap()),
+                    "f" => PropValue::Float(raw.parse().unwrap()),
+                    "b" => PropValue::Boolean(raw == "true"),
+                    _ => continue,
+                };
+                properties.push((key, value));
+            }
+            nodes.insert(
+                id,
+                node(id, parent, fields[2].parse().unwrap(), kind, properties),
+            );
+        }
+        let padded = *nodes
+            .values()
+            .find(|node| {
+                node.properties.contains_key(&PropKey::PaddingBottom) && node.parent == wrapper
+            })
+            .map(|node| &node.id)
+            .unwrap();
+        let tree = Tree { root: 1, nodes };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 411.42856,
+                height: 868.5714,
+            },
+        )
+        .expect("edit profile layout");
+        assert!(
+            (layouts[&wrapper].height - layouts[&padded].height).abs() < 0.5,
+            "wrapper {:?} padded {:?}",
+            layouts[&wrapper],
+            layouts[&padded]
+        );
+    }
+
+    #[test]
+    fn scroll_wrapper_measures_contact_rows_like_their_layout() {
+        let f = |v: f64| PropValue::Float(v);
+        let mut nodes = vec![
+            node(1, 0, 0, NodeKind::Screen, []),
+            node(2, 1, 0, NodeKind::Scroll, []),
+            node(3, 2, 0, NodeKind::Column, []),
+            node(
+                4,
+                3,
+                0,
+                NodeKind::Column,
+                [(PropKey::PaddingBottom, f(68.0))],
+            ),
+            node(
+                5,
+                4,
+                0,
+                NodeKind::Column,
+                [
+                    (PropKey::PaddingTop, f(16.0)),
+                    (PropKey::PaddingLeft, f(16.0)),
+                    (PropKey::PaddingRight, f(16.0)),
+                ],
+            ),
+            node(
+                6,
+                5,
+                0,
+                NodeKind::View,
+                [(PropKey::Height, f(18.0)), (PropKey::MarginBottom, f(8.0))],
+            ),
+        ];
+        for row in 0..4u64 {
+            let id = 10 + row * 10;
+            nodes.push(node(
+                id,
+                5,
+                1 + row as u32,
+                NodeKind::Pressable,
+                [
+                    (PropKey::FlexDirection, PropValue::Integer(2)),
+                    (PropKey::Gap, f(10.0)),
+                    (PropKey::MinHeight, f(52.0)),
+                    (PropKey::PaddingTop, f(10.0)),
+                    (PropKey::PaddingBottom, f(10.0)),
+                    (PropKey::AlignItems, PropValue::Integer(2)),
+                ],
+            ));
+            nodes.push(node(
+                id + 1,
+                id,
+                0,
+                NodeKind::View,
+                [(PropKey::Height, f(36.0)), (PropKey::Width, f(36.0))],
+            ));
+            nodes.push(node(
+                id + 2,
+                id,
+                1,
+                NodeKind::Column,
+                [(PropKey::FlexGrow, f(1.0))],
+            ));
+            nodes.push(node(
+                id + 3,
+                id + 2,
+                0,
+                NodeKind::Text,
+                [
+                    (
+                        PropKey::Text,
+                        PropValue::String("Data de nascimento".into()),
+                    ),
+                    (PropKey::FontSize, f(15.0)),
+                ],
+            ));
+            nodes.push(node(
+                id + 4,
+                id + 2,
+                1,
+                NodeKind::Text,
+                [
+                    (PropKey::Text, PropValue::String("28/11/1994".into())),
+                    (PropKey::FontSize, f(13.0)),
+                    (PropKey::MarginTop, f(3.0)),
+                ],
+            ));
+            nodes.push(node(
+                id + 5,
+                id,
+                2,
+                NodeKind::View,
+                [
+                    (PropKey::MinHeight, f(28.0)),
+                    (PropKey::PaddingLeft, f(10.0)),
+                    (PropKey::PaddingRight, f(10.0)),
+                ],
+            ));
+            nodes.push(node(
+                id + 6,
+                id + 5,
+                0,
+                NodeKind::Text,
+                [
+                    (PropKey::Text, PropValue::String("Só você vê".into())),
+                    (PropKey::FontSize, f(11.0)),
+                ],
+            ));
+        }
+        let tree = Tree {
+            root: 1,
+            nodes: nodes.into_iter().map(|node| (node.id, node)).collect(),
+        };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 411.0,
+                height: 800.0,
+            },
+        )
+        .expect("scroll layout");
+        let rows_bottom = layouts[&40].y + layouts[&40].height;
+        assert_eq!(
+            layouts[&4].y + layouts[&4].height,
+            rows_bottom + 68.0,
+            "inner column pads below the rows"
+        );
+        assert_eq!(
+            layouts[&3].height, layouts[&4].height,
+            "the wrapper measures its child like its layout"
+        );
+    }
+
+    #[test]
+    fn nested_scroll_content_column_measures_its_child_padding() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, [])),
+                (2, node(2, 1, 0, NodeKind::Scroll, [])),
+                (3, node(3, 2, 0, NodeKind::Column, [])),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::PaddingBottom, PropValue::Float(68.0))],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        4,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(900.0))],
+                    ),
+                ),
+                (
+                    6,
+                    node(
+                        6,
+                        4,
+                        1,
+                        NodeKind::Pressable,
+                        [
+                            (PropKey::FlexDirection, PropValue::Integer(2)),
+                            (PropKey::MinHeight, PropValue::Float(52.0)),
+                            (PropKey::PaddingTop, PropValue::Float(10.0)),
+                            (PropKey::PaddingBottom, PropValue::Float(10.0)),
+                        ],
+                    ),
+                ),
+                (7, node(7, 6, 0, NodeKind::Column, [])),
+                (
+                    8,
+                    node(
+                        8,
+                        7,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(45.0))],
+                    ),
+                ),
+            ]),
+        };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("scroll layout");
+        assert_eq!(layouts[&6].height, 65.0);
+        assert_eq!(layouts[&4].height, 1033.0);
+        assert_eq!(
+            layouts[&3].height, 1033.0,
+            "the wrapper keeps its child's padding"
+        );
+    }
+
+    #[test]
     fn scroll_content_extent_includes_the_content_padding_bottom() {
         let tree = Tree {
             root: 1,
@@ -5376,13 +5694,44 @@ mod tests {
                 (2, node(2, 1, 0, NodeKind::Scroll, [])),
                 (
                     3,
-                    node(3, 2, 0, NodeKind::Column, [(PropKey::PaddingBottom, PropValue::Float(68.0))]),
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::Column,
+                        [(PropKey::PaddingBottom, PropValue::Float(68.0))],
+                    ),
                 ),
-                (4, node(4, 3, 0, NodeKind::View, [(PropKey::Height, PropValue::Float(900.0))])),
-                (5, node(5, 3, 1, NodeKind::View, [(PropKey::Height, PropValue::Float(1.0))])),
+                (
+                    4,
+                    node(
+                        4,
+                        3,
+                        0,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(900.0))],
+                    ),
+                ),
+                (
+                    5,
+                    node(
+                        5,
+                        3,
+                        1,
+                        NodeKind::View,
+                        [(PropKey::Height, PropValue::Float(1.0))],
+                    ),
+                ),
             ]),
         };
-        let layouts = calculate(&tree, Size { width: 360.0, height: 640.0 }).expect("scroll layout");
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("scroll layout");
         assert_eq!(layouts[&3].height, 969.0);
         assert_eq!(layouts[&5].y, 900.0);
     }

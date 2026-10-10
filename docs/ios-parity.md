@@ -100,6 +100,9 @@ mirror the Android instrumented tests: `PamCssPaintTests`,
 
 Visual checks that tests cannot fully cover:
 
+- Scroll content min/max (1.37.1): engine-only (Rust); in Zé Chat Editar
+  perfil scrolled to the end the "Senha" row must sit 68 pt above the home
+  indicator, as in RN.
 - ScrollView bottom padding (1.36.0): no Swift change (iOS already sizes the
   content from the engine frames); in Zé Chat, Editar perfil and Configurações
   scrolled to the end must show the bottom padding above the home indicator.

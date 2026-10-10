@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.37.1 - 2026-10-10
+
+- Scroll content measures each node's `minHeight` / `maxHeight` (and
+  `minWidth` / `maxWidth` on horizontal scrollers) like layout does. A
+  content Column holding rows with `minHeight: 52` whose content was shorter
+  was measured several rows short, so the scroll extent ended before the
+  content's bottom padding (Zé Chat Editar perfil: the last row sat on the
+  navigation bar instead of 68 dp above it). Android and iOS share the fix.
+
 ## 1.37.0 - 2026-10-10
 
 - `System\ViewCapture::capture()` (new, Android and iOS): renders a mounted
