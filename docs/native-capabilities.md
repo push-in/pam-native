@@ -374,6 +374,31 @@ any number of listeners to Active/Inactive/Background transitions
 fraction of the viewport, and re-arms after the content grows or the user
 scrolls back (Android).
 
+### Capturing a view as an image
+
+`System\ViewCapture::capture($ref, $callback, pixelRatio:, format:, quality:, directory:)`
+renders a mounted view and its subtree (React Native's view-shot) into a
+private PNG (`ImageCaptureFormat::Png`) or JPEG under the app's files. The view
+is found by its `nativeRef` attribute and drawn with its own content only:
+its opacity, transform and position belong to its parent, so a view kept
+invisible by an ancestor (`opacity: 0`, off screen or under other content)
+captures as it would look on screen. Compose stickers, cards or share images
+with ordinary components and real text layout, wait for their images'
+`on:load`, then capture:
+
+```php
+ViewCapture::capture('share-card', function (?CapturedImage $image, string $error): void {
+    if ($image === null) return;
+    // $image->file is a private FileReference; $image->width / height in pixels.
+}, pixelRatio: 3.0, directory: 'share-cards');
+```
+
+`pixelRatio` is output pixels per point (`0` uses the screen density); each
+side is capped at 4096 pixels. A ref that is not mounted or not laid out
+reports an error. Android draws the view into a bitmap on the UI thread and
+encodes it on a worker; iOS renders the layer tree with
+`UIGraphicsImageRenderer`.
+
 ## Incoming shares
 
 Declare only the MIME types the application accepts:

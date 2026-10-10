@@ -120,4 +120,28 @@ final class PamNativeGestureTransformTests: XCTestCase {
         coordinator.remove(5)
         XCTAssertFalse(opacity.isRunning)
     }
+
+    func testPanFollowsTheFingerUnderAScaledOrRotatedAncestor() {
+        // A layer of a logical canvas drawn at half size, itself committed at 2x.
+        let canvas = UIView(frame: CGRect(x: 0, y: 0, width: 568, height: 1010))
+        canvas.transform = CGAffineTransform(scaleX: 0.5, y: 0.5)
+        let layer = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 60))
+        layer.transform = CGAffineTransform(scaleX: 2, y: 2)
+        let content = UIView(frame: layer.bounds)
+        canvas.addSubview(layer)
+        layer.addSubview(content)
+        let scaled = PamNativeGestureTransform.parentSpaceVector(CGPoint(x: -80, y: 0), for: content)
+        XCTAssertEqual(scaled.x, -80, accuracy: 0.001)
+        XCTAssertEqual(scaled.y, 0, accuracy: 0.001)
+        layer.transform = .identity
+        let half = PamNativeGestureTransform.parentSpaceVector(CGPoint(x: -80, y: 0), for: content)
+        XCTAssertEqual(half.x, -160, accuracy: 0.001)
+        // Rotated 90° clockwise: a leftward drag runs down the parent's y axis.
+        canvas.transform = CGAffineTransform(rotationAngle: .pi / 2)
+        let rotated = PamNativeGestureTransform.parentSpaceVector(CGPoint(x: -80, y: 0), for: content)
+        XCTAssertEqual(rotated.x, 0, accuracy: 0.001)
+        XCTAssertEqual(rotated.y, 80, accuracy: 0.001)
+        canvas.transform = .identity
+        XCTAssertEqual(PamNativeGestureTransform.parentSpaceVector(CGPoint(x: 12, y: -4), for: content), CGPoint(x: 12, y: -4))
+    }
 }

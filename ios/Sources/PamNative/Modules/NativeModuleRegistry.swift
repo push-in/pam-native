@@ -27,6 +27,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
     private let biometrics = BiometricsModule()
     private let secureStorage = SecureStorageModule()
     private let image = ImagePrefetchModule()
+    private let viewCapture = ViewCaptureModule()
     private let modules: [String: NativeModule]
 
     public init(additionalModules: [String: NativeModule] = [:]) {
@@ -56,6 +57,7 @@ public final class NativeModuleRegistry: @unchecked Sendable {
             "biometrics": biometrics,
             "secure-storage": secureStorage,
             "image": image,
+            "view-capture": viewCapture,
         ]
         GeneratedPamModules.create().forEach { values[$0.key] = $0.value }
         additionalModules.forEach { name, module in

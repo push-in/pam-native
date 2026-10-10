@@ -38,6 +38,13 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val biometrics = (context as? android.app.Activity)?.let(::BiometricsModule)
     private val secureStorage = SecureStorageModule(context)
     private val image = ImagePrefetchModule(context)
+    private val viewCapture = (context as? dev.pam.nativeapp.PamActivity)?.let { activity ->
+        ViewCaptureModule(
+            activity.filesDir,
+            density = { activity.resources.displayMetrics.density },
+            findView = activity::viewForNativeRef,
+        )
+    }
     private val modules: Map<String, NativeModule> = buildMap {
         put("http", http)
         put("storage", storage)
@@ -64,6 +71,7 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
         biometrics?.let { put("biometrics", it) }
         put("secure-storage", secureStorage)
         put("image", image)
+        viewCapture?.let { put("view-capture", it) }
         putAll(GeneratedPamModules.create(context))
     }
 

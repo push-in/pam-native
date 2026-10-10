@@ -1405,6 +1405,15 @@ class PamRenderer(
      * that yield to input, vsync and the first PHP batch; stops as soon as a
      * commit starts or the targets are reached.
      */
+    /** The mounted view whose `nativeRef` is [ref] (ViewCapture), across every surface of this renderer. */
+    fun viewForNativeRef(ref: String): View? {
+        for (index in 0 until views.size()) {
+            val view = views.valueAt(index) ?: continue
+            if (view.getTag(dev.pam.nativeapp.R.id.pam_native_ref) == ref) return view
+        }
+        return null
+    }
+
     fun prewarmViews() {
         if (prewarmActive || nodes.size() > 0) return
         prewarmActive = true

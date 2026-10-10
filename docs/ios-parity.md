@@ -204,6 +204,15 @@ Visual checks that tests cannot fully cover:
   with `position: absolute; top: 0; right: 0` inside padded avatars must sit
   on the avatar's edge like the React Native build; OptionDialog/BottomSheet
   detents and backdrops must match the RN screenshots.
+- ViewCapture and pan under transformed ancestors (1.37.0): `swift build` and
+  `swift test` (`ViewCaptureModuleTests`, `PamNativeGestureTransformTests`)
+  must pass; then in Zé Chat, "Compartilhar no story" of a feed post must open
+  the composer on the blurred cover with the repost card (avatar, @author,
+  media with play badge for a video, caption) and, from Lembranças, the
+  "Lembrança" sticker above it; tapping the card cycles light/dark and
+  with/without caption; dragging any story layer (text, card, sticker) must
+  follow the finger exactly, also after resizing it with −/+ and on a
+  rotated layer.
 - HLS with forward buffer and Switch thumb (1.34.1): no Swift change (AVPlayer
   plays HLS natively and `PamVuetifySwitch` already draws a thumb shadow);
   `swift build` and `swift test` must pass, then in Zé Chat a feed/reel video

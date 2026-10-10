@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.37.0 - 2026-10-10
+
+- `System\ViewCapture::capture()` (new, Android and iOS): renders a mounted
+  view found by its `nativeRef`, with its subtree, into a private PNG or JPEG
+  (`ImageCaptureFormat`), `pixelRatio` output pixels per point (each side
+  capped at 4096), and returns a `CapturedImage` (file, width, height). The
+  view is drawn with its own content only, so a view kept invisible by an
+  ancestor (`opacity: 0`) captures as it would look on screen — React
+  Native's view-shot, used by Zé Chat for story stickers (repost card,
+  memory sticker, blurred background) drawn with real text layout.
+- `gestureNativeTransform` pan: the translation follows the finger under a
+  scaled or rotated ancestor. It was applied in screen pixels to the child's
+  translation, which lives in its parent's space, so a story layer on a
+  logical canvas drawn at half size moved twice as far as the finger (and a
+  rotated parent sent it sideways). The vector is now mapped through the
+  inverse of every ancestor transform (Android `View.getMatrix()`, iOS
+  `layer.affineTransform()`); without transformed ancestors nothing changes.
+
 ## 1.36.0 - 2026-10-10
 
 Notification actions for every app (found porting Zé Chat's notification

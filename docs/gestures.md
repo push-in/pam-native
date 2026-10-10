@@ -65,6 +65,12 @@ rate. `on:gestureBegin`, `on:gestureEnd` and `on:gestureCancel` remain
 available for semantic state updates; omit `on:gestureUpdate` to keep PHP out
 of the frame loop.
 
+The finger moves in screen pixels and the child translates in its parent's
+space: under a scaled or rotated ancestor (a layer on a logical canvas drawn
+at a uniform scale, a layer committed at 2x) the translation is mapped
+through the inverse of those transforms, so the child keeps following the
+finger. Pinch and rotation are relative and need no mapping.
+
 ```pam
 <GestureDetector
     gestureType="pinch"

@@ -48,6 +48,8 @@ import dev.pam.nativeapp.modules.PamDeepLinks
 
 class PamActivity : FragmentActivity() {
     internal lateinit var rootHost: PamRootHost
+    /** The renderer of this surface: ViewCapture finds `nativeRef` views through it. */
+    private var activeRenderer: PamRenderer? = null
         private set
     private lateinit var runtime: PamRuntime
     private var hotReload: HotReloadClient? = null
@@ -79,6 +81,9 @@ class PamActivity : FragmentActivity() {
     private var nextActivityRequest = 50_000
     private var runtimeStarted = false
     private var fullyDrawnReported = false
+
+    /** ViewCapture: the mounted view tagged with `nativeRef` [ref], if any. */
+    internal fun viewForNativeRef(ref: String): View? = activeRenderer?.viewForNativeRef(ref)
 
     /** Uptime of this Activity's first committed native frame (0 = none yet). */
     @Volatile
@@ -149,6 +154,7 @@ class PamActivity : FragmentActivity() {
         val renderer = PamRenderer(this, host) { nodeId, kind, payload ->
             runtime.dispatchEvent(nodeId, kind, payload)
         }
+        activeRenderer = renderer
         val onFrameCommitted: (RuntimeFrameMetrics) -> Unit = {
             devTools.update(it)
             errorOverlay?.onFrameCommitted()

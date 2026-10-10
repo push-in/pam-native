@@ -34,6 +34,9 @@ struct PamNativeGestureTransform {
         var current = PamMotionTarget.transform(of: view)
         switch type {
         case 2, 5:
+            // The finger moves in screen points; the view translates in its
+            // superview's space, which a scaled or rotated ancestor transforms.
+            let translation = Self.parentSpaceVector(translation, for: view)
             if Self.focalZoomTargets.contains(ObjectIdentifier(view)) {
                 // Resume panning from wherever the focal pinch leaves the content.
                 base.translateX = current.translateX - translation.x
@@ -60,6 +63,27 @@ struct PamNativeGestureTransform {
         }
         PamMotionTarget.setTransform(current, on: view)
         return current
+    }
+}
+
+extension PamNativeGestureTransform {
+    /// A screen-space vector expressed in `view`'s superview coordinates: the
+    /// inverse of the linear part (scale, rotation) of every ancestor's
+    /// transform, from the superview up to the window.
+    static func parentSpaceVector(_ vector: CGPoint, for view: UIView) -> CGPoint {
+        var combined = CGAffineTransform.identity
+        var ancestor = view.superview
+        while let current = ancestor {
+            let transform = current.layer.affineTransform()
+            if !transform.isIdentity {
+                combined = combined.concatenating(CGAffineTransform(a: transform.a, b: transform.b, c: transform.c, d: transform.d, tx: 0, ty: 0))
+            }
+            ancestor = current.superview
+        }
+        if combined.isIdentity { return vector }
+        let determinant = combined.a * combined.d - combined.b * combined.c
+        guard abs(determinant) > 0.000_001 else { return vector }
+        return CGPoint(x: vector.x, y: vector.y).applying(combined.inverted())
     }
 }
 
