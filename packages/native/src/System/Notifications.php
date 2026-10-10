@@ -48,7 +48,7 @@ final class Notifications
     }
 
     /**
-     * Receives inline replies and mark-as-read taps. Actions performed while
+     * Receives inline replies, mark-as-read and button taps. Actions performed while
      * PHP was not running are queued natively and delivered on subscription.
      *
      * @param Closure(NotificationAction): void $callback
@@ -105,6 +105,8 @@ final class Notifications
                     statusCode: (int) ($values['statusCode'] ?? 0),
                     timestamp: (int) ($values['timestamp'] ?? 0),
                     credentialMissing: (bool) ($values['credentialMissing'] ?? false),
+                    action: (string) ($values['action'] ?? ''),
+                    failureShown: (bool) ($values['failureShown'] ?? false),
                 ));
             }
             self::armActions($subscription);

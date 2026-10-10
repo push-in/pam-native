@@ -61,6 +61,8 @@ internal class PamScrollContainer @JvmOverloads constructor(
     private var scrollTargetAlignment = SCROLL_TARGET_START
     private var keyboardAvoidanceInsetPx = 0
     private var keyboardBaseContentExtentPx = 0
+    private var engineContentWidthPx = 0
+    private var engineContentHeightPx = 0
     private val applyOffsetRunnable = Runnable {
         offsetScheduled = false
         applyRequestedOffset()
@@ -363,19 +365,10 @@ internal class PamScrollContainer @JvmOverloads constructor(
         keyboardAvoidanceInsetPx = inset
         if (horizontal) {
             content.setPadding(0, 0, inset, 0)
-            content.minimumWidth = if (inset > 0) {
-                keyboardBaseContentExtentPx + inset
-            } else {
-                0
-            }
         } else {
             content.setPadding(0, 0, 0, inset)
-            content.minimumHeight = if (inset > 0) {
-                keyboardBaseContentExtentPx + inset
-            } else {
-                0
-            }
         }
+        applyMinimumContentExtent()
         if (inset == 0) keyboardBaseContentExtentPx = 0
         content.requestLayout()
         if (anchorToEnd && wasNearEnd) {
@@ -388,6 +381,42 @@ internal class PamScrollContainer @JvmOverloads constructor(
     }
 
     fun keyboardAvoidanceInsetPixels(): Int = keyboardAvoidanceInsetPx
+
+    /**
+     * Extent of the scroll content as laid out by the engine (pixels), i.e.
+     * the content node's frame including its padding. A layout-only content
+     * node has no view, so without it the FrameLayout only measured the last
+     * child's bottom and the content's bottom padding could not be scrolled
+     * into view.
+     */
+    fun setEngineContentExtent(widthPx: Int, heightPx: Int) {
+        val width = widthPx.coerceAtLeast(0)
+        val height = heightPx.coerceAtLeast(0)
+        if (engineContentWidthPx == width && engineContentHeightPx == height) return
+        engineContentWidthPx = width
+        engineContentHeightPx = height
+        applyMinimumContentExtent()
+        content.requestLayout()
+    }
+
+    private fun applyMinimumContentExtent() {
+        val inset = keyboardAvoidanceInsetPx
+        if (horizontal) {
+            content.minimumWidth = if (inset > 0) {
+                maxOf(keyboardBaseContentExtentPx, engineContentWidthPx) + inset
+            } else {
+                engineContentWidthPx
+            }
+            content.minimumHeight = 0
+        } else {
+            content.minimumHeight = if (inset > 0) {
+                maxOf(keyboardBaseContentExtentPx, engineContentHeightPx) + inset
+            } else {
+                engineContentHeightPx
+            }
+            content.minimumWidth = 0
+        }
+    }
 
     fun ensureKeyboardTargetVisible(target: View) {
         if (keyboardAvoidanceInsetPx <= 0) return

@@ -153,6 +153,48 @@ final class NativeCapabilitiesParityTests: XCTestCase {
         XCTAssertEqual(PamPushRendering.timestamp("2023-11-14T22:13:20Z"), 1_700_000_000_000)
     }
 
+    func testReplyFailuresResolveStatusesServerMessagesAndOffline() {
+        let config: [String: Any] = [
+            "offline": ["text": "Sem conexão.", "retry": true, "keepReply": true, "serverMessage": false],
+            "statuses": [
+                ["codes": [401], "text": "Sua sessão expirou.", "retry": false, "keepReply": false, "serverMessage": false],
+                ["codes": [422], "text": "Não foi possível enviar.", "retry": true, "keepReply": true, "serverMessage": true],
+            ],
+            "otherwise": ["text": "O servidor não respondeu.", "retry": true, "keepReply": true, "serverMessage": false],
+        ]
+        XCTAssertEqual(PamReplyFailure.resolve(config, status: 0, message: nil), PamReplyFailure(text: "Sem conexão.", retry: true, keepReply: true))
+        XCTAssertEqual(PamReplyFailure.resolve(config, status: 401, message: "x"), PamReplyFailure(text: "Sua sessão expirou.", retry: false, keepReply: false))
+        XCTAssertEqual(PamReplyFailure.resolve(config, status: 422, message: "Aguarde 10 s."), PamReplyFailure(text: "Aguarde 10 s.", retry: true, keepReply: true))
+        XCTAssertEqual(PamReplyFailure.resolve(config, status: 503, message: nil).text, "O servidor não respondeu.")
+        let id = Int64(PamReplyFailure.createActionId(now: 1_700_000_000_000))!
+        XCTAssertTrue((1_700_000_000_000_000...1_700_000_000_000_999).contains(id))
+    }
+
+    func testRuleCategoriesAndMostSpecificMatch() {
+        let message: [String: Any] = [
+            "type": "1", "field": "chat_type",
+            "reply": ["label": "Responder", "hideWhen": ["can_reply": "0"]],
+            "markRead": ["label": "Marcar como lida"],
+            "replyFailures": ["retryLabel": "Tentar de novo"],
+            "category": ["identifier": "ZE_MESSAGE_REPLY", "withoutReply": "ZE_MESSAGE"],
+        ]
+        let invite: [String: Any] = [
+            "type": "5", "where": ["system_event": "post_collaboration_invite"], "requires": ["collaboration_invite_id"],
+            "actions": [["id": "decline", "label": "Recusar"], ["id": "accept", "label": "Aceitar"]],
+            "category": ["identifier": "POST_COLLABORATION_INVITE", "withoutReply": ""],
+        ]
+        let generic: [String: Any] = ["type": "5"]
+        let plan = PamNotificationCategories.plan([message, invite, generic])
+        XCTAssertEqual(plan["ZE_MESSAGE_REPLY"], [PamConversationNotifications.replyAction, PamConversationNotifications.markReadAction])
+        XCTAssertEqual(plan["ZE_MESSAGE"], [PamConversationNotifications.markReadAction])
+        XCTAssertEqual(plan["ZE_MESSAGE_REPLY.pam-failed-retry"], [PamNotificationCategories.retryAction, PamConversationNotifications.replyAction])
+        XCTAssertEqual(plan["POST_COLLABORATION_INVITE"], ["pam.button.decline", "pam.button.accept"])
+        let rules = [generic, invite]
+        XCTAssertNotNil(PamPushRendering.select(rules, data: ["type": 5, "system_event": "post_collaboration_invite", "collaboration_invite_id": "9"])?["where"])
+        XCTAssertNil(PamPushRendering.select(rules, data: ["type": 5, "system_event": "post_collaboration_invite"])?["where"])
+        XCTAssertNil(PamPushRendering.select(rules, data: ["type": "5", "system_event": "admin"])?["where"])
+    }
+
     func testConversationHistoryMergesByIdAndKeepsLatest() throws {
         let first = try PamConversationSpec.from([
             "key": "c-1",

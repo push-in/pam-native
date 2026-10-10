@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.36.0 - 2026-10-10
+
+Notification actions for every app (found porting Zé Chat's notification
+"Responder" and collaboration invites):
+
+- `PushRenderingRule::reply(..., hideWhen: ['can_reply' => '0'])` leaves the
+  inline reply out for pushes whose data says the recipient may not reply.
+- `PushRenderingRule::replyFailures(ReplyFailures)`: the reply is sent first;
+  if the endpoint fails (offline, 401/403/404/409/422/429, other errors, or no
+  account credential = 401) the unsent text stays in the conversation
+  notification under the configured sender ("Not sent") with the reason (or
+  the server's JSON `message` with `serverMessage`), an optional retry button
+  that re-sends the same request and, when opened, the text in the push data
+  field `draftField`. `NotificationAction::$failureShown` tells PHP not to
+  resend it.
+- `{action_id}`: a positive integer unique per action (milliseconds × 1000 +
+  random) for numeric client ids; `{action_id}` and `{uuid}` keep their values
+  across a retry so the server can dedupe.
+- `PushRenderingRule::where($field, $value)` and `requires(...$fields)` (present,
+  non-empty): extra data conditions; the most
+  specific matching rule wins.
+- `PushRenderingRule::action($id, $label, ActionEndpoint, dismiss:)`:
+  background buttons (up to 3) on standard notifications, sent natively with
+  the app killed; reported as `NotificationActionType::Button` with
+  `NotificationAction::$action`.
+- iOS: `PushRenderingRule::category($id, withoutReply:)` registers the APNs
+  categories with the rule's reply (`UNTextInputNotificationAction`),
+  mark-as-read, retry and buttons and answers them natively from
+  `PamPushNotifications.didReceive(response:)`; failed replies stay as a
+  local notification in the same thread.
+- Android text: a text without allocated width centered (or end-aligned) by
+  its parent now moves as a block with its lines start-aligned, like the RN
+  shrink-wrapped Text box, instead of centering each wrapped line (iOS:
+  alignments 5/6 in `PamTextLayout`).
+- Templates: a `Text` / `Span` leaf no longer trims the spaces of
+  interpolated values (`{{ ' · '.$pronouns }}` kept its separator only through
+  an `<If>` workaround); only the template's own whitespace at the edges is
+  dropped, like the string RN renders.
+- `RefreshControl` adopts the flex item sizing of its scroll content
+  (`flexGrow`, `flexShrink`, `flexBasis`, `minHeight`, `alignSelf`) unless it
+  authors its own: RN's `refreshControl` is a prop of the ScrollView, whose
+  `flex: 1` fills the screen, so a wrapper no longer needs its own `flexGrow`.
+- Android `ScrollView`: the scrollable extent is the engine frame of the
+  content (padding included). A layout-only content `Column` has no view, so
+  the content measured only to its last child and a bottom padding (e.g.
+  `safeBottom + 20` above the navigation bar) could never be scrolled into
+  view; iOS already used the frames.
+
 ## 1.35.0 - 2026-10-09
 
 - Android `Location`: `current()`, `watch()` and the new `lastKnown()` use the

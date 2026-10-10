@@ -955,6 +955,38 @@ final class TemplateRenderer
      *
      * @return array<string, mixed>
      */
+    /**
+     * Drops only the whitespace the template itself puts at the edges of a
+     * Text / Span leaf (its first and last static characters); spaces that
+     * come from interpolated values stay, like the string RN renders.
+     *
+     * @param list<CompiledTemplateNode> $nodes
+     */
+    private static function trimStaticEdges(array $nodes, string $text): string
+    {
+        if ($text === '') {
+            return $text;
+        }
+        $first = $nodes[0] ?? null;
+        $last = $nodes[count($nodes) - 1] ?? null;
+        $lead = $first instanceof CompiledTemplateNode && $first->kind === 2
+            ? strspn((string) $first->value, " \t\n\r\0\x0B")
+            : 0;
+        $trail = 0;
+        if ($last instanceof CompiledTemplateNode && $last->kind === 2) {
+            $value = (string) $last->value;
+            $trail = strlen($value) - strlen(rtrim($value));
+        }
+        if ($first === $last && $lead > 0 && $lead === strlen((string) $first->value)) {
+            return trim($text);
+        }
+        if ($lead + $trail >= strlen($text)) {
+            return trim($text);
+        }
+
+        return substr($text, $lead, strlen($text) - $lead - $trail);
+    }
+
     private static function nodePlan(CompiledTemplateNode $node): array
     {
         $attributes = self::directiveAliases($node->attributes);
@@ -1689,7 +1721,7 @@ final class TemplateRenderer
             }
         }
         if ($richParts === null && $textTag) {
-            $text = trim($text);
+            $text = self::trimStaticEdges($defaultNodes, $text);
         }
         if ($text !== '' && $richParts === null) {
             $values['text'] ??= $text;
@@ -2542,7 +2574,7 @@ final class TemplateRenderer
             }
         }
         if ($richParts === null && $textTag) {
-            $text = trim($text);
+            $text = self::trimStaticEdges($childNodes, $text);
         }
         if ($text !== '' && $richParts === null) {
             $values['text'] ??= $text;

@@ -33,8 +33,26 @@ public enum PamPushNotifications {
     /// Call `completionHandler` exactly as UIKit hands it in.
     public static func didReceive(response: UNNotificationResponse, completionHandler: @escaping () -> Void) {
         let userInfo = response.notification.request.content.userInfo
+        // APNs pushes whose category belongs to a PushRendering rule (reply,
+        // mark-as-read, retry, buttons) are answered natively.
+        if userInfo[PamConversationNotifications.userInfoKey] == nil,
+           response.actionIdentifier != UNNotificationDefaultActionIdentifier,
+           response.actionIdentifier != UNNotificationDismissActionIdentifier {
+            let token = PamBackgroundTaskToken()
+            let finish = PamMainCallback(completionHandler)
+            token.begin("pam-notification-category-action")
+            let handled = PamNotificationCategories.handle(response) {
+                DispatchQueue.main.async {
+                    finish.call()
+                    token.end()
+                }
+            }
+            if handled { return }
+            token.end()
+        }
         guard let key = userInfo[PamConversationNotifications.userInfoKey] as? String,
               response.actionIdentifier == PamConversationNotifications.replyAction ||
+                response.actionIdentifier == PamNotificationCategories.retryAction ||
                 response.actionIdentifier == PamConversationNotifications.markReadAction else {
             if response.actionIdentifier != UNNotificationDismissActionIdentifier {
                 didOpen(response: response)
@@ -42,11 +60,16 @@ public enum PamPushNotifications {
             completionHandler()
             return
         }
-        let type = response.actionIdentifier == PamConversationNotifications.replyAction
-            ? PamNotificationActionType.reply
-            : PamNotificationActionType.markRead
+        let retrying = response.actionIdentifier == PamNotificationCategories.retryAction
+        let type = response.actionIdentifier == PamConversationNotifications.markReadAction
+            ? PamNotificationActionType.markRead
+            : PamNotificationActionType.reply
+        let retry: (actionId: String, uuid: String)? = retrying
+            ? ((userInfo[PamNotificationCategories.retryActionIdKey] as? String) ?? "", (userInfo[PamNotificationCategories.retryUuidKey] as? String) ?? "")
+            : nil
         let text = String(
-            ((response as? UNTextInputNotificationResponse)?.userText ?? "")
+            ((response as? UNTextInputNotificationResponse)?.userText
+                ?? (retrying ? userInfo[PamNotificationCategories.retryTextKey] as? String : nil) ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
                 .prefix(PamConversationMessage.maxText)
         )
@@ -59,7 +82,7 @@ public enum PamPushNotifications {
         let finish = PamMainCallback(completionHandler)
         DispatchQueue.main.async {
             token.begin("pam-notification-action")
-            PamNotificationActions.handle(type: type, key: key, text: text) {
+            PamNotificationActions.handle(type: type, key: key, text: text, retry: retry) {
                 DispatchQueue.main.async {
                     finish.call()
                     token.end()

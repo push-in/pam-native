@@ -1499,7 +1499,7 @@ class PamRenderer(
             NodeKind.INPUT_ACCESSORY_VIEW,
             -> PamContainer(context)
             NodeKind.PRESSABLE -> PamPressable(context)
-            NodeKind.TEXT -> TextView(context).apply {
+            NodeKind.TEXT -> PamTextView(context).apply {
                 // React Native Android defaults: includeFontPadding=true,
                 // high-quality breaking, no hyphenation, fallback spacing.
                 includeFontPadding = true
@@ -2337,6 +2337,24 @@ class PamRenderer(
         return left.size.compareTo(right.size)
     }
 
+    /** The engine extent of a ScrollView's content (its direct children's frames, padding included). */
+    private fun updateScrollContentExtent(scrollId: Long) {
+        val scroll = views[scrollId] as? PamScrollContainer ?: return
+        val scrollFrame = frames[scrollId] ?: return
+        var right = 0f
+        var bottom = 0f
+        children.get(scrollId)?.forEach { childId ->
+            val child = frames[childId] ?: return@forEach
+            right = maxOf(right, child.x + child.width - scrollFrame.x)
+            bottom = maxOf(bottom, child.y + child.height - scrollFrame.y)
+        }
+        val density = resourcesDensity()
+        scroll.setEngineContentExtent(
+            kotlin.math.ceil(right * density).toInt(),
+            kotlin.math.ceil(bottom * density).toInt(),
+        )
+    }
+
     private fun effectiveParent(start: Long): Long {
         var parent = start
         var depth = 0
@@ -2383,6 +2401,9 @@ class PamRenderer(
     }
 
     private fun applyLayout(id: Long) {
+        nodes[id]?.let { state ->
+            if (nodes[state.parent]?.kind == NodeKind.SCROLL) updateScrollContentExtent(state.parent)
+        }
         if (views[id] == null) return
         virtualCellRoot(id)?.let { rootId ->
             val slotFrame = cellSlotFrame(rootId) ?: return
@@ -7004,7 +7025,21 @@ class PamRenderer(
         } else {
             parent?.integer(PropKey.JUSTIFY_CONTENT, 1L) == 2L
         }
-        view.gravity = horizontal or if (allocatedHeight || centeredByParent) Gravity.CENTER_VERTICAL else Gravity.TOP
+        // An implicit (parent-driven) center/end places the text box, not each
+        // line: wrapped lines stay start-aligned inside it like RN/Yoga.
+        val implicit = authored == null || authored == 0
+        val block = if (implicit && view is PamTextView) {
+            when (horizontal) {
+                Gravity.CENTER_HORIZONTAL -> 0.5f
+                Gravity.END -> 1f
+                else -> 0f
+            }
+        } else {
+            0f
+        }
+        (view as? PamTextView)?.blockAlignment = block
+        val lineGravity = if (block > 0f) Gravity.START else horizontal
+        view.gravity = lineGravity or if (allocatedHeight || centeredByParent) Gravity.CENTER_VERTICAL else Gravity.TOP
     }
 
     private fun applyLineHeight(view: TextView, state: NodeState) {

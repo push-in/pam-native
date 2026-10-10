@@ -76,12 +76,32 @@ public object PamPushRendering {
         val type = rule.getString("type")
         require(type.isNotBlank() && type.length <= 128) { "Push rendering type is invalid" }
         require(rule.optInt("kind") in KIND_CONVERSATION..KIND_DISMISS) { "Push rendering kind is invalid" }
-        preferences(context).edit().putString(key(rule.optString("field", "type"), type), rule.toString()).apply()
+        preferences(context).edit().putString(key(rule.optString("field", "type"), type, rule.optJSONObject("where"), rule.optJSONArray("requires")), rule.toString()).apply()
     }
 
     internal fun forget(context: Context, field: String, type: String) {
-        preferences(context).edit().remove(key(field, type)).apply()
+        val prefix = key(field, type, null, null)
+        val editor = preferences(context).edit()
+        preferences(context).all.keys.filter { it == prefix || it.startsWith(prefix + "\u0000") }.forEach(editor::remove)
+        editor.apply()
     }
+
+    /** The registered rule for this push: type field plus every `where` condition; the most specific wins. */
+    internal fun select(context: Context, data: JSONObject): JSONObject? =
+        preferences(context).all.values.asSequence()
+            .mapNotNull { value -> (value as? String)?.let { runCatching { JSONObject(it) }.getOrNull() } }
+            .filter { candidate ->
+                data.opt(candidate.optString("field", "type"))?.toString() == candidate.optString("type") &&
+                    (candidate.optJSONObject("where") ?: JSONObject()).let { where ->
+                        where.keys().asSequence().all { field -> data.opt(field)?.toString() == where.optString(field) }
+                    } &&
+                    (candidate.optJSONArray("requires") ?: JSONArray()).let { required ->
+                        (0 until required.length()).all { index ->
+                            !data.opt(required.optString(index))?.toString().isNullOrBlank() && data.opt(required.optString(index)) != JSONObject.NULL
+                        }
+                    }
+            }
+            .maxByOrNull { (it.optJSONObject("where")?.length() ?: 0) + (it.optJSONArray("requires")?.length() ?: 0) }
 
     internal fun clear(context: Context) {
         preferences(context).edit().clear().apply()
@@ -91,11 +111,7 @@ public object PamPushRendering {
     @JvmStatic
     public fun render(context: Context, id: String, title: String, body: String, dataJson: String): Boolean {
         val data = runCatching { JSONObject(dataJson) }.getOrNull() ?: return false
-        val rule = preferences(context).all.values.asSequence()
-            .mapNotNull { value -> (value as? String)?.let { runCatching { JSONObject(it) }.getOrNull() } }
-            .firstOrNull { candidate ->
-                data.opt(candidate.optString("field", "type"))?.toString() == candidate.optString("type")
-            } ?: return false
+        val rule = select(context, data) ?: return false
         val variables = NotificationTemplate.variables(dataJson) + mapOf(
             "_id" to id,
             "_title" to title,
@@ -124,6 +140,10 @@ public object PamPushRendering {
                 val sender = text(message.optString("sender"))
                 if (key.isEmpty() || messageText.isEmpty() || sender.isEmpty()) return false
                 val reply = rule.optJSONObject("reply")
+                // hideWhen: the push says this recipient may not reply (e.g. can_reply = "0").
+                val replyHidden = reply?.optJSONObject("hideWhen")?.let { hide ->
+                    hide.keys().asSequence().any { field -> variables[field] == hide.optString(field) }
+                } ?: false
                 val markRead = rule.optJSONObject("markRead")
                 PamConversationNotifications.show(
                     context,
@@ -144,7 +164,7 @@ public object PamPushRendering {
                                 ),
                             ),
                         ),
-                        replyLabel = reply?.optString("label").orEmpty(),
+                        replyLabel = if (replyHidden) "" else reply?.optString("label").orEmpty(),
                         replyEndpoint = reply?.optJSONObject("endpoint"),
                         markReadLabel = markRead?.optString("label").orEmpty(),
                         markReadEndpoint = markRead?.optJSONObject("endpoint"),
@@ -153,6 +173,8 @@ public object PamPushRendering {
                         importance = rule.optInt("importance", 3),
                         channelId = rule.optString("channelId").ifBlank { ConversationSpec.DEFAULT_CHANNEL },
                         channelName = rule.optString("channelName").ifBlank { "Messages" },
+                        replyFailures = rule.optJSONObject("replyFailures"),
+                        failure = null,
                     ),
                 )
                 return true
@@ -177,6 +199,26 @@ public object PamPushRendering {
         deepLink: String,
         dataJson: String,
     ) {
+        val notification = buildNotification(context, rule, id, title, body, deepLink, dataJson)
+        val compat = NotificationManagerCompat.from(context)
+        if (!PamConversationNotifications.canPostNotifications(context, compat)) return
+        try {
+            compat.notify(TAG, id.hashCode(), notification)
+        } catch (_: SecurityException) {
+            // Permission revoked between the check and the post.
+        }
+    }
+
+    /** Standard notification of a rule, with its background buttons (PushRenderingRule::action()). */
+    internal fun buildNotification(
+        context: Context,
+        rule: JSONObject,
+        id: String,
+        title: String,
+        body: String,
+        deepLink: String,
+        dataJson: String,
+    ): android.app.Notification {
         val channelId = rule.optString("channelId").ifBlank { "pam-push" }
         val manager = context.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(channelId) == null) {
@@ -196,7 +238,7 @@ public object PamPushRendering {
             putExtra("pam.notification.data", dataJson)
             putExtra("pam.notification.deepLink", deepLink)
         }
-        val notification = NotificationCompat.Builder(context, channelId)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(dev.pam.nativeapp.R.drawable.pam_icon)
             .setContentTitle(title)
             .setContentText(body)
@@ -214,14 +256,33 @@ public object PamPushRendering {
                     )
                 }
             }
-            .build()
-        val compat = NotificationManagerCompat.from(context)
-        if (!PamConversationNotifications.canPostNotifications(context, compat)) return
-        try {
-            compat.notify("pam-push", id.hashCode(), notification)
-        } catch (_: SecurityException) {
-            // Permission revoked between the check and the post.
+        val buttons = rule.optJSONArray("actions") ?: JSONArray()
+        for (index in 0 until minOf(buttons.length(), 3)) {
+            val button = buttons.optJSONObject(index) ?: continue
+            val endpoint = button.optJSONObject("endpoint") ?: continue
+            val intent = Intent(context, PamNotificationActionReceiver::class.java)
+                .setAction(PamConversationNotifications.ACTION_BUTTON)
+                .setPackage(context.packageName)
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_ID, button.optString("id"))
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_ENDPOINT, endpoint.toString())
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_DATA, dataJson)
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_DEEP_LINK, deepLink)
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_TAG, TAG)
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_NOTIFICATION, id.hashCode())
+                .putExtra(PamConversationNotifications.EXTRA_BUTTON_DISMISS, button.optBoolean("dismiss", true))
+            val pending = PendingIntent.getBroadcast(
+                context,
+                (id.hashCode() * 31) + 16 + index,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(
+                NotificationCompat.Action.Builder(0, button.optString("label"), pending)
+                    .setShowsUserInterface(false)
+                    .build(),
+            )
         }
+        return builder.build()
     }
 
     internal fun timestamp(value: String): Long {
@@ -231,7 +292,14 @@ public object PamPushRendering {
         return runCatching { Instant.parse(value).toEpochMilli() }.getOrDefault(System.currentTimeMillis())
     }
 
-    private fun key(field: String, type: String): String = "$field\u0000$type"
+    private const val TAG = "pam-push"
+
+    private fun key(field: String, type: String, where: JSONObject?, requires: JSONArray?): String {
+        val base = "$field\u0000$type"
+        val conditions = (where?.keys()?.asSequence()?.sorted()?.map { "$it=${where.optString(it)}" }?.toList() ?: emptyList()) +
+            (0 until (requires?.length() ?: 0)).map { "$" + requires!!.optString(it) }.sorted()
+        return if (conditions.isEmpty()) base else base + conditions.joinToString("") { "\u0000$it" }
+    }
 
     private fun preferences(context: Context) =
         context.applicationContext.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)

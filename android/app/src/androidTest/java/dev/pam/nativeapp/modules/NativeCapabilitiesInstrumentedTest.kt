@@ -497,6 +497,187 @@ class NativeCapabilitiesInstrumentedTest {
         }
     }
 
+    private fun replyFailures(): JSONObject = JSONObject()
+        .put("sender", "Não enviada")
+        .put("retryLabel", "Tentar de novo")
+        .put("draftField", "reply_draft")
+        .put("offline", JSONObject().put("text", "Sem conexão.").put("retry", true).put("keepReply", true).put("serverMessage", false))
+        .put(
+            "statuses",
+            JSONArray()
+                .put(JSONObject().put("codes", JSONArray().put(401)).put("text", "Sua sessão expirou.").put("retry", false).put("keepReply", false).put("serverMessage", false))
+                .put(JSONObject().put("codes", JSONArray().put(422)).put("text", "Não foi possível enviar.").put("retry", true).put("keepReply", true).put("serverMessage", true)),
+        )
+        .put("otherwise", JSONObject().put("text", "O servidor não respondeu.").put("retry", true).put("keepReply", true).put("serverMessage", false))
+
+    private fun failureConversation(key: String, base: String, account: String = "user-a") = ConversationSpec(
+        key = key,
+        messages = listOf(ConversationMessage("m1", "Oi", 1_000, ConversationPerson("Ana"))),
+        replyLabel = "Responder",
+        markReadLabel = "Marcar como lida",
+        replyEndpoint = JSONObject()
+            .put("method", "POST")
+            .put("url", "$base/chats/{chat_id}/notification-replies")
+            .put("headers", JSONObject().put("Authorization", "Bearer {credential:user_id}"))
+            .put("body", JSONObject().put("body", "{reply}").put("client_message_id", "{action_id}").put("idempotency_key", "r:{uuid}")),
+        replyFailures = replyFailures(),
+        dataJson = """{"chat_id":"42","user_id":"$account"}""",
+    )
+
+    @Test
+    fun replyFailuresResolveStatusesServerMessagesAndOffline() {
+        val config = replyFailures()
+        assertEquals(ReplyFailure("Sem conexão.", true, true), ReplyFailure.resolve(config, 0, null))
+        assertEquals(ReplyFailure("Sua sessão expirou.", false, false), ReplyFailure.resolve(config, 401, "ignored"))
+        assertEquals(ReplyFailure("Aguarde 10 s.", true, true), ReplyFailure.resolve(config, 422, "Aguarde 10 s."))
+        assertEquals(ReplyFailure("Não foi possível enviar.", true, true), ReplyFailure.resolve(config, 422, "x".repeat(161)))
+        assertEquals(ReplyFailure("O servidor não respondeu.", true, true), ReplyFailure.resolve(config, 503, null))
+    }
+
+    @Test
+    fun failedInlineReplyStaysWithReasonRetryAndDraft() {
+        val key = "chat-${UUID.randomUUID()}"
+        PamNotificationCredentials.replace(context, mapOf("user-a" to "token-a"))
+        try {
+            val firstBody: JSONObject
+            LocalServer(
+                response = "HTTP/1.1 422 Unprocessable\r\nContent-Type: application/json\r\nContent-Length: 34\r\n\r\n",
+                body = """{"message":"Modo lento: aguarde."}""".toByteArray(Charsets.UTF_8),
+            ).use { server ->
+                PamConversationNotifications.show(context, failureConversation(key, "http://127.0.0.1:${server.port}"))
+                PamNotificationActions.handle(context, NotificationActionType.REPLY, key, "Já vou")
+                firstBody = JSONObject(String(server.request().body, Charsets.UTF_8))
+                assertTrue(firstBody.getString("client_message_id").toLong() > 0)
+                val event = drainAction(key)
+                assertEquals(WireValue.Integer(422), event["statusCode"])
+                assertEquals(WireValue.Flag(true), event["failureShown"])
+                val failed = PamConversationNotifications.load(context, key)!!
+                assertEquals("Modo lento: aguarde.", failed.failure!!.optString("text"))
+                assertEquals("Já vou", failed.failure!!.optString("failedText"))
+                assertEquals(1, failed.messages.size)
+                val notification = PamConversationNotifications.build(context, failed).build()
+                assertEquals(listOf("Tentar de novo", "Responder", "Marcar como lida"), notification.actions.map { it.title.toString() })
+                assertEquals("Não enviada", notification.extras.getCharSequence(NotificationCompat.EXTRA_SUB_TEXT)?.toString())
+                val style = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)!!
+                assertEquals(listOf("Oi", "Já vou", "Modo lento: aguarde."), style.messages.map { it.text.toString() })
+                val draft = PamConversationNotifications.openIntent(context, failed)!!
+                assertEquals("Já vou", JSONObject(draft.getStringExtra("pam.notification.data")!!).getString("reply_draft"))
+            }
+            LocalServer(response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n").use { server ->
+                val failed = PamConversationNotifications.load(context, key)!!.failure!!
+                PamConversationNotifications.show(context, failureConversation(key, "http://127.0.0.1:${server.port}").copy(messages = emptyList()))
+                PamNotificationActions.handle(
+                    context,
+                    NotificationActionType.REPLY,
+                    key,
+                    failed.optString("failedText"),
+                    retry = ReplyRetry(failed.optString("actionId"), failed.optString("uuid")),
+                )
+                val retried = JSONObject(String(server.request().body, Charsets.UTF_8))
+                assertEquals(firstBody.getString("client_message_id"), retried.getString("client_message_id"))
+                assertEquals(firstBody.getString("idempotency_key"), retried.getString("idempotency_key"))
+                val event = drainAction(key)
+                assertEquals(WireValue.Flag(false), event["failureShown"])
+                val sent = PamConversationNotifications.load(context, key)!!
+                assertNull(sent.failure)
+                assertEquals("Já vou", sent.messages.last().text)
+                assertNull(sent.messages.last().sender)
+            }
+        } finally {
+            PamConversationNotifications.cancel(context, key)
+            PamNotificationCredentials.clear(context)
+        }
+    }
+
+    @Test
+    fun replyWithoutCredentialShowsSignedOutWithoutReplyOrRetry() {
+        val key = "chat-${UUID.randomUUID()}"
+        PamNotificationCredentials.replace(context, mapOf("user-a" to "token-a"))
+        try {
+            LocalServer(response = "HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n").use { server ->
+                PamConversationNotifications.show(context, failureConversation(key, "http://127.0.0.1:${server.port}", "user-b"))
+                PamNotificationActions.handle(context, NotificationActionType.REPLY, key, "Oi")
+                assertNull(server.requestOrNull(500))
+                val failed = PamConversationNotifications.load(context, key)!!
+                assertEquals("Sua sessão expirou.", failed.failure!!.optString("text"))
+                val actions = PamConversationNotifications.build(context, failed).build().actions.map { it.title.toString() }
+                assertEquals(listOf("Marcar como lida"), actions)
+                assertEquals(WireValue.Flag(true), drainAction(key)["credentialMissing"])
+            }
+        } finally {
+            PamConversationNotifications.cancel(context, key)
+            PamNotificationCredentials.clear(context)
+        }
+    }
+
+    @Test
+    fun pushRulesHideTheReplyAndPreferTheMostSpecificMatchWithButtons() {
+        val conversation = JSONObject()
+            .put("type", "1").put("field", "chat_type")
+            .put("kind", PamPushRendering.KIND_CONVERSATION)
+            .put("conversation", JSONObject().put("key", "{chat_id}"))
+            .put("message", JSONObject().put("sender", "{actor_name}").put("text", "{body}"))
+            .put("reply", JSONObject().put("label", "Responder").put("hideWhen", JSONObject().put("can_reply", "0")))
+        val generic = JSONObject().put("type", "5").put("kind", PamPushRendering.KIND_NOTIFICATION).put("title", "{title}").put("body", "{body}")
+        val invite = JSONObject(generic.toString())
+            .put("where", JSONObject().put("system_event", "post_collaboration_invite"))
+            .put("requires", JSONArray().put("invite"))
+            .put(
+                "actions",
+                JSONArray()
+                    .put(JSONObject().put("id", "decline").put("label", "Recusar").put("dismiss", true)
+                        .put("endpoint", JSONObject().put("method", "POST").put("url", "https://api.test/c/{invite}/respond").put("body", JSONObject().put("status", 3))))
+                    .put(JSONObject().put("id", "accept").put("label", "Aceitar").put("dismiss", true)
+                        .put("endpoint", JSONObject().put("method", "POST").put("url", "https://api.test/c/{invite}/respond").put("body", JSONObject().put("status", 2)))),
+            )
+        PamPushRendering.register(context, conversation.toString())
+        PamPushRendering.register(context, generic.toString())
+        PamPushRendering.register(context, invite.toString())
+        val chat = "c${UUID.randomUUID().toString().take(8)}"
+        try {
+            PamActiveRoute.setForeground(false)
+            val data = JSONObject().put("chat_type", "1").put("chat_id", chat).put("actor_name", "Ana").put("body", "Oi").put("can_reply", "0")
+            assertTrue(PamPushRendering.render(context, "p1", "", "", data.toString()))
+            assertEquals("", PamConversationNotifications.load(context, chat)!!.replyLabel)
+            assertTrue(PamPushRendering.render(context, "p2", "", "", data.put("can_reply", "1").put("body", "De novo").toString()))
+            assertEquals("Responder", PamConversationNotifications.load(context, chat)!!.replyLabel)
+
+            val pushInvite = JSONObject().put("type", "5").put("system_event", "post_collaboration_invite").put("invite", "9").put("title", "Convite").put("body", "Ana")
+            assertEquals(invite.getJSONObject("where").toString(), PamPushRendering.select(context, pushInvite)!!.optJSONObject("where")!!.toString())
+            val withoutInvite = JSONObject().put("type", "5").put("system_event", "post_collaboration_invite").put("invite", " ").put("title", "Convite")
+            assertNull(PamPushRendering.select(context, withoutInvite)!!.optJSONObject("where"))
+            val other = JSONObject().put("type", "5").put("system_event", "admin_support").put("title", "Aviso").put("body", "Oi")
+            assertNull(PamPushRendering.select(context, other)!!.optJSONObject("where"))
+            val built = PamPushRendering.buildNotification(context, PamPushRendering.select(context, pushInvite)!!, "p3", "Convite", "Ana", "", pushInvite.toString())
+            assertEquals(listOf("Recusar", "Aceitar"), built.actions.map { it.title.toString() })
+        } finally {
+            PamPushRendering.clear(context)
+            PamConversationNotifications.cancel(context, chat)
+        }
+    }
+
+    @Test
+    fun notificationButtonSendsItsEndpointAndReportsTheId() {
+        LocalServer(response = "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n").use { server ->
+            val endpoint = JSONObject().put("method", "POST").put("url", "http://127.0.0.1:${server.port}/c/{invite}/respond").put("body", JSONObject().put("status", 2))
+            PamNotificationActions.handleButton(context, "accept", endpoint, """{"invite":"9"}""", "", "pam-push", 77, true)
+            val request = server.request()
+            assertTrue(request.head.startsWith("POST /c/9/respond HTTP/1.1"))
+            var event: Map<String, WireValue>? = null
+            while (event == null) {
+                val next = CountDownLatch(1)
+                PamNotificationActions.next { _, payload ->
+                    val values = WireMap.decode(payload)
+                    if ((values["action"] as? WireValue.Text)?.value == "accept") event = values
+                    next.countDown()
+                }
+                assertTrue(next.await(5, TimeUnit.SECONDS))
+            }
+            assertEquals(WireValue.Integer(3), event!!["type"])
+            assertEquals(WireValue.Integer(200), event!!["statusCode"])
+        }
+    }
+
     @Test
     fun imagePrefetchWarmsTheRendererDiskCache() {
         val png = ByteArrayOutputStream().also {

@@ -125,6 +125,16 @@ class NativeCapabilitiesTest {
     }
 
     @Test
+    fun replyActionIdsArePositiveTimeOrderedIntegers() {
+        val first = ReplyFailure.createActionId(1_700_000_000_000).toLong()
+        val later = ReplyFailure.createActionId(1_700_000_000_001).toLong()
+        assertTrue(first in 1_700_000_000_000_000..1_700_000_000_000_999)
+        assertTrue(later > first)
+        assertTrue(later < 9_007_199_254_740_991)
+        assertTrue(NotificationTemplate.complete("{action_id}", emptyMap()))
+    }
+
+    @Test
     fun notificationTemplatesResolveDataAndEncodeUrls() {
         val variables = mapOf("chat_id" to "42 a/b", "reply" to "Oi")
         assertEquals(

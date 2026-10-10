@@ -75,7 +75,8 @@ struct PamTextStyle: Equatable {
 
 /// Drawing-only options of a text node.
 struct PamTextDrawOptions: Equatable {
-    /// 1 left, 2 center, 3 right, 4 justify.
+    /// 1 left, 2 center, 3 right, 4 justify; 5 / 6: the box is centered /
+    /// end-aligned by its parent (RN shrink-wrap) while its lines stay left.
     var alignment = 1
     /// 1 tail, 2 head, 3 middle, 4 clip, 5 marquee (tail on iOS).
     var ellipsize = 1
@@ -461,11 +462,14 @@ enum PamTextLayout {
 
     // MARK: Drawing
 
-    static func horizontalOffset(_ line: PamTextLine, boxWidth: CGFloat, alignment: Int) -> CGFloat {
+    static func horizontalOffset(_ line: PamTextLine, boxWidth: CGFloat, alignment: Int, widest: CGFloat = 0) -> CGFloat {
         let free = max(0, boxWidth - line.width)
+        let blockFree = max(0, boxWidth - max(widest, line.width))
         switch alignment {
         case 2: return free / 2
         case 3: return free
+        case 5: return blockFree / 2
+        case 6: return blockFree
         default: return 0
         }
     }
@@ -490,7 +494,7 @@ enum PamTextLayout {
             forEachRun(line.line) { run, attributes in
                 guard let background = attributes[PamTextAttribute.background] else { return }
                 let color = background as! CGColor
-                let rect = runRect(run, line: line, bounds: bounds, alignment: options.alignment)
+                let rect = runRect(run, line: line, bounds: bounds, alignment: options.alignment, widest: result.size.width)
                 context.setFillColor(color)
                 context.fill(rect)
             }
@@ -507,7 +511,7 @@ enum PamTextLayout {
 
         for line in result.lines {
             var ctLine = line.line
-            var x = bounds.minX + horizontalOffset(line, boxWidth: bounds.width, alignment: options.alignment)
+            var x = bounds.minX + horizontalOffset(line, boxWidth: bounds.width, alignment: options.alignment, widest: result.size.width)
             if options.alignment == 4, !line.endsParagraph,
                let justified = CTLineCreateJustifiedLine(line.line, 1.0, Double(bounds.width)) {
                 ctLine = justified
@@ -570,11 +574,11 @@ enum PamTextLayout {
         }
     }
 
-    private static func runRect(_ run: CTRun, line: PamTextLine, bounds: CGRect, alignment: Int) -> CGRect {
+    private static func runRect(_ run: CTRun, line: PamTextLine, bounds: CGRect, alignment: Int, widest: CGFloat) -> CGRect {
         let range = CTRunGetStringRange(run)
         let start = CTLineGetOffsetForStringIndex(line.line, range.location, nil)
         let end = CTLineGetOffsetForStringIndex(line.line, range.location + range.length, nil)
-        let x = bounds.minX + horizontalOffset(line, boxWidth: bounds.width, alignment: alignment)
+        let x = bounds.minX + horizontalOffset(line, boxWidth: bounds.width, alignment: alignment, widest: widest)
         let baseline = bounds.minY + line.top + line.baseline
         return CGRect(x: x + start, y: baseline - line.ascent, width: max(0, end - start), height: line.ascent + line.descent)
     }
@@ -590,7 +594,7 @@ enum PamTextLayout {
         guard let line = result.lines.first(where: { point.y >= $0.top && point.y < $0.top + $0.height }) else {
             return nil
         }
-        let x = point.x - horizontalOffset(line, boxWidth: boxWidth, alignment: alignment)
+        let x = point.x - horizontalOffset(line, boxWidth: boxWidth, alignment: alignment, widest: result.size.width)
         guard x >= 0, x <= line.width else { return nil }
         let index = CTLineGetStringIndexForPosition(line.line, CGPoint(x: x, y: 0))
         guard index != kCFNotFound else { return nil }

@@ -23,6 +23,7 @@ use Pam\Native\Notifications\NotificationActionType;
 use Pam\Native\Notifications\NotificationCredentials;
 use Pam\Native\Notifications\Person;
 use Pam\Native\Notifications\PushRendering;
+use Pam\Native\Notifications\ReplyFailures;
 use Pam\Native\NotificationImportance;
 use Pam\Native\FileReference;
 use Pam\Native\PermissionDecision;
@@ -355,6 +356,7 @@ $assert(
     count($actions) === 2 && $actions[1]->credentialMissing && !$actions[1]->delivered() && !$actions[0]->credentialMissing,
     'Actions must report when the push account had no native credential.',
 );
+$pendingActionCall = $lastCall();
 
 // 9b. Per-account notification credentials.
 $credentialEndpoint = ActionEndpoint::post('https://api.example.test/chats/{chat_id}/messages')
@@ -440,6 +442,70 @@ $assert(
 );
 PushRendering::forget('chat.read');
 $assert($lastCall()['method'] === 'forgetPushRendering' && $lastCall()['values'] == ['type' => 'chat.read', 'field' => 'type'], 'PushRendering::forget must remove one rule.');
+
+// 9c. Conditional reply, reply failures, buttons, extra matches and iOS categories.
+PushRendering::forType('1', 'chat_type')
+    ->conversation('chat_{chat_id}', title: '{chat_title}')
+    ->message(sender: '{actor_name}', text: '{message_preview}', id: '{message_id}')
+    ->reply(
+        'Responder',
+        ActionEndpoint::post('https://api.example.test/chats/{chat_id}/notification-replies')
+            ->bearerFromCredential('user_id')
+            ->json(['body' => '{reply}', 'client_message_id' => '{action_id}', 'idempotency_key' => 'notification.reply:{chat_id}:{action_id}']),
+        hideWhen: ['can_reply' => '0'],
+    )
+    ->replyFailures(
+        ReplyFailures::make(sender: 'Não enviada', retryLabel: 'Tentar de novo', draftField: 'reply_draft')
+            ->offline('Sem conexão. Toque em Tentar de novo.')
+            ->status(401, 'Sua sessão expirou. Abra o Zé para enviar.')
+            ->status(403, 'Você não pode responder nesta conversa.', serverMessage: true)
+            ->status([409, 422, 429], 'Não foi possível enviar a resposta.', retry: true, keepReply: true, serverMessage: true)
+            ->otherwise('O Zé não respondeu. Toque em Tentar de novo.'),
+    )
+    ->category('ZE_MESSAGE_REPLY', withoutReply: 'ZE_MESSAGE')
+    ->register();
+$rule = json_decode((string) $lastCall()['values']['rule'], true);
+$assert(
+    $rule['reply']['hideWhen'] === ['can_reply' => '0']
+        && $rule['replyFailures']['sender'] === 'Não enviada' && $rule['replyFailures']['retryLabel'] === 'Tentar de novo'
+        && $rule['replyFailures']['draftField'] === 'reply_draft'
+        && $rule['replyFailures']['offline'] === ['text' => 'Sem conexão. Toque em Tentar de novo.', 'retry' => true, 'keepReply' => true, 'serverMessage' => false]
+        && $rule['replyFailures']['statuses'][0] === ['codes' => [401], 'text' => 'Sua sessão expirou. Abra o Zé para enviar.', 'retry' => false, 'keepReply' => false, 'serverMessage' => false]
+        && $rule['replyFailures']['statuses'][2]['codes'] === [409, 422, 429] && $rule['replyFailures']['statuses'][2]['retry'] === true
+        && $rule['replyFailures']['otherwise'] === ['text' => 'O Zé não respondeu. Toque em Tentar de novo.', 'retry' => true, 'keepReply' => true, 'serverMessage' => false]
+        && $rule['category'] === ['identifier' => 'ZE_MESSAGE_REPLY', 'withoutReply' => 'ZE_MESSAGE'],
+    'Replies must support a per-push hide condition, failure presentation and iOS categories.',
+);
+PushRendering::forType('5')
+    ->where('system_event', 'post_collaboration_invite')
+    ->requires('collaboration_invite_id')
+    ->notification('{title}', '{body}')
+    ->action('decline', 'Recusar', ActionEndpoint::post('https://api.example.test/post-collaborations/{collaboration_invite_id}/respond')->json(['status' => 3]))
+    ->action('accept', 'Aceitar', ActionEndpoint::post('https://api.example.test/post-collaborations/{collaboration_invite_id}/respond')->json(['status' => 2]), dismiss: false)
+    ->category('POST_COLLABORATION_INVITE')
+    ->register();
+$rule = json_decode((string) $lastCall()['values']['rule'], true);
+$assert(
+    $rule['where'] === ['system_event' => 'post_collaboration_invite'] && $rule['requires'] === ['collaboration_invite_id']
+        && array_column($rule['actions'], 'id') === ['decline', 'accept'] && $rule['actions'][0]['label'] === 'Recusar'
+        && $rule['actions'][0]['dismiss'] === true && $rule['actions'][1]['dismiss'] === false
+        && $rule['actions'][1]['endpoint']['body'] === ['status' => 2],
+    'Rules must match extra data fields and carry background action buttons.',
+);
+$assert(
+    $rejects(static fn () => PushRendering::forType('5')->notification()->action('bad id', 'X', ActionEndpoint::post('https://x.test')))
+        && $rejects(static fn () => PushRendering::forType('5')->notification()->where('bad field', 'x'))
+        && $rejects(static fn () => PushRendering::forType('5')->notification()->category('bad category!'))
+        && $rejects(static fn () => ReplyFailures::make()->status(99, 'x'))
+        && $rejects(static fn () => PushRendering::forType('5')->notification()->reply('R', null, hideWhen: ['bad field' => '0'])),
+    'Buttons, matches, categories and failures must be validated.',
+);
+Runtime::dispatchModuleResult($pendingActionCall['requestId'], ModuleResultStatus::Success->value, Wire::map([
+    'type' => 3, 'conversation' => '', 'text' => '', 'data' => '{"collaboration_invite_id":"9"}', 'deepLink' => '',
+    'handledNatively' => true, 'statusCode' => 200, 'timestamp' => 7, 'action' => 'accept',
+]));
+$last = $actions[count($actions) - 1];
+$assert($last->type === NotificationActionType::Button && $last->action === 'accept' && $last->delivered() && !$last->failureShown, 'Button taps must reach PHP with their id.');
 
 // 10. Accessibility announcements.
 $announced = null;

@@ -58,7 +58,7 @@ enum PamNotificationTemplate {
     /// True when every placeholder in the template has a value.
     static func complete(_ template: String, _ variables: [String: String]) -> Bool {
         names(template).allSatisfy { name in
-            variables[name] != nil || name == "uuid" || name == "now"
+            variables[name] != nil || name == "uuid" || name == "now" || name == "action_id"
                 || name.hasPrefix("storage:") || name.hasPrefix(credentialPrefix)
         }
     }
@@ -97,6 +97,7 @@ enum PamNotificationTemplate {
         }
         if name == "uuid" { return UUID().uuidString.lowercased() }
         if name == "now" { return String(Int64(Date().timeIntervalSince1970 * 1_000)) }
+        if name == "action_id" { return PamReplyFailure.createActionId() }
         if name.hasPrefix("storage:") {
             let key = String(name.dropFirst("storage:".count))
             guard key.range(of: storageKey, options: .regularExpression) != nil else { return "" }
@@ -130,6 +131,13 @@ enum PamNotificationEndpoint {
     }
 
     static func send(_ endpoint: [String: Any], variables: [String: String], completion: @escaping (Int) -> Void) {
+        sendForResult(endpoint, variables: variables) { status, _ in completion(status) }
+    }
+
+    /// HTTP status (0 without a response) and the error response's JSON `message`.
+    static func sendForResult(_ endpoint: [String: Any], variables: [String: String], completion: @escaping (Int, String?) -> Void) {
+        let resultCompletion = completion
+        let completion = { (status: Int) in resultCompletion(status, nil) }
         let method = ((endpoint["method"] as? String) ?? "POST").uppercased()
         guard ["POST", "PUT", "PATCH", "DELETE"].contains(method), let template = endpoint["url"] as? String else {
             completion(0)
@@ -162,8 +170,15 @@ enum PamNotificationEndpoint {
             request.httpBody = data
         }
         let session = URLSession(configuration: .ephemeral, delegate: PamNoRedirects(), delegateQueue: nil)
-        session.dataTask(with: request) { _, response, _ in
-            completion((response as? HTTPURLResponse)?.statusCode ?? 0)
+        session.dataTask(with: request) { body, response, _ in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            var message: String?
+            if status >= 400, let body, body.count <= 16_384,
+               let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+               let text = (object["message"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+                message = text
+            }
+            resultCompletion(status, message)
             session.finishTasksAndInvalidate()
         }.resume()
     }
@@ -249,6 +264,8 @@ struct PamConversationSpec {
     var dataJson = "{}"
     var importance = 3
     var silent = false
+    /// ReplyFailures config: send first, keep failed replies visible.
+    var replyFailures: [String: Any]?
 
     var json: [String: Any] {
         [
@@ -265,6 +282,7 @@ struct PamConversationSpec {
             "data": dataJson,
             "importance": importance,
             "silent": silent,
+            "replyFailures": replyFailures ?? NSNull(),
         ]
     }
 
@@ -289,6 +307,7 @@ struct PamConversationSpec {
         spec.dataJson = data.trimmingCharacters(in: .whitespaces).isEmpty ? "{}" : String(data.prefix(262_144))
         spec.importance = min(max((object["importance"] as? NSNumber)?.intValue ?? 3, 1), 4)
         spec.silent = (object["silent"] as? Bool) ?? false
+        spec.replyFailures = object["replyFailures"] as? [String: Any]
         return spec
     }
 
@@ -357,6 +376,46 @@ public enum PamConversationNotifications {
             return reply
         }())
         storeLocked(spec)
+    }
+
+    static let failedCategoryPrefix = "pam.conversation.failed."
+
+    /// Keeps an undelivered reply of a local conversation in the tray (reason, retry, draft field).
+    static func postFailure(_ spec: PamConversationSpec, failure: PamReplyFailure, text: String, actionId: String, uuid: String) {
+        let failures = spec.replyFailures ?? [:]
+        let retryLabel = (failures["retryLabel"] as? String) ?? "Try again"
+        let category = failure.retry ? failedCategoryPrefix + categoryIdentifier(replyLabel: retryLabel, markReadLabel: "") : ""
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationCategories { categories in
+            if !category.isEmpty, !categories.contains(where: { $0.identifier == category }) {
+                var next = categories
+                next.insert(UNNotificationCategory(
+                    identifier: category,
+                    actions: [UNNotificationAction(identifier: PamNotificationCategories.retryAction, title: retryLabel, options: [])],
+                    intentIdentifiers: [],
+                    options: []
+                ))
+                center.setNotificationCategories(next)
+            }
+            let content = UNMutableNotificationContent()
+            content.threadIdentifier = spec.key
+            content.categoryIdentifier = category
+            content.title = spec.title.isEmpty ? (spec.messages.last?.sender?.name ?? "") : spec.title
+            content.subtitle = (failures["sender"] as? String) ?? "Not sent"
+            content.body = "\(failure.text)\n“\(text)”"
+            content.sound = nil
+            var data = (try? JSONSerialization.jsonObject(with: Data(spec.dataJson.utf8)) as? [String: Any]) ?? [:]
+            if let draftField = failures["draftField"] as? String, !draftField.isEmpty { data[draftField] = text }
+            content.userInfo = [
+                userInfoKey: spec.key,
+                "pam.data": data,
+                "pam.deepLink": spec.deepLink,
+                PamNotificationCategories.retryTextKey: text,
+                PamNotificationCategories.retryActionIdKey: actionId,
+                PamNotificationCategories.retryUuidKey: uuid,
+            ]
+            center.add(UNNotificationRequest(identifier: identifier(spec.key), content: content, trigger: nil))
+        }
     }
 
     static func cancel(key: String) {
@@ -541,6 +600,7 @@ public enum PamConversationNotifications {
 enum PamNotificationActionType {
     static let reply = 1
     static let markRead = 2
+    static let button = 3
 }
 
 /// Durable action queue drained by Notifications::onAction() in PHP.
@@ -551,12 +611,28 @@ public enum PamNotificationActions {
     private static var waiter: ModuleCompletion?
 
     /// Optional native HTTP delivery, conversation bookkeeping, then queue.
-    static func handle(type: Int, key: String, text: String, completion: @escaping () -> Void) {
+    static func handle(
+        type: Int,
+        key: String,
+        text: String,
+        retry: (actionId: String, uuid: String)? = nil,
+        completion: @escaping () -> Void
+    ) {
         let spec = PamConversationNotifications.load(key: key)
         let endpoint = type == PamNotificationActionType.reply ? spec?.replyEndpoint : spec?.markReadEndpoint
         var variables = PamNotificationTemplate.variables(spec?.dataJson ?? "{}")
         variables["reply"] = text
         variables["conversation"] = key
+        // {action_id} / {uuid} stay fixed for this reply and its retries.
+        let actionId = retry.flatMap { $0.actionId.isEmpty ? nil : $0.actionId } ?? PamReplyFailure.createActionId()
+        let uuid = retry.flatMap { $0.uuid.isEmpty ? nil : $0.uuid } ?? UUID().uuidString.lowercased()
+        variables["action_id"] = actionId
+        variables["uuid"] = uuid
+        if type == PamNotificationActionType.reply, let spec, let failures = spec.replyFailures {
+            handleReplyWithFailures(spec: spec, failures: failures, endpoint: endpoint, variables: variables,
+                                    key: key, text: text, actionId: actionId, uuid: uuid, completion: completion)
+            return
+        }
         // An endpoint authenticated per account ({credential:user_id}) is never
         // sent when the push's account has no token here: the notification is
         // dismissed and nothing goes out with another account's session.
@@ -583,6 +659,39 @@ public enum PamNotificationActions {
             return
         }
         PamNotificationEndpoint.send(endpoint, variables: variables, completion: finish)
+    }
+
+    /// Sends first; success records the reply, failure keeps it in the tray with the reason.
+    private static func handleReplyWithFailures(
+        spec: PamConversationSpec,
+        failures: [String: Any],
+        endpoint: [String: Any]?,
+        variables: [String: String],
+        key: String,
+        text: String,
+        actionId: String,
+        uuid: String,
+        completion: @escaping () -> Void
+    ) {
+        let missingCredential = endpoint.map { PamNotificationEndpoint.missingCredential($0, variables: variables) } ?? false
+        let finish = { (status: Int, message: String?) in
+            let delivered = (200...299).contains(status)
+            let shown = !delivered && endpoint != nil
+            if delivered || endpoint == nil {
+                PamConversationNotifications.appendOwnReply(key: key, text: text)
+            } else {
+                let failure = PamReplyFailure.resolve(failures, status: missingCredential ? 401 : status, message: message)
+                PamConversationNotifications.postFailure(spec, failure: failure, text: text, actionId: actionId, uuid: uuid)
+            }
+            report(type: PamNotificationActionType.reply, key: key, text: text, dataJson: spec.dataJson, deepLink: spec.deepLink,
+                   status: (endpoint == nil || missingCredential) ? -1 : status, missingCredential: missingCredential, failureShown: shown)
+            completion()
+        }
+        guard let endpoint, !missingCredential else {
+            finish(endpoint == nil ? -1 : 401, nil)
+            return
+        }
+        PamNotificationEndpoint.sendForResult(endpoint, variables: variables, completion: finish)
     }
 
     static func next(_ completion: @escaping ModuleCompletion) {
@@ -619,7 +728,9 @@ public enum PamNotificationActions {
         dataJson: String,
         deepLink: String,
         status: Int,
-        missingCredential: Bool = false
+        missingCredential: Bool = false,
+        failureShown: Bool = false,
+        action: String = ""
     ) {
         let payload = (try? WireMap.encode([
             "type": .integer(Int64(type)),
@@ -630,6 +741,8 @@ public enum PamNotificationActions {
             "handledNatively": .flag(status >= 0),
             "statusCode": .integer(Int64(max(status, 0))),
             "credentialMissing": .flag(missingCredential),
+            "failureShown": .flag(failureShown),
+            "action": .text(action),
             "timestamp": .integer(Int64(Date().timeIntervalSince1970 * 1_000)),
         ])) ?? Data()
         lock.lock()
@@ -750,13 +863,43 @@ public enum PamPushRendering {
             throw PamNotificationError("Push rendering rule is invalid")
         }
         var all = UserDefaults.standard.dictionary(forKey: storeKey) ?? [:]
-        all[key((rule["field"] as? String) ?? "type", type)] = ruleJson
+        all[key((rule["field"] as? String) ?? "type", type, rule["where"] as? [String: Any], rule["requires"] as? [String])] = ruleJson
         UserDefaults.standard.set(all, forKey: storeKey)
+        if rule["category"] is [String: Any] { PamNotificationCategories.register() }
+    }
+
+    /// Every registered rule.
+    static func rules() -> [[String: Any]] {
+        (UserDefaults.standard.dictionary(forKey: storeKey) ?? [:]).values
+            .compactMap { ($0 as? String).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] } }
+    }
+
+    /// The rule for this push: type field plus every `where` condition; the most specific wins.
+    static func select(_ rules: [[String: Any]], data: [String: Any]) -> [String: Any]? {
+        rules.filter { candidate in
+            let field = (candidate["field"] as? String) ?? "type"
+            guard let value = data[field], "\(value)" == (candidate["type"] as? String) else { return false }
+            let matches = ((candidate["where"] as? [String: Any]) ?? [:]).allSatisfy { key, expected in
+                data[key].map { "\($0)" } == "\(expected)"
+            }
+            let present = ((candidate["requires"] as? [String]) ?? []).allSatisfy { key in
+                guard let value = data[key], !(value is NSNull) else { return false }
+                return !"\(value)".trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return matches && present
+        }.max { specificity($0) < specificity($1) }
+    }
+
+    private static func specificity(_ rule: [String: Any]) -> Int {
+        ((rule["where"] as? [String: Any])?.count ?? 0) + ((rule["requires"] as? [String])?.count ?? 0)
     }
 
     static func forget(field: String, type: String) {
         var all = UserDefaults.standard.dictionary(forKey: storeKey) ?? [:]
-        all.removeValue(forKey: key(field, type))
+        let prefix = key(field, type, nil, nil)
+        for name in all.keys where name == prefix || name.hasPrefix(prefix + "\u{0}") {
+            all.removeValue(forKey: name)
+        }
         UserDefaults.standard.set(all, forKey: storeKey)
     }
 
@@ -767,13 +910,7 @@ public enum PamPushRendering {
     /// Returns true when a rule rendered (or intentionally dismissed/suppressed) the push.
     public static func render(id: String, title: String, body: String, dataJson: String) -> Bool {
         guard let data = try? JSONSerialization.jsonObject(with: Data(dataJson.utf8)) as? [String: Any] else { return false }
-        let rules = (UserDefaults.standard.dictionary(forKey: storeKey) ?? [:]).values
-            .compactMap { ($0 as? String).flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] } }
-        guard let rule = rules.first(where: { candidate in
-            let field = (candidate["field"] as? String) ?? "type"
-            guard let value = data[field] else { return false }
-            return "\(value)" == (candidate["type"] as? String)
-        }) else { return false }
+        guard let rule = select(rules(), data: data) else { return false }
         var variables = PamNotificationTemplate.variables(dataJson)
         variables["_id"] = id
         variables["_title"] = title
@@ -815,7 +952,12 @@ public enum PamPushRendering {
             )]
             let reply = rule["reply"] as? [String: Any]
             let markRead = rule["markRead"] as? [String: Any]
-            spec.replyLabel = (reply?["label"] as? String) ?? ""
+            // hideWhen: the push says this recipient may not reply (e.g. can_reply = "0").
+            let replyHidden = ((reply?["hideWhen"] as? [String: Any]) ?? [:]).contains { field, value in
+                variables[field] == "\(value)"
+            }
+            spec.replyLabel = replyHidden ? "" : ((reply?["label"] as? String) ?? "")
+            spec.replyFailures = rule["replyFailures"] as? [String: Any]
             spec.replyEndpoint = reply?["endpoint"] as? [String: Any]
             spec.markReadLabel = (markRead?["label"] as? String) ?? ""
             spec.markReadEndpoint = markRead?["endpoint"] as? [String: Any]
@@ -858,7 +1000,13 @@ public enum PamPushRendering {
         return formatter.date(from: value).map { Int64($0.timeIntervalSince1970 * 1_000) } ?? now
     }
 
-    private static func key(_ field: String, _ type: String) -> String { "\(field)\u{0}\(type)" }
+    private static func key(_ field: String, _ type: String, _ conditions: [String: Any]?, _ requires: [String]?) -> String {
+        let base = "\(field)\u{0}\(type)"
+        let wheres = (conditions ?? [:]).keys.sorted().map { "\($0)=\(conditions?[$0].map { "\($0)" } ?? "")" }
+        let required = (requires ?? []).sorted().map { "$" + $0 }
+        let all = wheres + required
+        return all.isEmpty ? base : base + all.map { "\u{0}\($0)" }.joined()
+    }
 }
 
 /// Thread-safe one-shot result used to bridge callback APIs synchronously on

@@ -13,6 +13,8 @@ use Pam\Native\Modules\NativeModules;
 use Pam\Native\NotificationImportance;
 use RuntimeException;
 
+use function count;
+use function in_array;
 use function is_bool;
 use function strlen;
 
@@ -53,6 +55,20 @@ final class PushRenderingRule
     /** @var list<array<string, mixed>> */
     private array $suppress = [];
 
+    /** @var array<string, string> extra data fields the push must match */
+    private array $where = [];
+
+    /** @var list<string> data fields the push must carry (non-empty) */
+    private array $requires = [];
+
+    private ?ReplyFailures $replyFailures = null;
+
+    /** @var list<array{id: string, label: string, endpoint: array<string, mixed>, dismiss: bool}> */
+    private array $actions = [];
+
+    /** @var array{identifier: string, withoutReply: string}|null */
+    private ?array $category = null;
+
     public function __construct(private readonly string $type, private readonly string $field = 'type')
     {
         if ($type === '' || strlen($type) > 128) {
@@ -61,6 +77,42 @@ final class PushRenderingRule
         if (preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $field) !== 1) {
             throw new InvalidArgumentException('Push rendering fields must be simple data keys.');
         }
+    }
+
+    /**
+     * Also require data[$field] === $value. When several rules match a push,
+     * the one with the most conditions wins (e.g. a system push with
+     * `system_event` = `post_collaboration_invite` over the generic one).
+     */
+    public function where(string $field, string $value): self
+    {
+        if (preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $field) !== 1 || strlen($value) > 1_024) {
+            throw new InvalidArgumentException('Push rendering conditions need a simple data key and a value up to 1024 bytes.');
+        }
+        if (count($this->where) >= 8 && !isset($this->where[$field])) {
+            throw new InvalidArgumentException('Push rendering rules support at most 8 conditions.');
+        }
+        $this->where[$field] = $value;
+
+        return $this;
+    }
+
+    /** Also require these data fields to be present and non-empty (counts toward specificity). */
+    public function requires(string ...$fields): self
+    {
+        foreach ($fields as $field) {
+            if (preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $field) !== 1) {
+                throw new InvalidArgumentException('Required push fields must be simple data keys.');
+            }
+            if (!in_array($field, $this->requires, true)) {
+                $this->requires[] = $field;
+            }
+        }
+        if (count($this->requires) > 8) {
+            throw new InvalidArgumentException('Push rendering rules require at most 8 fields.');
+        }
+
+        return $this;
     }
 
     /** Render as a MessagingStyle conversation keyed by a template such as '{chat_id}'. */
@@ -133,9 +185,70 @@ final class PushRenderingRule
         return $this;
     }
 
-    public function reply(string $label = 'Reply', ?ActionEndpoint $endpoint = null): self
+    /**
+     * Inline reply. $hideWhen leaves the action out for pushes whose data
+     * matches any field => value pair (e.g. ['can_reply' => '0'] when the
+     * server says the recipient may not send).
+     *
+     * @param array<string, string> $hideWhen
+     */
+    public function reply(string $label = 'Reply', ?ActionEndpoint $endpoint = null, array $hideWhen = []): self
     {
         $this->reply = ['label' => self::label($label), 'endpoint' => $endpoint?->toArray()];
+        if ($hideWhen !== []) {
+            foreach ($hideWhen as $field => $value) {
+                if (!\is_string($field) || preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $field) !== 1 || strlen((string) $value) > 1_024) {
+                    throw new InvalidArgumentException('Reply conditions need simple data keys.');
+                }
+            }
+            $this->reply['hideWhen'] = array_map('strval', $hideWhen);
+        }
+
+        return $this;
+    }
+
+    /** Send replies first and keep the ones that fail visible (see ReplyFailures). */
+    public function replyFailures(ReplyFailures $failures): self
+    {
+        $this->replyFailures = $failures;
+
+        return $this;
+    }
+
+    /**
+     * A background button (no app UI): tapping it sends $endpoint natively,
+     * app killed or not, and reports a NotificationActionType::Button action
+     * with $id. With $dismiss the notification is removed once the endpoint
+     * answers 2xx. At most 3 buttons (Android shows three actions).
+     */
+    public function action(string $id, string $label, ActionEndpoint $endpoint, bool $dismiss = true): self
+    {
+        if (preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $id) !== 1) {
+            throw new InvalidArgumentException('Notification button ids must match [A-Za-z0-9_.-]{1,64}.');
+        }
+        $this->actions = array_values(array_filter($this->actions, static fn (array $action): bool => $action['id'] !== $id));
+        if (count($this->actions) >= 3) {
+            throw new InvalidArgumentException('Notifications support at most 3 buttons.');
+        }
+        $this->actions[] = ['id' => $id, 'label' => self::label($label), 'endpoint' => $endpoint->toArray(), 'dismiss' => $dismiss];
+
+        return $this;
+    }
+
+    /**
+     * iOS: the APNs category the server sets on these pushes. The framework
+     * registers it with this rule's reply / mark-as-read / buttons and
+     * handles them natively. $withoutReply is the category the server uses
+     * when the reply is hidden (iOS cannot drop an action per push).
+     */
+    public function category(string $identifier, ?string $withoutReply = null): self
+    {
+        foreach ([$identifier, $withoutReply ?? 'x'] as $value) {
+            if (preg_match('/^[A-Za-z0-9_.-]{1,64}$/D', $value) !== 1) {
+                throw new InvalidArgumentException('Notification categories must match [A-Za-z0-9_.-]{1,64}.');
+            }
+        }
+        $this->category = ['identifier' => $identifier, 'withoutReply' => $withoutReply ?? ''];
 
         return $this;
     }
@@ -245,6 +358,11 @@ final class PushRenderingRule
             'channelId' => $this->channelId,
             'channelName' => $this->channelName,
             'suppress' => $this->suppress,
+            'where' => (object) $this->where,
+            'requires' => $this->requires,
+            'replyFailures' => $this->replyFailures?->toArray(),
+            'actions' => $this->actions,
+            'category' => $this->category,
         ];
     }
 

@@ -100,6 +100,28 @@ mirror the Android instrumented tests: `PamCssPaintTests`,
 
 Visual checks that tests cannot fully cover:
 
+- ScrollView bottom padding (1.36.0): no Swift change (iOS already sizes the
+  content from the engine frames); in Zé Chat, Editar perfil and Configurações
+  scrolled to the end must show the bottom padding above the home indicator.
+  A collaboration invite rule with `requires('collaboration_invite_id')` must
+  not match a push without that field.
+- Notification actions (1.36.0): `swift build` and `swift test`
+  (`testReplyFailuresResolveStatusesServerMessagesAndOffline`,
+  `testRuleCategoriesAndMostSpecificMatch`). Then in Zé Chat, with the app
+  killed: a message push with category `ZE_MESSAGE_REPLY` shows "Responder"
+  and "Marcar como lida"; `ZE_MESSAGE` only "Marcar como lida". A reply goes
+  to `POST /chats/{chat}/notification-replies` with the push account's
+  Keychain credential and a numeric `client_message_id`; on success the
+  thread's notifications leave the tray. In Airplane mode the reply stays as
+  "Não enviada" with "Sem conexão. Toque em Tentar de novo." and "Tentar de
+  novo" re-sends the same `client_message_id` (one message on the server);
+  removing the account's credential shows "Sua sessão expirou. Abra o Zé para
+  enviar." without retry; tapping the failed notification opens the chat
+  with the text in the composer (`reply_draft`). A collaboration invite
+  (`POST_COLLABORATION_INVITE`) answers "Aceitar"/"Recusar" in the
+  background and leaves the tray. Text: a wrapped note inside a column with
+  `align-items: center` keeps its lines left-aligned inside the centered box
+  (Perfil → Compartilhar perfil note matches RN).
 - `text-shadow` direction (positive `y` must go down) and blur strength.
 - Text measured vs. drawn (no clipped descenders, same line breaks) with
   `lineHeight`, emoji, `fontScale` at the largest accessibility size.

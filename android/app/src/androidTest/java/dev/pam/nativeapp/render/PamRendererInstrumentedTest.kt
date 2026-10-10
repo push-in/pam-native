@@ -2151,8 +2151,10 @@ class PamRendererInstrumentedTest {
                 val allocated = requireNotNull(
                     activity.host.findByTransitionName("allocated-start"),
                 ) as TextView
+                // The box is centered (RN shrink-wrap), its lines stay start-aligned.
+                assertEquals(0.5f, (intrinsic as PamTextView).blockAlignment)
                 assertEquals(
-                    Gravity.CENTER_HORIZONTAL,
+                    Gravity.START,
                     intrinsic.gravity and Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK,
                 )
                 assertEquals(
@@ -2161,6 +2163,57 @@ class PamRendererInstrumentedTest {
                 )
                 assertEquals(Gravity.TOP, intrinsic.gravity and Gravity.VERTICAL_GRAVITY_MASK)
                 assertEquals(Gravity.CENTER_VERTICAL, allocated.gravity and Gravity.VERTICAL_GRAVITY_MASK)
+                renderer.close()
+            }
+        } finally {
+            activity.finish()
+        }
+    }
+
+    @Test
+    fun wrappedTextInACenteringColumnKeepsItsLinesStartAligned() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val paragraph = "Quem escanear o código abre o seu perfil no Zé Chat e pode te seguir ou mandar mensagem."
+                renderer.commit(
+                    listOf(
+                        listOf(
+                            Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                            Mutation.Create(node(2, 1, NodeKind.COLUMN, mapOf(PropKey.ALIGN_ITEMS to PropValue.Integer(2)))),
+                            Mutation.Create(
+                                node(
+                                    3,
+                                    2,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text(paragraph),
+                                        PropKey.TEST_ID to PropValue.Text("wrapped-note"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
+                            Mutation.Layout(2, Frame(0f, 0f, 360f, 200f)),
+                            Mutation.Layout(3, Frame(0f, 0f, 200f, 120f)),
+                            Mutation.SetRoot(1),
+                        ),
+                    ),
+                )
+                val text = requireNotNull(activity.host.findByTransitionName("wrapped-note")) as PamTextView
+                text.measure(
+                    android.view.View.MeasureSpec.makeMeasureSpec(text.width.coerceAtLeast(1), android.view.View.MeasureSpec.EXACTLY),
+                    android.view.View.MeasureSpec.makeMeasureSpec(text.height.coerceAtLeast(1), android.view.View.MeasureSpec.EXACTLY),
+                )
+                text.layout(text.left, text.top, text.right, text.bottom)
+                val layout = requireNotNull(text.layout)
+                assertTrue(layout.lineCount > 1)
+                assertEquals(Gravity.START, text.gravity and Gravity.RELATIVE_HORIZONTAL_GRAVITY_MASK)
+                for (line in 0 until layout.lineCount) assertEquals(0f, layout.getLineLeft(line), 0.5f)
+                var widest = 0f
+                for (line in 0 until layout.lineCount) widest = maxOf(widest, layout.getLineWidth(line))
+                assertEquals(((text.width - text.totalPaddingLeft - text.totalPaddingRight - widest) / 2f).coerceAtLeast(0f), text.blockOffset(), 0.5f)
                 renderer.close()
             }
         } finally {

@@ -94,6 +94,10 @@ internal data class ConversationSpec(
     val channelId: String = DEFAULT_CHANNEL,
     val channelName: String = "Messages",
     val silent: Boolean = false,
+    /** ReplyFailures config: send first, keep failed replies visible. */
+    val replyFailures: JSONObject? = null,
+    /** The reply that failed: failedText, text, retry, keepReply, actionId, uuid, timestamp. */
+    val failure: JSONObject? = null,
 ) {
     init {
         require(KEY.matches(key)) { "Conversation key must contain 1-128 safe characters" }
@@ -116,6 +120,8 @@ internal data class ConversationSpec(
         .put("channelId", channelId)
         .put("channelName", channelName)
         .put("silent", silent)
+        .put("replyFailures", replyFailures ?: JSONObject.NULL)
+        .put("failure", failure ?: JSONObject.NULL)
 
     companion object {
         const val DEFAULT_CHANNEL = "pam-messages"
@@ -142,6 +148,8 @@ internal data class ConversationSpec(
                 channelId = json.optString("channelId").ifBlank { DEFAULT_CHANNEL },
                 channelName = json.optString("channelName").ifBlank { "Messages" }.take(128),
                 silent = json.optBoolean("silent"),
+                replyFailures = json.optJSONObject("replyFailures"),
+                failure = json.optJSONObject("failure"),
             )
         }
 
@@ -155,6 +163,17 @@ public object PamConversationNotifications {
     internal const val ACTION_MARK_READ = "dev.pam.nativeapp.action.CONVERSATION_MARK_READ"
     internal const val EXTRA_KEY = "dev.pam.nativeapp.conversation.KEY"
     internal const val REMOTE_INPUT_KEY = "pam.reply"
+    internal const val EXTRA_RETRY_TEXT = "dev.pam.nativeapp.conversation.RETRY_TEXT"
+    internal const val EXTRA_RETRY_ACTION_ID = "dev.pam.nativeapp.conversation.RETRY_ACTION_ID"
+    internal const val EXTRA_RETRY_UUID = "dev.pam.nativeapp.conversation.RETRY_UUID"
+    internal const val ACTION_BUTTON = "dev.pam.nativeapp.action.NOTIFICATION_BUTTON"
+    internal const val EXTRA_BUTTON_ID = "dev.pam.nativeapp.button.ID"
+    internal const val EXTRA_BUTTON_ENDPOINT = "dev.pam.nativeapp.button.ENDPOINT"
+    internal const val EXTRA_BUTTON_DATA = "dev.pam.nativeapp.button.DATA"
+    internal const val EXTRA_BUTTON_DEEP_LINK = "dev.pam.nativeapp.button.DEEP_LINK"
+    internal const val EXTRA_BUTTON_TAG = "dev.pam.nativeapp.button.TAG"
+    internal const val EXTRA_BUTTON_NOTIFICATION = "dev.pam.nativeapp.button.NOTIFICATION"
+    internal const val EXTRA_BUTTON_DISMISS = "dev.pam.nativeapp.button.DISMISS"
     private const val PREFERENCES = "pam-native-conversations"
     private const val AVATAR_BYTES = 2 * 1024 * 1024
     private val lock = Any()
@@ -182,8 +201,38 @@ public object PamConversationNotifications {
             spec.copy(
                 messages = listOf(ConversationMessage("reply-${System.nanoTime()}", text, System.currentTimeMillis(), null)),
                 silent = true,
+                failure = null,
             ),
         )
+    }
+
+    /**
+     * Keeps a reply the endpoint did not deliver in the notification: the
+     * unsent text, the reason, the retry button and the draft for the app.
+     */
+    internal fun showFailure(context: Context, key: String, failure: JSONObject): ConversationSpec? {
+        val spec = synchronized(lock) { load(context, key) } ?: return null
+        return show(context, spec.copy(messages = emptyList(), silent = true, failure = failure))
+    }
+
+    /** Intent that opens the app from the notification (data + the failed reply as the draft field). */
+    internal fun openIntent(context: Context, spec: ConversationSpec): Intent? {
+        var data = spec.dataJson
+        val failure = spec.failure
+        val draftField = spec.replyFailures?.optString("draftField").orEmpty()
+        if (failure != null && draftField.isNotEmpty()) {
+            data = runCatching { JSONObject(spec.dataJson).put(draftField, failure.optString("failedText")).toString() }
+                .getOrDefault(spec.dataJson)
+        }
+        return context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            putExtra("pam.notification.opened", true)
+            putExtra("pam.notification.id", spec.key)
+            putExtra("pam.notification.title", spec.title.ifBlank { spec.messages.lastOrNull()?.sender?.name.orEmpty() })
+            putExtra("pam.notification.body", spec.messages.lastOrNull()?.text.orEmpty())
+            putExtra("pam.notification.data", data)
+            putExtra("pam.notification.deepLink", spec.deepLink)
+        }
     }
 
     internal fun cancel(context: Context, key: String) {
@@ -220,15 +269,16 @@ public object PamConversationNotifications {
             }
             style.addMessage(NotificationCompat.MessagingStyle.Message(message.text, message.timestamp, sender))
         }
-        val launch = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            putExtra("pam.notification.opened", true)
-            putExtra("pam.notification.id", spec.key)
-            putExtra("pam.notification.title", spec.title.ifBlank { spec.messages.lastOrNull()?.sender?.name.orEmpty() })
-            putExtra("pam.notification.body", spec.messages.lastOrNull()?.text.orEmpty())
-            putExtra("pam.notification.data", spec.dataJson)
-            putExtra("pam.notification.deepLink", spec.deepLink)
+        val failure = spec.failure
+        val failureSender = spec.replyFailures?.optString("sender").orEmpty().ifBlank { "Not sent" }
+        if (failure != null) {
+            // The unsent reply as the user's own line, then the reason.
+            val at = failure.optLong("timestamp").takeIf { it > 0 } ?: System.currentTimeMillis()
+            style.addMessage(NotificationCompat.MessagingStyle.Message(failure.optString("failedText"), at, null as Person?))
+            val notice = Person.Builder().setName(failureSender).setKey("pam-reply-failure").build()
+            style.addMessage(NotificationCompat.MessagingStyle.Message(failure.optString("text"), at, notice))
         }
+        val launch = openIntent(context, spec)
         val builder = NotificationCompat.Builder(context, spec.channelId)
             .setSmallIcon(dev.pam.nativeapp.R.drawable.pam_icon)
             .setStyle(style)
@@ -241,6 +291,26 @@ public object PamConversationNotifications {
             .setWhen(spec.messages.lastOrNull()?.timestamp ?: System.currentTimeMillis())
             .setShowWhen(true)
         spec.messages.lastOrNull()?.sender?.let { builder.addPerson(people[it.key.ifEmpty { it.name }]) }
+        if (failure != null) {
+            builder.setSubText(failureSender).setContentText(failure.optString("text"))
+            if (failure.optBoolean("retry")) {
+                val retryIntent = actionIntent(context, ACTION_REPLY, spec.key)
+                    .putExtra(EXTRA_RETRY_TEXT, failure.optString("failedText"))
+                    .putExtra(EXTRA_RETRY_ACTION_ID, failure.optString("actionId"))
+                    .putExtra(EXTRA_RETRY_UUID, failure.optString("uuid"))
+                val pending = PendingIntent.getBroadcast(
+                    context,
+                    requestCode(spec.key, 3),
+                    retryIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                )
+                builder.addAction(
+                    NotificationCompat.Action.Builder(android.R.drawable.ic_menu_send, spec.replyFailures?.optString("retryLabel").orEmpty().ifBlank { "Try again" }, pending)
+                        .setShowsUserInterface(false)
+                        .build(),
+                )
+            }
+        }
         launch?.let {
             builder.setContentIntent(
                 PendingIntent.getActivity(
@@ -251,7 +321,7 @@ public object PamConversationNotifications {
                 ),
             )
         }
-        if (spec.replyLabel.isNotBlank()) {
+        if (spec.replyLabel.isNotBlank() && failure?.optBoolean("keepReply", true) != false) {
             val remoteInput = RemoteInput.Builder(REMOTE_INPUT_KEY).setLabel(spec.replyLabel).build()
             val replyIntent = actionIntent(context, ACTION_REPLY, spec.key)
             val mutable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
@@ -306,13 +376,13 @@ public object PamConversationNotifications {
                 ) == android.content.pm.PackageManager.PERMISSION_GRANTED
             )
 
-    private fun actionIntent(context: Context, action: String, key: String): Intent =
+    internal fun actionIntent(context: Context, action: String, key: String): Intent =
         Intent(context, PamNotificationActionReceiver::class.java)
             .setAction(action)
             .setPackage(context.packageName)
             .putExtra(EXTRA_KEY, key)
 
-    private fun requestCode(key: String, action: Int): Int = (key.hashCode() * 31) + action
+    internal fun requestCode(key: String, action: Int): Int = (key.hashCode() * 31) + action
 
     private fun priority(importance: Int): Int = when (importance) {
         1 -> NotificationCompat.PRIORITY_LOW
@@ -412,6 +482,29 @@ public object PamConversationNotifications {
 /** Receives inline replies and mark-as-read taps, even while PHP is suspended. */
 public class PamNotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == PamConversationNotifications.ACTION_BUTTON) {
+            val id = intent.getStringExtra(PamConversationNotifications.EXTRA_BUTTON_ID) ?: return
+            val endpoint = runCatching { JSONObject(intent.getStringExtra(PamConversationNotifications.EXTRA_BUTTON_ENDPOINT).orEmpty()) }.getOrNull() ?: return
+            val pending = goAsync()
+            val appContext = context.applicationContext
+            thread(name = "pam-notification-button") {
+                try {
+                    PamNotificationActions.handleButton(
+                        appContext,
+                        id,
+                        endpoint,
+                        intent.getStringExtra(PamConversationNotifications.EXTRA_BUTTON_DATA) ?: "{}",
+                        intent.getStringExtra(PamConversationNotifications.EXTRA_BUTTON_DEEP_LINK).orEmpty(),
+                        intent.getStringExtra(PamConversationNotifications.EXTRA_BUTTON_TAG).orEmpty(),
+                        intent.getIntExtra(PamConversationNotifications.EXTRA_BUTTON_NOTIFICATION, 0),
+                        intent.getBooleanExtra(PamConversationNotifications.EXTRA_BUTTON_DISMISS, true),
+                    )
+                } finally {
+                    pending.finish()
+                }
+            }
+            return
+        }
         val key = intent.getStringExtra(PamConversationNotifications.EXTRA_KEY) ?: return
         val type = when (intent.action) {
             PamConversationNotifications.ACTION_REPLY -> NotificationActionType.REPLY
@@ -419,12 +512,13 @@ public class PamNotificationActionReceiver : BroadcastReceiver() {
             else -> return
         }
         val text = if (type == NotificationActionType.REPLY) {
-            RemoteInput.getResultsFromIntent(intent)
+            (RemoteInput.getResultsFromIntent(intent)
                 ?.getCharSequence(PamConversationNotifications.REMOTE_INPUT_KEY)
                 ?.toString()
                 ?.trim()
-                .orEmpty()
-                .take(ConversationMessage.MAX_TEXT)
+                ?.ifEmpty { null }
+                ?: intent.getStringExtra(PamConversationNotifications.EXTRA_RETRY_TEXT)?.trim().orEmpty()
+            ).take(ConversationMessage.MAX_TEXT)
         } else {
             ""
         }
@@ -433,7 +527,10 @@ public class PamNotificationActionReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         thread(name = "pam-notification-action") {
             try {
-                PamNotificationActions.handle(appContext, type, key, text)
+                val retry = intent.getStringExtra(PamConversationNotifications.EXTRA_RETRY_ACTION_ID)
+                    ?.takeIf(String::isNotEmpty)
+                    ?.let { ReplyRetry(it, intent.getStringExtra(PamConversationNotifications.EXTRA_RETRY_UUID).orEmpty()) }
+                PamNotificationActions.handle(appContext, type, key, text, retry)
             } finally {
                 pending.finish()
             }

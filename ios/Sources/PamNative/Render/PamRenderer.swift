@@ -3242,9 +3242,10 @@ public final class PamRenderer {
         } else {
             alignment = parent.properties[PamConstants.justifyContent]?.integerOrNil() ?? 1
         }
+        // Parent-driven: the box moves, its wrapped lines stay left (RN/Yoga).
         switch alignment {
-        case 2: return 2
-        case 3: return 3
+        case 2: return 5
+        case 3: return 6
         default: return 1
         }
     }
@@ -3256,8 +3257,8 @@ public final class PamRenderer {
             return
         }
         label.textAlignment = switch textAlignmentValue(state) {
-        case 2: .center
-        case 3: .right
+        case 2, 5: .center
+        case 3, 6: .right
         case 4: .justified
         default: .left
         }

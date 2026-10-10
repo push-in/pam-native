@@ -144,6 +144,82 @@ class PamSurfaceSafeAreaInstrumentedTest {
         assertEquals(result.window.navigationHeightDp, result.safeAreaPaddingBottom, 0.6f)
     }
 
+    /**
+     * A screen like Zé Chat's Editar perfil (RN SafeAreaView edges top+bottom):
+     * header + ScrollView whose content pads 68 dp at the bottom. Scrolled to
+     * the end, the padding must sit above the navigation bar, as in RN: the
+     * last row may not end behind the bar.
+     */
+    @Test
+    fun scrollInsideASafeAreaViewEndsWithItsBottomPaddingAboveTheNavigationBar() {
+        lateinit var mutations: List<Mutation>
+        var navigationTop = 0
+        var density = 1f
+        instrumentation.runOnMainSync {
+            val decor = activity.window.decorView
+            density = activity.resources.displayMetrics.density
+            val insets = WindowInsetsCompat.toWindowInsetsCompat(decor.rootWindowInsets, decor)
+            val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            assumeTrue("needs a status bar and a navigation bar", safe.top > 0 && safe.bottom > 0)
+            val origin = IntArray(2).also(decor::getLocationOnScreen)
+            navigationTop = origin[1] + decor.height - safe.bottom
+            val tree = encodeTree(
+                listOf(
+                    TreeNode(1, 0, 0, KIND_SCREEN),
+                    TreeNode(2, 1, 0, KIND_SAFE_AREA_VIEW, mapOf(KEY_FLEX_GROW to 1.0, KEY_BACKGROUND_COLOR to 0xFFF7F6F2L)),
+                    TreeNode(3, 2, 0, KIND_COLUMN, mapOf(KEY_FLEX_GROW to 1.0, KEY_MIN_HEIGHT to 0.0)),
+                    TreeNode(HEADER, 3, 0, KIND_VIEW, mapOf(KEY_HEIGHT to 52.0)),
+                    TreeNode(SCROLL, 3, 1, KIND_SCROLL, mapOf(KEY_FLEX_GROW to 1.0, KEY_MIN_HEIGHT to 0.0)),
+                    TreeNode(6, SCROLL, 0, KIND_COLUMN, mapOf(KEY_PADDING_BOTTOM to 68.0)),
+                    TreeNode(7, 6, 0, KIND_VIEW, mapOf(KEY_HEIGHT to 2400.0)),
+                    TreeNode(LAST_ROW, 6, 1, KIND_VIEW, mapOf(KEY_HEIGHT to 40.0, KEY_BACKGROUND_COLOR to 0xFF2244AAL)),
+                ),
+            )
+            val batch = PamEngineLayoutProbe.nativeLayout(
+                tree,
+                decor.width / density,
+                decor.height / density,
+                floatArrayOf(safe.left / density, safe.top / density, safe.right / density, safe.bottom / density),
+                modalWindowSurfacePolicy(activity),
+            )
+            assertNotNull("engine layout probe failed", batch)
+            mutations = BatchDecoder.decode(ByteBuffer.wrap(batch!!).asReadOnlyBuffer())
+            renderer = PamRenderer(activity, activity.host) { _, _, _ -> }.also {
+                it.engineManagedSafeArea = true
+                it.commit(listOf(mutations))
+            }
+        }
+        val active = renderer!!
+        assertTrue("screen was not laid out", waitUntil {
+            var ready = false
+            instrumentation.runOnMainSync { ready = (active.viewForNode(LAST_ROW)?.isAttachedToWindow == true) }
+            ready
+        })
+        instrumentation.waitForIdleSync()
+        instrumentation.runOnMainSync {
+            val scroll = active.viewForNode(SCROLL) as PamScrollContainer
+            scroll.setContentOffsetY(100_000f)
+        }
+        instrumentation.waitForIdleSync()
+        SystemClock.sleep(300)
+        var lastBottom = 0
+        var scrollBottom = 0
+        instrumentation.runOnMainSync {
+            val row = active.viewForNode(LAST_ROW)!!
+            lastBottom = screenTop(row) + row.height
+            val scroll = active.viewForNode(SCROLL)!!
+            scrollBottom = screenTop(scroll) + scroll.height
+        }
+        val padding = (68f * density).toInt()
+        assertNear("the scroll viewport ends at the navigation bar", navigationTop, scrollBottom)
+        val frames = mutations.filterIsInstance<Mutation.Layout>().associate { it.id to it.frame }
+        assertNear(
+            "the last row ends 68 dp above the navigation bar (frames 5=${frames[SCROLL]} 6=${frames[6L]} 8=${frames[LAST_ROW]})",
+            navigationTop - padding,
+            lastBottom,
+        )
+    }
+
     @Test
     fun hostSurfacePolicyMatchesTheRealDialogWindow() {
         val sdk = android.os.Build.VERSION.SDK_INT
@@ -346,6 +422,12 @@ class PamSurfaceSafeAreaInstrumentedTest {
         const val KIND_VIEW = 11
         const val KIND_MODAL = 15
         const val KIND_SAFE_AREA_VIEW = 21
+        const val KIND_COLUMN = 2
+        const val KIND_SCROLL = 8
+        const val KEY_MIN_HEIGHT = 32
+        const val KEY_PADDING_BOTTOM = 107
+        const val SCROLL = 5L
+        const val LAST_ROW = 8L
         const val KEY_HEIGHT = 6
         const val KEY_FLEX_GROW = 7
         const val KEY_BACKGROUND_COLOR = 10

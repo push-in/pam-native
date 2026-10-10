@@ -5368,6 +5368,26 @@ mod tests {
     }
 
     #[test]
+    fn scroll_content_extent_includes_the_content_padding_bottom() {
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (1, node(1, 0, 0, NodeKind::Screen, [])),
+                (2, node(2, 1, 0, NodeKind::Scroll, [])),
+                (
+                    3,
+                    node(3, 2, 0, NodeKind::Column, [(PropKey::PaddingBottom, PropValue::Float(68.0))]),
+                ),
+                (4, node(4, 3, 0, NodeKind::View, [(PropKey::Height, PropValue::Float(900.0))])),
+                (5, node(5, 3, 1, NodeKind::View, [(PropKey::Height, PropValue::Float(1.0))])),
+            ]),
+        };
+        let layouts = calculate(&tree, Size { width: 360.0, height: 640.0 }).expect("scroll layout");
+        assert_eq!(layouts[&3].height, 969.0);
+        assert_eq!(layouts[&5].y, 900.0);
+    }
+
+    #[test]
     fn scroll_content_keeps_its_natural_extent_on_both_axes() {
         let horizontal = Tree {
             root: 1,

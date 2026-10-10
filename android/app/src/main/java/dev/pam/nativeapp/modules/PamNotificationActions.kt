@@ -18,6 +18,41 @@ import org.json.JSONObject
 internal object NotificationActionType {
     const val REPLY = 1
     const val MARK_READ = 2
+    const val BUTTON = 3
+}
+
+/** The ids a failed reply was first sent with, reused by "Try again" so the server can dedupe. */
+internal data class ReplyRetry(val actionId: String, val uuid: String)
+
+/** What a failed inline reply shows, resolved from the rule's ReplyFailures config. */
+internal data class ReplyFailure(val text: String, val retry: Boolean, val keepReply: Boolean) {
+    companion object {
+        /** [status] <= 0: no HTTP response; a missing credential counts as 401. */
+        fun resolve(config: JSONObject, status: Int, serverMessage: String?): ReplyFailure {
+            val entry = when {
+                status <= 0 -> config.optJSONObject("offline")
+                else -> {
+                    val statuses = config.optJSONArray("statuses") ?: JSONArray()
+                    (0 until statuses.length()).asSequence()
+                        .mapNotNull(statuses::optJSONObject)
+                        .firstOrNull { candidate ->
+                            val codes = candidate.optJSONArray("codes") ?: JSONArray()
+                            (0 until codes.length()).any { codes.optInt(it) == status }
+                        } ?: config.optJSONObject("otherwise")
+                }
+            } ?: JSONObject()
+            val message = serverMessage?.trim()?.takeIf { status > 0 && entry.optBoolean("serverMessage") && it.isNotEmpty() && it.length <= 160 }
+            return ReplyFailure(
+                text = message ?: entry.optString("text").ifBlank { "Could not send." },
+                retry = entry.optBoolean("retry", status <= 0),
+                keepReply = entry.optBoolean("keepReply", status <= 0),
+            )
+        }
+
+        /** Positive, unique per reply: milliseconds × 1000 + random (fits a signed 64-bit and JS safe integers). */
+        fun createActionId(now: Long = System.currentTimeMillis()): String =
+            (now * 1_000L + kotlin.random.Random.nextInt(0, 1_000)).toString()
+    }
 }
 
 /**
@@ -31,14 +66,24 @@ public object PamNotificationActions {
     private var waiter: ModuleCompletion? = null
     private var preferences: SharedPreferences? = null
 
-    internal fun handle(context: Context, type: Int, key: String, text: String) {
+    internal fun handle(context: Context, type: Int, key: String, text: String, retry: ReplyRetry? = null) {
         attach(context)
         val spec = PamConversationNotifications.load(context, key)
         val endpoint = if (type == NotificationActionType.REPLY) spec?.replyEndpoint else spec?.markReadEndpoint
+        // {action_id} / {uuid} stay fixed for this reply and its retries.
+        val actionId = retry?.actionId?.takeIf(String::isNotEmpty) ?: ReplyFailure.createActionId()
+        val uuid = retry?.uuid?.takeIf(String::isNotEmpty) ?: UUID.randomUUID().toString()
         val variables = NotificationTemplate.variables(spec?.dataJson ?: "{}") + mapOf(
             "reply" to text,
             "conversation" to key,
+            "action_id" to actionId,
+            "uuid" to uuid,
         )
+        val failures = spec?.replyFailures
+        if (type == NotificationActionType.REPLY && failures != null) {
+            handleReplyWithFailures(context, spec, failures, endpoint, variables, key, text, actionId, uuid)
+            return
+        }
         // An endpoint authenticated per account ({credential:user_id}) is never
         // sent when the push's account has no token here: the notification is
         // dismissed and nothing goes out with another account's session.
@@ -55,6 +100,83 @@ public object PamNotificationActions {
             else -> runCatching { NotificationEndpoint.send(context, endpoint, variables) }.getOrDefault(0)
         }
         report(type, key, text, spec?.dataJson ?: "{}", spec?.deepLink.orEmpty(), status, missingCredential)
+    }
+
+    /** Sends first; success appends the reply, failure keeps it with the reason (ReplyFailures). */
+    private fun handleReplyWithFailures(
+        context: Context,
+        spec: ConversationSpec,
+        failures: JSONObject,
+        endpoint: JSONObject?,
+        variables: Map<String, String>,
+        key: String,
+        text: String,
+        actionId: String,
+        uuid: String,
+    ) {
+        val missingCredential = endpoint != null && NotificationEndpoint.missingCredential(endpoint, variables) {
+            PamNotificationCredentials.token(context, it)
+        }
+        val result = when {
+            endpoint == null -> NotificationEndpoint.Result(-1, null)
+            missingCredential -> NotificationEndpoint.Result(401, null)
+            else -> runCatching { NotificationEndpoint.sendForResult(context, endpoint, variables) }
+                .getOrDefault(NotificationEndpoint.Result(0, null))
+        }
+        val delivered = result.status in 200..299
+        if (delivered || endpoint == null) {
+            PamConversationNotifications.appendOwnReply(context, key, text)
+        } else {
+            val failure = ReplyFailure.resolve(failures, result.status, result.message)
+            PamConversationNotifications.showFailure(
+                context,
+                key,
+                JSONObject()
+                    .put("failedText", text)
+                    .put("text", failure.text)
+                    .put("retry", failure.retry)
+                    .put("keepReply", failure.keepReply)
+                    .put("actionId", actionId)
+                    .put("uuid", uuid)
+                    .put("timestamp", System.currentTimeMillis()),
+            )
+        }
+        report(
+            NotificationActionType.REPLY,
+            key,
+            text,
+            spec.dataJson,
+            spec.deepLink,
+            if (endpoint == null || missingCredential) -1 else result.status,
+            missingCredential,
+            failureShown = !delivered && endpoint != null,
+        )
+    }
+
+    /** A PushRenderingRule::action() button: send natively, dismiss on 2xx, report the id to PHP. */
+    internal fun handleButton(
+        context: Context,
+        id: String,
+        endpoint: JSONObject,
+        dataJson: String,
+        deepLink: String,
+        tag: String,
+        notificationId: Int,
+        dismiss: Boolean,
+    ) {
+        attach(context)
+        val variables = NotificationTemplate.variables(dataJson) + mapOf(
+            "action_id" to ReplyFailure.createActionId(),
+            "uuid" to UUID.randomUUID().toString(),
+        )
+        val missingCredential = NotificationEndpoint.missingCredential(endpoint, variables) {
+            PamNotificationCredentials.token(context, it)
+        }
+        val status = if (missingCredential) -1 else runCatching { NotificationEndpoint.send(context, endpoint, variables) }.getOrDefault(0)
+        if (dismiss && status in 200..299) {
+            androidx.core.app.NotificationManagerCompat.from(context).cancel(tag.ifEmpty { null }, notificationId)
+        }
+        report(NotificationActionType.BUTTON, "", "", dataJson, deepLink, status, missingCredential, action = id)
     }
 
     @JvmStatic
@@ -105,6 +227,8 @@ public object PamNotificationActions {
         deepLink: String,
         status: Int,
         missingCredential: Boolean,
+        failureShown: Boolean = false,
+        action: String = "",
     ) {
         val payload = WireMap.encode(
             mapOf(
@@ -116,6 +240,8 @@ public object PamNotificationActions {
                 "handledNatively" to WireValue.Flag(status >= 0),
                 "statusCode" to WireValue.Integer(status.coerceAtLeast(0).toLong()),
                 "credentialMissing" to WireValue.Flag(missingCredential),
+                "failureShown" to WireValue.Flag(failureShown),
+                "action" to WireValue.Text(action),
                 "timestamp" to WireValue.Integer(System.currentTimeMillis()),
             ),
         )
@@ -211,7 +337,7 @@ internal object NotificationTemplate {
     fun complete(template: String, variables: Map<String, String>): Boolean =
         PLACEHOLDER.findAll(template).all { match ->
             val name = match.groupValues[1]
-            name in variables || name == "uuid" || name == "now" ||
+            name in variables || name == "uuid" || name == "now" || name == "action_id" ||
                 name.startsWith("storage:") || name.startsWith(CREDENTIAL)
         }
 
@@ -228,6 +354,7 @@ internal object NotificationTemplate {
         name in variables -> variables.getValue(name)
         name == "uuid" -> UUID.randomUUID().toString()
         name == "now" -> System.currentTimeMillis().toString()
+        name == "action_id" -> ReplyFailure.createActionId()
         name.startsWith("storage:") && context != null -> {
             val key = name.removePrefix("storage:")
             require(STORAGE_KEY.matches(key)) { "Invalid storage placeholder" }
@@ -252,7 +379,13 @@ internal object NotificationEndpoint {
         }
     }
 
-    fun send(context: Context, endpoint: JSONObject, variables: Map<String, String>): Int {
+    /** HTTP status (0 when no response) and the error response's JSON `message`. */
+    data class Result(val status: Int, val message: String?)
+
+    fun send(context: Context, endpoint: JSONObject, variables: Map<String, String>): Int =
+        sendForResult(context, endpoint, variables).status
+
+    fun sendForResult(context: Context, endpoint: JSONObject, variables: Map<String, String>): Result {
         val method = endpoint.optString("method", "POST").uppercase()
         require(method in setOf("POST", "PUT", "PATCH", "DELETE")) { "Unsupported endpoint method" }
         val url = NotificationTemplate.render(endpoint.getString("url"), variables, context, NO_CREDENTIALS) {
@@ -286,8 +419,18 @@ internal object NotificationEndpoint {
                 connection.outputStream.use { it.write(rendered) }
             }
             val status = connection.responseCode
-            runCatching { (if (status >= 400) connection.errorStream else connection.inputStream)?.close() }
-            return status
+            var message: String? = null
+            runCatching {
+                if (status >= 400) {
+                    connection.errorStream?.use { stream ->
+                        val raw = stream.readBytes().take(16_384).toByteArray().toString(Charsets.UTF_8)
+                        message = runCatching { JSONObject(raw).optString("message").trim() }.getOrNull()?.takeIf(String::isNotEmpty)
+                    }
+                } else {
+                    connection.inputStream?.close()
+                }
+            }
+            return Result(status, message)
         } finally {
             connection.disconnect()
         }
