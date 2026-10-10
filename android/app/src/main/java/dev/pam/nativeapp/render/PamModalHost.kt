@@ -214,6 +214,16 @@ internal fun isPointOutsideModalChild(
 internal fun isPointOutsideModalChildren(x: Float, y: Float, children: List<IntArray>): Boolean =
     children.all { isPointOutsideModalChild(x, y, it[0], it[1], it[2], it[3]) }
 
+/**
+ * A mounted modal Dialog is on screen only while its decor is visible.
+ * Older platforms answer `isShowing` from the `mShowing` field, which
+ * `Dialog.hide()` leaves true (API 26 does), so a hidden, reusable window
+ * looked presented: it was never shown again on reopen and its close
+ * notified twice.
+ */
+internal val Dialog.isPresentedWindow: Boolean
+    get() = isShowing && window?.peekDecorView()?.visibility == View.VISIBLE
+
 internal class PamModalHost @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
@@ -299,7 +309,7 @@ internal class PamModalHost @JvmOverloads constructor(
         content.clipChildren = false
         content.clipToPadding = false
         content.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            val shown = dialog?.takeIf { it.isShowing }
+            val shown = dialog?.takeIf { it.isPresentedWindow }
             if (shown != null) {
                 dispatchOrientation(force = false)
                 // The first presentation is sized before its window exists;
@@ -352,7 +362,7 @@ internal class PamModalHost @JvmOverloads constructor(
     }
 
     fun setVisible(value: Boolean) {
-        if (desiredVisible == value && dialog?.isShowing == value) return
+        if (desiredVisible == value && dialog?.isPresentedWindow == value) return
         desiredVisible = value
         scheduleUpdate()
     }
@@ -565,7 +575,7 @@ internal class PamModalHost @JvmOverloads constructor(
         this.onShow = onShow
         this.onDismiss = onDismiss
         this.onOrientationChange = onOrientationChange
-        if (onOrientationChange != null && dialog?.isShowing == true) {
+        if (onOrientationChange != null && dialog?.isPresentedWindow == true) {
             dispatchOrientation(force = lastOrientation == null)
         }
     }
@@ -587,7 +597,7 @@ internal class PamModalHost @JvmOverloads constructor(
         dragVelocity = null
     }
 
-    fun isPresented(): Boolean = dialog?.isShowing == true
+    fun isPresented(): Boolean = dialog?.isPresentedWindow == true
 
     /**
      * Activity-level fallback for synthetic/OEM Back dispatch that reaches
@@ -615,7 +625,7 @@ internal class PamModalHost @JvmOverloads constructor(
         // input and IME. A host that stays detached still closes its window.
         val activity = pamActivity()
         if (
-            dialog?.isShowing == true &&
+            dialog?.isPresentedWindow == true &&
             activity != null &&
             !activity.isFinishing &&
             !activity.isDestroyed &&
@@ -642,7 +652,7 @@ internal class PamModalHost @JvmOverloads constructor(
             return
         }
         val active = dialog
-        if (active?.isShowing == true) {
+        if (active?.isPresentedWindow == true) {
             content.animate().cancel()
             content.alpha = 1f
             content.translationY = 0f
@@ -653,9 +663,10 @@ internal class PamModalHost @JvmOverloads constructor(
         if (active != null) {
             previousFocus = WeakReference(rootView.findFocus())
             val generation = ++dialogGeneration
+            setHiddenWindowInput(active, hidden = false)
             active.show()
             if (dialogGeneration != generation || !desiredVisible) {
-                active.hide()
+                hideWindow(active)
                 return
             }
             applyWindowConfiguration(active)
@@ -851,7 +862,7 @@ internal class PamModalHost @JvmOverloads constructor(
             // An auto-focused input that already took focus keeps it: moving
             // focus to the first focusable (a header button) would drop the
             // keyboard it is opening.
-            if (dialog === modal && modal.isShowing && (focusKeyboard || content.findFocus() == null)) {
+            if (dialog === modal && modal.isPresentedWindow && (focusKeyboard || content.findFocus() == null)) {
                 val focus = if (focusKeyboard) {
                     content.findFirstEditText()
                 } else {
@@ -1392,7 +1403,7 @@ internal class PamModalHost @JvmOverloads constructor(
 
     private fun dismiss(notify: Boolean, animated: Boolean) {
         val modal = dialog ?: return
-        if (!modal.isShowing) {
+        if (!modal.isPresentedWindow) {
             dismissNow(modal, notify)
             return
         }
@@ -1455,7 +1466,7 @@ internal class PamModalHost @JvmOverloads constructor(
         resetSlideFade()
         content.alpha = 1f
         content.translationY = 0f
-        val wasShowing = modal.isShowing
+        val wasShowing = modal.isPresentedWindow
         if (focusKeyboard) {
             modal.currentFocus?.let { focus ->
                 val keyboard = context.getSystemService(Context.INPUT_METHOD_SERVICE)
@@ -1465,13 +1476,35 @@ internal class PamModalHost @JvmOverloads constructor(
             }
             previousFocus = null
         }
-        modal.hide()
+        hideWindow(modal)
         lastOrientation = null
         publishSurfaceKeyboard(0, animating = false)
         if (!focusKeyboard) restoreFocus()
         if (notify && wasShowing) {
             onDismiss?.invoke()
         }
+    }
+
+    /**
+     * Hides a mounted Dialog that stays around to be reopened. `hide()` only
+     * makes its decor GONE: once the activity is stopped and restarted (Play
+     * Services' location settings dialog, a share sheet, the camera) Android
+     * 12 shows that window's surface again and the GONE, fill-parent window
+     * became an input target that swallowed every touch meant for the screen
+     * below. A hidden modal window is never touchable nor focusable; both
+     * flags travel to the window manager with the same traversal as `hide()`.
+     */
+    private fun hideWindow(modal: Dialog) {
+        setHiddenWindowInput(modal, hidden = true)
+        modal.hide()
+    }
+
+    /** Cleared before `show()`, so a reopened window takes focus and touches when it is added back. */
+    private fun setHiddenWindowInput(modal: Dialog, hidden: Boolean) {
+        val window = modal.window ?: return
+        val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        if (hidden) window.addFlags(flags) else window.clearFlags(flags)
     }
 
     private fun destroyDialog(notify: Boolean) {
@@ -1481,7 +1514,7 @@ internal class PamModalHost @JvmOverloads constructor(
         resetSlideFade()
         content.alpha = 1f
         content.translationY = 0f
-        val wasShowing = modal.isShowing
+        val wasShowing = modal.isPresentedWindow
         unregisterDialogBackCallback(modal)
         modal.dismiss()
         dialog = null

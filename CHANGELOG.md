@@ -31,6 +31,17 @@
   the bare messages of older runtimes. `LocationError::detail()` strips the
   code. A location switched off is now `disabled` on both platforms (Android
   checked only for an enabled provider; iOS reported a `.denied` permission).
+- Android `Modal`/`BottomSheet`: a closed modal keeps its Dialog mounted and
+  hidden (`Dialog.hide()`), and once the activity was stopped and restarted by
+  another activity (Play Services' "turn on location" dialog from
+  `Location::requestServices`, a share sheet, the camera) Android 12 showed
+  the hidden window's surface again as a fill-parent input target: no touch
+  reached the screen below until the user left it with Back. A hidden modal
+  window is now `FLAG_NOT_TOUCHABLE` and `FLAG_NOT_FOCUSABLE`, cleared before
+  the same mounted modal is shown again. The host also tells a hidden Dialog
+  from a presented one by its decor visibility: older platforms (API 26) keep
+  `Dialog.isShowing` true after `hide()`, so a reopened modal was never shown
+  again and a close notified `onDismiss` twice.
 
 ## 1.34.1 - 2026-10-09
 
