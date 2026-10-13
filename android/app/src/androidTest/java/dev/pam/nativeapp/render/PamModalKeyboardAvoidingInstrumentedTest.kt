@@ -196,6 +196,13 @@ class PamModalKeyboardAvoidingInstrumentedTest {
             lastGeometry = "palette=${screenBottom(palette)} closed=$closedBottom engine=${engineInsets.takeLast(3)}"
             imeTop(input) == null && kotlin.math.abs(screenBottom(palette) - closedBottom) <= 2
         }
+        // adjustPan can restore geometry while rootWindowInsets already reports
+        // the hidden target, before the last animation/onEnd reaches our host.
+        // Await that independent asynchronous contract, then still require
+        // exactly one binary transition (no missing event or per-frame spam).
+        waitUntil("Back publishes the hidden keyboard transition") {
+            keyboardEvents.lastOrNull() == false
+        }
         assertEquals("Back emits hidden without requiring blur", listOf(true, false), keyboardEvents)
         assertTrue("the field remains focused after Android Back hides IME", onMainValue { input.hasFocus() })
     }
