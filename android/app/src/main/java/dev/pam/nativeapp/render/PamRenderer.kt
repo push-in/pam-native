@@ -2718,6 +2718,17 @@ class PamRenderer(
             topPx = placement.top
             frameGravity = placement.gravity
         }
+        // Sheet roots are positioned by the native dialog's detent. Engine
+        // relayouts (SafeArea/KAV/focus) still describe the activity viewport;
+        // applying those frames here would replace BOTTOM with TOP and stretch
+        // the sheet behind the status bar. Descendants use this reduced viewport.
+        (parentView as? PamModalHost)?.sheetChildLayoutParams()?.let { placement ->
+            width = placement.width
+            height = placement.height
+            leftPx = placement.leftMargin
+            topPx = placement.topMargin
+            frameGravity = placement.gravity
+        }
         val current = view.layoutParams as? FrameLayout.LayoutParams
 
         val layoutChanged =

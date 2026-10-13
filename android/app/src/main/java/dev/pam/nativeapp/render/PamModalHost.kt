@@ -386,6 +386,12 @@ internal class PamModalHost @JvmOverloads constructor(
 
     internal fun usesWindowSizedContent(): Boolean = presentation != 2 && presentation != 3
 
+    /** The dialog owns the detent even when the engine emits a new window-sized frame. */
+    internal fun sheetChildLayoutParams(): FrameLayout.LayoutParams? =
+        if (presentation == PRESENTATION_SHEET && lastSheetHeight > 0) {
+            modalChildLayoutParams(presentation, lastSheetHeight)
+        } else null
+
     fun setPresentation(value: Int) {
         if (presentation == value) return
         presentation = value
