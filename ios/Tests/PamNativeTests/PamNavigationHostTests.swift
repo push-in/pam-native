@@ -3,6 +3,87 @@ import UIKit
 @testable import PamNative
 
 final class PamNavigationHostTests: XCTestCase {
+    func testRetainedRouteReleasesFirstResponderAndPreservesDraft() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let host = PamNavigationHost(frame: window.bounds)
+        controller.view.addSubview(host)
+        host.operation = 2
+        host.transition = 8
+        let source = UIView(frame: window.bounds)
+        let destination = UIView(frame: window.bounds)
+        let input = PamInputField(frame: CGRect(x: 0, y: 100, width: 300, height: 44))
+        input.text = "retained draft"
+        source.addSubview(input)
+        host.insert(source, index: 0)
+        host.insert(destination, index: 1)
+        source.isHidden = false
+        destination.isHidden = true
+        XCTAssertTrue(input.becomeFirstResponder())
+        host.navigate(1)
+        XCTAssertTrue(source.isHidden)
+        XCTAssertFalse(input.isFirstResponder)
+        XCTAssertEqual(input.text, "retained draft")
+        source.isHidden = false
+        XCTAssertTrue(input.becomeFirstResponder())
+        XCTAssertEqual(input.text, "retained draft")
+    }
+
+    func testHidingOldRouteDoesNotResignDestinationInput() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let host = PamNavigationHost(frame: window.bounds)
+        controller.view.addSubview(host)
+        host.operation = 2
+        host.transition = 8
+        let source = UIView(frame: window.bounds)
+        let destination = UIView(frame: window.bounds)
+        let first = PamInputField(frame: CGRect(x: 0, y: 100, width: 300, height: 44))
+        let next = PamInputField(frame: first.frame)
+        source.addSubview(first)
+        destination.addSubview(next)
+        host.insert(source, index: 0)
+        host.insert(destination, index: 1)
+        source.isHidden = false
+        destination.isHidden = false
+        XCTAssertTrue(first.becomeFirstResponder())
+        XCTAssertTrue(next.becomeFirstResponder())
+        host.navigate(1)
+        XCTAssertFalse(first.isFirstResponder)
+        XCTAssertTrue(next.isFirstResponder)
+    }
+
+    func testLateAutomaticFocusRespectsHiddenAncestors() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        let source = UIView(frame: window.bounds)
+        let input = PamInputField(frame: CGRect(x: 0, y: 100, width: 300, height: 44))
+        controller.view.addSubview(source)
+        source.addSubview(input)
+        input.autoFocusRequested = true
+        source.isHidden = true
+        let completed = expectation(description: "hidden focus ignored and visible focus works")
+        DispatchQueue.main.async {
+            XCTAssertFalse(input.isFirstResponder)
+            source.isHidden = false
+            input.requestAutomaticFocus()
+            DispatchQueue.main.async {
+                XCTAssertTrue(input.isFirstResponder)
+                completed.fulfill()
+            }
+        }
+        wait(for: [completed], timeout: 1)
+    }
+
     override func tearDown() {
         PamMotionPolicy.reduceMotionOverride = nil
         super.tearDown()

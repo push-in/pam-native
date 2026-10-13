@@ -4643,8 +4643,14 @@ class PamRenderer(
                 } else {
                     null
                 },
-                onShow = state.callback(PropKey.ON_MODAL_SHOW) {
-                    dispatch(state.id, EVENT_MODAL_SHOW)
+                onShow = {
+                    // A remounted editor may have cancelled its initial focus
+                    // while the retained sheet was hidden. Presentation is a
+                    // fresh visible request, never a hidden-route retry.
+                    requestAutoFocusDescendant(state.id)
+                    if (state.properties[PropKey.ON_MODAL_SHOW] != null) {
+                        dispatch(state.id, EVENT_MODAL_SHOW)
+                    }
                 },
                 onDismiss = state.callback(PropKey.ON_MODAL_DISMISS) {
                     dispatch(state.id, EVENT_MODAL_DISMISS)
@@ -8306,7 +8312,7 @@ class PamRenderer(
     private fun restoreKeyboardAvoidingInput(state: NodeState) {
         if (state.keyboardInset <= 0) return
         val input = state.keyboardFocusedInput ?: return
-        if (!input.isAttachedToWindow) return
+        if (!input.isAttachedToWindow || !input.isShown) return
         if (!input.hasFocus()) input.requestFocus()
         (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
             ?.showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
@@ -8342,7 +8348,7 @@ class PamRenderer(
             if (
                 state.flag(PropKey.AUTO_FOCUS, false) &&
                 view is PamEditText &&
-                view.visibility == View.VISIBLE
+                view.isShown
             ) {
                 requestAutoFocus(view, id)
                 return
@@ -8364,6 +8370,12 @@ class PamRenderer(
      */
     private fun attemptAutoFocus(view: View, deadline: Long, retry: Boolean) {
         view.postDelayed({
+            // A retained route may become hidden between scheduling and running.
+            // Hidden editors must never acquire focus or restart the IME.
+            if (view.isAttachedToWindow && !view.isShown) {
+                (view as? PamEditText)?.onInputConnectionCreated = null
+                return@postDelayed
+            }
             if (!view.isAttachedToWindow || !view.hasFocus() && !view.requestFocus()) {
                 if (SystemClock.uptimeMillis() < deadline) {
                     attemptAutoFocus(view, deadline, retry = true)
@@ -8390,13 +8402,13 @@ class PamRenderer(
      */
     private fun showAutoFocusKeyboard(input: PamEditText, deadline: Long, retry: Boolean) {
         input.onInputConnectionCreated = {
-            if (input.hasFocus() && input.hasWindowFocus() && !autoFocusImeVisible(input)) {
+            if (input.isShown && input.hasFocus() && input.hasWindowFocus() && !autoFocusImeVisible(input)) {
                 Log.i(AUTO_FOCUS_LOG, "input connection created; showing the IME")
                 requestAutoFocusIme(input)
             }
         }
         input.postDelayed({
-            if (!input.isAttachedToWindow || !input.hasFocus()) {
+            if (!input.isAttachedToWindow || !input.isShown || !input.hasFocus()) {
                 Log.i(AUTO_FOCUS_LOG, "stopped: attached=${input.isAttachedToWindow} focused=${input.hasFocus()}")
                 input.onInputConnectionCreated = null
                 return@postDelayed

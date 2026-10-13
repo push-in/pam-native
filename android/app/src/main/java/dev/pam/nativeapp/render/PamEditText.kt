@@ -16,6 +16,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputConnectionWrapper
 import android.widget.EditText
 
@@ -46,6 +47,25 @@ internal class PamEditText @JvmOverloads constructor(
         isFocusable = enabled
         isFocusableInTouchMode = enabled
         if (!enabled) clearFocus()
+    }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        if (isVisible) return
+        // Kept-alive navigation routes are INVISIBLE, not detached. Android
+        // can continue serving their focused editor unless focus is released.
+        // Clear pending auto-focus hooks as well, so an IME callback cannot
+        // reopen the keyboard for a route the user has already left.
+        onInputConnectionCreated = null
+        if (!hasFocus()) return
+        val token = windowToken
+        clearFocus()
+        // A destination may already own another editor in the same window.
+        // Never hide that editor's keyboard while retiring this input.
+        if (rootView.findFocus() !is EditText) {
+            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
+                ?.hideSoftInputFromWindow(token, 0)
+        }
     }
 
     fun setInputCallbacks(

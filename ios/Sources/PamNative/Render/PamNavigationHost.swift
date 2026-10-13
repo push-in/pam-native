@@ -226,7 +226,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             finish(incoming: incoming, outgoing: outgoing)
             return
         }
-        routeViews.forEach { $0.isHidden = $0 !== incoming && $0 !== outgoing }
+        routeViews.forEach { setRouteHidden($0, $0 !== incoming && $0 !== outgoing) }
         incoming.isHidden = false
         outgoing?.isHidden = false
         layoutIfNeeded()
@@ -556,13 +556,13 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
                 outgoing.transform = .identity
                 incoming.alpha = 1
                 if complete {
-                    outgoing.isHidden = true
+                    self.setRouteHidden(outgoing, true)
                     self.interactivePopCommitted = true
                     self.onGestureEnd?()
                     self.onGesturePop?()
                 } else {
                     self.clearSharedElements()
-                    incoming.isHidden = true
+                    self.setRouteHidden(incoming, true)
                     self.onGestureCancel?()
                 }
             }
@@ -591,14 +591,21 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         incoming.isHidden = false
         outgoing?.alpha = 1
         outgoing?.transform = .identity
-        outgoing?.isHidden = true
+        if let outgoing { setRouteHidden(outgoing, true) }
         onTransitionEnd?()
         PamStatusBarCoordinator.invalidate()
     }
 
+    /// Retained routes stay attached; hiding them must retire their editor too.
+    /// endEditing on this subtree cannot resign an editor in the destination.
+    private func setRouteHidden(_ view: UIView, _ hidden: Bool) {
+        if hidden { view.endEditing(true) }
+        view.isHidden = hidden
+    }
+
     private func showOnlyTop() {
         for (index, view) in routeViews.enumerated() {
-            view.isHidden = index != routeViews.count - 1
+            setRouteHidden(view, index != routeViews.count - 1)
         }
     }
 

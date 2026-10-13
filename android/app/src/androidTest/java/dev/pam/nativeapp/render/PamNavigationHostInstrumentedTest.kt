@@ -867,6 +867,120 @@ class PamNavigationHostInstrumentedTest {
         }
     }
 
+    @Test
+    fun retainedRouteReleasesEditorFocusWithoutLosingDraft() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var navigation: PamNavigationHost
+        lateinit var source: FrameLayout
+        lateinit var destination: FrameLayout
+        lateinit var input: PamEditText
+        try {
+            onMain(instrumentation) {
+                navigation = PamNavigationHost(activity).apply {
+                    operation = OPERATION_PUSH
+                    transition = TRANSITION_NONE
+                }
+                activity.host.addView(navigation)
+                source = FrameLayout(activity)
+                destination = FrameLayout(activity)
+                input = PamEditText(activity).apply { setText("retained draft") }
+                source.addView(input, FrameLayout.LayoutParams(300, 100))
+                navigation.insert(source, 0)
+                navigation.insert(destination, 1)
+            }
+            awaitFrames(instrumentation, 2)
+            onMain(instrumentation) {
+                assertTrue(input.requestFocus())
+                input.onInputConnectionCreated = { /* A visible input connection is permitted before navigation commits. */ }
+                navigation.navigate(1)
+            }
+            awaitFrames(instrumentation, 3)
+            onMain(instrumentation) {
+                assertEquals(View.INVISIBLE, source.visibility)
+                assertTrue("Hidden route input cannot retain focus", !input.hasFocus())
+                assertTrue("Hidden IME hook is released", input.onInputConnectionCreated == null)
+                assertEquals("retained draft", input.text.toString())
+                source.visibility = View.VISIBLE
+                destination.visibility = View.INVISIBLE
+                assertTrue("Returning visible editor remains focusable", input.requestFocus())
+                assertEquals("retained draft", input.text.toString())
+            }
+        } finally { activity.finish() }
+    }
+
+    @Test
+    fun retiringOldRouteDoesNotBlurDestinationEditor() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var source: FrameLayout
+        lateinit var first: PamEditText
+        lateinit var next: PamEditText
+        try {
+            onMain(instrumentation) {
+                source = FrameLayout(activity)
+                first = PamEditText(activity)
+                next = PamEditText(activity)
+                source.addView(first, FrameLayout.LayoutParams(300, 100))
+                activity.host.addView(source)
+                activity.host.addView(next, FrameLayout.LayoutParams(300, 100))
+            }
+            awaitFrames(instrumentation, 2)
+            onMain(instrumentation) {
+                assertTrue(first.requestFocus())
+                assertTrue(next.requestFocus())
+                source.visibility = View.INVISIBLE
+                assertTrue("Visible destination keeps focus", next.hasFocus())
+                assertTrue(!first.hasFocus())
+            }
+        } finally { activity.finish() }
+    }
+
+    @Test
+    fun lateAutoFocusCannotReviveHiddenInputButVisibleAutoFocusWorks() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var source: FrameLayout
+        lateinit var input: PamEditText
+        lateinit var renderer: PamRenderer
+        val focus = PamRenderer::class.java.getDeclaredMethod(
+            "attemptAutoFocus", View::class.java, java.lang.Long.TYPE, java.lang.Boolean.TYPE,
+        ).apply { isAccessible = true }
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                source = FrameLayout(activity)
+                input = PamEditText(activity)
+                source.addView(input, FrameLayout.LayoutParams(300, 100))
+                activity.host.addView(source)
+            }
+            awaitFrames(instrumentation, 2)
+            onMain(instrumentation) {
+                focus.invoke(renderer, input, android.os.SystemClock.uptimeMillis() + 2_000L, false)
+                source.visibility = View.INVISIBLE
+            }
+            awaitFrames(instrumentation, 3)
+            onMain(instrumentation) {
+                assertTrue("Late focus callback cannot focus a hidden ancestor", !input.hasFocus())
+                source.visibility = View.VISIBLE
+            }
+            awaitFrames(instrumentation, 6)
+            onMain(instrumentation) {
+                assertTrue("Showing a retired route cannot restart its cancelled autofocus", !input.hasFocus())
+                focus.invoke(renderer, input, android.os.SystemClock.uptimeMillis() + 2_000L, false)
+            }
+            awaitFrames(instrumentation, 3)
+            onMain(instrumentation) {
+                assertTrue("Visible autoFocus still focuses the input", input.hasFocus())
+                source.visibility = View.INVISIBLE
+            }
+            awaitFrames(instrumentation, 3)
+            onMain(instrumentation) {
+                assertTrue("Pending IME callbacks cannot restore retired input focus", !input.hasFocus())
+            }
+        } finally { activity.finish() }
+    }
+
     private fun launchActivity(instrumentation: Instrumentation): PamTestActivity =
         instrumentation.startActivitySync(
             Intent(instrumentation.targetContext, PamTestActivity::class.java).apply {
