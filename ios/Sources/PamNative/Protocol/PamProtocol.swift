@@ -138,6 +138,7 @@ public enum EventKind: Int {
     case scrollEndDrag = 73
     case momentumScrollEnd = 74
     case textLayout = 75
+    case keyboardVisibility = 76
 }
 
 public enum PropValue {

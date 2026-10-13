@@ -616,6 +616,7 @@ class PamRenderer(
      * keyboard inset).
      */
     var onSurfaceKeyboardInset: ((Long, Float) -> Unit)? = null
+    var onKeyboardVisibility: ((Long, Boolean) -> Unit)? = null
 
     /**
      * True once the runtime feeds window insets to the engine: SafeAreaView
@@ -1309,6 +1310,7 @@ class PamRenderer(
         check(Looper.myLooper() == Looper.getMainLooper())
         onNativeChildVisibility = null
         onSurfaceKeyboardInset = null
+        onKeyboardVisibility = null
         prewarmActive = false
         main.removeCallbacks(prewarmSlice)
         destroyed = true
@@ -1557,6 +1559,7 @@ class PamRenderer(
                 appliedStatusBar?.let { applyStatusBar(modal, it) }
                 val id = state?.id ?: return@also
                 modal.onSurfaceKeyboardInset = { inset, _ -> forwardSurfaceKeyboard(id, modal, inset) }
+                modal.onKeyboardVisibility = { visible -> onKeyboardVisibility?.invoke(id, visible) }
             }
             NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {
                 installKeyboardInsets(it, requireNotNull(state))

@@ -11,6 +11,7 @@ import android.widget.EditText
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import dev.pam.nativeapp.KeyboardVisibility
 import dev.pam.nativeapp.PamTestActivity
 import dev.pam.nativeapp.protocol.BatchDecoder
 import dev.pam.nativeapp.protocol.Mutation
@@ -98,6 +99,8 @@ class PamModalKeyboardAvoidingInstrumentedTest {
 
     private fun runComposer(behavior: Long, translucent: Boolean, sheet: Boolean = false) {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val keyboardEvents = Collections.synchronizedList(ArrayList<Boolean>())
+        val visibility = KeyboardVisibility { keyboardEvents.add(it) }
         val engineInsets = Collections.synchronizedList(ArrayList<Float>())
         val lastFrames = HashMap<Long, dev.pam.nativeapp.protocol.Frame>()
         lateinit var tree: ByteArray
@@ -124,6 +127,9 @@ class PamModalKeyboardAvoidingInstrumentedTest {
             assertNotNull("engine layout probe failed", batch)
             renderer = PamRenderer(activity, activity.host) { _, _, _ -> }.also { active ->
                 active.engineManagedSafeArea = true
+                active.onKeyboardVisibility = { surface, visible ->
+                    visibility.update(surface, if (visible) 1f else 0f)
+                }
                 // The runtime's path: surface IME -> engine relayout -> frames.
                 active.onSurfaceKeyboardInset = { surface, inset ->
                     engineInsets += inset
@@ -168,6 +174,7 @@ class PamModalKeyboardAvoidingInstrumentedTest {
             input.hasFocus() && bottom <= imeTop + 2 && bottom >= imeTop - 2
         }
         Thread.sleep(500)
+        assertEquals("IME animation emits one visible transition, including interactive sheets", listOf(true), keyboardEvents)
         instrumentation.runOnMainSync {
             val imeTop = requireNotNull(imeTop(input))
             assertTrue("settled above the IME: $lastGeometry", screenBottom(palette) <= imeTop + 2)
@@ -189,6 +196,8 @@ class PamModalKeyboardAvoidingInstrumentedTest {
             lastGeometry = "palette=${screenBottom(palette)} closed=$closedBottom engine=${engineInsets.takeLast(3)}"
             imeTop(input) == null && kotlin.math.abs(screenBottom(palette) - closedBottom) <= 2
         }
+        assertEquals("Back emits hidden without requiring blur", listOf(true, false), keyboardEvents)
+        assertTrue("the field remains focused after Android Back hides IME", onMainValue { input.hasFocus() })
     }
 
     /**

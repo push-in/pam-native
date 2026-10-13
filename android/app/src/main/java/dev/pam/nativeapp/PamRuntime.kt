@@ -176,6 +176,9 @@ class PamRuntime(
             }
         }
         target.onSurfaceKeyboardInset = ::updateSurfaceKeyboardInset
+        target.onKeyboardVisibility = { surface, visible ->
+            keyboardVisibility.update(surface, if (visible) 1f else 0f)
+        }
     }
 
     val isRunning: Boolean
@@ -195,6 +198,7 @@ class PamRuntime(
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
         check(!closed.get()) { "Pam Runtime is closed" }
+        keyboardVisibility.setActive(true)
         val previousRenderer = this.renderer
         val previousModules = installedModules
         surfaceContext = WeakReference(context)
@@ -204,6 +208,7 @@ class PamRuntime(
         if (previousRenderer !== renderer) {
             previousRenderer.onNativeChildVisibility = null
             previousRenderer.onSurfaceKeyboardInset = null
+            previousRenderer.onKeyboardVisibility = null
             if (attachedSurface) runCatching { previousRenderer.close() }
             renderer.engineManagedSafeArea = previousRenderer.engineManagedSafeArea
             this.renderer = renderer
@@ -229,6 +234,7 @@ class PamRuntime(
     fun detach(context: Context) {
         check(Looper.myLooper() == Looper.getMainLooper())
         if (surfaceContext.get() !== context || !attachedSurface) return
+        keyboardVisibility.setActive(false)
         attachedSurface = false
         surfaceContext.clear()
         awaitingRemount = true
@@ -349,6 +355,11 @@ class PamRuntime(
         }
     }
 
+    private val keyboardVisibility = KeyboardVisibility { visible ->
+        dispatchEvent(0, dev.pam.nativeapp.protocol.EventKind.KEYBOARD_VISIBILITY.value,
+            (if (visible) "1" else "0").toByteArray())
+    }
+
     private var layoutViewport = floatArrayOf(0f, 0f, 1f)
 
     /**
@@ -358,6 +369,7 @@ class PamRuntime(
      * views and engine frames move together.
      */
     fun updateKeyboardInset(bottomDp: Float) {
+        keyboardVisibility.update(0, bottomDp)
         synchronized(handleLock) {
             val active = handle
             val (width, height, textScale) = layoutViewport.let { Triple(it[0], it[1], it[2]) }
@@ -391,6 +403,9 @@ class PamRuntime(
     }
 
     fun dispatchLifecycle(kind: Int, payload: ByteArray) {
+        if (kind == dev.pam.nativeapp.protocol.EventKind.APP_STATE.value) {
+            keyboardVisibility.setActive(payload.toString(Charsets.UTF_8) == "1")
+        }
         onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.LIFECYCLE, "event $kind"))
         dispatchEvent(0, kind, payload)
     }
@@ -916,6 +931,7 @@ class PamRuntime(
                 val event = pendingImmediateEvents.removeFirst()
                 nativeDispatchEvent(active, event.nodeId, event.kind, event.payload)
             }
+            keyboardVisibility.publishCurrent()
         }
     }
 

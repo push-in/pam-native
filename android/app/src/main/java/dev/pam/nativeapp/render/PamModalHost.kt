@@ -277,6 +277,7 @@ internal class PamModalHost @JvmOverloads constructor(
      * this window's keyboard.
      */
     internal var onSurfaceKeyboardInset: ((Int, Boolean) -> Unit)? = null
+    internal var onKeyboardVisibility: ((Boolean) -> Unit)? = null
     private var lastSheetHeight = 0
     private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
     private var backdropAnimator: android.animation.ValueAnimator? = null
@@ -790,6 +791,7 @@ internal class PamModalHost @JvmOverloads constructor(
      * already moves or shrinks with the IME.
      */
     private fun surfaceKeyboardInsetFor(insets: WindowInsetsCompat): Int {
+        onKeyboardVisibility?.invoke(desiredVisible && insets.isVisible(WindowInsetsCompat.Type.ime()))
         if (!desiredVisible || !insets.isVisible(WindowInsetsCompat.Type.ime())) return 0
         val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.coerceAtLeast(0)
         return modalSurfaceKeyboardInset(
@@ -1478,6 +1480,7 @@ internal class PamModalHost @JvmOverloads constructor(
         }
         hideWindow(modal)
         lastOrientation = null
+        onKeyboardVisibility?.invoke(false)
         publishSurfaceKeyboard(0, animating = false)
         if (!focusKeyboard) restoreFocus()
         if (notify && wasShowing) {
@@ -1519,6 +1522,7 @@ internal class PamModalHost @JvmOverloads constructor(
         modal.dismiss()
         dialog = null
         lastOrientation = null
+        onKeyboardVisibility?.invoke(false)
         publishSurfaceKeyboard(0, animating = false)
         if (notify && wasShowing) {
             onDismiss?.invoke()

@@ -439,10 +439,18 @@ final class Runtime
             }
             if ($eventKind === EventKind::AppState->value) {
                 $appState = AppState::from((int) $payload);
+                \Pam\Native\System\Keyboard::setActive($appState === AppState::Active);
                 ComponentLifecycle::appState($appState);
                 DependencyTracker::invalidateAll();
                 self::$appStateHandler?->__invoke($appState);
                 self::afterDispatch();
+
+                return;
+            }
+            if ($eventKind === EventKind::KeyboardVisibility->value) {
+                if (\Pam\Native\System\Keyboard::synchronize($payload === '1')) {
+                    self::afterDispatch();
+                }
 
                 return;
             }
@@ -727,6 +735,7 @@ final class Runtime
         self::$environmentKey = null;
         self::$themed = null;
         Appearance::resetRuntime();
+        \Pam\Native\System\Keyboard::resetRuntime();
         self::$windowMetrics = self::bootMetrics();
         ComponentLifecycle::shutdown();
         PamPhpRegistry::releaseInstances();

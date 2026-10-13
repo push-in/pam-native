@@ -479,6 +479,7 @@ public final class PamRuntime {
     /// thread only.
     public func attach(hostView: UIView) {
         dispatchPrecondition(condition: .onQueue(.main))
+        keyboardVisibility.setActive(true)
         let previous = renderer
         previous?.onNativeChildVisibility = nil
         previous?.close()
@@ -491,6 +492,7 @@ public final class PamRuntime {
     /// folded into the remount performed by the next `attach(hostView:)`.
     public func detach() {
         dispatchPrecondition(condition: .onQueue(.main))
+        keyboardVisibility.setActive(false)
         awaitingRemount = true
         dropPendingBatches()
         renderer?.onNativeChildVisibility = nil
@@ -670,6 +672,15 @@ public final class PamRuntime {
         configureDisplayLink()
     }
 
+    private lazy var keyboardVisibility: PamKeyboardVisibility = {
+        let visibility = PamKeyboardVisibility()
+        visibility.onChange = { [weak self] visible in
+            self?.dispatchEvent(0, kind: EventKind.keyboardVisibility.rawValue,
+                payload: Data((visible ? "1" : "0").utf8))
+        }
+        return visibility
+    }()
+
     private var layoutViewport: (width: Float, height: Float, textScale: Float) = (0, 0, 1)
 
     /// Visible keyboard height in points over the PAM root view (0 when
@@ -747,6 +758,9 @@ public final class PamRuntime {
             .cgRectValue ?? .zero
         let keyboard = window.convert(end, from: window.screen.coordinateSpace)
         let frame = host.convert(host.bounds, to: window)
+        // Visibility is independent of avoidance: interactive sheets already
+        // ride above the IME and deliberately publish zero avoidance inset.
+        keyboardVisibility.update(surface: 0, bottom: hiding || !keyboard.intersects(window.bounds) ? 0 : 1)
         // The keyboard of a presented sheet/modal input does not cover the
         // screen's composer below it (Android: the covered window ignores the
         // dialog's IME); only hiding applies.
@@ -887,6 +901,9 @@ public final class PamRuntime {
     }
 
     public func dispatchLifecycle(kind: Int, payload: Data = Data()) {
+        if kind == NativeViewEventKind.appState.rawValue {
+            keyboardVisibility.setActive(payload == Data("1".utf8))
+        }
         reportDiagnostic(RuntimeDiagnostic(kind: .lifecycle, label: "event \(kind)"))
         dispatchEvent(0, kind: kind, payload: payload)
     }
@@ -1551,7 +1568,7 @@ public final class PamRuntime {
         pendingImmediateEvents.removeAll()
         stateLock.unlock()
 
-        guard active != 0, !immediate.isEmpty else {
+        guard active != 0 else {
             return
         }
 
@@ -1562,6 +1579,7 @@ public final class PamRuntime {
                 payload: event.payload,
             )
         }
+        keyboardVisibility.publishCurrent()
     }
 
     private func scheduleFrame() {

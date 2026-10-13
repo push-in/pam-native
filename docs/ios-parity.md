@@ -232,3 +232,24 @@ Visual checks that tests cannot fully cover:
   swiping Reels must show each new page on the frame after it is ready (no
   blank cell, no flash), typing in the composer must echo in the same frame
   as before, and the dev tools overlay must still show commit statistics.
+
+## Keyboard visibility events (next release)
+
+`Keyboard::isVisible()`, `onVisibilityChange()` and `offVisibilityChange()` use
+binary native visibility, independently of input focus. Android Back can hide
+an IME while the field remains focused. An interactive sheet may have zero
+avoidance inset while the keyboard is visible; both hosts report visibility
+separately from that geometry. Insets animate natively without PHP callbacks
+per frame. Pause/detach clears the state; unsubscribing releases the consumer.
+
+Mac validation (not compiled on Linux):
+
+- Build the SDK and run `swift test --filter PamKeyboardVisibilityTests`.
+- On a device, observe a normal input, fullscreen Modal and interactive sheet:
+  one true event on show and one false on hide, with no events per frame.
+- Hide without blur, switch focused fields and change keyboard height; no
+  duplicate events. Check hardware keyboard and floating keyboard.
+- Background while visible, foreground, dismiss a modal and detach/reattach
+  the host. State must clear/reconcile and covered consumers must unsubscribe.
+- Reload while visible: the new PHP runtime receives the host snapshot and
+  no subscription from the old runtime survives.

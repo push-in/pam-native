@@ -152,7 +152,8 @@ enum class EventKind(val value: Int) {
     SCROLL_BEGIN_DRAG(72),
     SCROLL_END_DRAG(73),
     MOMENTUM_SCROLL_END(74),
-    TEXT_LAYOUT(75);
+    TEXT_LAYOUT(75),
+    KEYBOARD_VISIBILITY(76);
 }
 
 enum class PropKey(val value: Int) {

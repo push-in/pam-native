@@ -8033,6 +8033,7 @@ require __DIR__.'/signals.php';
 require __DIR__.'/visual_dom.php';
 require __DIR__.'/memoization.php';
 require __DIR__.'/appearance.php';
+require __DIR__.'/keyboard_visibility.php';
 require __DIR__.'/native_capabilities.php';
 require __DIR__.'/text_whitespace.php';
 require __DIR__.'/typography_parity.php';
