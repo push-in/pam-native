@@ -57,12 +57,13 @@ internal class PamEditText @JvmOverloads constructor(
         // Clear pending auto-focus hooks as well, so an IME callback cannot
         // reopen the keyboard for a route the user has already left.
         onInputConnectionCreated = null
-        if (!hasFocus()) return
+        // Android can clear focus before the visibility callback while IMM
+        // still serves this editor. Focus alone is not IME ownership.
         val token = windowToken
         clearFocus()
         // A destination may already own another editor in the same window.
         // Never hide that editor's keyboard while retiring this input.
-        if (rootView.findFocus() !is EditText) {
+        if (hasWindowFocus() && rootView.findFocus() !is EditText) {
             (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
                 ?.hideSoftInputFromWindow(token, 0)
         }

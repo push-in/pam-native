@@ -868,6 +868,56 @@ class PamNavigationHostInstrumentedTest {
     }
 
     @Test
+    fun retiringRouteDismissesServedImeEvenAfterAndroidAlreadyClearedFocus() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var source: FrameLayout
+        lateinit var input: PamEditText
+        try {
+            onMain(instrumentation) {
+                source = FrameLayout(activity)
+                input = PamEditText(activity).apply { setText("retained search") }
+                source.addView(input, FrameLayout.LayoutParams(600, 140))
+                activity.host.addView(source)
+            }
+            awaitFrames(instrumentation, 2)
+            onMain(instrumentation) {
+                assertTrue(input.requestFocus())
+                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .showSoftInput(input, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
+            awaitCondition(instrumentation, "IME must actually be visible before retiring the route") {
+                input.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+            }
+            onMain(instrumentation) {
+                // Android navigation can clear editor focus before dispatching
+                // aggregated visibility, while IMM still serves that editor.
+                input.clearFocus()
+                source.visibility = View.INVISIBLE
+            }
+            awaitCondition(instrumentation, "A hidden unfocused served editor must release the IME") {
+                input.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == false
+            }
+            onMain(instrumentation) {
+                assertTrue(!input.hasFocus())
+                assertEquals("retained search", input.text.toString())
+            }
+        } finally { activity.finish() }
+    }
+
+    private fun awaitCondition(instrumentation: Instrumentation, message: String, condition: () -> Boolean) {
+        val deadline = android.os.SystemClock.uptimeMillis() + 5_000L
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            var matches = false
+            onMain(instrumentation) { matches = condition() }
+            if (matches) return
+            Thread.sleep(40)
+        }
+        throw AssertionError(message)
+    }
+
+    @Test
     fun retainedRouteReleasesEditorFocusWithoutLosingDraft() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -929,9 +979,24 @@ class PamNavigationHostInstrumentedTest {
             onMain(instrumentation) {
                 assertTrue(first.requestFocus())
                 assertTrue(next.requestFocus())
+                (activity.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .showSoftInput(next, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                awaitCondition(instrumentation, "Destination IME is shown") {
+                    next.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+                }
+            }
+            onMain(instrumentation) {
                 source.visibility = View.INVISIBLE
                 assertTrue("Visible destination keeps focus", next.hasFocus())
                 assertTrue(!first.hasFocus())
+            }
+            awaitFrames(instrumentation, 8)
+            onMain(instrumentation) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    assertTrue("Retiring source preserves destination keyboard", next.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true)
+                }
             }
         } finally { activity.finish() }
     }
@@ -962,6 +1027,11 @@ class PamNavigationHostInstrumentedTest {
             awaitFrames(instrumentation, 3)
             onMain(instrumentation) {
                 assertTrue("Late focus callback cannot focus a hidden ancestor", !input.hasFocus())
+                // Keep a real focus owner while revealing the route. Otherwise
+                // Android may default-focus the only editor independently of
+                // our cancelled callback, depending on the prior IME test.
+                activity.host.isFocusableInTouchMode = true
+                assertTrue(activity.host.requestFocus())
                 source.visibility = View.VISIBLE
             }
             awaitFrames(instrumentation, 6)

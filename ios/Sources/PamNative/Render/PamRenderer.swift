@@ -613,6 +613,15 @@ public final class PamRenderer {
             navigation.reorderRoute(view, index: children[parent]?.firstIndex(of: id) ?? index)
             return
         }
+        if let view = views[id], let parentView = views[parent],
+           view.superview === parentView,
+           !(parentView is PamNavigationHost), !(parentView is PamTabHost),
+           !(parentView is PamModalHost), virtualListAncestor(of: parent) == nil {
+            // UIKit can reorder existing siblings without detaching their
+            // descendants or resigning the editor's first responder.
+            parentView.pamInsertManagedSubview(view, at: children[parent]?.firstIndex(of: id) ?? index)
+            return
+        }
         views[id]?.removeFromSuperview()
         if let view = views[id] {
             attach(view, parentId: parent, index: index)

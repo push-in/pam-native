@@ -203,6 +203,19 @@ internal open class PamContainer(context: Context) :
         addView(view, safeIndex)
     }
 
+    /** Reordering within this host must not detach focused editors or players
+     * from the window. A true reparent still uses normal remove/add lifecycle. */
+    internal fun reorderChild(view: View, index: Int) {
+        check(view.parent === this)
+        val target = index.coerceIn(0, childCount - 1)
+        if (indexOfChild(view) == target) return
+        val params = view.layoutParams
+        detachViewFromParent(view)
+        attachViewToParent(view, target, params)
+        requestLayout()
+        invalidate()
+    }
+
     private fun updateOverflowClipPath() {
         if (!overflowClipPathDirty) return
         val (left, top, right, bottom) = overflowClipInsets.toList()

@@ -1803,6 +1803,18 @@ class PamRenderer(
             sourceNavigation.reorderRoute(view, hostedInsertionIndex(state, effectiveParent(parent)))
             return
         }
+        val container = view?.parent as? PamContainer
+        if (!wasVirtualized && virtualListAncestor(parent) == null &&
+            container != null && container === views[effectiveParent(parent)]) {
+            removeChild(state.parent, id)
+            state.parent = parent
+            state.index = index
+            addChild(parent, id)
+            clearHitSlop(requireNotNull(view))
+            container.reorderChild(view, hostedInsertionIndex(state, effectiveParent(parent)))
+            applyHitSlop(view, state)
+            return
+        }
         view?.let(::clearHitSlop)
         if (sourceNavigation != null && sourceNavigation === destinationNavigation) {
             sourceNavigation.detachRouteForMove(requireNotNull(view))
@@ -1844,8 +1856,12 @@ class PamRenderer(
         val target = hostedInsertionIndex(state, host)
         if (hostView.indexOfChild(view) != target) {
             clearHitSlop(view)
-            hostView.removeView(view)
-            attach(view, host, target)
+            if (hostView is PamContainer) {
+                hostView.reorderChild(view, target)
+            } else {
+                hostView.removeView(view)
+                attach(view, host, target)
+            }
             applyHitSlop(view, state)
         }
         return true
@@ -2451,8 +2467,14 @@ class PamRenderer(
                 reattachHostedDescendants(childId)
             } else {
                 clearHitSlop(child)
-                (child.parent as? ViewGroup)?.removeView(child)
-                attachHosted(child, childState)
+                val host = effectiveParent(childState.parent)
+                val container = child.parent as? PamContainer
+                if (container != null && container === views[host]) {
+                    container.reorderChild(child, hostedInsertionIndex(childState, host))
+                } else {
+                    (child.parent as? ViewGroup)?.removeView(child)
+                    attachHosted(child, childState)
+                }
                 applyLayout(childId)
             }
         }
