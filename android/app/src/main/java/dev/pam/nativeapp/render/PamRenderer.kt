@@ -9057,6 +9057,9 @@ class PamRenderer(
 
         input.isSingleLine = !multiline
         input.inputType = type
+        // Android replaces the typeface for password variations. Reapply the
+        // authored/default family after every configuration, including updates.
+        applyTypeface(input, state)
         input.transformationMethod =
             if (secure) PasswordTransformationMethod.getInstance() else null
         input.setHorizontallyScrolling(!multiline)

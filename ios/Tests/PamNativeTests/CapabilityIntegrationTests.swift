@@ -319,6 +319,8 @@ final class CapabilityIntegrationTests: XCTestCase {
             .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
             .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .input, properties: [
                 PamConstants.testId: .text("secure-fixture"),
+                PamConstants.fontFamily: .text("Helvetica"),
+                PamConstants.fontWeight: .integer(700),
                 PamConstants.value: .text("sample-secret"),
                 PamConstants.secure: .flag(true),
             ])),
@@ -326,12 +328,15 @@ final class CapabilityIntegrationTests: XCTestCase {
         ]])
         let field = try XCTUnwrap(host.descendant(accessibilityIdentifier: "secure-fixture") as? UITextField)
         XCTAssertTrue(field.isSecureTextEntry)
+        let authoredFont = try XCTUnwrap(field.font)
+        XCTAssertTrue(authoredFont.fontDescriptor.symbolicTraits.contains(.traitBold))
         let start = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 2))
         let end = try XCTUnwrap(field.position(from: field.beginningOfDocument, offset: 5))
         field.selectedTextRange = field.textRange(from: start, to: end)
         for secure in [false, true, false] {
             renderer.commit([[.update(id: 2, key: PamConstants.secure, value: .flag(secure))]])
             XCTAssertEqual(field.isSecureTextEntry, secure)
+            XCTAssertEqual(field.font, authoredFont)
             XCTAssertEqual(field.text, "sample-secret")
             let selection = try XCTUnwrap(field.selectedTextRange)
             XCTAssertEqual(field.offset(from: field.beginningOfDocument, to: selection.start), 2)

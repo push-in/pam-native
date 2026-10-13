@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.38.1 - 2026-10-13
+
+- Android inputs retain their authored/default font family, weight and style
+  after secure text entry, keyboard, alignment and autocorrection configuration.
+  Password input types no longer silently replace the font with monospace.
+- Add real Android creation/update regression coverage for font, value and
+  selection preservation; extend the equivalent iOS secure-toggle contract.
+  No API or application migration is required.
+
 ## 1.38.0 - 2026-10-13
 
 - `System\Keyboard::isVisible()`, `onVisibilityChange()` and

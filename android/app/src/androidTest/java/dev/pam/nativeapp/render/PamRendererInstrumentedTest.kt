@@ -635,6 +635,60 @@ class PamRendererInstrumentedTest {
     }
 
     @Test
+    fun secureInputRetainsAuthoredTypefaceAcrossConfigurationUpdates() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        try {
+            onMain(instrumentation) {
+                val renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.INPUT, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("secure-font"),
+                        PropKey.FONT_FAMILY to PropValue.Text("serif"),
+                        PropKey.FONT_WEIGHT to PropValue.Integer(700),
+                        PropKey.FONT_STYLE to PropValue.Integer(2),
+                        PropKey.VALUE to PropValue.Text("sample-secret"),
+                        PropKey.SECURE to PropValue.Flag(true),
+                    ))),
+                    Mutation.Create(node(3, 1, NodeKind.INPUT, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("default-secure-font"),
+                        PropKey.SECURE to PropValue.Flag(true),
+                    ))),
+                    Mutation.SetRoot(1),
+                )))
+                val input = activity.host.findByTransitionName("secure-font") as EditText
+                val defaultInput = activity.host.findByTransitionName("default-secure-font") as EditText
+                val expected = if (Build.VERSION.SDK_INT >= 28) {
+                    android.graphics.Typeface.create(android.graphics.Typeface.create("serif", 0), 700, true)
+                } else android.graphics.Typeface.create("serif", android.graphics.Typeface.BOLD_ITALIC)
+                assertEquals("Initial secure field keeps authored serif bold italic", expected, input.typeface)
+                assertFalse("Default secure field must not become monospace", defaultInput.typeface == android.graphics.Typeface.MONOSPACE)
+                input.setSelection(2, 5)
+                for ((key, value) in listOf(
+                    PropKey.SECURE to PropValue.Flag(false),
+                    PropKey.SECURE to PropValue.Flag(true),
+                    PropKey.INPUT_AUTO_CORRECT to PropValue.Flag(false),
+                    PropKey.TEXT_ALIGN to PropValue.Integer(2),
+                    PropKey.KEYBOARD_TYPE to PropValue.Integer(3),
+                    PropKey.KEYBOARD_TYPE to PropValue.Integer(1),
+                )) {
+                    renderer.commit(listOf(listOf(Mutation.Update(2, key, value))))
+                    assertEquals("Configuration $key keeps authored typeface", expected, input.typeface)
+                    assertEquals("sample-secret", input.text.toString())
+                    assertEquals(2, input.selectionStart)
+                    assertEquals(5, input.selectionEnd)
+                }
+                renderer.commit(listOf(listOf(Mutation.Update(2, PropKey.FONT_FAMILY, PropValue.Text("sans-serif")))))
+                assertFalse("Font updates apply while secure", expected == input.typeface)
+                renderer.close()
+            }
+        } finally {
+            onMain(instrumentation) { activity.finish() }
+        }
+    }
+
+    @Test
     fun currencyInputKeepsNumericTypingAtTheTrailingMinorUnit() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
