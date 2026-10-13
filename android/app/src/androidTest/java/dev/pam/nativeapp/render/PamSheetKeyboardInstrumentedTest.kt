@@ -5,6 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
@@ -393,7 +394,10 @@ class PamSheetKeyboardInstrumentedTest {
     @Test
     fun fullHeightInteractiveSheetPreservesSafeTopBeforeAndAfterIme() = runTallSheet(1.0)
 
-    private fun runTallSheet(snapPoint: Double) {
+    @Test
+    fun sheetRetainsDetentAfterFullViewportEngineRelayout() = runTallSheet(0.5, true)
+
+    private fun runTallSheet(snapPoint: Double, relayout: Boolean = false) {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation)
@@ -433,13 +437,41 @@ class PamSheetKeyboardInstrumentedTest {
                 val found = presentedModalContent(renderer)?.findByTransitionName("tall-input") as? EditText
                 if (found == null || !found.hasWindowFocus()) false else { input = found; true }
             }
+            if (relayout) {
+                onMain(instrumentation) {
+                    val density = activity.resources.displayMetrics.density
+                    renderer.commit(listOf(listOf(Mutation.Layout(7, Frame(
+                        0f, 0f, activity.host.width / density, activity.host.height / density,
+                    )))))
+                }
+                instrumentation.waitForIdleSync()
+            }
             onMain(instrumentation) {
                 val sheet = input.parent as View
                 val top = screenBottom(sheet) - sheet.height
                 val safeTop = input.rootView.rootWindowInsets.getInsets(WindowInsets.Type.systemBars()).top
                 assertTrue("sheet starts below safe top before IME: top=$top safe=$safeTop snap=$snapPoint", top >= safeTop)
-                input.requestFocus()
-                (activity.getSystemService(InputMethodManager::class.java)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                if (!relayout) {
+                    input.requestFocus()
+                    (activity.getSystemService(InputMethodManager::class.java)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+                }
+            }
+            if (relayout) {
+                // Match CreateStickerSheet: the user taps after the engine's
+                // viewport update, rather than requesting IME during relayout.
+                val location = IntArray(2)
+                var x = 0f
+                var y = 0f
+                onMain(instrumentation) {
+                    input.getLocationOnScreen(location)
+                    x = location[0] + input.width / 2f
+                    y = location[1] + input.height / 2f
+                }
+                val down = SystemClock.uptimeMillis()
+                listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP).forEach { action ->
+                    val event = MotionEvent.obtain(down, SystemClock.uptimeMillis(), action, x, y, 0)
+                    try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+                }
             }
             waitUntil(instrumentation, "tall sheet IME visible") { dialogImeTop(input) != null }
             Thread.sleep(600)
@@ -452,8 +484,10 @@ class PamSheetKeyboardInstrumentedTest {
                     sheetTop >= safeTop)
                 assertTrue("focused field remains within viewport: top=$inputTop", inputTop >= safeTop)
                 assertTrue("focused field remains above IME", screenBottom(input) <= requireNotNull(dialogImeTop(input)))
-                assertTrue("remaining keyboard overlap reaches the sheet keyboard avoider",
-                    (renderer.viewForNode(6) as PamModalHost).currentSurfaceKeyboardInset() > 0)
+                if (snapPoint >= 0.9) {
+                    assertTrue("remaining keyboard overlap reaches the sheet keyboard avoider",
+                        (renderer.viewForNode(6) as PamModalHost).currentSurfaceKeyboardInset() > 0)
+                }
             }
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             waitUntil(instrumentation, "tall sheet keyboard fully settled closed") {
