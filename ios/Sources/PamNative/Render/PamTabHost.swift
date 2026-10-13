@@ -133,6 +133,7 @@ final class PamTabHost: UIView, UITabBarDelegate {
     private func updateSelection() {
         scenes.enumerated().forEach { index, scene in
             let active = index + 1 == selectedIndex
+            if !active { scene.endEditing(true) }
             scene.isHidden = !active
             scene.accessibilityElementsHidden = !active
         }

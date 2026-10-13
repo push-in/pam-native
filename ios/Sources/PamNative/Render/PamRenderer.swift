@@ -2522,7 +2522,12 @@ public final class PamRenderer {
                     indicator.stopAnimating()
                 }
             } else {
-                view.isHidden = !(value.boolOrNil() ?? true)
+                let hidden = !(value.boolOrNil() ?? true)
+                // A retained ordinary subtree has the same editor lifecycle
+                // as a hidden route. Never end editing on the entire window:
+                // another visible subtree may already own its first responder.
+                if hidden { view.endEditing(true) }
+                view.isHidden = hidden
             }
         case PamConstants.navigationOperation:
             (view as? PamNavigationHost)?.operation = Int(value.integerOrNil() ?? 1)
