@@ -263,7 +263,7 @@ final class Http
         $payload = [
             'url' => $url,
             'method' => $method,
-            'headers' => json_encode($normalizedHeaders, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            'headers' => json_encode((object) $normalizedHeaders, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             'timeoutMs' => max(1_000, min(120_000, $timeoutMs)),
         ];
         if ($source !== null) {

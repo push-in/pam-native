@@ -566,6 +566,21 @@ $assert($lastCall()['module'] === 'secure-storage' && $lastCall()['values'] == [
 Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['found' => false, 'value' => '']));
 $assert($secret === null && $rejects(static fn () => \Pam\Native\Storage\SecureStorage::set('', 'x')), 'SecureStorage must answer null for missing keys and reject empty keys.');
 
+// Request headers are a JSON object even when no optional headers are supplied.
+// Android consumes this field with JSONObject; [] fails before any HTTP request.
+foreach (['get', 'post', 'put', 'patch', 'delete', 'upload'] as $httpHelper) {
+    $callback = static function (HttpResponse $_): void {};
+    if ($httpHelper === 'upload') {
+        Http::upload('https://api.example.test/object', 'audio/note.wav', $callback);
+    } else {
+        Http::{$httpHelper}('https://api.example.test/object', $callback);
+    }
+    $call = $lastCall();
+    $assert($call['values']['headers'] === '{}', "Http::{$httpHelper} must encode empty request headers as a JSON object.");
+    Runtime::dispatchModuleResult($call['requestId'], ModuleResultStatus::Success->value,
+        Wire::map(['statusCode' => 204, 'body' => '']));
+}
+
 // HTTP response headers.
 $headerResponse = null;
 Http::get('https://api.example.test/clock', static function (HttpResponse $value) use (&$headerResponse): void { $headerResponse = $value; });
