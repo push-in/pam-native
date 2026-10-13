@@ -76,7 +76,11 @@ class PamModalNavigationBarInstrumentedTest {
                 if (forcedEdgeToEdge) Color.TRANSPARENT else PamAppearance.color(activity, R.color.pam_window_background, dark),
                 window.navigationBarColor,
             )
-            if (forcedEdgeToEdge) assertTrue(window.isNavigationBarContrastEnforced)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // The requested fitted policy still opts out of contrast;
+                // the platform only forces its navigation color transparent.
+                assertEquals(false, window.isNavigationBarContrastEnforced)
+            }
             assertEquals(
                 expectedLightIcons(),
                 WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars,
