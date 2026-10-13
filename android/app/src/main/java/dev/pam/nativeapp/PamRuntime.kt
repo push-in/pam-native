@@ -223,7 +223,7 @@ class PamRuntime(
         if (previousModules == null) {
             installModules()
         } else if (previousModules.boundContext !== context) {
-            modules = NativeModuleRegistry(context)
+            modules = NativeModuleRegistry(context, previousModules)
             previousModules.retire()
         }
         attachedSurface = true

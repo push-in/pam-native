@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.39.1 - 2026-10-13
+
+- Preserve Android push, notification-action, deep-link and incoming-share
+  subscriptions when an Activity is recreated while PHP remains alive.
+- Transfer context-free timers, HTTP, storage, SQLite and cache work to the new
+  surface registry instead of cancelling pending callbacks or writes. Surface
+  resources still close, and final runtime shutdown releases retained resources.
+- Avoid retaining a destroyed Activity through completion-generation guards.
+  Add registry lifecycle regressions and a real bundled-app recreation check.
+
 ## 1.39.0 - 2026-10-13
 
 - Target Android packages and use the iOS activity sheet with captioned files;

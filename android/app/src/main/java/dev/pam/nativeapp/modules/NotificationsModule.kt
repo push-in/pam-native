@@ -16,7 +16,7 @@ import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 import org.json.JSONObject
 
-internal class NotificationsModule(private val activity: PamActivity) : NativeModule, AutoCloseable {
+internal class NotificationsModule(private val activity: PamActivity) : NativeModule, SurfaceRetirableModule {
     private val main = Handler(Looper.getMainLooper())
 
     private val worker = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->
@@ -108,9 +108,13 @@ internal class NotificationsModule(private val activity: PamActivity) : NativeMo
         }
     }
 
-    override fun close() {
+    override fun retireSurface() {
         main.removeCallbacksAndMessages(null)
         worker.shutdownNow()
+    }
+
+    override fun close() {
+        retireSurface()
         PamPushNotifications.close("Notifications module closed")
         PamNotificationActions.close("Notifications module closed")
     }

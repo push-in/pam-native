@@ -3,23 +3,23 @@ package dev.pam.nativeapp.modules
 import android.content.Context
 import java.util.concurrent.atomic.AtomicLong
 
-class NativeModuleRegistry(context: Context) : AutoCloseable {
+class NativeModuleRegistry(context: Context, previous: NativeModuleRegistry? = null) : AutoCloseable {
     /** The surface (normally the PamActivity) these modules were created for. */
     val boundContext: Context = context
     private val generation = AtomicLong(1)
-    private val http = HttpModule(
+    private val http: HttpModule = previous?.http ?: HttpModule(
         java.io.File(context.filesDir, "pam-files"),
         java.io.File(context.cacheDir, "pam-http-uploads"),
     )
-    private val storage = StorageModule(context)
+    private val storage: StorageModule = previous?.storage ?: StorageModule(context.applicationContext)
     private val system = SystemModule(context)
-    private val sqlite = SQLiteModule(context)
+    private val sqlite: SQLiteModule = previous?.sqlite ?: SQLiteModule(context.applicationContext)
     private val files = (context as? dev.pam.nativeapp.PamActivity)?.let(::FilesModule)
     private val notifications =
         (context as? dev.pam.nativeapp.PamActivity)?.let(::NotificationsModule)
     private val linking = LinkingModule()
     private val incomingShare = IncomingShareModule()
-    private val cache = CacheModule(context)
+    private val cache: CacheModule = previous?.cache ?: CacheModule(context.applicationContext)
     private val background = BackgroundModule(context)
     private val device = DeviceModule(context)
     private val permissions =
@@ -31,7 +31,8 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
     private val location = LocationModule(context)
     private val audioRecorder = AudioRecorderModule(context)
     private val imageEditor = ImageEditorModule(context)
-    private val timers = TimersModule()
+    private var runtimeResourcesTransferred = false
+    private val timers: TimersModule = previous?.timers?.also { previous.runtimeResourcesTransferred = true } ?: TimersModule()
     private val appearance = AppearanceModule(context)
     private val window = (context as? android.app.Activity)?.let(::WindowModule)
     private val accessibility = AccessibilityModule(context)
@@ -150,26 +151,31 @@ class NativeModuleRegistry(context: Context) : AutoCloseable {
      * awaits still resolve (successfully or with the module's own failure).
      */
     fun retire() {
-        modules.values.filterIsInstance<AutoCloseable>().forEach {
-            runCatching { it.close() }
+        modules.values.filterIsInstance<AutoCloseable>().filterNot { runtimeResourcesTransferred && (it === timers || it === storage || it === sqlite || it === http || it === cache) }.forEach {
+            runCatching {
+                if (it is SurfaceRetirableModule) it.retireSurface() else it.close()
+            }
         }
         runCatching { system.close() }
     }
 
     override fun close() {
         generation.incrementAndGet()
-        modules.values.filterIsInstance<AutoCloseable>().forEach {
+        modules.values.filterIsInstance<AutoCloseable>().filterNot { runtimeResourcesTransferred && (it === timers || it === storage || it === sqlite || it === http || it === cache) }.forEach {
             runCatching { it.close() }
         }
         runCatching { system.close() }
     }
 
-    private fun ModuleCompletion.forGeneration(expected: Long): ModuleCompletion =
-        ModuleCompletion { status, payload ->
-            if (generation.get() == expected) {
+    private fun ModuleCompletion.forGeneration(expected: Long): ModuleCompletion {
+        // A process event waiter may outlive this registry: do not retain its Activity.
+        val completionGeneration = generation
+        return ModuleCompletion { status, payload ->
+            if (completionGeneration.get() == expected) {
                 complete(status, payload)
             }
         }
+    }
 }
 
 enum class NativeOperation(val value: Int) {

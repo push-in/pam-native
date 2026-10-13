@@ -1,6 +1,6 @@
 package dev.pam.nativeapp.modules
 
-internal class LinkingModule : NativeModule, AutoCloseable {
+internal class LinkingModule : NativeModule, SurfaceRetirableModule {
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
         runCatching {
             when (method) {
@@ -15,6 +15,9 @@ internal class LinkingModule : NativeModule, AutoCloseable {
             )
         }
     }
+
+    // The queue and waiter belong to the retained PHP runtime, not this Activity.
+    override fun retireSurface() = Unit
 
     override fun close() {
         PamDeepLinks.close("Linking module closed")

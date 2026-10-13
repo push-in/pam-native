@@ -1,6 +1,6 @@
 package dev.pam.nativeapp.modules
 
-internal class IncomingShareModule : NativeModule, AutoCloseable {
+internal class IncomingShareModule : NativeModule, SurfaceRetirableModule {
     override fun invoke(method: String, payload: ByteArray, completion: ModuleCompletion) {
         runCatching {
             when (method) {
@@ -15,6 +15,9 @@ internal class IncomingShareModule : NativeModule, AutoCloseable {
             )
         }
     }
+
+    // The queue and waiter belong to the retained PHP runtime, not this Activity.
+    override fun retireSurface() = Unit
 
     override fun close() {
         PamIncomingShares.close("Incoming-share module closed")
