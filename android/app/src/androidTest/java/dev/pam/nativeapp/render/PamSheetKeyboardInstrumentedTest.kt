@@ -387,6 +387,89 @@ class PamSheetKeyboardInstrumentedTest {
         }
     }
 
+    @Test
+    fun tallInteractiveSheetKeepsHeaderAndFocusedFieldWithinVisibleViewport() = runTallSheet(0.9)
+
+    @Test
+    fun fullHeightInteractiveSheetPreservesSafeTopBeforeAndAfterIme() = runTallSheet(1.0)
+
+    private fun runTallSheet(snapPoint: Double) {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val density = activity.resources.displayMetrics.density
+                val width = activity.host.width / density
+                val height = activity.host.height / density
+                val snaps = ByteBuffer.allocate(10).order(ByteOrder.LITTLE_ENDIAN).apply {
+                    putShort(1); putDouble(snapPoint); flip()
+                }
+                renderer.commit(listOf(listOf(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(6, 1, NodeKind.MODAL, mapOf(
+                        PropKey.VISIBLE to PropValue.Flag(true),
+                        PropKey.MODAL_PRESENTATION to PropValue.Integer(3),
+                        PropKey.BOTTOM_SHEET_SNAP_POINTS to PropValue.Bytes(snaps),
+                        PropKey.BOTTOM_SHEET_KEYBOARD_BEHAVIOR to PropValue.Integer(1),
+                    ))),
+                    Mutation.Create(node(7, 6, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFFFFFFFFL),
+                    ))),
+                    Mutation.Create(node(8, 7, NodeKind.INPUT, mapOf(
+                        PropKey.TEST_ID to PropValue.Text("tall-input"),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(6, Frame(0f, 0f, width, height)),
+                    Mutation.Layout(7, Frame(0f, 0f, width, height * snapPoint.toFloat())),
+                    Mutation.Layout(8, Frame(16f, 72f, width - 32f, 48f)),
+                    Mutation.SetRoot(1),
+                )))
+            }
+            lateinit var input: EditText
+            waitUntil(instrumentation, "tall sheet presented") {
+                val found = presentedModalContent(renderer)?.findByTransitionName("tall-input") as? EditText
+                if (found == null || !found.hasWindowFocus()) false else { input = found; true }
+            }
+            onMain(instrumentation) {
+                val sheet = input.parent as View
+                val top = screenBottom(sheet) - sheet.height
+                val safeTop = input.rootView.rootWindowInsets.getInsets(WindowInsets.Type.systemBars()).top
+                assertTrue("sheet starts below safe top before IME: top=$top safe=$safeTop snap=$snapPoint", top >= safeTop)
+                input.requestFocus()
+                (activity.getSystemService(InputMethodManager::class.java)).showSoftInput(input, InputMethodManager.SHOW_IMPLICIT)
+            }
+            waitUntil(instrumentation, "tall sheet IME visible") { dialogImeTop(input) != null }
+            Thread.sleep(600)
+            onMain(instrumentation) {
+                val sheet = input.parent as View
+                val sheetTop = screenBottom(sheet) - sheet.height
+                val safeTop = input.rootView.rootWindowInsets.getInsets(WindowInsets.Type.systemBars()).top
+                val inputTop = screenBottom(input) - input.height
+                assertTrue("sheet/header must remain below system bars: top=$sheetTop safe=$safeTop",
+                    sheetTop >= safeTop)
+                assertTrue("focused field remains within viewport: top=$inputTop", inputTop >= safeTop)
+                assertTrue("focused field remains above IME", screenBottom(input) <= requireNotNull(dialogImeTop(input)))
+                assertTrue("remaining keyboard overlap reaches the sheet keyboard avoider",
+                    (renderer.viewForNode(6) as PamModalHost).currentSurfaceKeyboardInset() > 0)
+            }
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+            waitUntil(instrumentation, "tall sheet keyboard fully settled closed") {
+                dialogImeTop(input) == null &&
+                    (renderer.viewForNode(6) as PamModalHost).currentSurfaceKeyboardInset() == 0 &&
+                    (input.parent as View).translationY == 0f
+            }
+            onMain(instrumentation) {
+                assertEquals(0, (renderer.viewForNode(6) as PamModalHost).currentSurfaceKeyboardInset())
+                val sheet = input.parent as View
+                assertTrue("hidden IME restores unlifted sheet", sheet.translationY == 0f)
+                renderer.close()
+            }
+        } finally { onMain(instrumentation) { activity.finish() } }
+    }
+
     private fun runSheetScenario(autoFocus: Boolean) {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         val instrumentation = InstrumentationRegistry.getInstrumentation()

@@ -1891,18 +1891,23 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         let end = (info?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?.cgRectValue ?? .zero
         let keyboard = window.convert(end, from: window.screen.coordinateSpace)
         let frame = convert(bounds, to: window)
-        let containedSheet = presentation == Presentation.sheet && bottomSheetContainsKeyboard
-        publishSurfaceKeyboard(
-            Self.surfaceKeyboardInset(
-                keyboardInModal: convert(end, from: window.screen.coordinateSpace),
-                modalBounds: bounds,
-                hiding: hiding || !currentlyVisible || (presentation == Presentation.sheet && !containedSheet)
-            ),
-            info: info
-        )
-        let lift = hiding || !currentlyVisible || presentation != Presentation.sheet || containedSheet
-            ? 0
+        let isSheet = presentation == Presentation.sheet
+        let containedSheet = isSheet && bottomSheetContainsKeyboard
+        let overlap = hiding || !currentlyVisible ? 0
             : PamKeyboardInsetObserver.overlap(keyboard: keyboard, viewInWindow: frame)
+        let lift = !isSheet || containedSheet ? 0 : Self.boundedSheetKeyboardLift(
+            requested: overlap,
+            availableHeight: max(1, bounds.height - safeAreaInsets.top),
+            sheetHeight: sheetHeight
+        )
+        // A tall sheet cannot rise beyond the safe top. Its own keyboard
+        // avoider consumes the remaining overlap; short sheets still ride
+        // fully above the keyboard as before.
+        publishSurfaceKeyboard(isSheet ? max(0, overlap - lift) : Self.surfaceKeyboardInset(
+            keyboardInModal: convert(end, from: window.screen.coordinateSpace),
+            modalBounds: bounds,
+            hiding: hiding || !currentlyVisible
+        ), info: info)
         guard abs(lift - sheetKeyboardLift) > 0.5 else { return }
         sheetKeyboardLift = lift
         contentBottomConstraint.constant = -lift
@@ -1915,6 +1920,10 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         ) {
             self.layoutIfNeeded()
         }
+    }
+
+    static func boundedSheetKeyboardLift(requested: CGFloat, availableHeight: CGFloat, sheetHeight: CGFloat) -> CGFloat {
+        min(max(0, requested), max(0, availableHeight - sheetHeight))
     }
 
     private func resetSheetKeyboardLift() {

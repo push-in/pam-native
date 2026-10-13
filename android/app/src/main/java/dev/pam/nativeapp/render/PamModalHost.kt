@@ -75,6 +75,10 @@ internal fun modalWindowSurfacePolicy(sdkInt: Int, targetSdk: Int): Int =
 internal fun modalWindowSurfacePolicy(context: android.content.Context): Int =
     modalWindowSurfacePolicy(Build.VERSION.SDK_INT, context.applicationInfo.targetSdkVersion)
 
+/** Preserve the safe top edge; the unconsumed IME is handled by the sheet's KAV. */
+internal fun boundedSheetKeyboardLift(requested: Int, availableHeight: Int, sheetHeight: Int): Int =
+    requested.coerceIn(0, (availableHeight - sheetHeight).coerceAtLeast(0))
+
 internal fun interactiveBottomSheetLayout(
     baseHeight: Int,
     keyboardInset: Int,
@@ -308,6 +312,7 @@ internal class PamModalHost @JvmOverloads constructor(
         }
     }
     private var lastSheetHeight = 0
+    private var sheetAvailableViewportHeight = 0
     private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
     private var backdropAnimator: android.animation.ValueAnimator? = null
     private var onBottomSheetChange: ((Int, Float) -> Unit)? = null
@@ -875,7 +880,11 @@ internal class PamModalHost @JvmOverloads constructor(
         val location = IntArray(2)
         content.getLocationInWindow(location)
         val contentBottom = location[1] - content.translationY.toInt() + content.height
-        return sheetKeyboardLift(contentBottom, root.height, ime)
+        return boundedSheetKeyboardLift(
+            sheetKeyboardLift(contentBottom, root.height, ime),
+            sheetAvailableViewportHeight,
+            lastSheetHeight,
+        )
     }
 
     private fun updateSheetKeyboardInset(lift: Int) {
@@ -1080,6 +1089,7 @@ internal class PamModalHost @JvmOverloads constructor(
         } else {
             resources.displayMetrics.heightPixels
         }
+        sheetAvailableViewportHeight = availableHeight
         val baseSheetHeight = (availableHeight * bottomSheetSnapPoints[bottomSheetIndex])
             .toInt()
             .coerceAtLeast(1)
@@ -1089,7 +1099,7 @@ internal class PamModalHost @JvmOverloads constructor(
         ) {
             interactiveBottomSheetLayout(
                 baseHeight = baseSheetHeight,
-                keyboardInset = bottomSheetKeyboardInset,
+                keyboardInset = boundedSheetKeyboardLift(bottomSheetKeyboardInset, availableHeight, baseSheetHeight),
             )
         } else {
             baseSheetHeight to 0f

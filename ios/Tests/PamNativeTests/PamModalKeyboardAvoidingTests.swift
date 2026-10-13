@@ -65,6 +65,15 @@ final class PamModalKeyboardAvoidingTests: XCTestCase {
         )
     }
 
+    func testTallSheetStopsAtSafeTopAndLeavesRemainingKeyboardOverlap() {
+        let lift = PamModalHost.boundedSheetKeyboardLift(requested: 300, availableHeight: 800, sheetHeight: 720)
+        XCTAssertEqual(lift, 80)
+        XCTAssertEqual(300 - lift, 220)
+        XCTAssertEqual(PamModalHost.boundedSheetKeyboardLift(requested: 300, availableHeight: 800, sheetHeight: 300), 300)
+        XCTAssertEqual(PamModalHost.boundedSheetKeyboardLift(requested: 0, availableHeight: 800, sheetHeight: 720), 0)
+        XCTAssertEqual(PamModalHost.boundedSheetKeyboardLift(requested: 300, availableHeight: 800, sheetHeight: 800), 0)
+    }
+
     func testOverlapIsMeasuredFromTheModalBottomEdge() {
         let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
         XCTAssertEqual(
@@ -133,6 +142,22 @@ final class PamModalKeyboardAvoidingTests: XCTestCase {
             "re-expressed from the PAM root view's bottom for the engine"
         )
         postKeyboard(top: nil, in: window)
+        modal.removeFromSuperview()
+    }
+
+    func testTallSheetPublishesResidualKeyboardAndRestoresWhenHidden() {
+        let (window, root) = makeWindow()
+        defer { window.isHidden = true }
+        let modal = present(3, in: root)
+        modal.setBottomSheetSnapPoints([0.9])
+        modal.layoutIfNeeded()
+        var inset: CGFloat = -1
+        modal.onSurfaceKeyboardInset = { value, _, _ in inset = value }
+        let available = modal.bounds.height - modal.safeAreaInsets.top
+        postKeyboard(top: 544, in: window)
+        XCTAssertEqual(inset, 300 - available * 0.1, accuracy: 1)
+        postKeyboard(top: nil, in: window)
+        XCTAssertEqual(inset, 0, accuracy: 0.5)
         modal.removeFromSuperview()
     }
 
