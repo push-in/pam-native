@@ -1710,6 +1710,19 @@ final class PamRefreshContainer: UIView {
     }
 }
 
+/// Reports actual Auto Layout viewport changes once; no display link or polling.
+private final class PamModalContentViewport: UIView {
+    var onBoundsChange: (() -> Void)?
+    private var previousSize = CGSize.zero
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard bounds.size != previousSize else { return }
+        previousSize = bounds.size
+        onBoundsChange?()
+    }
+}
+
 final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     private enum Presentation {
         static let dialog = 2
@@ -1739,7 +1752,7 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
     }
 
     private let backdropView = UIControl()
-    private let contentHost = UIView()
+    private let contentHost = PamModalContentViewport()
     private let contentClip = UIView()
     private let sheetHandle = UIView()
     private let orientationObserver = NotificationCenter.default
@@ -1946,6 +1959,20 @@ final class PamModalHost: UIView, UIGestureRecognizerDelegate {
         let duration = (info?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0
         let curve = (info?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.uintValue ?? 7
         onSurfaceKeyboardInset?(inset, duration, curve)
+    }
+
+    /// Sheet geometry belongs to its native detent, never the engine window frame.
+    var sheetContentBounds: CGRect? {
+        presentation == Presentation.sheet ? contentHost.bounds : nil
+    }
+
+    var onSheetViewportChange: (() -> Void)? {
+        didSet {
+            contentHost.onBoundsChange = { [weak self] in
+                guard let self, self.presentation == Presentation.sheet else { return }
+                self.onSheetViewportChange?()
+            }
+        }
     }
 
     func insert(_ view: UIView, index _: Int) {

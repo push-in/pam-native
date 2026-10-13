@@ -912,7 +912,7 @@ public final class PamRenderer {
         )
     }
 
-    private func applyLayout(_ id: Int64) {
+    private func applyLayout(_ id: Int64, forceDescendants: Bool = false) {
         guard let frame = frames[id], let state = nodes[id], let view = views[id] else {
             return
         }
@@ -957,6 +957,8 @@ public final class PamRenderer {
            let parentView = views[effectiveParent] {
             let horizontal = parentState.kind == .row
             let vertical = parentState.kind == .column
+                || parentState.kind == .safeAreaView
+                || parentState.kind == .keyboardAvoidingView
             if horizontal || vertical {
                 let engineExtent = horizontal
                     ? CGFloat(parentFrame.width)
@@ -1032,7 +1034,8 @@ public final class PamRenderer {
             }
         }
 
-        let nextFrame = CGRect(
+        let sheetViewport = (views[effectiveParent] as? PamModalHost)?.sheetContentBounds
+        let nextFrame = sheetViewport ?? CGRect(
             x: left,
             y: top,
             width: max(0, width),
@@ -1062,8 +1065,8 @@ public final class PamRenderer {
                 loadPhotoAsset(source, into: imageView, nodeId: id)
             }
         }
-        if layoutChanged {
-            children[state.id]?.forEach { applyLayout($0) }
+        if layoutChanged || forceDescendants {
+            children[state.id]?.forEach { applyLayout($0, forceDescendants: forceDescendants) }
         }
         applyBorder(view: view, nodeId: id)
         applyBoxShadow(view: view, nodeId: id)
@@ -1407,6 +1410,10 @@ public final class PamRenderer {
         case .modal:
             let modal = PamModalHost()
             let id = spec.id
+            modal.onSheetViewportChange = { [weak self] in
+                guard let self else { return }
+                self.children[id]?.forEach { self.applyLayout($0, forceDescendants: true) }
+            }
             modal.onSurfaceKeyboardInset = { [weak self, weak modal] inset, duration, curve in
                 guard let self, let modal else { return }
                 self.onSurfaceKeyboardInset?(
