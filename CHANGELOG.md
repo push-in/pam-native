@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.39.2 - 2026-10-13
+
+- Retire editor focus and pending autofocus when a retained Android route becomes
+  hidden, stopping invisible IME redraw work without resigning the destination input.
+- Restore autofocus when a visible modal is shown again; hidden inputs cannot
+  steal focus on queued callbacks.
+- Resign editors within hidden iOS navigation subtrees on completed/cancelled
+  transitions. Add Android navigation/keyboard regressions and three iOS XCTest cases.
+
 ## 1.39.1 - 2026-10-13
 
 - Preserve Android push, notification-action, deep-link and incoming-share
