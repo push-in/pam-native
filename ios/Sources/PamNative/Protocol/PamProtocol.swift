@@ -537,6 +537,7 @@ public enum PamConstants {
     public static let needsOffscreenAlphaCompositing = 527
     public static let sectionItems = 80
     public static let hostProperties = 100
+    public static let zIndex = 97
     public static let opacity = 38
     public static let pressOpacity = 68
     public static let hitSlop = 96

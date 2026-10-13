@@ -46,6 +46,8 @@ public final class PamRenderer {
     private var nodes: [Int64: NodeState] = [:]
     private var frames: [Int64: Frame] = [:]
     private var children: [Int64: [Int64]] = [:]
+    private var dirtyStackingParents = Set<Int64>()
+    private var stackingParents = Set<Int64>()
     /// Mounted list / section-list / virtual-list nodes (no per-commit scan).
     private var virtualListIds = Set<Int64>()
     /// Cells of inactive keyed sections (`listSection`) kept materialized
@@ -249,6 +251,7 @@ public final class PamRenderer {
             applyLayout(id)
         }
         dirtyLists.forEach { syncVirtualList($0) }
+        flushStackingOrder()
         if needsModalSync {
             syncLocalModalTriggers()
         }
@@ -385,6 +388,8 @@ public final class PamRenderer {
         views.removeAll()
         frames.removeAll()
         children.removeAll()
+        dirtyStackingParents.removeAll()
+        stackingParents.removeAll()
         host.subviews.forEach { $0.removeFromSuperview() }
         host.layoutIfNeeded()
         nativeViews.close()
@@ -1203,6 +1208,7 @@ public final class PamRenderer {
     /// the sibling array on every insert made long lists and prepends
     /// quadratic.
     private func addChild(to parent: Int64, child: Int64) {
+        dirtyStackingParents.insert(parent)
         // Callers (create, move after removeChild) never pass a child that
         // is already listed under this parent.
         let index = nodes[child]?.index ?? Int.max
@@ -1224,6 +1230,7 @@ public final class PamRenderer {
     }
 
     private func removeChild(from parent: Int64, child: Int64) {
+        dirtyStackingParents.insert(parent)
         guard var siblings = children[parent] else {
             return
         }
@@ -1232,6 +1239,41 @@ public final class PamRenderer {
             children.removeValue(forKey: parent)
         } else {
             children[parent] = siblings
+        }
+    }
+
+    /// UIKit hit testing follows subview order, while Core Animation follows
+    /// zPosition. Keep both orders consistent without detaching focused views.
+    /// Only structurally/property-dirty parents are visited, once per commit.
+    private func flushStackingOrder() {
+        let parents = dirtyStackingParents
+        dirtyStackingParents.removeAll(keepingCapacity: true)
+        for parentId in parents {
+            let logical = (children[parentId] ?? []).compactMap { views[$0] }
+            let hasStacking = logical.contains { $0.layer.zPosition != 0 }
+            guard hasStacking || stackingParents.contains(parentId) else { continue }
+            if hasStacking { stackingParents.insert(parentId) }
+            else { stackingParents.remove(parentId) }
+            let groups = Dictionary(grouping: logical.filter { $0.superview != nil }) {
+                ObjectIdentifier($0.superview!)
+            }
+            for siblings in groups.values {
+                guard siblings.count > 1, let container = siblings.first?.superview else { continue }
+                let ordered = siblings.enumerated().sorted {
+                    let left = $0.element.layer.zPosition
+                    let right = $1.element.layer.zPosition
+                    return left == right ? $0.offset < $1.offset : left < right
+                }.map(\.element)
+                let ids = Set(siblings.map(ObjectIdentifier.init))
+                let slots = container.subviews.indices.filter {
+                    ids.contains(ObjectIdentifier(container.subviews[$0]))
+                }
+                for (slot, wanted) in zip(slots, ordered) {
+                    guard container.subviews[slot] !== wanted,
+                          let current = container.subviews.firstIndex(where: { $0 === wanted }) else { continue }
+                    container.exchangeSubview(at: slot, withSubviewAt: current)
+                }
+            }
         }
     }
 
@@ -2278,6 +2320,9 @@ public final class PamRenderer {
                 frame.size.height = CGFloat(height)
                 view.frame = frame
             }
+        case PamConstants.zIndex:
+            view.layer.zPosition = CGFloat(value.decimalOrZero())
+            if let parent = nodes[nodeId]?.parent { dirtyStackingParents.insert(parent) }
         case PamConstants.opacity:
             if !motion.animateTransition(nodeId: nodeId, view: view, property: .opacity, target: value.decimalOrZero()) {
                 view.alpha = CGFloat(value.decimalOrZero())
@@ -2767,6 +2812,9 @@ public final class PamRenderer {
         // A removed value (a class toggled off) goes back to its default
         // through the declared transition, like any other change; re-adding
         // it before a frame continues from where the view still is.
+        case PamConstants.zIndex:
+            view.layer.zPosition = 0
+            dirtyStackingParents.insert(state.parent)
         case PamConstants.opacity:
             if !motion.animateTransition(nodeId: nodeId, view: view, property: .opacity, target: 1) {
                 view.alpha = 1

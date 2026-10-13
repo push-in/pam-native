@@ -9506,13 +9506,16 @@ class PamRenderer(
     private fun isLayoutOnly(spec: NodeSpec): Boolean =
         spec.parent != 0L &&
             spec.kind in LAYOUT_ONLY_KINDS &&
+            // A nonzero z-index owns a stacking context; flattening its children loses it.
             spec.properties[PropKey.COLLAPSABLE]?.flag() != false &&
+            (spec.properties[PropKey.Z_INDEX]?.decimal() ?: 0.0) == 0.0 &&
             spec.properties.keys.none(HOST_PROPERTIES::contains)
 
     private fun isLayoutOnly(state: NodeState): Boolean =
         state.parent != 0L &&
             state.kind in LAYOUT_ONLY_KINDS &&
             state.properties[PropKey.COLLAPSABLE]?.flag() != false &&
+            (state.properties[PropKey.Z_INDEX]?.decimal() ?: 0.0) == 0.0 &&
             state.properties.keys.none(HOST_PROPERTIES::contains)
 
     private fun PropKey.isEventProperty(): Boolean =
