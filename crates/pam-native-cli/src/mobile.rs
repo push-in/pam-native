@@ -365,6 +365,10 @@ struct IosOptions {
     /// Project-relative 1024x1024 PNG for the home-screen/App Store icon.
     #[serde(default)]
     icon: Option<String>,
+    #[serde(default)]
+    url_schemes: Vec<String>,
+    #[serde(default)]
+    associated_domains: Vec<String>,
 }
 
 impl Default for IosOptions {
@@ -372,6 +376,8 @@ impl Default for IosOptions {
         Self {
             minimum_version: default_ios_minimum_version(),
             icon: None,
+            url_schemes: Vec::new(),
+            associated_domains: Vec::new(),
         }
     }
 }
@@ -1481,6 +1487,7 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
     if ios_version < (15, 0) {
         return Err("PAM Native requires iOS 15.0 or newer".to_owned());
     }
+    validate_ios_links(&manifest.ios)?;
     validate_relative_path(&manifest.entry)?;
     if !root.join(&manifest.entry).is_file() {
         return Err(format!(
@@ -1585,6 +1592,71 @@ fn valid_mime_type(value: &str) -> bool {
             })
     };
     valid(kind) && (subtype == "*" || valid(subtype))
+}
+
+fn validate_ios_links(ios: &IosOptions) -> Result<(), String> {
+    if ios.url_schemes.len() > 32 || ios.associated_domains.len() > 32 {
+        return Err(
+            "iOS URL schemes and associated domains are limited to 32 entries each".to_owned(),
+        );
+    }
+    let mut schemes = HashSet::new();
+    for scheme in &ios.url_schemes {
+        let lower = scheme.to_ascii_lowercase();
+        if !valid_uri_scheme(scheme)
+            || matches!(lower.as_str(), "http" | "https" | "file")
+            || lower.starts_with("pam-native-")
+            || !schemes.insert(lower)
+        {
+            return Err(format!(
+                "invalid or duplicate ios.urlSchemes entry {scheme:?}"
+            ));
+        }
+    }
+    let mut domains = HashSet::new();
+    for domain in &ios.associated_domains {
+        let host = domain.strip_prefix("applinks:").unwrap_or("");
+        let host = host.strip_prefix("*.").unwrap_or(host);
+        if !valid_deep_link_host(host)
+            || !host.split('.').all(|part| {
+                !part.is_empty()
+                    && part.len() <= 63
+                    && !part.starts_with('-')
+                    && !part.ends_with('-')
+            })
+            || !domains.insert(domain.to_ascii_lowercase())
+        {
+            return Err(format!(
+                "invalid or duplicate ios.associatedDomains entry {domain:?}; expected applinks:example.com"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn merge_ios_links(
+    ios: &IosOptions,
+    info: &mut serde_json::Value,
+    entitlements: &mut serde_json::Value,
+) -> Result<bool, String> {
+    validate_ios_links(ios)?;
+    if !ios.url_schemes.is_empty() {
+        merge_plist_value(
+            info,
+            serde_json::json!({"CFBundleURLTypes":[{
+                "CFBundleTypeRole":"Editor", "CFBundleURLName":"PAM application links", "CFBundleURLSchemes":ios.url_schemes
+            }]}),
+            "ios.urlSchemes",
+        )?;
+    }
+    if !ios.associated_domains.is_empty() {
+        merge_plist_value(
+            entitlements,
+            serde_json::json!({"com.apple.developer.associated-domains":ios.associated_domains}),
+            "ios.associatedDomains",
+        )?;
+    }
+    Ok(!ios.associated_domains.is_empty())
 }
 
 fn valid_uri_scheme(value: &str) -> bool {
@@ -3457,6 +3529,7 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
         }
     }
 
+    has_entitlements |= merge_ios_links(&project.manifest.ios, &mut info, &mut entitlements)?;
     merge_ios_appearance(project, &mut info, &info_path)?;
     write_ios_launch_assets(project, workspace, &mut info, &info_path)?;
     if let Some(object) = info.as_object_mut() {
@@ -10616,5 +10689,106 @@ mod bundle_exclusion_tests {
         ] {
             assert!(parse_bundle_exclusions(input).is_err(), "{input}");
         }
+    }
+    #[test]
+    fn ios_links_merge_preserves_plugin_entitlements_and_diagnostics() {
+        let ios: IosOptions = serde_json::from_value(serde_json::json!({
+            "urlSchemes": ["zechat"], "associatedDomains": ["applinks:zechat.com.br", "applinks:*.example.com"]
+        })).unwrap();
+        let mut info = serde_json::json!({"CFBundleURLTypes": [
+            {"CFBundleURLName":"Diagnostics", "CFBundleURLSchemes":["pam-native-aabbcc"]},
+            {"CFBundleURLName":"Plugin", "CFBundleURLSchemes":["plugin-login"]}
+        ], "NSCameraUsageDescription":"Camera"});
+        let mut entitlements = serde_json::json!({"com.apple.security.application-groups":["group.example"],
+            "aps-environment":"development", "com.apple.developer.associated-domains":["applinks:plugin.example"]});
+        assert!(merge_ios_links(&ios, &mut info, &mut entitlements).unwrap());
+        assert_eq!(info["CFBundleURLTypes"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            info["CFBundleURLTypes"][0]["CFBundleURLSchemes"][0],
+            "pam-native-aabbcc"
+        );
+        assert_eq!(
+            info["CFBundleURLTypes"][2]["CFBundleURLSchemes"][0],
+            "zechat"
+        );
+        assert_eq!(info["NSCameraUsageDescription"], "Camera");
+        assert_eq!(
+            entitlements["com.apple.security.application-groups"][0],
+            "group.example"
+        );
+        assert_eq!(entitlements["aps-environment"], "development");
+        assert_eq!(
+            entitlements["com.apple.developer.associated-domains"]
+                .as_array()
+                .unwrap()
+                .len(),
+            3
+        );
+        merge_ios_links(&ios, &mut info, &mut entitlements).unwrap();
+        assert_eq!(
+            info["CFBundleURLTypes"].as_array().unwrap().len(),
+            3,
+            "repeated preparation is idempotent"
+        );
+    }
+
+    #[test]
+    fn ios_links_validate_bounds_reserved_schemes_and_domain_syntax() {
+        for scheme in [
+            "",
+            "https",
+            "file",
+            "pam-native-abcd",
+            "bad scheme",
+            "1invalid",
+            "zechat://",
+        ] {
+            let mut ios = IosOptions::default();
+            ios.url_schemes.push(scheme.to_owned());
+            assert!(validate_ios_links(&ios).is_err(), "accepted {scheme:?}");
+        }
+        for domain in [
+            "example.com",
+            "applinks:",
+            "applinks:bad/path",
+            "applinks:bad?mode=developer",
+            "applinks:bad..host",
+            "applinks:host.-bad",
+            "applinks:*",
+        ] {
+            let mut ios = IosOptions::default();
+            ios.associated_domains.push(domain.to_owned());
+            assert!(validate_ios_links(&ios).is_err(), "accepted {domain:?}");
+        }
+        let mut ios = IosOptions::default();
+        ios.url_schemes = vec!["zechat".into(), "ZECHAT".into()];
+        assert!(validate_ios_links(&ios).is_err());
+        ios.url_schemes = (0..33).map(|n| format!("app{n}")).collect();
+        assert!(validate_ios_links(&ios).is_err());
+        ios.url_schemes.clear();
+        let mut info = serde_json::json!({});
+        let mut entitlements = serde_json::json!({});
+        assert!(!merge_ios_links(&ios, &mut info, &mut entitlements).unwrap());
+        assert_eq!(info, serde_json::json!({}));
+        ios.associated_domains = vec!["applinks:example.com".into()];
+        entitlements =
+            serde_json::json!({"com.apple.developer.associated-domains":"invalid plugin value"});
+        assert!(merge_ios_links(&ios, &mut info, &mut entitlements).is_err());
+    }
+
+    #[test]
+    fn ios_link_host_hooks_cover_cold_warm_universal_and_diagnostics() {
+        let host = include_str!("../../../ios-host/App/PamAppDelegate.swift");
+        assert!(
+            host.find("PamLinking.captureInitial(url)").unwrap()
+                < host.find("runtime.start(").unwrap()
+        );
+        assert!(host.contains("launchOptions?[.userActivityDictionary]"));
+        assert!(host.contains("continue userActivity: NSUserActivity"));
+        assert!(host.contains("NSUserActivityTypeBrowsingWeb"));
+        assert!(host.contains("guard acceptsApplicationURL(url) else { return false }"));
+        assert_eq!(host.matches("PamLinking.open(url)").count(), 2);
+        assert!(host.contains("publishDiagnostics(snapshot, requestID: requestID)"));
+        assert!(host.contains("CFBundleURLSchemes"));
     }
 }

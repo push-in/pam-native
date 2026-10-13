@@ -37,6 +37,49 @@ final class Share
     }
 
     /**
+     * Android-only package visibility check. iOS returns null (unsupported).
+     * Android 11+ callers must declare optional targets in their manifest queries.
+     * @param Closure(?bool): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function isPackageInstalled(string $packageName, Closure $callback, ?Closure $failure = null): int
+    {
+        self::validatePackage($packageName);
+
+        return NativeModules::call('files', 'isPackageInstalled', ['packageName' => $packageName],
+            static function ($result) use ($callback, $failure): void {
+                if ($result->status === ModuleResultStatus::Failure) {
+                    if ($failure !== null) { $failure($result->payload); return; }
+                    throw new RuntimeException($result->payload);
+                }
+                $values = Wire::decodeMap($result->payload);
+                $callback(($values['supported'] ?? false) ? (bool) ($values['installed'] ?? false) : null);
+            },
+        );
+    }
+
+    /** Android ACTION_SEND to one package, with temporary read access; iOS fails explicitly. */
+    public static function fileToPackage(
+        string $path,
+        string $packageName,
+        ?string $mimeType = null,
+        ?string $text = null,
+        ?Closure $opened = null,
+        ?Closure $failure = null,
+    ): int {
+        self::validatePackage($packageName);
+
+        return self::files([$path], $mimeType, opened: $opened, failure: $failure, text: $text, packageName: $packageName);
+    }
+
+    private static function validatePackage(string $packageName): void
+    {
+        if (strlen($packageName) > 255 || preg_match('/^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$/D', $packageName) !== 1) {
+            throw new InvalidArgumentException('Invalid Android package name.');
+        }
+    }
+
+    /**
      * Shares private sandbox files through the platform share sheet.
      *
      * Android grants temporary read access through the PAM FileProvider and uses
@@ -56,7 +99,9 @@ final class Share
         ?Closure $opened = null,
         ?Closure $failure = null,
         ?string $text = null,
+        ?string $packageName = null,
     ): int {
+        if ($packageName !== null) self::validatePackage($packageName);
         if ($paths === [] || count($paths) > 50 || !array_is_list($paths)) {
             throw new InvalidArgumentException('Share between 1 and 50 private files.');
         }
@@ -79,6 +124,7 @@ final class Share
                 'mimeType' => $mimeType,
                 'title' => $title ?? '',
                 'text' => $text ?? '',
+                'packageName' => $packageName ?? '',
             ],
             static function ($result) use ($opened, $failure): void {
                 if ($result->status === ModuleResultStatus::Failure) {

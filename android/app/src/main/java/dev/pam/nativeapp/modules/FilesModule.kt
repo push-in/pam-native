@@ -56,6 +56,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "copy" -> executor.execute { transfer(payload, completion, move = false) }
                 "makeDirectory" -> executor.execute { makeDirectory(payload, completion) }
                 "share" -> share(payload, completion)
+                "isPackageInstalled" -> isPackageInstalled(payload, completion)
                 "pick" -> pick(payload, completion)
                 "pickMany" -> pickMany(payload, completion)
                 "importUri" -> executor.execute { importContentUri(payload, completion) }
@@ -137,6 +138,14 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         }.onFailure { completion.failure(it) }
     }
 
+    private fun isPackageInstalled(payload: ByteArray, completion: ModuleCompletion) {
+        val packageName = validatedSharePackage(WireMap.decode(payload).requiredText("packageName"))
+        val installed = installedSharePackage(activity.packageManager, packageName)
+        completion.complete(ModuleResultStatus.SUCCESS, WireMap.encode(mapOf(
+            "supported" to WireValue.Flag(true), "installed" to WireValue.Flag(installed),
+        )))
+    }
+
     private fun share(payload: ByteArray, completion: ModuleCompletion) {
         val values = WireMap.decode(payload)
         val paths = JSONArray(values.requiredText("paths"))
@@ -149,9 +158,10 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
         val authority = "${activity.packageName}.pam.files"
         val uris = files.map { FileProvider.getUriForFile(activity, authority, it) }
         val text = (values["text"] as? WireValue.Text)?.value?.takeIf(String::isNotBlank)
-        val intent = shareFilesIntent(uris, mime, text)
+        val packageName = (values["packageName"] as? WireValue.Text)?.value?.takeIf(String::isNotEmpty)
+        val intent = shareFilesIntent(uris, mime, text, packageName)
         val title = (values["title"] as? WireValue.Text)?.value?.takeIf(String::isNotBlank)
-        val chooser = Intent.createChooser(intent, title).apply {
+        val chooser = if (packageName != null) intent else Intent.createChooser(intent, title).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         activity.runOnUiThread {
@@ -838,7 +848,24 @@ internal fun sharedMimeType(types: List<String>): String {
     return if (families.size == 1) "${families.first()}/*" else "*/*"
 }
 
-internal fun shareFilesIntent(uris: List<Uri>, mime: String, text: String? = null): Intent {
+internal fun installedSharePackage(manager: android.content.pm.PackageManager, packageName: String): Boolean {
+    validatedSharePackage(packageName)
+    return try {
+        @Suppress("DEPRECATION")
+        manager.getApplicationInfo(packageName, 0).enabled
+    } catch (_: android.content.pm.PackageManager.NameNotFoundException) {
+        false
+    }
+}
+
+internal fun validatedSharePackage(value: String): String {
+    require(value.length <= 255 && Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+").matches(value)) {
+        "Invalid Android package name"
+    }
+    return value
+}
+
+internal fun shareFilesIntent(uris: List<Uri>, mime: String, text: String? = null, packageName: String? = null): Intent {
     require(uris.isNotEmpty()) { "At least one file is required" }
     val intent = if (uris.size == 1) {
         Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris.first())
@@ -846,6 +873,7 @@ internal fun shareFilesIntent(uris: List<Uri>, mime: String, text: String? = nul
         Intent(Intent.ACTION_SEND_MULTIPLE)
             .putParcelableArrayListExtra(Intent.EXTRA_STREAM, ArrayList(uris))
     }
+    if (packageName != null) intent.setPackage(validatedSharePackage(packageName))
     intent.type = mime
     // Optional caption shared beside the files (EXTRA_TEXT, e.g. a link).
     if (!text.isNullOrBlank()) intent.putExtra(Intent.EXTRA_TEXT, text)

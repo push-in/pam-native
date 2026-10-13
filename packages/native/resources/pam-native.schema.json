@@ -191,6 +191,28 @@
                     "type": "string",
                     "pattern": "^[^/][^\\\\]*\\.(?:png|PNG)$",
                     "description": "Project-relative 1024x1024 PNG used as the home-screen and App Store icon (AppIcon)."
+                },
+                "urlSchemes": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z][A-Za-z0-9+.-]*$"
+                    },
+                    "description": "Custom application URL schemes. HTTP, HTTPS, file and pam-native-* are reserved. Existing plugin and diagnostic URL types are preserved."
+                },
+                "associatedDomains": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string",
+                        "maxLength": 264,
+                        "pattern": "^applinks:(?:\\*\\.)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$"
+                    },
+                    "description": "Universal-link entitlements, e.g. applinks:example.com. Requires Associated Domains capability and a matching apple-app-site-association document. Merges with plugin entitlements."
                 }
             }
         },

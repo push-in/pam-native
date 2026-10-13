@@ -2,6 +2,27 @@ import XCTest
 @testable import PamNative
 
 final class FilesParityTests: XCTestCase {
+    func testAndroidPackageSharingIsExplicitlyUnsupportedOnIOS() throws {
+        let module = FilesModule()
+        let lookup = expectation(description: "package lookup unsupported")
+        module.invoke(method: "isPackageInstalled", payload: try WireMap.encode(["packageName": .text("com.instagram.android")])) { status, payload in
+            XCTAssertEqual(status, .success)
+            if case .flag(false)? = try? WireMap.decode(payload)["supported"] {} else {
+                XCTFail("Package capability must be false on iOS")
+            }
+            lookup.fulfill()
+        }
+        let share = expectation(description: "package share rejected")
+        module.invoke(method: "share", payload: try WireMap.encode([
+            "packageName": .text("com.instagram.android"), "paths": .text("[]"),
+        ])) { status, payload in
+            XCTAssertEqual(status, .failure)
+            XCTAssertTrue(String(decoding: payload, as: UTF8.self).contains("only supported on Android"))
+            share.fulfill()
+        }
+        wait(for: [lookup, share], timeout: 1)
+    }
+
     func testObservedDownloadChannelDeliversOneWaiterAndBoundsEvents() {
         let channel = FileDownloadChannel()
         let pending = expectation(description: "waiting observer receives event")

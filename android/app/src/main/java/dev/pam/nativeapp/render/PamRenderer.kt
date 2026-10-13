@@ -1918,80 +1918,82 @@ class PamRenderer(
     }
 
     private fun syncVirtualLists(dirty: Set<Long>? = null) {
-        for (id in virtualListIds) {
-            val state = nodes[id] ?: continue
-            val list = views[id] as? PamRecyclerList ?: continue
-            if (dirty != null && id !in dirty && state.virtualListItemIds.isNotEmpty()) {
-                list.remountEmptyRows()
-                continue
-            }
-            val activeSection = state.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty()
-            val allItemIds = children[id]?.toList().orEmpty()
-            val itemIds = visibleSectionItems(allItemIds, activeSection, ::listSectionOf)
-            val sectionSwitch = state.appliedListSection
-                ?.takeIf { previous -> previous != activeSection }
-                ?.let { previous ->
-                    ListSectionSwitch(previous, activeSection, sectionRailId(allItemIds, ::listSectionOf))
-                }
-            state.appliedListSection = activeSection
-            if (state.virtualListItemIds != itemIds) {
-                state.virtualListItemIds = itemIds
-                state.endReachedSent = false
-            }
-            val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
-            val fallbackExtent = state.number(PropKey.LIST_ROW_HEIGHT, 48.0).toFloat()
-            // A cell slot is its root's margin box, like a React Native cell
-            // around an item with margins (the engine insets the root frame).
-            val itemExtents = itemIds.associateWith { id ->
-                frames[id]?.let { frame ->
-                    val margins = cellRootMargins(nodes[id]?.properties)
-                    if (horizontal) {
-                        frame.width + margins.left + margins.right
-                    } else {
-                        frame.height + margins.top + margins.bottom
-                    }
-                }?.coerceAtLeast(1f) ?: fallbackExtent
-            }
-            list.setRichItems(
-                ids = itemIds,
-                extents = itemExtents,
-                mount = { cell, holder -> materializeCell(cell, holder) },
-                unmount = { cell, _ ->
-                    val section = listSectionOf(cell)
-                    val listState = nodes[nodes[cell]?.parent ?: 0L]
-                    if (
-                        section != null &&
-                        listState != null &&
-                        section != listState.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty()
-                    ) {
-                        parkCell(cell)
-                    } else {
-                        recycleCell(cell)
-                    }
-                },
-                sectionSwitch = sectionSwitch,
-            )
-            if (sectionSwitch != null) {
-                // Cells of the active section that the switch did not bind
-                // (scrolled away meanwhile) return to the ordinary recycling.
-                list.postOnAnimation {
-                    // After this frame's layout bound the switched-in rows.
-                    list.post {
-                        releaseParkedCells { cell ->
-                            nodes[cell]?.parent == id &&
-                                listSectionOf(cell) == nodes[id]?.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty() &&
-                                !list.isBound(cell)
-                        }
-                    }
-                }
-            }
-            list.setFullSpanIds(
-                itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.LIST_FULL_SPAN, false) == true },
-            )
-            list.setStickyIds(
-                itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.STICKY_HEADER, false) == true },
-            )
+        for (id in virtualListIds) syncVirtualList(id, dirty)
+    }
+
+    private fun syncVirtualList(id: Long, dirty: Set<Long>? = null) {
+        val state = nodes[id] ?: return
+        val list = views[id] as? PamRecyclerList ?: return
+        if (dirty != null && id !in dirty && state.virtualListItemIds.isNotEmpty()) {
+            list.remountEmptyRows()
+            return
         }
+        val activeSection = state.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty()
+        val allItemIds = children[id]?.toList().orEmpty()
+        val itemIds = visibleSectionItems(allItemIds, activeSection, ::listSectionOf)
+        val sectionSwitch = state.appliedListSection
+            ?.takeIf { previous -> previous != activeSection }
+            ?.let { previous ->
+                ListSectionSwitch(previous, activeSection, sectionRailId(allItemIds, ::listSectionOf))
+            }
+        state.appliedListSection = activeSection
+        if (state.virtualListItemIds != itemIds) {
+            state.virtualListItemIds = itemIds
+            state.endReachedSent = false
+        }
+        val horizontal = state.flag(PropKey.LIST_HORIZONTAL, false)
+        val fallbackExtent = state.number(PropKey.LIST_ROW_HEIGHT, 48.0).toFloat()
+        // A cell slot is its root's margin box, like a React Native cell
+        // around an item with margins (the engine insets the root frame).
+        val itemExtents = itemIds.associateWith { id ->
+            frames[id]?.let { frame ->
+                val margins = cellRootMargins(nodes[id]?.properties)
+                if (horizontal) {
+                    frame.width + margins.left + margins.right
+                } else {
+                    frame.height + margins.top + margins.bottom
+                }
+            }?.coerceAtLeast(1f) ?: fallbackExtent
+        }
+        list.setRichItems(
+            ids = itemIds,
+            extents = itemExtents,
+            mount = { cell, holder -> materializeCell(cell, holder) },
+            unmount = { cell, _ ->
+                val section = listSectionOf(cell)
+                val listState = nodes[nodes[cell]?.parent ?: 0L]
+                if (
+                    section != null &&
+                    listState != null &&
+                    section != listState.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty()
+                ) {
+                    parkCell(cell)
+                } else {
+                    recycleCell(cell)
+                }
+            },
+            sectionSwitch = sectionSwitch,
+        )
+        if (sectionSwitch != null) {
+            // Cells of the active section that the switch did not bind
+            // (scrolled away meanwhile) return to the ordinary recycling.
+            list.postOnAnimation {
+                // After this frame's layout bound the switched-in rows.
+                list.post {
+                    releaseParkedCells { cell ->
+                        nodes[cell]?.parent == id &&
+                            listSectionOf(cell) == nodes[id]?.textOrNull(PropKey.LIST_ACTIVE_SECTION).orEmpty() &&
+                            !list.isBound(cell)
+                    }
+                }
+            }
+        }
+        list.setFullSpanIds(
+            itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.LIST_FULL_SPAN, false) == true },
+        )
+        list.setStickyIds(
+            itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.STICKY_HEADER, false) == true },
+        )
     }
 
     private fun requestVirtualListScroll(list: PamRecyclerList, state: NodeState) {
@@ -2164,7 +2166,8 @@ class PamRenderer(
         holder: FrameLayout,
     ) {
         val state = nodes[id] ?: return
-        if (!state.virtual && views[id] == null) {
+        val created = !state.virtual && views[id] == null
+        if (created) {
             val view = takePooledCellView(state) ?: createView(state.kind, state)
             if (view is TextView) state.defaultHighlightColor = view.highlightColor
             putView(id, view)
@@ -2172,6 +2175,13 @@ class PamRenderer(
             applyInitialProperties(view, state)
             installEvents(view, state)
             applyCellLayout(id, rootId, rootFrame)
+        }
+        if (state.kind == NodeKind.VIRTUAL_LIST) {
+            // This list owns its descendants through its own adapter, even
+            // when it was created while binding an outer list's header cell.
+            // It may materialize after the commit's global list-sync pass.
+            if (created) syncVirtualList(id)
+            return
         }
         children[id]?.forEach { child ->
             materializeCellNode(child, rootId, rootFrame, holder)

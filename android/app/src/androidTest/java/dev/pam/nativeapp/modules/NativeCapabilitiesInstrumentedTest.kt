@@ -128,6 +128,13 @@ class NativeCapabilitiesInstrumentedTest {
     }
 
     @Test
+    fun packageShareLookupDistinguishesInstalledMissingAndInvalidTargets() {
+        assertTrue(installedSharePackage(context.packageManager, context.packageName))
+        assertFalse(installedSharePackage(context.packageManager, "dev.pam.nonexistent.sharetarget"))
+        assertTrue(runCatching { installedSharePackage(context.packageManager, "bad/package") }.isFailure)
+    }
+
+    @Test
     fun shareIntentGrantsEveryFileAndUsesSendMultiple() {
         val uris = listOf(Uri.parse("content://a/1"), Uri.parse("content://a/2"))
         val intent = shareFilesIntent(uris, "image/*")
@@ -139,6 +146,13 @@ class NativeCapabilitiesInstrumentedTest {
         val captioned = shareFilesIntent(uris.take(1), "image/jpeg", "Veja https://example.com")
         assertEquals("Veja https://example.com", captioned.getStringExtra(Intent.EXTRA_TEXT))
         assertEquals(null, shareFilesIntent(uris.take(1), "image/jpeg", " ").getStringExtra(Intent.EXTRA_TEXT))
+        val targeted = shareFilesIntent(uris.take(1), "image/jpeg", "caption", "com.instagram.android")
+        assertEquals("com.instagram.android", targeted.`package`)
+        assertEquals(Intent.ACTION_SEND, targeted.action)
+        assertEquals("caption", targeted.getStringExtra(Intent.EXTRA_TEXT))
+        assertEquals(uris.first(), targeted.clipData?.getItemAt(0)?.uri)
+        assertTrue(targeted.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0)
+        assertTrue(runCatching { shareFilesIntent(uris, "image/jpeg", packageName = "bad;package") }.isFailure)
     }
 
     @Test

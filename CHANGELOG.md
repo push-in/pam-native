@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.39.0 - 2026-10-13
+
+- Target Android packages and use the iOS activity sheet with captioned files;
+  expose availability checks without opening another application. Android keeps
+  URI grants and ClipData for every attachment, including multiple-file shares.
+- Deliver iOS custom scheme and universal links through the shared linking
+  module, including cold starts, runtime reset and observer replacement. Add
+  manifest configuration for schemes and associated domains.
+- Materialize nested Android virtual lists through their own adapters, preserving
+  bounded recycling and route visibility instead of attaching children directly
+  to RecyclerView. Add native scroll, recycle, rebind and hide/show regressions.
+
 ## 1.38.1 - 2026-10-13
 
 - Android inputs retain their authored/default font family, weight and style

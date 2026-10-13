@@ -20,6 +20,19 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
+        // Capture before PHP starts: Linking::initial() consumes the cold-start URL.
+        if let url = launchOptions?[.url] as? URL, acceptsApplicationURL(url) {
+            PamLinking.captureInitial(url)
+        }
+        if let activities = launchOptions?[.userActivityDictionary] as? [AnyHashable: Any] {
+            for case let activity as NSUserActivity in activities.values {
+                if activity.activityType == NSUserActivityTypeBrowsingWeb,
+                   let url = activity.webpageURL, isWebURL(url) {
+                    PamLinking.captureInitial(url)
+                    break
+                }
+            }
+        }
         UNUserNotificationCenter.current().delegate = self
         let window = UIWindow(frame: UIScreen.main.bounds)
         let controller = PamHostViewController()
@@ -194,22 +207,52 @@ final class PamAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificati
         open url: URL,
         options: [UIApplication.OpenURLOptionsKey: Any] = [:]
     ) -> Bool {
+        if url.scheme?.lowercased() == "__PAM_DIAGNOSTICS_SCHEME__" {
 #if DEBUG
-        guard url.scheme == "__PAM_DIAGNOSTICS_SCHEME__" else { return false }
-        if url.host == "devtools" {
-            devTools?.toggle()
+            if url.host == "devtools" {
+                devTools?.toggle()
+                return true
+            }
+            guard url.host == "diagnostics" else { return false }
+            let requestID = url.lastPathComponent
+            guard requestID.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
+                  let devTools = devTools,
+                  let snapshot = try? devTools.snapshotData() else { return false }
+            publishDiagnostics(snapshot, requestID: requestID)
             return true
-        }
-        guard url.host == "diagnostics" else { return false }
-        let requestID = url.lastPathComponent
-        guard requestID.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil,
-              let devTools = devTools,
-              let snapshot = try? devTools.snapshotData() else { return false }
-        publishDiagnostics(snapshot, requestID: requestID)
-        return true
 #else
-        return false
+            return false
 #endif
+        }
+        guard acceptsApplicationURL(url) else { return false }
+        PamLinking.open(url)
+        return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        continue userActivity: NSUserActivity,
+        restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void
+    ) -> Bool {
+        guard userActivity.activityType == NSUserActivityTypeBrowsingWeb,
+              let url = userActivity.webpageURL, isWebURL(url) else { return false }
+        PamLinking.open(url)
+        return true
+    }
+
+    private func isWebURL(_ url: URL) -> Bool {
+        return ["https", "http"].contains(url.scheme?.lowercased() ?? "")
+            && url.host != nil && url.absoluteString.utf8.count <= 8_192
+    }
+
+    private func acceptsApplicationURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme != "__PAM_DIAGNOSTICS_SCHEME__",
+              url.absoluteString.utf8.count <= 8_192 else { return false }
+        let types = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]] ?? []
+        return types.contains { type in
+            (type["CFBundleURLSchemes"] as? [String] ?? []).contains { $0.lowercased() == scheme }
+        }
     }
 
 #if DEBUG

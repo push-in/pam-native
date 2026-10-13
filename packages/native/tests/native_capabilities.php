@@ -174,6 +174,22 @@ $assert(
     'Share::files must validate paths and MIME types.',
 );
 
+// Optional direct Android targets preserve sandbox validation and report capability on iOS.
+Share::fileToPackage('exports/card.jpg', 'com.instagram.android', 'image/jpeg', 'caption');
+$assert($lastCall()['values']['packageName'] === 'com.instagram.android' && $lastCall()['values']['text'] === 'caption', 'Targeted shares must preserve caption and explicit package.');
+$installed = null;
+Share::isPackageInstalled('com.whatsapp', static function (?bool $value) use (&$installed): void { $installed = $value; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['supported' => true, 'installed' => true]));
+$assert($installed === true, 'Installed Android package must be reported.');
+Share::isPackageInstalled('com.whatsapp', static function (?bool $value) use (&$installed): void { $installed = $value; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Success->value, Wire::map(['supported' => false]));
+$assert($installed === null, 'Unsupported package lookup must remain unknown on iOS.');
+$shareFailure = '';
+Share::fileToPackage('exports/card.jpg', 'com.missing.app', failure: static function (string $error) use (&$shareFailure): void { $shareFailure = $error; });
+Runtime::dispatchModuleResult($lastCall()['requestId'], ModuleResultStatus::Failure->value, 'missing target');
+$assert($shareFailure === 'missing target', 'Missing target must call failure, never silently open another app.');
+$assert($rejects(static fn () => Share::fileToPackage('../secret', 'com.instagram.android')) && $rejects(static fn () => Share::fileToPackage('card.jpg', 'bad;package')), 'Targeted sharing must reject escaping paths and malformed packages.');
+
 // 3. File move, copy and directories.
 $moved = null;
 Files::move('drafts/a.jpg', 'sent/a.jpg', static function (FileReference $file) use (&$moved): void { $moved = $file; }, overwrite: true);

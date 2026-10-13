@@ -39,6 +39,7 @@ import dev.pam.nativeapp.protocol.PropKey
 import dev.pam.nativeapp.protocol.PropValue
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -50,6 +51,100 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PamRendererInstrumentedTest {
+    @Test
+    fun nestedRichListOwnsCellsAcrossScrollRecycleAndVisibility() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        lateinit var renderer: PamRenderer
+        lateinit var outer: PamRecyclerList
+        lateinit var originalInner: PamRecyclerList
+        lateinit var views: android.util.LongSparseArray<View>
+        try {
+            onMain(instrumentation) {
+                renderer = PamRenderer(activity, activity.host) { _, _, _ -> }
+                val mutations = mutableListOf<Mutation>(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.VIRTUAL_LIST)),
+                    Mutation.Create(node(3, 2, NodeKind.COLUMN)),
+                    Mutation.Create(node(4, 3, NodeKind.VIRTUAL_LIST, mapOf(
+                        PropKey.LIST_HORIZONTAL to PropValue.Flag(true),
+                        PropKey.LIST_ROW_HEIGHT to PropValue.Decimal(120.0),
+                        PropKey.LIST_PREFETCH to PropValue.Integer(1),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 300f, 400f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 300f, 400f)),
+                    Mutation.Layout(3, Frame(0f, 0f, 300f, 160f)),
+                    Mutation.Layout(4, Frame(0f, 0f, 300f, 140f)),
+                )
+                for (index in 0 until 100) {
+                    val id = 1000L + index
+                    mutations += Mutation.Create(node(id, 4, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("Suggested $index"),
+                    ), index))
+                    mutations += Mutation.Layout(id, Frame(index * 120f, 0f, 120f, 140f))
+                }
+                for (index in 0 until 40) {
+                    val id = 2000L + index
+                    mutations += Mutation.Create(node(id, 2, NodeKind.TEXT, mapOf(
+                        PropKey.TEXT to PropValue.Text("Feed $index"),
+                    ), index + 1))
+                    mutations += Mutation.Layout(id, Frame(0f, 160f + index * 120f, 300f, 120f))
+                }
+                mutations += Mutation.SetRoot(1)
+                renderer.commit(listOf(mutations))
+                val field = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
+                @Suppress("UNCHECKED_CAST")
+                val rendered = field.get(renderer) as android.util.LongSparseArray<View>
+                views = rendered
+                outer = views[2] as PamRecyclerList
+                // Force actual recycle rather than retaining the header in
+                // RecyclerView's bounded detached-item cache.
+                outer.setItemViewCacheSize(0)
+            }
+            awaitFrames(instrumentation, 4)
+            onMain(instrumentation) {
+                originalInner = views[4] as PamRecyclerList
+                assertEquals(100, originalInner.adapter?.itemCount)
+                assertTrue("Only a bounded horizontal viewport may materialize", (1000L..1099L).count { views[it] != null } in 1..12)
+                originalInner.scrollToLogicalOffset(1800f)
+            }
+            awaitFrames(instrumentation, 4)
+            onMain(instrumentation) {
+                assertNotNull("Inner adapter owns its scrolled cell", originalInner.findViewHolderForAdapterPosition(15))
+                assertTrue((1000L..1099L).count { views[it] != null } <= 12)
+                outer.scrollToLogicalOffset(3500f)
+            }
+            awaitFrames(instrumentation, 4)
+            onMain(instrumentation) {
+                assertNull("Recycling the outer header releases its nested list", views[4])
+                assertEquals(0, (1000L..1099L).count { views[it] != null })
+                outer.scrollToLogicalOffset(0f)
+            }
+            awaitFrames(instrumentation, 4)
+            onMain(instrumentation) {
+                val rebound = views[4] as PamRecyclerList
+                assertFalse(originalInner === rebound)
+                assertEquals(100, rebound.adapter?.itemCount)
+                assertTrue((1000L..1099L).count { views[it] != null } in 1..12)
+                outer.visibility = View.GONE
+                assertFalse(rebound.isShown)
+                outer.visibility = View.VISIBLE
+            }
+            awaitFrames(instrumentation, 3)
+            onMain(instrumentation) {
+                val shown = views[4] as PamRecyclerList
+                assertTrue(shown.isShown)
+                assertEquals(100, shown.adapter?.itemCount)
+                assertTrue((1000L..1099L).count { views[it] != null } in 1..12)
+            }
+        } finally {
+            onMain(instrumentation) {
+                renderer.close()
+                activity.finish()
+            }
+        }
+    }
+
     @Test
     fun unrelatedTextPatchDoesNotResubmitRichVirtualList() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -2887,10 +2982,11 @@ class PamRendererInstrumentedTest {
         parent: Long,
         kind: NodeKind,
         properties: Map<PropKey, PropValue> = emptyMap(),
+        index: Int = 0,
     ): NodeSpec = NodeSpec(
         id = id,
         parent = parent,
-        index = 0,
+        index = index,
         kind = kind,
         properties = properties,
     )

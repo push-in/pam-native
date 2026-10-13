@@ -53,6 +53,7 @@ public enum PamLinking {
 
     fileprivate static func close() {
         lock.lock()
+        initialURL = nil
         values.removeAll()
         let callback = waiter
         waiter = nil

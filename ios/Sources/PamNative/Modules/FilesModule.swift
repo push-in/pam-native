@@ -60,6 +60,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 queue.async { self.transfer(payload, move: false, completion) }
             case "makeDirectory":
                 queue.async { self.makeDirectory(payload, completion) }
+            case "isPackageInstalled":
+                completion(.success, try WireMap.encode(["supported": .flag(false)]))
             case "share":
                 shareFiles(payload, completion: completion)
             case "pick":
@@ -227,6 +229,9 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
     private func shareFiles(_ payload: Data, completion: @escaping ModuleCompletion) {
         do {
             let values = try WireMap.decode(payload)
+            guard (values["packageName"]?.textValue ?? "").isEmpty else {
+                throw FileModuleError("Targeted package sharing is only supported on Android")
+            }
             guard let raw = values["paths"]?.textValue,
                   let paths = try JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String],
                   (1...50).contains(paths.count) else {
