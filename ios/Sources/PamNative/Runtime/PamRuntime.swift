@@ -484,6 +484,7 @@ public final class PamRuntime {
         previous?.onNativeChildVisibility = nil
         previous?.close()
         renderer = makeRenderer(hostView: hostView)
+        refreshKeyboardVisibility()
         surfaceAwaitingFirstFrame = true
         requestRemount()
     }
@@ -752,7 +753,25 @@ public final class PamRuntime {
         })
     }
 
+    private func refreshKeyboardVisibility() {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard let window = renderer.hostView?.window else {
+            keyboardVisibility.update(surface: 0, bottom: 0)
+            return
+        }
+        // Unlike a cached notification frame, the layout guide reflects an
+        // IME that stayed visible while an OS prompt made the app inactive.
+        let guide = window.keyboardLayoutGuide
+        guide.followsUndockedKeyboard = true
+        window.layoutIfNeeded()
+        let visible = PamKeyboardVisibility.guideIsVisible(
+            guide.layoutFrame, in: window.bounds, safeBottom: window.safeAreaInsets.bottom
+        )
+        keyboardVisibility.update(surface: 0, bottom: visible ? 1 : 0)
+    }
+
     private func keyboardChanged(_ notification: Notification, hiding: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
         guard let host = renderer.hostView, let window = host.window else { return }
         let end = (notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
             .cgRectValue ?? .zero
@@ -901,11 +920,20 @@ public final class PamRuntime {
     }
 
     public func dispatchLifecycle(kind: Int, payload: Data = Data()) {
-        if kind == NativeViewEventKind.appState.rawValue {
-            keyboardVisibility.setActive(payload == Data("1".utf8))
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.dispatchLifecycle(kind: kind, payload: payload) }
+            return
         }
+        let appState = kind == NativeViewEventKind.appState.rawValue
+        let active = payload == Data("1".utf8)
+        if appState && !active { keyboardVisibility.setActive(false) }
         reportDiagnostic(RuntimeDiagnostic(kind: .lifecycle, label: "event \(kind)"))
         dispatchEvent(0, kind: kind, payload: payload)
+        if appState && active {
+            // Order matters: PHP rejects visibility updates while inactive.
+            keyboardVisibility.setActive(true)
+            refreshKeyboardVisibility()
+        }
     }
 
     public func dispatchBack() {
@@ -1557,6 +1585,7 @@ public final class PamRuntime {
     }
 
     private func markReadyForEvents() {
+        dispatchPrecondition(condition: .onQueue(.main))
         stateLock.lock()
         guard !readyForEvents else {
             stateLock.unlock()

@@ -64,15 +64,19 @@ class PamModalNavigationBarInstrumentedTest {
     }
 
     @Test
-    fun fittedModalPaintsTheAppWindowBackground() {
+    fun nonTranslucentModalFollowsThePlatformWindowPolicy() {
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
         val window = present(translucent = false).window!!
         instrumentation.runOnMainSync {
             val dark = PamAppearance.isDark(activity)
+            // Android 15+ with target 35+ enforces edge-to-edge even when
+            // the app requests fitted bars. Earlier devices retain fitting.
+            val forcedEdgeToEdge = Build.VERSION.SDK_INT >= 35 && activity.applicationInfo.targetSdkVersion >= 35
             assertEquals(
-                PamAppearance.color(activity, R.color.pam_window_background, dark),
+                if (forcedEdgeToEdge) Color.TRANSPARENT else PamAppearance.color(activity, R.color.pam_window_background, dark),
                 window.navigationBarColor,
             )
+            if (forcedEdgeToEdge) assertTrue(window.isNavigationBarContrastEnforced)
             assertEquals(
                 expectedLightIcons(),
                 WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightNavigationBars,

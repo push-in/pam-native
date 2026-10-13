@@ -2,6 +2,14 @@ import XCTest
 @testable import PamNative
 
 final class PamKeyboardVisibilityTests: XCTestCase {
+    func testResumeSnapshotDoesNotConfuseHomeIndicatorWithVisibleKeyboard() {
+        let bounds = CGRect(x: 0, y: 0, width: 390, height: 844)
+        XCTAssertFalse(PamKeyboardVisibility.guideIsVisible(CGRect(x: 0, y: 810, width: 390, height: 34), in: bounds, safeBottom: 34))
+        XCTAssertTrue(PamKeyboardVisibility.guideIsVisible(CGRect(x: 0, y: 500, width: 390, height: 344), in: bounds, safeBottom: 34))
+        XCTAssertTrue(PamKeyboardVisibility.guideIsVisible(CGRect(x: 40, y: 300, width: 240, height: 200), in: bounds, safeBottom: 34))
+        XCTAssertFalse(PamKeyboardVisibility.guideIsVisible(CGRect(x: 0, y: 844, width: 390, height: 344), in: bounds, safeBottom: 34))
+    }
+
     func testFramesAndModalHandoffEmitOnlyBinaryTransitions() {
         let visibility = PamKeyboardVisibility()
         var events: [Bool] = []

@@ -212,7 +212,10 @@ class PamSheetKeyboardInstrumentedTest {
             val inside = screenshot.getPixel(x, (sheetTop + sheetBottom) / 2)
             val geometry = "sheet=$sheetTop..$sheetBottom host=$screenHeight " +
                 "above=${Integer.toHexString(above)} inside=${Integer.toHexString(inside)}"
-            assertTrue("the Column keeps its 44% height ($geometry)", sheetTop > screenHeight / 2)
+            // Fitted windows on older APIs are offset by system bars, so
+            // absolute top > screen/2 is not a valid measure of its height.
+            assertTrue("the Column keeps its 44% height ($geometry)",
+                kotlin.math.abs((sheetBottom - sheetTop) - screenHeight * 0.44f) <= 2f)
             assertTrue("the Column stays on screen ($geometry)", sheetBottom <= screenshot.height)
             // Red screen under a 40% black backdrop: about (153, 0, 0).
             assertTrue(

@@ -616,7 +616,42 @@ class PamRenderer(
      * keyboard inset).
      */
     var onSurfaceKeyboardInset: ((Long, Float) -> Unit)? = null
+    private var legacyRootKeyboard: AutoCloseable? = null
+    private var keyboardVisibilityActive = true
     var onKeyboardVisibility: ((Long, Boolean) -> Unit)? = null
+        set(value) {
+            field = value
+            (host as? PamRootHost)?.onKeyboardWindowVisibility =
+                if (value == null) null else { visible -> onKeyboardVisibility?.invoke(0, visible) }
+            updateLegacyKeyboardObservation()
+        }
+
+    internal fun setKeyboardVisibilityActive(active: Boolean) {
+        keyboardVisibilityActive = active
+        updateLegacyKeyboardObservation()
+        if (active) (host as? PamRootHost)?.publishKeyboardWindowVisibility()
+        for (index in 0 until views.size()) {
+            (views.valueAt(index) as? PamModalHost)?.setKeyboardVisibilityActive(active)
+        }
+    }
+
+    private fun updateLegacyKeyboardObservation() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) return
+        if (!keyboardVisibilityActive || onKeyboardVisibility == null) {
+            legacyRootKeyboard?.close()
+            legacyRootKeyboard = null
+            onKeyboardVisibility?.invoke(0, false)
+            return
+        }
+        val root = host as? PamRootHost ?: return
+        if (legacyRootKeyboard == null) {
+            // Share the single pre-30 measurement window with KAV/scrollers.
+            // Visibility must also work for a plain Input without those views.
+            legacyRootKeyboard = root.legacyImeInsets.subscribe(root) { inset ->
+                onKeyboardVisibility?.invoke(0, inset > 0)
+            }
+        }
+    }
 
     /**
      * True once the runtime feeds window insets to the engine: SafeAreaView
@@ -1560,6 +1595,7 @@ class PamRenderer(
                 val id = state?.id ?: return@also
                 modal.onSurfaceKeyboardInset = { inset, _ -> forwardSurfaceKeyboard(id, modal, inset) }
                 modal.onKeyboardVisibility = { visible -> onKeyboardVisibility?.invoke(id, visible) }
+                modal.setKeyboardVisibilityActive(keyboardVisibilityActive)
             }
             NodeKind.KEYBOARD_AVOIDING_VIEW -> PamContainer(context).also {
                 installKeyboardInsets(it, requireNotNull(state))

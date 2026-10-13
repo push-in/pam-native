@@ -55,6 +55,14 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
 
     /** Called synchronously while insets are dispatched, before layout. */
     var onImeInsetChanged: ((Int) -> Unit)? = null
+    internal var onKeyboardWindowVisibility: ((Boolean) -> Unit)? = null
+
+    internal fun publishKeyboardWindowVisibility() {
+        val bottom = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            rootWindowInsets?.let(::imeInsetOf) ?: 0
+        } else legacyImeInsets.bottom
+        onKeyboardWindowVisibility?.invoke(windowFocused() && bottom > 0)
+    }
     internal var statusBarSurfaceColor: Int = Color.TRANSPARENT
         private set
 
@@ -146,6 +154,9 @@ internal class PamRootHost(context: Context) : FrameLayout(context) {
             // Re-read the real insets that were retained while unfocused.
             requestApplyInsets()
         }
+        // The root may retain its layout inset while a dialog owns the IME.
+        // Drop only its visibility source, without changing layout or focus.
+        publishKeyboardWindowVisibility()
     }
 
     /** Re-reads the settled IME height (after an insets animation ends). */

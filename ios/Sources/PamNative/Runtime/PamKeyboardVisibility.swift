@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reduces the root and presented-dialog insets to binary visibility changes.
+/// Main-thread-only reducer of root/dialog insets to binary visibility changes.
 final class PamKeyboardVisibility {
     private var surfaces: Set<Int64> = []
     private var visible = false
@@ -19,6 +19,12 @@ final class PamKeyboardVisibility {
             surfaces.removeAll()
             publish(false)
         }
+    }
+
+    static func guideIsVisible(_ frame: CGRect, in bounds: CGRect, safeBottom: CGFloat) -> Bool {
+        let overlap = frame.intersection(bounds)
+        return !overlap.isNull && overlap.width > 0 && overlap.height > 0 &&
+            overlap.minY < bounds.maxY - max(0, safeBottom) - 0.5
     }
 
     func publishCurrent() { onChange?(visible) }

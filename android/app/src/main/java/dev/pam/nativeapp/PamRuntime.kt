@@ -141,6 +141,11 @@ class PamRuntime(
      */
     private val callsAwaitingModules = ArrayList<() -> Unit>()
 
+    private val keyboardVisibility = KeyboardVisibility { visible ->
+        dispatchEvent(0, dev.pam.nativeapp.protocol.EventKind.KEYBOARD_VISIBILITY.value,
+            (if (visible) "1" else "0").toByteArray())
+    }
+
     init {
         bindRenderer(renderer)
         if (installModules) installModules()
@@ -175,6 +180,7 @@ class PamRuntime(
                 }
             }
         }
+        target.setKeyboardVisibilityActive(true)
         target.onSurfaceKeyboardInset = ::updateSurfaceKeyboardInset
         target.onKeyboardVisibility = { surface, visible ->
             keyboardVisibility.update(surface, if (visible) 1f else 0f)
@@ -235,6 +241,7 @@ class PamRuntime(
         check(Looper.myLooper() == Looper.getMainLooper())
         if (surfaceContext.get() !== context || !attachedSurface) return
         keyboardVisibility.setActive(false)
+        renderer.setKeyboardVisibilityActive(false)
         attachedSurface = false
         surfaceContext.clear()
         awaitingRemount = true
@@ -355,11 +362,6 @@ class PamRuntime(
         }
     }
 
-    private val keyboardVisibility = KeyboardVisibility { visible ->
-        dispatchEvent(0, dev.pam.nativeapp.protocol.EventKind.KEYBOARD_VISIBILITY.value,
-            (if (visible) "1" else "0").toByteArray())
-    }
-
     private var layoutViewport = floatArrayOf(0f, 0f, 1f)
 
     /**
@@ -369,7 +371,9 @@ class PamRuntime(
      * views and engine frames move together.
      */
     fun updateKeyboardInset(bottomDp: Float) {
-        keyboardVisibility.update(0, bottomDp)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            keyboardVisibility.update(0, bottomDp)
+        }
         synchronized(handleLock) {
             val active = handle
             val (width, height, textScale) = layoutViewport.let { Triple(it[0], it[1], it[2]) }
@@ -403,11 +407,19 @@ class PamRuntime(
     }
 
     fun dispatchLifecycle(kind: Int, payload: ByteArray) {
-        if (kind == dev.pam.nativeapp.protocol.EventKind.APP_STATE.value) {
-            keyboardVisibility.setActive(payload.toString(Charsets.UTF_8) == "1")
+        val appState = kind == dev.pam.nativeapp.protocol.EventKind.APP_STATE.value
+        val active = payload.toString(Charsets.UTF_8) == "1"
+        if (appState && !active) {
+            keyboardVisibility.setActive(false)
+            renderer.setKeyboardVisibilityActive(false)
         }
         onDiagnostic(RuntimeDiagnostic(RuntimeDiagnosticKind.LIFECYCLE, "event $kind"))
         dispatchEvent(0, kind, payload)
+        if (appState && active) {
+            // PHP must become active before accepting the resumed snapshot.
+            keyboardVisibility.setActive(true)
+            renderer.setKeyboardVisibilityActive(true)
+        }
     }
 
     fun trimMemory(critical: Boolean) {

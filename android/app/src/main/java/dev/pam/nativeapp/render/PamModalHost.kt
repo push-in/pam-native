@@ -278,6 +278,35 @@ internal class PamModalHost @JvmOverloads constructor(
      */
     internal var onSurfaceKeyboardInset: ((Int, Boolean) -> Unit)? = null
     internal var onKeyboardVisibility: ((Boolean) -> Unit)? = null
+    private var legacyKeyboardVisibility: PamLegacyImeObserver? = null
+    private var keyboardVisibilityActive = true
+    private var keyboardWindowFocusListener: android.view.ViewTreeObserver.OnWindowFocusChangeListener? = null
+
+    internal fun setKeyboardVisibilityActive(active: Boolean) {
+        keyboardVisibilityActive = active
+        if (!active) {
+            legacyKeyboardVisibility?.close()
+            legacyKeyboardVisibility = null
+            onKeyboardVisibility?.invoke(false)
+        } else {
+            dialog?.let {
+                observeLegacyKeyboardVisibility(it)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    val decor = it.window?.decorView
+                    onKeyboardVisibility?.invoke(desiredVisible && decor?.hasWindowFocus() == true &&
+                        ViewCompat.getRootWindowInsets(decor)?.isVisible(WindowInsetsCompat.Type.ime()) == true)
+                }
+            }
+        }
+    }
+
+    private fun observeLegacyKeyboardVisibility(modal: Dialog) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R || !keyboardVisibilityActive || legacyKeyboardVisibility != null) return
+        val decor = modal.window?.decorView ?: return
+        legacyKeyboardVisibility = PamLegacyImeObserver(decor, { desiredVisible }) { inset ->
+            onKeyboardVisibility?.invoke(desiredVisible && inset > 0)
+        }
+    }
     private var lastSheetHeight = 0
     private val backdropDrawable = android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)
     private var backdropAnimator: android.animation.ValueAnimator? = null
@@ -734,7 +763,15 @@ internal class PamModalHost @JvmOverloads constructor(
      * covered activity window ignores this IME (see PamRootHost).
      */
     private fun observeDialogIme(modal: Dialog) {
+        observeLegacyKeyboardVisibility(modal)
         val decor = modal.window?.decorView ?: return
+        keyboardWindowFocusListener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (!focused) onKeyboardVisibility?.invoke(false)
+            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                onKeyboardVisibility?.invoke(desiredVisible && keyboardVisibilityActive &&
+                    ViewCompat.getRootWindowInsets(decor)?.isVisible(WindowInsetsCompat.Type.ime()) == true)
+            }
+        }.also { decor.viewTreeObserver.addOnWindowFocusChangeListener(it) }
         ViewCompat.setOnApplyWindowInsetsListener(decor) { view, insets ->
             if (insets.isVisible(WindowInsetsCompat.Type.ime())) finishAutoFocusKeyboard()
             if (!sheetImeAnimating) {
@@ -791,7 +828,9 @@ internal class PamModalHost @JvmOverloads constructor(
      * already moves or shrinks with the IME.
      */
     private fun surfaceKeyboardInsetFor(insets: WindowInsetsCompat): Int {
-        onKeyboardVisibility?.invoke(desiredVisible && insets.isVisible(WindowInsetsCompat.Type.ime()))
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            onKeyboardVisibility?.invoke(desiredVisible && insets.isVisible(WindowInsetsCompat.Type.ime()))
+        }
         if (!desiredVisible || !insets.isVisible(WindowInsetsCompat.Type.ime())) return 0
         val ime = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.coerceAtLeast(0)
         return modalSurfaceKeyboardInset(
@@ -1519,6 +1558,12 @@ internal class PamModalHost @JvmOverloads constructor(
         content.translationY = 0f
         val wasShowing = modal.isPresentedWindow
         unregisterDialogBackCallback(modal)
+        legacyKeyboardVisibility?.close()
+        legacyKeyboardVisibility = null
+        keyboardWindowFocusListener?.let { listener ->
+            modal.window?.decorView?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnWindowFocusChangeListener(listener)
+        }
+        keyboardWindowFocusListener = null
         modal.dismiss()
         dialog = null
         lastOrientation = null

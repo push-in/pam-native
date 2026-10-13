@@ -233,7 +233,7 @@ Visual checks that tests cannot fully cover:
   blank cell, no flash), typing in the composer must echo in the same frame
   as before, and the dev tools overlay must still show commit statistics.
 
-## Keyboard visibility events (next release)
+## Keyboard visibility events (1.38.0)
 
 `Keyboard::isVisible()`, `onVisibilityChange()` and `offVisibilityChange()` use
 binary native visibility, independently of input focus. Android Back can hide
@@ -253,3 +253,13 @@ Mac validation (not compiled on Linux):
   the host. State must clear/reconcile and covered consumers must unsubscribe.
 - Reload while visible: the new PHP runtime receives the host snapshot and
   no subscription from the old runtime survives.
+
+- Resume while the keyboard remains onscreen, without blurring/refocusing: the
+  active event must precede one true visibility snapshot. Repeat on iPad with
+  docked and floating keyboards, then with a hardware keyboard and the home
+  indicator visible (false). The snapshot uses `UIKeyboardLayoutGuide` with
+  `followsUndockedKeyboard = true`; check the guide is laid out on attach and
+  foreground. UIKit lifecycle callbacks and reducer access stay on the main
+  thread; `dispatchLifecycle` redirects callers from other threads.
+
+UIKit guide behavior: [Apple documentation](https://developer.apple.com/documentation/uikit/uikeyboardlayoutguide/followsundockedkeyboard).

@@ -191,6 +191,19 @@ class PamModalKeyboardAvoidingInstrumentedTest {
             val opening = engineInsets.filter { it > 0f }.distinct()
             assertTrue("animated surface insets: $engineInsets", opening.size >= 3)
         }
+        instrumentation.runOnMainSync {
+            visibility.setActive(false)
+            active.setKeyboardVisibilityActive(false)
+        }
+        assertEquals(listOf(true, false), keyboardEvents)
+        instrumentation.runOnMainSync {
+            visibility.setActive(true)
+            active.setKeyboardVisibilityActive(true)
+        }
+        waitUntil("resume publishes the still-visible keyboard snapshot") {
+            keyboardEvents.lastOrNull() == true
+        }
+        assertEquals(listOf(true, false, true), keyboardEvents)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         waitUntil("palette back at the bottom once the IME hides") {
             lastGeometry = "palette=${screenBottom(palette)} closed=$closedBottom engine=${engineInsets.takeLast(3)}"
@@ -203,7 +216,7 @@ class PamModalKeyboardAvoidingInstrumentedTest {
         waitUntil("Back publishes the hidden keyboard transition") {
             keyboardEvents.lastOrNull() == false
         }
-        assertEquals("Back emits hidden without requiring blur", listOf(true, false), keyboardEvents)
+        assertEquals("Back emits hidden without requiring blur", listOf(true, false, true, false), keyboardEvents)
         assertTrue("the field remains focused after Android Back hides IME", onMainValue { input.hasFocus() })
     }
 

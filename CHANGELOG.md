@@ -9,7 +9,10 @@
 - Keyboard subscriptions are cleared on runtime shutdown. Backgrounding clears
   stale visibility, inactive native surfaces cannot re-open it, and detached
   modal sources are removed. The current snapshot is synchronized on boot and
-  hot reload. Existing keyboard avoidance and input focus APIs are unchanged.
+  hot reload and foreground resume without requiring input blur. Android 26–29
+  uses a shared legacy window observer even for plain inputs; iOS resumes from
+  the main-thread keyboard layout guide, including floating keyboards. Existing
+  keyboard avoidance and input focus APIs are unchanged.
 - Add PHP subscription/invalidation contracts, native reducer tests and real
   Android IME assertions across fitted/translucent modals and interactive sheets.
   The iOS checklist records the equivalent Xcode/device journey.
