@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.38.0 - 2026-10-13
+
+- `System\Keyboard::isVisible()`, `onVisibilityChange()` and
+  `offVisibilityChange()` expose binary native IME visibility on Android and
+  iOS, including dialog windows, sheets and hardware Back without input blur.
+  Native animation frames stay on the host; PHP receives only transitions.
+- Keyboard subscriptions are cleared on runtime shutdown. Backgrounding clears
+  stale visibility, inactive native surfaces cannot re-open it, and detached
+  modal sources are removed. The current snapshot is synchronized on boot and
+  hot reload. Existing keyboard avoidance and input focus APIs are unchanged.
+- Add PHP subscription/invalidation contracts, native reducer tests and real
+  Android IME assertions across fitted/translucent modals and interactive sheets.
+  The iOS checklist records the equivalent Xcode/device journey.
+
+
 ## 1.37.1 - 2026-10-10
 
 - Scroll content measures each node's `minHeight` / `maxHeight` (and

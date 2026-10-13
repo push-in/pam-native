@@ -451,8 +451,10 @@ mod tests {
         let options: AppearanceOptions =
             serde_json::from_str(r##"{"firstFrame":"window"}"##).expect("appearance");
         assert!(!options.first_frame.waits_for_php());
-        assert!(launch_resources(options.first_frame)
-            .contains("<bool name=\"pam_first_frame_waits_for_php\">false</bool>"));
+        assert!(
+            launch_resources(options.first_frame)
+                .contains("<bool name=\"pam_first_frame_waits_for_php\">false</bool>")
+        );
         assert!(AppearanceOptions::default().first_frame.waits_for_php());
         assert!(serde_json::from_str::<AppearanceOptions>(r##"{"firstFrame":"never"}"##).is_err());
     }
