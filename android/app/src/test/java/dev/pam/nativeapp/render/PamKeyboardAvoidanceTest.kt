@@ -6,6 +6,19 @@ import org.junit.Test
 
 class PamKeyboardAvoidanceTest {
     @Test
+    fun tallSheetsStopAtSafeTopAndLeaveResidualImeForTheirKeyboardAvoider() {
+        val lift = boundedSheetKeyboardLift(883, 2272, 2044)
+        assertEquals(228, lift)
+        assertEquals(655, modalSurfaceKeyboardInset(
+            imeInset = 883, presentation = 3, interactiveSheet = true,
+            sheetLift = lift, containedSheet = false,
+        ))
+        assertEquals(883, boundedSheetKeyboardLift(883, 2272, 700))
+        assertEquals(0, boundedSheetKeyboardLift(883, 2272, 2272))
+        assertEquals(0, boundedSheetKeyboardLift(0, 2272, 2044))
+    }
+
+    @Test
     fun interactiveBottomSheetKeepsAStableFullWindowForInsets() {
         assertEquals(
             WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING,
