@@ -11,7 +11,7 @@ Android and iOS. A runnable screen using all of it is in
 | --- | --- |
 | Cross-screen events | `Events\EventBus`, `Events\Observable`, `Events\Subscription` |
 | Release on unmount | `Component::own()`, `Disposable`, `owner:` arguments |
-| Timers bound to a component | `Component::timers()` → `System\ComponentTimers` |
+| Timers bound to a component | `Component::timers()` → `System\ComponentTimers`, `Support\ProgressiveListWindow` |
 | Rate limiting | `Scheduling\Debouncer`, `Scheduling\Throttler`, `Scheduling\SingleFlight` |
 | Bounded caches | `Cache\BoundedStore`, `Cache\IdLedger`, `Cache\CachePersistence` |
 | Optimistic UI | `Store\OptimisticOverlay` |
@@ -93,12 +93,49 @@ public function mount(): void
   re-arms it on return (a timeout keeps its remaining delay, an interval
   restarts a full period), `Cancel` drops it, `Continue` keeps it running for
   work that must finish in the background.
-- `ComponentTimer` exposes `cancel()`, `active()`, `suspended()` and
-  `repeating()`. Interval callbacks receive the timer, so they can cancel
-  themselves.
+- `ComponentTimer` exposes `cancel()`, `restart()`, `active()`,
+  `suspended()`, `repeating()` and the `onCancel()`/`onFinish()` hooks
+  (`onFinish` runs when the timer ends for any reason). `timeout()`/`every()`
+  also take `onCancel:` and `failure:` (the native timer could not be armed;
+  rethrown when null). Interval callbacks receive the timer.
+- A field keeps its timer object after it fires or is auto-cancelled on
+  unmount, so guard with `$this->hide?->active()` rather than `=== null`,
+  call `$timer->restart()`, or write
+  `$this->poll = $this->timers()->ensure($this->poll, 2_000, fn () => $this->refresh());`
+  (reuses a live timer, starts a new one otherwise).
+- Timeouts may be longer than a day (armed in daily steps) and measure the
+  remaining delay with the wall clock, so time spent with the device asleep
+  counts when a suspended timer resumes.
 
 Plain `System\Timers` remains available for work that is not tied to a
 component.
+
+### Progressive list windows
+
+`Support\ProgressiveListWindow` builds long lists a viewport at a time: the
+first window admits `firstFrameRows` new rows, later ones `batchRows`, mounted
+rows always stay, and deferred rows join on the next frame through a component
+timer (cancelled on unmount):
+
+```php
+private ?ProgressiveListWindow $window = null;
+
+private function renderRows(): void
+{
+    $this->window ??= new ProgressiveListWindow(
+        firstFrameRows: 12,
+        batchRows: 8,
+        timers: $this->timers(),
+        onNextFrame: fn () => $this->renderRows(),
+    );
+    [$this->rows] = $this->window->apply($this->presenter->present($this->items));
+}
+```
+
+`admitViewport()` gives a tab/filter switch a first-frame budget,
+`admitAll()` admits everything (a page appended at the end), `expand()` runs
+the pending frame now and `reset()` forgets the mounted rows. Rows are arrays
+with a `key` unless `keyOf:` is given.
 
 ## Debouncer, Throttler and SingleFlight
 
@@ -124,6 +161,13 @@ $flights->run("profile:{$id}", function (Closure $done) use ($id): void {
   native timer (tests, custom clocks).
 - `Throttler($interval, $action, leading: true, trailing: true)` never loses
   the final value: the last call made during a window runs when it closes.
+  `rearm: false` with `leading: false` is a batching window: the first call
+  opens it, the last arguments run when it closes, and the next call opens a
+  new one.
+- `setDelay()`/`setInterval()` change the period for the next call or window;
+  `markSent()` records work done by other means (the debouncer drops its
+  pending call, the throttler opens a window without running). `clock:`
+  (debouncer maxWait) and `failure:` (native timer errors) are optional.
 - `SingleFlight::run()` returns `true` when it started the work and `false`
   when the caller joined an in-flight one. `$done($result, $error)` must be
   called once; exceptions thrown by `$work` reach the waiters. With
@@ -311,7 +355,10 @@ private function send(OfflineMutationQueue $queue): void
   never replaced. The idempotency `key` still deduplicates exact repeats.
 - Re-enqueueing an unsent `key` updates its payload; `stored:` runs once the
   queue holding the mutation is written (immediately without persistence) and
-  `failed:` receives the write error.
+  `failed:` receives the write error, or an `OverflowException` when the
+  mutation did not fit a trimmed snapshot. `createdAtMs:` keeps the original
+  time of intents imported from another store. `hydrate()` can be called
+  again safely (e.g. after a hot reload dropped a pending load).
 - `batch(fn ($q) => ...)` applies several changes with one write; `clear()`
   empties the queue (logout); `all($operation)` filters; mutations carry
   `createdAtMs`. Keys and dedupe keys accept 1–255 printable ASCII characters.

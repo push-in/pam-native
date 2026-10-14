@@ -24,6 +24,8 @@ use Pam\Native\UI\Text as TextView;
 use Pam\Native\Store\OptimisticOverlay;
 use Pam\Native\Support\DateStyle;
 use Pam\Native\Support\Format;
+use Pam\Native\Support\ProgressiveListWindow;
+use Pam\Native\Internal\Wire;
 use Pam\Native\Support\RelativeTimeStyle;
 use Pam\Native\Support\Text;
 use Pam\Native\Sync\BackoffPolicy;
@@ -661,3 +663,157 @@ $assert($drains === [1, 1, 1, 1] && !$triggered->drain(), 'Nothing ready means n
 $drainSubscription->cancel();
 $triggered->enqueue('msg:2', 'message.send', ['body' => 'tchau']);
 $assert($drains === [1, 1, 1, 1] && $triggered->prune() === 1, 'A cancelled drain subscription must stop draining.');
+
+// 1.40 hardening: timer hooks, restart/ensure, failures, long delays, list windows.
+final class UtilitiesTimerHooksFixture extends Component
+{
+    public function render(): Renderable
+    {
+        return TextView::make('hooks');
+    }
+
+    public function exposedTimers(): \Pam\Native\System\ComponentTimers
+    {
+        return $this->timers();
+    }
+}
+$hooks = new UtilitiesTimerHooksFixture();
+ComponentLifecycle::beginRender();
+$hooks->toElement();
+ComponentLifecycle::finishRender();
+ComponentLifecycle::commit();
+$events = [];
+$fail = static function (int $requestId): void {
+    Runtime::dispatchModuleResult($requestId, ModuleResultStatus::Failure->value, 'timer unavailable');
+};
+$hooked = $hooks->exposedTimers()->timeout(1_000, static function () use (&$events): void { $events[] = 'fired'; }, onCancel: static function () use (&$events): void { $events[] = 'cancel-arg'; })
+    ->onCancel(static function () use (&$events): void { $events[] = 'cancel'; })
+    ->onFinish(static function () use (&$events): void { $events[] = 'finish'; });
+$hooked->cancel();
+$hooked->cancel();
+$assert($events === ['finish', 'cancel-arg', 'cancel'], 'Cancelling must run onFinish and the onCancel hooks once.');
+$events = [];
+$hooked->restart();
+$restartRequest = $armed();
+$assert($hooked->active() && $hooks->exposedTimers()->count() === 1, 'restart() must arm a finished timer again.');
+$fire($restartRequest);
+$assert($events === ['finish', 'fired'] && !$hooked->active(), 'A restarted timer must fire once with its callback.');
+$ensured = $hooks->exposedTimers()->ensure($hooked, 500, static function () use (&$events): void { $events[] = 'ensured'; });
+$assert($ensured !== $hooked && $ensured->active() && $hooks->exposedTimers()->ensure($ensured, 500, static fn () => null) === $ensured, 'ensure() must reuse a live timer and replace a finished one.');
+$ensured->cancel();
+$failures = [];
+$broken = $hooks->exposedTimers()->timeout(10, static fn () => null, failure: static function (string $error) use (&$failures): void { $failures[] = $error; });
+$fail($armed());
+$assert($failures === ['timer unavailable'] && !$broken->active() && $hooks->exposedTimers()->count() === 0, 'A native timer failure must end the timer and reach failure().');
+$long = $hooks->exposedTimers()->timeout(3 * 86_400_000, static fn () => null);
+$assert($long->active() && TestDiagnostics::$moduleCall !== null && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'])['milliseconds'] === 86_400_000, 'Delays longer than a day must be armed in steps.');
+$fire($armed());
+$assert($long->active(), 'A step of a long delay must not fire the timer.');
+$long->cancel();
+ComponentLifecycle::shutdown();
+
+$clockNow = 0.0;
+$debounceFailures = [];
+$clocked = new Debouncer(100, static function () use (&$events): void { $events[] = 'clocked'; }, maxWaitMs: 300, clock: static function () use (&$clockNow): float { return $clockNow; }, failure: static function (string $error) use (&$debounceFailures): void { $debounceFailures[] = $error; });
+$clocked->call();
+$clockNow = 350.0;
+$clocked->call();
+$assert(end($events) === 'clocked' && !$clocked->pending(), 'An injected clock must drive maxWait.');
+$clocked->setDelay(200);
+$clocked->call();
+$failedRequest = $armed();
+$assert($clocked->delayMs() === 200 && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'])['milliseconds'] === 200, 'setDelay() must apply to the next call.');
+$fail($failedRequest);
+$assert($debounceFailures === ['timer unavailable'] && !$clocked->pending(), 'A failed debounce timer must drop the call and report it.');
+$clocked->call();
+$clocked->markSent();
+$assert(!$clocked->pending(), 'markSent() must drop the pending call.');
+
+$batched = [];
+$batch = new Throttler(1_000, static function (int $n) use (&$batched): void { $batched[] = $n; }, leading: false, rearm: false);
+$batch->call(1);
+$batch->call(2);
+$fire($armed());
+$assert($batched === [2] && !$batch->throttling(), 'rearm: false must close the window after the trailing run.');
+$batch->call(3);
+$assert($batch->throttling() && $batched === [2], 'The next call must open a new batching window.');
+$fire($armed());
+$typing = [];
+$throttleFailures = [];
+$typer = new Throttler(3_000, static function () use (&$typing): void { $typing[] = 'typing'; }, failure: static function (string $error) use (&$throttleFailures): void { $throttleFailures[] = $error; });
+$typer->markSent();
+$typer->call();
+$assert($typing === [] && $typer->throttling(), 'markSent() must open a window without running the action.');
+$fail($armed());
+$assert(!$typer->throttling() && $throttleFailures === ['timer unavailable'], 'A failed throttle window must close and report.');
+$typer->setInterval(500);
+$typer->call();
+$assert($typing === ['typing'] && $typer->intervalMs() === 500 && Wire::decodeMap(TestDiagnostics::$moduleCall['payload'])['milliseconds'] === 500, 'setInterval() must apply to the next window.');
+
+// ProgressiveListWindow.
+$rowsOf = static fn (int $count): array => array_map(static fn (int $i): array => ['key' => "r{$i}"], range(1, $count));
+$plain = new ProgressiveListWindow(3, 2);
+[$visible, $deferred] = $plain->apply($rowsOf(8));
+$assert(array_column($visible, 'key') === ['r1', 'r2', 'r3'] && $deferred, 'The first window must admit the first-frame budget.');
+[$visible, $deferred] = $plain->apply($rowsOf(8));
+$assert(count($visible) === 5 && $deferred, 'Later windows must admit one batch.');
+[$visible] = $plain->apply(array_merge([['key' => 'new']], $rowsOf(8)));
+$assert($visible[0]['key'] === 'new' && count($visible) === 7, 'Mounted rows stay and new rows join in list order.');
+$plain->admitAll();
+[$visible, $deferred] = $plain->apply($rowsOf(8));
+$assert(count($visible) === 8 && !$deferred, 'admitAll() must admit every row.');
+$plain->admitViewport();
+[$visible] = $plain->apply(array_merge($rowsOf(8), [['key' => 'x1'], ['key' => 'x2'], ['key' => 'x3'], ['key' => 'x4']]));
+$assert(count($visible) === 11, 'admitViewport() must use the first-frame budget for the new rows.');
+$plain->reset();
+$assert($plain->mountedCount() === 0 && !$plain->deferred(), 'reset() must forget mounted rows.');
+$objects = new ProgressiveListWindow(1, keyOf: static fn (object $row): string => $row->id);
+[$visibleObjects] = $objects->apply([(object) ['id' => 'a'], (object) ['id' => 'b']]);
+$assert(count($visibleObjects) === 1, 'keyOf must identify rows of any shape.');
+
+final class UtilitiesWindowFixture extends Component
+{
+    public int $frames = 0;
+    /** @var list<array{key: string}> */
+    public array $rows = [];
+    private ?ProgressiveListWindow $window = null;
+
+    public function render(): Renderable
+    {
+        return TextView::make('window');
+    }
+
+    public function renderRows(): void
+    {
+        ++$this->frames;
+        $this->window ??= new ProgressiveListWindow(2, 2, $this->timers(), fn () => $this->renderRows());
+        [$this->rows] = $this->window->apply(array_map(static fn (int $i): array => ['key' => "k{$i}"], range(1, 5)));
+    }
+}
+$windowed = new UtilitiesWindowFixture();
+ComponentLifecycle::beginRender();
+$windowed->toElement();
+ComponentLifecycle::finishRender();
+ComponentLifecycle::commit();
+$windowed->renderRows();
+$fire($armed());
+$assert(count($windowed->rows) === 4 && $windowed->frames === 2, 'Deferred rows must join on the next scheduled frame.');
+$pendingFrame = $armed();
+ComponentLifecycle::beginRender();
+ComponentLifecycle::finishRender();
+$fire($pendingFrame);
+$assert($windowed->frames === 2, 'Unmount must cancel the pending frame.');
+ComponentLifecycle::shutdown();
+
+// Queue: imported creation times and trimmed snapshots.
+$importDisk = new MemoryPersistence(maxValueBytes: 700);
+$importQueue = new OfflineMutationQueue(persistence: $importDisk, name: 'import', clock: $queueClock);
+$importQueue->hydrate();
+$importedAt = $importQueue->enqueue('legacy:1', 'post.like', [], createdAtMs: 42);
+$outcomes = [];
+foreach (range(1, 6) as $i) {
+    $importQueue->enqueue("fill:{$i}", 'message.send', ['body' => str_repeat('q', 20)],
+        stored: static function () use (&$outcomes, $i): void { $outcomes[] = "stored:{$i}"; },
+        failed: static function () use (&$outcomes, $i): void { $outcomes[] = "failed:{$i}"; });
+}
+$assert($importedAt->createdAtMs === 42 && in_array('stored:1', $outcomes, true) && in_array('failed:6', $outcomes, true), 'Imported intents keep their time; mutations left out of a trimmed snapshot must fail, not be acknowledged.');

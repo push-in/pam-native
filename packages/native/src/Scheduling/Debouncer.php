@@ -26,6 +26,8 @@ final class Debouncer implements Disposable
     private ?Closure $timer = null;
     /** @var Closure(int, Closure(): void): (Closure(): void) */
     private Closure $schedule;
+    /** @var Closure(): float */
+    private Closure $clock;
     /** @var list<mixed>|null */
     private ?array $arguments = null;
     private ?float $firstCallMs = null;
@@ -35,26 +37,39 @@ final class Debouncer implements Disposable
      * @param Closure(mixed...): void $action
      * @param (Closure(int, Closure(): void): (Closure(): void))|null $schedule
      *        arms a timer and returns its canceller; defaults to native Timers (test seam)
+     * @param (Closure(): float)|null $clock monotonic milliseconds for maxWait (test seam)
+     * @param (Closure(string): void)|null $failure the native timer failed; the pending call is dropped
      */
     public function __construct(
-        public readonly int $delayMs,
+        private int $delayMs,
         private readonly Closure $action,
         public readonly ?int $maxWaitMs = null,
         ?Closure $schedule = null,
+        ?Closure $clock = null,
+        ?Closure $failure = null,
     ) {
         if ($delayMs < 0 || ($maxWaitMs !== null && $maxWaitMs < $delayMs)) {
             throw new InvalidArgumentException('Debounce delay must be >= 0 and maxWait must not be shorter than it.');
         }
-        $this->schedule = $schedule ?? self::nativeSchedule(...);
+        $this->clock = $clock ?? static fn (): float => hrtime(true) / 1_000_000;
+        $this->schedule = $schedule ?? function (int $milliseconds, Closure $fire) use ($failure): Closure {
+            return self::nativeSchedule($milliseconds, $fire, function (string $error) use ($failure): void {
+                $this->reset();
+                $failure?->__invoke($error);
+            });
+        };
     }
 
     /**
+     * Arms a native Timers::timeout() and returns its canceller.
+     *
      * @param Closure(): void $fire
+     * @param (Closure(string): void)|null $failure
      * @return Closure(): void
      */
-    public static function nativeSchedule(int $milliseconds, Closure $fire): Closure
+    public static function nativeSchedule(int $milliseconds, Closure $fire, ?Closure $failure = null): Closure
     {
-        $handle = Timers::timeout($milliseconds, $fire);
+        $handle = Timers::timeout($milliseconds, $fire, $failure);
 
         return static fn () => $handle->cancel();
     }
@@ -65,7 +80,7 @@ final class Debouncer implements Disposable
             return;
         }
         $this->arguments = array_values($arguments);
-        $now = hrtime(true) / 1_000_000;
+        $now = ($this->clock)();
         $this->firstCallMs ??= $now;
         if ($this->maxWaitMs !== null && $now - $this->firstCallMs >= $this->maxWaitMs) {
             $this->flush();
@@ -79,6 +94,26 @@ final class Debouncer implements Disposable
             $this->timer = null;
             $this->flush();
         });
+    }
+
+    public function delayMs(): int
+    {
+        return $this->delayMs;
+    }
+
+    /** Changes the quiet period used by the next call() (a pending call keeps its timer). */
+    public function setDelay(int $delayMs): void
+    {
+        if ($delayMs < 0 || ($this->maxWaitMs !== null && $this->maxWaitMs < $delayMs)) {
+            throw new InvalidArgumentException('Debounce delay must be >= 0 and not exceed maxWait.');
+        }
+        $this->delayMs = $delayMs;
+    }
+
+    /** The work was done by other means (sent elsewhere): drop the pending call. */
+    public function markSent(): void
+    {
+        $this->reset();
     }
 
     /** Runs a pending call now. Returns false when nothing was pending. */

@@ -12,10 +12,16 @@ artifacts are unchanged from 1.39.4 (only the version moves).
   timers and rate limiters owned by a component are released on unmount.
 - Add `Component::timers()` (`ComponentTimers`): timeouts and intervals that
   cancel on unmount and follow `TimerBackgroundPolicy` (Suspend by default,
-  re-armed on resume), plus owned `debounce()` and `throttle()`.
-- Add `Scheduling\Debouncer` (maxWait, flush), `Scheduling\Throttler`
-  (leading/trailing) and `Scheduling\SingleFlight` (joined callers,
-  `again` refresh, bounded keys).
+  re-armed on resume with the wall-clock time left), `ensure()`, `restart()`,
+  `onCancel`/`onFinish` hooks, `failure` handlers, delays longer than a day,
+  plus owned `debounce()` and `throttle()`.
+- Add `Scheduling\Debouncer` (maxWait, flush, setDelay, markSent),
+  `Scheduling\Throttler` (leading/trailing, `rearm: false` batching windows,
+  setInterval, markSent) — both with injectable scheduler/clock and failure
+  handlers — and `Scheduling\SingleFlight` (joined callers, `again` refresh,
+  bounded keys).
+- Add `Support\ProgressiveListWindow`: viewport-first list windows whose
+  deferred rows join on the next frame through a component timer.
 - Add `Cache\BoundedStore` (LRU with max items, TTL, byte budget, account
   scope, `get/peek/put/replace/forget/remember/trim/persist/hydrate`) and
   `Cache\IdLedger` (bounded id set with TTL), persisted through

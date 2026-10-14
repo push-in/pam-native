@@ -15,7 +15,9 @@ use Pam\Native\Scheduling\Throttler;
 use function count;
 
 /**
- * The timers of one component, returned by `$this->timers()`. Everything
+ * The timers of one component, returned by `$this->timers()`. Timeouts may
+ * be longer than a day (armed in steps) and measure the remaining delay with
+ * the wall clock, so device sleep counts. Everything
  * created here stops on unmount; timeouts and intervals also follow their
  * TimerBackgroundPolicy (Suspend by default) while the app is in the
  * background, and are re-armed when the component resumes.
@@ -41,30 +43,60 @@ final class ComponentTimers
         $this->suspended = ComponentLifecycle::currentAppState() === AppState::Background;
     }
 
-    /** @param Closure(ComponentTimer): void $callback */
+    /**
+     * @param Closure(ComponentTimer): void $callback
+     * @param (Closure(ComponentTimer): void)|null $onCancel runs when the timer is cancelled
+     *        (explicitly, on unmount or by the Cancel background policy), never when it fires
+     * @param (Closure(string): void)|null $failure the native timer could not be armed (rethrown when null)
+     */
     public function timeout(
         int $milliseconds,
         Closure $callback,
         TimerBackgroundPolicy $background = TimerBackgroundPolicy::Suspend,
+        ?Closure $onCancel = null,
+        ?Closure $failure = null,
     ): ComponentTimer {
-        if ($milliseconds < 0 || $milliseconds > 86_400_000) {
-            throw new InvalidArgumentException('Timer delay must be between 0 and 86,400,000 milliseconds.');
+        if ($milliseconds < 0) {
+            throw new InvalidArgumentException('Timer delay must not be negative.');
         }
 
-        return $this->start($milliseconds, null, $callback, $background);
+        return $this->start($milliseconds, null, $callback, $background, $onCancel, $failure);
     }
 
-    /** @param Closure(ComponentTimer): void $callback */
+    /**
+     * @param Closure(ComponentTimer): void $callback
+     * @param (Closure(ComponentTimer): void)|null $onCancel
+     */
     public function every(
         int $milliseconds,
         Closure $callback,
         TimerBackgroundPolicy $background = TimerBackgroundPolicy::Suspend,
+        ?Closure $onCancel = null,
+        ?Closure $failure = null,
     ): ComponentTimer {
         if ($milliseconds < 16 || $milliseconds > 86_400_000) {
             throw new InvalidArgumentException('Repeating timers need an interval between 16 and 86,400,000 milliseconds.');
         }
 
-        return $this->start($milliseconds, $milliseconds, $callback, $background);
+        return $this->start($milliseconds, $milliseconds, $callback, $background, $onCancel, $failure);
+    }
+
+    /**
+     * Returns $timer when it is still active, otherwise starts a new timeout:
+     * `$this->poll = $this->timers()->ensure($this->poll, 2_000, fn () => $this->refresh());`
+     *
+     * @param Closure(ComponentTimer): void $callback
+     * @param (Closure(ComponentTimer): void)|null $onCancel
+     */
+    public function ensure(
+        ?ComponentTimer $timer,
+        int $milliseconds,
+        Closure $callback,
+        TimerBackgroundPolicy $background = TimerBackgroundPolicy::Suspend,
+        ?Closure $onCancel = null,
+        ?Closure $failure = null,
+    ): ComponentTimer {
+        return $timer !== null && $timer->active() ? $timer : $this->timeout($milliseconds, $callback, $background, $onCancel, $failure);
     }
 
     /** @param Closure(mixed...): void $action */
@@ -121,11 +153,30 @@ final class ComponentTimers
         }
     }
 
-    private function start(int $delay, ?int $interval, Closure $callback, TimerBackgroundPolicy $background): ComponentTimer
-    {
-        $timer = new ComponentTimer($delay, $interval, $callback, $background, function (ComponentTimer $timer): void {
-            unset($this->timers[spl_object_id($timer)]);
-        });
+    private function start(
+        int $delay,
+        ?int $interval,
+        Closure $callback,
+        TimerBackgroundPolicy $background,
+        ?Closure $onCancel,
+        ?Closure $failure,
+    ): ComponentTimer {
+        $timer = new ComponentTimer(
+            $delay,
+            $interval,
+            $callback,
+            $background,
+            function (ComponentTimer $timer): bool {
+                $this->timers[spl_object_id($timer)] = $timer;
+
+                return $this->suspended;
+            },
+            function (ComponentTimer $timer): void {
+                unset($this->timers[spl_object_id($timer)]);
+            },
+            $onCancel,
+            $failure,
+        );
         $this->timers[spl_object_id($timer)] = $timer;
         $timer->start($this->suspended);
 

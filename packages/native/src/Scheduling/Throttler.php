@@ -31,18 +31,29 @@ final class Throttler implements Disposable
      * @param Closure(mixed...): void $action
      * @param (Closure(int, Closure(): void): (Closure(): void))|null $schedule
      *        arms a timer and returns its canceller; defaults to native Timers (test seam)
+     * @param bool $rearm reopen the window after a trailing run (false = batching window:
+     *        the first call opens it, the last arguments run when it closes, the next call opens a new one)
+     * @param (Closure(string): void)|null $failure the native timer failed; the window closes
      */
     public function __construct(
-        public readonly int $intervalMs,
+        private int $intervalMs,
         private readonly Closure $action,
         public readonly bool $leading = true,
         public readonly bool $trailing = true,
         ?Closure $schedule = null,
+        public readonly bool $rearm = true,
+        ?Closure $failure = null,
     ) {
         if ($intervalMs < 1 || (!$leading && !$trailing)) {
             throw new InvalidArgumentException('Throttle interval must be positive and leading or trailing must be enabled.');
         }
-        $this->schedule = $schedule ?? Debouncer::nativeSchedule(...);
+        $this->schedule = $schedule ?? function (int $milliseconds, Closure $fire) use ($failure): Closure {
+            return Debouncer::nativeSchedule($milliseconds, $fire, function (string $error) use ($failure): void {
+                $this->window = null;
+                $this->trailingArguments = null;
+                $failure?->__invoke($error);
+            });
+        };
     }
 
     public function call(mixed ...$arguments): void
@@ -65,6 +76,33 @@ final class Throttler implements Disposable
         if ($this->trailing) {
             $this->trailingArguments = array_values($arguments);
         }
+    }
+
+    public function intervalMs(): int
+    {
+        return $this->intervalMs;
+    }
+
+    /** Changes the window length used from the next window on. */
+    public function setInterval(int $intervalMs): void
+    {
+        if ($intervalMs < 1) {
+            throw new InvalidArgumentException('Throttle interval must be positive.');
+        }
+        $this->intervalMs = $intervalMs;
+    }
+
+    /**
+     * The action was performed by other means (a send made elsewhere): open
+     * a window now, as if a leading call had run, dropping a pending trailing call.
+     */
+    public function markSent(): void
+    {
+        if ($this->disposed) {
+            return;
+        }
+        $this->cancel();
+        $this->open();
     }
 
     /** True while calls are being held back. */
@@ -102,7 +140,9 @@ final class Throttler implements Disposable
             if ($arguments === null || $this->disposed) {
                 return;
             }
-            $this->open();
+            if ($this->rearm) {
+                $this->open();
+            }
             ($this->action)(...$arguments);
         });
     }
