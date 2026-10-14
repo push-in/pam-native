@@ -20,8 +20,9 @@ artifacts are unchanged from 1.39.4 (only the version moves).
   setInterval, markSent) — both with injectable scheduler/clock and failure
   handlers — and `Scheduling\SingleFlight` (joined callers, `again` refresh,
   bounded keys).
-- Add `Support\ProgressiveListWindow`: viewport-first list windows whose
-  deferred rows join on the next frame through a component timer.
+- Add `Support\ProgressiveListWindow`: viewport-first list windows (row or
+  cost/height budgets, `admitLeading` for top inserts) whose deferred rows
+  join on the next frame through a component timer.
 - Add `Cache\BoundedStore` (LRU with max items, TTL, byte budget, account
   scope, `get/peek/put/replace/forget/remember/trim/persist/hydrate`) and
   `Cache\IdLedger` (bounded id set with TTL), persisted through

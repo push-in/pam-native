@@ -44,10 +44,14 @@ final class ProgressiveListWindow
     private bool $all = false;
     private ?ComponentTimer $frame = null;
     private ?Closure $keyOf;
+    private ?Closure $costOf;
+    private int $leading = 0;
 
     /**
      * @param (Closure(mixed): (string|int))|null $keyOf
      * @param (Closure(): void)|null $onNextFrame re-renders the list on the next frame
+     * @param (Closure(mixed): float)|null $costOf size of a row (e.g. its height) for apply()'s
+     *        $firstFrameBudget: the first window then admits rows until their cost fills the budget
      */
     public function __construct(
         public readonly int $firstFrameRows,
@@ -56,24 +60,37 @@ final class ProgressiveListWindow
         private readonly ?Closure $onNextFrame = null,
         public readonly int $frameMs = 16,
         ?Closure $keyOf = null,
+        ?Closure $costOf = null,
     ) {
         if ($firstFrameRows < 1 || $batchRows < 1 || $frameMs < 0) {
             throw new InvalidArgumentException('ProgressiveListWindow needs positive row budgets and a non-negative frame delay.');
         }
         $this->keyOf = $keyOf;
+        $this->costOf = $costOf;
     }
 
     /**
+     * $firstFrameBudget (with costOf) sizes a first window by content, e.g.
+     * the viewport height left under a header: rows are admitted while the
+     * cost spent is below it (at least one row).
+     *
      * @template T
      * @param list<T> $rows
      * @return array{0: list<T>, 1: bool} visible rows and whether rows were deferred
      */
-    public function apply(array $rows): array
+    public function apply(array $rows, ?float $firstFrameBudget = null): array
     {
-        $budget = $this->all ? PHP_INT_MAX
-            : ($this->mounted === [] || $this->viewport ? $this->firstFrameRows : $this->batchRows);
+        $first = $this->mounted === [] || $this->viewport;
+        $byCost = $first && !$this->all && $firstFrameBudget !== null && $this->costOf !== null;
+        $budget = $this->all ? PHP_INT_MAX : ($first ? $this->firstFrameRows : $this->batchRows);
+        if ($this->leading > 0 && $budget !== PHP_INT_MAX) {
+            $budget = $byCost ? $this->leading : min(PHP_INT_MAX - $this->leading, $budget) + $this->leading;
+        }
+        $spent = 0.0;
+        $admittedByCost = 0;
         $this->viewport = false;
         $this->all = false;
+        $this->leading = 0;
         $window = [];
         $mounted = [];
         $admitting = true;
@@ -86,7 +103,15 @@ final class ProgressiveListWindow
                 continue;
             }
             // Rows join in list order: once one waits, every later new row waits.
-            if ($admitting && $budget > 0) {
+            if ($admitting && $byCost && ($admittedByCost === 0 || $spent < $firstFrameBudget)) {
+                $window[] = $row;
+                $mounted[$key] = true;
+                $spent += max(0.0, ($this->costOf)($row));
+                ++$admittedByCost;
+
+                continue;
+            }
+            if ($admitting && !$byCost && $budget > 0) {
                 $window[] = $row;
                 $mounted[$key] = true;
                 --$budget;
@@ -121,6 +146,17 @@ final class ProgressiveListWindow
         $this->all = true;
     }
 
+    /**
+     * $count rows were put at the top (a "new posts" jump): the next window
+     * admits them in addition to its budget, so they mount in the same frame.
+     */
+    public function admitLeading(int $count): void
+    {
+        if ($count > 0) {
+            $this->leading += $count;
+        }
+    }
+
     /** Runs the pending next frame now, if rows are deferred. */
     public function expand(): void
     {
@@ -140,6 +176,7 @@ final class ProgressiveListWindow
         $this->deferred = false;
         $this->viewport = false;
         $this->all = false;
+        $this->leading = 0;
     }
 
     public function mountedCount(): int

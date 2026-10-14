@@ -132,6 +132,13 @@ private function renderRows(): void
 }
 ```
 
+Feeds with tall, uneven rows size the first window by content: pass
+`costOf: fn (array $row): float => $row['height']` and call
+`apply($rows, firstFrameBudget: $viewportHeight - $headerHeight)`; rows are
+admitted until their cost fills the budget (at least one), then `batchRows`
+per frame. `admitLeading($n)` mounts `$n` rows inserted at the top in the
+same frame (a "new posts" jump).
+
 `admitViewport()` gives a tab/filter switch a first-frame budget,
 `admitAll()` admits everything (a page appended at the end), `expand()` runs
 the pending frame now and `reset()` forgets the mounted rows. Rows are arrays
