@@ -9,6 +9,7 @@ use Pam\Native\GestureSettleEvent;
 use Pam\Native\ImageErrorEvent;
 use Pam\Native\ImageLoadEvent;
 use Pam\Native\ImageProgressEvent;
+use Pam\Native\PageChangeEvent;
 use Pam\Native\PressEvent;
 use Pam\Native\ScrollPhaseEvent;
 use Pam\Native\TextLayoutEvent;
@@ -32,6 +33,7 @@ final class EventPayloads
         ImageLoadEvent::class => true,
         ImageProgressEvent::class => true,
         ScrollPhaseEvent::class => true,
+        PageChangeEvent::class => true,
         TextLayoutEvent::class => true,
     ];
 

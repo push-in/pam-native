@@ -3440,6 +3440,7 @@ class PamRenderer(
             PropKey.ON_SCROLL_BEGIN_DRAG,
             PropKey.ON_SCROLL_END_DRAG,
             PropKey.ON_MOMENTUM_SCROLL_END,
+            PropKey.ON_PAGE_CHANGE,
             PropKey.ON_TEXT_LAYOUT,
             -> Unit
             PropKey.ANIMATION_KEYFRAMES,
@@ -6188,11 +6189,14 @@ class PamRenderer(
         installScrollPhases(state) { listener -> scroll.setOnScrollPhase(listener) }
         val onScroll = state.properties[PropKey.ON_SCROLL] != null
         val endReached = state.properties[PropKey.ON_END_REACHED] != null
-        if (!onScroll && !endReached) {
+        val pageChange = state.properties[PropKey.ON_PAGE_CHANGE] != null
+        if (!onScroll && !endReached && !pageChange) {
             scroll.setOnViewportChanged(null)
             return
         }
+        if (pageChange) state.pageTracker.reset(scroll.pageIndex())
         scroll.setOnViewportChanged { scrollX, scrollY ->
+            if (pageChange) dispatchPageChange(state, scroll.pageIndex())
             if (endReached) {
                 val threshold = state.number(PropKey.END_REACHED_THRESHOLD, 0.5).coerceIn(0.0, 1.0)
                 val trigger = scroll.primaryViewportPixels() * threshold
@@ -6221,6 +6225,26 @@ class PamRenderer(
                 }
             }
         }
+    }
+
+    /**
+     * `on:pageChange`: evaluated natively on every scroll step but dispatched
+     * only when the rounded page along the scroll axis changes (mid-drag,
+     * once past half a page), never per frame.
+     */
+    private fun dispatchPageChange(state: NodeState, page: Int) {
+        if (nodes[state.id] !== state) return
+        val previous = state.pageTracker.advance(page) ?: return
+        dispatchBytes(
+            state.id,
+            EventKind.PAGE_CHANGE.value,
+            WireMap.encode(
+                mapOf(
+                    "page" to WireValue.Integer(page.toLong()),
+                    "previousPage" to WireValue.Integer(previous.toLong()),
+                ),
+            ),
+        )
     }
 
     private fun installScrollPhases(
@@ -6269,16 +6293,19 @@ class PamRenderer(
         installScrollPhases(state) { listener -> list.setOnScrollPhase(listener) }
         val scroll = state.properties[PropKey.ON_SCROLL] != null
         val endReached = state.properties[PropKey.ON_END_REACHED] != null
-        if (!scroll && !endReached) {
+        val pageChange = state.properties[PropKey.ON_PAGE_CHANGE] != null
+        if (!scroll && !endReached && !pageChange) {
             list.setOnViewportChanged(null)
             return
         }
+        if (pageChange) state.pageTracker.reset(list.pageIndex())
         list.setOnViewportChanged {
                 offset,
                 firstVisibleItem,
                 visibleItemCount,
                 totalItemCount,
             ->
+            if (pageChange) dispatchPageChange(state, list.pageIndex())
             if (scroll) {
                 state.pendingScrollOffset = offset
                 if (!state.scrollScheduled) {
@@ -9623,6 +9650,7 @@ class PamRenderer(
         var scrollScheduled: Boolean = false,
         var pendingScrollOffset: Float = 0f,
         var endReachedSent: Boolean = false,
+        val pageTracker: PamPageTracker = PamPageTracker(),
         var virtualListItemIds: List<Long> = emptyList(),
         /** Active keyed section the list last showed (null before the first sync). */
         var appliedListSection: String? = null,
@@ -9997,6 +10025,7 @@ class PamRenderer(
             PropKey.ON_SCROLL_BEGIN_DRAG,
             PropKey.ON_SCROLL_END_DRAG,
             PropKey.ON_MOMENTUM_SCROLL_END,
+            PropKey.ON_PAGE_CHANGE,
             PropKey.ON_TEXT_LAYOUT,
             PropKey.ON_PRESS,
             PropKey.ON_CHANGE,

@@ -316,6 +316,31 @@ public function authorChanged(ScrollPhaseEvent $event): void
 }
 ```
 
+### Page change while dragging
+
+`on:pageChange` (`->onPageChange()` on `Scroll`, `FlatList` and
+`VirtualizedList`) fires once each time the current page changes, already
+during the drag (when the offset crosses half a page), so a carousel's dots
+follow the finger. The page is computed natively on each scroll step and
+only a change crosses the bridge: no `on:scroll` per frame. The page uses the
+paging extent, `snapToInterval` or, for lists, the snapped/first fully
+visible item. Programmatic scrolls that change the page also fire it.
+
+| Event | Payload (`PageChangeEvent`) |
+| --- | --- |
+| `on:pageChange` | `page` (now current), `previousPage` |
+
+```xml
+<Scroll horizontal="true" pagingEnabled="true" on:pageChange="slideChanged">
+```
+
+```php
+public function slideChanged(PageChangeEvent $event): void
+{
+    $this->activeSlide = $event->page;
+}
+```
+
 ## Text layout
 
 `on:textLayout` reports the wrapped line count at the rendered width (even

@@ -705,6 +705,7 @@ pub enum PropKey {
     ListActiveSection = 525,
     GestureNativeFocalZoom = 526,
     NeedsOffscreenAlphaCompositing = 527,
+    OnPageChange = 528,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1239,6 +1240,7 @@ impl TryFrom<u16> for PropKey {
             525 => Ok(Self::ListActiveSection),
             526 => Ok(Self::GestureNativeFocalZoom),
             527 => Ok(Self::NeedsOffscreenAlphaCompositing),
+            528 => Ok(Self::OnPageChange),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2176,10 +2178,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=527 {
+        for value in 1..=528 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(528).is_err());
+        assert!(PropKey::try_from(529).is_err());
     }
 
     #[test]

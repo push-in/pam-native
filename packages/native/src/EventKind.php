@@ -82,4 +82,5 @@ enum EventKind: int
     case MomentumScrollEnd = 74;
     case TextLayout = 75;
     case KeyboardVisibility = 76;
+    case PageChange = 77;
 }

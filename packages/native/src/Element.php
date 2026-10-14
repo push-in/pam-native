@@ -885,6 +885,7 @@ abstract class Element implements Renderable
             EventKind::ScrollEndDrag => PropKey::OnScrollEndDrag,
             EventKind::MomentumScrollEnd => PropKey::OnMomentumScrollEnd,
             EventKind::TextLayout => PropKey::OnTextLayout,
+            EventKind::PageChange => PropKey::OnPageChange,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,

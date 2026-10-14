@@ -1717,7 +1717,8 @@ public final class PamRenderer {
         let hasBeginDrag = eventProperties.contains(PamConstants.onScrollBeginDrag)
         let hasEndDrag = eventProperties.contains(PamConstants.onScrollEndDrag)
         let hasMomentumEnd = eventProperties.contains(PamConstants.onMomentumScrollEnd)
-        if (hasScroll || hasEndReached || hasNativePaging || hasBeginDrag || hasEndDrag || hasMomentumEnd),
+        let hasPageChange = eventProperties.contains(PamConstants.onPageChange)
+        if (hasScroll || hasEndReached || hasNativePaging || hasBeginDrag || hasEndDrag || hasMomentumEnd || hasPageChange),
            let scroll = view as? UIScrollView {
             let bridge = EventBridge(nodeId: nodeId, kind: EventKind.scroll.rawValue, dispatchEvent: dispatchEvent)
             bridge.attachScrollEvents(
@@ -1732,9 +1733,13 @@ public final class PamRenderer {
                 emitBeginDrag: hasBeginDrag,
                 emitEndDrag: hasEndDrag,
                 emitMomentumEnd: hasMomentumEnd,
+                emitPageChange: hasPageChange,
             )
             if hasBeginDrag || hasEndDrag || hasMomentumEnd {
                 eventBridges[nodeId]?[EventKind.momentumScrollEnd.rawValue] = bridge
+            }
+            if hasPageChange {
+                eventBridges[nodeId]?[EventKind.pageChange.rawValue] = bridge
             }
             if hasScroll {
                 eventBridges[nodeId]?[EventKind.scroll.rawValue] = bridge
@@ -3967,6 +3972,7 @@ public final class PamRenderer {
         PamConstants.onScrollBeginDrag,
         PamConstants.onScrollEndDrag,
         PamConstants.onMomentumScrollEnd,
+        PamConstants.onPageChange,
         PamConstants.onTextLayout,
         PamConstants.pressDoubleTapDelayMs,
         PamConstants.pressTapEffect,
@@ -4893,6 +4899,8 @@ public final class PamRenderer {
         private var emitsScrollEndDrag = false
         private var emitsMomentumScrollEnd = false
         private var scrollPhaseDragging = false
+        private var emitsPageChange = false
+        private var pageTracker = PamPageTracker()
 
         init(nodeId: Int64, kind: Int, dispatchEvent: @escaping (Int64, Int, Data) -> Void) {
             self.nodeId = nodeId
@@ -5199,7 +5207,10 @@ public final class PamRenderer {
             emitBeginDrag: Bool = false,
             emitEndDrag: Bool = false,
             emitMomentumEnd: Bool = false,
+            emitPageChange: Bool = false,
         ) {
+            emitsPageChange = emitPageChange
+            pageTracker.reset(Self.pageIndex(scroll))
             emitsScrollBeginDrag = emitBeginDrag
             emitsScrollEndDrag = emitEndDrag
             emitsMomentumScrollEnd = emitMomentumEnd
@@ -5873,6 +5884,9 @@ public final class PamRenderer {
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             let isHorizontal = scrollView.alwaysBounceHorizontal && !scrollView.alwaysBounceVertical
             dispatchEndReachedIfNeeded(scrollView, isHorizontal: isHorizontal)
+            if emitsPageChange {
+                dispatchPageChangeIfNeeded(scrollView)
+            }
 
             guard emitsScroll else {
                 return
@@ -5939,6 +5953,18 @@ public final class PamRenderer {
                 "page": .integer(Int64(Self.pageIndex(scrollView))),
             ])) ?? Data()
             dispatchEvent(nodeId, kind, payload)
+        }
+
+        /// `on:pageChange`: checked on every scroll step, dispatched only
+        /// when the rounded page changes (mid-drag), never per frame.
+        private func dispatchPageChangeIfNeeded(_ scrollView: UIScrollView) {
+            let page = Self.pageIndex(scrollView)
+            guard let previous = pageTracker.advance(page) else { return }
+            let payload = (try? WireMap.encode([
+                "page": .integer(Int64(page)),
+                "previousPage": .integer(Int64(previous)),
+            ])) ?? Data()
+            dispatchEvent(nodeId, EventKind.pageChange.rawValue, payload)
         }
 
         static func pageIndex(_ scrollView: UIScrollView) -> Int {

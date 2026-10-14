@@ -82,5 +82,6 @@ final class EventProperties
         EventKind::ScrollEndDrag->value => PropKey::OnScrollEndDrag->value,
         EventKind::MomentumScrollEnd->value => PropKey::OnMomentumScrollEnd->value,
         EventKind::TextLayout->value => PropKey::OnTextLayout->value,
+        EventKind::PageChange->value => PropKey::OnPageChange->value,
     ];
 }

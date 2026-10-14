@@ -2,6 +2,13 @@
 
 ## 1.39.3 - 2026-10-13
 
+- Add `on:pageChange`/`onPageChange()` (`PageChangeEvent`) to scroll views and
+  lists: fires once when the current page changes mid-drag, never per frame.
+- Android `onTrimMemory` now empties caches only on RUNNING_CRITICAL/COMPLETE
+  (RN parity); UI_HIDDEN/BACKGROUND halve them. iOS halves the media memory
+  cache on entering background and still empties it on memory warnings.
+- A mounted VirtualizedList cell whose content is empty or hidden measures 0
+  instead of taking the row estimate; only unmounted cells use the estimate.
 - Dismiss an IME still serving a hidden Android editor after the system has
   already cleared its focus; preserve the destination editor and valid autofocus.
 - Reorder focused descendants within their existing Android/iOS host without

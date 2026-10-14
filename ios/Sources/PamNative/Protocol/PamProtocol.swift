@@ -139,6 +139,7 @@ public enum EventKind: Int {
     case momentumScrollEnd = 74
     case textLayout = 75
     case keyboardVisibility = 76
+    case pageChange = 77
 }
 
 public enum PropValue {
@@ -535,6 +536,7 @@ public enum PamConstants {
     public static let listActiveSection = 525
     public static let gestureNativeFocalZoom = 526
     public static let needsOffscreenAlphaCompositing = 527
+    public static let onPageChange = 528
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

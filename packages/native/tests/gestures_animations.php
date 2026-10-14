@@ -18,6 +18,7 @@ use Pam\Native\Internal\TemplateCompiler;
 use Pam\Native\Internal\TemplateExpression;
 use Pam\Native\Internal\TemplateRenderer;
 use Pam\Native\Internal\Wire;
+use Pam\Native\PageChangeEvent;
 use Pam\Native\PressEvent;
 use Pam\Native\PropKey;
 use Pam\Native\ScrollPhaseEvent;
@@ -25,6 +26,7 @@ use Pam\Native\TextEllipsizeMode;
 use Pam\Native\TextLayoutEvent;
 use Pam\Native\UI\GestureDetector;
 use Pam\Native\UI\Pressable;
+use Pam\Native\UI\Scroll;
 use Pam\Native\UI\Swipeable;
 use Pam\Native\UI\Text;
 use Pam\Native\UI\View;
@@ -228,6 +230,20 @@ $assert(
 $scrollPayload = Wire::map(['x' => 720.0, 'y' => 0.0, 'velocityX' => 1800.0, 'velocityY' => 0.0, 'page' => 2]);
 $momentum = ScrollPhaseEvent::fromPayload($scrollPayload);
 $assert($momentum->page === 2 && $momentum->velocityX === 1800.0, 'Scroll phase events must decode the page index.');
+$pageChanges = [];
+$carousel = Scroll::make(Text::make('Slide'))
+    ->onPageChange(static function (PageChangeEvent $event) use (&$pageChanges): void {
+        $pageChanges[] = [$event->previousPage, $event->page];
+    })
+    ->toElement();
+$carousel->events()[EventKind::PageChange->value](Wire::map(['page' => 3, 'previousPage' => 2]));
+$assert(
+    EventKind::PageChange->value === 77 && PropKey::OnPageChange->value === 528
+        && ($carousel->properties()[PropKey::OnPageChange->value] ?? null) === true
+        && $pageChanges === [[2, 3]]
+        && PageChangeEvent::fromPayload('')->page === 0,
+    'onPageChange must register the native page-change event and decode the current and previous page.',
+);
 $layout = TextLayoutEvent::fromPayload(Wire::map([
     'lines' => 4, 'visibleLines' => 2, 'truncated' => true, 'width' => 300.0, 'height' => 80.0,
     'lineWidths' => '[290.5,288,300,120.25]',
@@ -242,6 +258,7 @@ $templateScope = new class {
     public ?PressEvent $liked = null;
     public ?TextLayoutEvent $layout = null;
     public ?ScrollPhaseEvent $page = null;
+    public ?PageChangeEvent $pageChange = null;
     public string $legacy = 'unset';
     public Animation $bounce;
 
@@ -265,6 +282,11 @@ $templateScope = new class {
         $this->layout = $event;
     }
 
+    public function pageChanged(PageChangeEvent $event): void
+    {
+        $this->pageChange = $event;
+    }
+
     public function paged(ScrollPhaseEvent $event): void
     {
         $this->page = $event;
@@ -276,7 +298,7 @@ $template = TemplateRenderer::render(
         .'<Pressable on:doubleTap="like" on:press="open" doubleTapDelay="240" nativeRef="surface"><Text>Reel</Text></Pressable>'
         .'<View nativeRef="heart" :animation="$bounce"><Text>♥</Text></View>'
         .'<Text numberOfLines="2" on:textLayout="measured" ellipsizeMode="marquee">Caption</Text>'
-        .'<Scroll horizontal="true" pagingEnabled="true" on:momentumScrollEnd="paged"><Text>Page</Text></Scroll>'
+        .'<Scroll horizontal="true" pagingEnabled="true" on:momentumScrollEnd="paged" on:pageChange="pageChanged"><Text>Page</Text></Scroll>'
         .'<Swipeable rightWidth="96" group="inbox"><Text>Delete</Text><Text>Row</Text></Swipeable>'
         .'</Column>',
         'gestures-animations.pam.php',
@@ -289,6 +311,7 @@ $surface->events()[EventKind::DoubleTap->value]($pressPayload);
 $surface->events()[EventKind::Press->value]($pressPayload);
 $caption->events()[EventKind::TextLayout->value](Wire::map(['lines' => 3, 'visibleLines' => 2, 'truncated' => true]));
 $pager->events()[EventKind::MomentumScrollEnd->value]($scrollPayload);
+$pager->events()[EventKind::PageChange->value](Wire::map(['page' => 1, 'previousPage' => 0]));
 $assert(
     $templateScope->liked instanceof PressEvent && $templateScope->liked->x === 12.5
         && $templateScope->legacy === ''
@@ -310,6 +333,11 @@ $assert(
     $templateScope->page instanceof ScrollPhaseEvent && $templateScope->page->page === 2
         && $pager->properties()[PropKey::ScrollPagingEnabled->value] === true,
     'Template on:momentumScrollEnd must hydrate the page index.',
+);
+$assert(
+    $templateScope->pageChange instanceof PageChangeEvent && $templateScope->pageChange->page === 1
+        && $templateScope->pageChange->previousPage === 0,
+    'Template on:pageChange must hydrate PageChangeEvent.',
 );
 $assert(
     str_contains($swipeRow->properties()[PropKey::GestureDrag->value], 'snaps=-96,0'),

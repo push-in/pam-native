@@ -743,6 +743,7 @@ final class TemplateRenderer
         'on:scrollBeginDrag' => EventKind::ScrollBeginDrag,
         'on:scrollEndDrag' => EventKind::ScrollEndDrag,
         'on:momentumScrollEnd' => EventKind::MomentumScrollEnd,
+        'on:pageChange' => EventKind::PageChange,
         'on:textLayout' => EventKind::TextLayout,
         'on:cacheHit' => EventKind::MediaCacheHit,
         'on:cacheMiss' => EventKind::MediaCacheMiss,
