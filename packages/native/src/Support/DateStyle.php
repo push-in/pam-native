@@ -17,4 +17,6 @@ enum DateStyle: int
     case Numeric = 4;
     /** pt-BR "12/10/2025"; en "10/12/2025" (always with the year). */
     case NumericWithYear = 5;
+    /** pt-BR "12/10/25"; en "10/12/25". */
+    case NumericWithShortYear = 6;
 }

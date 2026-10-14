@@ -29,7 +29,7 @@ artifacts are unchanged from 1.39.4 (only the version moves).
   revision- and age-based `dropSettled()`, change-only listeners and LRU that
   never evicts in-flight entries.
 - Add `Support\Format` (`count`, `countLabel`, `compact`, `relative` with
-  Short/Long/Narrow/Tiny styles, `date` with `DateStyle`, `bytes`, `duration`,
+  Short/Long/Narrow/Tiny styles, `date`/`dateTime` with `DateStyle`, `bytes`, `duration`,
   `time`; pt-BR and English, no ext-intl) and
   `Support\Text` (`fold`, `foldWithMap`, `contains`, `length`).
 - Harden `Sync\OfflineMutationQueue`: `BackoffPolicy` (base, cap, factor,

@@ -518,6 +518,13 @@ $assert(
         && Format::date('', DateStyle::Medium) === '' && Format::time($october, 'Not/AZone') === '',
     'Format::date must render calendar dates per style and locale.',
 );
+$assert(
+    Format::date($october, DateStyle::NumericWithShortYear, 'UTC') === '12/10/25'
+        && Format::dateTime($october, timeZone: 'UTC') === '12/10/2025 15:00'
+        && Format::dateTime($october, DateStyle::Medium, ', ', 'UTC', withYear: false) === '12 de out., 15:00'
+        && Format::relative($october - 7 * 86_400, $october + 9 * 86_400, RelativeTimeStyle::Tiny, maxWeeks: 0, timeZone: 'UTC', dateStyle: DateStyle::Medium, padDay: true, withYear: false) === '05 de out.',
+    'Short-year dates, dateTime() and the relative date fallback options must work.',
+);
 Format::useLocale('en-US');
 $assert(Format::compact(1234) === '1.2K' && Format::locale() === 'en-US', 'useLocale() must change the default locale.');
 Format::useLocale('pt-BR');

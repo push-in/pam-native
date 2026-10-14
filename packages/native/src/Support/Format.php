@@ -128,6 +128,8 @@ final class Format
         DateTimeZone|string|null $timeZone = null,
         int $maxDays = 6,
         ?DateStyle $dateStyle = null,
+        bool $padDay = false,
+        ?bool $withYear = null,
     ): string {
         $timestamp = self::timestamp($time);
         if ($timestamp === null) {
@@ -150,7 +152,15 @@ final class Format
             }
         }
 
-        return self::date($timestamp, $dateStyle ?? ($style === RelativeTimeStyle::Long ? DateStyle::Long : DateStyle::Short), $timeZone, $locale, null, $now);
+        return self::date(
+            $timestamp,
+            $dateStyle ?? ($style === RelativeTimeStyle::Long ? DateStyle::Long : DateStyle::Short),
+            $timeZone,
+            $locale,
+            $withYear,
+            $now,
+            $padDay,
+        );
     }
 
     /**
@@ -185,6 +195,7 @@ final class Format
         return match ($style) {
             DateStyle::Numeric => $pt ? $date->format('d/m') : $date->format('m/d'),
             DateStyle::NumericWithYear => $pt ? $date->format('d/m/Y') : $date->format('m/d/Y'),
+            DateStyle::NumericWithShortYear => $pt ? $date->format('d/m/y') : $date->format('m/d/y'),
             DateStyle::Long => $pt
                 ? $day.' de '.self::PT_MONTHS_LONG[$month].($showYear ? ' de '.$year : '')
                 : self::EN_MONTHS_LONG[$month].' '.$day.($showYear ? ', '.$year : ''),
@@ -243,6 +254,25 @@ final class Format
         }
 
         return ($padMinutes ? str_pad((string) $minutes, 2, '0', STR_PAD_LEFT) : (string) $minutes).':'.$secondsPart;
+    }
+
+    /**
+     * Date and clock time joined by $separator: "12/10/2025 14:05",
+     * "12 de out., 14:05".
+     */
+    public static function dateTime(
+        int|string|DateTimeInterface $time,
+        DateStyle $style = DateStyle::NumericWithYear,
+        string $separator = ' ',
+        DateTimeZone|string|null $timeZone = null,
+        ?string $locale = null,
+        ?bool $withYear = null,
+        ?int $now = null,
+        bool $padDay = false,
+    ): string {
+        $date = self::date($time, $style, $timeZone, $locale, $withYear, $now, $padDay);
+
+        return $date === '' ? '' : $date.$separator.self::time($time, $timeZone, $locale);
     }
 
     /** Clock time in $timeZone (default: the process zone): "14:05" / "2:05 PM". */

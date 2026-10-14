@@ -247,7 +247,8 @@ Format::bytes(1_572_864);                    // "1,5 MB"
 Format::duration(65);                        // "1:05"; padMinutes: "01:05"
 Format::time($sentAt, 'America/Sao_Paulo');  // "14:05"         en "2:05 PM"
 Format::date($sentAt, DateStyle::Medium);    // "12 de out."    en "Oct 12"
-Format::date($sentAt, DateStyle::Numeric);   // "12/10"; NumericWithYear "12/10/2025"
+Format::date($sentAt, DateStyle::Numeric);   // "12/10"; NumericWithYear "12/10/2025", NumericWithShortYear "12/10/25"
+Format::dateTime($sentAt);                   // "12/10/2025 14:05"
 Format::relative($t, style: RelativeTimeStyle::Tiny, maxWeeks: 0,
     dateStyle: DateStyle::Medium);           // "5m", "3h", "2d", then "12 de out."
 Format::useLocale('en');                     // default locale (pt-BR)
