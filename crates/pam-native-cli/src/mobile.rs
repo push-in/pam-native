@@ -10760,8 +10760,10 @@ mod bundle_exclusion_tests {
             ios.associated_domains.push(domain.to_owned());
             assert!(validate_ios_links(&ios).is_err(), "accepted {domain:?}");
         }
-        let mut ios = IosOptions::default();
-        ios.url_schemes = vec!["zechat".into(), "ZECHAT".into()];
+        let mut ios = IosOptions {
+            url_schemes: vec!["zechat".into(), "ZECHAT".into()],
+            ..IosOptions::default()
+        };
         assert!(validate_ios_links(&ios).is_err());
         ios.url_schemes = (0..33).map(|n| format!("app{n}")).collect();
         assert!(validate_ios_links(&ios).is_err());
