@@ -45,6 +45,15 @@ class PamRefreshControlInstrumentedTest {
     }
 
     @Test
+    fun emptyVirtualListCanStillBePulled() {
+        withRefresh(contentHeight = 0f, scrollKind = NodeKind.VIRTUAL_LIST) { refresh, events, _ ->
+            pull(refresh, 320f)
+            waitUntil(3_000) { events.count { it == EventKind.REFRESH.value } == 1 }
+            assertEquals(1, events.count { it == EventKind.REFRESH.value })
+        }
+    }
+
+    @Test
     fun pullWithContentScrolledDownOnlyScrolls() {
         withRefresh(contentHeight = 3_000f) { refresh, events, _ ->
             // Scroll the content down first, then drag down less than the offset.
@@ -103,6 +112,7 @@ class PamRefreshControlInstrumentedTest {
     private fun withRefresh(
         contentHeight: Float,
         enabled: Boolean = true,
+        scrollKind: NodeKind = NodeKind.SCROLL,
         block: (PamRefreshContainer, MutableList<Int>, PamRenderer) -> Unit,
     ) {
         val activity = launchActivity()
@@ -117,19 +127,21 @@ class PamRefreshControlInstrumentedTest {
                     put(PropKey.ON_REFRESH, PropValue.Flag(true))
                     if (!enabled) put(PropKey.ENABLED, PropValue.Flag(false))
                 }
-                renderer.commit(listOf(listOf(
+                val mutations = mutableListOf<Mutation>(
                     Mutation.Create(NodeSpec(1, 0, 0, NodeKind.SCREEN, emptyMap())),
                     Mutation.Create(NodeSpec(2, 1, 0, NodeKind.REFRESH_CONTROL, refreshProps)),
-                    Mutation.Create(NodeSpec(3, 2, 0, NodeKind.SCROLL, emptyMap())),
-                    Mutation.Create(NodeSpec(4, 3, 0, NodeKind.VIEW, mapOf(
-                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF3366CC),
-                    ))),
+                    Mutation.Create(NodeSpec(3, 2, 0, scrollKind, emptyMap())),
                     Mutation.Layout(1, Frame(0f, 0f, 360f, 640f)),
                     Mutation.Layout(2, Frame(0f, 0f, 360f, 640f)),
                     Mutation.Layout(3, Frame(0f, 0f, 360f, 640f)),
-                    Mutation.Layout(4, Frame(0f, 0f, 360f, contentHeight)),
-                    Mutation.SetRoot(1),
-                )))
+                )
+                if (contentHeight > 0f) {
+                    mutations += Mutation.Create(NodeSpec(4, 3, 0, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF3366CC),
+                    )))
+                    mutations += Mutation.Layout(4, Frame(0f, 0f, 360f, contentHeight))
+                }
+                renderer.commit(listOf(mutations + Mutation.SetRoot(1)))
                 @Suppress("UNCHECKED_CAST")
                 val views = PamRenderer::class.java.getDeclaredField("views").apply { isAccessible = true }
                     .get(renderer) as android.util.LongSparseArray<View>
