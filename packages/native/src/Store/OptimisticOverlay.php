@@ -27,27 +27,32 @@ use function count;
  *         : $overlay->rollback("post:{$id}", ['liked' => true, 'likes' => $likes + 1], ['liked' => false, 'likes' => $likes]));
  *     $rows = $overlay->applyAll($rows, fn (array $row) => "post:{$row['id']}");
  *
+ * Listeners are notified only when an entry's fields actually change.
  * Bounded LRU: beyond $maxEntries the least recently written settled entry
  * is dropped; entries with requests in flight are never evicted.
  */
 final class OptimisticOverlay
 {
-    /** @var array<string, array{fields: array<string, mixed>, pending: int, revision: int}> least recent first */
+    /** @var array<string, array{fields: array<string, mixed>, pending: int, revision: int, at: int}> least recent first */
     private array $entries = [];
     private int $revision = 0;
     private ?EventBus $bus = null;
     private ?Closure $resolver;
+    /** @var Closure(): int */
+    private Closure $clock;
 
     /**
      * @param (Closure(array<string, mixed>, array<string, mixed>): array<string, mixed>)|null $resolver
      *        merges overlay fields into a row; default: overlay values replace row values
+     * @param (Closure(): int)|null $clock milliseconds, for dropSettled(olderThanMs:)
      */
-    public function __construct(public readonly int $maxEntries = 400, ?Closure $resolver = null)
+    public function __construct(public readonly int $maxEntries = 400, ?Closure $resolver = null, ?Closure $clock = null)
     {
         if ($maxEntries < 1) {
             throw new InvalidArgumentException('OptimisticOverlay needs room for at least one entry.');
         }
         $this->resolver = $resolver;
+        $this->clock = $clock ?? static fn (): int => (int) floor(microtime(true) * 1_000);
     }
 
     /**
@@ -84,8 +89,7 @@ final class OptimisticOverlay
         $fields = $confirmed !== null && $pending === 0 ? [...$current['fields'], ...$confirmed] : $current['fields'];
         if ($fields === $current['fields']) {
             // Nothing visible changed: refresh recency without notifying.
-            unset($this->entries[$key]);
-            $this->entries[$key] = ['fields' => $fields, 'pending' => $pending, 'revision' => ++$this->revision];
+            $this->touch($key, $fields, $pending);
 
             return;
         }
@@ -197,16 +201,22 @@ final class OptimisticOverlay
 
     /**
      * Fresh server copies replace settled overlays written before
-     * $beforeRevision (all settled ones when null), without notifying.
+     * $beforeRevision and/or more than $olderThanMs ago (all settled ones
+     * when both are null), without notifying.
      *
      * @param iterable<string> $keys
      */
-    public function dropSettled(iterable $keys, ?int $beforeRevision = null): int
+    public function dropSettled(iterable $keys, ?int $beforeRevision = null, ?int $olderThanMs = null): int
     {
         $dropped = 0;
+        $cutoff = $olderThanMs === null ? null : ($this->clock)() - $olderThanMs;
         foreach ($keys as $key) {
             $entry = $this->entries[$key] ?? null;
-            if ($entry !== null && $entry['pending'] <= 0 && ($beforeRevision === null || $entry['revision'] <= $beforeRevision)) {
+            if (
+                $entry !== null && $entry['pending'] <= 0
+                && ($beforeRevision === null || $entry['revision'] <= $beforeRevision)
+                && ($cutoff === null || $entry['at'] <= $cutoff)
+            ) {
                 unset($this->entries[$key]);
                 ++$dropped;
             }
@@ -245,11 +255,23 @@ final class OptimisticOverlay
         }, $owner);
     }
 
+    /**
+     * Refreshes recency and pending count without a visible change.
+     *
+     * @param array<string, mixed> $fields
+     */
+    private function touch(string $key, array $fields, int $pending): void
+    {
+        unset($this->entries[$key]);
+        $this->entries[$key] = ['fields' => $fields, 'pending' => $pending, 'revision' => ++$this->revision, 'at' => ($this->clock)()];
+    }
+
     /** @param array<string, mixed> $fields */
     private function write(string $key, array $fields, int $pending): void
     {
+        $previous = $this->entries[$key]['fields'] ?? null;
         unset($this->entries[$key]);
-        $this->entries[$key] = ['fields' => $fields, 'pending' => $pending, 'revision' => ++$this->revision];
+        $this->entries[$key] = ['fields' => $fields, 'pending' => $pending, 'revision' => ++$this->revision, 'at' => ($this->clock)()];
         if (count($this->entries) > $this->maxEntries) {
             foreach ($this->entries as $candidate => $entry) {
                 if (count($this->entries) <= $this->maxEntries) {
@@ -260,6 +282,8 @@ final class OptimisticOverlay
                 }
             }
         }
-        $this->bus?->emit('change', [$key, $fields]);
+        if ($previous !== $fields) {
+            $this->bus?->emit('change', [$key, $fields]);
+        }
     }
 }

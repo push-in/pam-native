@@ -118,6 +118,33 @@ final class BoundedStore
     }
 
     /**
+     * Updates a live entry in place, keeping its recency and expiry (for
+     * FIFO-style stores and status flips). Returns false when the key is
+     * missing or expired, or when the new value exceeds the byte budget.
+     */
+    public function replace(string $key, mixed $value): bool
+    {
+        $entry = $this->live($key);
+        if ($entry === null) {
+            return false;
+        }
+        $bytes = $this->measure($key, $value);
+        if ($this->maxBytes !== null && $bytes > $this->maxBytes) {
+            $this->remove($key);
+
+            return false;
+        }
+        $this->entries[$key] = [$value, $entry[1], $bytes];
+        $this->bytes += $bytes - $entry[2];
+        $this->dirty = true;
+        if ($this->maxBytes !== null && $this->bytes > $this->maxBytes) {
+            $this->evict();
+        }
+
+        return isset($this->entries[$key]);
+    }
+
+    /**
      * Returns the cached value or computes, stores and returns it.
      *
      * @param Closure(): mixed $compute
@@ -246,7 +273,7 @@ final class BoundedStore
         return $this->dirty;
     }
 
-    /** Storage key of the current scope's snapshot. */
+    /** Persistence key of the current scope's snapshot (StoragePersistence maps it with Storage::safeKey()). */
     public function storageKey(): string
     {
         return 'pam.cache.'.$this->name.($this->scope === null ? '' : '.'.$this->scope);
@@ -264,7 +291,7 @@ final class BoundedStore
             return false;
         }
         $this->dirty = false;
-        $this->persistence->save($this->storageKey(), $this->export(), $done);
+        $this->persistence->save($this->storageKey(), $this->export($this->persistence->maxValueBytes()), $done);
 
         return true;
     }
@@ -289,10 +316,14 @@ final class BoundedStore
         });
     }
 
-    /** JSON snapshot of the live, encodable entries (oldest first). */
-    public function export(): string
+    /**
+     * JSON snapshot of the live, encodable entries (oldest first). When it
+     * would exceed $maxBytes (2 MiB by default) the oldest entries are left out.
+     */
+    public function export(?int $maxBytes = null): string
     {
         $this->prune();
+        $limit = min(self::MAX_SNAPSHOT_BYTES, max(64, $maxBytes ?? self::MAX_SNAPSHOT_BYTES)) - 32;
         $rows = [];
         $size = 0;
         foreach (array_reverse($this->entries, true) as $key => $entry) {
@@ -305,7 +336,7 @@ final class BoundedStore
                 continue;
             }
             $size += strlen($row) + 1;
-            if ($size > self::MAX_SNAPSHOT_BYTES) {
+            if ($size > $limit) {
                 break;
             }
             $rows[] = $row;

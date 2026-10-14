@@ -74,6 +74,10 @@ final class OfflineMutationQueue
     private bool $backgrounded = false;
     private bool $draining = false;
     private bool $hydrated = false;
+    private int $batchDepth = 0;
+    private bool $batchDirty = false;
+    /** @var list<array{0: (Closure(): void)|null, 1: (Closure(Throwable): void)|null}> */
+    private array $writeWaiters = [];
 
     /** @param (Closure(): int)|null $clock wall clock in milliseconds */
     public function __construct(
@@ -90,51 +94,108 @@ final class OfflineMutationQueue
     }
 
     /**
-     * Queues an intent. An active mutation with the same $key is returned
-     * unchanged; an unsent one with the same $dedupeKey is replaced in place.
+     * Queues an intent. An active mutation with the same $key is reused (its
+     * payload is updated while unsent); an unsent one with the same
+     * $dedupeKey is replaced in place, keeping its position.
+     *
+     * $stored runs once the queue holding this mutation has been written by
+     * the persistence (at once without one; after hydrate() when called
+     * before it); $failed receives the error when that write fails.
      *
      * @param array<string, mixed> $payload JSON values, at most 256 KiB encoded
+     * @param (Closure(Mutation): void)|null $stored
+     * @param (Closure(Throwable, Mutation): void)|null $failed
      */
-    public function enqueue(string $key, string $operation, array $payload, ?string $dedupeKey = null): Mutation
-    {
-        self::safeName($key, 'idempotency key');
+    public function enqueue(
+        string $key,
+        string $operation,
+        array $payload,
+        ?string $dedupeKey = null,
+        ?Closure $stored = null,
+        ?Closure $failed = null,
+    ): Mutation {
+        self::safeKey($key, 'idempotency key');
         self::safeName($operation, 'operation');
         if ($dedupeKey !== null) {
-            self::safeName($dedupeKey, 'dedupe key');
+            self::safeKey($dedupeKey, 'dedupe key');
         }
         $encoded = json_encode($payload, JSON_THROW_ON_ERROR);
         if (strlen($encoded) > self::MAX_PAYLOAD_BYTES) {
             throw new InvalidArgumentException('Offline mutation payload exceeds 256 KiB.');
         }
+        $target = null;
         foreach ($this->mutations as $mutation) {
             if ($mutation->key === $key && self::active($mutation)) {
-                return $mutation;
+                if (!self::unsent($mutation) || ($mutation->payload === $payload && $mutation->operation === $operation)) {
+                    $this->acknowledge($mutation, $stored, $failed, false);
+
+                    return $mutation;
+                }
+                $target = $mutation;
+                break;
             }
         }
-        if ($dedupeKey !== null) {
+        if ($target === null && $dedupeKey !== null) {
             foreach ($this->mutations as $mutation) {
-                if (
-                    $mutation->dedupeKey === $dedupeKey
-                    && in_array($mutation->status, [MutationStatus::Queued, MutationStatus::Retry], true)
-                ) {
-                    $replacement = new Mutation($mutation->id, $key, $operation, $payload, dedupeKey: $dedupeKey);
-                    $this->mutations[$mutation->id] = $replacement;
-                    $this->changed();
-                    $this->fire(DrainTrigger::Enqueue);
-
-                    return $replacement;
+                if ($mutation->dedupeKey === $dedupeKey && self::unsent($mutation)) {
+                    $target = $mutation;
+                    break;
                 }
             }
+        }
+        if ($target !== null) {
+            $replacement = new Mutation(
+                $target->id,
+                $key,
+                $operation,
+                $payload,
+                dedupeKey: $dedupeKey ?? $target->dedupeKey,
+                createdAtMs: ($this->clock)(),
+            );
+            $this->mutations[$target->id] = $replacement;
+            $this->acknowledge($replacement, $stored, $failed, true);
+            $this->fire(DrainTrigger::Enqueue);
+
+            return $replacement;
         }
         if (count($this->mutations) >= self::MAX_MUTATIONS) {
             throw new OverflowException('Offline mutation queue exceeded 10,000 entries.');
         }
-        $mutation = new Mutation($this->nextId++, $key, $operation, $payload, dedupeKey: $dedupeKey);
+        $mutation = new Mutation($this->nextId++, $key, $operation, $payload, dedupeKey: $dedupeKey, createdAtMs: ($this->clock)());
         $this->mutations[$mutation->id] = $mutation;
-        $this->changed();
+        $this->acknowledge($mutation, $stored, $failed, true);
         $this->fire(DrainTrigger::Enqueue);
 
         return $mutation;
+    }
+
+    /**
+     * Applies several changes with a single persistence write, e.g. marking
+     * a whole batch Sending or Applied.
+     *
+     * @template T
+     * @param Closure(self): T $changes
+     * @return T
+     */
+    public function batch(Closure $changes): mixed
+    {
+        ++$this->batchDepth;
+        try {
+            return $changes($this);
+        } finally {
+            --$this->batchDepth;
+            if ($this->batchDepth === 0 && $this->batchDirty) {
+                $this->batchDirty = false;
+                $this->changed();
+            }
+        }
+    }
+
+    /** Drops every mutation (logout, account removal) and persists the empty queue. */
+    public function clear(): void
+    {
+        $this->mutations = [];
+        $this->changed();
     }
 
     /** @return list<Mutation> Queued and due Retry mutations, oldest first */
@@ -158,10 +219,14 @@ final class OfflineMutationQueue
         return $this->mutations[$id] ?? null;
     }
 
-    /** @return list<Mutation> */
-    public function all(): array
+    /** @return list<Mutation> oldest first, optionally only one $operation */
+    public function all(?string $operation = null): array
     {
-        return array_values($this->mutations);
+        if ($operation === null) {
+            return array_values($this->mutations);
+        }
+
+        return array_values(array_filter($this->mutations, static fn (Mutation $mutation): bool => $mutation->operation === $operation));
     }
 
     /** Mutations not yet Applied or Failed (including Conflict). */
@@ -307,7 +372,29 @@ final class OfflineMutationQueue
         if ($this->persistence === null) {
             return false;
         }
-        $this->persistence->save($this->storageKey(), $this->export(includeApplied: false), $done);
+        $snapshot = $this->export(includeApplied: false);
+        $limit = $this->persistence->maxValueBytes();
+        if (strlen($snapshot) > $limit) {
+            $snapshot = $this->boundedSnapshot($limit);
+        }
+        $waiters = $this->writeWaiters;
+        $this->writeWaiters = [];
+        $this->persistence->save(
+            $this->storageKey(),
+            $snapshot,
+            static function () use ($waiters, $done): void {
+                foreach ($waiters as [$stored]) {
+                    $stored?->__invoke();
+                }
+                $done?->__invoke();
+            },
+            static function (Throwable $error) use ($waiters, $done): void {
+                foreach ($waiters as [, $failed]) {
+                    $failed?->__invoke($error);
+                }
+                $done?->__invoke();
+            },
+        );
 
         return true;
     }
@@ -365,10 +452,33 @@ final class OfflineMutationQueue
                     'availableAtMs' => $mutation->availableAtMs,
                     'error' => $mutation->error,
                     'dedupeKey' => $mutation->dedupeKey,
+                    'createdAtMs' => $mutation->createdAtMs,
                 ],
                 array_values($mutations),
             ),
         ], JSON_THROW_ON_ERROR);
+    }
+
+    /**
+     * Snapshot that fits $limit: Failed mutations are left out first, then
+     * the newest pending ones, so the oldest intents (sent first) survive. Mutations left
+     * out stay in memory and are written again once the queue shrinks.
+     */
+    private function boundedSnapshot(int $limit): string
+    {
+        $kept = array_filter($this->mutations, static fn (Mutation $mutation): bool => self::active($mutation));
+        $copy = new self($this->backoff, null, $this->name, $this->clock);
+        $copy->nextId = $this->nextId;
+        $copy->mutations = $kept;
+        $snapshot = $copy->export(includeApplied: false);
+        while ($copy->mutations !== [] && strlen($snapshot) > $limit) {
+            $overflow = strlen($snapshot) - $limit;
+            $drop = max(1, (int) ceil(count($copy->mutations) * $overflow / strlen($snapshot)));
+            $copy->mutations = array_slice($copy->mutations, 0, max(0, count($copy->mutations) - $drop), true);
+            $snapshot = $copy->export(includeApplied: false);
+        }
+
+        return $snapshot;
     }
 
     /** @param (Closure(): int)|null $clock */
@@ -411,6 +521,7 @@ final class OfflineMutationQueue
                 is_int($item['availableAtMs'] ?? null) ? $item['availableAtMs'] : 0,
                 is_string($item['error'] ?? null) ? $item['error'] : null,
                 is_string($item['dedupeKey'] ?? null) ? $item['dedupeKey'] : null,
+                is_int($item['createdAtMs'] ?? null) ? $item['createdAtMs'] : 0,
             );
             $queue->mutations[$mutation->id] = $mutation;
         }
@@ -447,6 +558,7 @@ final class OfflineMutationQueue
                 $mutation->availableAtMs,
                 $mutation->error,
                 $mutation->dedupeKey,
+                $mutation->createdAtMs,
             );
             $this->nextId = max($this->nextId, $id + 1, $stored->nextId);
             ++$restored;
@@ -542,8 +654,42 @@ final class OfflineMutationQueue
         });
     }
 
+    /**
+     * @param (Closure(Mutation): void)|null $stored
+     * @param (Closure(Throwable, Mutation): void)|null $failed
+     */
+    private function acknowledge(Mutation $mutation, ?Closure $stored, ?Closure $failed, bool $changed): void
+    {
+        if ($stored !== null || $failed !== null) {
+            if ($this->persistence === null) {
+                $stored?->__invoke($mutation);
+            } else {
+                $this->writeWaiters[] = [
+                    $stored === null ? null : static fn () => $stored($mutation),
+                    $failed === null ? null : static fn (Throwable $error) => $failed($error, $mutation),
+                ];
+                if (!$changed && $this->hydrated && $this->batchDepth === 0) {
+                    $this->persist();
+                }
+            }
+        }
+        if ($changed) {
+            $this->changed();
+        }
+    }
+
+    private static function unsent(Mutation $mutation): bool
+    {
+        return in_array($mutation->status, [MutationStatus::Queued, MutationStatus::Retry], true);
+    }
+
     private function changed(): void
     {
+        if ($this->batchDepth > 0) {
+            $this->batchDirty = true;
+
+            return;
+        }
         if ($this->hydrated) {
             $this->persist();
         }
@@ -569,6 +715,13 @@ final class OfflineMutationQueue
     private function require(int $id): Mutation
     {
         return $this->mutations[$id] ?? throw new InvalidArgumentException("Unknown offline mutation {$id}.");
+    }
+
+    private static function safeKey(string $value, string $label): void
+    {
+        if (preg_match('/^[\x21-\x7E]{1,255}$/D', $value) !== 1) {
+            throw new InvalidArgumentException("Offline mutation {$label} must be 1-255 printable ASCII characters.");
+        }
     }
 
     private static function safeName(string $value, string $label): void

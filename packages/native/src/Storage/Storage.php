@@ -13,8 +13,32 @@ use Pam\Native\Modules\NativeModuleException;
 
 final class Storage
 {
+    /** Largest value (UTF-8 bytes) the native key-value store accepts. */
+    public const MAX_VALUE_BYTES = 262_144;
+
+    /** Keys the native store accepts. */
+    public const KEY_PATTERN = '/^[A-Za-z0-9_.-]{1,128}$/D';
+
     private function __construct()
     {
+    }
+
+    /**
+     * Maps any identifier to a key the native store accepts: unsupported
+     * characters become '-', and keys longer than 128 bytes keep a readable
+     * prefix plus a hash.
+     */
+    public static function safeKey(string $key): string
+    {
+        $safe = (string) preg_replace('/[^A-Za-z0-9_.-]/', '-', $key);
+        if ($safe === '') {
+            return 'key-'.substr(hash('sha256', $key), 0, 16);
+        }
+        if (strlen($safe) > 128) {
+            return substr($safe, 0, 95).'-'.substr(hash('sha256', $key), 0, 32);
+        }
+
+        return $safe;
     }
 
     /**

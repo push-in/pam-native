@@ -22,6 +22,7 @@ use Pam\Native\System\ComponentTimer;
 use Pam\Native\System\TimerBackgroundPolicy;
 use Pam\Native\UI\Text as TextView;
 use Pam\Native\Store\OptimisticOverlay;
+use Pam\Native\Support\DateStyle;
 use Pam\Native\Support\Format;
 use Pam\Native\Support\RelativeTimeStyle;
 use Pam\Native\Support\Text;
@@ -337,6 +338,40 @@ $numeric->put('20', 'b');
 $numeric->put('30', 'c');
 $assert($numeric->keys() === ['20', '30'], 'Numeric string keys must keep string identity.');
 
+// replace(), snapshot limits and storage-safe keys.
+$fifo = new BoundedStore('fifo', maxItems: 2);
+$fifo->put('a', 1);
+$fifo->put('b', 2);
+$assert($fifo->replace('a', 10) && !$fifo->replace('missing', 1) && $fifo->keys() === ['a', 'b'] && $fifo->peek('a') === 10, 'replace() must update in place without refreshing recency.');
+$fifo->put('c', 3);
+$assert($fifo->keys() === ['b', 'c'], 'A replaced entry must keep its eviction position.');
+$smallDisk = new MemoryPersistence(maxValueBytes: 80);
+$trimmed = new BoundedStore('trimmed', persistence: $smallDisk);
+foreach (range(1, 10) as $i) {
+    $trimmed->put("k{$i}", str_repeat('x', 10));
+}
+$trimmed->persist();
+$snapshot = $smallDisk->values['pam.cache.trimmed'];
+$assert(strlen($snapshot) <= 80 && str_contains($snapshot, '"k10"') && !str_contains($snapshot, '"k1"'), 'Snapshots must keep the newest entries within the backend limit.');
+$assert(
+    \Pam\Native\Storage\Storage::safeKey('pam.cache.profiles.account:1') === 'pam.cache.profiles.account-1'
+        && preg_match(\Pam\Native\Storage\Storage::KEY_PATTERN, \Pam\Native\Storage\Storage::safeKey(str_repeat('é', 100))) === 1
+        && preg_match(\Pam\Native\Storage\Storage::KEY_PATTERN, \Pam\Native\Storage\Storage::safeKey('')) === 1,
+    'Storage::safeKey must produce keys the native store accepts.',
+);
+$storageScoped = new BoundedStore('profiles', scope: 'account:9', persistence: new \Pam\Native\Cache\StoragePersistence());
+$storageScoped->put('u', 1);
+$storageScoped->persist();
+$storageCall = TestDiagnostics::$typedCall;
+$assert($storageCall !== null && str_contains($storageCall['payload'], 'pam.cache.profiles.account-9') && (new \Pam\Native\Cache\StoragePersistence())->maxValueBytes() === 240_000, 'StoragePersistence must write storage-safe keys within the native limit.');
+
+// StorageBudget.
+$budgetItems = array_map(static fn (int $i): array => ['id' => $i, 'body' => str_repeat('b', 50)], range(1, 100));
+$trimmedList = \Pam\Native\Storage\StorageBudget::trimList($budgetItems, 60, 1_000);
+$assert(count($trimmedList) < 60 && $trimmedList[0]['id'] === 1 && strlen((string) json_encode($trimmedList)) <= 1_000, 'trimList must keep the head within the byte budget.');
+$assert(\Pam\Native\Storage\StorageBudget::encodeList([1, 2, 3], 2) === '[1,2]' && \Pam\Native\Storage\StorageBudget::encodeObject(['a' => str_repeat('x', 100)], 50) === '', 'encodeList/encodeObject must bound values.');
+$assert(\Pam\Native\Storage\StorageBudget::encodeMap(['old' => 1, 'mid' => 2, 'new' => 3], 2) === '{"mid":2,"new":3}' && \Pam\Native\Storage\StorageBudget::encodeMap([]) === '{}', 'encodeMap must keep the most recent entries.');
+
 // IdLedger.
 $ledgerDisk = new MemoryPersistence();
 $deleted = new IdLedger('feed.deleted', maxIds: 3, ttlMs: 1_000, persistence: $ledgerDisk, clock: $clock);
@@ -353,6 +388,7 @@ $assert($reloaded->count() === 3 && $reloaded->has(3), 'IdLedger must restore pe
 $now += 2_000;
 $assert(!$reloaded->has(2) && $reloaded->count() === 0, 'Persisted ids must keep their TTL.');
 $assert($deleted->remove(4) && !$deleted->has(4), 'remove() must forget an id.');
+
 
 // OptimisticOverlay.
 $overlay = new OptimisticOverlay(maxEntries: 2);
@@ -384,6 +420,17 @@ $count = count($notified);
 $overlaySubscription->cancel();
 $overlay->set('post:9', ['liked' => false]);
 $assert(count($notified) === $count, 'Cancelled overlay listeners must not be notified.');
+$overlayNow = 10_000;
+$quiet = new OptimisticOverlay(clock: static function () use (&$overlayNow): int { return $overlayNow; });
+$quietEvents = 0;
+$quiet->on(static function () use (&$quietEvents): void { ++$quietEvents; });
+$quiet->set('a', ['liked' => true]);
+$quiet->begin('a', ['liked' => true]);
+$quiet->rollback('a', ['liked' => false], ['liked' => false]);
+$assert($quietEvents === 1 && !$quiet->pending('a'), 'Listeners must be notified only when fields change.');
+$overlayNow += 40_000;
+$quiet->set('b', ['liked' => true]);
+$assert($quiet->dropSettled(['a', 'b'], olderThanMs: 30_000) === 1 && $quiet->fields('b') !== null && $quiet->fields('a') === null, 'dropSettled(olderThanMs:) must drop only old settled entries.');
 $resolved = new OptimisticOverlay(resolver: static fn (array $row, array $fields): array => [...$row, 'resolved' => true]);
 $resolved->set('a', ['x' => 1]);
 $assert($resolved->apply('a', ['id' => 'a']) === ['id' => 'a', 'resolved' => true] && $resolved->apply('b', ['id' => 'b']) === ['id' => 'b'], 'A custom resolver must merge overlay rows.');
@@ -449,6 +496,28 @@ $assert(
         && Format::time('', 'UTC') === '',
     'Format::time must render the clock in the given zone and locale.',
 );
+$assert(
+    Format::relative($base, $base + 300, RelativeTimeStyle::Tiny) === '5m' && Format::relative($base, $base + 3 * 86_400, RelativeTimeStyle::Tiny) === '3d'
+        && Format::relative($base, $base + 14 * 86_400, RelativeTimeStyle::Tiny) === '2sem'
+        && Format::relative($base, $base + 14 * 86_400, RelativeTimeStyle::Tiny, 'en') === '2w'
+        && Format::relative($base, $base + 40 * 86_400, RelativeTimeStyle::Tiny, maxDays: PHP_INT_MAX) === '40d'
+        && Format::relative($october, $october + 9 * 86_400, RelativeTimeStyle::Tiny, maxWeeks: 0, timeZone: 'UTC', dateStyle: DateStyle::Medium) === '12 de out.'
+        && Format::relative($base, $base + 300, timeZone: 'Not/AZone') === 'há 5 min'
+        && Format::relative($october, $october + 60 * 86_400, timeZone: 'Not/AZone') === '',
+    'Tiny style, day/week limits, date fallback style and invalid zones must be honoured.',
+);
+$assert(
+    Format::date($october, DateStyle::Short, 'UTC', now: $october) === '12 out.'
+        && Format::date($october, DateStyle::Medium, 'UTC', now: $october) === '12 de out.'
+        && Format::date($october, DateStyle::Long, 'UTC', now: $october + 400 * 86_400) === '12 de outubro de 2025'
+        && Format::date($october, DateStyle::Numeric, 'UTC') === '12/10'
+        && Format::date($october, DateStyle::NumericWithYear, 'UTC') === '12/10/2025'
+        && Format::date($october, DateStyle::Numeric, 'UTC', 'en') === '10/12'
+        && Format::date($october, DateStyle::Medium, 'UTC', 'en', withYear: true) === 'Oct 12, 2025'
+        && Format::date($october - 7 * 86_400, DateStyle::Medium, 'UTC', now: $october, padDay: true) === '05 de out.'
+        && Format::date('', DateStyle::Medium) === '' && Format::time($october, 'Not/AZone') === '',
+    'Format::date must render calendar dates per style and locale.',
+);
 Format::useLocale('en-US');
 $assert(Format::compact(1234) === '1.2K' && Format::locale() === 'en-US', 'useLocale() must change the default locale.');
 Format::useLocale('pt-BR');
@@ -503,6 +572,51 @@ $assert(
     'hydrate() must merge persisted mutations, turn interrupted sends into retries and then persist the merge.',
 );
 $assert(OfflineMutationQueue::restore($queue->export())->get($relike->id)?->dedupeKey === 'like:p1', 'export()/restore() must keep dedupe keys.');
+$tinyDisk = new MemoryPersistence(maxValueBytes: 600);
+$bigQueue = new OfflineMutationQueue(persistence: $tinyDisk, name: 'big', clock: $queueClock);
+$bigQueue->hydrate();
+foreach (range(1, 20) as $i) {
+    $bigQueue->enqueue("m:{$i}", 'message.send', ['body' => str_repeat('z', 20)]);
+}
+$bigSnapshot = $tinyDisk->values['pam.sync.big'];
+$assert(strlen($bigSnapshot) <= 600 && str_contains($bigSnapshot, '"m:1"') && !str_contains($bigSnapshot, '"m:20"') && $bigQueue->pendingCount() === 20, 'Oversized queue snapshots must keep the oldest intents and the rest in memory.');
+
+$writes = 0;
+$failWrites = false;
+$countingDisk = new CallbackPersistence(
+    static function (string $key, Closure $done): void { $done(null); },
+    static function (string $key, string $value, ?Closure $done, ?Closure $failed) use (&$writes, &$failWrites): void {
+        ++$writes;
+        if ($failWrites) {
+            $failed?->__invoke(new RuntimeException('disk full'));
+
+            return;
+        }
+        $done?->__invoke();
+    },
+);
+$acked = [];
+$early = new OfflineMutationQueue(persistence: $countingDisk, name: 'acks', clock: $queueClock);
+$early->enqueue('vote:1', 'poll.vote', ['option' => 1], stored: static function (\Pam\Native\Sync\Mutation $m) use (&$acked): void { $acked[] = "stored:{$m->key}"; });
+$assert($acked === [] && $writes === 0, 'Before hydrate() nothing is written and stored callbacks wait.');
+$early->hydrate();
+$assert($acked === ['stored:vote:1'] && $writes === 1, 'hydrate() must write once and acknowledge waiting enqueues.');
+$updated = $early->enqueue('vote:1', 'poll.vote', ['option' => 2]);
+$assert($updated->payload === ['option' => 2] && count($early->all()) === 1 && $updated->createdAtMs === $queueNow, 'Re-enqueueing an unsent key must update its payload.');
+$failWrites = true;
+$early->enqueue('vote:2', 'poll.vote', ['option' => 3], failed: static function (Throwable $error, \Pam\Native\Sync\Mutation $m) use (&$acked): void { $acked[] = "failed:{$m->key}:{$error->getMessage()}"; });
+$assert(end($acked) === 'failed:vote:2:disk full', 'A failed write must reach the failed callback.');
+$failWrites = false;
+$before = $writes;
+$early->batch(static function (OfflineMutationQueue $q): void {
+    foreach ($q->ready() as $m) {
+        $q->sending($m->id);
+    }
+});
+$assert($writes === $before + 1 && count($early->all('poll.vote')) === 2 && $early->all('other') === [], 'batch() must write once; all() must filter by operation.');
+$early->clear();
+$assert($early->all() === [] && $writes === $before + 2, 'clear() must drop and persist everything.');
+$assert(!$throws(static fn () => $early->enqueue('sha256/abc+def=', 'x.y', [])) && $throws(static fn () => $early->enqueue('has space', 'x.y', [])), 'Idempotency keys accept printable ASCII only.');
 
 $drains = [];
 $triggered = new OfflineMutationQueue(clock: $queueClock);

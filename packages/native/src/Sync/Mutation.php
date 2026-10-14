@@ -17,6 +17,7 @@ final readonly class Mutation
         public int $availableAtMs = 0,
         public ?string $error = null,
         public ?string $dedupeKey = null,
+        public int $createdAtMs = 0,
     ) {
     }
 
@@ -35,6 +36,7 @@ final readonly class Mutation
             $availableAtMs ?? $this->availableAtMs,
             $error,
             $this->dedupeKey,
+            $this->createdAtMs,
         );
     }
 }

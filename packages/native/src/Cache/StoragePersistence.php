@@ -7,8 +7,13 @@ namespace Pam\Native\Cache;
 use Closure;
 use Pam\Native\Modules\NativeModuleException;
 use Pam\Native\Storage\Storage;
+use Pam\Native\Storage\StorageBudget;
 
-/** Persists snapshots in the native key-value Storage (SharedPreferences / UserDefaults). */
+/**
+ * Persists snapshots in the native key-value Storage (SharedPreferences /
+ * UserDefaults): keys pass through Storage::safeKey() and snapshots are kept
+ * under StorageBudget::MAX_BYTES.
+ */
 final class StoragePersistence implements CachePersistence
 {
     /** @param (Closure(NativeModuleException): void)|null $onError failures are ignored when null */
@@ -16,18 +21,34 @@ final class StoragePersistence implements CachePersistence
     {
     }
 
+    public function maxValueBytes(): int
+    {
+        return StorageBudget::MAX_BYTES;
+    }
+
+    /** Keys are mapped with Storage::safeKey(). */
     public function load(string $key, Closure $done): void
     {
-        Storage::get($key, static function (?string $value) use ($done): void {
+        Storage::get(Storage::safeKey($key), static function (?string $value) use ($done): void {
             $done($value === '' ? null : $value);
         }, $this->failure(static fn () => $done(null)));
     }
 
-    public function save(string $key, string $value, ?Closure $done = null): void
+    public function save(string $key, string $value, ?Closure $done = null, ?Closure $failed = null): void
     {
-        Storage::set($key, $value, $done, $this->failure($done ?? static fn () => null));
+        $onError = $this->onError;
+        Storage::set(Storage::safeKey($key), $value, $done, static function (NativeModuleException $error) use ($onError, $failed, $done): void {
+            $onError?->__invoke($error);
+            if ($failed !== null) {
+                $failed($error);
+
+                return;
+            }
+            $done?->__invoke();
+        });
     }
 
+    /** @param Closure(): void $continue */
     private function failure(Closure $continue): Closure
     {
         $onError = $this->onError;

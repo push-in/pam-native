@@ -17,18 +17,24 @@ artifacts are unchanged from 1.39.4 (only the version moves).
   (leading/trailing) and `Scheduling\SingleFlight` (joined callers,
   `again` refresh, bounded keys).
 - Add `Cache\BoundedStore` (LRU with max items, TTL, byte budget, account
-  scope, `get/put/forget/remember/trim/persist/hydrate`) and `Cache\IdLedger`
-  (bounded id set with TTL), persisted through `Cache\CachePersistence`
-  (`StoragePersistence`, `CallbackPersistence` for Nitro or other stores,
-  `MemoryPersistence`).
+  scope, `get/peek/put/replace/forget/remember/trim/persist/hydrate`) and
+  `Cache\IdLedger` (bounded id set with TTL), persisted through
+  `Cache\CachePersistence` (`StoragePersistence`, `CallbackPersistence` for
+  Nitro or other stores, `MemoryPersistence`) with snapshots trimmed to the
+  backend's `maxValueBytes()`.
+- Add `Storage\StorageBudget` (`trimList/encodeList/encodeMap/encodeObject`)
+  and `Storage::MAX_VALUE_BYTES`/`KEY_PATTERN`/`safeKey()` for the native
+  256 KiB value and `[A-Za-z0-9_.-]{1,128}` key limits.
 - Add `Store\OptimisticOverlay`: `begin/settle/rollback/set/apply/applyAll`,
-  revision-based `dropSettled()`, change listeners and LRU that never evicts
-  in-flight entries.
-- Add `Support\Format` (`count`, `countLabel`, `compact`, `relative`,
-  `bytes`, `duration`, `time`; pt-BR and English, no ext-intl) and
+  revision- and age-based `dropSettled()`, change-only listeners and LRU that
+  never evicts in-flight entries.
+- Add `Support\Format` (`count`, `countLabel`, `compact`, `relative` with
+  Short/Long/Narrow/Tiny styles, `date` with `DateStyle`, `bytes`, `duration`,
+  `time`; pt-BR and English, no ext-intl) and
   `Support\Text` (`fold`, `foldWithMap`, `contains`, `length`).
 - Harden `Sync\OfflineMutationQueue`: `BackoffPolicy` (base, cap, factor,
-  jitter, maxAttempts), `dedupeKey` coalescing of unsent intents, persistence
+  jitter, maxAttempts), `dedupeKey` coalescing of unsent intents, `stored`/
+  `failed` write callbacks, `batch()`, `clear()`, `createdAtMs`, persistence
   with `hydrate()`/`persist()` (interrupted sends restored as Retry) and
   `drainOn()` triggers (Enqueue, Connectivity, Foreground, RetryDue) that run
   only while mutations are pending in the foreground. Existing calls keep

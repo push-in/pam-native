@@ -158,9 +158,15 @@ $visible = $deleted->filter($posts, fn (array $post) => $post['id']);
 
 - Least recently used entries are evicted first, by count and by bytes. A
   value larger than the whole byte budget is rejected (`put()` returns false).
-- `peek()` reads without refreshing recency; `keys()`/`all()` list from least
-  to most recently used; `count()` excludes expired entries.
-- Snapshots are capped at 2 MiB and stored under `pam.cache.<name>[.<scope>]`.
+- `peek()` reads without refreshing recency and `replace()` updates a live
+  entry keeping its position and expiry, so FIFO stores use `peek()`/`replace()`;
+  `keys()`/`all()` list from least to most recently used; `count()` excludes
+  expired entries.
+- Snapshots are stored under `pam.cache.<name>[.<scope>]` and trimmed (oldest
+  entries first) to the backend's `maxValueBytes()`: 240,000 bytes for
+  `StoragePersistence`, whose native store rejects values over 256 KiB and
+  keys outside `[A-Za-z0-9_.-]` (keys pass through `Storage::safeKey()`, so
+  `account:42` is stored as `account-42`).
   Only JSON values persist (arrays, strings, numbers, booleans, null,
   `JsonSerializable`); other values stay in memory. Expired entries are not
   restored, and memory entries stay newer than restored ones.
@@ -173,7 +179,20 @@ $visible = $deleted->filter($posts, fn (array $post) => $post['id']);
 $kv = new CallbackPersistence(
     load: fn (string $key, Closure $done) => $nitroKv->get($key, $done),
     save: fn (string $key, string $value, ?Closure $done) => $nitroKv->set($key, $value, $done),
+    maxValueBytes: 4 * 1024 * 1024,
 );
+```
+
+For plain JSON written straight to `Storage`, `Storage\StorageBudget` keeps
+values under the limit instead of letting the native write fail:
+
+```php
+use Pam\Native\Storage\{Storage, StorageBudget};
+
+Storage::set('feed.page', StorageBudget::encodeList($postsNewestFirst, limit: 48));
+Storage::set('drafts', StorageBudget::encodeMap($draftsOldestFirst, limit: 100)); // keeps the newest
+Storage::set('profile.me', StorageBudget::encodeObject($profile));                // '' when oversized
+$kept = StorageBudget::trimList($items, limit: 200, maxBytes: 64_000);
 ```
 
 ## OptimisticOverlay
@@ -203,7 +222,9 @@ $rows = $likes->applyAll($rows, fn (array $row) => "post:{$row['id']}");
   hold the failed tap's value; a later tap's change survives.
 - `set()` records a confirmed change (a push, another screen).
 - `revision()` + `dropSettled($keys, $revision)` let fresh server pages
-  replace settled overlays written before the request.
+  replace settled overlays written before the request; `olderThanMs:` adds an
+  age cut (e.g. keep overlays younger than 30 s).
+- Listeners are notified only when an entry's fields actually change.
 - Beyond `maxEntries` the least recently written settled entry is dropped;
   entries with requests in flight are never evicted. Pass a
   `resolver: fn (array $row, array $fields): array` for domain merge rules.
@@ -211,7 +232,7 @@ $rows = $likes->applyAll($rows, fn (array $row) => "post:{$row['id']}");
 ## Format and Text
 
 ```php
-use Pam\Native\Support\{Format, RelativeTimeStyle, Text};
+use Pam\Native\Support\{DateStyle, Format, RelativeTimeStyle, Text};
 
 Format::count(12_345);                       // "12.345"        en "12,345"
 Format::countLabel(3, 'item', 'itens');      // "3 itens"
@@ -225,6 +246,10 @@ Format::relative($old);                      // "12 out." / "12 out. 2025"
 Format::bytes(1_572_864);                    // "1,5 MB"
 Format::duration(65);                        // "1:05"; padMinutes: "01:05"
 Format::time($sentAt, 'America/Sao_Paulo');  // "14:05"         en "2:05 PM"
+Format::date($sentAt, DateStyle::Medium);    // "12 de out."    en "Oct 12"
+Format::date($sentAt, DateStyle::Numeric);   // "12/10"; NumericWithYear "12/10/2025"
+Format::relative($t, style: RelativeTimeStyle::Tiny, maxWeeks: 0,
+    dateStyle: DateStyle::Medium);           // "5m", "3h", "2d", then "12 de out."
 Format::useLocale('en');                     // default locale (pt-BR)
 
 Text::fold('Ação');                          // "acao"
@@ -233,8 +258,10 @@ Text::contains('Conversa com João', 'joao'); // true
 ```
 
 `relative()` accepts Unix seconds, ISO-8601 strings or `DateTimeInterface`,
-uses weeks up to `maxWeeks` (4; 0 jumps from days to a date) and then a
-calendar date with the year when it differs. `Text::fold()` is canonical
+uses days up to `maxDays` (6; `PHP_INT_MAX` never stops), weeks up to
+`maxWeeks` (4; 0 jumps from days to a date) and then a calendar date in
+`dateStyle`, with the year when it differs. Invalid times or time zones give
+an empty string. `Text::fold()` is canonical
 decomposition minus combining marks plus lower case for Latin, Greek and
 Cyrillic, without ext-intl.
 
@@ -279,10 +306,19 @@ private function send(OfflineMutationQueue $queue): void
 - `dedupeKey`: a new mutation replaces an unsent (Queued or Retry) one with the
   same key, so rapid toggles send only the last intent; one already Sending is
   never replaced. The idempotency `key` still deduplicates exact repeats.
+- Re-enqueueing an unsent `key` updates its payload; `stored:` runs once the
+  queue holding the mutation is written (immediately without persistence) and
+  `failed:` receives the write error.
+- `batch(fn ($q) => ...)` applies several changes with one write; `clear()`
+  empties the queue (logout); `all($operation)` filters; mutations carry
+  `createdAtMs`. Keys and dedupe keys accept 1–255 printable ASCII characters.
 - `BackoffPolicy` controls the retry delay; after `maxAttempts` sends,
   `retry()` marks the mutation `Failed`.
 - Persistence: call `hydrate()` once; from then on every change is written
-  (`pam.sync.<name>`), Applied mutations are omitted, mutations queued before
+  (`pam.sync.<name>`), Applied mutations are omitted, a snapshot larger than
+  the backend's `maxValueBytes()` leaves out Failed and then the newest
+  mutations (they stay in memory; use a `CallbackPersistence` over SQLite for
+  very large queues), mutations queued before
   hydration are merged rather than overwritten, and mutations caught mid-send
   by process death come back as `Retry`.
 - `drainOn()` calls the callback only when mutations are ready. The

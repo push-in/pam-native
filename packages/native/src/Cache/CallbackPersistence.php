@@ -15,15 +15,24 @@ use Closure;
  *     );
  *
  * Synchronous backends call $done before returning; asynchronous ones later.
+ * $save may receive a fourth argument, $failed(Throwable), to report a failed write.
  */
 final class CallbackPersistence implements CachePersistence
 {
     /**
      * @param Closure(string, Closure(?string): void): void $load
-     * @param Closure(string, string, (Closure(): void)|null): void $save
+     * @param Closure(string, string, (Closure(): void)|null, (Closure(\Throwable): void)|null): void $save
      */
-    public function __construct(private readonly Closure $load, private readonly Closure $save)
+    public function __construct(
+        private readonly Closure $load,
+        private readonly Closure $save,
+        private readonly int $maxValueBytes = 2_097_152,
+    ) {
+    }
+
+    public function maxValueBytes(): int
     {
+        return $this->maxValueBytes;
     }
 
     public function load(string $key, Closure $done): void
@@ -31,8 +40,15 @@ final class CallbackPersistence implements CachePersistence
         ($this->load)($key, $done);
     }
 
-    public function save(string $key, string $value, ?Closure $done = null): void
+    public function save(string $key, string $value, ?Closure $done = null, ?Closure $failed = null): void
     {
-        ($this->save)($key, $value, $done);
+        try {
+            ($this->save)($key, $value, $done, $failed);
+        } catch (\Throwable $error) {
+            if ($failed === null) {
+                throw $error;
+            }
+            $failed($error);
+        }
     }
 }

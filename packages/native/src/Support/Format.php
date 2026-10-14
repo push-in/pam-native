@@ -21,6 +21,7 @@ use function is_string;
  *     Format::bytes(1_572_864);                 // "1,5 MB"
  *     Format::duration(65);                     // "1:05"
  *     Format::time($sentAt, 'America/Sao_Paulo'); // "14:05"  (en: "2:05 PM")
+ *     Format::date($sentAt, DateStyle::Medium);   // "12 de out." (en: "Oct 12")
  *
  * The locale defaults to pt-BR; set it once with Format::useLocale('en') or
  * pass it per call. Any "pt…" tag selects Portuguese, anything else English.
@@ -110,9 +111,10 @@ final class Format
 
     /**
      * Elapsed time since $time: "agora", "há 5 min", "há 3 h", "há 2 d",
-     * "há 2 sem", then a date ("12 de out.", with the year when it differs).
-     * Weeks are used up to $maxWeeks (0 jumps from days to the date).
-     * Future times read as "agora".
+     * "há 2 sem", then a calendar date ("12 out.", with the year when it
+     * differs; $dateStyle picks another wording). Days are used up to
+     * $maxDays and weeks up to $maxWeeks (0 jumps from days to the date).
+     * Future times read as "agora". Invalid times or zones give ''.
      *
      * @param int|string|DateTimeInterface $time Unix seconds, ISO-8601 string or date
      * @param int|null $now Unix seconds; defaults to time()
@@ -124,6 +126,8 @@ final class Format
         ?string $locale = null,
         int $maxWeeks = 4,
         DateTimeZone|string|null $timeZone = null,
+        int $maxDays = 6,
+        ?DateStyle $dateStyle = null,
     ): string {
         $timestamp = self::timestamp($time);
         if ($timestamp === null) {
@@ -135,9 +139,10 @@ final class Format
         if ($elapsed < 60) {
             return $pt ? 'agora' : 'now';
         }
-        $steps = [[3_600, 60, 'min'], [86_400, 3_600, 'h'], [604_800, 86_400, 'd']];
-        if ($maxWeeks > 0) {
-            $steps[] = [($maxWeeks + 1) * 604_800, 604_800, 'w'];
+        $dayLimit = $maxDays >= PHP_INT_MAX / 86_400 - 1 ? PHP_INT_MAX : ($maxDays + 1) * 86_400;
+        $steps = [[3_600, 60, 'min'], [86_400, 3_600, 'h'], [max(86_400, $dayLimit), 86_400, 'd']];
+        if ($maxWeeks > 0 && $dayLimit !== PHP_INT_MAX) {
+            $steps[] = [max($dayLimit, ($maxWeeks + 1) * 604_800), 604_800, 'w'];
         }
         foreach ($steps as [$limit, $unitSeconds, $unit]) {
             if ($elapsed < $limit) {
@@ -145,7 +150,51 @@ final class Format
             }
         }
 
-        return self::calendarDate($timestamp, $now, $style, $pt, $timeZone);
+        return self::date($timestamp, $dateStyle ?? ($style === RelativeTimeStyle::Long ? DateStyle::Long : DateStyle::Short), $timeZone, $locale, null, $now);
+    }
+
+    /**
+     * Calendar date: "12 out.", "12 de out.", "12 de outubro", "12/10",
+     * "12/10/2025" (en "Oct 12", "October 12", "10/12"). The year is added
+     * when it differs from $now's year unless $withYear says otherwise;
+     * $padDay writes "05 de out.".
+     *
+     * @param int|null $now Unix seconds; defaults to time()
+     */
+    public static function date(
+        int|string|DateTimeInterface $time,
+        DateStyle $style = DateStyle::Medium,
+        DateTimeZone|string|null $timeZone = null,
+        ?string $locale = null,
+        ?bool $withYear = null,
+        ?int $now = null,
+        bool $padDay = false,
+    ): string {
+        $date = self::moment($time, $timeZone);
+        $today = self::moment($now ?? time(), $timeZone);
+        if ($date === null || $today === null) {
+            return '';
+        }
+        $pt = self::portuguese($locale);
+        $dayNumber = (int) $date->format('j');
+        $day = $padDay ? str_pad((string) $dayNumber, 2, '0', STR_PAD_LEFT) : (string) $dayNumber;
+        $month = (int) $date->format('n') - 1;
+        $year = (int) $date->format('Y');
+        $showYear = $withYear ?? ($year !== (int) $today->format('Y'));
+
+        return match ($style) {
+            DateStyle::Numeric => $pt ? $date->format('d/m') : $date->format('m/d'),
+            DateStyle::NumericWithYear => $pt ? $date->format('d/m/Y') : $date->format('m/d/Y'),
+            DateStyle::Long => $pt
+                ? $day.' de '.self::PT_MONTHS_LONG[$month].($showYear ? ' de '.$year : '')
+                : self::EN_MONTHS_LONG[$month].' '.$day.($showYear ? ', '.$year : ''),
+            DateStyle::Medium => $pt
+                ? $day.' de '.self::PT_MONTHS_SHORT[$month].($showYear ? ' de '.$year : '')
+                : self::EN_MONTHS_SHORT[$month].' '.$day.($showYear ? ', '.$year : ''),
+            DateStyle::Short => $pt
+                ? $day.' '.self::PT_MONTHS_SHORT[$month].($showYear ? ' '.$year : '')
+                : self::EN_MONTHS_SHORT[$month].' '.$day.($showYear ? ', '.$year : ''),
+        };
     }
 
     /**
@@ -202,7 +251,7 @@ final class Format
         DateTimeZone|string|null $timeZone = null,
         ?string $locale = null,
     ): string {
-        $date = self::date($time, $timeZone);
+        $date = self::moment($time, $timeZone);
         if ($date === null) {
             return '';
         }
@@ -220,6 +269,9 @@ final class Format
 
             return $pt ? "há {$count} {$word}" : "{$count} {$word} ago";
         }
+        if ($style === RelativeTimeStyle::Tiny) {
+            return $count.($unit === 'min' ? 'm' : ($unit === 'w' && $pt ? 'sem' : $unit));
+        }
         if ($pt) {
             $short = $count.' '.($unit === 'w' ? 'sem' : $unit);
 
@@ -228,28 +280,6 @@ final class Format
         $short = $count.($unit === 'min' ? 'm' : $unit);
 
         return $style === RelativeTimeStyle::Narrow ? $short : $short.' ago';
-    }
-
-    private static function calendarDate(int $timestamp, int $now, RelativeTimeStyle $style, bool $pt, DateTimeZone|string|null $timeZone): string
-    {
-        $date = self::date($timestamp, $timeZone);
-        $today = self::date($now, $timeZone);
-        if ($date === null || $today === null) {
-            return '';
-        }
-        $day = (int) $date->format('j');
-        $month = (int) $date->format('n') - 1;
-        $year = (int) $date->format('Y');
-        $otherYear = $year !== (int) $today->format('Y');
-        if ($style === RelativeTimeStyle::Long) {
-            return $pt
-                ? $day.' de '.self::PT_MONTHS_LONG[$month].($otherYear ? ' de '.$year : '')
-                : self::EN_MONTHS_LONG[$month].' '.$day.($otherYear ? ', '.$year : '');
-        }
-
-        return $pt
-            ? $day.' '.self::PT_MONTHS_SHORT[$month].($otherYear ? ' '.$year : '')
-            : self::EN_MONTHS_SHORT[$month].' '.$day.($otherYear ? ', '.$year : '');
     }
 
     private static function timestamp(int|string|DateTimeInterface $time): ?int
@@ -268,7 +298,7 @@ final class Format
         return $parsed === false || $parsed <= 0 ? null : $parsed;
     }
 
-    private static function date(int|string|DateTimeInterface $time, DateTimeZone|string|null $timeZone): ?DateTimeImmutable
+    private static function moment(int|string|DateTimeInterface $time, DateTimeZone|string|null $timeZone): ?DateTimeImmutable
     {
         $timestamp = self::timestamp($time);
         if ($timestamp === null) {
@@ -277,7 +307,7 @@ final class Format
         try {
             $zone = is_string($timeZone) ? new DateTimeZone($timeZone) : ($timeZone ?? new DateTimeZone(date_default_timezone_get()));
         } catch (\Exception) {
-            $zone = new DateTimeZone('UTC');
+            return null;
         }
 
         return (new DateTimeImmutable('@'.$timestamp))->setTimezone($zone);

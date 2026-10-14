@@ -38,6 +38,7 @@ parameters:
         - src/System/ComponentTimer.php
         - src/System/ComponentTimers.php
         - src/System/TimerBackgroundPolicy.php
+        - src/Storage/StorageBudget.php
     tmpDir: ../../../.pam-native/phpstan-singularity
     treatPhpDocTypesAsCertain: true
     reportUnmatchedIgnoredErrors: true
