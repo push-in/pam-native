@@ -86,6 +86,10 @@ Failed optimistic tasks restore the pre-action snapshot. A custom compensation
 closure can be supplied. History and undo stacks are bounded to 200 entries.
 `StoreDevTools::exportJson()` exposes integer-typed action/diff history.
 
+For per-record optimism shared across screens (likes, saves, follows) without
+a whole-store snapshot, use `Store\OptimisticOverlay`; offline intents go
+through `Sync\OfflineMutationQueue`. See [App infrastructure](app-infrastructure.md).
+
 ## Middleware and action policies
 
 ```php

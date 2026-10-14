@@ -26,6 +26,18 @@ parameters:
         - src/LanguageVersion.php
         - src/UI/Contract
         - src/UI/Ir
+        - src/Disposable.php
+        - src/Events
+        - src/Cache
+        - src/Support
+        - src/Store/OptimisticOverlay.php
+        - src/Sync
+        - src/Scheduling/Debouncer.php
+        - src/Scheduling/Throttler.php
+        - src/Scheduling/SingleFlight.php
+        - src/System/ComponentTimer.php
+        - src/System/ComponentTimers.php
+        - src/System/TimerBackgroundPolicy.php
     tmpDir: ../../../.pam-native/phpstan-singularity
     treatPhpDocTypesAsCertain: true
     reportUnmatchedIgnoredErrors: true
@@ -71,3 +83,17 @@ parameters:
         - src/Style/StyleValueUnit.php
         - src/Style/StyleVariables.php
         - src/TemplateRegistry.php
+        - src/App.php
+        - src/AppState.php
+        - src/DeviceStatus.php
+        - src/NetworkType.php
+        - src/Internal/ComponentLifecycle.php
+        - src/Signals/Signal.php
+        - src/Signals/ReactiveSource.php
+        - src/Signals/ReactiveScope.php
+        - src/Signals/ReactiveObserver.php
+        - src/Storage/Storage.php
+        - src/System/DeviceStatus.php
+        - src/System/TimerHandle.php
+        - src/System/Timers.php
+        - src/Modules/NativeModuleException.php

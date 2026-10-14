@@ -59,6 +59,9 @@ abstract class Component implements Renderable
     private int $pamEpoch = -1;
     /** @var array<string, Closure> event handlers bound to this scope, by expression */
     private array $pamHandlers = [];
+    /** @var array<int, Disposable> resources released on unmount, by object id */
+    private array $pamOwned = [];
+    private ?\Pam\Native\System\ComponentTimers $pamTimers = null;
 
     /** @var array<class-string, bool> */
     private static array $pamAlwaysRender = [];
@@ -98,6 +101,8 @@ abstract class Component implements Renderable
         'pamSnapshot',
         'pamEpoch',
         'pamHandlers',
+        'pamOwned',
+        'pamTimers',
     ];
 
     public function render(): Renderable
@@ -550,6 +555,7 @@ abstract class Component implements Renderable
                 && !$value instanceof \UnitEnum
                 && !$value instanceof Element
                 && !$value instanceof ComponentState
+                && !$value instanceof Disposable
             ) {
                 $values[$key] = [$value, self::pamExpandObjects((array) $value, 1)];
             }
@@ -640,6 +646,7 @@ abstract class Component implements Renderable
                 && !$value instanceof Closure
                 && !$value instanceof \UnitEnum
                 && !$value instanceof Element
+                && !$value instanceof Disposable
             ) {
                 $values[$key] = [
                     $value,
@@ -731,6 +738,75 @@ abstract class Component implements Renderable
         }
 
         return $this->pamHandlers[$key] = $handler;
+    }
+
+    /**
+     * Releases $resource (an event Subscription, a Debouncer, any Disposable)
+     * when this component unmounts. Subscribe in mount(): a remounted
+     * component runs mount() again.
+     *
+     * @template T of Disposable
+     * @param T $resource
+     * @return T
+     */
+    final protected function own(Disposable $resource): Disposable
+    {
+        $this->__pamOwn($resource);
+
+        return $resource;
+    }
+
+    /**
+     * Timers that stop on unmount and pause in the background:
+     * `$this->timers()->timeout(3_000, fn () => ...)`, `->every()`,
+     * `->debounce()` and `->throttle()`.
+     */
+    final protected function timers(): \Pam\Native\System\ComponentTimers
+    {
+        return $this->pamTimers ??= new \Pam\Native\System\ComponentTimers();
+    }
+
+    /** @internal Use own() or Subscription::ownedBy(). */
+    final public function __pamOwn(Disposable $resource): void
+    {
+        if ($resource->disposed()) {
+            return;
+        }
+        if (count($this->pamOwned) >= 128) {
+            $this->pamOwned = array_filter($this->pamOwned, static fn (Disposable $owned): bool => !$owned->disposed());
+        }
+        $this->pamOwned[spl_object_id($resource)] = $resource;
+    }
+
+    /** @internal The component was paused (app in the background). */
+    final public function __pamSuspendResources(): void
+    {
+        $this->pamTimers?->suspend();
+    }
+
+    /** @internal The component resumed. */
+    final public function __pamResumeResources(): void
+    {
+        $this->pamTimers?->resume();
+    }
+
+    /** @internal The component unmounted: release owned resources and timers. */
+    final public function __pamDisposeResources(): void
+    {
+        $owned = $this->pamOwned;
+        $this->pamOwned = [];
+        $failure = null;
+        foreach ($owned as $resource) {
+            try {
+                $resource->dispose();
+            } catch (Throwable $error) {
+                $failure ??= $error;
+            }
+        }
+        $this->pamTimers?->cancelAll();
+        if ($failure !== null) {
+            throw $failure;
+        }
     }
 
     final public function __pamRelease(): void

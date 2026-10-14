@@ -523,6 +523,38 @@ Macrobenchmarks, and `pam mobile profile` to generate the Baseline Profile
 independently. Protocol v1 compatibility and limits are documented in
 `PROTOCOL.md`.
 
+## App infrastructure
+
+Reusable plumbing ships in the SDK, so apps do not hand-roll it. Listeners and
+timers owned by a component stop when it unmounts; component timers also pause
+in the background:
+
+```php
+use Pam\Native\Cache\{BoundedStore, StoragePersistence};
+use Pam\Native\Events\EventBus;
+use Pam\Native\Support\{Format, Text};
+use Pam\Native\Sync\{DrainTrigger, OfflineMutationQueue};
+
+public function mount(): void
+{
+    EventBus::shared()->on('feed.refresh', fn () => $this->reload(), owner: $this);
+    $this->timers()->every(30_000, fn () => $this->poll());
+    $this->search = $this->timers()->debounce(300, fn (string $q) => $this->query($q));
+}
+
+$profiles = new BoundedStore('profiles', maxItems: 200, ttlMs: 600_000,
+    scope: "account:{$id}", persistence: new StoragePersistence());
+Format::compact(1_234);        // "1,2 mil"
+Format::relative($createdAt);  // "há 5 min"
+Text::fold('Ação');            // "acao"
+$queue->drainOn(fn ($q) => $this->send($q), DrainTrigger::Connectivity, DrainTrigger::Foreground);
+```
+
+`Events\EventBus`/`Observable`, `Component::timers()`, `Scheduling\Debouncer`/
+`Throttler`/`SingleFlight`, `Cache\BoundedStore`/`IdLedger`,
+`Store\OptimisticOverlay`, `Support\Format`/`Text` and the persistent
+`Sync\OfflineMutationQueue` are documented in `docs/app-infrastructure.md`.
+
 ## HTTP
 
 `Http::get()` remains available for simple reads. Authenticated APIs can use the

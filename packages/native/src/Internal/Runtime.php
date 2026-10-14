@@ -760,6 +760,7 @@ final class Runtime
         ErrorReporter::reset();
         self::$renderFailure = null;
         Linking::resetRuntime();
+        \Pam\Native\Events\EventBus::resetRuntime();
         IncomingShares::resetRuntime();
         PushNotifications::resetRuntime();
         State::resetCache();

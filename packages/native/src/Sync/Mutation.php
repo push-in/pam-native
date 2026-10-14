@@ -6,7 +6,7 @@ namespace Pam\Native\Sync;
 
 final readonly class Mutation
 {
-    /** @param array<string, string|int|float|bool|null> $payload */
+    /** @param array<string, mixed> $payload JSON values */
     public function __construct(
         public int $id,
         public string $key,
@@ -16,6 +16,7 @@ final readonly class Mutation
         public int $attempts = 0,
         public int $availableAtMs = 0,
         public ?string $error = null,
+        public ?string $dedupeKey = null,
     ) {
     }
 
@@ -33,6 +34,7 @@ final readonly class Mutation
             $status === MutationStatus::Sending ? $this->attempts + 1 : $this->attempts,
             $availableAtMs ?? $this->availableAtMs,
             $error,
+            $this->dedupeKey,
         );
     }
 }

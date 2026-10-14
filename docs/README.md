@@ -29,6 +29,7 @@ short end-to-end recipes.
 | Components, props, state, lifecycle, effects, slots, context and refs | [Component runtime](component-runtime.md) |
 | Typed retained UI queries, transactions, events, animation and measurement | [Visual DOM](visual-dom.md) |
 | Global store, transactions, persistence, sync, undo and optimistic state | [Pam Store](store.md) |
+| Event bus, component timers, debounce/throttle/single-flight, bounded caches, optimistic overlay, formatting, offline queue | [App infrastructure](app-infrastructure.md) |
 | Files, direct gallery, camera, notifications, SQLite, WebView, media, animation and device APIs | [Capability cookbook](examples.md) |
 | Permissions, push, observation and lifecycle recovery | [Production capabilities](production-capabilities.md) |
 | Light/dark preference, first-frame theming and native window colours | [Appearance](appearance.md) |

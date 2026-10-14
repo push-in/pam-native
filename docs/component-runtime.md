@@ -129,6 +129,24 @@ Effects run only after native attachment. Dependency changes run the previous
 cleanup before the new effect. `Effect::once()` runs once. All cleanups are
 attempted even if one throws.
 
+## Owned resources and timers
+
+```php
+public function mount(): void
+{
+    EventBus::shared()->on('chat.read', fn (string $id) => $this->markRead($id), owner: $this);
+    $this->own(Subscription::from(fn () => App::offStateChange($stateListener)));
+    $this->timers()->every(30_000, fn () => $this->poll());
+    $this->search = $this->timers()->debounce(300, fn (string $q) => $this->query($q));
+}
+```
+
+Everything passed to `own()` (any `Disposable`) or created through
+`timers()` is released after `unmount()`. Component timers pause in the
+background by default (`TimerBackgroundPolicy::Suspend`) and are re-armed when
+the component resumes. Subscribe in `mount()`, which runs again on remount. See
+[App infrastructure](app-infrastructure.md).
+
 ## Error boundary and fallback
 
 ```php

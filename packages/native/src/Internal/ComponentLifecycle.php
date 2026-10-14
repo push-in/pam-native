@@ -393,7 +393,11 @@ final class ComponentLifecycle
             if ($state->resumed) {
                 $component->paused();
             }
-            $component->unmount();
+            try {
+                $component->unmount();
+            } finally {
+                $component->__pamDisposeResources();
+            }
             $state->mounted = false;
             $state->attached = false;
             $state->resumed = false;
@@ -441,6 +445,7 @@ final class ComponentLifecycle
                     $state->attached = true;
                 }
                 if (self::$appState !== AppState::Background && !$state->resumed) {
+                    $component->__pamResumeResources();
                     $component->resumed();
                     $state->resumed = true;
                 }
@@ -477,6 +482,12 @@ final class ComponentLifecycle
      * share sheet, biometric dialog) is drawn over the still-visible app, so
      * components stay resumed and observe it through `inactive()`/`activated()`.
      */
+    /** Foreground state last delivered to components. */
+    public static function currentAppState(): AppState
+    {
+        return self::$appState;
+    }
+
     public static function appState(AppState $appState): void
     {
         $previous = self::$appState;
@@ -497,11 +508,13 @@ final class ComponentLifecycle
             }
             if ($appState === AppState::Background) {
                 if ($state->resumed) {
+                    $component->__pamSuspendResources();
                     $component->paused();
                     $state->resumed = false;
                     $state->inactive = false;
                 }
             } elseif (!$state->resumed) {
+                $component->__pamResumeResources();
                 $component->resumed();
                 $state->resumed = true;
                 $state->inactive = false;
@@ -532,6 +545,7 @@ final class ComponentLifecycle
                 $component->unmount();
             }
         } finally {
+            $component->__pamDisposeResources();
             $component->__pamCleanup();
             DependencyTracker::forget($component);
         }
@@ -552,6 +566,7 @@ final class ComponentLifecycle
                         $component->unmount();
                     }
                 } finally {
+                    $component->__pamDisposeResources();
                     $component->__pamCleanup();
                     DependencyTracker::forget($component);
                     $component->__pamRelease();
