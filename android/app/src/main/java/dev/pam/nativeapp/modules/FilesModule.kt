@@ -50,6 +50,7 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
                 "downloadCancel" -> cancelDownload(subscription(payload), completion)
                 "open" -> open(payload, completion)
                 "stat" -> executor.execute { stat(payload, completion) }
+                "exists" -> executor.execute { exists(payload, completion) }
                 "list" -> executor.execute { list(payload, completion) }
                 "delete" -> executor.execute { delete(payload, completion) }
                 "move" -> executor.execute { transfer(payload, completion, move = true) }
@@ -78,6 +79,19 @@ internal class FilesModule(private val activity: PamActivity) : NativeModule, Au
             val file = resolve(WireMap.decode(payload).requiredText("path"))
             require(file.isFile) { "File does not exist" }
             completion.success(file, mimeFor(file))
+        }.onFailure { completion.failure(it) }
+    }
+
+    private fun exists(payload: ByteArray, completion: ModuleCompletion) {
+        runCatching {
+            val file = resolve(WireMap.decode(payload).requiredText("path"))
+            completion.complete(
+                ModuleResultStatus.SUCCESS,
+                WireMap.encode(mapOf(
+                    "exists" to WireValue.Flag(file.isFile),
+                    "directory" to WireValue.Flag(file.isDirectory),
+                )),
+            )
         }.onFailure { completion.failure(it) }
     }
 

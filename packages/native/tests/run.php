@@ -3873,6 +3873,27 @@ $hashRequest = Files::sha256('missing.pdf', static function (string $_): void {}
 Runtime::dispatchModuleResult($hashRequest, ModuleResultStatus::Failure->value, 'File does not exist');
 $assert($hashFailure === 'File does not exist', 'Files SHA-256 must expose native failure through the optional failure callback.');
 
+$statSeen = ['file' => null, 'missing' => 0, 'failure' => null, 'found' => 'unset', 'exists' => null];
+$statRequest = Files::stat('notes/a.txt', static function (\Pam\Native\FileReference $file) use (&$statSeen): void { $statSeen['file'] = $file; });
+Runtime::dispatchModuleResult($statRequest, ModuleResultStatus::Success->value, Wire::map(['path' => 'notes/a.txt', 'name' => 'a.txt', 'mimeType' => 'text/plain', 'size' => 3]));
+$statRequest = Files::stat('notes/gone.txt', static function (\Pam\Native\FileReference $_): void {});
+Runtime::dispatchModuleResult($statRequest, ModuleResultStatus::Failure->value, 'File does not exist');
+$statRequest = Files::stat('notes/gone.txt', static function (\Pam\Native\FileReference $_): void {}, static function () use (&$statSeen): void { $statSeen['missing']++; });
+Runtime::dispatchModuleResult($statRequest, ModuleResultStatus::Failure->value, 'File does not exist');
+$statRequest = Files::stat('notes/a.txt', static function (\Pam\Native\FileReference $_): void {}, null, static function (string $message) use (&$statSeen): void { $statSeen['failure'] = $message; });
+Runtime::dispatchModuleResult($statRequest, ModuleResultStatus::Failure->value, 'Disk unavailable');
+$statRequest = Files::find('notes/gone.txt', static function (?\Pam\Native\FileReference $file) use (&$statSeen): void { $statSeen['found'] = $file; });
+Runtime::dispatchModuleResult($statRequest, ModuleResultStatus::Failure->value, 'File does not exist');
+$existsRequest = Files::exists('notes/a.txt', static function (bool $exists) use (&$statSeen): void { $statSeen['exists'] = $exists; });
+$existsCall = TestDiagnostics::$moduleCall;
+Runtime::dispatchModuleResult($existsRequest, ModuleResultStatus::Success->value, Wire::map(['exists' => true, 'directory' => false]));
+$assert(
+    $statSeen['file']?->size === 3 && $statSeen['missing'] === 1 && $statSeen['failure'] === 'Disk unavailable'
+        && $statSeen['found'] === null && $statSeen['exists'] === true
+        && $existsCall !== null && $existsCall['module'] === 'files' && $existsCall['method'] === 'exists',
+    'Files::stat must not throw for a missing file, find() must yield null and exists() must report a bool.',
+);
+
 foreach (['', ' ', '/absolute', '../outside', 'a//b', 'a/../b', 'a\\b', "bad\nname", str_repeat('a', 4097)] as $unsafeHashPath) {
     $rejected = false;
     try { Files::sha256($unsafeHashPath, static function (string $_): void {}); }

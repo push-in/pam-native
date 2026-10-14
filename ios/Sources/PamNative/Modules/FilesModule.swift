@@ -50,6 +50,8 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 openFile(payload, completion: completion)
             case "stat":
                 queue.async { self.stat(payload, completion) }
+            case "exists":
+                queue.async { self.exists(payload, completion) }
             case "list":
                 queue.async { self.list(payload, completion) }
             case "delete":
@@ -126,6 +128,18 @@ final class FilesModule: NSObject, NativeModule, ClosableNativeModule,
                 throw FileModuleError("File does not exist")
             }
             completion(.success, try WireMap.encode(reference(file)))
+        } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
+    }
+
+    private func exists(_ payload: Data, _ completion: @escaping ModuleCompletion) {
+        do {
+            let file = try requiredPath(payload)
+            var isDirectory: ObjCBool = false
+            let found = FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory)
+            completion(.success, try WireMap.encode([
+                "exists": .flag(found && !isDirectory.boolValue),
+                "directory": .flag(found && isDirectory.boolValue),
+            ]))
         } catch { completion(.failure, Data(error.localizedDescription.utf8)) }
     }
 

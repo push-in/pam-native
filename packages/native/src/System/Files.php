@@ -196,13 +196,77 @@ final class Files
         );
     }
 
-    /** @param Closure(FileReference): void $callback */
-    public static function stat(string $path, Closure $callback): int
+    /**
+     * Native message both hosts report for a private file that is not there.
+     *
+     * @internal
+     */
+    public const MISSING_FILE_MESSAGE = 'File does not exist';
+
+    /**
+     * Metadata of a private file. A missing file is not an error: it calls
+     * [$missing] (or nothing) instead of throwing. Other native failures go to
+     * [$failure], or throw when it is null.
+     *
+     * @param Closure(FileReference): void $callback
+     * @param null|Closure(): void $missing
+     * @param null|Closure(string): void $failure
+     */
+    public static function stat(
+        string $path,
+        Closure $callback,
+        ?Closure $missing = null,
+        ?Closure $failure = null,
+    ): int {
+        return NativeModules::call('files', 'stat', ['path' => $path], static function ($result) use ($callback, $missing, $failure): void {
+            if ($result->status === ModuleResultStatus::Failure) {
+                if ($result->payload === self::MISSING_FILE_MESSAGE) {
+                    $missing?->__invoke();
+
+                    return;
+                }
+                if ($failure !== null) {
+                    $failure($result->payload);
+
+                    return;
+                }
+                throw new RuntimeException($result->payload);
+            }
+            $callback(self::reference($result->payload === '' ? [] : Wire::decodeMap($result->payload)));
+        });
+    }
+
+    /**
+     * Nullable form of {@see stat()}: the callback receives null when the
+     * private file does not exist.
+     *
+     * @param Closure(?FileReference): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function find(string $path, Closure $callback, ?Closure $failure = null): int
     {
-        return self::invoke(
-            'stat',
+        return self::stat(
+            $path,
+            static fn (FileReference $file): mixed => $callback($file),
+            static fn (): mixed => $callback(null),
+            $failure,
+        );
+    }
+
+    /**
+     * Whether a private file exists (directories report false), off the UI
+     * thread. Only invalid paths (outside the sandbox) fail.
+     *
+     * @param Closure(bool): void $callback
+     * @param null|Closure(string): void $failure
+     */
+    public static function exists(string $path, Closure $callback, ?Closure $failure = null): int
+    {
+        return self::invokeOptionalFailure(
+            'exists',
             ['path' => $path],
-            static fn (array $values): mixed => $callback(self::reference($values)),
+            static fn (array $values): mixed => $callback((bool) ($values['exists'] ?? false)),
+            $failure,
         );
     }
 
