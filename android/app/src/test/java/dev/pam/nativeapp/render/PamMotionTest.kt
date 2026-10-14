@@ -142,6 +142,27 @@ class PamMotionTest {
     }
 
     @Test
+    fun dragRawDriversExtrapolatePastTheirPoints() {
+        val config = PamDragConfig.parse(
+            listOf(
+                "axis=y", "min=0", "max=0", "snaps=0",
+                "drive=|opacity|0,100|1,0", "driveRaw=hero|scale|0,100|1,2",
+            ).joinToString("\n"),
+        )!!
+        assertEquals(listOf(false, true), config.drivers.map { it.raw })
+        val unbounded = PamDragConfig.parse("axis=y\ndriveUnbounded=1\ndrive=|scale|0,100|1,2")!!
+        assertTrue(unbounded.drivers.single().raw)
+        val input = listOf(0.0, 100.0)
+        val output = listOf(1.0, 2.0)
+        assertEquals(3.0, PamDragMath.extrapolate(input, output, 200.0), 1e-9)
+        assertEquals(0.5, PamDragMath.extrapolate(input, output, -50.0), 1e-9)
+        assertEquals(1.5, PamDragMath.extrapolate(input, output, 50.0), 1e-9)
+        assertEquals(2.0, PamDragMath.interpolate(input, output, 200.0), 1e-9)
+        // Descending inputs keep the outer slope too.
+        assertEquals(3.0, PamDragMath.extrapolate(listOf(100.0, 0.0), listOf(2.0, 1.0), 200.0), 1e-9)
+    }
+
+    @Test
     fun dragReleaseChoosesAdjacentSnapByDistanceOrVelocity() {
         val story = listOf(0.0, 1_600.0)
         // Below both thresholds: spring back.

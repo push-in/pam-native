@@ -10,6 +10,10 @@ struct PamDragDriver: Equatable {
     let property: PamMotionProperty
     let input: [PamMotionValue]
     let output: [PamMotionValue]
+    /// Raw driver (`driveRaw` / `driveUnbounded`): reads the finger
+    /// translation before bounds and rubber band and extrapolates past the
+    /// first and last points instead of clamping.
+    var raw: Bool = false
 }
 
 struct PamDragSettle: Equatable {
@@ -47,8 +51,9 @@ struct PamDragSettle: Equatable {
 }
 
 /// `key=value` lines: `axis`, `min`, `max`, `rubber`, `target`, `snaps`,
-/// `settle`, `settle.<i>`, `threshold`, `velocity`, `haptic`, `group` and
-/// repeated `drive=<ref>|<property>|<inputs>|<outputs>`.
+/// `settle`, `settle.<i>`, `threshold`, `velocity`, `haptic`, `group`,
+/// `driveUnbounded` and repeated `drive=<ref>|<property>|<inputs>|<outputs>`
+/// / `driveRaw=` (same fields).
 struct PamDragConfig: Equatable {
     let horizontal: Bool
     let min: Double?
@@ -84,8 +89,8 @@ struct PamDragConfig: Equatable {
             let line = raw.trimmingCharacters(in: .whitespaces)
             let parts = line.split(separator: "=", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
-            if parts[0] == "drive" {
-                if let driver = parseDriver(parts[1]) { drivers.append(driver) }
+            if parts[0] == "drive" || parts[0] == "driveRaw" {
+                if let driver = parseDriver(parts[1], raw: parts[0] == "driveRaw") { drivers.append(driver) }
             } else if parts[0] == "text" {
                 if let driver = PamDragTextDriver.parse(parts[1]) { textDrivers.append(driver) }
             } else {
@@ -123,14 +128,18 @@ struct PamDragConfig: Equatable {
             velocity: Swift.max(Double(values["velocity"] ?? "") ?? 0, 0),
             haptic: values["haptic"] == "1",
             group: values["group"] ?? "",
-            drivers: Array(drivers.prefix(16)),
+            drivers: Array(drivers.prefix(16)).map { driver in
+                var copy = driver
+                if values["driveUnbounded"] == "1" { copy.raw = true }
+                return copy
+            },
             textDrivers: Array(textDrivers.prefix(8)),
             touchInset: finite("touch"),
             snapOnRelease: values["snapOnRelease"] != "0"
         )
     }
 
-    private static func parseDriver(_ source: String) -> PamDragDriver? {
+    private static func parseDriver(_ source: String, raw: Bool) -> PamDragDriver? {
         let parts = source.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
         guard parts.count == 4, let property = PamMotionProperty.parse(parts[1]) else { return nil }
         var input: [PamMotionValue] = []
@@ -144,7 +153,7 @@ struct PamDragConfig: Equatable {
             output.append(value)
         }
         guard input.count >= 2, input.count == output.count, input.count <= 8 else { return nil }
-        return PamDragDriver(ref: parts[0], property: property, input: input, output: output)
+        return PamDragDriver(ref: parts[0], property: property, input: input, output: output, raw: raw)
     }
 }
 
@@ -199,6 +208,27 @@ enum PamDragMath {
         return ys.last!
     }
 
+    /// Piecewise-linear like `interpolate`, but past the first/last point it
+    /// continues the slope of the outer segment instead of clamping.
+    static func extrapolate(_ input: [Double], _ output: [Double], _ value: Double) -> Double {
+        guard input.count >= 2 else { return output.first ?? value }
+        let ascending = input.first! <= input.last!
+        let xs = ascending ? input : input.reversed()
+        let ys = ascending ? output : output.reversed()
+        let last = xs.count - 1
+        let x0: Double, x1: Double, y0: Double, y1: Double
+        if value < xs[0] {
+            (x0, x1, y0, y1) = (xs[0], xs[1], ys[0], ys[1])
+        } else if value > xs[last] {
+            (x0, x1, y0, y1) = (xs[last - 1], xs[last], ys[last - 1], ys[last])
+        } else {
+            return interpolate(input, output, value)
+        }
+        let span = x1 - x0
+        if span == 0 { return value < xs[0] ? ys[0] : ys[last] }
+        return y0 + (y1 - y0) * (value - x0) / span
+    }
+
     private static func sign(_ value: Double) -> Double {
         value > 0 ? 1 : (value < 0 ? -1 : 0)
     }
@@ -230,6 +260,8 @@ final class PamDragController {
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     private var releasing = false
     private var releaseSettle: (() -> Void)?
+    /// Finger translation before bounds/rubber while dragging; nil = follow the position.
+    private var rawPosition: Double?
 
     var currentIndex: Int { restingIndex }
 
@@ -280,6 +312,7 @@ final class PamDragController {
             max: current.max,
             rubber: current.rubber
         )
+        rawPosition = startPosition + delta
         write(target, current, bounded)
         let snaps = snapPositions(target, current)
         let originPosition = snaps.indices.contains(origin) ? snaps[origin] : 0
@@ -295,6 +328,7 @@ final class PamDragController {
     /// after the gesture end has been delivered: settle never precedes end.
     func end(velocity: CGPoint, cancelled: Bool) -> PamDragRelease? {
         releasing = true
+        rawPosition = nil
         defer { releasing = false }
         return release(velocity: velocity, cancelled: cancelled)
     }
@@ -400,6 +434,7 @@ final class PamDragController {
     private func applyDrivers(_ target: UIView, _ current: PamDragConfig) {
         guard !current.drivers.isEmpty || !current.textDrivers.isEmpty, let host else { return }
         let position = read(target, current)
+        let rawValue = rawPosition ?? position
         let size = PamMotionTarget.size(of: target)
         let extent = Double(current.horizontal ? size.width : size.height)
         for driver in current.drivers {
@@ -407,7 +442,10 @@ final class PamDragController {
             guard let view else { continue }
             let input = driver.input.map { $0.percent ? extent * $0.number / 100 : $0.number }
             let output = driver.output.map { PamMotionTarget.resolve(view, driver.property, $0) }
-            PamMotionTarget.write(view, driver.property, PamDragMath.interpolate(input, output, position))
+            let value = driver.raw
+                ? PamDragMath.extrapolate(input, output, rawValue)
+                : PamDragMath.interpolate(input, output, position)
+            PamMotionTarget.write(view, driver.property, value)
         }
         for driver in current.textDrivers {
             guard let view = host.pamFindNativeRef(driver.ref) as? UILabel else { continue }

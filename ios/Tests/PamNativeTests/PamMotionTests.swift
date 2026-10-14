@@ -115,6 +115,21 @@ final class PamMotionTests: XCTestCase {
         XCTAssertNil(PamDragConfig.parse("axis=z"))
     }
 
+    func testDragRawDriversExtrapolatePastTheirPoints() throws {
+        let config = try XCTUnwrap(PamDragConfig.parse([
+            "axis=y", "min=0", "max=0", "snaps=0",
+            "drive=|opacity|0,100|1,0", "driveRaw=hero|scale|0,100|1,2",
+        ].joined(separator: "\n")))
+        XCTAssertEqual(config.drivers.map(\.raw), [false, true])
+        let unbounded = try XCTUnwrap(PamDragConfig.parse("axis=y\ndriveUnbounded=1\ndrive=|scale|0,100|1,2"))
+        XCTAssertEqual(unbounded.drivers.map(\.raw), [true])
+        XCTAssertEqual(PamDragMath.extrapolate([0, 100], [1, 2], 200), 3, accuracy: 1e-9)
+        XCTAssertEqual(PamDragMath.extrapolate([0, 100], [1, 2], -50), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(PamDragMath.extrapolate([0, 100], [1, 2], 50), 1.5, accuracy: 1e-9)
+        XCTAssertEqual(PamDragMath.interpolate([0, 100], [1, 2], 200), 2, accuracy: 1e-9)
+        XCTAssertEqual(PamDragMath.extrapolate([100, 0], [2, 1], 200), 3, accuracy: 1e-9)
+    }
+
     func testDragReleaseChoosesAdjacentSnapByDistanceOrVelocity() {
         let story: [Double] = [0, 1_600]
         XCTAssertEqual(PamDragMath.release(story, origin: 0, position: 80, velocity: 200, threshold: 120, velocityThreshold: 900), 0)

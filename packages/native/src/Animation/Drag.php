@@ -55,6 +55,7 @@ final readonly class Drag implements Stringable
         private array $textDrivers = [],
         private ?float $touchInset = null,
         private bool $snapOnRelease = true,
+        private bool $unbounded = false,
     ) {
     }
 
@@ -92,6 +93,7 @@ final readonly class Drag implements Stringable
             $this->textDrivers,
             $this->touchInset,
             $this->snapOnRelease,
+            $this->unbounded,
         );
     }
 
@@ -169,17 +171,44 @@ final readonly class Drag implements Stringable
      */
     public function drive(string $ref, string $property, array $input, array $output): self
     {
+        return $this->with(drivers: [...$this->drivers, $this->driver($ref, $property, $input, $output)]);
+    }
+
+    /**
+     * Like {@see drive()}, but reads the raw finger translation (before
+     * `bounds()` and `rubberBand()`) and extrapolates past the first and last
+     * points instead of clamping, so the property keeps following the finger
+     * beyond the limits (pull-to-zoom headers, overscroll stretch).
+     *
+     * @param list<float|int|string> $input
+     * @param list<float|int|string> $output
+     */
+    public function driveRaw(string $ref, string $property, array $input, array $output): self
+    {
+        return $this->with(drivers: [...$this->drivers, '!'.$this->driver($ref, $property, $input, $output)]);
+    }
+
+    /** Every `drive()` driver of this drag behaves like {@see driveRaw()}. */
+    public function driveUnbounded(bool $enabled = true): self
+    {
+        return $this->with(unbounded: $enabled);
+    }
+
+    /**
+     * @param list<float|int|string> $input
+     * @param list<float|int|string> $output
+     */
+    private function driver(string $ref, string $property, array $input, array $output): string
+    {
         if (count($input) < 2 || count($input) !== count($output) || count($input) > 8) {
             throw new InvalidArgumentException('Drag drivers need 2-8 matching input and output points.');
         }
         if (count($this->drivers) >= 16) {
             throw new InvalidArgumentException('Drags support up to 16 drivers.');
         }
-        $driver = ($ref === '' ? '' : self::ref($ref)).'|'.Motion::property($property).'|'
+        return ($ref === '' ? '' : self::ref($ref)).'|'.Motion::property($property).'|'
             .implode(',', array_map(Motion::value(...), $input)).'|'
             .implode(',', array_map(Motion::value(...), $output));
-
-        return $this->with(drivers: [...$this->drivers, $driver]);
     }
 
     /** Anchor translation to the pointer inside the detector, for continuous controls. */
@@ -235,8 +264,9 @@ final readonly class Drag implements Stringable
         if ($this->velocity > 0) $lines[] = 'velocity='.Motion::number($this->velocity);
         if ($this->haptic) $lines[] = 'haptic=1';
         if ($this->group !== '') $lines[] = 'group='.$this->group;
+        if ($this->unbounded) $lines[] = 'driveUnbounded=1';
         foreach ($this->drivers as $driver) {
-            $lines[] = 'drive='.$driver;
+            $lines[] = str_starts_with($driver, '!') ? 'driveRaw='.substr($driver, 1) : 'drive='.$driver;
         }
         foreach ($this->textDrivers as $driver) $lines[] = 'text='.$driver;
 
@@ -312,6 +342,7 @@ final readonly class Drag implements Stringable
         ?array $textDrivers = null,
         ?float $touchInset = null,
         ?bool $snapOnRelease = null,
+        ?bool $unbounded = null,
     ): self {
         return new self(
             $this->horizontal,
@@ -330,6 +361,7 @@ final readonly class Drag implements Stringable
             $textDrivers ?? $this->textDrivers,
             $touchInset ?? $this->touchInset,
             $snapOnRelease ?? $this->snapOnRelease,
+            $unbounded ?? $this->unbounded,
         );
     }
 }

@@ -152,6 +152,16 @@ $assert(
     ]),
     'Story drag-to-dismiss must encode bounds, snaps, thresholds, settles and drivers.',
 );
+$assert(
+    Drag::vertical()->bounds(0, 0)->drive('', 'opacity', [0, 100], [1, 0])
+        ->driveRaw('hero', 'scale', [0, 100], [1, 2])->encode() === implode("\n", [
+            'axis=y', 'min=0', 'max=0', 'snaps=0', 'settle=spring:260:22:1',
+            'drive=|opacity|0,100|1,0', 'driveRaw=hero|scale|0,100|1,2',
+        ])
+        && str_contains(Drag::horizontal()->driveUnbounded()->drive('', 'scale', [0, 1], [1, 2])->encode(), "driveUnbounded=1\ndrive=|scale|0,1|1,2")
+        && !str_contains(Drag::horizontal()->driveUnbounded()->driveUnbounded(false)->encode(), 'driveUnbounded'),
+    'Raw drivers must encode as driveRaw lines and driveUnbounded as a flag.',
+);
 $detector = GestureDetector::make(GestureType::Pan, View::make())
     ->drag($storyDrag)
     ->snapTo(0, 3)

@@ -13,6 +13,12 @@ internal data class PamDragDriver(
     val property: PamMotionProperty,
     val input: List<PamMotionValue>,
     val output: List<PamMotionValue>,
+    /**
+     * Raw driver (`driveRaw` / `driveUnbounded`): reads the finger
+     * translation before bounds and rubber band, and extrapolates past the
+     * first and last points instead of clamping.
+     */
+    val raw: Boolean = false,
 )
 
 /** Settle animation used when a drag releases onto a snap point. */
@@ -50,8 +56,8 @@ internal data class PamDragSettle(
 /**
  * Text drag contract (`key=value` lines):
  * `axis`, `min`, `max`, `rubber`, `target`, `snaps`, `settle`, `settle.<i>`,
- * `threshold`, `velocity`, `haptic`, `group` and repeated
- * `drive=<ref>|<property>|<inputs>|<outputs>`.
+ * `threshold`, `velocity`, `haptic`, `group`, `driveUnbounded` and repeated
+ * `drive=<ref>|<property>|<inputs>|<outputs>` / `driveRaw=` (same fields).
  */
 internal data class PamDragConfig(
     val horizontal: Boolean,
@@ -89,8 +95,8 @@ internal data class PamDragConfig(
             for (line in source.split('\n', ';').map(String::trim).filter(String::isNotEmpty)) {
                 val parts = line.split('=', limit = 2)
                 if (parts.size != 2) continue
-                if (parts[0] == "drive") {
-                    parseDriver(parts[1])?.let(drivers::add)
+                if (parts[0] == "drive" || parts[0] == "driveRaw") {
+                    parseDriver(parts[1], raw = parts[0] == "driveRaw")?.let(drivers::add)
                 } else if (parts[0] == "text") {
                     PamDragTextDriver.parse(parts[1])?.let(textDrivers::add)
                 } else {
@@ -124,21 +130,23 @@ internal data class PamDragConfig(
                 velocity = (values["velocity"]?.toDoubleOrNull() ?: 0.0).coerceAtLeast(0.0),
                 haptic = values["haptic"] == "1",
                 group = values["group"].orEmpty(),
-                drivers = drivers.take(16),
+                drivers = drivers.take(16).let { list ->
+                    if (values["driveUnbounded"] == "1") list.map { it.copy(raw = true) } else list
+                },
                 textDrivers = textDrivers.take(8),
                 touchInset = values["touch"]?.toDoubleOrNull()?.takeIf(Double::isFinite),
                 snapOnRelease = values["snapOnRelease"] != "0",
             )
         }
 
-        private fun parseDriver(source: String): PamDragDriver? {
+        private fun parseDriver(source: String, raw: Boolean): PamDragDriver? {
             val parts = source.split('|')
             if (parts.size != 4) return null
             val property = PamMotionProperty.parse(parts[1]) ?: return null
             val input = parts[2].split(',').map { PamMotionValue.parse(it.trim()) ?: return null }
             val output = parts[3].split(',').map { PamMotionValue.parse(it.trim()) ?: return null }
             if (input.size < 2 || input.size != output.size || input.size > 8) return null
-            return PamDragDriver(parts[0], property, input, output)
+            return PamDragDriver(parts[0], property, input, output, raw)
         }
     }
 }
@@ -199,6 +207,26 @@ internal object PamDragMath {
         }
         return ys.last()
     }
+
+    /**
+     * Piecewise-linear like [interpolate], but past the first/last point it
+     * continues the slope of the outer segment instead of clamping.
+     */
+    fun extrapolate(input: List<Double>, output: List<Double>, value: Double): Double {
+        if (input.size < 2) return output.firstOrNull() ?: value
+        val ascending = input.first() <= input.last()
+        val xs = if (ascending) input else input.reversed()
+        val ys = if (ascending) output else output.reversed()
+        val last = xs.size - 1
+        val (x0, x1, y0, y1) = when {
+            value < xs.first() -> listOf(xs[0], xs[1], ys[0], ys[1])
+            value > xs.last() -> listOf(xs[last - 1], xs[last], ys[last - 1], ys[last])
+            else -> return interpolate(input, output, value)
+        }
+        val span = x1 - x0
+        if (span == 0.0) return if (value < xs.first()) ys.first() else ys.last()
+        return y0 + (y1 - y0) * (value - x0) / span
+    }
 }
 
 internal data class PamDragRelease(val snapIndex: Int, val thresholdReached: Boolean)
@@ -217,6 +245,8 @@ internal class PamDragController(private val host: ViewGroup) {
     private var thresholdReached = false
     private var runner: PamMotionRunner? = null
     private var lastPosition = 0.0
+    /** Finger translation before bounds/rubber while dragging; null = follow the position. */
+    private var rawPx: Double? = null
     private var releasing = false
     private var releaseSettle: (() -> Unit)? = null
 
@@ -263,6 +293,7 @@ internal class PamDragController(private val host: ViewGroup) {
             current.max?.times(density),
             current.rubber,
         )
+        rawPx = raw
         write(target, current, bounded)
         val snaps = snapPixels(target, current)
         val reached = current.threshold > 0.0 &&
@@ -282,6 +313,7 @@ internal class PamDragController(private val host: ViewGroup) {
      */
     fun end(velocityX: Float, velocityY: Float, cancelled: Boolean): PamDragRelease? {
         releasing = true
+        rawPx = null
         try {
             return release(velocityX, velocityY, cancelled)
         } finally {
@@ -395,12 +427,18 @@ internal class PamDragController(private val host: ViewGroup) {
         if (current.drivers.isEmpty() && current.textDrivers.isEmpty()) return
         val density = density()
         val positionDp = read(target, current) / density
+        val rawDp = rawPx?.div(density) ?: positionDp
         val extentDp = (if (current.horizontal) target.width else target.height) / density
         for (driver in current.drivers) {
             val view = if (driver.ref.isEmpty()) target else findRef(host, driver.ref) ?: continue
             val input = driver.input.map { if (it.percent) extentDp * it.number / 100.0 else it.number }
             val output = driver.output.map { PamMotionTarget.resolve(view, driver.property, it) }
-            PamMotionTarget.write(view, driver.property, PamDragMath.interpolate(input, output, positionDp))
+            val value = if (driver.raw) {
+                PamDragMath.extrapolate(input, output, rawDp)
+            } else {
+                PamDragMath.interpolate(input, output, positionDp)
+            }
+            PamMotionTarget.write(view, driver.property, value)
         }
         for (driver in current.textDrivers) {
             val view = findRef(host, driver.ref) as? TextView ?: continue
