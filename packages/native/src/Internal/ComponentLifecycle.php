@@ -8,6 +8,7 @@ use Closure;
 use Pam\Native\AppState;
 use Pam\Native\Component;
 use Pam\Native\Element;
+use Pam\Native\HotReload\ComponentStatePreserver;
 use WeakMap;
 
 use function count;
@@ -35,6 +36,12 @@ final class ComponentLifecycle
 
     /** @var list<array{depth: int, components: list<Component>}> */
     private static array $captures = [];
+
+    /** @var WeakMap<Component, string>|null Tree keys of components mounted while hot reload restores state. */
+    private static ?WeakMap $hotKeys = null;
+
+    /** @var array<class-string, int> */
+    private static array $hotRoots = [];
 
     private function __construct()
     {
@@ -76,6 +83,7 @@ final class ComponentLifecycle
     {
         $states = self::$states ??= new WeakMap();
         $state = $states[$component] ?? null;
+        $created = $state === null;
         if ($state === null) {
             $state = new ComponentLifecycleState();
             $state->sequence = ++self::$sequence;
@@ -90,6 +98,9 @@ final class ComponentLifecycle
         if ($parent !== null && $parent !== $component) {
             self::addChild($parent, $component);
         }
+        $hotKey = $created && ComponentStatePreserver::restoring()
+            ? self::hotKey($parent === $component ? null : $parent, $component)
+            : null;
         if (self::$captures !== []) {
             $capture = count(self::$captures) - 1;
             if (self::$captures[$capture]['depth'] === count(self::$renderStack)) {
@@ -110,6 +121,10 @@ final class ComponentLifecycle
                 $state->setup = true;
             }
             if (!$state->mounted) {
+                if ($hotKey !== null) {
+                    // Like Fast Refresh: mount() and effects run again, on the preserved state.
+                    ComponentStatePreserver::restore($component, $hotKey);
+                }
                 $component->mount();
                 $state->mounted = true;
             }
@@ -118,6 +133,101 @@ final class ComponentLifecycle
             array_pop(self::$renderStack);
 
             throw $error;
+        }
+    }
+
+    /**
+     * Position of a component in the tree: `Class#n` segments from the root,
+     * `n` counting same-class siblings in render order. The same code renders
+     * the same keys, so state survives a hot reload; a structural edit above
+     * a component changes its key and it starts fresh.
+     */
+    private static function hotKey(?Component $parent, Component $component): ?string
+    {
+        $class = $component::class;
+        if ($parent === null) {
+            $index = self::$hotRoots[$class] = (self::$hotRoots[$class] ?? -1) + 1;
+            $key = $class.'#'.$index;
+        } else {
+            $parentKey = self::$hotKeys[$parent] ?? null;
+            if ($parentKey === null) {
+                return null;
+            }
+            $index = -1;
+            foreach (self::$children[$parent]->children ?? [] as $sibling) {
+                if ($sibling::class === $class) {
+                    $index++;
+                }
+                if ($sibling === $component) {
+                    break;
+                }
+            }
+            $key = $parentKey.'/'.$class.'#'.max(0, $index);
+        }
+        $keys = self::$hotKeys ??= new WeakMap();
+        $keys[$component] = $key;
+
+        return $key;
+    }
+
+    /**
+     * Hot reload: records the `#[State]` of every mounted component under its
+     * tree key (see hotKey()), right before the request shuts down.
+     */
+    public static function checkpointHotReload(): int
+    {
+        $states = self::$states;
+        if ($states === null) {
+            return ComponentStatePreserver::checkpoint([]);
+        }
+        $children = new WeakMap();
+        foreach (self::$children ?? [] as $holder) {
+            foreach ($holder->children as $child) {
+                $children[$child] = true;
+            }
+        }
+        $roots = [];
+        foreach ($states as $component => $state) {
+            if ($state->mounted && !isset($children[$component])) {
+                $roots[$state->sequence] = $component;
+            }
+        }
+        ksort($roots);
+        $keyed = [];
+        $visited = new WeakMap();
+        $rootIndexes = [];
+        foreach ($roots as $root) {
+            $index = $rootIndexes[$root::class] = ($rootIndexes[$root::class] ?? -1) + 1;
+            self::collectHotKeys($root, $root::class.'#'.$index, $keyed, $visited, 0);
+        }
+
+        return ComponentStatePreserver::checkpoint($keyed);
+    }
+
+    /**
+     * @param array<string, Component> $keyed
+     * @param WeakMap<Component, true> $visited
+     */
+    private static function collectHotKeys(
+        Component $component,
+        string $key,
+        array &$keyed,
+        WeakMap $visited,
+        int $depth,
+    ): void {
+        if ($depth > 256 || isset($visited[$component])) {
+            return;
+        }
+        $visited[$component] = true;
+        $state = self::$states[$component] ?? null;
+        if ($state === null || !$state->mounted) {
+            return;
+        }
+        $keyed[$key] = $component;
+        $indexes = [];
+        foreach (self::$children[$component]->children ?? [] as $child) {
+            $index = $indexes[$child::class] = ($indexes[$child::class] ?? -1) + 1;
+            self::collectHotKeys($child, $key.'/'.$child::class.'#'.$index, $keyed, $visited, $depth + 1);
         }
     }
 
@@ -451,6 +561,9 @@ final class ComponentLifecycle
 
         self::$states = null;
         self::$children = null;
+        self::$hotKeys = null;
+        self::$hotRoots = [];
+        ComponentStatePreserver::reset();
         self::$commitQueue = [];
         self::$queueSorted = true;
         self::$renderStack = [];

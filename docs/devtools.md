@@ -85,18 +85,115 @@ Use the overlay alongside `pam mobile benchmark` and `pam mobile profile`.
 The overlay helps identify an expensive interactive path; the benchmark and
 baseline-profile commands provide repeatable evidence suitable for CI.
 
-## Android hot reload
+## Hot reload (`pam dev`)
 
-From 1.22.3, hot reload keeps the current and incoming bundles until the native
-worker confirms that the previous PHP request has shut down. Shutdown handlers
-can still autoload classes from the old bundle. The client waits for that
-confirmation before processing another version and removes obsolete bundles
-only afterward. Reattaching an Activity reuses an existing immutable bundle.
+`pam dev` builds and installs the debug host once, then keeps a sync server
+running. Editing any bundled file (`.pam.php`, PHP classes, styles, assets,
+`vendor/` after `composer update`) swaps the changed files on the device and
+restarts the PHP request in the same process. No size limit applies: a large
+application (the first sync of Zé Chat is about 2,100 files and 17 MiB of
+sources) works the same as a small one.
 
-No application changes are required. Regenerate the Android host with `pam dev`
-after updating the SDK. When validating development reloads, wait for the new
-server's ready status, edit a source file, observe the changed screen, restore
-the file and observe the restored screen in the same application process.
+How it works:
+
+1. The CLI indexes the project (same files and exclusions as a build) into a
+   manifest of `SHA-256, size, path`. Unchanged files are not read again; the
+   project is polled every 100 ms, and `vendor/` is re-indexed when
+   `vendor/composer/installed.json` changes.
+2. The device long-polls `/status`. The first sync downloads the manifest and
+   only the files it does not already hold: files of the bundle it booted
+   from and the APK assets are verified by digest and reused, the rest stream
+   to disk in one response.
+3. Later saves arrive in the same long-poll response: the version, a delta
+   manifest and the edited files (one round trip). Only the edited files are
+   sent; `vendor/` is sent only when it changed.
+4. The device writes into a stable tree (`files/pam/dev/live`). The previous
+   PHP request shuts down first (its lazy autoloads still see the old files);
+   the edited files are swapped in place before the next request starts.
+   Stable paths keep OPcache and the component compile cache warm, so only the
+   edited files recompile. Each written file gets a strictly newer
+   modification second, so two saves in one second never serve stale code.
+5. The navigation state is restored as usual (persisted navigators and
+   `Restorable` components), and **component state survives the reload**
+   (Fast Refresh): right before the old request shuts down, the `#[State]`
+   properties of every mounted component are recorded by tree position
+   (class and index among same-class siblings). A component of the same class
+   at the same position gets them back before its `mount()` runs, so
+   `mount()` and effects see the preserved state. Props, services, objects
+   and plain fields are never carried over; a structural edit above a
+   component, a changed class, or a value the new property type rejects makes
+   it start fresh. A screen whose `mount()` resets its fields starts with
+   `mount()`'s values. Snapshots are consumed by the next request and expire
+   after 5 s, so a cold start never restores development state.
+
+The terminal reports every step:
+
+```text
+Android sync: indexed 2108 files (16.8 MiB) in 464 ms; the device fetches only files it does not hold
+Android change e7a2501762af: 1 file changed (src/Components/Inbox/InboxHeader.pam.php), 8.0 KiB to send, indexed in 42 ms
+Android sync: sent 1 file (8.0 KiB) in 0 ms
+Android reload e7a2501762af: screen updated in 305 ms, 1 file (8.0 KiB) applied; change to screen 531 ms
+```
+
+`screen updated` is measured on the device (new version received to first
+committed frame); `change to screen` adds indexing and transport, from the
+moment the CLI saw the change. Saving a syntax error or throwing exception
+opens the error overlay without closing the app (`... failed after N ms`);
+the next good save clears it and renders the fixed code.
+
+Transport:
+
+- The device always connects to `127.0.0.1:39100`; `adb reverse` maps it to
+  the host port (`PAM_NATIVE_ANDROID_DEV_PORT`, default 39100). This works the
+  same over USB and over adb Wi-Fi (`adb pair` / `adb connect`, or the
+  `adb-tls-connect` mDNS transports). Select a device with `ANDROID_SERIAL`.
+- When the device goes silent the CLI checks `adb reverse --list` every 3 s
+  and restores the mapping after a cable replug, an adb server restart or a
+  Wi-Fi reconnect. The device client retries with a short backoff
+  (0.3 s to 2 s) and resumes on its own.
+- `pam native dev:serve .` runs only the sync server for a debug app that is
+  already installed (no Gradle build, no reinstall), for example after
+  restarting the terminal. Set `PAM_NATIVE_DEV_NO_ADB=1` to skip `adb`
+  entirely (the end-to-end test does this).
+
+Restart `pam dev` (native rebuild) after adding plugins, permissions, native
+modules or changing `pam-native.json`; the CLI prints a note when those files
+change. Device logcat uses the `PamNativeHotReload` tag.
+
+Measured on a Galaxy S10 over adb Wi-Fi with Zé Chat (2,108 files), editing a
+visible title: device `screen updated` 234 to 374 ms, CLI `change to screen`
+368 to 847 ms (median about 530 ms), plus up to 100 ms of file polling.
+The first switch to the development tree after installing compiles every
+component once (about 5 s); after that a cold app start switches in under
+1 s.
+
+### Protocol
+
+`crates/pam-native-cli/src/dev_sync.rs` documents the HTTP endpoints
+(`/status`, `/manifest`, `/objects`, `/reloaded`) and the `PNM1`, `PNMD1`,
+`PNO1` and `PNS1` formats. Android implements the client in
+`HotReloadClient.kt` and `HotReloadStore.kt`, iOS in `PamHotReload.swift`
+and `PamHotReloadStore.swift`.
+
+### iOS simulator checklist (Mac)
+
+The iOS client shares the protocol and layout (`Caches/pam/dev/live`) and
+applies edits between two PHP requests through
+`pam_native_runtime_reload_prepared`. It was written without a Mac; validate
+it there before relying on it:
+
+1. `swift test --package-path ios --filter 'PamHotReload'` passes
+   (`PamHotReloadTests`, `PamHotReloadStoreTests`).
+2. `pam ios:dev .` on a booted simulator prints `iOS sync: indexed ...` and
+   the app switches to `live/` (`iOS reload ...: screen updated`).
+3. Edit a visible text: one file is sent, the screen changes within 1 s and
+   `#[State]` (for example a selected filter) is kept.
+4. Save a syntax error: the error overlay opens and the app keeps running;
+   fix it and the overlay clears by itself.
+5. Restore the file, stop with Ctrl+C, run `pam native dev:serve .` with the
+   app still open: it reconnects without reinstalling.
+6. Check `Caches/pam/dev` holds only `live/` and `live.manifest` after a
+   reload (old per-version directories are removed).
 
 ## iOS
 

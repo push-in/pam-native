@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased - hot reload for large apps
+
+- `pam dev` hot reload has no bundle size limit anymore. The CLI serves a
+  content-addressed manifest; the first sync streams only the files the
+  device lacks (files of the installed bundle and APK assets are verified and
+  reused), and every later save arrives as a one-round-trip delta with only
+  the edited files. `vendor/` is resent only when Composer changed it.
+- Edits are applied in place to a stable development tree between two PHP
+  requests, keeping OPcache and the component compile cache warm: editing a
+  `.pam.php` file in Zé Chat (2,100 files) updates the S10 screen in about
+  300 ms on the device and about 0.5 s from save.
+- Fast Refresh: `#[State]` of mounted components survives a hot reload by
+  tree position and is restored before `mount()`; props, objects and plain
+  fields start fresh, and snapshots never reach a cold start.
+- Long-polling replaces 300 ms polling; the CLI restores `adb reverse` after
+  USB/Wi-Fi/adb reconnects and the device client resumes by itself.
+- Terminal logs name the changed files, bytes sent, device reload time and
+  change-to-screen time. New `pam native dev:serve` serves an installed app
+  without rebuilding.
+- Syntax errors and exceptions keep showing the error overlay without closing
+  the app and clear on the next good save.
+- iOS simulator client, bridge (`pam_native_runtime_reload_prepared`) and
+  XCTest sources follow the same protocol; see the Mac checklist in
+  docs/devtools.md.
+- Tests: CLI protocol and scanner tests, Android JVM store tests, PHP state
+  preservation tests and `scripts/test_hot_reload_large_app.py` (end-to-end,
+  35 MiB generated app).
+
 ## 1.39.3 - 2026-10-13
 
 - Pull to refresh with RN `RefreshControl` behavior straight on `ScrollView`,

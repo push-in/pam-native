@@ -84,6 +84,7 @@ class PamRuntime(
     private val pendingEvents = LinkedHashMap<EventIdentity, ByteArray>()
     private val hotReloadLatency = HotReloadLatency()
     private val reloadReleases = mutableMapOf<String, () -> Unit>()
+    private val reloadPreparations = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
     private var frameScheduled = false
     private var readyForEvents = false
 
@@ -481,16 +482,18 @@ class PamRuntime(
     fun reload(
         entryPath: String,
         confirmedAtNanos: Long? = null,
-        bundleBytes: Int = 0,
+        transferredBytes: Long = 0,
         previousRequestReleased: (() -> Unit)? = null,
+        beforeNextRequest: (() -> Unit)? = null,
     ) {
         synchronized(handleLock) {
             val active = handle
             if (active != 0L) {
                 if (confirmedAtNanos != null) {
-                    hotReloadLatency.begin(confirmedAtNanos, bundleBytes)
+                    hotReloadLatency.begin(confirmedAtNanos, transferredBytes)
                 }
                 if (previousRequestReleased != null) reloadReleases[entryPath] = previousRequestReleased
+                if (beforeNextRequest != null) reloadPreparations[entryPath] = beforeNextRequest
                 readyForEvents = false
                 modules.prepareReload()
                 nativeReload(active, entryPath)
@@ -498,8 +501,18 @@ class PamRuntime(
         }
     }
 
-    @Suppress("unused") // JNI: shutdown has finished, including lazy PHP autoloads.
+    /**
+     * JNI, on the PHP worker: the previous request has shut down (including
+     * lazy autoloads) and the next one has not started. Hot reload swaps the
+     * edited files of the stable development tree here.
+     */
+    @Suppress("unused")
     private fun onNativeRequestReleased(entryPath: String) {
+        reloadPreparations.remove(entryPath)?.let { prepare ->
+            runCatching(prepare).onFailure { error ->
+                onNativeError("Hot reload could not apply the edited files: ${error.message}")
+            }
+        }
         main.post { reloadReleases.remove(entryPath)?.invoke() }
     }
 
@@ -545,6 +558,7 @@ class PamRuntime(
         }
         main.removeCallbacksAndMessages(null)
         reloadReleases.clear()
+        reloadPreparations.clear()
         choreographer.removeFrameCallback(frameCallback)
         main.removeCallbacks(commitAfterFrame)
         commitAfterFrameScheduled = false
@@ -1046,7 +1060,7 @@ class PamRuntime(
                 label = if (failed) "confirmed version to failure" else "confirmed version to first frame",
                 durationNanos = timing.durationNanos,
                 failed = timing.failed,
-                requestBytes = timing.bundleBytes,
+                requestBytes = timing.bundleBytes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
             )
         )
     }

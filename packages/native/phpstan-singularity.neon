@@ -18,6 +18,7 @@ parameters:
         - src/Scheduling/TaskGroup.php
         - src/Attributes/Action.php
         - src/Attributes/Event.php
+        - src/Attributes/State.php
         - src/Attributes/Slot.php
         - src/Attributes/Tag.php
         - src/Internal/Language2StyleCompiler.php

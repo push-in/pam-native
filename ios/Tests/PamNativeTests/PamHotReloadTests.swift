@@ -26,14 +26,14 @@ final class PamHotReloadTests: XCTestCase {
         XCTAssertEqual(timing?.failed, true)
     }
 
-    func testRejectsInvalidMonotonicTimeAndBundleSizes() {
+    func testRejectsInvalidMonotonicTimeAndNegativeTransfers() throws {
         let latency = PamHotReloadLatency()
         XCTAssertThrowsError(try latency.begin(confirmedAtNanos: 0, bundleBytes: 1))
-        XCTAssertThrowsError(try latency.begin(confirmedAtNanos: 1, bundleBytes: 0))
-        XCTAssertThrowsError(try latency.begin(
-            confirmedAtNanos: 1,
-            bundleBytes: PamHotReloadClient.maximumBundleBytes + 1
-        ))
+        XCTAssertThrowsError(try latency.begin(confirmedAtNanos: 1, bundleBytes: -1))
+        // Nothing downloaded and transfers beyond the former 16 MiB cap are valid.
+        try latency.begin(confirmedAtNanos: 1, bundleBytes: 0)
+        try latency.begin(confirmedAtNanos: 1, bundleBytes: 64 * 1024 * 1024)
+        XCTAssertEqual(latency.complete(completedAtNanos: 2, failed: false)?.bundleBytes, 64 * 1024 * 1024)
     }
 
     func testStatisticsReportsNearestRankP95AndFailureRate() throws {

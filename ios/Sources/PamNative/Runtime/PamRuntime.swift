@@ -949,13 +949,28 @@ public final class PamRuntime {
     }
 
     public func reload(entry: String) {
+        reload(entry: entry, betweenRequests: nil)
+    }
+
+    /// `betweenRequests` runs on the PHP worker after the previous request
+    /// shut down and before the next one starts (hot reload file swaps).
+    func reload(entry: String, betweenRequests: (() -> Void)?) {
         let currentHandle = currentHandle()
         guard !entry.isEmpty, currentHandle != 0 else {
+            betweenRequests?()
             return
         }
 
         entry.withCString { buffer in
-            pam_native_runtime_reload(currentHandle, buffer)
+            if let betweenRequests {
+                let context = Unmanaged.passRetained(PamReloadPreparation(betweenRequests)).toOpaque()
+                pam_native_runtime_reload_prepared(currentHandle, buffer, { context in
+                    guard let context else { return }
+                    Unmanaged<PamReloadPreparation>.fromOpaque(context).takeRetainedValue().run()
+                }, context)
+            } else {
+                pam_native_runtime_reload(currentHandle, buffer)
+            }
         }
         runtimeEntry = entry
         DispatchQueue.main.async { [weak self] in self?.errorOverlay.onRuntimeReload() }
@@ -977,17 +992,25 @@ public final class PamRuntime {
         let client = PamHotReloadClient(
             baseURL: baseURL,
             destination: destination,
+            initialEntryPath: runtimeEntry,
             onReload: { [weak self] receipt in
                 DispatchQueue.main.async {
-                    guard let self else { return }
+                    guard let self else {
+                        receipt.beforeNextRequest?()
+                        receipt.previousRequestReleased()
+                        return
+                    }
                     do {
                         try self.hotReloadLatency.begin(
                             confirmedAtNanos: receipt.confirmedAtNanos,
                             bundleBytes: receipt.bundleBytes
                         )
-                        self.reload(entry: receipt.entryPath)
                     } catch {
                         self.reportHotReload(failed: true, message: "invalid hot reload measurement")
+                    }
+                    self.reload(entry: receipt.entryPath) {
+                        receipt.beforeNextRequest?()
+                        receipt.previousRequestReleased()
                     }
                 }
             },
@@ -1668,6 +1691,23 @@ public final class PamRuntime {
             failed: timing.failed,
             responseBytes: timing.bundleBytes
         ))
+        stateLock.lock()
+        let client = hotReloadClient
+        stateLock.unlock()
+        client?.reportReloaded(durationNanos: timing.durationNanos, failed: timing.failed)
     }
 #endif
+}
+
+/// Boxes a Swift closure for the C reload-preparation callback.
+private final class PamReloadPreparation {
+    private let body: () -> Void
+
+    init(_ body: @escaping () -> Void) {
+        self.body = body
+    }
+
+    func run() {
+        body()
+    }
 }

@@ -251,7 +251,7 @@ internal class PamDevToolsOverlay(context: Context) : FrameLayout(context) {
             hotReloadStatistics.record(
                 HotReloadTiming(
                     durationNanos = diagnostic.durationNanos,
-                    bundleBytes = diagnostic.requestBytes ?: 0,
+                    bundleBytes = (diagnostic.requestBytes ?: 0).toLong(),
                     failed = diagnostic.failed,
                 ),
             )

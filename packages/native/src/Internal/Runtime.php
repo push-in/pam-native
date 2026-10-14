@@ -711,6 +711,20 @@ final class Runtime
         }
     }
 
+    /**
+     * Called by the native host right before a hot reload shuts this request
+     * down (never on a regular stop): records component state for the next
+     * request. Best effort; development only.
+     */
+    public static function checkpointHotReload(): void
+    {
+        try {
+            ComponentLifecycle::checkpointHotReload();
+        } catch (Throwable) {
+            // A broken request (the edit that is being fixed) simply restarts fresh.
+        }
+    }
+
     public static function shutdown(): void
     {
         self::$root = null;

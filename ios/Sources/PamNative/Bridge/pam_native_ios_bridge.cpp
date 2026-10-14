@@ -90,9 +90,29 @@ struct RuntimeState {
     std::thread worker;
 
     std::atomic<bool> stopping = false;
+
+    // Hot reload: runs between two PHP requests (see runtime_loop).
+    std::mutex reload_prepare_mutex;
+    PamNativeReloadPrepareCallback reload_prepare = nullptr;
+    void* reload_prepare_context = nullptr;
 };
 
 thread_local RuntimeState* active_runtime = nullptr;
+
+void run_reload_prepare(RuntimeState* state) {
+    PamNativeReloadPrepareCallback prepare = nullptr;
+    void* context = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(state->reload_prepare_mutex);
+        prepare = state->reload_prepare;
+        context = state->reload_prepare_context;
+        state->reload_prepare = nullptr;
+        state->reload_prepare_context = nullptr;
+    }
+    if (prepare != nullptr) {
+        prepare(context);
+    }
+}
 
 std::atomic<PamNativeMeasureTextCallback> host_text_measurer{nullptr};
 std::atomic<PamNativeCryptoCallback> host_crypto_provider{nullptr};
@@ -721,6 +741,14 @@ bool run_php_request(RuntimeState* state) {
 
     zval result;
     ZVAL_UNDEF(&result);
+    if (reload) {
+        // Hot reload: let PHP record component state (Fast Refresh style)
+        // while the old components are still mounted. Best effort only.
+        call_runtime("checkpointHotReload", 0, nullptr);
+        if (EG(exception)) {
+            zend_clear_exception();
+        }
+    }
     call_runtime("shutdown", 0, nullptr);
     if (!Z_ISUNDEF(result)) {
         zval_ptr_dtor(&result);
@@ -738,6 +766,9 @@ void runtime_loop(RuntimeState* state) {
         ) {
             log_debug("Restarting PHP request for hot reload.");
             php_request_shutdown(nullptr);
+            // The previous request (and its lazy autoloads) is gone: the
+            // hot reload client may now swap edited files in place.
+            run_reload_prepare(state);
             SG(request_info).argc = 2;
             SG(request_info).argv = state->php_arguments.data();
             if (php_request_startup() == FAILURE) {
@@ -754,6 +785,8 @@ void runtime_loop(RuntimeState* state) {
         }
         php_embed_shutdown();
     }
+    // Releases a preparation that never reached a request boundary.
+    run_reload_prepare(state);
     active_runtime = nullptr;
 }
 
@@ -1179,6 +1212,35 @@ void pam_native_runtime_remount(uint64_t handle, PamNativeBatchCallback on_remou
     }
     state->on_remount.store(on_remount);
     enqueue(state, Event{EventType::Remount, 0, 0, std::string()}, false);
+}
+
+void pam_native_runtime_reload_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+) {
+    RuntimeState* state = from_handle(handle);
+    if (state == nullptr || entry == nullptr) {
+        if (prepare != nullptr) {
+            prepare(context);
+        }
+        return;
+    }
+    PamNativeReloadPrepareCallback previous = nullptr;
+    void* previous_context = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(state->reload_prepare_mutex);
+        previous = state->reload_prepare;
+        previous_context = state->reload_prepare_context;
+        state->reload_prepare = prepare;
+        state->reload_prepare_context = context;
+    }
+    if (previous != nullptr) {
+        // Superseded before a request boundary: release it without waiting.
+        previous(previous_context);
+    }
+    enqueue(state, Event{EventType::Reload, 0, 0, std::string(entry)}, false);
 }
 
 void pam_native_runtime_reload(uint64_t handle, const char* entry) {

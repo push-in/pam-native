@@ -963,6 +963,14 @@ bool run_php_request(RuntimeState* state) {
 
     zval result;
     ZVAL_UNDEF(&result);
+    if (reload) {
+        // Hot reload: let PHP record component state (Fast Refresh style)
+        // while the old components are still mounted. Best effort only.
+        call_runtime("checkpointHotReload", 0, nullptr);
+        if (EG(exception)) {
+            zend_clear_exception();
+        }
+    }
     call_runtime("shutdown", 0, nullptr);
     return reload;
 }

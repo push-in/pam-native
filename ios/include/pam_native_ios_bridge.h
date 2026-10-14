@@ -190,6 +190,20 @@ void pam_native_runtime_dispatch_module_result(
 
 void pam_native_runtime_reload(uint64_t handle, const char* entry);
 
+/* Development hot reload into a stable tree. Like pam_native_runtime_reload,
+ * and `prepare(context)` runs once on the PHP worker after the previous
+ * request shut down (including lazy autoloads) and before the next request
+ * starts, so edited files can be swapped in place. If the runtime stops
+ * first, `prepare` still runs once while stopping so `context` is released. */
+typedef void (*PamNativeReloadPrepareCallback)(void* context);
+
+void pam_native_runtime_reload_prepared(
+    uint64_t handle,
+    const char* entry,
+    PamNativeReloadPrepareCallback prepare,
+    void* context
+);
+
 /*
  * Asks the runtime worker to publish the retained tree as a full mount for a
  * recreated host view. The batch arrives through `on_remount`, in order with

@@ -8032,6 +8032,7 @@ require __DIR__.'/singularity.php';
 require __DIR__.'/signals.php';
 require __DIR__.'/visual_dom.php';
 require __DIR__.'/memoization.php';
+require __DIR__.'/hot_reload_state.php';
 require __DIR__.'/appearance.php';
 require __DIR__.'/keyboard_visibility.php';
 require __DIR__.'/native_capabilities.php';

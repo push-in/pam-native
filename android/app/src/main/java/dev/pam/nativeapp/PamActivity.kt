@@ -192,7 +192,7 @@ class PamActivity : FragmentActivity() {
                 renderer = renderer,
                 reportError = { message -> handleRuntimeError(message) },
                 onFrameCommitted = onFrameCommitted,
-                onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
+                onDiagnostic = ::recordDiagnostic,
             )
         } else {
             runtime = PamRuntime(
@@ -200,7 +200,7 @@ class PamActivity : FragmentActivity() {
                 renderer = renderer,
                 reportError = { message -> handleRuntimeError(message) },
                 onFrameCommitted = onFrameCommitted,
-                onDiagnostic = { diagnostic -> devTools.record(diagnostic) },
+                onDiagnostic = ::recordDiagnostic,
                 installModules = false,
             )
             // PHP reads its launch intent while booting.
@@ -397,14 +397,19 @@ class PamActivity : FragmentActivity() {
             if (BuildConfig.DEBUG) {
                 hotReload = HotReloadClient(
                     context = this,
+                    initialEntryPath = runtimeEntryPath,
                     onReload = { receipt -> runOnUiThread {
+                        // A previous syntax error or exception clears here;
+                        // the overlay returns only if this version fails too.
                         errorOverlay?.clearError()
                         runtimeEntryPath = receipt.entryPath
+                        PamRuntimeHost.entryPath = receipt.entryPath
                         runtime.reload(
                             receipt.entryPath,
                             receipt.confirmedAtNanos,
-                            receipt.bundleBytes,
+                            receipt.transferredBytes,
                             receipt.previousRequestReleased,
+                            receipt.beforeNextRequest,
                         )
                     } },
                     onError = { message ->
@@ -608,6 +613,13 @@ class PamActivity : FragmentActivity() {
                     }
             }
         }.also { window.decorView.postDelayed(it, delay) }
+    }
+
+    private fun recordDiagnostic(diagnostic: RuntimeDiagnostic) {
+        devTools.record(diagnostic)
+        if (diagnostic.kind == RuntimeDiagnosticKind.HOT_RELOAD) {
+            hotReload?.reportReloaded(diagnostic.durationNanos, diagnostic.failed)
+        }
     }
 
     /** Reload / "Try again" from the error overlay: a fresh PHP runtime on the active entry. */
