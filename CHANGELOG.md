@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.40.0 - 2026-10-14
+
+Pure PHP SDK release: Android and iOS hosts, the protocol and native
+artifacts are unchanged from 1.39.4 (only the version moves).
+
+- Add `Events\EventBus` (named and typed events, `once()`, shared buses,
+  bounded listeners, error isolation) and `Events\Observable` (Signal-backed
+  value with change listeners). `on()` returns a `Subscription`.
+- Add `Disposable`, `Component::own()` and `owner:` arguments: subscriptions,
+  timers and rate limiters owned by a component are released on unmount.
+- Add `Component::timers()` (`ComponentTimers`): timeouts and intervals that
+  cancel on unmount and follow `TimerBackgroundPolicy` (Suspend by default,
+  re-armed on resume), plus owned `debounce()` and `throttle()`.
+- Add `Scheduling\Debouncer` (maxWait, flush), `Scheduling\Throttler`
+  (leading/trailing) and `Scheduling\SingleFlight` (joined callers,
+  `again` refresh, bounded keys).
+- Add `Cache\BoundedStore` (LRU with max items, TTL, byte budget, account
+  scope, `get/put/forget/remember/trim/persist/hydrate`) and `Cache\IdLedger`
+  (bounded id set with TTL), persisted through `Cache\CachePersistence`
+  (`StoragePersistence`, `CallbackPersistence` for Nitro or other stores,
+  `MemoryPersistence`).
+- Add `Store\OptimisticOverlay`: `begin/settle/rollback/set/apply/applyAll`,
+  revision-based `dropSettled()`, change listeners and LRU that never evicts
+  in-flight entries.
+- Add `Support\Format` (`count`, `countLabel`, `compact`, `relative`,
+  `bytes`, `duration`, `time`; pt-BR and English, no ext-intl) and
+  `Support\Text` (`fold`, `foldWithMap`, `contains`, `length`).
+- Harden `Sync\OfflineMutationQueue`: `BackoffPolicy` (base, cap, factor,
+  jitter, maxAttempts), `dedupeKey` coalescing of unsent intents, persistence
+  with `hydrate()`/`persist()` (interrupted sends restored as Retry) and
+  `drainOn()` triggers (Enqueue, Connectivity, Foreground, RetryDue) that run
+  only while mutations are pending in the foreground. Existing calls keep
+  their behaviour.
+- Guide: `docs/app-infrastructure.md`; example:
+  `examples/showcase/src/InfrastructureDemo.php`.
+
 ## 1.39.4 - 2026-10-14
 
 - `pam dev` hot reload has no bundle size limit anymore. The CLI serves a
