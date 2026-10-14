@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.39.3 - 2026-10-13
+
+- Dismiss an IME still serving a hidden Android editor after the system has
+  already cleared its focus; preserve the destination editor and valid autofocus.
+- Reorder focused descendants within their existing Android/iOS host without
+  detaching them, preserving draft, selection and keyboard across sibling moves.
+- Preserve authored stacking contexts in Android layout-only containers and
+  synchronize iOS visual stacking with hit testing, including property removal.
+- Bound interactive sheet keyboard lift to the safe viewport and deliver the
+  remaining overlap to its keyboard avoider instead of moving headers offscreen.
+- Encode empty HTTP headers as an object for both native decoders.
+- Retire iOS editors in hidden ordinary subtrees and inactive retained tabs.
+  Add Android native regressions and iOS XCTest source; Mac execution remains
+  a separate validation requirement.
+
 ## 1.39.2 - 2026-10-13
 
 - Retire editor focus and pending autofocus when a retained Android route becomes
