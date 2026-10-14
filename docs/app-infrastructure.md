@@ -119,7 +119,9 @@ $flights->run("profile:{$id}", function (Closure $done) use ($id): void {
 ```
 
 - `Debouncer` runs with the arguments of the last call; `cancel()` drops it,
-  `pending()` reports it.
+  `pending()` reports it. Both `Debouncer` and `Throttler` accept
+  `schedule: fn (int $ms, Closure $fire): Closure $cancel` to replace the
+  native timer (tests, custom clocks).
 - `Throttler($interval, $action, leading: true, trailing: true)` never loses
   the final value: the last call made during a window runs when it closes.
 - `SingleFlight::run()` returns `true` when it started the work and `false`

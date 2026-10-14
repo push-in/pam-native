@@ -7,7 +7,6 @@ namespace Pam\Native\Scheduling;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Disposable;
-use Pam\Native\System\TimerHandle;
 use Pam\Native\System\Timers;
 
 /**
@@ -23,21 +22,41 @@ use Pam\Native\System\Timers;
  */
 final class Debouncer implements Disposable
 {
-    private ?TimerHandle $timer = null;
+    /** @var (Closure(): void)|null cancels the armed timer */
+    private ?Closure $timer = null;
+    /** @var Closure(int, Closure(): void): (Closure(): void) */
+    private Closure $schedule;
     /** @var list<mixed>|null */
     private ?array $arguments = null;
     private ?float $firstCallMs = null;
     private bool $disposed = false;
 
-    /** @param Closure(mixed...): void $action */
+    /**
+     * @param Closure(mixed...): void $action
+     * @param (Closure(int, Closure(): void): (Closure(): void))|null $schedule
+     *        arms a timer and returns its canceller; defaults to native Timers (test seam)
+     */
     public function __construct(
         public readonly int $delayMs,
         private readonly Closure $action,
         public readonly ?int $maxWaitMs = null,
+        ?Closure $schedule = null,
     ) {
         if ($delayMs < 0 || ($maxWaitMs !== null && $maxWaitMs < $delayMs)) {
             throw new InvalidArgumentException('Debounce delay must be >= 0 and maxWait must not be shorter than it.');
         }
+        $this->schedule = $schedule ?? self::nativeSchedule(...);
+    }
+
+    /**
+     * @param Closure(): void $fire
+     * @return Closure(): void
+     */
+    public static function nativeSchedule(int $milliseconds, Closure $fire): Closure
+    {
+        $handle = Timers::timeout($milliseconds, $fire);
+
+        return static fn () => $handle->cancel();
     }
 
     public function call(mixed ...$arguments): void
@@ -53,8 +72,10 @@ final class Debouncer implements Disposable
 
             return;
         }
-        $this->timer?->cancel();
-        $this->timer = Timers::timeout($this->delayMs, function (): void {
+        $cancel = $this->timer;
+        $this->timer = null;
+        $cancel?->__invoke();
+        $this->timer = ($this->schedule)($this->delayMs, function (): void {
             $this->timer = null;
             $this->flush();
         });
@@ -97,8 +118,9 @@ final class Debouncer implements Disposable
 
     private function reset(): void
     {
-        $this->timer?->cancel();
+        $cancel = $this->timer;
         $this->timer = null;
+        $cancel?->__invoke();
         $this->arguments = null;
         $this->firstCallMs = null;
     }

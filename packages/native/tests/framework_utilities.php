@@ -218,6 +218,16 @@ $bounded->call('now');
 $assert(end($searches) === 'max:now', 'maxWait must flush a continuous stream of calls.');
 $assert($throws(static fn () => new Debouncer(100, static fn () => null, 50)), 'maxWait shorter than the delay must be rejected.');
 
+$scheduled = [];
+$seamed = new Debouncer(100, static function (string $q) use (&$searches): void { $searches[] = "seam:{$q}"; }, schedule: static function (int $ms, Closure $fire) use (&$scheduled): Closure {
+    $scheduled[] = [$ms, $fire];
+
+    return static function () use (&$scheduled, $ms): void { $scheduled[] = [$ms, null]; };
+});
+$seamed->call('x');
+($scheduled[0][1])();
+$assert($scheduled[0][0] === 100 && end($searches) === 'seam:x', 'A custom scheduler must drive the debouncer.');
+
 // Throttler.
 $sent = [];
 $throttle = new Throttler(1_000, static function (int $value) use (&$sent): void { $sent[] = $value; });
