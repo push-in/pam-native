@@ -488,6 +488,60 @@ class PamGestureAnimationInstrumentedTest {
     }
 
     @Test
+    fun horizontalPagerReportsPageChangeOnceWhileStillDragging() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val activity = launchActivity(instrumentation)
+        val events = Collections.synchronizedList(mutableListOf<Dispatched>())
+        lateinit var renderer: PamRenderer
+        lateinit var scroll: View
+        try {
+            onMain(instrumentation) {
+                renderer = recordingRenderer(activity, events)
+                val mutations = mutableListOf<Mutation>(
+                    Mutation.Create(node(1, 0, NodeKind.SCREEN)),
+                    Mutation.Create(node(2, 1, NodeKind.SCROLL, mapOf(
+                        PropKey.SCROLL_HORIZONTAL to PropValue.Flag(true),
+                        PropKey.SCROLL_PAGING_ENABLED to PropValue.Flag(true),
+                        PropKey.ON_PAGE_CHANGE to PropValue.Flag(true),
+                    ))),
+                    Mutation.Layout(1, Frame(0f, 0f, 360f, 640f)),
+                    Mutation.Layout(2, Frame(0f, 0f, 360f, 640f)),
+                )
+                repeat(3) { index ->
+                    val id = index + 3L
+                    mutations += Mutation.Create(NodeSpec(id, 2, index, NodeKind.VIEW, mapOf(
+                        PropKey.BACKGROUND_COLOR to PropValue.Integer(0xFF000000 or (0x404040L * (index + 1))),
+                    )))
+                    mutations += Mutation.Layout(id, Frame(index * 360f, 0f, 360f, 640f))
+                }
+                mutations += Mutation.SetRoot(1)
+                renderer.commit(listOf(mutations))
+                scroll = views(renderer)[2]
+            }
+            instrumentation.waitForIdleSync()
+            val origin = locationOf(instrumentation, activity.host)
+            val y = origin.second + 320f.dp(scroll)
+            // Hold the finger past half a page: the change is reported mid-drag.
+            drag(instrumentation, origin.first + 330f.dp(scroll), y, origin.first + 60f.dp(scroll), y, steps = 18, release = false)
+            waitUntil(2_000) { events.any { it.kind == EventKind.PAGE_CHANGE.value } }
+            onMain(instrumentation) {
+                val changes = events.filter { it.kind == EventKind.PAGE_CHANGE.value }
+                assertEquals(1, changes.size)
+                assertEquals(1L, (changes[0].payload["page"] as WireValue.Integer).value)
+                assertEquals(0L, (changes[0].payload["previousPage"] as WireValue.Integer).value)
+                // No per-frame traffic: page change is the only event.
+                assertEquals(changes.size, events.size)
+            }
+            release(instrumentation, origin.first + 60f.dp(scroll), y)
+        } finally {
+            onMain(instrumentation) {
+                renderer.close()
+                activity.finish()
+            }
+        }
+    }
+
+    @Test
     fun textLayoutReportsWrappedLinesBeyondNumberOfLines() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val activity = launchActivity(instrumentation, requireFocus = false)

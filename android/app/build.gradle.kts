@@ -266,6 +266,7 @@ dependencies {
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.recyclerview:recyclerview:1.4.0")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     // Forward-buffered video (MediaPlayer preloadSeconds > 0); MediaPlayer stays the default engine.
     implementation("androidx.media3:media3-exoplayer:1.10.1")
     // HLS (.m3u8) for those players: MediaPlayer plays HLS, so ExoPlayer must too.

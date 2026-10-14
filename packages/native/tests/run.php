@@ -8038,6 +8038,7 @@ require __DIR__.'/native_capabilities.php';
 require __DIR__.'/text_whitespace.php';
 require __DIR__.'/typography_parity.php';
 require __DIR__.'/gestures_animations.php';
+require __DIR__.'/refresh_control.php';
 require __DIR__.'/drag_text.php';
 require __DIR__.'/error_reporting.php';
 require __DIR__.'/conditional_identity.php';

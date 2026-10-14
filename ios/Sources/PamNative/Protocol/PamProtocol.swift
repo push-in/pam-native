@@ -537,6 +537,7 @@ public enum PamConstants {
     public static let gestureNativeFocalZoom = 526
     public static let needsOffscreenAlphaCompositing = 527
     public static let onPageChange = 528
+    public static let refreshEnabled = 529
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

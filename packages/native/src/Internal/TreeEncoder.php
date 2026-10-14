@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use LogicException;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
+use Pam\Native\NodeKind;
 use Pam\Native\Protocol;
 use Pam\Native\PropKey;
 use WeakMap;
@@ -91,9 +92,38 @@ final class TreeEncoder
      */
     private array $childPaths = [];
 
+    /** @var \WeakMap<Element, Element> scrollables lowered to a RefreshControl host */
+    private \WeakMap $refreshHosts;
+
+    /**
+     * RN `refreshControl` props set directly on a ScrollView/list become a
+     * RefreshControl host around it. Memoized per element so cached and
+     * reused subtrees keep their identity across frames.
+     */
+    private function refreshHosted(Element $element): Element
+    {
+        $kind = $element->kind;
+        if ($kind !== NodeKind::Scroll && $kind !== NodeKind::List
+            && $kind !== NodeKind::VirtualList && $kind !== NodeKind::SectionList
+        ) {
+            return $element;
+        }
+        if (isset($this->refreshHosts[$element])) {
+            return $this->refreshHosts[$element];
+        }
+        $host = $element->__pamRefreshHost();
+        if ($host === null) {
+            return $element;
+        }
+        $this->refreshHosts[$element] = $host;
+
+        return $host;
+    }
+
     public function __construct()
     {
         $this->subtreeCache = new WeakMap();
+        $this->refreshHosts = new WeakMap();
     }
 
     /**
@@ -115,6 +145,7 @@ final class TreeEncoder
      */
     public function encode(Element $root): array
     {
+        $root = $this->refreshHosted($root);
         $cachedRoot = ($this->subtreeCache[$root] ?? [])['root'] ?? null;
 
         if ($this->previousTree !== null && $cachedRoot !== null) {
@@ -298,6 +329,7 @@ final class TreeEncoder
             $learned = false;
 
             foreach ($children as $childIndex => $child) {
+                $child = $this->refreshHosted($child);
                 $childKind = $child->kind->value;
                 $childKey = $child->elementKey;
                 $childDom = $child->domIdentity;

@@ -134,6 +134,10 @@ accessibility diagnostics, Composer-extensible tags and a full editor-neutral
 LSP. Attributes such as `#[Prop]` and `#[Action]` remain the canonical PHP API.
 Read the [UI Language 2 guide](docs/ui-language-2.md).
 
+Lists and scroll views take React Native's pull to refresh directly
+(`:refreshing`, `on:refresh`, `tintColor`, `refreshColors`) with the platform
+indicator on each side: see [Pull to refresh](docs/pull-to-refresh.md).
+
 Need precise imperative control without introducing a browser runtime? The
 [Visual DOM](docs/visual-dom.md) adds indexed selectors, atomic tree mutations,
 events, native animation and asynchronous layout observation directly on the

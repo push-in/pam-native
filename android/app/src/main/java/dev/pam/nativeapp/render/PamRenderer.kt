@@ -3306,8 +3306,11 @@ class PamRenderer(
                 (view as? PamMediaView)?.setResizeMode(value.integer().toInt())
                 loadImage(view, state)
             }
-            PropKey.TINT_COLOR -> imageView(view)?.imageTintList =
-                ColorStateList.valueOf(value.integer().toInt())
+            PropKey.TINT_COLOR -> if (view is PamRefreshContainer) {
+                view.setTint(value.integer().toInt())
+            } else {
+                imageView(view)?.imageTintList = ColorStateList.valueOf(value.integer().toInt())
+            }
             PropKey.IMAGE_DEFAULT_SOURCE,
             PropKey.IMAGE_LOADING_INDICATOR_SOURCE,
             PropKey.IMAGE_FADE_DURATION_MS,
@@ -3441,6 +3444,7 @@ class PamRenderer(
             PropKey.ON_SCROLL_END_DRAG,
             PropKey.ON_MOMENTUM_SCROLL_END,
             PropKey.ON_PAGE_CHANGE,
+            PropKey.REFRESH_ENABLED,
             PropKey.ON_TEXT_LAYOUT,
             -> Unit
             PropKey.ANIMATION_KEYFRAMES,
@@ -3482,7 +3486,7 @@ class PamRenderer(
             PropKey.SAFE_AREA_LEFT,
             PropKey.SAFE_AREA_MODE,
             -> applySafeAreaLayout(view, state)
-            PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(value.flag())
+            PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setControlledRefreshing(value.flag())
             PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(value.text(key))
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
                 (view as? PamRefreshContainer)?.setProgressBackgroundColor(
@@ -4051,7 +4055,11 @@ class PamRenderer(
             PropKey.STATUS_BAR_TRANSLUCENT,
             PropKey.NAVIGATION_BAR_HIDDEN,
             -> applyMergedStatusBar()
-            PropKey.TINT_COLOR -> imageView(view)?.imageTintList = null
+            PropKey.TINT_COLOR -> if (view is PamRefreshContainer) {
+                view.setTint(null)
+            } else {
+                imageView(view)?.imageTintList = null
+            }
             PropKey.IMAGE_FIT -> {
                 imageView(view)?.scaleType = ImageView.ScaleType.CENTER_CROP
                 (view as? PamMediaView)?.setResizeMode(1)
@@ -4398,7 +4406,7 @@ class PamRenderer(
             PropKey.SWITCH_THUMB_COLOR ->
                 (view as? PamSwitch)?.setThumbColor(null)
             PropKey.PROGRESS_COLOR -> (view as? PamActivityIndicator)?.setColor(null)
-            PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setRefreshing(false)
+            PropKey.REFRESHING -> (view as? PamRefreshContainer)?.setControlledRefreshing(false)
             PropKey.REFRESH_COLORS -> (view as? PamRefreshContainer)?.setColors(null)
             PropKey.REFRESH_PROGRESS_BACKGROUND_COLOR ->
                 (view as? PamRefreshContainer)?.setProgressBackgroundColor(null)

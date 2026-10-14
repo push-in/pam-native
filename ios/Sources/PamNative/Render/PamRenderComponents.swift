@@ -1508,43 +1508,34 @@ final class PamDrawerLayout: UIView, UIGestureRecognizerDelegate {
     }
 }
 
+/// RN `RefreshControl` on iOS: a native `UIRefreshControl` installed on the
+/// hosted scroll view (ScrollView or list). `alwaysBounceVertical` keeps a
+/// short or empty list pullable. `refreshing` is controlled: after a pull the
+/// handler's value wins, so `refreshing=false` ends the spinner even when the
+/// handler never flipped it (RN re-applies the controlled value).
 final class PamRefreshContainer: UIView {
-    private enum HolderStyle {
-        static let defaultThreshold: CGFloat = 64
-        static let defaultIndicatorSize: Int = 1
+    private enum Sync {
+        static let controlledDelay: TimeInterval = 0.6
     }
 
     private let contentHost = UIView()
-    private let indicatorContainer = UIView()
-    private let indicator = UIActivityIndicatorView(style: .medium)
-
+    private let control = UIRefreshControl()
     private weak var scrollView: UIScrollView?
-    private var scrollObserver: NSKeyValueObservation?
-    private var dragging = false
-    private var refreshing = false
-    private(set) var colors: [Int] = []
-
     private var refreshCallback: (() -> Void)?
-    private var progressBackgroundColor: Int?
+    private var controlled = false
+    private var userTriggered = false
     private var progressOffset: CGFloat = 0
-    private var indicatorSize: Int = HolderStyle.defaultIndicatorSize
+    private(set) var colors: [Int] = []
+    private var tint: Int?
 
-    var isRefreshControlEnabled = true
+    var isEnabled = true {
+        didSet { installControl() }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        clipsToBounds = false
-        indicatorContainer.backgroundColor = .systemBackground
-        indicatorContainer.layer.cornerRadius = 18
-        indicatorContainer.addSubview(indicator)
-        indicator.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            indicator.centerXAnchor.constraint(equalTo: indicatorContainer.centerXAnchor),
-            indicator.centerYAnchor.constraint(equalTo: indicatorContainer.centerYAnchor),
-        ])
         addSubview(contentHost)
-        addSubview(indicatorContainer)
-        updateIndicatorLayout()
+        control.addTarget(self, action: #selector(onValueChanged), for: .valueChanged)
     }
 
     required init?(coder: NSCoder) {
@@ -1568,64 +1559,52 @@ final class PamRefreshContainer: UIView {
     }
 
     func setRefreshing(_ value: Bool) {
-        refreshing = value
-        isUserInteractionEnabled = !value
-        if value {
-            indicator.startAnimating()
-            indicatorContainer.alpha = 1
-            indicatorContainer.isHidden = false
-            indicatorContainer.transform = .identity
-        } else {
-            indicator.stopAnimating()
-            indicatorContainer.isHidden = true
-            indicatorContainer.transform = .identity
-        }
-        if !value {
-            dragging = false
-        }
+        controlled = value
+        userTriggered = false
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(syncControlled), object: nil)
+        apply(value)
     }
 
+    /// RN `colors` (Android); iOS uses the first one when no `tintColor`.
     func setColors(_ encoded: String?) {
         colors = encoded?
             .split(separator: ",")
-            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-            ?? [UIColor.systemGray.cgColor.components?.first.flatMap { Int($0 * 255) } ?? 0]
-        indicator.color = UIColor(argb: Int64(colors.first ?? 0xFF888888))
+            .compactMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) } ?? []
+        applyTint()
+    }
+
+    /// RN `tintColor`: the iOS spinner color.
+    func setTint(_ color: Int?) {
+        tint = color
+        applyTint()
+    }
+
+    private func applyTint() {
+        control.tintColor = (tint ?? colors.first).map { UIColor(argb: Int64($0)) }
     }
 
     func setProgressBackgroundColor(_ color: Int?) {
-        progressBackgroundColor = color
-        indicatorContainer.backgroundColor = color.map { UIColor(argb: Int64($0)) }
+        control.backgroundColor = color.map { UIColor(argb: Int64($0)) }
     }
 
+    /// RN `progressViewOffset`: moves the spinner down, e.g. below a
+    /// translucent header.
     func setProgressViewOffset(_ offset: Float) {
         progressOffset = CGFloat(offset)
-        setNeedsLayout()
+        control.bounds = CGRect(
+            x: control.bounds.origin.x,
+            y: -progressOffset,
+            width: control.bounds.width,
+            height: control.bounds.height
+        )
     }
 
-    func setIndicatorSize(_ size: Int) {
-        indicatorSize = size
-        updateIndicatorLayout()
-    }
+    /// Android-only (`size`); UIRefreshControl has a single size.
+    func setIndicatorSize(_ size: Int) {}
 
     func setOnRefresh(_ action: (() -> Void)?) {
         refreshCallback = action
-    }
-
-    override var isHidden: Bool {
-        didSet {
-            if !isHidden {
-                dragging = false
-            }
-        }
-    }
-
-    var isEnabled = true {
-        didSet {
-            if !isEnabled && !refreshing {
-                setRefreshing(false)
-            }
-        }
+        installControl()
     }
 
     override func layoutSubviews() {
@@ -1634,79 +1613,74 @@ final class PamRefreshContainer: UIView {
         contentHost.subviews.forEach { view in
             view.frame = bounds
         }
-        updateIndicatorLayout()
-        updateIndicatorVisibility()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // UIRefreshControl cannot begin refreshing off-window.
+        if window != nil, controlled != control.isRefreshing {
+            apply(controlled)
+        }
     }
 
     private func bind(scrollView: UIScrollView) {
-        if self.scrollView === scrollView {
-            return
+        guard self.scrollView !== scrollView else { return }
+        if self.scrollView?.refreshControl === control {
+            self.scrollView?.refreshControl = nil
         }
-        unbind()
         self.scrollView = scrollView
-        scrollObserver = scrollView.observe(\.contentOffset, options: [.initial, .new], changeHandler: { [weak self] _, _ in
-            self?.handleScrollOffset()
-        })
-        scrollView.showsVerticalScrollIndicator = true
+        // A short or empty list must still be pullable.
         scrollView.alwaysBounceVertical = true
+        installControl()
     }
 
-    private func unbind() {
-        scrollObserver?.invalidate()
-        scrollObserver = nil
-        scrollView = nil
+    private func installControl() {
+        guard let scrollView else { return }
+        let wanted = isEnabled && refreshCallback != nil
+        if wanted, scrollView.refreshControl !== control {
+            scrollView.refreshControl = control
+            if controlled { apply(true) }
+        } else if !wanted, scrollView.refreshControl === control, !control.isRefreshing {
+            // RN `enabled=false`: no new pulls; a running refresh still ends
+            // through `refreshing=false`.
+            scrollView.refreshControl = nil
+        }
     }
 
-    private func handleScrollOffset() {
-        guard isRefreshControlEnabled, let scrollView, let refreshCallback else { return }
-        let topInset = scrollView.adjustedContentInset.top
-        let pulled = max(0, -(scrollView.contentOffset.y + topInset))
-        if scrollView.isDragging {
-            if pulled > 0 {
-                dragging = true
-                updateIndicatorProgress(pulled / HolderStyle.defaultThreshold)
+    private func apply(_ value: Bool) {
+        if value, !control.isRefreshing {
+            control.beginRefreshing()
+            // RN: a programmatic refresh at the top reveals the spinner.
+            if !userTriggered, let scrollView, scrollView.refreshControl === control,
+               scrollView.contentOffset.y <= -scrollView.adjustedContentInset.top {
+                scrollView.setContentOffset(
+                    CGPoint(x: scrollView.contentOffset.x, y: scrollView.contentOffset.y - control.frame.height),
+                    animated: true
+                )
             }
+        } else if !value, control.isRefreshing {
+            control.endRefreshing()
+            installControl()
+        }
+    }
+
+    @objc private func onValueChanged() {
+        guard let refreshCallback else {
+            control.endRefreshing()
             return
         }
-
-        guard dragging else {
-            return
-        }
-        dragging = false
-        if pulled >= HolderStyle.defaultThreshold {
-            if !refreshing {
-                setRefreshing(true)
-                refreshCallback()
-            }
-        } else {
-            setRefreshing(false)
-        }
+        userTriggered = true
+        refreshCallback()
+        // A handler that leaves `refreshing` unchanged sends no update: fall
+        // back to the controlled value after the round trip.
+        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(syncControlled), object: nil)
+        perform(#selector(syncControlled), with: nil, afterDelay: Sync.controlledDelay)
     }
 
-    private func updateIndicatorProgress(_ progress: CGFloat) {
-        let clamped = min(1, max(0, progress))
-        indicatorContainer.alpha = clamped
-        indicatorContainer.transform = CGAffineTransform(translationX: 0, y: -(clamped * -progressOffset))
-        if clamped >= 0.99 {
-            indicator.startAnimating()
-        }
-    }
-
-    private func updateIndicatorVisibility() {
-        indicatorContainer.isHidden = !refreshing && indicatorContainer.alpha == 0
-    }
-
-    private func updateIndicatorLayout() {
-        let size = CGFloat(indicatorSize == 2 ? 44 : 32)
-        indicatorContainer.frame = CGRect(
-            x: (bounds.width - size) / 2,
-            y: progressOffset + 8,
-            width: size,
-            height: size,
-        )
-        indicatorContainer.layer.cornerRadius = size / 2
-        indicator.transform = .identity
-        indicator.frame = indicator.bounds
+    @objc private func syncControlled() {
+        guard userTriggered else { return }
+        userTriggered = false
+        apply(controlled)
     }
 }
 

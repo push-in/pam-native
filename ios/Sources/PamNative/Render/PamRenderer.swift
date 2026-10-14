@@ -2319,7 +2319,9 @@ public final class PamRenderer {
                 loadImage(source, into: imageView, nodeId: nodeId)
             }
         case PamConstants.tintColor:
-            if let color = value.integerOrNil() {
+            if let refresh = view as? PamRefreshContainer {
+                refresh.setTint(value.integerOrNil().map { Int($0) })
+            } else if let color = value.integerOrNil() {
                 (imageView(for: view) as? PamImageView)?.pamTintColor = UIColor(argb: color)
             }
         case PamConstants.imageFit:
@@ -2428,7 +2430,10 @@ public final class PamRenderer {
             applyBoxShadow(view: view, nodeId: nodeId)
             applyBorder(view: view, nodeId: nodeId)
         case PamConstants.enabled:
-            if let enabled = value.boolOrNil() {
+            if let refresh = view as? PamRefreshContainer {
+                // RN `RefreshControl.enabled`: blocks pulls, not scrolling.
+                refresh.isEnabled = value.boolOrNil() ?? true
+            } else if let enabled = value.boolOrNil() {
                 view.isUserInteractionEnabled = enabled
                 if let control = view as? UIControl {
                     control.isEnabled = enabled
@@ -2954,6 +2959,7 @@ public final class PamRenderer {
         case PamConstants.nativeStateStyles:
             (view as? PamPressButton)?.pamStateStyles = [:]
         case PamConstants.tintColor:
+            (view as? PamRefreshContainer)?.setTint(nil)
             (imageView(for: view) as? PamImageView)?.pamTintColor = nil
         case PamConstants.imageFit:
             imageView(for: view)?.contentMode = .scaleAspectFill

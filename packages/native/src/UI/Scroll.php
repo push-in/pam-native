@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\UI;
 
 use Closure;
+use Pam\Native\UI\Concerns\HasRefreshControl;
 use Pam\Native\UI\Concerns\HasScrollPhaseEvents;
 use Pam\Native\Element;
 use Pam\Native\EventKind;
@@ -18,6 +19,7 @@ use Pam\Native\ScrollTargetAlignment;
 
 final class Scroll extends Element
 {
+    use HasRefreshControl;
     use HasScrollPhaseEvents;
 
     public static function make(Renderable $child): self

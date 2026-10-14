@@ -12,12 +12,15 @@ use Pam\Native\Internal\BinaryValue;
 use Pam\Native\Internal\Wire;
 use Pam\Native\NodeKind;
 use Pam\Native\PropKey;
+use Pam\Native\UI\Concerns\HasRefreshControl;
 
 use function is_array;
 use function is_string;
 
 final class SectionList extends Element
 {
+    use HasRefreshControl;
+
     /**
      * @param array<array-key, mixed> $sections
      */

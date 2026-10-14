@@ -7,6 +7,7 @@ namespace Pam\Native;
 use Closure;
 use InvalidArgumentException;
 use Pam\Native\Internal\BinaryValue;
+use Pam\Native\Internal\RefreshHost;
 use Pam\Native\Navigation\SharedTransitionStyle;
 
 use function array_key_exists;
@@ -505,6 +506,127 @@ abstract class Element implements Renderable
     final public function __pamEncoded(array $encoded, ?string $bytes = null): void
     {
         $this->encodedProperties = [$this->properties, $encoded, $bytes];
+    }
+
+    /** Scrollables that accept RN `refreshControl` props directly. */
+    private const array REFRESH_HOSTS = [
+        NodeKind::Scroll->value => true,
+        NodeKind::List->value => true,
+        NodeKind::VirtualList->value => true,
+        NodeKind::SectionList->value => true,
+    ];
+
+    /** Refresh props a scrollable hands to its RefreshControl host. */
+    private const array REFRESH_PROPERTIES = [
+        PropKey::Refreshing->value => true,
+        PropKey::RefreshColors->value => true,
+        PropKey::RefreshProgressBackgroundColor->value => true,
+        PropKey::RefreshProgressViewOffset->value => true,
+        PropKey::RefreshIndicatorSize->value => true,
+        PropKey::OnRefresh->value => true,
+        // RN RefreshControl `tintColor` (iOS spinner; Android without colors).
+        PropKey::TintColor->value => true,
+    ];
+
+    /**
+     * Outer-box props (RN `splitLayoutProps`): with a refresh host they size
+     * and place the host; the scrollable fills it.
+     */
+    private const array REFRESH_OUTER_PROPERTIES = [
+        PropKey::Width->value => true,
+        PropKey::Height->value => true,
+        PropKey::WidthPercent->value => true,
+        PropKey::HeightPercent->value => true,
+        PropKey::MinWidth->value => true,
+        PropKey::MinHeight->value => true,
+        PropKey::MaxWidth->value => true,
+        PropKey::MaxHeight->value => true,
+        PropKey::MinWidthPercent->value => true,
+        PropKey::MinHeightPercent->value => true,
+        PropKey::MaxWidthPercent->value => true,
+        PropKey::MaxHeightPercent->value => true,
+        PropKey::FlexGrow->value => true,
+        PropKey::FlexShrink->value => true,
+        PropKey::FlexBasis->value => true,
+        PropKey::FlexBasisPercent->value => true,
+        PropKey::FlexBasisContent->value => true,
+        PropKey::AlignSelf->value => true,
+        PropKey::AspectRatio->value => true,
+        PropKey::Margin->value => true,
+        PropKey::MarginHorizontal->value => true,
+        PropKey::MarginVertical->value => true,
+        PropKey::MarginLeft->value => true,
+        PropKey::MarginTop->value => true,
+        PropKey::MarginRight->value => true,
+        PropKey::MarginBottom->value => true,
+        PropKey::MarginLeftAuto->value => true,
+        PropKey::MarginTopAuto->value => true,
+        PropKey::MarginRightAuto->value => true,
+        PropKey::MarginBottomAuto->value => true,
+        PropKey::PositionType->value => true,
+        PropKey::Left->value => true,
+        PropKey::Top->value => true,
+        PropKey::Right->value => true,
+        PropKey::Bottom->value => true,
+        PropKey::LeftPercent->value => true,
+        PropKey::TopPercent->value => true,
+        PropKey::RightPercent->value => true,
+        PropKey::BottomPercent->value => true,
+        PropKey::ZIndex->value => true,
+    ];
+
+    /**
+     * @internal RN `refreshControl` given as props of a ScrollView or list
+     * (`refreshing`, `on:refresh`, colors, `progressViewOffset`,
+     * `refreshEnabled`): lowered to a native RefreshControl host around the
+     * scrollable, which keeps every other prop. Null when nothing to lower.
+     */
+    final public function __pamRefreshHost(): ?self
+    {
+        if (!isset(self::REFRESH_HOSTS[$this->kind->value])) {
+            return null;
+        }
+        $properties = $this->properties;
+        if (!isset($this->events[EventKind::Refresh->value])
+            && !array_key_exists(PropKey::Refreshing->value, $properties)
+            && !array_key_exists(PropKey::OnRefresh->value, $properties)
+        ) {
+            return null;
+        }
+        $hostProperties = [];
+        $innerProperties = [];
+        foreach ($properties as $key => $value) {
+            if (isset(self::REFRESH_PROPERTIES[$key]) || isset(self::REFRESH_OUTER_PROPERTIES[$key])) {
+                $hostProperties[$key] = $value;
+            } elseif ($key === PropKey::RefreshEnabled->value) {
+                $hostProperties[PropKey::Enabled->value] = $value;
+            } else {
+                $innerProperties[$key] = $value;
+            }
+        }
+        $hostProperties[PropKey::Refreshing->value] ??= false;
+
+        $inner = clone $this;
+        $inner->properties = $innerProperties;
+        $inner->encodedProperties = null;
+        $inner->elementKey = null;
+        $inner->domIdentity = null;
+        $inner->identitySlot = null;
+        $refresh = $this->events[EventKind::Refresh->value] ?? null;
+        $innerEvents = $this->events;
+        unset($innerEvents[EventKind::Refresh->value]);
+        $inner->events = $innerEvents;
+
+        $host = new RefreshHost(NodeKind::RefreshControl);
+        $host->properties = $hostProperties;
+        $host->children = [$inner];
+        $host->events = $refresh === null ? [] : [EventKind::Refresh->value => $refresh];
+        $host->elementKey = $this->elementKey;
+        $host->domIdentity = $this->domIdentity;
+        $host->identitySlot = $this->identitySlot;
+        $host->reusable = $this->reusable;
+
+        return $host;
     }
 
     /** @internal Marks an element the renderer expects to reuse across frames. */

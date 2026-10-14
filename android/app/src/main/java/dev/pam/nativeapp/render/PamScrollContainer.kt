@@ -487,6 +487,9 @@ internal class PamScrollContainer @JvmOverloads constructor(
 
     fun primaryViewportPixels(): Int = if (horizontal) activeScroll.width else activeScroll.height
 
+    /** Whether the vertical content can still scroll towards its top. */
+    fun canContentScrollUp(): Boolean = !horizontal && activeScroll.canScrollVertically(-1)
+
     fun snapshotOffsetPixels(): Pair<Int, Int> =
         scrollXOf(activeScroll) to scrollYOf(activeScroll)
 

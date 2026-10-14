@@ -397,6 +397,7 @@ final class TemplateRenderer
         'progressBackgroundColor' => PropKey::RefreshProgressBackgroundColor,
         'progressViewOffset' => PropKey::RefreshProgressViewOffset,
         'refreshIndicatorSize' => PropKey::RefreshIndicatorSize,
+        'refreshEnabled' => PropKey::RefreshEnabled,
         'scrollEnabled' => PropKey::ScrollEnabled,
         'showsScrollIndicator' => PropKey::ShowsScrollIndicator,
         'scrollIndicatorStyle' => PropKey::ScrollIndicatorStyle,
@@ -4319,6 +4320,26 @@ final class TemplateRenderer
         return self::convertPropertyValue($key, $value);
     }
 
+    /**
+     * `refreshColors`: a color, a list of colors or a comma-separated list
+     * (`"#e11d48, #2563eb"`), encoded as the native ARGB list.
+     */
+    private static function refreshColors(mixed $value): string
+    {
+        if (is_string($value) && preg_match('/^-?\d+(,-?\d+)*$/', $value) === 1) {
+            return $value;
+        }
+        $colors = is_array($value)
+            ? $value
+            : (is_string($value) ? array_map('trim', explode(',', $value)) : [$value]);
+        $encoded = [];
+        foreach ($colors as $color) {
+            $encoded[] = (string) self::colorValue($color, 'Template refreshColors');
+        }
+
+        return implode(',', $encoded);
+    }
+
     private static function rememberPropertyValue(): void
     {
         if (++self::$propertyMemoSize > 16384) {
@@ -4365,6 +4386,7 @@ final class TemplateRenderer
             PropKey::TextShadowColor,
             PropKey::ShimmerGradientColor,
             => self::colorValue($value, "Template {$key->name}"),
+            PropKey::RefreshColors => self::refreshColors($value),
             PropKey::AlignContent => self::named($value, [
                 'start' => 1, 'flex-start' => 1, 'normal' => 1, 'center' => 2,
                 'end' => 3, 'flex-end' => 3, 'stretch' => 4,

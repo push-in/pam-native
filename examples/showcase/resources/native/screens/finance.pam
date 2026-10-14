@@ -36,7 +36,13 @@
                     accessibilityLabel="Toggle balance visibility"
                 >{{ $visibilityAction }}</Button>
             </Column>
-            <ScrollView class="flex-1">
+            <ScrollView
+                class="flex-1"
+                :refreshing="$refreshing"
+                on:refresh="refresh"
+                tintColor="#FF16A34A"
+                refreshColors="#FF16A34A"
+            >
                 <Column padding="18" gap="16">
                     <Row height="90" gap="10">
                         <Column flexGrow="1" padding="14" borderRadius="18" backgroundColor="#FFFFFFFF">

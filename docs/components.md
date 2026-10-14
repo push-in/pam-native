@@ -767,6 +767,10 @@ their retained layout frames before asking the platform list to scroll.
 the identified descendant within the visible viewport on both axes and both
 platforms. Edge targets are clamped to the available scroll range.
 
+Pull to refresh (`:refreshing`, `on:refresh`, `tintColor`, `refreshColors`,
+`progressViewOffset`, `refreshEnabled`) goes straight on `ScrollView` and the
+lists; see [Pull to refresh](pull-to-refresh.md).
+
 File and media picker cancellation is a normal control-flow result. `Files::pick()`
 invokes its callback with `null`, while `Files::pickMany()` invokes its callback
 with an empty list. Platform back/cancel actions do not throw native-module

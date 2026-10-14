@@ -2,6 +2,13 @@
 
 ## 1.39.3 - 2026-10-13
 
+- Pull to refresh with RN `RefreshControl` behavior straight on `ScrollView`,
+  `VirtualizedList`, `FlatList` and `SectionList` (`:refreshing`,
+  `on:refresh`, `tintColor`, `refreshColors`, `progressBackgroundColor`,
+  `progressViewOffset`, `refreshIndicatorSize`, `refreshEnabled`), lowered to
+  a native host automatically. Android now uses SwipeRefreshLayout and iOS
+  UIRefreshControl: pulls start only at the top, work on empty/short content,
+  ignore horizontal gestures, and the controlled `refreshing` always wins.
 - Add `on:pageChange`/`onPageChange()` (`PageChangeEvent`) to scroll views and
   lists: fires once when the current page changes mid-drag, never per frame.
 - Android `onTrimMemory` now empties caches only on RUNNING_CRITICAL/COMPLETE

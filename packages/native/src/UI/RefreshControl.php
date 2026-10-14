@@ -55,6 +55,12 @@ final class RefreshControl extends Element
         return $this->withProperty(PropKey::RefreshColors, implode(',', $colors));
     }
 
+    /** RN `tintColor`: the iOS spinner color (Android uses it when no colors). */
+    public function tintColor(int $color): self
+    {
+        return $this->withProperty(PropKey::TintColor, $color);
+    }
+
     public function progressBackgroundColor(int $color): self
     {
         return $this->withProperty(PropKey::RefreshProgressBackgroundColor, $color);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Native\UI;
 
 use Closure;
+use Pam\Native\UI\Concerns\HasRefreshControl;
 use Pam\Native\UI\Concerns\HasScrollPhaseEvents;
 use InvalidArgumentException;
 use Pam\Native\Element;
@@ -22,6 +23,7 @@ use function is_string;
 
 final class VirtualizedList extends Element
 {
+    use HasRefreshControl;
     use HasScrollPhaseEvents;
 
     /**
