@@ -316,7 +316,11 @@ public final class PamRenderer {
         }
         viewPool.removeAll()
         viewPoolCount = 0
-        guard critical else { return }
+        guard critical else {
+            // Android UI_HIDDEN parity: halve the media memory layer only.
+            PamMediaDiskCache.shared.trimMemory(critical: false)
+            return
+        }
         for cellId in parkedCells {
             dematerializeSubtree(cellId)
         }
@@ -324,7 +328,7 @@ public final class PamRenderer {
         for node in nodes.values {
             cancelImageLoad(for: node)
         }
-        PamMediaDiskCache.shared.trimMemory()
+        PamMediaDiskCache.shared.trimMemory(critical: true)
         syncVirtualLists(forceMinimal: true)
     }
 

@@ -16,6 +16,9 @@ final class PamMediaDiskCache: @unchecked Sendable {
     private let root: URL
     private let queue = DispatchQueue(label: "dev.pam.media-cache", qos: .utility)
     private let memory = NSCache<NSString, NSData>()
+    /// Insertion order of `memory` (touched only on `queue`) so a moderate
+    /// trim can drop the oldest half; NSCache cannot be halved by itself.
+    private var memoryOrder = PamMemoryCostOrder()
     private var downloads: [String: [(Result<Resolution, Error>) -> Void]] = [:]
 
     private init() {
@@ -60,7 +63,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
                 completion(nil)
                 return
             }
-            self.memory.setObject(data as NSData, forKey: identity as NSString, cost: data.count)
+            self.remember(data, identity: identity)
             completion(data)
         }
     }
@@ -92,7 +95,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
             if pinned {
                 try? Data([1]).write(to: self.pin(identity), options: .atomic)
             }
-            self.memory.setObject(data as NSData, forKey: identity as NSString, cost: data.count)
+            self.remember(data, identity: identity)
             self.trim(limit: limit > 0 ? limit : 512 * 1024 * 1024)
             completion?(FileManager.default.fileExists(atPath: target.path))
         }
@@ -168,8 +171,24 @@ final class PamMediaDiskCache: @unchecked Sendable {
         }
     }
 
-    func trimMemory() {
-        memory.removeAllObjects()
+    private func remember(_ data: Data, identity: String) {
+        memory.setObject(data as NSData, forKey: identity as NSString, cost: data.count)
+        memoryOrder.insert(identity, cost: data.count, limit: memory.totalCostLimit)
+    }
+
+    /// Critical (memory warning) empties the in-memory layer; moderate
+    /// (entering background, Android UI_HIDDEN parity) drops its oldest half.
+    func trimMemory(critical: Bool = true) {
+        if critical {
+            memory.removeAllObjects()
+            queue.async { self.memoryOrder.removeAll() }
+            return
+        }
+        queue.async {
+            for key in self.memoryOrder.trimToHalf() {
+                self.memory.removeObject(forKey: key as NSString)
+            }
+        }
     }
 
     func usage(completion: @escaping @Sendable (PamCacheUsage) -> Void) {
@@ -205,6 +224,7 @@ final class PamMediaDiskCache: @unchecked Sendable {
                 }
             }
             self.memory.removeAllObjects()
+            self.memoryOrder.removeAll()
             let after = self.currentUsage()
             completion(after, max(0, before.totalBytes - after.totalBytes))
         }

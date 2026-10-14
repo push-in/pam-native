@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.annotation.SuppressLint
 import android.content.pm.PackageManager
 import android.content.BroadcastReceiver
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.content.IntentSender
@@ -466,11 +467,7 @@ class PamActivity : FragmentActivity() {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (!runtimeStarted) return
-        val pressure = if (level >= TRIM_MEMORY_RUNNING_CRITICAL) {
-            MEMORY_PRESSURE_CRITICAL
-        } else {
-            MEMORY_PRESSURE_MODERATE
-        }
+        val pressure = memoryPressureForTrimLevel(level)
         runtime.trimMemory(pressure == MEMORY_PRESSURE_CRITICAL)
         runtime.dispatchLifecycle(EVENT_MEMORY_PRESSURE, pressure.toString().toByteArray())
     }
@@ -1091,7 +1088,7 @@ class PamActivity : FragmentActivity() {
         }
     }
 
-    private companion object {
+    internal companion object {
         const val EVENT_APP_STATE = 16
         const val EVENT_DIMENSIONS = 17
         const val EVENT_MEMORY_PRESSURE = 18
@@ -1105,6 +1102,22 @@ class PamActivity : FragmentActivity() {
         const val DIAGNOSTICS_FILE_PREFIX = "pam-diagnostics-"
         val DIAGNOSTICS_REQUEST_PATTERN = Regex("[a-f0-9]{32}")
         const val MEMORY_PRESSURE_CRITICAL = 2
+
+        /**
+         * RN parity: only RUNNING_CRITICAL and COMPLETE empty the caches.
+         * UI_HIDDEN/BACKGROUND/MODERATE (going to background) and the lower
+         * running levels only halve them, so returning to the app does not
+         * re-decode every visible image.
+         */
+        @Suppress("DEPRECATION")
+        fun memoryPressureForTrimLevel(level: Int): Int =
+            if (level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+                level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+            ) {
+                MEMORY_PRESSURE_CRITICAL
+            } else {
+                MEMORY_PRESSURE_MODERATE
+            }
         const val APPEARANCE_LIGHT = 1L
         const val APPEARANCE_DARK = 2L
         const val MAX_RUNTIME_RECOVERY_ATTEMPTS = 3
