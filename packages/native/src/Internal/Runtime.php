@@ -509,21 +509,73 @@ final class Runtime
             if ($callback === null) {
                 return;
             }
-            if (!self::marksItsScope($callback)) {
+            $pure = self::isPureCallback($callback);
+            if (!$pure && !self::marksItsScope($callback)) {
                 // Arbitrary element closures may mutate any state: re-render
                 // everything. Template handlers mark their component dirty.
                 DependencyTracker::invalidateAll();
             }
+            $revision = DependencyTracker::revision();
+            $epoch = DependencyTracker::epoch();
             self::$dispatchingEvent = true;
             try {
                 $callback($payload);
             } finally {
                 self::$dispatchingEvent = false;
             }
+            if (
+                $pure
+                && DependencyTracker::revision() === $revision
+                && DependencyTracker::epoch() === $epoch
+            ) {
+                // #[PureHandler]: nothing it touched changed, so nothing can
+                // render differently. Skip the tree walk, encode and patch.
+                return;
+            }
             self::afterDispatch();
         } catch (Throwable $error) {
             self::reportError($error, RuntimeErrorPhase::Event);
         }
+    }
+
+    /**
+     * A #[PureHandler] template method, a closure carrying the attribute, or
+     * an element wrapper (payload decoding) around only such handlers.
+     */
+    private static function isPureCallback(Closure $callback, int $depth = 0): bool
+    {
+        if (TemplateRenderer::isPureHandler($callback)) {
+            return true;
+        }
+        $function = new \ReflectionFunction($callback);
+        if ($function->getAttributes(\Pam\Native\Attributes\PureHandler::class) !== []) {
+            return true;
+        }
+        $scope = $function->getClosureScopeClass()?->getName();
+        if (
+            $depth >= 3
+            || $scope === null
+            || !str_starts_with($scope, 'Pam\\Native\\')
+            || !is_a($scope, Element::class, true)
+        ) {
+            return false;
+        }
+        $wrapped = [];
+        foreach ($function->getClosureUsedVariables() as $variable) {
+            if ($variable instanceof Closure) {
+                $wrapped[] = $variable;
+            }
+        }
+        if ($wrapped === []) {
+            return false;
+        }
+        foreach ($wrapped as $inner) {
+            if (!self::isPureCallback($inner, $depth + 1)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

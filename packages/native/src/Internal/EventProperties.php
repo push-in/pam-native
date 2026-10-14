@@ -83,5 +83,7 @@ final class EventProperties
         EventKind::MomentumScrollEnd->value => PropKey::OnMomentumScrollEnd->value,
         EventKind::TextLayout->value => PropKey::OnTextLayout->value,
         EventKind::PageChange->value => PropKey::OnPageChange->value,
+        EventKind::RouteCovered->value => PropKey::OnRouteCovered->value,
+        EventKind::RouteFocused->value => PropKey::OnRouteFocused->value,
     ];
 }

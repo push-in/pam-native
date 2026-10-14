@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.41.0 - 2026-10-14
+
+- Covered routes release native media (Android and iOS): a route covered by a
+  full-screen route, or an inactive native tab, frees every player's decoder
+  (ExoPlayer/MediaPlayer + MediaCodec, AVPlayer), video surface and progress
+  loop, and recreates it at the same position and play intent when visible
+  again. Contained modals and form sheets keep the route below playing. Opt
+  out per player with `keepAliveWhenCovered`. Apps no longer need to release
+  players before pushing (Zé Chat's `ReleasesMediaWhenCovered`).
+- `on:routeCovered`/`on:routeFocused` (`onRouteCovered()`/`onRouteFocused()`
+  on any element): native, edge-triggered route coverage events, also inside
+  nested navigators and tabs; a view mounted covered reports it once.
+- Scroll requests land exactly: an Android fling still running is stopped
+  before `ScrollView`, `FlatList`, `SectionList` and `VirtualizedList` jump
+  (a scroll to the top used to stop ~40 px short), offset 0 on Android
+  virtual lists is the very top (it resolved to 1 px), and iOS deceleration
+  is halted the same way. New `scrollAnimated` / `scrollRequest(..., animated:)`
+  glides there and snaps exactly; iOS virtual lists no longer animate every
+  request by default.
+- `#[PureHandler]` event handlers (template methods and element closures) do
+  not mark their component dirty: the runtime renders after them only when
+  its state, a tracked store/signal or an explicit request changed, so
+  timer-like events no longer re-render the screen.
+- Native media clock and progress: `<Text mediaClock="ref"
+  mediaClockFormat="remaining">` and `mediaProgress="ref"` (`Text::mediaClock()`,
+  `Element::mediaProgress()`, `MediaClockFormat`) follow a player's position
+  natively with no PHP tick, nothing while paused or covered.
+- Protocol: event kinds 78-79 and properties 530-536 (append-only). Android
+  JVM/instrumented regressions and iOS `PamCoveredRouteTests` (Mac validation
+  checklist in `docs/ios-parity.md`).
+
 ## 1.40.0 - 2026-10-14
 
 Pure PHP SDK release: Android and iOS hosts, the protocol and native

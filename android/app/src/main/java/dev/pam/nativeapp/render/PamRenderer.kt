@@ -703,6 +703,18 @@ class PamRenderer(
     private val pressableIds = LinkedHashSet<Long>()
     private val inputIds = LinkedHashSet<Long>()
     private val statusBarIds = LinkedHashSet<Long>()
+    /** Nodes with `on:routeCovered`/`on:routeFocused` and their last reported coverage. */
+    private val routeListeners = HashMap<Long, RouteFocusTracker>()
+    private var routeListenerSyncPosted = false
+    private val routeListenerSync = Runnable {
+        routeListenerSyncPosted = false
+        syncRouteListeners()
+    }
+    /** Nodes bound to a player position (`mediaClock` texts, `mediaProgress` fills). */
+    private val mediaBoundIds = LinkedHashSet<Long>()
+    private val mediaBoundViews: () -> List<View> = {
+        if (mediaBoundIds.isEmpty()) emptyList() else mediaBoundIds.mapNotNull { views[it] }
+    }
     private var appliedStatusBar: StatusBarConfig? = null
     private var appliedHostBackground: Int? = null
     private val nodes = LongSparseArray<NodeState>()
@@ -806,6 +818,8 @@ class PamRenderer(
 
     private fun removeView(id: Long) {
         (views[id] as? PamScrollContainer)?.let { scrollKeyboardInsets.remove(it)?.close() }
+        routeListeners.remove(id)
+        if (mediaBoundIds.remove(id)) views[id]?.let(::clearMediaBinding)
         scrollContainers.remove(id)
         pressableIds.remove(id)
         inputIds.remove(id)
@@ -1607,11 +1621,16 @@ class PamRenderer(
             NodeKind.DRAWER_LAYOUT -> PamDrawerLayout(context)
             NodeKind.NAVIGATION_HOST -> PamNavigationHost(context).also {
                 it.onActiveRouteChanged = ::applyMergedStatusBar
+                it.onRouteVisibilityChanged = ::scheduleRouteListenerSync
             }
             NodeKind.WEB_VIEW -> PamWebView(context)
-            NodeKind.MEDIA -> PamMediaView(context, mediaCache, imageLoader)
+            NodeKind.MEDIA -> PamMediaView(context, mediaCache, imageLoader).also {
+                it.boundViews = mediaBoundViews
+            }
             NodeKind.DRAWING_CANVAS -> PamDrawingCanvas(context)
-            NodeKind.TAB_HOST -> PamTabHost(context)
+            NodeKind.TAB_HOST -> PamTabHost(context).also {
+                it.onSceneVisibilityChanged = Runnable { scheduleRouteListenerSync() }
+            }
             NodeKind.CANVAS -> PamVectorCanvas(context)
             NodeKind.CUSTOM_VIEW -> {
                 val custom = requireNotNull(state) { "Custom native view requires node state" }
@@ -2034,6 +2053,7 @@ class PamRenderer(
                             state.integer(PropKey.SCROLL_TARGET_ALIGNMENT, 1).toInt(),
                             innerStartPx = if (cellId == targetId) 0 else dp(innerStart),
                             targetExtentPx = if (cellId == targetId) null else dp(innerExtent),
+                            animated = state.flag(PropKey.SCROLL_ANIMATED, false),
                         )
                     ) {
                         return@post
@@ -2075,7 +2095,7 @@ class PamRenderer(
                 state.number(PropKey.SCROLL_TARGET_OFFSET, -1.0).toFloat()
             }
             if (targetOffset >= 0f) {
-                list.scrollToLogicalOffset(targetOffset)
+                list.scrollToLogicalOffset(targetOffset, state.flag(PropKey.SCROLL_ANIMATED, false))
             }
         }
     }
@@ -3435,6 +3455,25 @@ class PamRenderer(
             -> configurePressable(view, state)
             PropKey.GESTURE_DRAG_SNAP_INDEX -> applyDragSnap(view, state)
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, value.text(key))
+            PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED ->
+                (view as? PamMediaView)?.setKeepAliveWhenCovered(value.flag())
+            PropKey.ON_ROUTE_COVERED,
+            PropKey.ON_ROUTE_FOCUSED,
+            -> {
+                routeListeners.getOrPut(state.id) { RouteFocusTracker() }
+                scheduleRouteListenerSync()
+            }
+            PropKey.SCROLL_ANIMATED -> (view as? PamScrollContainer)?.setScrollAnimated(value.flag())
+            PropKey.MEDIA_CLOCK -> {
+                view.setTag(dev.pam.nativeapp.R.id.pam_media_clock, value.text(key))
+                mediaBoundIds.add(state.id)
+            }
+            PropKey.MEDIA_CLOCK_FORMAT ->
+                view.setTag(dev.pam.nativeapp.R.id.pam_media_clock_format, value.integer().toInt())
+            PropKey.MEDIA_PROGRESS -> {
+                view.setTag(dev.pam.nativeapp.R.id.pam_media_progress, value.text(key))
+                mediaBoundIds.add(state.id)
+            }
             PropKey.ANIMATION_PROGRAM -> configureMotionProgram(view, state)
             PropKey.ANIMATION_RESTART_KEY -> restartAnimations(view, state)
             PropKey.TRANSITION_SPEC -> state.transitionRules = PamTransitionSpec.parse(value.text(key))
@@ -4379,6 +4418,27 @@ class PamRenderer(
                 state.motionProgramId = Long.MIN_VALUE
             }
             PropKey.NATIVE_REF -> view.setTag(dev.pam.nativeapp.R.id.pam_native_ref, null)
+            PropKey.MEDIA_KEEP_ALIVE_WHEN_COVERED -> (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
+            PropKey.ON_ROUTE_COVERED,
+            PropKey.ON_ROUTE_FOCUSED,
+            -> if (
+                state.properties[PropKey.ON_ROUTE_COVERED] == null &&
+                state.properties[PropKey.ON_ROUTE_FOCUSED] == null
+            ) {
+                routeListeners.remove(state.id)
+            }
+            PropKey.SCROLL_ANIMATED -> (view as? PamScrollContainer)?.setScrollAnimated(false)
+            PropKey.MEDIA_CLOCK -> {
+                view.setTag(dev.pam.nativeapp.R.id.pam_media_clock, null)
+                if (state.properties[PropKey.MEDIA_PROGRESS] == null) mediaBoundIds.remove(state.id)
+            }
+            PropKey.MEDIA_CLOCK_FORMAT -> view.setTag(dev.pam.nativeapp.R.id.pam_media_clock_format, null)
+            PropKey.MEDIA_PROGRESS -> {
+                view.setTag(dev.pam.nativeapp.R.id.pam_media_progress, null)
+                view.animate().cancel()
+                view.scaleX = 1f
+                if (state.properties[PropKey.MEDIA_CLOCK] == null) mediaBoundIds.remove(state.id)
+            }
             PropKey.TRANSITION_SPEC -> state.transitionRules = emptyMap()
             PropKey.PRESS_DOUBLE_TAP_DELAY_MS,
             PropKey.PRESS_TAP_EFFECT,
@@ -6388,6 +6448,40 @@ class PamRenderer(
                 ),
             ),
         )
+    }
+
+    private fun scheduleRouteListenerSync() {
+        if (routeListeners.isEmpty() || routeListenerSyncPosted) return
+        routeListenerSyncPosted = true
+        main.post(routeListenerSync)
+    }
+
+    /**
+     * `on:routeCovered` / `on:routeFocused`: evaluated only when a navigation
+     * route or tab scene changed visibility (and when a listener mounts),
+     * dispatched only when a listener's coverage really changed.
+     */
+    internal fun syncRouteListeners() {
+        if (routeListeners.isEmpty()) return
+        for ((id, tracker) in routeListeners.entries.toList()) {
+            val view = views[id] ?: continue
+            if (!view.isAttachedToWindow) continue
+            val covered = tracker.update(PamRouteCoverage.isCovered(view)) ?: continue
+            val state = nodes[id] ?: continue
+            val event = if (covered) EventKind.ROUTE_COVERED else EventKind.ROUTE_FOCUSED
+            val property = if (covered) PropKey.ON_ROUTE_COVERED else PropKey.ON_ROUTE_FOCUSED
+            if (state.properties[property] != null) dispatch(id, event.value)
+        }
+    }
+
+    private fun clearMediaBinding(view: View) {
+        view.setTag(dev.pam.nativeapp.R.id.pam_media_clock, null)
+        view.setTag(dev.pam.nativeapp.R.id.pam_media_clock_format, null)
+        if (view.getTag(dev.pam.nativeapp.R.id.pam_media_progress) != null) {
+            view.setTag(dev.pam.nativeapp.R.id.pam_media_progress, null)
+            view.animate().cancel()
+            view.scaleX = 1f
+        }
     }
 
     private fun dispatch(id: Long, kind: Int, payload: String = "") {
@@ -9879,6 +9973,10 @@ class PamRenderer(
         )
 
         val HOST_PROPERTIES = setOf(
+            // Route focus listeners and media progress fills need a real view.
+            PropKey.ON_ROUTE_COVERED,
+            PropKey.ON_ROUTE_FOCUSED,
+            PropKey.MEDIA_PROGRESS,
             // Sticky headers are positioned natively while scrolling.
             PropKey.STICKY_HEADER,
             // A semantic value on a layout container is also its Android tag.
@@ -10034,6 +10132,8 @@ class PamRenderer(
             PropKey.ON_SCROLL_END_DRAG,
             PropKey.ON_MOMENTUM_SCROLL_END,
             PropKey.ON_PAGE_CHANGE,
+            PropKey.ON_ROUTE_COVERED,
+            PropKey.ON_ROUTE_FOCUSED,
             PropKey.ON_TEXT_LAYOUT,
             PropKey.ON_PRESS,
             PropKey.ON_CHANGE,

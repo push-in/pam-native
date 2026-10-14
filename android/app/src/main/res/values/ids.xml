@@ -6,4 +6,7 @@
     <item name="pam_native_ref" type="id" />
     <item name="pam_await_window_focus" type="id" />
     <item name="pam_motion_runners" type="id" />
+    <item name="pam_media_clock" type="id" />
+    <item name="pam_media_clock_format" type="id" />
+    <item name="pam_media_progress" type="id" />
 </resources>

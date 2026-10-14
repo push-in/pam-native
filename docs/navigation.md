@@ -232,6 +232,46 @@ If another navigation interrupts the exit animation, the discarded outgoing
 screen is still released. Use this callback to cancel route-owned subscriptions
 and other work that must outlive a temporary blur.
 
+## Covered routes release native media
+
+A screen below another route keeps its native tree (its PHP element tree is
+frozen until it is on top again), but it must not keep heavy native resources
+alive. Since 1.41.0 this is the platform default on Android and iOS: when a
+route is covered by a full-screen route, or its native tab becomes inactive,
+every `MediaPlayer` in it releases its player, decoder (MediaCodec/AVPlayer)
+and video surface. When the route is visible again (pop, gesture back, tab
+reselected) the player is recreated at the same position and play intent.
+Contained modals and form sheets leave the route below visible, so it keeps
+playing state. Nothing has to be done in PHP; apps that released players
+before pushing (rendering without the player, then navigating on the next
+tick) can drop that workaround.
+
+Opt a player out with `keepAliveWhenCovered` (audio that must continue under
+another screen); it is then only paused while hidden, as before:
+
+```xml
+<MediaPlayer source="$track" keepAliveWhenCovered="true" />
+```
+
+Any element can react to the same native state without polling or a
+navigation listener, even inside a nested navigator or tab:
+
+```xml
+<View on:routeCovered="pauseTimers" on:routeFocused="resumeTimers">...</View>
+```
+
+```php
+View::make($feed)
+    ->onRouteCovered(fn () => $this->ticker->pause())
+    ->onRouteFocused(fn () => $this->ticker->resume());
+```
+
+`routeCovered` fires when the route (or tab scene) holding the view is covered,
+`routeFocused` when it is visible again; each fires once per change, never per
+frame. A view mounted in a covered route (prewarmed, parked by `keepAlive()`)
+reports `routeCovered` once. The events reach the frozen screen's own
+handlers; re-render work they cause is applied when it is on top again.
+
 ## Nested navigators
 
 Stacks and tabs may be declared inline and registered as ordinary named route

@@ -49,6 +49,21 @@ final class Text extends Element
     }
 
     /**
+     * Shows the position of the player whose `nativeRef` is [ref], updated
+     * natively while it plays (no PHP tick, nothing while paused or covered).
+     * The text's own content is the placeholder until the player is ready;
+     * give it a stable width (e.g. tabular digits) so updates never relayout.
+     */
+    public function mediaClock(
+        string $ref,
+        \Pam\Native\MediaClockFormat $format = \Pam\Native\MediaClockFormat::Elapsed,
+    ): self {
+        return $this
+            ->withProperty(PropKey::MediaClock, \Pam\Native\Animation\Drag::ref($ref))
+            ->withProperty(PropKey::MediaClockFormat, $format->value);
+    }
+
+    /**
      * Inline rich text: one paragraph whose runs may change weight, size,
      * color, decoration, background or font and may be individually
      * pressable (links, mentions), like nested `<Text>` in React Native.

@@ -20,6 +20,8 @@ final class DependencyTracker
     /** @var WeakMap<Component, Component>|null */
     private static ?WeakMap $parents = null;
     private static int $epoch = 0;
+    /** Bumped whenever a component newly becomes dirty (pure event dispatch compares it). */
+    private static int $revision = 0;
     private static bool $memoization = true;
 
     private function __construct()
@@ -105,6 +107,12 @@ final class DependencyTracker
         return self::$dirty !== null && isset(self::$dirty[$component]);
     }
 
+    /** Monotonic counter bumped each time a component newly becomes dirty. */
+    public static function revision(): int
+    {
+        return self::$revision;
+    }
+
     /** Monotonic counter bumped by every global invalidation. */
     public static function epoch(): int
     {
@@ -163,6 +171,7 @@ final class DependencyTracker
                 return;
             }
             $dirty[$current] = true;
+            self::$revision++;
             $parent = $parents !== null && isset($parents[$current])
                 ? $parents[$current]
                 : null;

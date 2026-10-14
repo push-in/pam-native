@@ -140,6 +140,8 @@ public enum EventKind: Int {
     case textLayout = 75
     case keyboardVisibility = 76
     case pageChange = 77
+    case routeCovered = 78
+    case routeFocused = 79
 }
 
 public enum PropValue {
@@ -538,6 +540,13 @@ public enum PamConstants {
     public static let needsOffscreenAlphaCompositing = 527
     public static let onPageChange = 528
     public static let refreshEnabled = 529
+    public static let mediaKeepAliveWhenCovered = 530
+    public static let onRouteCovered = 531
+    public static let onRouteFocused = 532
+    public static let scrollAnimated = 533
+    public static let mediaClock = 534
+    public static let mediaClockFormat = 535
+    public static let mediaProgress = 536
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

@@ -227,8 +227,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
             return
         }
         routeViews.forEach { setRouteHidden($0, $0 !== incoming && $0 !== outgoing) }
-        incoming.isHidden = false
-        outgoing?.isHidden = false
+        setRouteHidden(incoming, false)
+        if let outgoing { setRouteHidden(outgoing, false) }
         layoutIfNeeded()
         prepareSharedElements(incoming: incoming, outgoing: outgoing)
         let kind = transition == 1 ? 2 : transition
@@ -516,8 +516,8 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         switch gesture.state {
         case .began:
             onGestureStart?()
-            incoming.isHidden = false
-            outgoing.isHidden = false
+            setRouteHidden(incoming, false)
+            setRouteHidden(outgoing, false)
             prepareSharedElements(incoming: incoming, outgoing: outgoing)
             fallthrough
         case .changed:
@@ -588,7 +588,7 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
         clearSharedElements()
         incoming.alpha = 1
         incoming.transform = .identity
-        incoming.isHidden = false
+        setRouteHidden(incoming, false)
         outgoing?.alpha = 1
         outgoing?.transform = .identity
         if let outgoing { setRouteHidden(outgoing, true) }
@@ -600,7 +600,9 @@ final class PamNavigationHost: UIView, UIGestureRecognizerDelegate, UIAdaptivePr
     /// endEditing on this subtree cannot resign an editor in the destination.
     private func setRouteHidden(_ view: UIView, _ hidden: Bool) {
         if hidden { view.endEditing(true) }
+        guard view.isHidden != hidden else { return }
         view.isHidden = hidden
+        PamRouteCoverage.notifyChanged()
     }
 
     private func showOnlyTop() {

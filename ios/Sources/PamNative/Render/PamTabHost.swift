@@ -134,7 +134,10 @@ final class PamTabHost: UIView, UITabBarDelegate {
         scenes.enumerated().forEach { index, scene in
             let active = index + 1 == selectedIndex
             if !active { scene.endEditing(true) }
-            scene.isHidden = !active
+            if scene.isHidden == active {
+                scene.isHidden = !active
+                PamRouteCoverage.notifyChanged()
+            }
             scene.accessibilityElementsHidden = !active
         }
         tabBar.selectedItem = tabBar.items?.first { $0.tag == selectedIndex }

@@ -707,6 +707,13 @@ pub enum PropKey {
     NeedsOffscreenAlphaCompositing = 527,
     OnPageChange = 528,
     RefreshEnabled = 529,
+    MediaKeepAliveWhenCovered = 530,
+    OnRouteCovered = 531,
+    OnRouteFocused = 532,
+    ScrollAnimated = 533,
+    MediaClock = 534,
+    MediaClockFormat = 535,
+    MediaProgress = 536,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1243,6 +1250,13 @@ impl TryFrom<u16> for PropKey {
             527 => Ok(Self::NeedsOffscreenAlphaCompositing),
             528 => Ok(Self::OnPageChange),
             529 => Ok(Self::RefreshEnabled),
+            530 => Ok(Self::MediaKeepAliveWhenCovered),
+            531 => Ok(Self::OnRouteCovered),
+            532 => Ok(Self::OnRouteFocused),
+            533 => Ok(Self::ScrollAnimated),
+            534 => Ok(Self::MediaClock),
+            535 => Ok(Self::MediaClockFormat),
+            536 => Ok(Self::MediaProgress),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2180,10 +2194,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=529 {
+        for value in 1..=536 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(530).is_err());
+        assert!(PropKey::try_from(537).is_err());
     }
 
     #[test]

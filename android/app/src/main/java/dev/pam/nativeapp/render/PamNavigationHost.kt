@@ -134,7 +134,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val isVisibleRoute = isInitialRoute || view === activeRoute
         val moved = movingRoute === view
         if (moved) movingRoute = null
-        view.visibility = if (isVisibleRoute) View.VISIBLE else View.INVISIBLE
+        setRouteVisibility(view, if (isVisibleRoute) View.VISIBLE else View.INVISIBLE)
         // A screen mounted hidden (prewarmed, kept alive, or pushed and not
         // yet animating) is measured and laid out on the next frame, so its
         // mount and its first layout never add up in a single frame.
@@ -221,7 +221,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
             activeRoute = null
             if (childCount > 0) {
                 getChildAt(childCount - 1).also { replacement ->
-                    replacement.visibility = View.VISIBLE
+                    setRouteVisibility(replacement, View.VISIBLE)
                     replacement.importantForAccessibility =
                         View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                     setActiveRoute(replacement)
@@ -232,6 +232,27 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val fragment = routeControllers.remove(child) ?: return
         fragmentManager()?.takeUnless(FragmentManager::isStateSaved)?.let { manager ->
             manager.beginTransaction().remove(fragment).commitNowAllowingStateLoss()
+        }
+    }
+
+    /**
+     * Fired (at most once per frame) after a route's visibility changed:
+     * a route hidden below a full-screen route is covered, the top route and
+     * the routes of a running transition are visible.
+     */
+    var onRouteVisibilityChanged: (() -> Unit)? = null
+    private var routeVisibilityNotifyPosted = false
+    private val notifyRouteVisibility = Runnable {
+        routeVisibilityNotifyPosted = false
+        onRouteVisibilityChanged?.invoke()
+    }
+
+    private fun setRouteVisibility(route: View, value: Int) {
+        if (route.visibility == value) return
+        route.visibility = value
+        if (!routeVisibilityNotifyPosted && onRouteVisibilityChanged != null) {
+            routeVisibilityNotifyPosted = true
+            post(notifyRouteVisibility)
         }
     }
 
@@ -450,8 +471,8 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         val outgoing = getChildAt(childCount - 1)
         setActiveRoute(incoming)
         applyRoutePresentation(incoming)
-        incoming.visibility = View.VISIBLE
-        outgoing.visibility = View.VISIBLE
+        setRouteVisibility(incoming, View.VISIBLE)
+        setRouteVisibility(outgoing, View.VISIBLE)
         prepareSharedElements(incoming, outgoing)
         onGestureStart?.invoke()
     }
@@ -488,14 +509,14 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
                     clearSharedElements()
                     if (complete) {
                         predictiveBackCommitted = true
-                        outgoing.visibility = View.INVISIBLE
-                        incoming.visibility = View.VISIBLE
+                        setRouteVisibility(outgoing, View.INVISIBLE)
+                        setRouteVisibility(incoming, View.VISIBLE)
                         setActiveRoute(incoming)
                         onGestureEnd?.invoke()
                         onGesturePop?.invoke()
                     } else {
-                        incoming.visibility = View.INVISIBLE
-                        outgoing.visibility = View.VISIBLE
+                        setRouteVisibility(incoming, View.INVISIBLE)
+                        setRouteVisibility(outgoing, View.VISIBLE)
                         setActiveRoute(outgoing)
                         onGestureCancel?.invoke()
                     }
@@ -597,7 +618,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
 
         for (index in 0 until childCount) {
             getChildAt(index).apply {
-                visibility = if (this === incoming || this === outgoing) View.VISIBLE else View.INVISIBLE
+                setRouteVisibility(this, if (this === incoming || this === outgoing) View.VISIBLE else View.INVISIBLE)
                 importantForAccessibility = if (this === incoming) {
                     View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                 } else {
@@ -869,9 +890,9 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         reset(incoming)
         outgoing?.let {
             reset(it)
-            it.visibility = if (keepsPreviousRouteVisible()) View.VISIBLE else View.INVISIBLE
+            setRouteVisibility(it, if (keepsPreviousRouteVisible()) View.VISIBLE else View.INVISIBLE)
         }
-        incoming.visibility = View.VISIBLE
+        setRouteVisibility(incoming, View.VISIBLE)
         incoming.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
         outgoing?.importantForAccessibility =
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
@@ -884,7 +905,7 @@ internal class PamNavigationHost(context: Context) : FrameLayout(context) {
         for (index in 0 until childCount) {
             getChildAt(index).apply {
                 val active = index == childCount - 1
-                visibility = if (active) View.VISIBLE else View.INVISIBLE
+                setRouteVisibility(this, if (active) View.VISIBLE else View.INVISIBLE)
                 importantForAccessibility = if (active) {
                     View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                 } else {

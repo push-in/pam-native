@@ -193,8 +193,22 @@ final class PamMediaView: UIView {
     var onCacheMiss: ((String) -> Void)?
     var onCacheReady: ((String, Int64) -> Void)?
 
+    /// Covered-route policy (Android parity): a covered route frees its
+    /// AVPlayer/decoder and recreates it at the same position when visible.
+    private var keepAliveWhenCovered = false
+    private(set) var releasedForCover = false
+    private var resumeSource = ""
+    private var resumeAt: Double = 0
+    private var resumePlaying = false
+    private var coverageObserver: NSObjectProtocol?
+    /// Views bound to this player's `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer.
+    var boundViews: (() -> [UIView])?
+
     override init(frame: CGRect) {
         super.init(frame: frame)
+        coverageObserver = NotificationCenter.default.addObserver(
+            forName: PamRouteCoverage.didChange, object: nil, queue: .main
+        ) { [weak self] _ in self?.syncCoverage() }
         backgroundColor = .black
         controller.view.frame = bounds
         controller.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -206,14 +220,99 @@ final class PamMediaView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit { releasePlayer() }
+    deinit {
+        if let coverageObserver { NotificationCenter.default.removeObserver(coverageObserver) }
+        releasePlayer()
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        // Next turn: a reparent (remove + add) must not recreate the player.
+        DispatchQueue.main.async { [weak self] in self?.syncCoverage() }
+    }
+
+    func setKeepAliveWhenCovered(_ value: Bool) {
+        guard keepAliveWhenCovered != value else { return }
+        keepAliveWhenCovered = value
+        syncCoverage()
+    }
+
+    private func syncCoverage() {
+        let covered = !keepAliveWhenCovered && !source.isEmpty && PamRouteCoverage.isCovered(self)
+        guard covered != releasedForCover else { return }
+        releasedForCover = covered
+        if covered {
+            if let player, player.currentItem?.status == .readyToPlay {
+                resumeSource = source
+                resumeAt = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
+                resumePlaying = player.timeControlStatus != .paused
+            }
+            sourceGeneration &+= 1
+            releasePlayer()
+        } else {
+            let current = source
+            source = ""
+            setSource(current)
+        }
+    }
+
+    private func bindingTargets() -> [UIView] {
+        guard let ref = pamNativeRef, let all = boundViews?(), !all.isEmpty else { return [] }
+        return all.filter { $0.pamMediaClockRef == ref || $0.pamMediaProgressRef == ref }
+    }
+
+    /// `mediaClock` labels and `mediaProgress` fills follow the player natively.
+    private func updateBindings(position: Double, duration: Double, animated: Bool) {
+        guard let ref = pamNativeRef else { return }
+        for target in bindingTargets() {
+            if target.pamMediaClockRef == ref, let label = target as? UILabel {
+                let text = PamMediaClock.format(target.pamMediaClockFormat, position: position, duration: duration)
+                if label.attributedText?.string != text {
+                    // Keep the label's styled attributes (font, color, tabular digits).
+                    if let current = label.attributedText, current.length > 0 {
+                        label.attributedText = NSAttributedString(
+                            string: text,
+                            attributes: current.attributes(at: 0, effectiveRange: nil)
+                        )
+                    } else {
+                        label.text = text
+                    }
+                }
+            }
+            if target.pamMediaProgressRef == ref {
+                let fraction = max(PamMediaClock.fraction(position: position, duration: duration), 0.0001)
+                // Scale from the leading edge without moving the anchor point
+                // (the renderer positions transformed views through center).
+                let rtl = target.effectiveUserInterfaceLayoutDirection == .rightToLeft
+                let shift = (1 - fraction) * target.bounds.width / 2 * (rtl ? 1 : -1)
+                let transform = CGAffineTransform(translationX: shift, y: 0).scaledBy(x: fraction, y: 1)
+                if animated {
+                    UIView.animate(withDuration: 0.25, delay: 0, options: [.curveLinear, .beginFromCurrentState]) {
+                        target.transform = transform
+                    }
+                } else {
+                    target.transform = transform
+                }
+            }
+        }
+    }
 
     func setSource(_ value: String) {
         guard value != source else { return }
         source = value
+        if value != resumeSource {
+            resumeSource = ""
+            resumeAt = 0
+            resumePlaying = false
+        }
         sourceGeneration &+= 1
         releasePlayer()
         guard !value.isEmpty else { return }
+        // A covered route prepares its player when it is visible again.
+        if window != nil, !keepAliveWhenCovered, PamRouteCoverage.isCovered(self) {
+            releasedForCover = true
+            return
+        }
         if PamPhotoAssetURI.identifier(value) != nil {
             guard let asset = PamPhotoAssetURI.asset(value), asset.mediaType == .video else {
                 onError?("Photo asset is unavailable or is not a video")
@@ -353,8 +452,10 @@ final class PamMediaView: UIView {
                 guard let self, self.player?.currentItem === item else { return }
                 switch item.status {
                 case .readyToPlay:
-                    if self.currentTime > 0 {
-                        self.seek(self.currentTime)
+                    let resuming = !self.resumeSource.isEmpty && self.resumeSource == self.source
+                    let startAt = resuming ? self.resumeAt : self.currentTime
+                    if startAt > 0 {
+                        self.player?.seek(to: CMTime(seconds: startAt, preferredTimescale: 600))
                     }
                     let size = item.presentationSize
                     let duration = item.duration.seconds
@@ -363,7 +464,8 @@ final class PamMediaView: UIView {
                         Int(size.height.rounded()),
                         duration.isFinite ? max(0, duration) : 0
                     )
-                    if self.autoPlay { self.play() }
+                    self.updateBindings(position: startAt, duration: duration, animated: false)
+                    if self.autoPlay || (resuming && self.resumePlaying) { self.play() }
                 case .failed:
                     self.onError?(item.error?.localizedDescription ?? "Media could not be loaded")
                 case .unknown:
@@ -379,7 +481,9 @@ final class PamMediaView: UIView {
         ) { [weak self] time in
             guard let self, let item = self.player?.currentItem else { return }
             let duration = item.duration.seconds
-            self.onProgress?(time.seconds.isFinite ? time.seconds : 0, duration.isFinite ? duration : 0)
+            let position = time.seconds.isFinite ? time.seconds : 0
+            self.onProgress?(position, duration.isFinite ? duration : 0)
+            self.updateBindings(position: position, duration: duration, animated: true)
         }
         endToken = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,

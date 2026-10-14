@@ -767,6 +767,15 @@ their retained layout frames before asking the platform list to scroll.
 the identified descendant within the visible viewport on both axes and both
 platforms. Edge targets are clamped to the available scroll range.
 
+A request always lands exactly on its target: a fling or deceleration still
+running is stopped first (before 1.41.0 an Android fling kept moving after the
+jump, so a "scroll to top" stopped about 40 px short). Add
+`scrollAnimated="true"` (or `scrollRequest(..., animated: true)`) on
+`ScrollView`, `FlatList`, `SectionList` and `VirtualizedList` to glide there
+instead; virtual lists then snap exactly onto the target once the glide
+settles, unless a finger took over. iOS lists now jump by default too
+(they used to animate every request).
+
 Pull to refresh (`:refreshing`, `on:refresh`, `tintColor`, `refreshColors`,
 `progressViewOffset`, `refreshEnabled`) goes straight on `ScrollView` and the
 lists; see [Pull to refresh](pull-to-refresh.md).
@@ -996,6 +1005,29 @@ the programmatic `MediaPlayer::onProgress()` API:
 ```xml
 <MediaPlayer source="$video" on:mediaProgress="trackProgress" />
 ```
+
+### Native clock and progress bar
+
+Time labels, countdowns and progress bars can follow a player natively, with
+no PHP tick at all (no `on:mediaProgress` handler, nothing wakes PHP while it
+plays, nothing runs while it is paused or covered):
+
+```xml
+<MediaPlayer source="$story" nativeRef="story" autoPlay />
+<View class="h-1 bg-white/30"><View class="h-1 w-full bg-white" mediaProgress="story" /></View>
+<Text mediaClock="story" mediaClockFormat="countdown" style="font-variant-numeric: tabular-nums">5</Text>
+```
+
+`mediaClock` names the player's `nativeRef`; `mediaClockFormat` is `elapsed`
+(default, `0:42`), `remaining` (`1:18`), `elapsed-duration` (`0:42 / 2:00`),
+`duration` (`2:00`) or `countdown` (whole seconds left, `5`) — the
+`MediaClockFormat` enum in PHP (`Text::make('0:00')->mediaClock('story',
+MediaClockFormat::Remaining)`). Hours appear past one hour (`1:01:05`). The
+text content is the placeholder shown until the player is ready; give the
+label a stable width (tabular digits) so updates never need a relayout.
+`mediaProgress` (`->mediaProgress('story')` on any element) scales the view
+horizontally from its leading edge to `position / duration`, gliding linearly
+between samples; it owns that view's horizontal scale.
 
 On Android, `http://` and `https://` sources are opened as network media URLs.
 Provider and local sources keep their context-aware handling through

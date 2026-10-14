@@ -382,6 +382,10 @@ final class TemplateRenderer
         'volume' => PropKey::MediaVolume,
         'currentTime' => PropKey::MediaCurrentTime,
         'playbackRate' => PropKey::MediaPlaybackRate,
+        'keepAliveWhenCovered' => PropKey::MediaKeepAliveWhenCovered,
+        'mediaClock' => PropKey::MediaClock,
+        'mediaClockFormat' => PropKey::MediaClockFormat,
+        'mediaProgress' => PropKey::MediaProgress,
         'draggable' => PropKey::Draggable,
         'dragData' => PropKey::DragData,
         'dropEnabled' => PropKey::DropEnabled,
@@ -412,6 +416,7 @@ final class TemplateRenderer
         'scrollRequest' => PropKey::ScrollRequest,
         'scrollTargetOffset' => PropKey::ScrollTargetOffset,
         'scrollTargetAlignment' => PropKey::ScrollTargetAlignment,
+        'scrollAnimated' => PropKey::ScrollAnimated,
         'brushColor' => PropKey::DrawingColor,
         'drawingColor' => PropKey::DrawingColor,
         'brushWidth' => PropKey::DrawingWidth,
@@ -745,6 +750,8 @@ final class TemplateRenderer
         'on:scrollEndDrag' => EventKind::ScrollEndDrag,
         'on:momentumScrollEnd' => EventKind::MomentumScrollEnd,
         'on:pageChange' => EventKind::PageChange,
+        'on:routeCovered' => EventKind::RouteCovered,
+        'on:routeFocused' => EventKind::RouteFocused,
         'on:textLayout' => EventKind::TextLayout,
         'on:cacheHit' => EventKind::MediaCacheHit,
         'on:cacheMiss' => EventKind::MediaCacheMiss,
@@ -4167,6 +4174,7 @@ final class TemplateRenderer
             PropKey::ScrollTargetTestId,
             PropKey::ScrollTargetOffset,
             PropKey::ScrollTargetAlignment,
+            PropKey::ScrollAnimated,
             PropKey::ScrollRequest,
             => in_array(
                 $kind,
@@ -4837,6 +4845,20 @@ final class TemplateRenderer
                 ? $value->encode()
                 : (is_string($value) && $value !== '' ? $value : null),
             PropKey::NativeRef => Drag::ref(self::stringValue($value, 'nativeRef')),
+            PropKey::MediaClock,
+            PropKey::MediaProgress,
+            => $value === null || $value === false || $value === ''
+                ? null
+                : Drag::ref(self::stringValue($value, "Template {$key->name}")),
+            PropKey::MediaClockFormat => $value instanceof \Pam\Native\MediaClockFormat
+                ? $value->value
+                : self::named($value, [
+                    'elapsed' => \Pam\Native\MediaClockFormat::Elapsed->value,
+                    'remaining' => \Pam\Native\MediaClockFormat::Remaining->value,
+                    'elapsed-duration' => \Pam\Native\MediaClockFormat::ElapsedAndDuration->value,
+                    'duration' => \Pam\Native\MediaClockFormat::Duration->value,
+                    'countdown' => \Pam\Native\MediaClockFormat::CountdownSeconds->value,
+                ]),
             PropKey::ListSection,
             PropKey::ListActiveSection,
             => $value === null || $value === false ? null : self::stringValue($value, "Template {$key->name}"),
@@ -6821,19 +6843,31 @@ final class TemplateRenderer
                 self::$componentMethods[$scope::class.'::'.$raw] = $method;
             }
 
+            $pure = self::pureMethod($method);
             $handler = static function (mixed $payload = null) use (
                 $method,
                 $scope,
+                $pure,
             ): void {
-                if ($scope instanceof Component) {
+                if ($scope instanceof Component && !$pure) {
                     DependencyTracker::markDirty($scope);
                 }
-                if ($method->getNumberOfParameters() === 0) {
-                    $method->invoke($scope);
-                } else {
-                    $method->invoke($scope, $payload);
+                try {
+                    if ($method->getNumberOfParameters() === 0) {
+                        $method->invoke($scope);
+                    } else {
+                        $method->invoke($scope, $payload);
+                    }
+                } finally {
+                    if ($pure) {
+                        self::settlePureHandler($scope);
+                    }
                 }
             };
+            if ($pure) {
+                self::$pureHandlers ??= new \WeakMap();
+                self::$pureHandlers[$handler] = true;
+            }
 
             return $scope instanceof Component ? $scope->__pamRememberHandler('@'.$raw, $handler) : $handler;
         }
@@ -6914,93 +6948,146 @@ final class TemplateRenderer
         if ($cached !== null) {
             return $cached;
         }
-        $handler = static function (mixed $payload = '') use ($kind, $method, $scope): void {
-            if ($scope instanceof Component) {
-                DependencyTracker::markDirty($scope);
-            }
-            if ($method->getNumberOfParameters() === 0) {
-                $method->invoke($scope);
-                return;
-            }
+        $pure = self::pureMethod($method);
+        $handler = static function (mixed $payload = '') use ($kind, $method, $scope, $pure): void {
+            if (!$pure) {
+                if ($scope instanceof Component) {
+                    DependencyTracker::markDirty($scope);
+                }
+                self::invokeMethodHandler($kind, $method, $scope, $payload);
 
-            $typed = EventPayloads::parameterClass($method, 0);
-            if ($typed !== null && is_string($payload)) {
-                $method->invoke($scope, EventPayloads::decode($typed, $payload));
                 return;
             }
-            if ($typed !== null && $payload instanceof $typed) {
-                $method->invoke($scope, $payload);
-                return;
+            try {
+                self::invokeMethodHandler($kind, $method, $scope, $payload);
+            } finally {
+                self::settlePureHandler($scope);
             }
-            if (in_array($kind, [EventKind::Press, EventKind::LongPress], true) && is_string($payload)) {
-                // Press payloads now carry coordinates; untyped handlers keep
-                // the historical empty payload.
-                $payload = '';
-            }
-
-            if (
-                $kind === EventKind::MediaProgress
-                && is_string($payload)
-                && $method->getNumberOfParameters() >= 2
-            ) {
-                $values = Wire::decodeMap($payload);
-                $method->invoke(
-                    $scope,
-                    (float) ($values['currentTime'] ?? 0.0),
-                    (float) ($values['duration'] ?? 0.0),
-                );
-                return;
-            }
-
-            if (
-                is_string($payload)
-                && in_array($kind, [
-                    EventKind::GestureBegin,
-                    EventKind::GestureUpdate,
-                    EventKind::GestureEnd,
-                    EventKind::GestureCancel,
-                ], true)
-            ) {
-                $value = GestureEvent::fromPayload($payload);
-            } elseif ($kind === EventKind::Layout && is_string($payload)) {
-                $value = \Pam\Native\LayoutEvent::fromPayload($payload);
-            } elseif ($kind === EventKind::MediaReady && is_string($payload)) {
-                $value = \Pam\Native\MediaReadyEvent::fromPayload($payload);
-            } elseif ($kind === EventKind::MediaBuffering && is_string($payload)) {
-                $value = (bool) (Wire::decodeMap($payload)['buffering'] ?? false);
-            } elseif ($kind === EventKind::Toggle) {
-                $value = $payload === true || $payload === '1';
-            } elseif (is_array($payload)) {
-                $value = $payload;
-            } elseif (
-                is_string($payload)
-                || is_int($payload)
-                || is_float($payload)
-                || is_bool($payload)
-                || $payload === null
-                || $payload instanceof Stringable
-            ) {
-                $value = (string) $payload;
-            } elseif (is_object($payload)) {
-                $value = $payload;
-            } else {
-                throw new RuntimeException(
-                    'Template event payload must be scalar, stringable, an object, or an array.',
-                );
-            }
-            if (
-                in_array($kind, [EventKind::Layout, EventKind::MediaReady], true)
-                && is_object($value)
-                && ($type = $method->getParameters()[0]->getType()) instanceof \ReflectionNamedType
-                && $type->getName() === 'string'
-            ) {
-                // Handlers written before typed payloads keep the raw string.
-                $value = is_string($payload) ? $payload : '';
-            }
-            $method->invoke($scope, $value);
         };
+        if ($pure) {
+            self::$pureHandlers ??= new \WeakMap();
+            self::$pureHandlers[$handler] = true;
+        }
 
         return $scope instanceof Component ? $scope->__pamRememberHandler($handlerKey, $handler) : $handler;
+    }
+
+    /** @var \WeakMap<Closure, true>|null */
+    private static ?\WeakMap $pureHandlers = null;
+
+    /** @var array<string, bool> */
+    private static array $pureMethods = [];
+
+    /** @internal True for a template handler built from a #[PureHandler] method. */
+    public static function isPureHandler(Closure $handler): bool
+    {
+        return self::$pureHandlers !== null && isset(self::$pureHandlers[$handler]);
+    }
+
+    private static function pureMethod(ReflectionMethod $method): bool
+    {
+        return self::$pureMethods[$method->class.'::'.$method->name]
+            ??= $method->getAttributes(\Pam\Native\Attributes\PureHandler::class) !== [];
+    }
+
+    /** A pure handler re-renders its component only when its own state really changed. */
+    private static function settlePureHandler(object $scope): void
+    {
+        if (
+            $scope instanceof Component
+            && !DependencyTracker::isDirty($scope)
+            && $scope->__pamStateChanged()
+        ) {
+            DependencyTracker::markDirty($scope);
+        }
+    }
+
+    private static function invokeMethodHandler(
+        EventKind $kind,
+        ReflectionMethod $method,
+        object $scope,
+        mixed $payload,
+    ): void {
+        if ($method->getNumberOfParameters() === 0) {
+            $method->invoke($scope);
+            return;
+        }
+
+        $typed = EventPayloads::parameterClass($method, 0);
+        if ($typed !== null && is_string($payload)) {
+            $method->invoke($scope, EventPayloads::decode($typed, $payload));
+            return;
+        }
+        if ($typed !== null && $payload instanceof $typed) {
+            $method->invoke($scope, $payload);
+            return;
+        }
+        if (in_array($kind, [EventKind::Press, EventKind::LongPress], true) && is_string($payload)) {
+            // Press payloads now carry coordinates; untyped handlers keep
+            // the historical empty payload.
+            $payload = '';
+        }
+
+        if (
+            $kind === EventKind::MediaProgress
+            && is_string($payload)
+            && $method->getNumberOfParameters() >= 2
+        ) {
+            $values = Wire::decodeMap($payload);
+            $method->invoke(
+                $scope,
+                (float) ($values['currentTime'] ?? 0.0),
+                (float) ($values['duration'] ?? 0.0),
+            );
+            return;
+        }
+
+        if (
+            is_string($payload)
+            && in_array($kind, [
+                EventKind::GestureBegin,
+                EventKind::GestureUpdate,
+                EventKind::GestureEnd,
+                EventKind::GestureCancel,
+            ], true)
+        ) {
+            $value = GestureEvent::fromPayload($payload);
+        } elseif ($kind === EventKind::Layout && is_string($payload)) {
+            $value = \Pam\Native\LayoutEvent::fromPayload($payload);
+        } elseif ($kind === EventKind::MediaReady && is_string($payload)) {
+            $value = \Pam\Native\MediaReadyEvent::fromPayload($payload);
+        } elseif ($kind === EventKind::MediaBuffering && is_string($payload)) {
+            $value = (bool) (Wire::decodeMap($payload)['buffering'] ?? false);
+        } elseif ($kind === EventKind::Toggle) {
+            $value = $payload === true || $payload === '1';
+        } elseif (is_array($payload)) {
+            $value = $payload;
+        } elseif (
+            is_string($payload)
+            || is_int($payload)
+            || is_float($payload)
+            || is_bool($payload)
+            || $payload === null
+            || $payload instanceof Stringable
+        ) {
+            $value = (string) $payload;
+        } elseif (is_object($payload)) {
+            $value = $payload;
+        } else {
+            throw new RuntimeException(
+                'Template event payload must be scalar, stringable, an object, or an array.',
+            );
+        }
+        if (
+            in_array($kind, [EventKind::Layout, EventKind::MediaReady], true)
+            && is_object($value)
+            && ($type = $method->getParameters()[0]->getType()) instanceof \ReflectionNamedType
+            && $type->getName() === 'string'
+        ) {
+            // Handlers written before typed payloads keep the raw string.
+            $value = is_string($payload) ? $payload : '';
+        }
+        $method->invoke($scope, $value);
     }
 
     private static function modelHandler(string $model, ?object $scope): Closure

@@ -311,8 +311,35 @@ internal class PamScrollContainer @JvmOverloads constructor(
         scrollTargetAlignment = value.coerceIn(SCROLL_TARGET_START, SCROLL_TARGET_END)
     }
 
+    private var scrollAnimated = false
+
+    /** `scrollAnimated`: the next scroll requests glide to their target. */
+    fun setScrollAnimated(value: Boolean) {
+        scrollAnimated = value
+    }
+
     fun requestScroll() {
         requestScrollAfterLayout(retry = true)
+    }
+
+    /**
+     * A requested scroll lands exactly on its target: a fling in progress is
+     * stopped first (it otherwise kept moving after the jump). Animated
+     * requests glide there and skip the follow-up correction, which would
+     * cut the animation short.
+     */
+    private fun scrollToRequested(offset: Int) {
+        (activeScroll as? ConfigurableScroll)?.stopFling()
+        if (!scrollAnimated) {
+            scrollToPrimary(offset)
+            return
+        }
+        val bounded = offset.coerceIn(0, primaryMaxOffset())
+        when (val scroll = activeScroll) {
+            is HorizontalScrollView -> scroll.smoothScrollTo(bounded, scroll.scrollY)
+            is ScrollView -> scroll.smoothScrollTo(scroll.scrollX, bounded)
+            else -> scrollToPrimary(offset)
+        }
     }
 
     private fun requestScrollAfterLayout(retry: Boolean) {
@@ -326,7 +353,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
                 val targetStart = if (horizontal) rect.left else rect.top
                 val targetExtent = if (horizontal) rect.width() else rect.height()
                 val viewportExtent = if (horizontal) activeScroll.width else activeScroll.height
-                scrollToPrimary(
+                scrollToRequested(
                     alignedTargetOffset(
                         targetStart,
                         targetExtent,
@@ -334,7 +361,7 @@ internal class PamScrollContainer @JvmOverloads constructor(
                         scrollTargetAlignment,
                     ),
                 )
-                if (retry) {
+                if (retry && !scrollAnimated) {
                     activeScroll.postOnAnimation {
                         requestScrollAfterLayout(retry = false)
                     }
@@ -342,11 +369,11 @@ internal class PamScrollContainer @JvmOverloads constructor(
                 return@post
             }
             if (scrollTargetOffsetPx >= 0) {
-                scrollToPrimary(scrollTargetOffsetPx)
+                scrollToRequested(scrollTargetOffsetPx)
             } else {
-                scrollToPrimary(primaryMaxOffset())
+                scrollToRequested(primaryMaxOffset())
             }
-            if (retry) {
+            if (retry && !scrollAnimated) {
                 activeScroll.postOnAnimation {
                     requestScrollAfterLayout(retry = false)
                 }
@@ -842,6 +869,14 @@ internal class PamScrollContainer @JvmOverloads constructor(
         var snapIntervalPx: Int
         var decelerationRate: Float
         var dismissKeyboardOnDrag: Boolean
+
+        /**
+         * Ends a fling in progress now. `fling(0)` is not enough: the
+         * scroller finishes on its next frame at the fling's start position
+         * and computeScroll() moves the view back, undoing a jump made in
+         * between. A synthetic down/cancel aborts it like a finger would.
+         */
+        fun stopFling()
     }
 
     private class PamVerticalScrollView(
@@ -859,6 +894,22 @@ internal class PamScrollContainer @JvmOverloads constructor(
         private var nestedGestureList: PamRecyclerList? = null
         private var nestedGestureDownY = 0f
         private val touch = ScrollTouchTracker(context)
+
+        override fun stopFling() {
+            val now = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 0f, 0f, 0)
+            val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+            try {
+                super.onTouchEvent(down)
+                super.onTouchEvent(cancel)
+            } finally {
+                down.recycle()
+                cancel.recycle()
+            }
+            flingStarted = false
+            stopNestedScroll()
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false
@@ -999,6 +1050,22 @@ internal class PamScrollContainer @JvmOverloads constructor(
         private var gestureStartScroll = 0
         private var gestureActive = false
         private val touch = ScrollTouchTracker(context)
+
+        override fun stopFling() {
+            val now = android.os.SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, 0f, 0f, 0)
+            val cancel = MotionEvent.obtain(now, now, MotionEvent.ACTION_CANCEL, 0f, 0f, 0)
+            try {
+                super.onTouchEvent(down)
+                super.onTouchEvent(cancel)
+            } finally {
+                down.recycle()
+                cancel.recycle()
+            }
+            flingStarted = false
+            stopNestedScroll()
+            parent?.requestDisallowInterceptTouchEvent(false)
+        }
 
         override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
             if (!scrollingEnabled) return false

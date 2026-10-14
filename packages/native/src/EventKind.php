@@ -83,4 +83,6 @@ enum EventKind: int
     case TextLayout = 75;
     case KeyboardVisibility = 76;
     case PageChange = 77;
+    case RouteCovered = 78;
+    case RouteFocused = 79;
 }

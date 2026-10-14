@@ -423,6 +423,32 @@ abstract class Element implements Renderable
         );
     }
 
+    /**
+     * Fires when the route (or tab scene) holding this view is covered by a
+     * full-screen route or becomes an inactive tab. Native media in that
+     * route is already released by then; see `keepAliveWhenCovered()`.
+     */
+    final public function onRouteCovered(Closure $handler): static
+    {
+        return $this->withEvent(EventKind::RouteCovered, static fn (mixed $payload = ''): mixed => $handler());
+    }
+
+    /** Fires when the route holding this view is visible again after being covered. */
+    final public function onRouteFocused(Closure $handler): static
+    {
+        return $this->withEvent(EventKind::RouteFocused, static fn (mixed $payload = ''): mixed => $handler());
+    }
+
+    /**
+     * Binds this view's horizontal fill to a player's position natively: the
+     * view scales from its leading edge to `position / duration` of the
+     * media whose `nativeRef` is [ref], with no PHP tick.
+     */
+    final public function mediaProgress(string $ref): static
+    {
+        return $this->withProperty(PropKey::MediaProgress, \Pam\Native\Animation\Drag::ref($ref));
+    }
+
     final public function toElement(): Element
     {
         return $this;
@@ -1008,6 +1034,8 @@ abstract class Element implements Renderable
             EventKind::MomentumScrollEnd => PropKey::OnMomentumScrollEnd,
             EventKind::TextLayout => PropKey::OnTextLayout,
             EventKind::PageChange => PropKey::OnPageChange,
+            EventKind::RouteCovered => PropKey::OnRouteCovered,
+            EventKind::RouteFocused => PropKey::OnRouteFocused,
             EventKind::Back,
             EventKind::ModuleResult,
             EventKind::AppState,

@@ -98,6 +98,36 @@ When it returns false Pam retains the previous element tree and recursively
 retains the lifecycle of its child component instances. A later local-state
 change always invalidates this skip.
 
+### Pure event handlers
+
+Template event handlers mark their component dirty, so every native event
+renders it. A handler that usually changes nothing (a timer-like progress
+event, a scroll or viewport probe, a counter kept outside component state)
+can opt out with `#[PureHandler]`:
+
+```php
+use Pam\Native\Attributes\PureHandler;
+
+#[PureHandler]
+public function progressed(float $current, float $duration): void
+{
+    $this->analytics->watched($current); // a service, not component state
+}
+```
+
+```xml
+<MediaPlayer source="$video" on:mediaProgress="progressed" />
+```
+
+After a pure handler the runtime renders only when something really changed:
+the component's own state (`$this->label = ...`), a tracked store or signal it
+read, or an explicit `requestRender()`/`markForRender()`. Otherwise the event
+costs only the handler call: no tree walk, no encode, no patch. Element
+closures accept the attribute too (`->onPress(#[PureHandler] fn () => ...)`),
+also behind the SDK's payload wrappers. Writes to *another* component's
+public properties are not detected from a pure handler; use a store/signal or
+`markForRender()` for those.
+
 ## Effects and watchers
 
 ```php

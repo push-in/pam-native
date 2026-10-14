@@ -54,6 +54,26 @@ final class FlatList extends Element
         );
     }
 
+    /**
+     * Scrolls to [targetOffset] (or the `testID` [targetTestId]) each time
+     * [request] changes. A fling in progress is stopped first, so the list
+     * lands exactly on the target; [animated] scrolls smoothly to it.
+     */
+    public function scrollRequest(
+        int $request,
+        string $targetTestId = '',
+        float $targetOffset = -1.0,
+        \Pam\Native\ScrollTargetAlignment $targetAlignment = \Pam\Native\ScrollTargetAlignment::Start,
+        bool $animated = false,
+    ): self {
+        return $this
+            ->withProperty(PropKey::ScrollTargetTestId, $targetTestId)
+            ->withProperty(PropKey::ScrollTargetOffset, $targetOffset)
+            ->withProperty(PropKey::ScrollTargetAlignment, $targetAlignment->value)
+            ->withProperty(PropKey::ScrollAnimated, $animated)
+            ->withProperty(PropKey::ScrollRequest, max(0, $request));
+    }
+
     public function horizontal(bool $horizontal = true): self
     {
         return $this->withProperty(PropKey::ListHorizontal, $horizontal);

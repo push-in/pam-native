@@ -315,6 +315,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         alignment: Int,
         innerStartPx: Int = 0,
         targetExtentPx: Int? = null,
+        animated: Boolean = false,
     ): Boolean {
         val index = richIds.indexOf(id)
         if (index < 0) return false
@@ -329,11 +330,8 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
         val start = extents.subList(0, index).sum() + innerStartPx
         val position = virtualScrollPosition(extents, (start - adjustment).coerceAtLeast(0))
-        (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(
-            position.index,
-            -position.offset,
-        )
-        dispatchViewport()
+        stopScroll()
+        scrollToVirtualPosition(position.index, -position.offset, animated)
         return true
     }
 
@@ -516,25 +514,70 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         }
     }
 
-    fun scrollToLogicalOffset(value: Float) {
+    /**
+     * Scrolls to a logical (dp) offset. A fling in progress is stopped
+     * first: `scrollToPositionWithOffset` does not stop it, and the fling
+     * kept moving after the jump (a scroll to the top stopped ~40 px short).
+     * [animated] glides there and then snaps exactly onto the target.
+     */
+    fun scrollToLogicalOffset(value: Float, animated: Boolean = false) {
         initialPositionApplied = true
-        val targetPx = dp(value.coerceAtLeast(0f))
+        stopScroll()
+        // Not dp(): it never returns less than 1 px, so the top landed 1 px short.
+        val targetPx = (value.coerceAtLeast(0f) * resources.displayMetrics.density + 0.5f).toInt()
         if (richIds.isEmpty()) {
-            scrollBy(
-                if (horizontal) targetPx - computeHorizontalScrollOffset() else 0,
-                if (horizontal) 0 else targetPx - computeVerticalScrollOffset(),
-            )
+            val dx = if (horizontal) targetPx - computeHorizontalScrollOffset() else 0
+            val dy = if (horizontal) 0 else targetPx - computeVerticalScrollOffset()
+            if (animated) smoothScrollBy(dx, dy) else scrollBy(dx, dy)
             return
         }
         val position = virtualScrollPosition(
             richIds.map { richExtents[it] ?: dp(rowHeight) },
             targetPx,
         )
-        (layoutManager as? LinearLayoutManager)?.scrollToPositionWithOffset(
-            position.index,
-            -position.offset,
-        )
-        dispatchViewport()
+        scrollToVirtualPosition(position.index, -position.offset, animated)
+    }
+
+    private var pendingExactScroll: RecyclerView.OnScrollListener? = null
+
+    private fun scrollToVirtualPosition(index: Int, offset: Int, animated: Boolean) {
+        val manager = layoutManager as? LinearLayoutManager ?: return
+        pendingExactScroll?.let(::removeOnScrollListener)
+        pendingExactScroll = null
+        if (!animated || !isLaidOut) {
+            manager.scrollToPositionWithOffset(index, offset)
+            dispatchViewport()
+            return
+        }
+        val scroller = object : androidx.recyclerview.widget.LinearSmoothScroller(context) {
+            override fun calculateDtToFit(
+                viewStart: Int,
+                viewEnd: Int,
+                boxStart: Int,
+                boxEnd: Int,
+                snapPreference: Int,
+            ): Int = boxStart + offset - viewStart
+        }
+        scroller.targetPosition = index
+        // The glide lands on estimated extents; snap exactly once it settles,
+        // unless a finger took over meanwhile.
+        val settle = object : RecyclerView.OnScrollListener() {
+            private var interrupted = false
+
+            override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                if (newState == SCROLL_STATE_DRAGGING) interrupted = true
+                if (newState != SCROLL_STATE_IDLE) return
+                removeOnScrollListener(this)
+                if (pendingExactScroll === this) pendingExactScroll = null
+                if (!interrupted) {
+                    manager.scrollToPositionWithOffset(index, offset)
+                    dispatchViewport()
+                }
+            }
+        }
+        pendingExactScroll = settle
+        addOnScrollListener(settle)
+        manager.startSmoothScroll(scroller)
     }
 
     fun setRowHeight(value: Float) {

@@ -124,6 +124,11 @@ public final class PamRenderer {
     private var statusBarDirty = false
     private var statusBarResolveScheduled = false
     private var statusBarObserver: NSObjectProtocol?
+    private var routeCoverageObserver: NSObjectProtocol?
+    /// Nodes with `on:routeCovered`/`on:routeFocused` and their last coverage.
+    private var routeListeners: [Int64: PamRouteFocusTracker] = [:]
+    /// Nodes bound to a player position (`mediaClock`, `mediaProgress`).
+    private var mediaBoundIds: Set<Int64> = []
 
     public init(
         hostView: UIView,
@@ -150,11 +155,38 @@ public final class PamRenderer {
         ) { [weak self] _ in
             self?.scheduleStatusBarResolve()
         }
+        routeCoverageObserver = NotificationCenter.default.addObserver(
+            forName: PamRouteCoverage.didChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.syncRouteListeners()
+        }
     }
 
     deinit {
         if let statusBarObserver {
             NotificationCenter.default.removeObserver(statusBarObserver)
+        }
+        if let routeCoverageObserver {
+            NotificationCenter.default.removeObserver(routeCoverageObserver)
+        }
+    }
+
+    /// `on:routeCovered` / `on:routeFocused`: evaluated when a route or tab
+    /// scene changed visibility (and when a listener mounts), dispatched only
+    /// when a listener's coverage really changed.
+    func syncRouteListeners() {
+        guard !routeListeners.isEmpty else { return }
+        for (id, var tracker) in routeListeners {
+            guard let view = views[id], let state = nodes[id] else { continue }
+            guard let covered = tracker.update(PamRouteCoverage.isCovered(view)) else { continue }
+            routeListeners[id] = tracker
+            let property = covered ? PamConstants.onRouteCovered : PamConstants.onRouteFocused
+            let event = covered ? EventKind.routeCovered : EventKind.routeFocused
+            if state.properties[property] != nil {
+                dispatchEvent(id, event.rawValue, Data())
+            }
         }
     }
 
@@ -501,6 +533,11 @@ public final class PamRenderer {
             bridge.detach()
         }
         eventBridges[id] = nil
+        routeListeners[id] = nil
+        if mediaBoundIds.remove(id) != nil, let view = views[id] {
+            view.pamMediaClockRef = nil
+            view.pamMediaProgressRef = nil
+        }
         interactionBridges.removeValue(forKey: id)?.detach()
         animationDelegates[id] = nil
         workletAnimators.removeValue(forKey: id)?.stop()
@@ -755,7 +792,10 @@ public final class PamRenderer {
                 )
             }
             if targetOffset >= 0 {
-                list.scrollToLogicalOffset(targetOffset)
+                list.scrollToLogicalOffset(
+                    targetOffset,
+                    animated: state.properties[PamConstants.scrollAnimated]?.boolOrNil() ?? false
+                )
             }
         }
     }
@@ -1437,7 +1477,12 @@ public final class PamRenderer {
         case .webView:
             return PamWebView()
         case .media:
-            return PamMediaView()
+            let media = PamMediaView()
+            media.boundViews = { [weak self] in
+                guard let self, !self.mediaBoundIds.isEmpty else { return [] }
+                return self.mediaBoundIds.compactMap { self.views[$0] }
+            }
+            return media
         case .drawingCanvas:
             return PamDrawingCanvas()
         case .tabHost:
@@ -1463,6 +1508,17 @@ public final class PamRenderer {
         eventBridges[nodeId] = [:]
 
         let eventProperties = Set(state.properties.keys)
+
+        if eventProperties.contains(PamConstants.onRouteCovered) ||
+            eventProperties.contains(PamConstants.onRouteFocused) {
+            if routeListeners[nodeId] == nil {
+                routeListeners[nodeId] = PamRouteFocusTracker()
+                // After this commit attaches the view: a route mounted covered reports it.
+                DispatchQueue.main.async { [weak self] in self?.syncRouteListeners() }
+            }
+        } else {
+            routeListeners[nodeId] = nil
+        }
 
         if state.kind == .customView {
             return
@@ -1906,6 +1962,8 @@ public final class PamRenderer {
 
     private var eventKeys: Set<Int> {
         [
+            PamConstants.onRouteCovered,
+            PamConstants.onRouteFocused,
             PamConstants.onPress,
             PamConstants.onChange,
             PamConstants.onLongPress,
@@ -2674,6 +2732,18 @@ public final class PamRenderer {
             (view as? PamMediaView)?.seek(value.decimalOrZero())
         case PamConstants.mediaPlaybackRate:
             (view as? PamMediaView)?.setPlaybackRate(Float(value.decimalOrZero()))
+        case PamConstants.mediaKeepAliveWhenCovered:
+            (view as? PamMediaView)?.setKeepAliveWhenCovered(value.boolOrNil() ?? false)
+        case PamConstants.mediaClock:
+            view.pamMediaClockRef = value.textOrNil()
+            mediaBoundIds.insert(nodeId)
+        case PamConstants.mediaClockFormat:
+            view.pamMediaClockFormat = Int(value.integerOrNil() ?? Int64(PamMediaClock.elapsed))
+        case PamConstants.mediaProgress:
+            view.pamMediaProgressRef = value.textOrNil()
+            mediaBoundIds.insert(nodeId)
+        case PamConstants.scrollAnimated:
+            (view as? PamAnchoredScrollView)?.scrollAnimated = value.boolOrNil() ?? false
         case PamConstants.mediaCachePolicy,
              PamConstants.mediaCacheKey,
              PamConstants.mediaCacheMaxAgeMs,
@@ -3100,6 +3170,19 @@ public final class PamRenderer {
             (view as? PamMediaView)?.seek(0)
         case PamConstants.mediaPlaybackRate:
             (view as? PamMediaView)?.setPlaybackRate(1)
+        case PamConstants.mediaKeepAliveWhenCovered:
+            (view as? PamMediaView)?.setKeepAliveWhenCovered(false)
+        case PamConstants.mediaClock:
+            view.pamMediaClockRef = nil
+            if state.properties[PamConstants.mediaProgress] == nil { mediaBoundIds.remove(nodeId) }
+        case PamConstants.mediaClockFormat:
+            view.pamMediaClockFormat = PamMediaClock.elapsed
+        case PamConstants.mediaProgress:
+            view.pamMediaProgressRef = nil
+            view.transform = .identity
+            if state.properties[PamConstants.mediaClock] == nil { mediaBoundIds.remove(nodeId) }
+        case PamConstants.scrollAnimated:
+            (view as? PamAnchoredScrollView)?.scrollAnimated = false
         case PamConstants.mediaCachePolicy,
              PamConstants.mediaCacheKey,
              PamConstants.mediaCacheMaxAgeMs,

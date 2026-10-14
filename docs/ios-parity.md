@@ -233,6 +233,32 @@ Visual checks that tests cannot fully cover:
   blank cell, no flash), typing in the composer must echo in the same frame
   as before, and the dev tools overlay must still show commit statistics.
 
+## Covered routes, exact scroll requests and native media clock (1.41.0)
+
+Swift sources and `PamCoveredRouteTests` are written but not compiled on Linux.
+
+Mac validation:
+
+- `swift build`, then `swift test --filter PamCoveredRouteTests` and
+  `swift test --filter PamProtocolTests` (event kinds 78-79, properties
+  530-536).
+- Push a full-screen route over a screen with an autoplaying video: the
+  covered `PamMediaView` drops its `AVPlayer` (Instruments → Allocations shows
+  no `AVPlayer`/`FigPlayer` for it; Activity Monitor CPU falls back), and pop
+  or the edge-swipe back resumes at the same position. Repeat with
+  UINavigationController routes (window removal), hidden routes and an
+  inactive `PamTabHost` scene. A `formSheet`/`containedModal` above it keeps
+  the player. `keepAliveWhenCovered="true"` keeps the player (paused).
+- `on:routeCovered`/`on:routeFocused` fire once per push/pop and tab switch,
+  including in nested navigators, and once for a prewarmed route.
+- Fling a long `VirtualizedList` and a `ScrollView`, then trigger a scroll
+  request to the top while still decelerating: it must land at exactly 0 and
+  stop. With `scrollAnimated="true"` it glides and lands at 0.
+- `mediaClock`/`mediaProgress`: the label keeps its font/color while the time
+  changes (attributes preserved), the bar fills from the leading edge (also in
+  RTL), and nothing updates while paused or covered.
+- `#[PureHandler]` is PHP-only: no Swift change.
+
 ## Keyboard visibility events (1.38.0)
 
 `Keyboard::isVisible()`, `onVisibilityChange()` and `offVisibilityChange()` use

@@ -331,6 +331,24 @@ final class PamAnchoredScrollView: UIScrollView {
         }
     }
 
+    /// `scrollAnimated`: requests glide to their target.
+    var scrollAnimated = false
+
+    private func scrollToRequested(_ value: CGFloat) {
+        pamStopDeceleration()
+        guard scrollAnimated else {
+            setPrimaryOffset(value)
+            return
+        }
+        let bounded = horizontal
+            ? min(primaryMaxOffset, max(-adjustedContentInset.left, value))
+            : min(primaryMaxOffset, max(-adjustedContentInset.top, value))
+        setContentOffset(
+            horizontal ? CGPoint(x: bounded, y: contentOffset.y) : CGPoint(x: contentOffset.x, y: bounded),
+            animated: true
+        )
+    }
+
     func requestScroll() {
         DispatchQueue.main.async { [weak self] in
             guard let self, self.window != nil else { return }
@@ -354,13 +372,13 @@ final class PamAnchoredScrollView: UIScrollView {
                 default: adjustment = 0
                 }
                 let offset = max(0, targetStart - adjustment)
-                self.setPrimaryOffset(offset)
+                self.scrollToRequested(offset)
                 return
             }
             if self.scrollTargetOffset >= 0 {
-                self.setPrimaryOffset(self.scrollTargetOffset)
+                self.scrollToRequested(self.scrollTargetOffset)
             } else {
-                self.setPrimaryOffset(self.primaryMaxOffset)
+                self.scrollToRequested(self.primaryMaxOffset)
             }
         }
     }
@@ -451,16 +469,19 @@ final class PamVirtualListView: UIScrollView {
 
     var horizontal = false
 
-    func scrollToLogicalOffset(_ value: CGFloat) {
+    /// Lands exactly on the target: deceleration in progress is stopped
+    /// first (it otherwise kept moving after the jump). `animated` glides.
+    func scrollToLogicalOffset(_ value: CGFloat, animated: Bool = false) {
         let requested = max(0, value)
         let maximum = horizontal
             ? max(0, contentSize.width - bounds.width + adjustedContentInset.right)
             : max(0, contentSize.height - bounds.height + adjustedContentInset.bottom)
         let offset = min(requested, maximum)
+        pamStopDeceleration()
         if horizontal {
-            setContentOffset(CGPoint(x: offset, y: contentOffset.y), animated: true)
+            setContentOffset(CGPoint(x: offset, y: contentOffset.y), animated: animated)
         } else {
-            setContentOffset(CGPoint(x: contentOffset.x, y: offset), animated: true)
+            setContentOffset(CGPoint(x: contentOffset.x, y: offset), animated: animated)
         }
     }
 
@@ -2667,5 +2688,16 @@ enum PamInputEcho {
         }
         inFlight.removeFirst(index + 1)
         return true
+    }
+}
+
+extension UIScrollView {
+    /// Stops a fling/deceleration in progress: setting the current offset
+    /// without animation is UIKit's documented way to halt scrolling.
+    func pamStopDeceleration() {
+        // A finger on the view owns it; otherwise halt deceleration and any
+        // running setContentOffset animation.
+        guard !isTracking else { return }
+        setContentOffset(contentOffset, animated: false)
     }
 }

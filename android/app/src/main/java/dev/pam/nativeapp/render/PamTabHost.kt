@@ -27,6 +27,10 @@ internal class PamTabHost(context: Context) : FrameLayout(context) {
     private var touchStartX = 0f
     var onSelect: ((Int) -> Unit)? = null
 
+    /** Posted after a scene became visible or inactive (covered-route policy). */
+    var onSceneVisibilityChanged: Runnable? = null
+    private var sceneVisibilityChanged = false
+
     init {
         clipChildren = true
         super.addView(content, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
@@ -160,11 +164,19 @@ internal class PamTabHost(context: Context) : FrameLayout(context) {
     private fun updateSelection() {
         for (index in 0 until content.childCount) {
             content.getChildAt(index).apply {
-                visibility = if (index + 1 == selectedIndex) View.VISIBLE else View.GONE
+                val next = if (index + 1 == selectedIndex) View.VISIBLE else View.GONE
+                if (visibility != next) {
+                    visibility = next
+                    sceneVisibilityChanged = true
+                }
                 importantForAccessibility = if (index + 1 == selectedIndex) {
                     View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                 } else View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
             }
+        }
+        if (sceneVisibilityChanged) {
+            sceneVisibilityChanged = false
+            onSceneVisibilityChanged?.let(::post)
         }
         for (index in 0 until bar.childCount) {
             (bar.getChildAt(index) as? TextView)?.apply {

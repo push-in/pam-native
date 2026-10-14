@@ -8057,5 +8057,6 @@ require __DIR__.'/view_capture.php';
 require __DIR__.'/image_events.php';
 require __DIR__.'/encoder_patches.php';
 require __DIR__.'/framework_utilities.php';
+require __DIR__.'/route_coverage.php';
 
 echo "Pam Native PHP SDK tests passed.\n";

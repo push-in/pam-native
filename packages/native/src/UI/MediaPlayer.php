@@ -75,6 +75,18 @@ final class MediaPlayer extends Element
         return $this->withProperty(PropKey::MediaPlaybackRate, max(0.25, min(4.0, $rate)));
     }
 
+    /**
+     * Opts this player out of the covered-route policy: by default a player
+     * whose route is covered by a full-screen route (or whose tab is
+     * inactive) releases its decoder and recreates it, at the same position,
+     * when the route is visible again. Keep it alive only for audio that
+     * must continue under another screen.
+     */
+    public function keepAliveWhenCovered(bool $enabled = true): self
+    {
+        return $this->withProperty(PropKey::MediaKeepAliveWhenCovered, $enabled);
+    }
+
     public function fit(ImageFit $fit): self
     {
         return $this->withProperty(PropKey::ImageFit, $fit->value);

@@ -11,6 +11,8 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
+import android.view.animation.LinearInterpolator
+import android.widget.TextView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleEventObserver
@@ -97,6 +99,21 @@ internal class PamMediaView(
     @Volatile private var playerGeneration = 0L
 
     /**
+     * Covered-route policy: while the route holding this player is covered
+     * by a full-screen route (or its tab is inactive) the decoder, player
+     * and video surface are released; they come back, at the same position
+     * and play intent, when the route is visible again. `keepAliveWhenCovered`
+     * opts out (audio that must continue under another screen).
+     */
+    private var keepAliveWhenCovered = false
+    private var covered = false
+    private var resumeSource = ""
+    private var resumeAtSeconds = 0.0
+
+    /** Views bound to a player `nativeRef` (`mediaClock`/`mediaProgress`), resolved by the renderer. */
+    var boundViews: (() -> List<View>)? = null
+
+    /**
      * `preloadSeconds` (forward buffer). Above 0 the media plays through a
      * Media3 ExoPlayer ([exo]) whose load control keeps that much media
      * ahead of the playhead; at 0 it keeps the platform MediaPlayer.
@@ -129,16 +146,22 @@ internal class PamMediaView(
      */
     private val progress = object : Runnable {
         override fun run() {
+            // A covered player has nothing to report; restoring restarts the loop.
+            if (covered) return
+            val bindings = bindingTargets()
             val exoPlayer = exo
             if (exoPlayer != null) {
-                if (prepared && onProgress != null && exoPlayer.isPlaying) {
-                    onProgress?.invoke(exoPlayer.positionMs / 1_000.0, exoPlayer.durationMs / 1_000.0)
+                if (prepared && (onProgress != null || bindings.isNotEmpty()) && exoPlayer.isPlaying) {
+                    val position = exoPlayer.positionMs / 1_000.0
+                    val duration = exoPlayer.durationMs / 1_000.0
+                    onProgress?.invoke(position, duration)
+                    updateBindings(bindings, position, duration, animate = true)
                 }
                 main.postDelayed(this, 250)
                 return
             }
             val player = preparedPlayer
-            if (prepared && player != null && onProgress != null) {
+            if (prepared && player != null && (onProgress != null || bindings.isNotEmpty())) {
                 val generation = playerGeneration
                 mediaExecutor.execute {
                     val sample = runCatching {
@@ -146,7 +169,10 @@ internal class PamMediaView(
                     }.getOrNull() ?: return@execute
                     main.post {
                         if (generation == playerGeneration && prepared) {
-                            onProgress?.invoke(sample.first / 1_000.0, sample.second.coerceAtLeast(0) / 1_000.0)
+                            val position = sample.first / 1_000.0
+                            val duration = sample.second.coerceAtLeast(0) / 1_000.0
+                            onProgress?.invoke(position, duration)
+                            updateBindings(bindingTargets(), position, duration, animate = true)
                         }
                     }
                 }
@@ -184,9 +210,14 @@ internal class PamMediaView(
     fun setSource(value: String) {
         if (source == value) return
         source = value
+        if (value != resumeSource) {
+            resumeSource = ""
+            resumeAtSeconds = 0.0
+        }
         showPoster()
         sourceGeneration++
-        if (value.isEmpty()) {
+        if (value.isEmpty() || covered) {
+            // A covered route prepares its player when it is visible again.
             releasePlayer()
         } else {
             val uri = Uri.parse(value)
@@ -220,7 +251,7 @@ internal class PamMediaView(
                     error = { onError?.invoke(it) },
                 ),
             ) { cached ->
-                if (generation == sourceGeneration) {
+                if (generation == sourceGeneration && !covered) {
                     prepareMedia(
                         if (shouldUseResolvedMediaUri(cached == Uri.EMPTY, cached.scheme)) {
                             resolved
@@ -267,6 +298,12 @@ internal class PamMediaView(
     fun setAutoPlay(value: Boolean) {
         playback.autoPlay(value)
         syncPlayback()
+    }
+
+    fun setKeepAliveWhenCovered(value: Boolean) {
+        if (keepAliveWhenCovered == value) return
+        keepAliveWhenCovered = value
+        syncVisibility()
     }
 
     fun setControls(value: Boolean) {
@@ -334,7 +371,98 @@ internal class PamMediaView(
 
     private fun syncVisibility() {
         playback.visibility(isAttachedToWindow, isShown && windowVisibility == VISIBLE)
+        syncCoverage()
         syncPlayback()
+    }
+
+    private fun syncCoverage() {
+        val nowCovered = isAttachedToWindow && !keepAliveWhenCovered && PamRouteCoverage.isCovered(this)
+        if (nowCovered == covered) return
+        covered = nowCovered
+        if (nowCovered) releaseForCover() else restoreAfterCover()
+    }
+
+    /** Frees the decoder, player and video surface of a covered route, keeping its position. */
+    private fun releaseForCover() {
+        main.removeCallbacks(progress)
+        if (source.isNotEmpty() && prepared) {
+            resumeSource = source
+            resumeAtSeconds = currentPosition / 1_000.0
+        }
+        sourceGeneration++
+        releasePlayer()
+        // Detaching the TextureView destroys its SurfaceTexture (GPU buffers).
+        if (video.parent === this) removeViewInLayout(video)
+        requestLayout()
+    }
+
+    private fun restoreAfterCover() {
+        ensureVideoAttached()
+        main.removeCallbacks(progress)
+        main.post(progress)
+        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer) {
+            val current = source
+            source = ""
+            setSource(current)
+        }
+    }
+
+    private fun ensureVideoAttached() {
+        if (video.parent == null) {
+            addView(
+                video,
+                0,
+                LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT).apply {
+                    gravity = android.view.Gravity.CENTER
+                },
+            )
+        }
+    }
+
+    /** True while the covered-route policy holds this player released (tests, diagnostics). */
+    internal val releasedForCover: Boolean get() = covered
+
+    private fun startPositionSeconds(): Double =
+        if (resumeSource.isNotEmpty() && resumeSource == source) resumeAtSeconds else currentTime
+
+    private fun bindingTargets(): List<View> {
+        val ref = getTag(dev.pam.nativeapp.R.id.pam_native_ref) as? String ?: return emptyList()
+        val all = boundViews?.invoke() ?: return emptyList()
+        if (all.isEmpty()) return emptyList()
+        return all.filter {
+            it.getTag(dev.pam.nativeapp.R.id.pam_media_clock) == ref ||
+                it.getTag(dev.pam.nativeapp.R.id.pam_media_progress) == ref
+        }
+    }
+
+    /** `mediaClock` texts and `mediaProgress` fills follow the player natively. */
+    private fun updateBindings(targets: List<View>, position: Double, duration: Double, animate: Boolean) {
+        if (targets.isEmpty()) return
+        val ref = getTag(dev.pam.nativeapp.R.id.pam_native_ref) as? String ?: return
+        for (target in targets) {
+            if (target.getTag(dev.pam.nativeapp.R.id.pam_media_clock) == ref && target is TextView) {
+                val format = target.getTag(dev.pam.nativeapp.R.id.pam_media_clock_format) as? Int
+                    ?: PamMediaClock.ELAPSED
+                val text = PamMediaClock.format(format, position, duration)
+                if (!target.text.contentEquals(text)) target.text = text
+            }
+            if (target.getTag(dev.pam.nativeapp.R.id.pam_media_progress) == ref) {
+                val fraction = PamMediaClock.fraction(position, duration)
+                target.pivotX = if (target.layoutDirection == LAYOUT_DIRECTION_RTL) target.width.toFloat() else 0f
+                if (animate && fraction >= target.scaleX && fraction - target.scaleX < 0.25f) {
+                    // Linear to the next sample: smooth without a per-frame callback here.
+                    target.animate().scaleX(fraction).setDuration(250).setInterpolator(linear).start()
+                } else {
+                    target.animate().cancel()
+                    target.scaleX = fraction
+                }
+            }
+        }
+    }
+
+    /** Applies the position at once (ready, seek, end) instead of waiting for a tick. */
+    private fun refreshBindings(position: Double, duration: Double) {
+        updateBindings(bindingTargets(), position, duration, animate = false)
     }
 
     private fun syncViewLifecycle() {
@@ -440,8 +568,10 @@ internal class PamMediaView(
             videoHeightPx = height
             player.setLooping(looping)
             player.setVolume(audioLevel())
-            if (currentTime > 0) player.seekTo((currentTime * 1_000).toLong())
+            val startAt = startPositionSeconds()
+            if (startAt > 0) player.seekTo((startAt * 1_000).toLong())
             syncPlayback()
+            refreshBindings(startAt, durationMs / 1_000.0)
             mediaController?.isEnabled = true
             applyVideoTransform()
             onReady?.invoke()
@@ -461,7 +591,8 @@ internal class PamMediaView(
         }
 
         override fun onCompletion() {
-            current() ?: return
+            val player = current() ?: return
+            if (!looping) refreshBindings(player.durationMs / 1_000.0, player.durationMs / 1_000.0)
             playback.completed(looping)
             onEnd?.invoke()
             syncPlayback()
@@ -487,7 +618,8 @@ internal class PamMediaView(
             videoHeightPx = it.videoHeight
             val loop = looping
             val level = audioLevel()
-            val startAt = currentTime
+            val startAt = startPositionSeconds()
+            refreshBindings(startAt, it.duration.coerceAtLeast(0) / 1_000.0)
             mediaExecutor.execute {
                 if (generation != playerGeneration || preparedPlayer !== it) return@execute
                 runCatching {
@@ -520,6 +652,10 @@ internal class PamMediaView(
         }
         player.setOnCompletionListener {
             if (generation != playerGeneration) return@setOnCompletionListener
+            if (!looping) {
+                val end = it.duration.coerceAtLeast(0) / 1_000.0
+                refreshBindings(end, end)
+            }
             playback.completed(looping)
             onEnd?.invoke()
             syncPlayback()
@@ -673,6 +809,7 @@ internal class PamMediaView(
 
     override fun seekTo(position: Int) {
         currentTime = position.coerceAtLeast(0) / 1_000.0
+        if (prepared) refreshBindings(currentTime, duration / 1_000.0)
         if (prepared) {
             val target = position.coerceAtLeast(0)
             exo?.let {
@@ -698,12 +835,13 @@ internal class PamMediaView(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        ensureVideoAttached()
         viewLifecycle = (findViewTreeLifecycleOwner() ?: context as? LifecycleOwner)?.lifecycle
         viewLifecycle?.addObserver(viewLifecycleObserver)
         syncViewLifecycle()
         main.removeCallbacks(progress)
         main.post(progress)
-        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer) {
+        if (source.isNotEmpty() && preparedPlayer == null && exo == null && !creatingPlayer && !covered) {
             val current = source
             source = ""
             setSource(current)
@@ -722,6 +860,7 @@ internal class PamMediaView(
 
     override fun onDetachedFromWindow() {
         playback.visibility(false, false)
+        covered = false
         viewLifecycle?.removeObserver(viewLifecycleObserver)
         viewLifecycle = null
         main.removeCallbacks(progress)
@@ -743,6 +882,8 @@ private fun applyRate(player: MediaPlayer, rate: Float) {
     player.playbackParams = player.playbackParams.setSpeed(rate)
     if (!wasPlaying && player.isPlaying) player.pause()
 }
+
+private val linear = LinearInterpolator()
 
 /** Player setup/teardown thread (no Looper: callbacks stay on the main thread). */
 private val mediaExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { runnable ->

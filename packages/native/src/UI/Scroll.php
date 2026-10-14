@@ -80,12 +80,14 @@ final class Scroll extends Element
         string $targetTestId = '',
         float $targetOffset = -1.0,
         ScrollTargetAlignment $targetAlignment = ScrollTargetAlignment::Start,
+        bool $animated = false,
     ): self
     {
         return $this
             ->withProperty(PropKey::ScrollTargetTestId, $targetTestId)
             ->withProperty(PropKey::ScrollTargetOffset, $targetOffset)
             ->withProperty(PropKey::ScrollTargetAlignment, $targetAlignment->value)
+            ->withProperty(PropKey::ScrollAnimated, $animated)
             ->withProperty(PropKey::ScrollRequest, max(0, $request));
     }
 

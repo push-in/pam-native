@@ -535,4 +535,11 @@ enum PropKey: int
     case NeedsOffscreenAlphaCompositing = 527;
     case OnPageChange = 528;
     case RefreshEnabled = 529;
+    case MediaKeepAliveWhenCovered = 530;
+    case OnRouteCovered = 531;
+    case OnRouteFocused = 532;
+    case ScrollAnimated = 533;
+    case MediaClock = 534;
+    case MediaClockFormat = 535;
+    case MediaProgress = 536;
 }
