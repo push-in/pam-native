@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased - hot reload for large apps
+## 1.39.4 - 2026-10-14
 
 - `pam dev` hot reload has no bundle size limit anymore. The CLI serves a
   content-addressed manifest; the first sync streams only the files the
