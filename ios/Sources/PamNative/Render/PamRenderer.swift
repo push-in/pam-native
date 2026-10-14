@@ -2508,6 +2508,7 @@ public final class PamRenderer {
              PamConstants.accessibilityImportance,
              PamConstants.accessibilityExpanded,
              PamConstants.accessibilityBusy,
+             PamConstants.accessibilitySelected,
              PamConstants.accessibilityCheckedState,
              PamConstants.accessibilityValueMin,
              PamConstants.accessibilityValueMax,
@@ -3079,6 +3080,7 @@ public final class PamRenderer {
              PamConstants.accessibilityImportance,
              PamConstants.accessibilityExpanded,
              PamConstants.accessibilityBusy,
+             PamConstants.accessibilitySelected,
              PamConstants.accessibilityCheckedState,
              PamConstants.accessibilityValueMin,
              PamConstants.accessibilityValueMax,
@@ -3653,6 +3655,10 @@ public final class PamRenderer {
         )
         if selected || checkedState == 2 {
             traits.insert(.selected)
+        }
+        // accessibilitySelected overrides the trait without the visual state.
+        if let announced = state.properties[PamConstants.accessibilitySelected]?.boolOrNil() {
+            if announced { traits.insert(.selected) } else { traits.remove(.selected) }
         }
         if state.properties[PamConstants.enabled]?.boolOrNil() == false {
             traits.insert(.notEnabled)

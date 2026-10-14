@@ -714,6 +714,7 @@ pub enum PropKey {
     MediaClock = 534,
     MediaClockFormat = 535,
     MediaProgress = 536,
+    AccessibilitySelected = 537,
 }
 
 impl TryFrom<u16> for PropKey {
@@ -1257,6 +1258,7 @@ impl TryFrom<u16> for PropKey {
             534 => Ok(Self::MediaClock),
             535 => Ok(Self::MediaClockFormat),
             536 => Ok(Self::MediaProgress),
+            537 => Ok(Self::AccessibilitySelected),
             other => Err(ProtocolError::UnknownProperty(other)),
         }
     }
@@ -2194,10 +2196,10 @@ mod tests {
         }
         assert!(NodeKind::try_from(32).is_err());
 
-        for value in 1..=536 {
+        for value in 1..=537 {
             assert!(PropKey::try_from(value).is_ok(), "missing property {value}");
         }
-        assert!(PropKey::try_from(537).is_err());
+        assert!(PropKey::try_from(538).is_err());
     }
 
     #[test]

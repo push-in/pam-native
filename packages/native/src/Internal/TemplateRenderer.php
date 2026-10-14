@@ -597,6 +597,7 @@ final class TemplateRenderer
         'importantForAccessibility' => PropKey::AccessibilityImportance,
         'accessibilityExpanded' => PropKey::AccessibilityExpanded,
         'accessibilityBusy' => PropKey::AccessibilityBusy,
+        'accessibilitySelected' => PropKey::AccessibilitySelected,
         'accessibilityCheckedState' => PropKey::AccessibilityCheckedState,
         'accessibilityValueMin' => PropKey::AccessibilityValueMin,
         'accessibilityValueMax' => PropKey::AccessibilityValueMax,

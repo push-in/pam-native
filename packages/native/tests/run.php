@@ -1777,6 +1777,12 @@ $assert(
             === '40 percent',
     'Accessibility state and range helpers must use fixed protocol properties.',
 );
+$assert(
+    Text::make('Chip')->accessibilitySelected()->properties()[PropKey::AccessibilitySelected->value] === true
+        && Text::make('Chip')->accessibilitySelected(false)->properties()[PropKey::AccessibilitySelected->value] === false
+        && PropKey::AccessibilitySelected->value === 537,
+    'accessibilitySelected must use protocol property 537 without the visual selected state.',
+);
 
 $accessibilityActionElement = Text::make('Message')
     ->accessibilityActions(

@@ -542,4 +542,5 @@ enum PropKey: int
     case MediaClock = 534;
     case MediaClockFormat = 535;
     case MediaProgress = 536;
+    case AccessibilitySelected = 537;
 }

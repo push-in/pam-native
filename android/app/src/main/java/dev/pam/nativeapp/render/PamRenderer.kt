@@ -3679,6 +3679,10 @@ class PamRenderer(
                     4 -> View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
                     else -> View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
                 }
+            PropKey.ACCESSIBILITY_SELECTED -> {
+                configureAccessibilityDelegate(view, state)
+                notifyAccessibilityChanged(view)
+            }
             PropKey.ACCESSIBILITY_EXPANDED,
             PropKey.ACCESSIBILITY_BUSY,
             PropKey.ACCESSIBILITY_CHECKED_STATE,
@@ -4172,6 +4176,10 @@ class PamRenderer(
             }
             PropKey.ACCESSIBILITY_IMPORTANCE -> {
                 view.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_AUTO
+            }
+            PropKey.ACCESSIBILITY_SELECTED -> {
+                configureAccessibilityDelegate(view, state)
+                notifyAccessibilityChanged(view)
             }
             PropKey.ACCESSIBILITY_EXPANDED,
             PropKey.ACCESSIBILITY_BUSY,
@@ -9431,7 +9439,8 @@ class PamRenderer(
         }
         val hint = state.textOrNull(PropKey.ACCESSIBILITY_HINT)
             ?.takeIf(String::isNotEmpty)
-        if (role == 1 && actions.isEmpty() && hint == null) {
+        val selectedOverride = state.properties[PropKey.ACCESSIBILITY_SELECTED]?.flag()
+        if (role == 1 && actions.isEmpty() && hint == null && selectedOverride == null) {
             androidx.core.view.ViewCompat.setAccessibilityDelegate(view, nativeListDelegate)
             return
         }
@@ -9455,6 +9464,7 @@ class PamRenderer(
                     info.hintText = hint
                 }
                 applyAccessibilityRoleInfo(info, role, state)
+                if (selectedOverride != null) info.isSelected = selectedOverride
                 actions.forEachIndexed { index, action ->
                     info.addAction(
                         AccessibilityNodeInfo.AccessibilityAction(
@@ -10108,6 +10118,7 @@ class PamRenderer(
             PropKey.OVERFLOW,
             PropKey.ACCESSIBILITY_ACTIONS,
             PropKey.ON_ACCESSIBILITY_ACTION,
+            PropKey.ACCESSIBILITY_SELECTED,
         )
 
         const val TEXT_ALIGN_JUSTIFY = 4

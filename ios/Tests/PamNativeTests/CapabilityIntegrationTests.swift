@@ -485,6 +485,34 @@ final class CapabilityIntegrationTests: XCTestCase {
         renderer.close()
     }
 
+    func testAccessibilitySelectedOverridesOnlyTheSelectedTrait() throws {
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let renderer = PamRenderer(hostView: host) { _, _, _ in }
+        renderer.commit([[
+            .create(NodeSpec(id: 1, parent: 0, index: 0, kind: .screen, properties: [:])),
+            .create(NodeSpec(id: 2, parent: 1, index: 0, kind: .text, properties: [
+                PamConstants.text: .text("Chip"),
+                PamConstants.accessibilitySelected: .flag(true),
+                PamConstants.testId: .text("announced-selected"),
+            ])),
+            .create(NodeSpec(id: 3, parent: 1, index: 1, kind: .text, properties: [
+                PamConstants.text: .text("Visual"),
+                PamConstants.selected: .flag(true),
+                PamConstants.accessibilitySelected: .flag(false),
+                PamConstants.testId: .text("announced-unselected"),
+            ])),
+            .layout(id: 1, frame: Frame(x: 0, y: 0, width: 390, height: 844)),
+            .layout(id: 2, frame: Frame(x: 16, y: 16, width: 200, height: 48)),
+            .layout(id: 3, frame: Frame(x: 16, y: 72, width: 200, height: 48)),
+            .setRoot(1),
+        ]])
+        let selected = try XCTUnwrap(host.descendant(accessibilityIdentifier: "announced-selected"))
+        XCTAssertTrue(selected.accessibilityTraits.contains(.selected))
+        let unselected = try XCTUnwrap(host.descendant(accessibilityIdentifier: "announced-unselected"))
+        XCTAssertFalse(unselected.accessibilityTraits.contains(.selected))
+        renderer.close()
+    }
+
     func testVoiceOverCustomActionDispatchesItsBoundedIdentifier() throws {
         let host = UIView(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         var events: [(Int64, Int, Data)] = []

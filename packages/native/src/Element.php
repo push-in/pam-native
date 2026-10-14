@@ -184,6 +184,16 @@ abstract class Element implements Renderable
         return $this->withProperty(PropKey::AccessibilityExpanded, $expanded);
     }
 
+    /**
+     * Reports the element as selected to assistive technology only
+     * (`AccessibilityNodeInfo.isSelected` / the `.selected` trait) without
+     * changing its visual `selected` state: tabs, segmented controls, chips.
+     */
+    final public function accessibilitySelected(bool $selected = true): static
+    {
+        return $this->withProperty(PropKey::AccessibilitySelected, $selected);
+    }
+
     final public function accessibilityBusy(bool $busy = true): static
     {
         return $this->withProperty(PropKey::AccessibilityBusy, $busy);

@@ -1561,9 +1561,36 @@ class PamRendererInstrumentedTest {
                                     ),
                                 ),
                             ),
+                            Mutation.Create(
+                                node(
+                                    4,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Chip"),
+                                        PropKey.ACCESSIBILITY_SELECTED to PropValue.Flag(true),
+                                        PropKey.TEST_ID to PropValue.Text("announced-selected"),
+                                    ),
+                                ),
+                            ),
+                            Mutation.Create(
+                                node(
+                                    5,
+                                    1,
+                                    NodeKind.TEXT,
+                                    mapOf(
+                                        PropKey.TEXT to PropValue.Text("Visual"),
+                                        PropKey.SELECTED to PropValue.Flag(true),
+                                        PropKey.ACCESSIBILITY_SELECTED to PropValue.Flag(false),
+                                        PropKey.TEST_ID to PropValue.Text("announced-unselected"),
+                                    ),
+                                ),
+                            ),
                             Mutation.Layout(1, Frame(0f, 0f, 360f, 720f)),
                             Mutation.Layout(2, Frame(16f, 16f, 200f, 48f)),
                             Mutation.Layout(3, Frame(16f, 72f, 200f, 48f)),
+                            Mutation.Layout(4, Frame(16f, 128f, 200f, 48f)),
+                            Mutation.Layout(5, Frame(16f, 184f, 200f, 48f)),
                             Mutation.SetRoot(1),
                         ),
                     ),
@@ -1597,6 +1624,13 @@ class PamRendererInstrumentedTest {
                 assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_busy)) == true)
                 assertTrue(stateDescription?.contains(activity.getString(R.string.pam_accessibility_collapsed)) == true)
                 assertTrue(stateDescription?.contains("40 percent") == true)
+
+                val announced = requireNotNull(activity.host.findByTransitionName("announced-selected"))
+                assertTrue(announced.createAccessibilityNodeInfo().isSelected)
+                assertFalse(announced.isSelected)
+                val unannounced = requireNotNull(activity.host.findByTransitionName("announced-unselected"))
+                assertFalse(unannounced.createAccessibilityNodeInfo().isSelected)
+                assertTrue(unannounced.isSelected)
 
                 val hidden = requireNotNull(activity.host.findByTransitionName("hidden-state"))
                 assertEquals(
