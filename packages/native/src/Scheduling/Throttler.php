@@ -36,7 +36,7 @@ final class Throttler implements Disposable
      * @param (Closure(string): void)|null $failure the native timer failed; the window closes
      */
     public function __construct(
-        private int $intervalMs,
+        public private(set) int $intervalMs,
         private readonly Closure $action,
         public readonly bool $leading = true,
         public readonly bool $trailing = true,

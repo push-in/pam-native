@@ -41,7 +41,7 @@ final class Debouncer implements Disposable
      * @param (Closure(string): void)|null $failure the native timer failed; the pending call is dropped
      */
     public function __construct(
-        private int $delayMs,
+        public private(set) int $delayMs,
         private readonly Closure $action,
         public readonly ?int $maxWaitMs = null,
         ?Closure $schedule = null,
