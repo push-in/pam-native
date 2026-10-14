@@ -224,7 +224,7 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         sectionSwitch: ListSectionSwitch? = null,
     ) {
         val sectionRestore = sectionSwitch?.let(::leaveSection)
-        val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(1f)) }
+        val pixelExtents = extents.mapValues { (_, value) -> dp(value.coerceAtLeast(0f)) }
         // Content-sized cells are re-measured after mounting (fonts, images,
         // async text). When only extents change for the same rows, a list that
         // was resting at its end stays there instead of drifting by the delta.
@@ -1211,6 +1211,8 @@ internal fun virtualScrollPosition(extents: List<Int>, target: Int): VirtualScro
     if (extents.isEmpty()) return VirtualScrollPosition(0, 0)
     var remaining = target.coerceAtLeast(0)
     for ((index, extent) in extents.withIndex()) {
+        // Mounted empty cells occupy no space and cannot hold the target.
+        if (extent <= 0 && index != extents.lastIndex) continue
         val safeExtent = extent.coerceAtLeast(1)
         if (remaining < safeExtent || index == extents.lastIndex) {
             return VirtualScrollPosition(index, remaining.coerceAtMost(safeExtent - 1))

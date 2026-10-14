@@ -735,7 +735,7 @@ fn layout_node(
                     })
                     .reduce(f32::max);
                 let item_height = match (authored, retained) {
-                    (Some(height), _) => height,
+                    (Some(height), _) => height.max(1.0),
                     // A clean row keeps its measured extent: re-laying out a
                     // list (a section switch, one changed row) measures only
                     // the rows that changed.
@@ -743,14 +743,22 @@ fn layout_node(
                     // Cells without an authored height are content-sized, like
                     // React Native FlatList cells (the tallest cell of a
                     // multi-column row). The estimate only remains for cells
-                    // without a definite intrinsic extent or not populated yet.
+                    // not mounted yet (no children at all) or without a
+                    // definite intrinsic extent. A mounted cell whose content
+                    // is hidden measures 0: a component rendering an empty
+                    // root must not become a blank row of the estimated height.
                     (None, None) => {
                         let mut tallest = 0.0_f32;
+                        let mut mounted_empty = false;
                         for child in row.iter().copied() {
-                            let populated = context.children.get(&child.id).is_some_and(|cell| {
-                                cell.iter().any(|grandchild| visible(grandchild))
-                            });
-                            if !populated {
+                            let Some(cell) = context.children.get(&child.id) else {
+                                continue;
+                            };
+                            if cell.is_empty() {
+                                continue;
+                            }
+                            if !cell.iter().any(|grandchild| visible(grandchild)) {
+                                mounted_empty = true;
                                 continue;
                             }
                             let margins = cell_margins(child);
@@ -768,10 +776,15 @@ fn layout_node(
                                     + margins.bottom,
                             );
                         }
-                        if tallest > 0.0 { tallest } else { row_height }
+                        if tallest > 0.0 {
+                            tallest
+                        } else if mounted_empty {
+                            0.0
+                        } else {
+                            row_height.max(1.0)
+                        }
                     }
-                }
-                .max(1.0);
+                };
                 for (column, child) in row.iter().copied().enumerate() {
                     let margins = cell_margins(child);
                     let item_frame = Layout {
@@ -3732,7 +3745,7 @@ fn retained_row_extent(
         }
         extent = extent.max(frame.height + margins.top + margins.bottom);
     }
-    Some(extent.max(1.0))
+    Some(extent)
 }
 
 fn boolean(node: &Node, key: PropKey) -> bool {
@@ -8462,6 +8475,65 @@ mod css_flex_tests {
         assert_eq!(layouts[&2].height, 40.0);
         assert_eq!(layouts[&4].y, 40.0);
         assert_eq!(layouts[&4].height, 72.0);
+    }
+
+    #[test]
+    fn mounted_virtual_list_cells_without_visible_content_measure_zero() {
+        let node = |id, parent, index, kind, properties: Vec<(PropKey, PropValue)>| Node {
+            id,
+            parent,
+            index,
+            kind,
+            properties: properties.into_iter().collect(),
+        };
+        let tree = Tree {
+            root: 1,
+            nodes: BTreeMap::from([
+                (
+                    1,
+                    node(
+                        1,
+                        0,
+                        0,
+                        NodeKind::VirtualList,
+                        vec![(PropKey::ListRowHeight, f(604.0))],
+                    ),
+                ),
+                // Mounted cell whose component rendered a hidden root.
+                (2, node(2, 1, 0, NodeKind::Column, vec![])),
+                (
+                    3,
+                    node(
+                        3,
+                        2,
+                        0,
+                        NodeKind::View,
+                        vec![(PropKey::Visible, PropValue::Boolean(false))],
+                    ),
+                ),
+                // Mounted cell with content.
+                (4, node(4, 1, 1, NodeKind::Column, vec![])),
+                (
+                    5,
+                    node(5, 4, 0, NodeKind::View, vec![(PropKey::Height, f(72.0))]),
+                ),
+                // Cell not mounted yet keeps the estimate.
+                (6, node(6, 1, 2, NodeKind::Column, vec![])),
+            ]),
+        };
+        let layouts = calculate(
+            &tree,
+            Size {
+                width: 300.0,
+                height: 600.0,
+            },
+        )
+        .unwrap();
+        assert_eq!(layouts[&2].height, 0.0);
+        assert_eq!(layouts[&4].y, 0.0);
+        assert_eq!(layouts[&4].height, 72.0);
+        assert_eq!(layouts[&6].y, 72.0);
+        assert_eq!(layouts[&6].height, 604.0);
     }
 
     #[test]

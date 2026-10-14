@@ -17,4 +17,10 @@ class PamVirtualScrollTest {
         assertEquals(VirtualScrollPosition(1, 79), virtualScrollPosition(listOf(120, 80), 500))
         assertEquals(VirtualScrollPosition(0, 0), virtualScrollPosition(emptyList(), 500))
     }
+
+    @Test
+    fun mountedEmptyCellsTakeNoSpace() {
+        assertEquals(VirtualScrollPosition(2, 10), virtualScrollPosition(listOf(120, 0, 80), 130))
+        assertEquals(VirtualScrollPosition(2, 0), virtualScrollPosition(listOf(0, 0, 80), 0))
+    }
 }

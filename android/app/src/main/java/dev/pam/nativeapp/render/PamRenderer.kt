@@ -1969,7 +1969,7 @@ class PamRenderer(
                 } else {
                     frame.height + margins.top + margins.bottom
                 }
-            }?.coerceAtLeast(1f) ?: fallbackExtent
+            }?.coerceAtLeast(0f) ?: fallbackExtent
         }
         list.setRichItems(
             ids = itemIds,
