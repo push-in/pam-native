@@ -3852,6 +3852,8 @@ class PamRenderer(
             PropKey.GESTURE_NATIVE_TRANSLATION_LIMIT_X,
             PropKey.GESTURE_NATIVE_RESET_ON_END,
             PropKey.GESTURE_NATIVE_FOCAL_ZOOM,
+            PropKey.GESTURE_NATIVE_BOUNDS,
+            PropKey.GESTURE_NATIVE_CONTENT_ASPECT,
             -> configurePressable(view, state)
             PropKey.MARGIN,
             PropKey.MARGIN_HORIZONTAL,
@@ -5983,6 +5985,8 @@ class PamRenderer(
             ).toFloat(),
             nativeResetOnEnd = state.flag(PropKey.GESTURE_NATIVE_RESET_ON_END, false),
             nativeFocalZoom = state.flag(PropKey.GESTURE_NATIVE_FOCAL_ZOOM, false),
+            nativeBounds = state.flag(PropKey.GESTURE_NATIVE_BOUNDS, false),
+            nativeContentAspect = state.number(PropKey.GESTURE_NATIVE_CONTENT_ASPECT, 0.0).toFloat(),
         )
     }
 

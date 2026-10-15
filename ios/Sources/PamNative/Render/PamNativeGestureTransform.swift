@@ -9,6 +9,9 @@ struct PamNativeGestureTransform {
     /** Surfaces whose translation a focal pinch currently owns (shared by adjacent detectors). */
     static var focalZoomTargets = Set<ObjectIdentifier>()
 
+    /** Bounded native gestures in progress per surface (adjacent pan + pinch share one). */
+    static var boundedGestures = [ObjectIdentifier: Int]()
+
     mutating func begin(on view: UIView, focal: CGPoint? = nil) {
         base = PamMotionTarget.transform(of: view)
         if let focal {
@@ -29,7 +32,9 @@ struct PamNativeGestureTransform {
         maximumScale: CGFloat,
         translationLimitX: CGFloat,
         focal: CGPoint? = nil,
-        pivot: CGPoint? = nil
+        pivot: CGPoint? = nil,
+        bounds: Bool = false,
+        contentAspect: CGFloat = 0
     ) -> PamMotionTransform {
         var current = PamMotionTarget.transform(of: view)
         switch type {
@@ -47,6 +52,14 @@ struct PamNativeGestureTransform {
             current.translateX = translationLimitX > 0
                 ? min(translationLimitX, max(-translationLimitX, x)) : x
             current.translateY = base.translateY + translation.y
+            if bounds {
+                // The content edge stops at the viewport edge; rebasing makes a
+                // reversed drag move the content at once.
+                let bounded = Self.bounded(current, in: view, contentAspect: contentAspect)
+                base.translateX += bounded.translateX - current.translateX
+                base.translateY += bounded.translateY - current.translateY
+                current = bounded
+            }
         case 3:
             let target = min(maximumScale, max(minimumScale, base.scaleX * scale))
             if let focal, let pivot {
@@ -56,6 +69,9 @@ struct PamNativeGestureTransform {
             }
             current.scaleX = target
             current.scaleY = target
+            if bounds {
+                current = Self.bounded(current, in: view, contentAspect: contentAspect)
+            }
         case 4:
             current.rotationDegrees = base.rotationDegrees + rotation * 180 / .pi
         default:
@@ -67,6 +83,70 @@ struct PamNativeGestureTransform {
 }
 
 extension PamNativeGestureTransform {
+    static func containedContentSize(_ size: CGSize, aspect: CGFloat) -> CGSize {
+        guard aspect > 0, size.width > 0, size.height > 0 else { return size }
+        let width = min(size.width, size.height * aspect)
+        return CGSize(width: width, height: width / aspect)
+    }
+
+    /// One axis of a bounded transform: the content (`content` long, centred
+    /// in a `viewport`-long view scaled by `scale` around `pivot`) moves only
+    /// while it covers the viewport; shorter content stays centred.
+    static func boundedTranslation(
+        _ translation: CGFloat,
+        viewport: CGFloat,
+        content: CGFloat,
+        pivot: CGFloat,
+        scale: CGFloat
+    ) -> CGFloat {
+        let contentStart = (viewport - content) / 2
+        let start = pivot - (pivot - contentStart) * scale
+        let end = pivot + (contentStart + content - pivot) * scale
+        if end - start <= viewport { return viewport / 2 - (start + end) / 2 }
+        return min(-start, max(viewport - end, translation))
+    }
+
+    static func bounded(
+        _ transform: PamMotionTransform,
+        in view: UIView,
+        contentAspect: CGFloat,
+        scale: CGFloat? = nil
+    ) -> PamMotionTransform {
+        let size = view.bounds.size
+        guard size.width > 0, size.height > 0 else { return transform }
+        let content = containedContentSize(size, aspect: contentAspect)
+        let anchor = view.layer.anchorPoint
+        var result = transform
+        let applied = scale ?? transform.scaleX
+        if let scale {
+            result.scaleX = scale
+            result.scaleY = scale
+        }
+        result.translateX = boundedTranslation(
+            transform.translateX, viewport: size.width, content: content.width,
+            pivot: anchor.x * size.width, scale: applied
+        )
+        result.translateY = boundedTranslation(
+            transform.translateY, viewport: size.height, content: content.height,
+            pivot: anchor.y * size.height, scale: applied
+        )
+        return result
+    }
+
+    /// Resting transform of a bounded surface on release: below (or barely
+    /// above) 1x the centred identity, otherwise the scale with its
+    /// translation inside the content bounds.
+    static func settled(
+        _ transform: PamMotionTransform,
+        in view: UIView,
+        contentAspect: CGFloat,
+        maximumScale: CGFloat
+    ) -> PamMotionTransform {
+        var scale = min(max(1, maximumScale), max(1, transform.scaleX))
+        if scale <= 1.02 { scale = 1 }
+        return bounded(transform, in: view, contentAspect: contentAspect, scale: scale)
+    }
+
     /// A screen-space vector expressed in `view`'s superview coordinates: the
     /// inverse of the linear part (scale, rotation) of every ancestor's
     /// transform, from the superview up to the window.

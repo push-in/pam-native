@@ -945,6 +945,8 @@ $gesture = GestureDetector::make(
         translationLimitX: 96.0,
         resetOnEnd: true,
         focalZoom: true,
+        bounds: true,
+        contentAspect: 0.75,
     )
     ->onBegin(static function (): void {
     })
@@ -969,6 +971,8 @@ $assert(
             === true
         && $gesture->properties()[PropKey::GestureNativeFocalZoom->value]
             === true
+        && $gesture->properties()[PropKey::GestureNativeBounds->value] === true
+        && $gesture->properties()[PropKey::GestureNativeContentAspect->value] === 0.75
         && count($gesture->events()) === 4,
     'GestureDetector must compile to an additive native Pressable contract.',
 );
@@ -7197,8 +7201,8 @@ $assert(
     'Permanent drawer callbacks must not leak an open modal drawer into the compact layout after rotation.',
 );
 $assert(
-    \Pam\Native\Protocol::SDK_VERSION === '1.42.1',
-    'The runtime SDK contract must match the 1.42.1 release candidate.',
+    \Pam\Native\Protocol::SDK_VERSION === '1.43.0',
+    'The runtime SDK contract must match the 1.43.0 release candidate.',
 );
 $protocolReport = \Pam\Native\Protocol::negotiate(new \Pam\Native\ProtocolHandshake(
     abiVersion: 1,

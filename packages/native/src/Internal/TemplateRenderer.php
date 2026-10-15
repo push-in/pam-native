@@ -542,6 +542,8 @@ final class TemplateRenderer
         'gestureNativeTranslationLimitX' => PropKey::GestureNativeTranslationLimitX,
         'gestureNativeResetOnEnd' => PropKey::GestureNativeResetOnEnd,
         'gestureNativeFocalZoom' => PropKey::GestureNativeFocalZoom,
+        'gestureNativeBounds' => PropKey::GestureNativeBounds,
+        'gestureNativeContentAspect' => PropKey::GestureNativeContentAspect,
         'flexShrink' => PropKey::FlexShrink,
         'paddingLeft' => PropKey::PaddingLeft,
         'paddingTop' => PropKey::PaddingTop,

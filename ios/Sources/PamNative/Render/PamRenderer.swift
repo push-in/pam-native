@@ -1606,7 +1606,11 @@ public final class PamRenderer {
                 nativeResetOnEnd:
                     state.properties[PamConstants.gestureNativeResetOnEnd]?.boolOrNil() ?? false,
                 nativeFocalZoom:
-                    state.properties[PamConstants.gestureNativeFocalZoom]?.boolOrNil() ?? false
+                    state.properties[PamConstants.gestureNativeFocalZoom]?.boolOrNil() ?? false,
+                nativeBounds:
+                    state.properties[PamConstants.gestureNativeBounds]?.boolOrNil() ?? false,
+                nativeContentAspect:
+                    state.properties[PamConstants.gestureNativeContentAspect]?.decimalOrNil() ?? 0
             )
             bridge.drag = motion.existing(nodeId)?.drag
             bridge.nativeTransformTarget = { [weak self] in self?.nativeTransformTarget(nodeId) }
@@ -2900,7 +2904,9 @@ public final class PamRenderer {
              PamConstants.gestureNativeMaxScale,
              PamConstants.gestureNativeTranslationLimitX,
              PamConstants.gestureNativeResetOnEnd,
-             PamConstants.gestureNativeFocalZoom:
+             PamConstants.gestureNativeFocalZoom,
+             PamConstants.gestureNativeBounds,
+             PamConstants.gestureNativeContentAspect:
             installEvents(for: nodeId)
         case PamConstants.gestureNativeResetKey:
             if let child = nativeTransformTarget(nodeId) {
@@ -4989,6 +4995,8 @@ public final class PamRenderer {
         private var nativeGestureTranslationLimitX: CGFloat = 0
         private var nativeGestureResetOnEnd = false
         private var nativeGestureFocalZoom = false
+        private var nativeGestureBounds = false
+        private var nativeGestureContentAspect: CGFloat = 0
         private var nativeGesture = PamNativeGestureTransform()
         private var nativeGestureApplied: PamMotionTransform?
         var nativeTransformTarget: (() -> UIView?)?
@@ -5189,7 +5197,9 @@ public final class PamRenderer {
             nativeMaximumScale: Double,
             nativeTranslationLimitX: Double,
             nativeResetOnEnd: Bool,
-            nativeFocalZoom: Bool = false
+            nativeFocalZoom: Bool = false,
+            nativeBounds: Bool = false,
+            nativeContentAspect: Double = 0
         ) {
             semanticGestureType = type
             semanticGestureDirection = direction
@@ -5208,6 +5218,8 @@ public final class PamRenderer {
             nativeGestureTranslationLimitX = CGFloat(max(0, nativeTranslationLimitX))
             nativeGestureResetOnEnd = nativeResetOnEnd
             nativeGestureFocalZoom = nativeFocalZoom
+            nativeGestureBounds = nativeBounds
+            nativeGestureContentAspect = nativeContentAspect.isFinite ? CGFloat(max(0, nativeContentAspect)) : 0
 
             let minimum = min(max(minimumPointers, 1), 10)
             let maximum = min(max(maximumPointers, minimum), 10)
@@ -5744,6 +5756,9 @@ public final class PamRenderer {
                 if focalZoom {
                     PamNativeGestureTransform.focalZoomTargets.insert(ObjectIdentifier(child))
                 }
+                if nativeGestureBounds, (2...5).contains(semanticGestureType) {
+                    PamNativeGestureTransform.boundedGestures[ObjectIdentifier(child), default: 0] += 1
+                }
             }
             nativeGestureApplied = nativeGesture.apply(
                 on: child,
@@ -5755,10 +5770,43 @@ public final class PamRenderer {
                 maximumScale: nativeGestureMaximumScale,
                 translationLimitX: nativeGestureTranslationLimitX,
                 focal: focal,
-                pivot: pivot
+                pivot: pivot,
+                bounds: nativeGestureBounds,
+                contentAspect: nativeGestureContentAspect
             )
             if focalZoom, sender.state == .ended || sender.state == .cancelled || sender.state == .failed {
                 PamNativeGestureTransform.focalZoomTargets.remove(ObjectIdentifier(child))
+            }
+            if nativeGestureBounds, (2...5).contains(semanticGestureType),
+               sender.state == .ended || sender.state == .cancelled || sender.state == .failed {
+                let key = ObjectIdentifier(child)
+                let remaining = max(0, (PamNativeGestureTransform.boundedGestures[key] ?? 1) - 1)
+                PamNativeGestureTransform.boundedGestures[key] = remaining == 0 ? nil : remaining
+                // The last bounded gesture on the surface settles it (RN OPEN_SPRING).
+                if remaining == 0 {
+                    let current = PamMotionTarget.transform(of: child)
+                    let resting = PamNativeGestureTransform.settled(
+                        current,
+                        in: child,
+                        contentAspect: nativeGestureContentAspect,
+                        maximumScale: nativeGestureMaximumScale
+                    )
+                    nativeGestureApplied = resting
+                    takeOverNativeTransform?(child)
+                    if UIAccessibility.isReduceMotionEnabled {
+                        PamMotionTarget.setTransform(resting, on: child)
+                    } else {
+                        UIView.animate(
+                            withDuration: 0.32,
+                            delay: 0,
+                            usingSpringWithDamping: 1,
+                            initialSpringVelocity: 0,
+                            options: [.beginFromCurrentState, .allowUserInteraction]
+                        ) {
+                            PamMotionTarget.setTransform(resting, on: child)
+                        }
+                    }
+                }
             }
             if nativeGestureResetOnEnd,
                sender.state == .ended || sender.state == .cancelled || sender.state == .failed {

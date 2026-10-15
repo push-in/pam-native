@@ -549,6 +549,8 @@ public enum PamConstants {
     public static let mediaProgress = 536
     public static let accessibilitySelected = 537
     public static let scrollKeyboardPersistTaps = 538
+    public static let gestureNativeBounds = 539
+    public static let gestureNativeContentAspect = 540
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

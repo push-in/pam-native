@@ -122,6 +122,44 @@ public function commitZoom(GestureEvent $event): void
 }
 ```
 
+### Bounded photo zoom
+
+`gestureNativeBounds="true"` turns a native transform into a photo viewer:
+
+- while panning or pinching, the translation is limited so the scaled content
+  never uncovers the viewport (no background past the photo's edges); content
+  smaller than the viewport on an axis stays centred on it;
+- the content is the child itself, or the rectangle an image with
+  `resizeMode="contain"` draws inside it when `gestureNativeContentAspect`
+  gives its width / height ratio;
+- a reversed drag moves the content at once (the overshoot is not
+  accumulated);
+- on release, the last bounded gesture on the surface springs it to rest: a
+  scale at or below 1.02 returns to the centred identity, a larger one keeps
+  its scale (at most `gestureNativeMaxScale`) inside the bounds. Set
+  `gestureNativeMinScale` below 1 to let the pinch shrink the photo before it
+  springs back.
+
+The end event reports the resting values in `nativeScale`,
+`nativeTranslationX/Y`, so committing them keeps PHP state equal to what is
+on screen. Without bounds, a clamp committed in PHP that equals the previous
+commit produces no property change and the native transform keeps the
+unclamped value; bounded transforms never depend on that commit.
+
+```pam
+<GestureDetector gestureType="pan" gestureComposition="simultaneous" gestureNativeTransform="true"
+    gestureNativeBounds="true" :gestureNativeContentAspect="$aspect" :gestureEnabled="$zoomed"
+    on:gestureEnd="commit">
+    <GestureDetector gestureType="pinch" gestureComposition="simultaneous" gestureNativeTransform="true"
+        gestureNativeMinScale="0.6" gestureNativeMaxScale="4" gestureNativeFocalZoom="true"
+        gestureNativeBounds="true" :gestureNativeContentAspect="$aspect" on:gestureEnd="commit">
+        <View :scaleX="$zoom" :scaleY="$zoom" :translationX="$x" :translationY="$y">
+            <Image :source="$uri" resizeMode="contain" />
+        </View>
+    </GestureDetector>
+</GestureDetector>
+```
+
 ### Focal zoom
 
 `gestureNativeFocalZoom="true"` on a native-transform pinch keeps the content

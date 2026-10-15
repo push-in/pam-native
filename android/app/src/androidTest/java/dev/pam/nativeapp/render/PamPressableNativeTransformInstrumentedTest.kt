@@ -113,6 +113,112 @@ class PamPressableNativeTransformInstrumentedTest {
         }
     }
 
+    @Test
+    fun boundedPanStopsAtTheZoomedPhotoEdgesAndReportsTheRestingTransform() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        lateinit var photo: View
+        lateinit var pressable: PamPressable
+        val payloads = mutableListOf<PamGesturePayload>()
+        val downTime = 1_000L
+        fun send(action: Int, x: Float, y: Float, at: Long) {
+            instrumentation.runOnMainSync {
+                pressable.dispatchTouchEvent(MotionEvent.obtain(downTime, downTime + at, action, x, y, 0))
+            }
+            // Moves are coalesced to the next frame.
+            instrumentation.waitForIdleSync()
+            Thread.sleep(40)
+            instrumentation.waitForIdleSync()
+        }
+        instrumentation.runOnMainSync {
+            photo = View(context)
+            pressable = PamPressable(context).apply {
+                addView(photo)
+                layout(0, 0, 360, 640)
+                photo.layout(0, 0, 360, 640)
+                configureGesture(
+                    config = PamGestureConfig(
+                        type = 2,
+                        enabled = true,
+                        minPointers = 1,
+                        maxPointers = 1,
+                        direction = 1,
+                        composition = 1,
+                        minDistance = 2f,
+                        minDurationMs = 0L,
+                    ),
+                    callback = { payloads += it },
+                    nativeTransform = true,
+                    nativeBounds = true,
+                    // 16:9 landscape photo contained in a 360x640 page: 360x202.5.
+                    nativeContentAspect = 16f / 9f,
+                )
+            }
+            photo.scaleX = 2f
+            photo.scaleY = 2f
+        }
+        send(MotionEvent.ACTION_DOWN, 100f, 300f, 0L)
+        send(MotionEvent.ACTION_MOVE, 340f, 600f, 16L)
+        send(MotionEvent.ACTION_MOVE, 600f, 640f, 32L)
+        // At 2x the 720 px wide photo may move 180 px; at 405 px tall it stays centred.
+        assertEquals(180f, photo.translationX, 0.01f)
+        assertEquals(0f, photo.translationY, 0.01f)
+        send(MotionEvent.ACTION_UP, 600f, 640f, 48L)
+        val end = payloads.last()
+        assertEquals(2f, end.nativeScale ?: 0f, 0.01f)
+        assertEquals(180f, end.nativeTranslationX ?: 0f, 0.01f)
+        assertEquals(0f, end.nativeTranslationY ?: 1f, 0.01f)
+    }
+
+    @Test
+    fun aZoomedChildKeepsItsTapTargetWhereItIsDrawn() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            val context = instrumentation.targetContext
+            val photo = PamContainer(context)
+            var downs = 0
+            val tapTarget = android.widget.Button(context).apply {
+                setOnTouchListener { _, event ->
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) downs += 1
+                    true
+                }
+            }
+            val detector = PamPressable(context).apply {
+                addView(photo)
+                photo.addView(tapTarget)
+                layout(0, 0, 360, 640)
+                photo.layout(0, 0, 360, 640)
+                tapTarget.layout(0, 0, 360, 640)
+                configureGesture(
+                    config = PamGestureConfig(
+                        type = 3,
+                        enabled = true,
+                        minPointers = 2,
+                        maxPointers = 2,
+                        direction = 1,
+                        composition = 2,
+                        minDistance = 2f,
+                        minDurationMs = 0L,
+                    ),
+                    callback = {},
+                    nativeTransform = true,
+                )
+            }
+            // Zoomed 2.4x and panned: the photo covers the page, but (330, 40)
+            // lies outside its untransformed box moved by the translation only.
+            photo.scaleX = 2.4f
+            photo.scaleY = 2.4f
+            photo.translationX = -120f
+            photo.translationY = 280f
+            val local = childLocalPoint(photo, 330f, 40f)!!
+            assertTrue(local[0] in 0f..360f && local[1] in 0f..640f)
+            val downTime = 2_000L
+            detector.dispatchTouchEvent(MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, 330f, 40f, 0))
+            detector.dispatchTouchEvent(MotionEvent.obtain(downTime, downTime + 40L, MotionEvent.ACTION_UP, 330f, 40f, 0))
+            assertEquals("the tap must reach the control drawn under the finger", 1, downs)
+        }
+    }
+
     private fun panChild(
         context: android.content.Context,
         parentScale: Float,

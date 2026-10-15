@@ -99,6 +99,12 @@ final class GestureDetector extends Element
         return $this->withProperty(PropKey::GestureEnabled, $enabled);
     }
 
+    /**
+     * `bounds` keeps a zoomable photo framed: translation never shows the
+     * background past the edges of the scaled content (contained in the child
+     * with `contentAspect` = width / height, or filling it when 0), and on
+     * release a scale below 1 springs back to the centred identity.
+     */
     public function nativeTransform(
         bool $enabled = true,
         float $minimumScale = 1.0,
@@ -107,6 +113,8 @@ final class GestureDetector extends Element
         float $translationLimitX = 0.0,
         bool $resetOnEnd = false,
         bool $focalZoom = false,
+        bool $bounds = false,
+        float $contentAspect = 0.0,
     ): self {
         return $this
             ->withProperty(PropKey::GestureNativeTransform, $enabled)
@@ -124,7 +132,12 @@ final class GestureDetector extends Element
                 max(0.0, min(10_000.0, $translationLimitX)),
             )
             ->withProperty(PropKey::GestureNativeResetOnEnd, $resetOnEnd)
-            ->withProperty(PropKey::GestureNativeFocalZoom, $focalZoom);
+            ->withProperty(PropKey::GestureNativeFocalZoom, $focalZoom)
+            ->withProperty(PropKey::GestureNativeBounds, $bounds)
+            ->withProperty(
+                PropKey::GestureNativeContentAspect,
+                max(0.0, min(100.0, $contentAspect)),
+            );
     }
 
     /** @param Closure(GestureEvent): void $handler */

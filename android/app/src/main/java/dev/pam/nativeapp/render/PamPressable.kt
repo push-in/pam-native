@@ -66,6 +66,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private var nativeTranslationLimitX = 0f
     private var nativeResetOnEnd = false
     private var nativeFocalZoom = false
+    private var nativeBounds = false
+    private var nativeContentAspect = 0f
     private var nativeFocalStartX = 0f
     private var nativeFocalStartY = 0f
     private var nativeResetKey = 0L
@@ -230,6 +232,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         nativeTranslationLimitX: Float = 0f,
         nativeResetOnEnd: Boolean = false,
         nativeFocalZoom: Boolean = false,
+        nativeBounds: Boolean = false,
+        nativeContentAspect: Float = 0f,
     ) {
         this.nativeTransformEnabled = nativeTransform
         this.nativeMinScale = nativeMinScale.coerceAtLeast(0.01f)
@@ -237,6 +241,8 @@ internal class PamPressable(context: Context) : PamContainer(context) {
         this.nativeTranslationLimitX = nativeTranslationLimitX.coerceAtLeast(0f)
         this.nativeResetOnEnd = nativeResetOnEnd
         this.nativeFocalZoom = nativeFocalZoom
+        this.nativeBounds = nativeBounds
+        this.nativeContentAspect = nativeContentAspect.takeIf { it.isFinite() && it > 0f } ?: 0f
         if (this.nativeResetKey != nativeResetKey) {
             this.nativeResetKey = nativeResetKey
             resetNativeTransform()
@@ -285,6 +291,9 @@ internal class PamPressable(context: Context) : PamContainer(context) {
             nativeBaseScaleX = child.scaleX
             nativeBaseScaleY = child.scaleY
             nativeBaseRotation = child.rotation
+            if (nativeBounds && payload.type in 2..5) {
+                boundedGestures[child] = (boundedGestures[child] ?: 0) + 1
+            }
             if (payload.type == 3 && nativeFocalZoom) {
                 nativeFocalStartX = payload.focalX
                 nativeFocalStartY = payload.focalY
@@ -309,6 +318,17 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                     translatedX
                 }
                 translationTarget.translationY = nativeBaseTranslationY + deltaY
+                if (nativeBounds) {
+                    // The content edge stops at the viewport edge; rebasing makes a
+                    // reversed drag move the content at once instead of after the
+                    // overshoot is undone.
+                    val boundedX = boundedAxis(child, translationTarget.translationX, horizontal = true)
+                    val boundedY = boundedAxis(child, translationTarget.translationY, horizontal = false)
+                    nativeBaseTranslationX += boundedX - translationTarget.translationX
+                    nativeBaseTranslationY += boundedY - translationTarget.translationY
+                    translationTarget.translationX = boundedX
+                    translationTarget.translationY = boundedY
+                }
                 nativeGestureTransformActive = payload.state in 1..2
                 nativeAppliedTranslationX = translationTarget.translationX
                 nativeAppliedTranslationY = translationTarget.translationY
@@ -335,6 +355,10 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 }
                 child.scaleX = scale
                 child.scaleY = scale
+                if (nativeBounds) {
+                    child.translationX = boundedAxis(child, child.translationX, horizontal = true)
+                    child.translationY = boundedAxis(child, child.translationY, horizontal = false)
+                }
             }
             4 -> child.rotation = nativeBaseRotation + Math.toDegrees(
                 payload.rotation.toDouble(),
@@ -349,11 +373,91 @@ internal class PamPressable(context: Context) : PamContainer(context) {
                 .setDuration(180L)
                 .start()
         }
+        if (nativeBounds && payload.type in 2..5 && payload.state in 3..5) {
+            val remaining = ((boundedGestures[child] ?: 1) - 1).coerceAtLeast(0)
+            if (remaining == 0) boundedGestures.remove(child) else boundedGestures[child] = remaining
+            // The last bounded gesture on this surface settles it; a pinch that
+            // ends under a still-active pan leaves the release to the pan.
+            if (remaining == 0) {
+                val settled = settleBounded(child)
+                return payload.copy(
+                    nativeScale = settled[0],
+                    nativeTranslationX = settled[1],
+                    nativeTranslationY = settled[2],
+                )
+            }
+        }
         return payload.copy(
             nativeScale = child.scaleX,
             nativeTranslationX = translationTarget.translationX,
             nativeTranslationY = translationTarget.translationY,
         )
+    }
+
+    /** [translation] limited so the scaled content never uncovers the viewport on one axis. */
+    private fun boundedAxis(child: View, translation: Float, horizontal: Boolean): Float {
+        val width = child.width.toFloat()
+        val height = child.height.toFloat()
+        if (width <= 0f || height <= 0f) return translation
+        val (contentWidth, contentHeight) = containedContentSize(width, height, nativeContentAspect)
+        return if (horizontal) {
+            boundedTranslation(translation, width, contentWidth, child.pivotX, child.scaleX)
+        } else {
+            boundedTranslation(translation, height, contentHeight, child.pivotY, child.scaleY)
+        }
+    }
+
+    /**
+     * Release of a bounded surface: a scale below 1 (or barely above it)
+     * springs back to the centred identity, a larger one keeps its scale and
+     * springs its translation inside the content bounds. Returns the resting
+     * scale and translation (px) the gesture reports.
+     */
+    private fun settleBounded(child: View): FloatArray {
+        val width = child.width.toFloat()
+        val height = child.height.toFloat()
+        var scale = child.scaleX.coerceIn(1f, nativeMaxScale.coerceAtLeast(1f))
+        if (scale <= BOUNDED_IDENTITY_SNAP) scale = 1f
+        val (contentWidth, contentHeight) = containedContentSize(width, height, nativeContentAspect)
+        val x = if (width > 0f) {
+            boundedTranslation(child.translationX, width, contentWidth, child.pivotX, scale)
+        } else {
+            0f
+        }
+        val y = if (height > 0f) {
+            boundedTranslation(child.translationY, height, contentHeight, child.pivotY, scale)
+        } else {
+            0f
+        }
+        val targets = linkedMapOf(
+            PamMotionProperty.SCALE_X to scale.toDouble(),
+            PamMotionProperty.SCALE_Y to scale.toDouble(),
+            PamMotionProperty.TRANSLATE_X to x.toDouble(),
+            PamMotionProperty.TRANSLATE_Y to y.toDouble(),
+        )
+        val moving = targets.filter { (property, target) ->
+            kotlin.math.abs(PamMotionTarget.read(child, property) - target) > 0.01
+        }
+        if (moving.isNotEmpty()) {
+            PamMotionRunner.cancelTransforms(child)
+            child.animate().cancel()
+            val timeline = PamMotionTimeline.build(
+                PamMotionProgram(
+                    0L,
+                    1,
+                    listOf(
+                        moving.mapValues { (_, target) ->
+                            listOf(PamMotionStep.Spring(PamMotionValue(target), BOUNDED_SPRING, 0.0, 0L))
+                        },
+                    ),
+                ),
+                current = { PamMotionTarget.read(child, it) },
+                resolve = { _, value -> value.number },
+            )
+            PamMotionRunner(child, timeline, iterations = 1)
+                .start(reducedMotion = PamMotionPolicy.isReduced(context))
+        }
+        return floatArrayOf(scale, x, y)
     }
 
     /**
@@ -637,17 +741,15 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     ): Boolean {
         for (index in parent.childCount - 1 downTo 0) {
             val child = parent.getChildAt(index)
-            if (
-                child.visibility != View.VISIBLE ||
-                x < child.left + child.translationX ||
-                x >= child.right + child.translationX ||
-                y < child.top + child.translationY ||
-                y >= child.bottom + child.translationY
-            ) {
+            if (child.visibility != View.VISIBLE) continue
+            // The full child transform (scale, rotation, pivot), as ViewGroup
+            // hit testing does: a zoomed photo's tap target is its visual box.
+            val local = childLocalPoint(child, x, y) ?: continue
+            if (local[0] < 0f || local[0] >= child.width || local[1] < 0f || local[1] >= child.height) {
                 continue
             }
-            val childX = x - child.left - child.translationX + child.scrollX
-            val childY = y - child.top - child.translationY + child.scrollY
+            val childX = local[0] + child.scrollX
+            val childY = local[1] + child.scrollY
             if (isIndependentTouchTarget(child)) return true
             if (
                 child is ViewGroup &&
@@ -794,6 +896,11 @@ internal class PamPressable(context: Context) : PamContainer(context) {
     private companion object {
         /** Surfaces whose translation a focal pinch currently owns (shared by adjacent detectors). */
         val focalZoomTargets = java.util.WeakHashMap<View, Boolean>()
+        /** Bounded native gestures in progress per surface (adjacent pan + pinch share one). */
+        val boundedGestures = java.util.WeakHashMap<View, Int>()
+        /** RN MediaViewer OPEN_SPRING (stiffness 240, damping 24, mass 0.9). */
+        val BOUNDED_SPRING = PamSpringConfig(stiffness = 240.0, damping = 24.0, mass = 0.9)
+        const val BOUNDED_IDENTITY_SNAP = 1.02f
         const val GESTURE_LOG_TAG = "PamGesture"
         const val DEFAULT_PRESS_OPACITY = 0.72f
         const val DEFAULT_RETENTION_HORIZONTAL = 20f
@@ -853,6 +960,47 @@ internal fun gestureRecognitionCancelsPress(
  * the point under [focalStart] (relative to the untranslated [pivot]) is
  * scaled by [ratio] and lands under the current [focal].
  */
+/**
+ * [x], [y] in the parent's coordinates mapped into [child]'s own coordinates
+ * through its full transform; null when the transform is not invertible.
+ */
+internal fun childLocalPoint(child: View, x: Float, y: Float): FloatArray? {
+    val point = floatArrayOf(x - child.left, y - child.top)
+    val matrix = child.matrix
+    if (!matrix.isIdentity) {
+        val inverse = android.graphics.Matrix()
+        if (!matrix.invert(inverse)) return null
+        inverse.mapPoints(point)
+    }
+    return point
+}
+
+internal fun containedContentSize(width: Float, height: Float, aspect: Float): Pair<Float, Float> {
+    if (aspect <= 0f || width <= 0f || height <= 0f) return width to height
+    val fittedWidth = kotlin.math.min(width, height * aspect)
+    return fittedWidth to fittedWidth / aspect
+}
+
+/**
+ * One axis of a bounded native transform. The content ([content] long,
+ * centred in a [viewport]-long view scaled by [scale] around [pivot]) may
+ * move only while it still covers the viewport; content shorter than the
+ * viewport stays centred.
+ */
+internal fun boundedTranslation(
+    translation: Float,
+    viewport: Float,
+    content: Float,
+    pivot: Float,
+    scale: Float,
+): Float {
+    val contentStart = (viewport - content) / 2f
+    val start = pivot - (pivot - contentStart) * scale
+    val end = pivot + (contentStart + content - pivot) * scale
+    if (end - start <= viewport) return viewport / 2f - (start + end) / 2f
+    return translation.coerceIn(viewport - end, -start)
+}
+
 internal fun focalZoomTranslation(
     focal: Float,
     focalStart: Float,

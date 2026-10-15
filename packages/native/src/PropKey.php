@@ -544,4 +544,6 @@ enum PropKey: int
     case MediaProgress = 536;
     case AccessibilitySelected = 537;
     case ScrollKeyboardPersistTaps = 538;
+    case GestureNativeBounds = 539;
+    case GestureNativeContentAspect = 540;
 }

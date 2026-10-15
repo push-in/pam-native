@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.43.0 - 2026-10-14
+
+- Add bounded native photo zoom: `gestureNativeBounds` and
+  `gestureNativeContentAspect` on `GestureDetector` (and
+  `nativeTransform(bounds:, contentAspect:)`), property keys 539/540. Pan and
+  pinch keep the scaled content (the child, or the contained image rectangle)
+  covering the viewport, a reversed drag responds at once, and on release the
+  surface springs to rest: at or below 1.02x back to the centred identity,
+  otherwise inside the bounds. End events report the resting values. Android
+  and iOS.
+- Fix taps on a scaled child of a gesture `Pressable` on Android: the
+  independent-touch-target probe mapped the point with the translation only,
+  so outside the untransformed box the detector stole the touch (a zoomed
+  photo's double tap to zoom out failed on most of the screen). It now maps
+  through the child's full matrix like ViewGroup hit testing.
+- Fix photo viewers built on native transforms showing the background past
+  the photo after a pan: a PHP clamp equal to the previous commit produced no
+  property change, so the native view kept the unclamped translation.
+
 ## 1.42.1 - 2026-10-14
 
 Android and iOS host fix; PHP SDK, protocol and engine are unchanged from

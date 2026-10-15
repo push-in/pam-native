@@ -34,4 +34,38 @@ class PamPressableGestureTest {
         // No zoom, no movement: the translation stays.
         assertEquals(base, focalZoomTranslation(start, start, pivot, base, 1f), 0.0001f)
     }
+
+    @Test
+    fun containedContentFitsInsideTheView() {
+        // Portrait 3:4 in a 360x700 page: full width, 480 tall.
+        val portrait = containedContentSize(360f, 700f, 0.75f)
+        assertEquals(360f, portrait.first, 0.0001f)
+        assertEquals(480f, portrait.second, 0.0001f)
+        // Landscape 16:9: full width, 202.5 tall.
+        assertEquals(202.5f, containedContentSize(360f, 700f, 16f / 9f).second, 0.0001f)
+        // Very tall content: full height, narrower.
+        val tall = containedContentSize(360f, 700f, 0.25f)
+        assertEquals(175f, tall.first, 0.0001f)
+        assertEquals(700f, tall.second, 0.0001f)
+        // No aspect: the content fills the view.
+        assertEquals(360f to 700f, containedContentSize(360f, 700f, 0f))
+    }
+
+    @Test
+    fun boundedTranslationStopsAtTheScaledContentEdges() {
+        // Portrait 360x480 in a 360x700 page at 2x around the centre:
+        // 720x960 may move 180 horizontally and 130 vertically.
+        assertEquals(180f, boundedTranslation(500f, 360f, 360f, 180f, 2f), 0.0001f)
+        assertEquals(-180f, boundedTranslation(-500f, 360f, 360f, 180f, 2f), 0.0001f)
+        assertEquals(130f, boundedTranslation(400f, 700f, 480f, 350f, 2f), 0.0001f)
+        assertEquals(40f, boundedTranslation(40f, 700f, 480f, 350f, 2f), 0.0001f)
+        // Landscape 202.5 tall at 2.4x is still shorter than 700: stays centred.
+        assertEquals(0f, boundedTranslation(300f, 700f, 202.5f, 350f, 2.4f), 0.0001f)
+        // Below 1x the content is centred whatever the gesture left.
+        assertEquals(0f, boundedTranslation(-90f, 360f, 360f, 180f, 0.7f), 0.0001f)
+        // An off-centre pivot keeps the same edges.
+        val left = boundedTranslation(1_000f, 360f, 360f, 0f, 2f)
+        assertEquals(0f, left, 0.0001f)
+        assertEquals(-360f, boundedTranslation(-1_000f, 360f, 360f, 0f, 2f), 0.0001f)
+    }
 }

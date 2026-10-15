@@ -144,4 +144,28 @@ final class PamNativeGestureTransformTests: XCTestCase {
         canvas.transform = .identity
         XCTAssertEqual(PamNativeGestureTransform.parentSpaceVector(CGPoint(x: 12, y: -4), for: content), CGPoint(x: 12, y: -4))
     }
+
+    func testBoundedPhotoTransformKeepsTheContainedContentCoveringTheViewport() {
+        let page = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 700))
+        // Portrait 3:4 at 2x: 720x960 may move 180 horizontally, 130 vertically.
+        var transform = PamMotionTransform()
+        transform.scaleX = 2
+        transform.scaleY = 2
+        transform.translateX = 500
+        transform.translateY = -400
+        let bounded = PamNativeGestureTransform.bounded(transform, in: page, contentAspect: 0.75)
+        XCTAssertEqual(bounded.translateX, 180, accuracy: 0.001)
+        XCTAssertEqual(bounded.translateY, -130, accuracy: 0.001)
+        // Landscape 16:9 at 2.4x is still shorter than the page: centred vertically.
+        transform.scaleX = 2.4
+        transform.scaleY = 2.4
+        XCTAssertEqual(PamNativeGestureTransform.bounded(transform, in: page, contentAspect: 16 / 9).translateY, 0, accuracy: 0.001)
+        // Released below 1x: back to the centred identity.
+        transform.scaleX = 0.7
+        transform.scaleY = 0.7
+        let resting = PamNativeGestureTransform.settled(transform, in: page, contentAspect: 0.75, maximumScale: 4)
+        XCTAssertEqual(resting.scaleX, 1, accuracy: 0.001)
+        XCTAssertEqual(resting.translateX, 0, accuracy: 0.001)
+        XCTAssertEqual(resting.translateY, 0, accuracy: 0.001)
+    }
 }
