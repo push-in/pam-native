@@ -47,7 +47,7 @@ class PamVirtualListWindowInstrumentedTest {
         try {
             instrumentation.runOnMainSync {
                 renderer = PamRenderer(activity, activity.host) { id, kind, payload ->
-                    events += Triple(id, kind, payload)
+                    events.add(Triple(id, kind, String(payload, Charsets.UTF_8)))
                 }
                 val mutations = mutableListOf<Mutation>(
                     create(1, 0, 0, NodeKind.SCREEN),
