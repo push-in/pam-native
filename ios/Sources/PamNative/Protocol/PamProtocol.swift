@@ -142,6 +142,7 @@ public enum EventKind: Int {
     case pageChange = 77
     case routeCovered = 78
     case routeFocused = 79
+    case listWindow = 80
 }
 
 public enum PropValue {
@@ -551,6 +552,8 @@ public enum PamConstants {
     public static let scrollKeyboardPersistTaps = 538
     public static let gestureNativeBounds = 539
     public static let gestureNativeContentAspect = 540
+    public static let listPlaceholder = 541
+    public static let listWindowed = 542
     public static let sectionItems = 80
     public static let hostProperties = 100
     public static let zIndex = 97

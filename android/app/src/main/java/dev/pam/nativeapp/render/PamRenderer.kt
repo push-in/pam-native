@@ -2029,6 +2029,9 @@ class PamRenderer(
         list.setStickyIds(
             itemIds.filterTo(HashSet()) { item -> nodes[item]?.flag(PropKey.STICKY_HEADER, false) == true },
         )
+        // Windowed list: a tall viewport (or a jump) can show placeholders
+        // before any scroll; report the visible rows once laid out.
+        if (state.properties[PropKey.LIST_WINDOWED] != null) list.post { list.reportViewport() }
     }
 
     private fun requestVirtualListScroll(list: PamRecyclerList, state: NodeState) {
@@ -3816,7 +3819,11 @@ class PamRenderer(
             PropKey.LIST_FULL_SPAN,
             PropKey.LIST_SECTION,
             PropKey.LIST_ACTIVE_SECTION,
+            PropKey.LIST_PLACEHOLDER,
             -> Unit
+            // A list that crosses the windowing threshold starts (or stops)
+            // reporting its visible rows.
+            PropKey.LIST_WINDOWED -> (view as? PamRecyclerList)?.let { installListEvents(it, state) }
             PropKey.ANIMATION_KIND -> applyAnimationKind(view, state, value.integer().toInt())
             PropKey.ANIMATION_DURATION_MS -> {
                 if (state.integer(PropKey.ANIMATION_KIND, 1L) == 2L) {
@@ -4531,7 +4538,11 @@ class PamRenderer(
             PropKey.LIST_FULL_SPAN,
             PropKey.LIST_SECTION,
             PropKey.LIST_ACTIVE_SECTION,
+            PropKey.LIST_PLACEHOLDER,
             -> Unit
+            // A list that crosses the windowing threshold starts (or stops)
+            // reporting its visible rows.
+            PropKey.LIST_WINDOWED -> (view as? PamRecyclerList)?.let { installListEvents(it, state) }
             PropKey.TEXT_SPANS,
             PropKey.ON_SPAN_PRESS,
             -> (view as? TextView)?.let { if (isRichTextView(it, state)) applyTextContent(it, state) }
@@ -6382,7 +6393,8 @@ class PamRenderer(
         val scroll = state.properties[PropKey.ON_SCROLL] != null
         val endReached = state.properties[PropKey.ON_END_REACHED] != null
         val pageChange = state.properties[PropKey.ON_PAGE_CHANGE] != null
-        if (!scroll && !endReached && !pageChange) {
+        val windowed = state.properties[PropKey.LIST_WINDOWED] != null
+        if (!scroll && !endReached && !pageChange && !windowed) {
             list.setOnViewportChanged(null)
             return
         }
@@ -6394,6 +6406,7 @@ class PamRenderer(
                 totalItemCount,
             ->
             if (pageChange) dispatchPageChange(state, list.pageIndex())
+            if (windowed) requestListWindow(list, state, firstVisibleItem, visibleItemCount, totalItemCount)
             if (scroll) {
                 state.pendingScrollOffset = offset
                 if (!state.scrollScheduled) {
@@ -6420,6 +6433,43 @@ class PamRenderer(
                 }
             }
         }
+    }
+
+    /**
+     * A windowed list (long VirtualizedList) ships rows outside PHP's window
+     * as placeholders. When placeholders come within a screen of the visible
+     * rows, report the visible rows so PHP materializes ahead of the scroll.
+     * At most one request per range, re-sent after [LIST_WINDOW_RETRY_MS]
+     * if no commit answered it.
+     */
+    private fun requestListWindow(
+        list: PamRecyclerList,
+        state: NodeState,
+        firstVisible: Int,
+        visibleCount: Int,
+        total: Int,
+    ) {
+        if (total <= 0) return
+        val first = firstVisible.coerceIn(0, total - 1)
+        val last = (first + max(visibleCount, 1) - 1).coerceIn(first, total - 1)
+        val margin = max(LIST_WINDOW_MARGIN_ROWS, last - first + 1)
+        var placeholderNear = false
+        for (position in (first - margin).coerceAtLeast(0)..(last + margin).coerceAtMost(total - 1)) {
+            val id = list.richIdAt(position) ?: continue
+            if (nodes[id]?.properties?.get(PropKey.LIST_PLACEHOLDER) != null) {
+                placeholderNear = true
+                break
+            }
+        }
+        if (!placeholderNear) return
+        val firstId = list.richIdAt(first) ?: return
+        val lastId = list.richIdAt(last) ?: firstId
+        val request = "$firstId,$lastId"
+        val now = SystemClock.uptimeMillis()
+        if (request == state.listWindowRequest && now - state.listWindowRequestedAt < LIST_WINDOW_RETRY_MS) return
+        state.listWindowRequest = request
+        state.listWindowRequestedAt = now
+        dispatch(state.id, EVENT_LIST_WINDOW, request)
     }
 
     private fun dispatchInput(state: NodeState) {
@@ -9774,6 +9824,9 @@ class PamRenderer(
         var scrollScheduled: Boolean = false,
         var pendingScrollOffset: Float = 0f,
         var endReachedSent: Boolean = false,
+        /** Last ListWindow request ("firstId,lastId") and when it was sent. */
+        var listWindowRequest: String? = null,
+        var listWindowRequestedAt: Long = 0L,
         val pageTracker: PamPageTracker = PamPageTracker(),
         var virtualListItemIds: List<Long> = emptyList(),
         /** Active keyed section the list last showed (null before the first sync). */
@@ -9903,6 +9956,10 @@ class PamRenderer(
         const val EVENT_REFRESH = 10
         const val EVENT_TOGGLE = 11
         const val EVENT_END_REACHED = 12
+        const val EVENT_LIST_WINDOW = 80
+        /** Rows around the visible ones checked for placeholders (at least a screen). */
+        const val LIST_WINDOW_MARGIN_ROWS = 12
+        const val LIST_WINDOW_RETRY_MS = 250L
         const val EVENT_DRAWER_OPEN = 13
         const val EVENT_DRAWER_CLOSE = 14
         const val EVENT_NATIVE = 15

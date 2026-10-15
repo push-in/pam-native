@@ -1019,6 +1019,14 @@ internal class PamRecyclerList(context: Context) : RecyclerView(context) {
         initialPositionApplied = true
     }
 
+    /** Item (row node) id at adapter [position], or null outside the rows. */
+    fun richIdAt(position: Int): Long? = richIds.getOrNull(position)
+
+    /** Reports the current visible range again (after rows were replaced). */
+    fun reportViewport() {
+        if (viewportChanged != null && isLaidOut) dispatchViewport()
+    }
+
     private fun dispatchViewport() {
         val layout = layoutManager as? LinearLayoutManager ?: return
         val first = layout.findFirstVisibleItemPosition().coerceAtLeast(0)

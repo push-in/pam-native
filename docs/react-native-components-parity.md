@@ -48,6 +48,26 @@ their state (a horizontal tab rail offset, a focused input) is kept.
   — use it for `ListHeaderComponent`/`ListFooterComponent` equivalents placed
   first/last; they scroll with the list.
 
+### Windowed materialization (long lists)
+
+Write long lists the plain way (`VirtualizedList::make(...$rows)`,
+`VirtualGrid`, or `p-for` inside `<VirtualizedList>`); nothing else is needed.
+A vertical list with more than 96 rows is materialized by window, like
+FlashList's `renderItem`: the first frame carries the first 48 rows (and the
+rows around `initialScrollIndex`) and every other row as a placeholder — its
+own root node with its authored size, without children or events, sized by
+the list estimate (`estimatedRowHeight`) when it has no height of its own.
+
+While the user scrolls, the host reports the rows on screen whenever a
+placeholder comes within a screen of them (event kind 80, framework-owned,
+never an app callback) and the next frame turns the rows ahead into full rows
+in place: same node ids, so materialized rows keep their views, decoded
+images and state and are never re-encoded. Sticky headers and full-span rows
+are always materialized; horizontal lists and lists up to 96 rows are encoded
+completely as before. On a 10,000-row list this removes ~99% of the first
+frame's nodes from the PHP encoder, the engine's measure/layout pass and the
+native mount, so the list appears in the time of a short one.
+
 ### Keyed sections (tabs over one list)
 
 Screens such as chat details render a header, a sticky tab rail and the

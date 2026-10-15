@@ -55,6 +55,8 @@ public final class PamRenderer {
     private var parkedCells = Set<Int64>()
     /// Active keyed section each list last showed.
     private var appliedListSections: [Int64: String] = [:]
+    /// Last ListWindow request per windowed list ("firstId,lastId", time).
+    private var listWindowRequests: [Int64: (request: String, at: CFTimeInterval)] = [:]
     /// Scroll offset of each switched-away section, per list.
     private var listSectionOffsets: [Int64: [String: CGFloat]] = [:]
     private var eventBridges: [Int64: [Int: EventBridge]] = [:]
@@ -895,6 +897,9 @@ public final class PamRenderer {
                 visible.insert(pinned.0)
             }
         }
+        if nodes[id]?.properties[PamConstants.listWindowed]?.pamFlag == true {
+            requestListWindow(id, list: list, frames: localFrames, window: visible, horizontal: horizontal)
+        }
         // A list nobody sees yet (a screen mounted ahead, hidden under the
         // visible one) creates its cells a few per frame within a budget.
         let deferMounts = !list.pamIsShown
@@ -923,6 +928,33 @@ public final class PamRenderer {
                 self.syncVirtualList(id)
             }
         }
+    }
+
+    /// A windowed list (long VirtualizedList) ships rows outside PHP's window
+    /// as placeholders. When one enters the overscanned window, report the
+    /// rows on screen so PHP materializes ahead of the scroll (Android:
+    /// `PamRenderer.requestListWindow`). One request per range, re-sent after
+    /// 250 ms when no commit answered it.
+    private func requestListWindow(
+        _ listId: Int64,
+        list: PamVirtualListView,
+        frames localFrames: [(Int64, CGRect)],
+        window: Set<Int64>,
+        horizontal: Bool
+    ) {
+        guard window.contains(where: { nodes[$0]?.properties[PamConstants.listPlaceholder] != nil }) else { return }
+        let viewport = CGRect(origin: list.contentOffset, size: list.bounds.size)
+        let onScreen = localFrames
+            .filter { $0.1.intersects(viewport) }
+            .sorted { horizontal ? $0.1.minX < $1.1.minX : $0.1.minY < $1.1.minY }
+        guard let first = onScreen.first?.0, let last = onScreen.last?.0 else { return }
+        let request = "\(first),\(last)"
+        let now = CACurrentMediaTime()
+        if let previous = listWindowRequests[listId], previous.request == request, now - previous.at < 0.25 {
+            return
+        }
+        listWindowRequests[listId] = (request, now)
+        dispatchEvent(listId, EventKind.listWindow.rawValue, Data(request.utf8))
     }
 
     /// Saves the switched-away section's offset and restores the switched-in

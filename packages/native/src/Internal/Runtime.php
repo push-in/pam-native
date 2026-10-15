@@ -77,6 +77,9 @@ final class Runtime
     private static bool $pending = false;
     private static ?Element $lastRoot = null;
     private static ?Element $lastThemed = null;
+
+    /** A windowed list grew its materialized rows: encode even an unchanged tree. */
+    private static bool $windowChanged = false;
     private static ?Theme $lastTheme = null;
     private static ?string $environmentKey = null;
     /** @var \WeakMap<Theme, \WeakMap<Element, Element>>|null */
@@ -249,7 +252,9 @@ final class Runtime
                 // When every component was memoized the committed tree is current.
                 $unchanged = $untouched === self::$lastRoot
                     && $theme === self::$lastTheme
-                    && $element === self::$lastThemed;
+                    && $element === self::$lastThemed
+                    && !self::$windowChanged;
+                self::$windowChanged = false;
 
                 $encoder = self::$encoder ??= new TreeEncoder();
                 if (!$unchanged) {
@@ -444,6 +449,21 @@ final class Runtime
                 DependencyTracker::invalidateAll();
                 self::$appStateHandler?->__invoke($appState);
                 self::afterDispatch();
+
+                return;
+            }
+            if ($eventKind === EventKind::ListWindow->value) {
+                // Framework-owned: native shows rows near placeholders of a
+                // windowed list. Materialize ahead of them; no app callback
+                // and no component is invalidated.
+                $ids = explode(',', $payload, 2);
+                if (
+                    count($ids) === 2
+                    && self::$encoder?->extendWindow($nodeId, (int) $ids[0], (int) $ids[1]) === true
+                ) {
+                    self::$windowChanged = true;
+                    self::afterDispatch();
+                }
 
                 return;
             }

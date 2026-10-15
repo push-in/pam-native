@@ -7390,6 +7390,54 @@ mod tests {
     }
 
     #[test]
+    fn windowed_virtual_list_placeholders_use_authored_height_or_the_estimate() {
+        // Rows PHP has not materialized yet arrive as their childless root
+        // flagged ListPlaceholder: an authored height is kept, otherwise the
+        // list estimate sizes them, and the materialized rows after them are
+        // placed below.
+        let placeholder = |id: u64, index: u32, height: Option<f64>| {
+            let mut props = vec![(PropKey::ListPlaceholder, PropValue::Boolean(true))];
+            if let Some(height) = height {
+                props.push((PropKey::Height, PropValue::Float(height)));
+            }
+            node(id, 1, index, NodeKind::Column, props)
+        };
+        let mut nodes = BTreeMap::new();
+        nodes.insert(
+            1,
+            node(
+                1,
+                0,
+                0,
+                NodeKind::VirtualList,
+                [
+                    (PropKey::ListRowHeight, PropValue::Float(72.0)),
+                    (PropKey::ListWindowed, PropValue::Boolean(true)),
+                ],
+            ),
+        );
+        nodes.insert(2, placeholder(2, 0, Some(64.0)));
+        nodes.insert(3, placeholder(3, 1, None));
+        nodes.insert(4, node(4, 1, 2, NodeKind::Column, []));
+        nodes.insert(5, fixed_box(5, 4, 30.0));
+        let tree = Tree { root: 1, nodes };
+        let layout = calculate(
+            &tree,
+            Size {
+                width: 360.0,
+                height: 640.0,
+            },
+        )
+        .expect("windowed virtual list");
+
+        assert_eq!(layout[&2].height, 64.0);
+        assert_eq!(layout[&3].y, 64.0);
+        assert_eq!(layout[&3].height, 72.0);
+        assert_eq!(layout[&4].y, 136.0);
+        assert_eq!(layout[&4].height, 30.0);
+    }
+
+    #[test]
     fn horizontal_virtual_list_uses_authored_cell_widths() {
         let mut nodes = BTreeMap::new();
         nodes.insert(

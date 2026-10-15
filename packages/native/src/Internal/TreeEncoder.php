@@ -26,6 +26,40 @@ final class TreeEncoder
 {
     private const MAX_NODES = 100_000;
 
+    /**
+     * Vertical VirtualizedList/VirtualGrid with more rows than this are
+     * materialized by window: rows outside it are sent as childless
+     * placeholders (their own root properties plus ListPlaceholder), sized by
+     * the list's estimate. Native reports the rows it shows (EventKind
+     * ListWindow) and the window grows ahead of the scroll.
+     */
+    private const WINDOW_MIN_ROWS = 96;
+
+    /** Rows materialized when a list first mounts (and around initialScrollIndex). */
+    private const WINDOW_INITIAL_ROWS = 48;
+
+    /**
+     * Smallest margin materialized beyond the rows native reports visible.
+     * Native asks again only when a placeholder comes within a screen, so a
+     * wide margin keeps window growth (each one an O(rows) patch) rare.
+     */
+    private const WINDOW_MARGIN_ROWS = 64;
+
+    /** @var array<string, list<array{0: int, 1: int}>> materialized [start, end) row ranges by list path */
+    private array $windowRanges = [];
+
+    /** @var array<int, array{0: string, 1: array<int, int>}> windowed list id => [path, row id => index] */
+    private array $windowLists = [];
+
+    /** Bumped whenever a window grows; stale windowed subtrees are re-encoded. */
+    private int $windowStamp = 0;
+
+    /** Windowed lists encoded or reused so far (marks the subtrees containing one). */
+    private int $windowedLists = 0;
+
+    /** @var WeakMap<Element, array<string, EncodedNode>> placeholder rows by element and path */
+    private WeakMap $placeholders;
+
     private const EVENT_PROPERTIES = EventProperties::MAP;
 
     /** @var array<int, true> ids of the frame being encoded (outside reused subtrees) */
@@ -124,6 +158,170 @@ final class TreeEncoder
     {
         $this->subtreeCache = new WeakMap();
         $this->refreshHosts = new WeakMap();
+        $this->placeholders = new WeakMap();
+    }
+
+    /**
+     * @internal Native reported the rows a windowed list shows (node ids of
+     * the first and last visible rows). Grows the materialized window ahead
+     * of them and returns whether a new frame is needed.
+     */
+    public function extendWindow(int $listId, int $firstRowId, int $lastRowId): bool
+    {
+        $list = $this->windowLists[$listId] ?? null;
+        if ($list === null) {
+            return false;
+        }
+        [$path, $indexes] = $list;
+        $first = $indexes[$firstRowId] ?? null;
+        $last = $indexes[$lastRowId] ?? $first;
+        if ($first === null || $last === null) {
+            return false;
+        }
+        if ($last < $first) {
+            [$first, $last] = [$last, $first];
+        }
+        $margin = max(self::WINDOW_MARGIN_ROWS, ($last - $first + 1) * 2);
+        $ranges = $this->windowRanges[$path] ?? [];
+        // Rows already materialized half a margin around the visible ones:
+        // nothing to do yet (native also only asks near placeholders).
+        if (self::covers($ranges, max(0, $first - intdiv($margin, 2)), $last + intdiv($margin, 2) + 1)) {
+            return false;
+        }
+        $this->windowRanges[$path] = self::addRange($ranges, max(0, $first - $margin), $last + $margin + 1);
+        ++$this->windowStamp;
+
+        return true;
+    }
+
+    /** @param list<array{0: int, 1: int}> $ranges */
+    private static function covers(array $ranges, int $start, int $end): bool
+    {
+        foreach ($ranges as [$from, $to]) {
+            if ($from <= $start && $to >= $end) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param list<array{0: int, 1: int}> $ranges
+     * @return list<array{0: int, 1: int}>
+     */
+    private static function addRange(array $ranges, int $start, int $end): array
+    {
+        $ranges[] = [$start, $end];
+        usort($ranges, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+        $merged = [];
+        foreach ($ranges as [$from, $to]) {
+            $lastIndex = count($merged) - 1;
+            if ($lastIndex >= 0 && $from <= $merged[$lastIndex][1]) {
+                $merged[$lastIndex][1] = max($merged[$lastIndex][1], $to);
+            } else {
+                $merged[] = [$from, $to];
+            }
+        }
+
+        return $merged;
+    }
+
+    /** @param list<array{0: int, 1: int}> $ranges */
+    private static function inRanges(array $ranges, int $index): bool
+    {
+        foreach ($ranges as [$from, $to]) {
+            if ($index >= $from && $index < $to) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @return ?list<array{0: int, 1: int}> */
+    private function windowFor(Element $list, string $path): ?array
+    {
+        if (
+            $list->kind !== NodeKind::VirtualList
+            || count($list->children) <= self::WINDOW_MIN_ROWS
+            || ($list->properties[PropKey::ListHorizontal->value] ?? false) === true
+        ) {
+            return null;
+        }
+        $ranges = $this->windowRanges[$path] ?? null;
+        if ($ranges === null) {
+            $ranges = [[0, self::WINDOW_INITIAL_ROWS]];
+            $initial = $list->properties[PropKey::ListInitialScrollIndex->value] ?? null;
+            if (is_int($initial) && $initial > 0) {
+                $ranges = self::addRange(
+                    $ranges,
+                    max(0, $initial - self::WINDOW_MARGIN_ROWS),
+                    $initial + self::WINDOW_INITIAL_ROWS,
+                );
+            }
+            $this->windowRanges[$path] = $ranges;
+        }
+
+        return $ranges;
+    }
+
+    /** Sticky headers, full-span headers/footers and single-node rows are never deferred. */
+    private static function deferrable(Element $row): bool
+    {
+        return $row->children !== []
+            && ($row->properties[PropKey::StickyHeader->value] ?? false) !== true
+            && ($row->properties[PropKey::ListFullSpan->value] ?? false) !== true;
+    }
+
+    /**
+     * A row outside the window: its root node (same id, kind and properties)
+     * without children or events, flagged ListPlaceholder. Materializing it
+     * later only creates its children and drops the flag.
+     */
+    private function encodePlaceholder(Element $row, int $id, int $parent, int $index, string $path): void
+    {
+        if (++$this->nodeCount > self::MAX_NODES) {
+            throw new LogicException('Pam Native trees cannot exceed 100,000 nodes.');
+        }
+        $entries = $this->placeholders[$row] ?? [];
+        $node = $entries[$path] ?? null;
+        if ($node === null) {
+            $properties = $row->properties;
+            $properties[PropKey::ListPlaceholder->value] = true;
+            ksort($properties, SORT_NUMERIC);
+            $node = new EncodedNode($id, $parent, $index, $row->kind->value, self::encodeProperties($properties));
+            $entries[$path] = $node;
+            $this->placeholders[$row] = $entries;
+        } elseif ($node->id !== $id || $node->parent !== $parent || $node->index !== $index) {
+            $node = new EncodedNode($id, $parent, $index, $node->kind, $node->properties, $node->propertyBytes);
+            $entries[$path] = $node;
+            $this->placeholders[$row] = $entries;
+        }
+        $this->items[] = $node;
+    }
+
+    /**
+     * @param array<int, mixed> $properties sorted by key
+     * @return array<int, string>
+     */
+    private static function encodeProperties(array $properties): array
+    {
+        $encodedProperties = [];
+        foreach ($properties as $property => $value) {
+            if (is_string($value)) {
+                $encoded = self::$encodedStrings[$value] ?? self::encodeString($value);
+            } elseif (is_int($value)) {
+                $encoded = self::$encodedIntegers[$value] ?? self::encodeInteger($value);
+            } elseif (is_bool($value)) {
+                $encoded = $value ? "\x04\x01" : "\x04\x00";
+            } else {
+                $encoded = self::encodeValue($value);
+            }
+            $encodedProperties[$property] = $encoded;
+        }
+
+        return $encodedProperties;
     }
 
     /**
@@ -148,7 +346,11 @@ final class TreeEncoder
         $root = $this->refreshHosted($root);
         $cachedRoot = ($this->subtreeCache[$root] ?? [])['root'] ?? null;
 
-        if ($this->previousTree !== null && $cachedRoot !== null) {
+        if (
+            $this->previousTree !== null
+            && $cachedRoot !== null
+            && ($cachedRoot->windowStamp < 0 || $cachedRoot->windowStamp === $this->windowStamp)
+        ) {
             return [
                 'frame' => null,
                 'callbacks' => $cachedRoot->callbacks,
@@ -189,6 +391,11 @@ final class TreeEncoder
         $this->previousRoot = $rootId;
         $this->previousTree = $tree;
         $this->committed = $nodes;
+        foreach ($this->windowLists as $listId => [$listPath]) {
+            if (!isset($nodes[$listId])) {
+                unset($this->windowLists[$listId], $this->windowRanges[$listPath]);
+            }
+        }
         $this->emitted = $this->emitting;
         $this->emitting = [];
         $this->walked = [];
@@ -230,6 +437,14 @@ final class TreeEncoder
         $cacheable = $element->elementKey !== null || $dom !== null || $element->reusable || $path === 'root';
         if ($cacheable) {
             $cached = ($this->subtreeCache[$element] ?? [])[$path] ?? null;
+            if ($cached !== null && $cached->windowStamp >= 0) {
+                if ($cached->windowStamp !== $this->windowStamp) {
+                    // Contains a windowed list whose window grew since.
+                    $cached = null;
+                } else {
+                    ++$this->windowedLists;
+                }
+            }
 
             if ($cached !== null) {
                 $count = $cached->count;
@@ -265,6 +480,8 @@ final class TreeEncoder
         }
 
         $callbackStart = count($this->callbacks);
+        $windowedBefore = $this->windowedLists;
+        $window = $this->windowFor($element, $path);
 
         if (++$this->nodeCount > self::MAX_NODES) {
             throw new LogicException('Pam Native trees cannot exceed 100,000 nodes.');
@@ -279,28 +496,19 @@ final class TreeEncoder
 
         $cached = $element->encodedProperties;
         $propertyBytes = null;
-        if ($cached !== null && $cached[0] === $element->properties) {
+        if ($window !== null) {
+            $properties[PropKey::ListWindowed->value] = true;
+            ksort($properties, SORT_NUMERIC);
+            // Wire bytes are built lazily (EncodedNode::bytes()): only created
+            // nodes and full frames need them.
+            $encodedProperties = self::encodeProperties($properties);
+        } elseif ($cached !== null && $cached[0] === $element->properties) {
             // Encoded by the template renderer from its per-element template.
             $encodedProperties = $cached[1];
             $propertyBytes = $cached[2];
         } else {
-        ksort($properties, SORT_NUMERIC);
-        $encodedProperties = [];
-
-        // Wire bytes are built lazily (EncodedNode::bytes()): only created
-        // nodes and full frames need them.
-        foreach ($properties as $property => $value) {
-            if (is_string($value)) {
-                $encoded = self::$encodedStrings[$value] ?? self::encodeString($value);
-            } elseif (is_int($value)) {
-                $encoded = self::$encodedIntegers[$value] ?? self::encodeInteger($value);
-            } elseif (is_bool($value)) {
-                $encoded = $value ? "\x04\x01" : "\x04\x00";
-            } else {
-                $encoded = self::encodeValue($value);
-            }
-            $encodedProperties[$property] = $encoded;
-        }
+            ksort($properties, SORT_NUMERIC);
+            $encodedProperties = self::encodeProperties($properties);
         }
 
         $node = new EncodedNode(
@@ -327,6 +535,7 @@ final class TreeEncoder
             $segments = [];
             $placements = $this->childPaths[$path] ?? [];
             $learned = false;
+            $rowIndexes = [];
 
             foreach ($children as $childIndex => $child) {
                 $child = $this->refreshHosted($child);
@@ -372,11 +581,24 @@ final class TreeEncoder
                     $placements[$segment][$childKind] = [$childPath, $identity, $childId];
                     $learned = true;
                 }
+                if ($window !== null) {
+                    $rowIndexes[$childId] = $childIndex;
+                    if (!self::inRanges($window, $childIndex) && self::deferrable($child)) {
+                        $this->encodePlaceholder($child, $childId, $id, $childIndex, $childPath);
+                        continue;
+                    }
+                }
                 $this->encodeNode($child, $childId, $id, $childIndex, $childPath);
             }
             if ($learned) {
                 $this->childPaths[$path] = $placements;
             }
+            if ($window !== null) {
+                $this->windowLists[$id] = [$path, $rowIndexes];
+            }
+        }
+        if ($window !== null) {
+            ++$this->windowedLists;
         }
 
         if ($candidate) {
@@ -396,6 +618,9 @@ final class TreeEncoder
                     ? []
                     : array_slice($this->callbacks, $callbackStart, $callbackLength, true),
             );
+            if ($this->windowedLists !== $windowedBefore) {
+                $subtree->windowStamp = $this->windowStamp;
+            }
             $this->built[] = [$element, $path, $subtree];
             $outer[] = new SubtreeReference($subtree, $node);
             $this->items = $outer;

@@ -21,6 +21,12 @@ final class EncodedSubtree
     private ?array $flat = null;
 
     /**
+     * Window generation of the windowed list(s) this subtree contains, or -1
+     * when it contains none. A grown window invalidates it.
+     */
+    public int $windowStamp = -1;
+
+    /**
      * @param list<EncodedNode|SubtreeReference> $items own root first
      * @param list<EncodedSubtree> $children directly nested subtrees
      * @param array<string, Closure> $callbacks
