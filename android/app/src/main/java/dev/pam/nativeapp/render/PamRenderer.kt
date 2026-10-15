@@ -2859,8 +2859,11 @@ class PamRenderer(
         // Within a commit each ancestor is invalidated once: a mount of a
         // few hundred views otherwise walked (and invalidated) the full
         // ancestor chain of every view, O(views x depth).
+        // Only when this view's frame changed: re-applying an unchanged
+        // layout (safe-area insets dispatched again, a parent re-laid out)
+        // must not redraw the screen.
         val invalidated = layoutInvalidatedAncestors
-        var ancestor = view.parent
+        var ancestor = if (layoutChanged) view.parent else null
         while (ancestor is View) {
             if (invalidated != null && !invalidated.add(ancestor)) break
             ancestor.invalidate()
@@ -7346,11 +7349,14 @@ class PamRenderer(
     private fun applyTextAlignment(view: TextView, state: NodeState) {
         if (view is PamEditText) return
         val authored = state.properties[PropKey.TEXT_ALIGN]?.integer()?.toInt()
-        view.justificationMode = if (authored == TEXT_ALIGN_JUSTIFY) {
+        val justification = if (authored == TEXT_ALIGN_JUSTIFY) {
             android.text.Layout.JUSTIFICATION_MODE_INTER_WORD
         } else {
             android.text.Layout.JUSTIFICATION_MODE_NONE
         }
+        // TextView.setJustificationMode() drops the text layout and requests
+        // a layout even for the same mode; this runs on every frame update.
+        if (view.justificationMode != justification) view.justificationMode = justification
         val horizontal = when (authored) {
             2 -> Gravity.CENTER_HORIZONTAL
             3 -> Gravity.END
@@ -7954,10 +7960,22 @@ class PamRenderer(
         } else {
             safeAreaInsetsForView(raw, target)
         }
+        if (
+            state.safeAreaInsetsApplied &&
+            state.safeAreaLeftInset == resolved.left &&
+            state.safeAreaTopInset == resolved.top &&
+            state.safeAreaRightInset == resolved.right &&
+            state.safeAreaBottomInset == resolved.bottom
+        ) {
+            // The same insets dispatched again (window focus, a sibling
+            // window): nothing to re-lay out.
+            return
+        }
         state.safeAreaLeftInset = resolved.left
         state.safeAreaTopInset = resolved.top
         state.safeAreaRightInset = resolved.right
         state.safeAreaBottomInset = resolved.bottom
+        state.safeAreaInsetsApplied = true
         applySafeAreaLayout(target, state)
     }
 
@@ -10005,6 +10023,11 @@ class PamRenderer(
             get() = extras?.safeAreaBottomInset ?: 0
             set(value) { extras().safeAreaBottomInset = value }
 
+        /** Safe-area insets were applied at least once (see refreshSafeAreaLayout). */
+        var safeAreaInsetsApplied: Boolean
+            get() = extras?.safeAreaInsetsApplied ?: false
+            set(value) { extras().safeAreaInsetsApplied = value }
+
         var keyboardInset: Int
             get() = extras?.keyboardInset ?: 0
             set(value) { extras().keyboardInset = value }
@@ -10250,6 +10273,7 @@ class PamRenderer(
         var safeAreaTopInset: Int = 0
         var safeAreaRightInset: Int = 0
         var safeAreaBottomInset: Int = 0
+        var safeAreaInsetsApplied: Boolean = false
         var keyboardInset: Int = 0
         var keyboardAnimating: Boolean = false
         var keyboardBaseHeight: Int = 0

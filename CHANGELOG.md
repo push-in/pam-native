@@ -54,6 +54,12 @@
   touch-to-pixel of a like went from ~47 ms to ~37 ms (native ~34 ms). A filter keystroke over 10,000
   rows went from seconds of UI-thread work to milliseconds.
 - `Style::properties()` is read natively on Android/iOS (same result, 14x).
+- Android renderer: re-applying an unchanged layout no longer redraws or
+  re-lays out the screen (the ancestor invalidation only follows a changed
+  frame; `TextView.setJustificationMode()`, which drops the text layout even
+  for the same mode, is only called on a change; the same safe-area insets
+  dispatched again skip the subtree relayout). A cold start drew 4 extra
+  frames after the content (window focus and insets dispatches); now 2.
 - `NavigationContainer::linking()` routes the launch URL before the first
   frame (Android/iOS export `PAM_NATIVE_LAUNCH_URL`), without a transition
   (no AnimationComplete round trip re-renders the stack after it), and the
