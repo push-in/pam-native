@@ -6901,6 +6901,22 @@ $assert(
     !$prewarmNavigator->isPrewarmed('detail', ['id' => 10]),
     'cancelPrewarm() must unmount the prewarmed screen.',
 );
+$pendingModuleCalls = static fn (): int => count((new ReflectionProperty(Runtime::class, 'moduleCallbacks'))->getValue());
+$callsBeforeWarm = $pendingModuleCalls();
+$prewarmNavigator->prewarm('detail', ['id' => 11]);
+$callsAfterTimedWarm = $pendingModuleCalls();
+$prewarmNavigator->prewarm('detail', ['id' => 11], null);
+$prewarmNavigator->prewarm('detail', ['id' => 11], null);
+$assert(
+    $callsAfterTimedWarm === $callsBeforeWarm + 1 && $pendingModuleCalls() === $callsAfterTimedWarm
+        && $prewarmNavigator->isPrewarmed('detail', ['id' => 11]),
+    'prewarm(releaseAfterMs: null) must keep the screen warm without arming a release timer.',
+);
+$prewarmNavigator->trimMemory();
+$assert(
+    !$prewarmNavigator->isPrewarmed('detail', ['id' => 11]),
+    'trimMemory() must release a screen held warm without a timer.',
+);
 $lifecycleScreen = new class extends Component implements NavigationLifecycleAware {
     use InteractsWithNavigationLifecycle;
 

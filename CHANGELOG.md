@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- Android spinners stop ticking off screen. `ActivityIndicator` and the
+  `Button` loading arc started their infinite `ValueAnimator` as soon as the
+  renderer created them, before (or without ever) being attached: a spinner
+  in a prewarmed or hidden subtree drove Choreographer frames forever, also
+  with the app in the background (Zé Chat inbox on the S10: ~60 main-thread
+  wakeups/s, 4-5% CPU idle and in background). The loop now runs only while
+  its host is attached, shown and in a visible window, pauses when the host
+  leaves and resumes on its next draw. iOS spinners already animate only in a
+  window.
+- `DeviceStatus::watch()` delivers the first status and then only changes.
+  Android drops the per-interval main-thread poll (three binder calls and a
+  PHP callback every interval, in the background too) for the default
+  network callback and the battery/power-save broadcasts; changes closer
+  than the interval are coalesced. iOS keeps its timer and drops unchanged
+  samples. Mac checklist in `docs/ios-parity.md`.
+- `Navigator::prewarm($route, $params, releaseAfterMs: null)` keeps the warm
+  screen until another navigation, `cancelPrewarm()` or `trimMemory()`
+  instead of releasing it after 4 s unused. A screen that keeps its first
+  row warm while idle no longer renews it with a timer (every renewal woke
+  PHP and ran two render passes: ~40 wakeups/min on the Zé Chat inbox). The
+  default stays 4 s. PHP only.
+
 ## 1.43.0 - 2026-10-14
 
 - Add bounded native photo zoom: `gestureNativeBounds` and

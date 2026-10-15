@@ -283,6 +283,9 @@ DeviceStatus::unwatch($device);
 
 The bridge is pull-driven with a four-value native queue. If PHP is busy, old
 samples are discarded in favor of recent state instead of growing memory.
+`DeviceStatus::watch()` reports the current status and then only changes;
+the interval is the shortest spacing between two callbacks, not a polling
+period (Android listens to system network, battery and power-save changes).
 
 ## Lifecycle and recovery
 

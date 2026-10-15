@@ -37,7 +37,14 @@ final class DeviceStatus
         });
     }
 
-    /** @param Closure(DeviceStatusValue): void $callback */
+    /**
+     * Calls back with the current status, then on every change (network type,
+     * metered network, battery level, charging, low power mode). Unchanged
+     * samples are never delivered; changes closer together than
+     * `$intervalMs` arrive as one callback.
+     *
+     * @param Closure(DeviceStatusValue): void $callback
+     */
     public static function watch(Closure $callback, int $intervalMs = 1_000): int
     {
         $subscription = self::$nextSubscription++;

@@ -344,3 +344,20 @@ Mac validation:
   dismisses it; `always` and absent - the keyboard never closes on tap.
 - Without the attribute, `PamAnchoredScrollView` / `PamVirtualListView` have no
   extra gesture recognizer (view debugger).
+
+## Idle work: off-screen spinners and DeviceStatus changes (unreleased)
+
+- Android spinners (`ActivityIndicator`, `Button loading`) tick only while
+  their host is attached, shown and in a visible window; iOS
+  `PamVuetifySpinner` already installs its Core Animation only with a window
+  (`didMoveToWindow`), so there is no Swift change for spinners.
+- `DeviceStatus::watch()` delivers the first status and then only changes.
+  Android listens to the default network callback and the battery and
+  power-save broadcasts (no timer); iOS keeps its timer but drops unchanged
+  samples (`DeviceStatusChanges`).
+
+Mac validation (not compiled on Linux):
+
+- `swift test --filter DeviceStatusChangesTests`.
+- On a device, `DeviceStatus::watch(fn, 3_000)`: one callback at start, none
+  while nothing changes; toggling Wi-Fi or Low Power Mode delivers one.

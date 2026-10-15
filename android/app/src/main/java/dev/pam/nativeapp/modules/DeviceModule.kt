@@ -1,14 +1,18 @@
 package dev.pam.nativeapp.modules
 
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.ConnectivityManager
+import android.net.Network
 import android.net.NetworkCapabilities
 import android.os.BatteryManager
+import android.os.Build
 import android.os.PowerManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import dev.pam.nativeapp.protocol.WireMap
 import dev.pam.nativeapp.protocol.WireValue
 
@@ -37,23 +41,85 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
         }
     }
 
+    /**
+     * A watch delivers the first status, then only changes, driven by the
+     * system (default network callback, battery and power-save broadcasts)
+     * instead of a timer: a watching screen no longer wakes the main thread
+     * and PHP every interval, in the foreground or the background. Changes
+     * closer together than `intervalMs` are coalesced into one delivery.
+     */
     private fun start(payload: ByteArray, completion: ModuleCompletion) {
         val interval = ((WireMap.decode(payload)["intervalMs"] as? WireValue.Integer)?.value ?: 1_000)
             .coerceIn(250, 60_000)
         val id = nextId.getAndIncrement()
         val channel = WatchChannel()
+        val changes = DeviceStatusChanges()
         lateinit var runnable: Runnable
         runnable = Runnable {
-            if (!watches.containsKey(id)) return@Runnable
-            channel.offer(statusPayload())
-            main.postDelayed(runnable, interval)
+            val watch = watches[id] ?: return@Runnable
+            watch.pending = false
+            val status = statusPayload()
+            if (changes.accept(status)) {
+                channel.offer(status)
+                watch.lastDeliveryMs = SystemClock.uptimeMillis()
+            }
         }
-        watches[id] = DeviceWatch(channel, runnable)
-        main.post(runnable)
+        watches[id] = DeviceWatch(channel, runnable, interval)
+        main.post {
+            registerSources()
+            runnable.run()
+        }
         completion.complete(
             ModuleResultStatus.SUCCESS,
             WireMap.encode(mapOf("subscription" to WireValue.Integer(id.toLong()))),
         )
+    }
+
+    /** A system change: every watch samples once, no sooner than its interval after the last delivery. */
+    private fun changed() {
+        main.post {
+            val now = SystemClock.uptimeMillis()
+            for (watch in watches.values) {
+                if (watch.pending) continue
+                watch.pending = true
+                val wait = (watch.lastDeliveryMs + watch.intervalMs - now).coerceAtLeast(0)
+                main.postDelayed(watch.runnable, wait)
+            }
+        }
+    }
+
+    private var sourcesRegistered = false
+    private val broadcasts = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) = changed()
+    }
+    private val network = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = changed()
+        override fun onLost(network: Network) = changed()
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = changed()
+    }
+
+    private fun registerSources() {
+        if (sourcesRegistered || watches.isEmpty()) return
+        sourcesRegistered = true
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(PowerManager.ACTION_POWER_SAVE_MODE_CHANGED)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(broadcasts, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            context.registerReceiver(broadcasts, filter)
+        }
+        runCatching {
+            context.getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network, main)
+        }
+    }
+
+    private fun unregisterSources() {
+        if (!sourcesRegistered || watches.isNotEmpty()) return
+        sourcesRegistered = false
+        runCatching { context.unregisterReceiver(broadcasts) }
+        runCatching { context.getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
     }
 
     private fun statusPayload(): ByteArray {
@@ -99,14 +165,30 @@ internal class DeviceModule(private val context: Context) : NativeModule, AutoCl
             main.removeCallbacks(it.runnable)
             it.channel.close()
         }
+        main.post(::unregisterSources)
     }
 
     override fun close() {
         watches.keys.toList().forEach(::stop)
     }
 
-    private data class DeviceWatch(
+    private class DeviceWatch(
         val channel: WatchChannel,
         val runnable: Runnable,
-    )
+        val intervalMs: Long,
+    ) {
+        var pending = false
+        var lastDeliveryMs = 0L
+    }
+}
+
+/** Passes the first status and then only statuses that differ from the last one passed. */
+internal class DeviceStatusChanges {
+    private var last: ByteArray? = null
+
+    fun accept(status: ByteArray): Boolean {
+        if (last?.contentEquals(status) == true) return false
+        last = status
+        return true
+    }
 }
